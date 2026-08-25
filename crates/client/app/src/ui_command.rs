@@ -27,7 +27,7 @@ use winit::window::CursorIcon;
 use crate::app::App;
 use crate::diagnostics::PickedTile;
 use crate::net_command::project_motion;
-use crate::world::{advance_presentation_to, footing, guide, terrain};
+use crate::world::{advance_presentation_to, footing, guide};
 use crate::{DEAD_ZONE, TURN_ZONE, steer};
 
 impl App {
@@ -211,16 +211,16 @@ impl App {
     /// thread because of the height: a `0x02` names the tile a step is asking
     /// for, the server lands the body wherever it actually stands and says
     /// nothing about it (`0x22` carries no position), so this end has to
-    /// predict — and predicting needs the terrain, which comes out of the
-    /// process's one `MapSnapshot`. See [`crate::link::connect`], which is
-    /// handed no map at all.
+    /// predict — and predicting needs the base terrain and live overlay, which
+    /// travel together in the process's one `Ground`. See
+    /// [`crate::link::connect`], which is handed no map at all.
     ///
-    /// `MapTerrain::predict_step` is the shard's own step rule run on this end:
-    /// it weighs the land's *average* (the same number the shard's own
+    /// [`openshard_movement::predict_step`] is the shard's own step rule run on
+    /// this end: it weighs the land's *average* (the same number the shard's own
     /// `ground_z` computes — on a slope the raw corner differs by most of the
     /// tile's relief, and a body predicted at the corner is drawn sunk into the
-    /// hill and sorted behind it) against every platform static on the tile, a
-    /// pier's or a bridge's deck among them, reaching from the top of the
+    /// hill and sorted behind it) against every platform on the tile, including
+    /// the live components of a placed house, reaching from the top of the
     /// surface underfoot and standing on the highest surface within a step.
     /// That last part is what climbs a staircase, and it is why this is not
     /// `predict_z`: the nearest-height guess stays on the floor a stair tile
@@ -245,14 +245,15 @@ impl App {
             Instant::now(),
         );
         self.project_player_motion();
+        let doors = self.walking_doors();
+        let ground = footing(&self.resources, doors).among(Bodies::standing(&self.world.bodies));
         let Some(walk) = self.world.authoritative.walk.as_mut() else {
             // A link with no world entered yet: the shard has not said where
             // the body is, so there is nothing to step from.
             return;
         };
-        let terrain = crate::world::terrain(&self.resources);
         let stepped = walk.step(facing, |from, tile| {
-            i8::try_from(terrain.predict_step(from, tile.x, tile.y)).ok()
+            i8::try_from(openshard_movement::predict_step(&ground, from, tile)).ok()
         });
         let packet = match stepped {
             Ok(packet) => packet,
@@ -355,8 +356,14 @@ impl App {
         // climbs a staircase; the nearest-height guess walks through it. See
         // `link.rs`'s online `Command::Step`, which wants the identical answer
         // once a server is involved.
-        let terrain = terrain(&self.resources);
-        let ground = i8::try_from(terrain.predict_step(motion.position, x, y)).unwrap_or(motion.position.z);
+        let doors = self.walking_doors();
+        let ground = footing(&self.resources, doors);
+        let ground = i8::try_from(openshard_movement::predict_step(
+            &ground,
+            motion.position,
+            openshard_map::grid::Tile::new(x, y),
+        ))
+        .unwrap_or(motion.position.z);
         // The presentation clocks first, before the step is folded in, and for
         // the same reason `App::user_event` does it for a step off the wire: a
         // step is timestamped with `Crowd`'s own `now`, and this is called from

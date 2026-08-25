@@ -379,7 +379,7 @@ impl World {
                 now,
             );
         }
-        self.state.registry.insert(entity, Combat::default());
+        self.state.registry.insert(entity, Combat::player_entered());
         self.state.registry.insert(entity, Notoriety::Innocent);
         self.state.registry.insert(entity, Resistance::none());
         // No explicit `MeleeDamage` or `SwingSpeed`: a player's blow and pace come

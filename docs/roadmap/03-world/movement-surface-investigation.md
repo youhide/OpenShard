@@ -150,13 +150,11 @@ Two things fell out of the same walk:
   tie-goes-to-the-lower, and `Boats::carries` is a fourth. Both are answered by
   the overlay in production now; `deck_at` and `blocks_at` have no caller left
   outside tests. Either they read the overlay or they go.
-- **This client has no notion of a boat at all.** `clutter` expands no multis —
-  only a designed house's `HouseShape` — so a ship is invisible to the client's
-  own step rule *and* to `predict_step`, which is what draws the body the
-  instant a key goes down. Every boarding is therefore a disagreement at this
-  end: the shard puts the body on a deck a median seven below the pier and this
-  client draws it at pier height, with a `0x22` that carries no position to
-  correct it. Nothing in [`client.md`](../../client.md) mentions boats.
+- ~~**This client has no notion of a boat at all.**~~ **Repaired 2026-08-25:**
+  every known multi is expanded into components, `clutter::project` lays those
+  into the live overlay, and both walk arms predict from the complete `Footing`.
+  A ship deck and a player-house stair therefore reach the same immediate `z`
+  prediction as the shard's step rule.
 - **A ship can be moored through a dock.** `check_berth` asks only that every
   berth tile is *water*, which a tile carrying a pier plank can be. **52 of the
   352** boardings in the survey land on the plank rather than on the deck under
@@ -224,8 +222,9 @@ now a rule rather than four.
   2026-08-02 report one bug with two client-side causes: `GroundQuad` builds its
   four heights from the **land layer only**, so a pier's deck has no ground plane
   of its own, and `Walk::step`'s predicted z came from the same place. The second
-  half is fixed — `ui_command.rs` predicts with `MapTerrain::predict_step` on
-  both the online and the offline arm — and the first is **still true today**
+  half is fixed — `ui_command.rs` predicts with the full
+  `movement::predict_step(Footing, ...)` on both the online and offline arm, so
+  runtime floors, stairs and decks participate too — and the first is **still true today**
   (`ground.rs`'s `corners` is `WorldMap::land_corners`). Whether that draws as
   *sinking* is not obvious and wants a look rather than an argument: the body is
   drawn above the plane, not below it, so the visible failure would have to come

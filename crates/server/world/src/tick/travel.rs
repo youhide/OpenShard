@@ -58,7 +58,7 @@ impl World {
             .state
             .registry
             .get::<Combat>(caster)
-            .is_some_and(|combat| combat.target.is_some())
+            .is_some_and(|combat| combat.target().is_some())
         {
             return Some("Wouldst thou flee during the heat of battle??");
         }

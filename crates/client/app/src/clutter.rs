@@ -346,7 +346,9 @@ fn placed(blockers: &[(openshard_protocol::world::Point, u8)]) -> Overlay {
 mod tests {
     use super::*;
     use openshard_map::overlay::{Body, Doors};
-    use openshard_movement::{Around, Detour, Footing, Heading, Lean, Leeway, Step, step_allowed};
+    use openshard_movement::{
+        Around, Detour, Footing, Heading, Lean, Leeway, Step, predict_step, step_allowed,
+    };
     use openshard_protocol::direction::{Direction, Facing};
     use openshard_protocol::items::ItemAmount;
     use openshard_protocol::serial::Serial;
@@ -601,6 +603,94 @@ mod tests {
             vec![standing],
             "the last view's crowd outlived the view that stood in it"
         );
+    }
+
+    /// The complete client-side handoff for a placed house: one multi item is
+    /// expanded through the install's component table, projected into the live
+    /// layer, and then read by the prediction attached to `Walk::step`.
+    ///
+    /// Keeping all four stages in one test matters. The component expansion,
+    /// overlay and movement rule each had tests of their own while the online
+    /// caller still bypassed the overlay and drew the body at `z = 0` after the
+    /// shard had put it on the stairs.
+    #[test]
+    fn a_walk_prediction_climbs_a_multi_projected_into_the_live_layer() {
+        use crate::net_command::{MultiDraw, multi_pieces};
+        use openshard_client_net::walk::Walk;
+        use openshard_movement::scene::Scene;
+        use openshard_tiles::TileFlags;
+        use openshard_uofiles::multi::{Component, Multi, Multis};
+
+        const STAIR: Graphic = Graphic(0x0751);
+        const FLOOR: Graphic = Graphic(0x04AC);
+        let mut scene = Scene::flat(0);
+        scene.art(STAIR.0, TileFlags::PLATFORM | TileFlags::CLIMBABLE, 5);
+        scene.art(FLOOR.0, TileFlags::PLATFORM, 0);
+
+        let house = Multi::new(
+            0x64,
+            vec![
+                Component {
+                    graphic: Graphic(1),
+                    dx: 0,
+                    dy: 0,
+                    dz: 0,
+                    flags: 0,
+                },
+                Component {
+                    graphic: STAIR,
+                    dx: 0,
+                    dy: -1,
+                    dz: 2,
+                    flags: 1,
+                },
+                Component {
+                    graphic: FLOOR,
+                    dx: 0,
+                    dy: -2,
+                    dz: 7,
+                    flags: 1,
+                },
+            ],
+        );
+        let multis = Multis::of([house]);
+        let MultiDraw::Pieces(pieces) = multi_pieces(
+            Some(&multis),
+            None,
+            Graphic(0x4064),
+            Point::new(5, 6, 0),
+            Hue::NONE,
+        ) else {
+            panic!("the known house did not expand into components");
+        };
+
+        let mut live = Overlay::default();
+        let mut bodies = Vec::new();
+        project(&mut live, &mut bodies, None, &pieces, scene.tiles());
+        let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
+        let north = Facing::walking(Direction::North);
+        let mut walk = Walk::new(Point::new(5, 6, 0), north);
+
+        walk.step(north, |from, tile| {
+            i8::try_from(predict_step(&footing, from, tile)).ok()
+        })
+        .expect("the stair prediction should produce a walk request");
+        assert_eq!(
+            walk.predicted().position,
+            Point::new(5, 5, 4),
+            "the projected stair was not climbed"
+        );
+
+        walk.step(north, |from, tile| {
+            i8::try_from(predict_step(&footing, from, tile)).ok()
+        })
+        .expect("the floor prediction should produce a walk request");
+        assert_eq!(
+            walk.predicted().position,
+            Point::new(5, 4, 7),
+            "the projected first floor was not reached"
+        );
+        assert!(bodies.is_empty(), "an offline projection invented a crowd");
     }
 
     /// The bug as it was reported: a body walking at a barrel diagonally went

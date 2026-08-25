@@ -224,9 +224,7 @@ pub(super) fn peacemaking(state: &mut WorldState, bard: EntityId, target: Entity
                 continue;
             }
             state.registry.insert(other, Pacified { until });
-            state
-                .registry
-                .remove::<openshard_state::components::Combat>(other);
+            state.disengage(other);
         }
         return;
     }
@@ -244,9 +242,7 @@ pub(super) fn peacemaking(state: &mut WorldState, bard: EntityId, target: Entity
         play(state, bard, item, true);
         let until = state.ticks + PACIFY_SECONDS * TICKS_PER_SECOND;
         state.registry.insert(target, Pacified { until });
-        state
-            .registry
-            .remove::<openshard_state::components::Combat>(target);
+        state.disengage(target);
         state.localized_message(bard, PACIFIED_IT, "");
     } else {
         play(state, bard, item, false);
@@ -321,11 +317,7 @@ pub(super) fn provoke_second(state: &mut WorldState, bard: EntityId, creature: E
     state.registry.remove::<Pacified>(creature);
     state.registry.insert(
         creature,
-        openshard_state::components::Combat {
-            warmode: true,
-            target: Some(victim_serial),
-            next_swing: state.ticks,
-        },
+        openshard_state::components::Combat::creature_engaged(victim_serial, state.ticks),
     );
 }
 

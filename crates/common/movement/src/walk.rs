@@ -426,6 +426,30 @@ pub fn can_step(footing: &Footing<'_>, from: Point, to: Point) -> Option<Point> 
     landing(footing, Stance::of(footing, from), to)
 }
 
+/// The height at which a client should draw one requested step.
+///
+/// A walk acknowledgement carries no position, so the requesting client has to
+/// predict this number before the shard answers.  The live overlay is part of
+/// that prediction: a player house's stair and upper floor do not exist in the
+/// map files, but they are exactly the surfaces the shard will land the body on.
+///
+/// This deliberately predicts a height, not a refusal.  When the complete live
+/// step is blocked, the shard still owns that decision and will return `0x21`;
+/// until then the bare map's prediction is the least surprising fallback.  With
+/// no map at all, preserving the body's current height is the same fallback
+/// the network walk historically uses when its caller has no terrain answer.
+#[must_use]
+pub fn predict_step(footing: &Footing<'_>, from: Point, tile: Tile) -> i32 {
+    let to = Point::new(tile.x, tile.y, from.z);
+    can_step(footing, from, to)
+        .map(|landed| i32::from(landed.z))
+        .unwrap_or_else(|| {
+            footing
+                .map
+                .map_or(i32::from(from.z), |map| map.predict_step(from, tile.x, tile.y))
+        })
+}
+
 /// The tile a body is leaving, resolved once.
 ///
 /// Every step out of one tile is measured from the same two heights, and both

@@ -361,16 +361,64 @@ pub fn war_mode(state: &mut WorldState, connection: ConnectionId, war: bool) {
     let Some(&player) = state.players.get(&connection) else {
         return;
     };
-    if let Some(combat) = state.registry.get_mut::<Combat>(player) {
-        combat.warmode = war;
+    // The packet is an intent. Missing session state is an invariant violation,
+    // not evidence that the player must be at peace; reject it without
+    // manufacturing state. A ghost likewise settles at peace.
+    let requested = war && attackable(state, player);
+    let Some((previous_war, previous_target)) = state
+        .registry
+        .get::<Combat>(player)
+        .map(|combat| (combat.warmode(), combat.target()))
+    else {
+        debug_assert!(false, "a connected player must carry combat session state");
+        return;
+    };
+    let combat = state
+        .registry
+        .get_mut::<Combat>(player)
+        .expect("the combat row read immediately above cannot disappear");
+    if requested {
+        let transitioned = combat.enter_war();
+        debug_assert!(
+            transitioned,
+            "a player session cannot carry a creature-only combat state"
+        );
+    } else {
+        combat.leave_combat();
     }
+    let war = state
+        .registry
+        .get::<Combat>(player)
+        .is_some_and(|combat| combat.warmode());
+    let target = state
+        .registry
+        .get::<Combat>(player)
+        .and_then(|combat| combat.target());
+    let changed = previous_war != war;
     state.send_packet(connection, &ServerPacket::WarMode(WarMode { war }));
+    if previous_target != target {
+        state.send_packet(connection, &ServerPacket::AttackTarget(AttackTarget { target }));
+    }
+    if changed {
+        state.broadcast_move(player);
+    }
 }
 
 /// Set a player's attack target. The blow itself is not struck here — this only
 /// aims; [`swings`] turns "in war mode, in reach, timer up" into damage.
 pub fn attack(state: &mut WorldState, connection: ConnectionId, target: Option<Serial>) {
     let Some(&player) = state.players.get(&connection) else {
+        return;
+    };
+    // The player-session invariant is the same one `war_mode` enforces. A dead
+    // player cannot aim; disengaging also corrects any stale stance/marker held
+    // by its client.
+    if !attackable(state, player) {
+        state.disengage(player);
+        return;
+    }
+    let Some(_) = state.registry.get::<Combat>(player) else {
+        debug_assert!(false, "a connected player must carry combat session state");
         return;
     };
     // A target that cannot be attacked — a serial of zero, an item, the attacker
@@ -400,7 +448,7 @@ pub fn attack(state: &mut WorldState, connection: ConnectionId, target: Option<S
     let previous_target = state
         .registry
         .get::<Combat>(player)
-        .and_then(|combat| combat.target);
+        .and_then(|combat| combat.target());
     let ambush = unarmed
         && state.registry.has::<Hidden>(player)
         && state
@@ -426,9 +474,16 @@ pub fn attack(state: &mut WorldState, connection: ConnectionId, target: Option<S
     } else {
         now + pace
     };
-    if let Some(combat) = state.registry.get_mut::<Combat>(player) {
-        combat.target = Some(serial);
-        combat.next_swing = next;
+    let aimed = state
+        .registry
+        .get_mut::<Combat>(player)
+        .is_some_and(|combat| combat.aim(serial, next));
+    if !aimed {
+        state.send_packet(
+            connection,
+            &ServerPacket::AttackTarget(AttackTarget { target: None }),
+        );
+        return;
     }
     if ambush {
         state.registry.insert(
@@ -494,7 +549,7 @@ pub fn retaliate_players(state: &mut WorldState, blows: &[MobileDamaged]) {
         let ready_to_retaliate = state
             .registry
             .get::<Combat>(victim)
-            .is_some_and(|combat| combat.warmode && combat.target.is_none())
+            .is_some_and(|combat| combat.warmode() && combat.target().is_none())
             && state
                 .registry
                 .get::<Hitpoints>(victim)
@@ -504,8 +559,7 @@ pub fn retaliate_players(state: &mut WorldState, blows: &[MobileDamaged]) {
         }
         let next_swing = state.ticks + swing_speed(state, victim);
         if let Some(combat) = state.registry.get_mut::<Combat>(victim) {
-            combat.target = Some(attacker);
-            combat.next_swing = next_swing;
+            combat.aim(attacker, next_swing);
         }
         // A defensive target selection is visible immediately.  Waiting for the
         // first swing leaves a war-mode player staring at their previous target
@@ -538,12 +592,15 @@ pub fn volleys(state: &mut WorldState) {
         .registry
         .query::<Combat>()
         .filter_map(|(attacker, combat)| {
-            if !combat.warmode || now < combat.next_swing {
+            if !combat.warmode()
+                || combat.next_swing().is_none_or(|next| now < next)
+                || !attackable(state, attacker)
+            {
                 return None;
             }
             let ranged = state.registry.get::<RangedAttack>(attacker)?;
             combat
-                .target
+                .target()
                 .map(|target| (attacker, target, ranged.range.get(), ranged.kind))
         })
         .collect();
@@ -575,7 +632,7 @@ pub fn volleys(state: &mut WorldState) {
         let by = state.registry.serial_of(attacker);
         let pace = swing_speed(state, attacker);
         if let Some(combat) = state.registry.get_mut::<Combat>(attacker) {
-            combat.next_swing = now + pace;
+            combat.schedule_swing(now + pace);
         }
         // The bolt's flight, then the thwack — emitted before the blow lands, so
         // the mark is still drawn for the arrow to fly at. A moving effect from
@@ -619,9 +676,11 @@ pub fn swings(state: &mut WorldState) {
         .registry
         .query::<Combat>()
         .filter_map(|(attacker, combat)| {
-            (combat.warmode && now >= combat.next_swing)
-                .then(|| combat.target.map(|target| (attacker, target)))
-                .flatten()
+            (combat.warmode()
+                && combat.next_swing().is_some_and(|next| now >= next)
+                && attackable(state, attacker))
+            .then(|| combat.target().map(|target| (attacker, target)))
+            .flatten()
         })
         .collect();
 
@@ -831,14 +890,14 @@ fn is_murderer(state: &WorldState, entity: EntityId) -> bool {
 /// Push a combatant's next swing out to `tick`.
 pub fn set_next_swing(state: &mut WorldState, attacker: EntityId, tick: WorldTick) {
     if let Some(combat) = state.registry.get_mut::<Combat>(attacker) {
-        combat.next_swing = tick;
+        combat.schedule_swing(tick);
     }
 }
 
 /// Stop a combatant attacking whatever it was.
 pub fn clear_target(state: &mut WorldState, attacker: EntityId) {
     if let Some(combat) = state.registry.get_mut::<Combat>(attacker) {
-        combat.target = None;
+        combat.clear_target();
     }
 }
 

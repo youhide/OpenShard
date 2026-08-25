@@ -1490,7 +1490,7 @@ pub const CORPSE_GUMP: Graphic = Graphic(0x0009);
 /// `Mobile` references and reads `.Name` when the corpse is examined, which cannot
 /// answer once the killer has logged out — and a corpse outliving its killer's
 /// session is the ordinary case, not the corner one.
-#[derive(Clone, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Corpse {
     /// Who this was.
     pub owner: String,
@@ -1508,6 +1508,24 @@ pub struct Corpse {
     /// pictures but not these layers; retaining this pairing is what lets the
     /// client dress the corpse after it opens the loot window.
     pub equipment: Vec<CorpseEquipmentItem>,
+}
+
+impl Corpse {
+    /// Start the forensic story attached to a newly-created corpse.
+    ///
+    /// Every field is named here so extending the story forces the death
+    /// transition to decide what the new fact means instead of silently taking
+    /// a derived default.
+    #[must_use]
+    pub fn from_death(owner: String, killer: Option<String>) -> Self {
+        Self {
+            owner,
+            killer,
+            examined_by: None,
+            looters: Vec::new(),
+            equipment: Vec::new(),
+        }
+    }
 }
 
 /// The death shroud a fresh ghost wears — item `0x204E` on the outer-torso
@@ -1956,21 +1974,148 @@ pub struct Npc {
     pub next_greet: WorldTick,
 }
 
-/// A mobile's fighting state: whether it is in war mode, whom it is attacking,
-/// and when it may next swing.
+/// A mobile's combat state machine.
 ///
-/// Players carry it from the moment they enter; a creature gets one when it
-/// starts fighting (which is an `ai` question, not here). `next_swing` is a tick
-/// number, like [`Decays`], so the swing timer is checked against the tick
-/// counter and never a clock.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+/// A connected player carries it for the entire world session, including while
+/// dead: for a player, presence is the capability to receive combat intents. A
+/// creature gets one only while engaged or remembering a threat (which is an
+/// `ai` question, not here). Life and death are represented by [`Hitpoints`] and
+/// [`Ghost`], never by the presence of this component.
+///
+/// The representation is private deliberately. `warmode = false` beside a target
+/// and an arbitrary timer used to be constructible anywhere, as did an alleged
+/// default state standing in for missing knowledge. Callers now enter through a
+/// known server event and can only move the machine through its transitions.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Combat {
-    /// Whether swings are allowed at all.
-    pub warmode: bool,
-    /// The mobile being attacked, if any.
-    pub target: Option<Serial>,
-    /// The tick at or after which the next swing may land.
-    pub next_swing: WorldTick,
+    state: CombatState,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum CombatState {
+    AtPeace,
+    AtWar,
+    Engaged {
+        target: Serial,
+        /// A tick number, like [`Decays`], so combat replays without a clock.
+        next_swing: WorldTick,
+    },
+    /// Passive fauna remembers whom to flee from without becoming an attacker.
+    Threatened {
+        by: Serial,
+    },
+}
+
+impl Combat {
+    /// Initial state established by the authoritative player-entry transition.
+    #[must_use]
+    pub const fn player_entered() -> Self {
+        Self {
+            state: CombatState::AtPeace,
+        }
+    }
+
+    /// Initial state established when server AI or an order engages a creature.
+    #[must_use]
+    pub const fn creature_engaged(target: Serial, next_swing: WorldTick) -> Self {
+        Self {
+            state: CombatState::Engaged { target, next_swing },
+        }
+    }
+
+    /// Initial state established when passive fauna is attacked.
+    #[must_use]
+    pub const fn creature_threatened(by: Serial) -> Self {
+        Self {
+            state: CombatState::Threatened { by },
+        }
+    }
+
+    /// The stance this state authoritatively exposes.
+    #[must_use]
+    pub const fn warmode(self) -> bool {
+        matches!(self.state, CombatState::AtWar | CombatState::Engaged { .. })
+    }
+
+    /// The opponent being fought or remembered as a threat.
+    #[must_use]
+    pub const fn target(self) -> Option<Serial> {
+        match self.state {
+            CombatState::AtPeace | CombatState::AtWar => None,
+            CombatState::Engaged { target, .. } => Some(target),
+            CombatState::Threatened { by } => Some(by),
+        }
+    }
+
+    /// When the next swing is due; only a war state owns such a timer.
+    #[must_use]
+    pub const fn next_swing(self) -> Option<WorldTick> {
+        match self.state {
+            CombatState::Engaged { next_swing, .. } => Some(next_swing),
+            CombatState::AtPeace | CombatState::AtWar | CombatState::Threatened { .. } => None,
+        }
+    }
+
+    /// Whether no fight and no remembered threat exists.
+    #[must_use]
+    pub const fn is_at_peace(self) -> bool {
+        matches!(self.state, CombatState::AtPeace)
+    }
+
+    /// Draw the weapon from a settled player stance.
+    ///
+    /// A remembered creature threat is not a player stance and therefore cannot
+    /// take this transition. The caller must handle `false` as an invariant
+    /// violation rather than reinterpret that state.
+    pub fn enter_war(&mut self) -> bool {
+        self.state = match self.state {
+            CombatState::AtPeace => CombatState::AtWar,
+            state @ (CombatState::AtWar | CombatState::Engaged { .. }) => state,
+            CombatState::Threatened { .. } => return false,
+        };
+        true
+    }
+
+    /// Aim an existing war state. Returns `false` when the transition is illegal.
+    pub fn aim(&mut self, target: Serial, next_swing: WorldTick) -> bool {
+        let (CombatState::AtWar | CombatState::Engaged { .. }) = self.state else {
+            return false;
+        };
+        self.state = CombatState::Engaged { target, next_swing };
+        true
+    }
+
+    /// Move the next swing of an existing war state.
+    pub fn schedule_swing(&mut self, next_swing: WorldTick) -> bool {
+        let CombatState::Engaged { target, .. } = self.state else {
+            return false;
+        };
+        self.state = CombatState::Engaged { target, next_swing };
+        true
+    }
+
+    /// Forget the current target without inventing a new stance.
+    pub fn clear_target(&mut self) {
+        self.state = match self.state {
+            CombatState::Engaged { .. } => CombatState::AtWar,
+            CombatState::Threatened { .. } => CombatState::AtPeace,
+            state @ (CombatState::AtPeace | CombatState::AtWar) => state,
+        };
+    }
+
+    /// End the fight because an authoritative server transition requires it.
+    pub fn leave_combat(&mut self) {
+        self.state = CombatState::AtPeace;
+    }
+
+    /// Stop attacking but retain a known threat for the flee state.
+    pub fn flee(&mut self) {
+        self.state = match self.state {
+            CombatState::Engaged { target: by, .. } => CombatState::Threatened { by },
+            CombatState::AtWar => CombatState::AtPeace,
+            state => state,
+        }
+    }
 }
 
 /// A hidden wrestler's next strike is an ambush rather than an ordinary swing.
@@ -2540,6 +2685,44 @@ pub struct HouseDeed {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn combat_states_can_only_move_through_valid_transitions() {
+        let target = Serial::new(1).expect("a mobile serial");
+        let due = WorldTick::from_raw(7);
+        let mut combat = Combat::player_entered();
+
+        assert!(combat.is_at_peace());
+        assert_eq!(combat.target(), None);
+        assert_eq!(combat.next_swing(), None);
+        assert!(combat.enter_war());
+        assert!(combat.warmode());
+        assert_eq!(combat.target(), None);
+        assert_eq!(combat.next_swing(), None, "a stance does not invent a timer");
+
+        assert!(combat.aim(target, due));
+        assert_eq!(combat.target(), Some(target));
+        assert_eq!(combat.next_swing(), Some(due));
+        combat.clear_target();
+        assert!(combat.warmode(), "forgetting a target does not sheathe a weapon");
+        assert_eq!(combat.target(), None);
+        assert_eq!(combat.next_swing(), None);
+
+        combat.leave_combat();
+        assert!(combat.is_at_peace());
+        assert!(!combat.aim(target, due), "peace cannot be aimed implicitly");
+    }
+
+    #[test]
+    fn a_creature_threat_is_not_reinterpreted_as_a_player_stance() {
+        let attacker = Serial::new(1).expect("a mobile serial");
+        let mut combat = Combat::creature_threatened(attacker);
+
+        assert!(!combat.warmode());
+        assert_eq!(combat.target(), Some(attacker));
+        assert!(!combat.enter_war());
+        assert_eq!(combat, Combat::creature_threatened(attacker));
+    }
 
     #[test]
     fn zero_is_not_a_key_value() {

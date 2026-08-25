@@ -1820,9 +1820,10 @@ mod tests {
     ///
     /// The other half of the pier-and-bridge report, and the half with a
     /// mechanism that can actually put a player under a deck.
-    /// [`predict_step`](MapTerrain::predict_step) is what the client draws with
-    /// the instant a key goes down, and [`check`](MapTerrain::check) is what the
-    /// shard decides with — and `predict_step` falls back to
+    /// [`MapTerrain::predict_step`] is the map-only half of what
+    /// [`crate::predict_step`] makes the client draw with the instant a key goes
+    /// down, and [`check`](MapTerrain::check) is what the shard decides with —
+    /// and the map-only prediction falls back to
     /// [`predict_z`](MapTerrain::predict_z)'s *nearest surface* where `check`
     /// refuses. A `0x22` carries no position, so where the two disagree the
     /// client's guess is what the player keeps looking at until something sends

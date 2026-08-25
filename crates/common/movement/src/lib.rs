@@ -82,5 +82,5 @@ pub use sequence::{OutOfSequence, StepCounter, WalkSequence};
 pub use terrain::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
 pub use walk::{
     Heading, Intent, Lean, Refusal, Walk, Walker, arrival_z, can_fit, can_stand, can_step, direction_toward,
-    heading_toward, intend, line_tiles, sight_clear, step_allowed, step_from, steps_out_of,
+    heading_toward, intend, line_tiles, predict_step, sight_clear, step_allowed, step_from, steps_out_of,
 };

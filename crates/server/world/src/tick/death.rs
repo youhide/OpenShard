@@ -145,11 +145,7 @@ impl World {
             } else {
                 format!("a corpse of {owner}")
             };
-            let story = Corpse {
-                owner,
-                killer,
-                ..Corpse::default()
-            };
+            let story = Corpse::from_death(owner, killer);
             if let Some(corpse) = self.spawn_corpse(at, facet, body, facing, name, story) {
                 // Everyone but the dying player, who is about to be told by
                 // `0x2C` and has a ghost to watch rather than a corpse to pair.
@@ -163,9 +159,70 @@ impl World {
                     corpse,
                     &[items::BACKPACK_LAYER, npc::BANK_LAYER, items::MOUNT_LAYER],
                 );
+                // A lifted item is in neither of the three ordinary places: the
+                // drag path has already removed its `Equipped`, `Contained` or
+                // `Position` component.  Consequently the worn-items sweep above
+                // cannot see a weapon that was on the cursor when its owner died.
+                // Retire that drag into the corpse before the ghost is drawn;
+                // bouncing it to its origin would put a formerly-worn weapon back
+                // on the ghost instead.
+                self.move_held_to_corpse(entity, serial, corpse);
             }
         }
         self.enter_ghost_state(entity, serial, true);
+    }
+
+    /// Clear a dying player's drag cursor and put its item into their corpse.
+    ///
+    /// A held item belongs to the cursor transaction rather than to an inventory
+    /// component, so [`move_gear_to_corpse`](Self::move_gear_to_corpse) cannot
+    /// collect it.  If it came off this mobile, retain that former layer in the
+    /// corpse's equipment map as well: the item is loot now, but the corpse still
+    /// needs to be drawn wearing it.
+    fn move_held_to_corpse(&mut self, entity: EntityId, mobile: Serial, container: Serial) {
+        let Some(&Client { connection, .. }) = self.state.registry.get::<Client>(entity) else {
+            return;
+        };
+        let Some(held) = self.state.take_held(connection) else {
+            return;
+        };
+
+        let former_layer = match held.origin {
+            openshard_state::Origin::Worn(worn) if worn.mobile == mobile => Some(worn.layer),
+            _ => None,
+        };
+        let slot = self
+            .state
+            .registry
+            .entity_of(container)
+            .and_then(|corpse| self.state.registry.get::<Corpse>(corpse))
+            .map_or(0, |story| story.equipment.len());
+
+        if let (Some(layer), Some(item)) = (former_layer, self.state.registry.serial_of(held.entity)) {
+            if let Some(corpse) = self.state.registry.entity_of(container) {
+                if let Some(story) = self.state.registry.get_mut::<Corpse>(corpse) {
+                    story
+                        .equipment
+                        .push(openshard_protocol::items::CorpseEquipmentItem { layer, item });
+                }
+            }
+        }
+        self.state.registry.insert(
+            held.entity,
+            Contained {
+                container,
+                position: GumpPoint::new(40 + i32::try_from(slot).unwrap_or(0) * 12, 60),
+                grid: GridSlot(0),
+            },
+        );
+
+        // The client performed the lift locally, so moving the server-side item
+        // is not enough: explicitly close the drag transaction on its cursor.
+        items::reject_drag(
+            &mut self.state,
+            connection,
+            openshard_protocol::items::DragCancelReason::Other,
+        );
     }
 
     /// Put a player into the ghost state: grey the body, remember the living one
@@ -181,11 +238,11 @@ impl World {
             hue: openshard_protocol::wire::Hue(0),
         });
 
-        // War is over, and a ghost holds no target. Clearing `Combat` also stops
-        // `swings` from striking on with a dead body.
-        self.state
-            .registry
-            .remove::<openshard_state::components::Combat>(entity);
+        // War is over, and a ghost holds no target. A connected player keeps its
+        // session-long `Combat` row in its explicit peace state; the transition also
+        // settles the client's stance and target. `swings` independently rejects
+        // a dead attacker, so a malformed later request cannot arm the ghost.
+        self.state.disengage(entity);
         self.state.registry.insert(entity, Ghost { body: living });
         self.clear_attackers_of(serial);
         // Rise in the ghost body.
@@ -218,7 +275,7 @@ impl World {
             .state
             .registry
             .query::<openshard_state::components::Combat>()
-            .filter_map(|(attacker, combat)| (combat.target == Some(target)).then_some(attacker))
+            .filter_map(|(attacker, combat)| (combat.target() == Some(target)).then_some(attacker))
             .collect();
         for attacker in attackers {
             combat::clear_target(&mut self.state, attacker);
@@ -292,6 +349,12 @@ impl World {
         debug!(?entity, full, "resurrect: bringing back to life");
         self.state.registry.remove::<Ghost>(entity);
         self.state.registry.insert(entity, living);
+        debug_assert!(
+            self.state
+                .registry
+                .has::<openshard_state::components::Combat>(entity),
+            "a connected player keeps Combat through the ghost transition"
+        );
         self.strip_death_shroud(serial);
         self.equip_resurrection_kit(serial);
 
@@ -493,11 +556,7 @@ impl World {
         let name = owner
             .as_ref()
             .map_or_else(|| "a corpse".to_owned(), |n| format!("a corpse of {n}"));
-        let story = Corpse {
-            owner: owner.unwrap_or_default(),
-            killer,
-            ..Corpse::default()
-        };
+        let story = Corpse::from_death(owner.unwrap_or_else(String::new), killer);
 
         let Some(corpse) = self.spawn_corpse(at, facet, body, facing, name, story) else {
             self.despawn_creature(entity, serial);

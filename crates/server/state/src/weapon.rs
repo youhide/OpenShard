@@ -88,6 +88,49 @@ pub enum WeaponKind {
     Ranged,
 }
 
+/// The human animation group a weapon uses for a swing.
+///
+/// These are ServUO's `WeaponAnimation` values, which are also the group ids in
+/// the classic human animation table.  The modern `0xE2` packet uses a compact
+/// sub-action instead; [`WeaponAnimation::sub_action`] names that translation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
+pub enum WeaponAnimation {
+    SlashOneHanded = 9,
+    PierceOneHanded = 10,
+    BashOneHanded = 11,
+    BashTwoHanded = 12,
+    SlashTwoHanded = 13,
+    PierceTwoHanded = 14,
+    ShootBow = 18,
+    ShootCrossbow = 19,
+    Wrestle = 31,
+}
+
+impl WeaponAnimation {
+    /// The classic human animation group (`0x6E` action id).
+    #[must_use]
+    pub const fn group(self) -> u16 {
+        self as u16
+    }
+
+    /// ServUO's `GetNewAnimationAction`, used as the `0xE2` attack sub-action.
+    #[must_use]
+    pub const fn sub_action(self) -> u16 {
+        match self {
+            Self::Wrestle => 0,
+            Self::ShootBow => 1,
+            Self::ShootCrossbow => 2,
+            Self::BashOneHanded => 3,
+            Self::SlashOneHanded => 4,
+            Self::PierceOneHanded => 5,
+            Self::BashTwoHanded => 6,
+            Self::SlashTwoHanded => 7,
+            Self::PierceTwoHanded => 8,
+        }
+    }
+}
+
 /// One weapon's combat numbers, keyed by its item [`Drawn`](crate::Drawn) id.
 #[derive(Debug, Clone, Copy)]
 pub struct WeaponData {
@@ -152,6 +195,49 @@ pub const fn swing_base(weapon: &WeaponData, era: CombatEra) -> u16 {
 #[must_use]
 pub fn weapon_data(graphic: Graphic) -> Option<&'static WeaponData> {
     WEAPONS.iter().find(|w| w.graphic == graphic)
+}
+
+/// Which human swing a known weapon uses while worn on `layer`.
+///
+/// The family follows ServUO's weapon base classes.  The worn layer settles the
+/// one/two-handed split for bashing and piercing weapons; axes and polearms use
+/// their characteristic wide two-handed slash even where an axe is physically
+/// held in one hand.  Pickaxes are ServUO's explicit one-handed exception.
+#[must_use]
+pub const fn weapon_animation(weapon: &WeaponData, layer: Layer) -> WeaponAnimation {
+    match weapon.kind {
+        WeaponKind::Slashing => WeaponAnimation::SlashOneHanded,
+        WeaponKind::Piercing => {
+            if layer.0 == LAYER_TWO_HANDED.0 {
+                WeaponAnimation::PierceTwoHanded
+            } else {
+                WeaponAnimation::PierceOneHanded
+            }
+        }
+        WeaponKind::Bashing => {
+            if layer.0 == LAYER_TWO_HANDED.0 {
+                WeaponAnimation::BashTwoHanded
+            } else {
+                WeaponAnimation::BashOneHanded
+            }
+        }
+        WeaponKind::Axe => {
+            if weapon.graphic.0 == 0x0E86 {
+                WeaponAnimation::SlashOneHanded // Pickaxe
+            } else {
+                WeaponAnimation::SlashTwoHanded
+            }
+        }
+        WeaponKind::Polearm => WeaponAnimation::SlashTwoHanded,
+        WeaponKind::Staff => WeaponAnimation::BashTwoHanded,
+        WeaponKind::Ranged => {
+            if weapon.graphic.0 == 0x13B2 {
+                WeaponAnimation::ShootBow
+            } else {
+                WeaponAnimation::ShootCrossbow
+            }
+        }
+    }
 }
 
 /// Which hand (or hands) a weapon is held in: the class's own answer where it has
@@ -305,6 +391,23 @@ mod tests {
         assert_eq!(sword.old_speed, 35);
         assert_eq!((sword.old_min, sword.old_max), (5, 33));
         assert!(weapon_data(Graphic(0x0000)).is_none());
+    }
+
+    #[test]
+    fn axes_swing_the_weapon_instead_of_wrestling() {
+        let axe = weapon_data(Graphic(0x0F49)).expect("axe");
+        assert_eq!(
+            weapon_animation(axe, LAYER_ONE_HANDED),
+            WeaponAnimation::SlashTwoHanded
+        );
+        assert_eq!(weapon_animation(axe, LAYER_ONE_HANDED).group(), 13);
+        assert_eq!(weapon_animation(axe, LAYER_ONE_HANDED).sub_action(), 7);
+
+        let war_axe = weapon_data(Graphic(0x13B0)).expect("war axe");
+        assert_eq!(
+            weapon_animation(war_axe, LAYER_ONE_HANDED),
+            WeaponAnimation::BashOneHanded
+        );
     }
 
     #[test]

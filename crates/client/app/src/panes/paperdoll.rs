@@ -17,7 +17,9 @@
 //! hand it fills — moved with the container at step 6. Both halves are here
 //! now. A worn item is pressed, dragged off the doll and lifted like an icon
 //! in a bag ([`PaperdollPane::pressed`]), and an item let go over *any* doll
-//! is offered to that body's empty slot ([`Effect::Drop`]).
+//! is offered to that body's empty slot ([`Effect::Drop`]). The backpack is
+//! the exception: its picture names the container itself, so a drop on it
+//! goes into the pack without requiring its window to be open first.
 //!
 //! What is still not this pane's is the hand itself: which item is on the
 //! cursor is [`Windows::hand`](crate::windows::Windows::hand), because there
@@ -383,6 +385,40 @@ impl PaperdollPane {
         // puts the item where it came from. Keeping that judgement here used
         // to strand the transfer with nobody to bounce it.
         if let (Some(hand), true) = (ctx.frame.hand, ctx.under_pointer) {
+            // The worn backpack's picture is both paperdoll furniture (a
+            // double click opens it) and the closed container itself.  A drop
+            // on those opaque pixels therefore names the bag, not the body's
+            // equipment slot.  Without this arm the exact same gesture only
+            // worked after opening the container gump, because every release
+            // handled here fell through to `Equip`.
+            let on_backpack = match ctx.drawn {
+                Some(Drawn::Paperdoll(window)) => {
+                    gump_art::pick(
+                        &window.doll.pictures,
+                        ctx.frame.cursor,
+                        ctx.frame.files.gump_atlas,
+                    )
+                    .and_then(|index| window.doll.hits.get(&index).copied())
+                        == Some(paperdoll::DollButton::Backpack)
+                }
+                _ => false,
+            };
+            if on_backpack {
+                if let Some(backpack) = self
+                    .equipment(&ctx.frame)
+                    .iter()
+                    .find(|item| item.layer == Layer::BACKPACK)
+                    .map(|item| item.serial)
+                {
+                    // A closed bag has no meaningful gump-local cursor
+                    // coordinate. The shard accepts the same neutral origin
+                    // used by its other container-targeted gestures.
+                    return Response::changed().with(Effect::Drop(PendingDrop::Container {
+                        container: backpack,
+                        at: GumpPoint::new(0, 0),
+                    }));
+                }
+            }
             let layer = openshard_protocol::wire::Layer(
                 ctx.frame
                     .files
@@ -936,6 +972,70 @@ mod tests {
             used.out.as_slice(),
             [Effect::Raise, Effect::Net(Outgoing::Use(item))]
                 if *item == serial(0x4000_0001)
+        ));
+    }
+
+    /// A closed backpack is still a container target on the paperdoll. This
+    /// pins the resurrection report directly: the axe is already on the hand,
+    /// the pack has no container window, and releasing over its drawn pixels
+    /// must emit a container drop rather than trying to equip the axe again.
+    #[test]
+    fn a_drop_on_the_paperdoll_backpack_goes_into_the_closed_pack() {
+        use std::collections::BTreeMap;
+
+        use openshard_client_render::gump::{GumpArt, Picture, PictureIndex};
+        use openshard_protocol::containers::GridSlot;
+        use openshard_protocol::items::ItemAmount;
+        use openshard_protocol::wire::Graphic;
+
+        use crate::hand::{Hand, ItemDrag};
+        use crate::panes::fixture;
+
+        const BACKPACK: Graphic = Graphic(0x0E75);
+        const AXE: Graphic = Graphic(0x0F43);
+
+        let me = serial(0x0000_002A);
+        let pack = serial(0x4000_0100);
+        let axe = serial(0x4000_0200);
+        let files = fixture::Install::shipping([(GumpArt::Item(BACKPACK), (30, 30))]);
+        let mut view = fixture::world(me);
+        view.player.equipment.push(Equipment {
+            serial: pack,
+            graphic: BACKPACK,
+            layer: Layer::BACKPACK,
+            hue: Hue::NONE,
+        });
+
+        let at = GumpPixel::new(90, 80);
+        let doll = paperdoll::Doll {
+            pictures: vec![Picture::plain(GumpArt::Item(BACKPACK), at)],
+            hits: BTreeMap::from([(PictureIndex::new(0), paperdoll::DollButton::Backpack)]),
+            equipment_hits: BTreeMap::new(),
+        };
+        let drawn = Drawn::Paperdoll(Window {
+            doll,
+            lines: Vec::new(),
+        });
+        let mut ctx = files.ctx(&view, Some(&drawn), at.offset(GumpPixel::new(5, 5)), true);
+        ctx.frame.hand = Some(Hand::Held(ItemDrag {
+            item: ContainedItem {
+                serial: axe,
+                graphic: AXE,
+                amount: ItemAmount(1),
+                at: GumpPoint::new(0, 0),
+                grid: GridSlot(0),
+                hue: Hue::NONE,
+            },
+            origin: DragOrigin::Ground,
+            grab: GumpPixel::new(5, 5),
+        }));
+
+        let mut pane = PaperdollPane::new(me);
+        let answer = pane.handle(Input::Release(Button::Left), &ctx);
+        assert!(matches!(
+            answer.out.as_slice(),
+            [Effect::Drop(PendingDrop::Container { container, at })]
+                if *container == pack && *at == GumpPoint::new(0, 0)
         ));
     }
 }

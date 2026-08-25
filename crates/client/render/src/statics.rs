@@ -535,6 +535,18 @@ fn collect_in_with_fades_profiled_with_interior<'a>(
             return;
         }
         let is_foliage = tile.flags.is_foliage();
+        // A building cutaway and a canopy fade answer different questions.
+        // `max_z` removes the roof and upper storeys over the player, while
+        // foliage only becomes translucent when its own picture overlaps the
+        // body.  Feeding a tree through the building cutaway used to drive its
+        // persistent alpha all the way to zero while the player was indoors;
+        // after leaving, the tree therefore looked as though its cutaway had
+        // stuck.  Keep foliage on the ordinary placement path and let the
+        // overlap rule below be its only source of transparency.
+        let object_cutaway = match is_foliage {
+            true => &Cutaway::OPEN,
+            false => cutaway,
+        };
         let Some(placed) = place(
             at,
             item.tile,
@@ -542,7 +554,7 @@ fn collect_in_with_fades_profiled_with_interior<'a>(
             tiledata,
             animations,
             atlas,
-            cutaway,
+            object_cutaway,
             // Foliage uses the canopy rule below. Passing the body rectangle
             // into `place` would hard-cut it before the shared fade can move
             // all members of the canopy into the late layer.
@@ -1153,6 +1165,86 @@ mod tests {
             .is_some(),
             "the same overlap draws a non-foliage static: only foliage is cut"
         );
+    }
+
+    /// Entering a building can lower the architectural `max_z` beneath a
+    /// nearby canopy.  That must not turn the tree into another roof: its
+    /// partial fade belongs only to the frame where it actually overlaps the
+    /// body, and moving clear restores it even while the building remains
+    /// open.
+    #[test]
+    fn foliage_restores_independently_of_a_building_cutaway() {
+        let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
+        let graphic = Graphic(0x0D45);
+        let atlas = atlas(graphic, 44, 88);
+        let animations = StaticAnimations::default();
+        let mut tiledata = TileData::empty();
+        tiledata.set_static_tile(
+            graphic.0,
+            openshard_tiles::StaticTile {
+                flags: openshard_tiles::TileFlags::new(openshard_tiles::TileFlags::FOLIAGE),
+                ..Default::default()
+            },
+        );
+        let at = Point::new(100, 100, 20);
+        let mut map = field();
+        map.place_static(StaticItem {
+            tile: graphic,
+            x: at.x,
+            y: at.y,
+            z: at.z,
+            hue: Hue::NONE,
+        });
+        let screen_at = stand_on(&camera, at, &atlas.sprite(graphic).expect("packed canopy"));
+        let over = Rect {
+            x: screen_at.x,
+            y: screen_at.y,
+            width: 44.0,
+            height: 88.0,
+        };
+        let elsewhere = Rect {
+            x: screen_at.x + 1000.0,
+            y: screen_at.y + 1000.0,
+            width: 44.0,
+            height: 88.0,
+        };
+        let building = Cutaway {
+            max_z: 10,
+            max_ground_z: 127,
+            no_draw_roofs: true,
+        };
+        let mut fades = crate::cutaway::Fades::default();
+
+        let covered = collect_with_fades(
+            &map,
+            &camera,
+            &tiledata,
+            &animations,
+            &atlas,
+            &building,
+            &crate::occlusion::Occlusion::EMPTY,
+            Some(over),
+            None,
+            &mut fades,
+        );
+        assert!(covered.quads.is_empty());
+        assert_eq!(covered.cutaway_quads.len(), 1, "the canopy did not start fading");
+
+        let clear = collect_with_fades(
+            &map,
+            &camera,
+            &tiledata,
+            &animations,
+            &atlas,
+            &building,
+            &crate::occlusion::Occlusion::EMPTY,
+            Some(elsewhere),
+            None,
+            &mut fades,
+        );
+        assert_eq!(clear.quads.len(), 1, "the canopy stayed in the cutaway layer");
+        assert!(clear.cutaway_quads.is_empty());
+        assert!(fades.is_empty(), "the restored canopy kept stale fade state");
     }
 
     /// A static covering the player's on-screen body moves out of the opaque

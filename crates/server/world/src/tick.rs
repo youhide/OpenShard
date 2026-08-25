@@ -1432,7 +1432,7 @@ impl World {
                     .state
                     .registry
                     .get::<Combat>(creature)
-                    .and_then(|c| c.target)
+                    .and_then(|combat| combat.target())
                     .is_some();
                 if !engaged {
                     let facet = self.state.facet_of(creature);
@@ -1475,7 +1475,7 @@ impl World {
                 .state
                 .registry
                 .get::<Combat>(creature)
-                .and_then(|c| c.target)
+                .and_then(|combat| combat.target())
                 .is_some();
             let base = self.brain_beat(creature);
             let interval = if engaged { base } else { base * 2 };

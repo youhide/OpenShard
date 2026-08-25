@@ -31,11 +31,7 @@ pub fn tame(
     if angered {
         state.registry.insert(
             creature,
-            openshard_state::components::Combat {
-                warmode: true,
-                target: Some(owner),
-                next_swing: state.ticks,
-            },
+            openshard_state::components::Combat::creature_engaged(owner, state.ticks),
         );
         return;
     }
@@ -50,9 +46,7 @@ pub fn tame(
     );
     // A pet is nobody's enemy: it drops whatever it was fighting, and its bar turns
     // the friendly green every client draws a controlled creature in.
-    state
-        .registry
-        .remove::<openshard_state::components::Combat>(creature);
+    state.disengage(creature);
     state
         .registry
         .insert(creature, openshard_protocol::mobile::Notoriety::Friend);
@@ -156,7 +150,7 @@ pub fn hear_pet_order(state: &mut WorldState, speaker: EntityId, text: &str) {
     let quarry = state
         .registry
         .get::<openshard_state::components::Combat>(speaker)
-        .and_then(|combat| combat.target);
+        .and_then(|combat| combat.target());
     for pet in named {
         let Some(mut current) = state
             .registry
@@ -174,16 +168,12 @@ pub fn hear_pet_order(state: &mut WorldState, speaker: EntityId, text: &str) {
             (openshard_state::components::PetOrder::Attack, Some(target)) => {
                 state.registry.insert(
                     pet,
-                    openshard_state::components::Combat {
-                        warmode: true,
-                        target: Some(target),
-                        next_swing: state.ticks,
-                    },
+                    openshard_state::components::Combat::creature_engaged(target, state.ticks),
                 );
             }
             (openshard_state::components::PetOrder::Attack, None) => {}
             _ => {
-                state.registry.remove::<openshard_state::components::Combat>(pet);
+                state.disengage(pet);
             }
         }
     }

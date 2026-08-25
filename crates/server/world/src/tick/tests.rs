@@ -3494,6 +3494,19 @@ fn a_player_who_dies_becomes_a_ghost() {
     let player_entity = world.state.players[&player];
     let mut died: Cursor<MobileDied> = world.bus().cursor();
 
+    // Die from a real engaged state, so the transition has both halves to
+    // settle rather than merely preserving an already-established peace state.
+    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    engage(&mut world, player, target, now);
+    assert!(
+        world
+            .registry()
+            .get::<Combat>(player_entity)
+            .is_some_and(|combat| combat.warmode() && combat.target() == Some(target)),
+        "engaged before death"
+    );
+    let _ = packets_for(&mut world, player);
+
     world.queue(Command::Damage {
         serial,
         amount: 500,
@@ -3522,8 +3535,12 @@ fn a_player_who_dies_becomes_a_ghost() {
         "with its living body remembered for resurrection"
     );
     assert!(
-        !world.state.registry.has::<Combat>(player_entity),
-        "war and target are dropped"
+        world
+            .state
+            .registry
+            .get::<Combat>(player_entity)
+            .is_some_and(|combat| combat.is_at_peace()),
+        "the player keeps its session combat row, at peace and with no target"
     );
     assert_eq!(
         world
@@ -3536,6 +3553,52 @@ fn a_player_who_dies_becomes_a_ghost() {
     assert!(
         packets.iter().any(|p| p.as_slice() == [0x2C, 0x00]),
         "the client is told it is dead (0x2C)"
+    );
+    assert!(
+        packets
+            .iter()
+            .any(|p| p.as_slice() == [0x72, 0x00, 0x00, 0x32, 0x00]),
+        "death settles the client's war stance at peace"
+    );
+    assert!(
+        packets
+            .iter()
+            .any(|p| p.as_slice() == [0xAA, 0x00, 0x00, 0x00, 0x00]),
+        "death clears the client's attack marker"
+    );
+
+    // Intents are allowed to disagree with authoritative state. The server
+    // settles both of these requests back to the ghost's actual state rather
+    // than echoing what was requested or relying on the client to suppress it.
+    world.queue(Command::WarMode {
+        connection: player,
+        war: true,
+    });
+    world.queue(Command::Attack {
+        connection: player,
+        target: Some(target),
+    });
+    world.tick(now);
+    assert!(
+        world
+            .state
+            .registry
+            .get::<Combat>(player_entity)
+            .is_some_and(|combat| combat.is_at_peace()),
+        "a ghost's conflicting intents cannot change authoritative combat state"
+    );
+    let packets = packets_for(&mut world, player);
+    assert!(
+        packets
+            .iter()
+            .any(|p| p.as_slice() == [0x72, 0x00, 0x00, 0x32, 0x00]),
+        "the requested war stance is answered with the settled stance"
+    );
+    assert!(
+        packets
+            .iter()
+            .any(|p| p.as_slice() == [0xAA, 0x00, 0x00, 0x00, 0x00]),
+        "the requested target is answered with the settled target"
     );
 }
 
@@ -3649,6 +3712,96 @@ fn a_dead_player_leaves_a_corpse_but_keeps_its_backpack() {
 }
 
 #[test]
+fn a_weapon_on_the_cursor_when_its_owner_dies_falls_into_the_corpse() {
+    // Lifting worn gear removes `Equipped` while the drag is in flight. Death
+    // must collect that fourth, temporary location explicitly; restoring the
+    // drag origin would otherwise equip the axe on the newly-created ghost.
+    use openshard_protocol::serial::SerialKind;
+
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let mobile = serial_of(&world, player);
+
+    let (axe, axe_serial) = world.state.registry.spawn_with_serial(SerialKind::Item).unwrap();
+    world.state.registry.insert(
+        axe,
+        Drawn {
+            id: Graphic(0x0F49),
+            hue: Hue(0),
+        },
+    );
+    world.state.registry.insert(
+        axe,
+        Equipped {
+            mobile,
+            layer: openshard_state::weapon::LAYER_TWO_HANDED,
+        },
+    );
+
+    world.queue(Command::PickUpItem {
+        connection: player,
+        serial: RawSerial(axe_serial.raw()),
+        amount: 1,
+    });
+    world.tick(now);
+    assert_eq!(world.state.held_of(player).map(|held| held.entity), Some(axe));
+    assert!(
+        world.registry().get::<Equipped>(axe).is_none(),
+        "the axe is in drag limbo"
+    );
+    let _ = packets_for(&mut world, player);
+
+    world.queue(Command::Damage {
+        serial: mobile,
+        amount: 500,
+        damage_type: 0,
+        by: None,
+    });
+    world.tick(now);
+
+    let corpse = world
+        .registry()
+        .query::<Corpse>()
+        .next()
+        .map(|(entity, _)| entity)
+        .expect("a corpse was laid");
+    let corpse_serial = world.registry().serial_of(corpse).unwrap();
+    assert!(world.state.held_of(player).is_none(), "death clears the cursor");
+    assert_eq!(
+        world
+            .registry()
+            .get::<Contained>(axe)
+            .map(|inside| inside.container),
+        Some(corpse_serial),
+        "the held axe became corpse loot"
+    );
+    assert!(
+        world.registry().get::<Equipped>(axe).is_none(),
+        "the axe was not restored onto the ghost"
+    );
+    assert_eq!(
+        world
+            .registry()
+            .get::<Corpse>(corpse)
+            .map(|story| story.equipment.as_slice()),
+        Some(
+            &[openshard_protocol::items::CorpseEquipmentItem {
+                layer: openshard_state::weapon::LAYER_TWO_HANDED,
+                item: axe_serial,
+            }][..]
+        ),
+        "the corpse preserves the axe's former hand layer"
+    );
+    assert!(
+        packets_for(&mut world, player)
+            .iter()
+            .any(|packet| packet.first() == Some(&0x27)),
+        "the dead player's client is told to release its drag cursor"
+    );
+}
+
+#[test]
 fn resurrection_brings_a_ghost_back() {
     // The staff `.res` command (and the Resurrection spell) call the same core
     // path: the ghost marker lifts, the living body returns, and the client is
@@ -3714,10 +3867,44 @@ fn resurrection_brings_a_ghost_back() {
         Some(Graphic(0x0F49)),
         "the resurrection axe is the active weapon"
     );
+    assert!(
+        world
+            .registry()
+            .get::<Combat>(player_entity)
+            .is_some_and(|combat| combat.is_at_peace()),
+        "the player's session combat row survived death at peace"
+    );
     let packets = packets_for(&mut world, player);
     assert!(
         packets.iter().any(|p| p.as_slice() == [0x2C, 0x02]),
         "the client is told it is alive again (0x2C 0x02)"
+    );
+
+    // Exercise the two requests that used to become no-ops after resurrection,
+    // then make their freshly-armed swing due immediately. This proves the
+    // session-long row remained functional across the transition.
+    let target = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let target_entity = entity(&world, target);
+    engage(&mut world, player, target, now);
+    let combat = world
+        .state
+        .registry
+        .get_mut::<Combat>(player_entity)
+        .expect("combat is a player-session invariant");
+    assert!(combat.warmode(), "war mode is recorded after resurrection");
+    assert_eq!(
+        combat.target(),
+        Some(target),
+        "the target is recorded after resurrection"
+    );
+    assert!(combat.schedule_swing(openshard_state::WorldTick::ZERO));
+    world.tick(now);
+    assert!(
+        world
+            .registry()
+            .get::<Hitpoints>(target_entity)
+            .is_some_and(|hits| hits.current < 50),
+        "the resurrected player lands a blow"
     );
 }
 
@@ -3755,7 +3942,7 @@ fn ghosts_cannot_be_selected_or_swung_at() {
         world
             .registry()
             .get::<Combat>(attacker_entity)
-            .and_then(|combat| combat.target),
+            .and_then(|combat| combat.target()),
         None,
         "a ghost cannot become an attack target"
     );
@@ -3764,18 +3951,14 @@ fn ghosts_cannot_be_selected_or_swung_at() {
     // attack animation may be sent while the next AI beat is pending.
     world.state.registry.insert(
         attacker_entity,
-        Combat {
-            warmode: true,
-            target: Some(ghost_serial),
-            next_swing: openshard_state::WorldTick::ZERO,
-        },
+        Combat::creature_engaged(ghost_serial, openshard_state::WorldTick::ZERO),
     );
     world.tick(now);
     assert_eq!(
         world
             .registry()
             .get::<Combat>(attacker_entity)
-            .and_then(|combat| combat.target),
+            .and_then(|combat| combat.target()),
         None,
         "a ghost clears a stale combat target before swinging"
     );
@@ -3792,11 +3975,7 @@ fn a_mob_immediately_forgets_a_player_who_becomes_a_ghost() {
     let mob_entity = entity(&world, mob);
     world.state.registry.insert(
         mob_entity,
-        Combat {
-            warmode: true,
-            target: Some(player_serial),
-            next_swing: openshard_state::WorldTick::ZERO,
-        },
+        Combat::creature_engaged(player_serial, openshard_state::WorldTick::ZERO),
     );
 
     world.enter_ghost_state(player_entity, player_serial, true);
@@ -3805,7 +3984,7 @@ fn a_mob_immediately_forgets_a_player_who_becomes_a_ghost() {
         world
             .registry()
             .get::<Combat>(mob_entity)
-            .and_then(|combat| combat.target),
+            .and_then(|combat| combat.target()),
         None,
         "a mob does not retain a dead player as its quarry"
     );
@@ -3841,7 +4020,7 @@ fn a_mob_cannot_see_or_reacquire_a_ghost() {
         world
             .registry()
             .get::<Combat>(creature)
-            .and_then(|combat| combat.target),
+            .and_then(|combat| combat.target()),
         None,
         "the creature does not acquire the invisible ghost as prey"
     );
@@ -4176,6 +4355,21 @@ fn war_mode_and_attack_are_confirmed_to_the_client() {
         packets.iter().any(|p| p[0] == 0xAA && mentions(p, mob)),
         "and the target is set"
     );
+
+    world.queue(Command::WarMode {
+        connection: player,
+        war: false,
+    });
+    world.tick(now);
+    let packets = packets_for(&mut world, player);
+    assert!(
+        packets.iter().any(|p| p == &[0x72, 0x00, 0x00, 0x32, 0x00]),
+        "the settled peace stance is confirmed"
+    );
+    assert!(
+        packets.iter().any(|p| p == &[0xAA, 0, 0, 0, 0]),
+        "and the target destroyed by that transition is cleared too"
+    );
 }
 
 #[test]
@@ -4214,7 +4408,7 @@ fn a_player_in_war_mode_retaliates_when_struck_without_a_target() {
             .state
             .registry
             .get::<Combat>(defender_entity)
-            .and_then(|combat| combat.target),
+            .and_then(|combat| combat.target()),
         Some(attacker_serial),
         "a struck war-mode player aims back at the attacker"
     );
@@ -5400,7 +5594,11 @@ fn an_invulnerable_mobile_cannot_be_attacked() {
     world.tick(now);
 
     assert_eq!(
-        world.state.registry.get::<Combat>(player_entity).unwrap().target,
+        world
+            .state
+            .registry
+            .get::<Combat>(player_entity)
+            .and_then(|combat| combat.target()),
         None,
         "the attack is refused"
     );
@@ -5423,11 +5621,7 @@ fn attacking_an_innocent_turns_the_attacker_grey() {
     let victim_serial = serial_of(&world, victim);
     let _ = packets_for(&mut world, victim);
 
-    world.queue(Command::Attack {
-        connection: aggressor,
-        target: Some(victim_serial),
-    });
-    world.tick(now);
+    engage(&mut world, aggressor, victim_serial, now);
 
     assert_eq!(
         world.state.notoriety_of(aggressor_entity),
@@ -5622,11 +5816,7 @@ fn attacking_an_enemy_is_not_a_crime() {
     // A plain orange enemy.
     let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
 
-    world.queue(Command::Attack {
-        connection: player,
-        target: Some(mob),
-    });
-    world.tick(now);
+    engage(&mut world, player, mob, now);
 
     assert_eq!(
         world.state.notoriety_of(player_entity),
@@ -5644,11 +5834,7 @@ fn the_criminal_flag_lifts_when_its_time_runs_out() {
     let aggressor_entity = world.state.players[&aggressor];
     let victim_serial = serial_of(&world, victim);
 
-    world.queue(Command::Attack {
-        connection: aggressor,
-        target: Some(victim_serial),
-    });
-    world.tick(now);
+    engage(&mut world, aggressor, victim_serial, now);
     assert_eq!(world.state.notoriety_of(aggressor_entity), Notoriety::Criminal);
 
     // Bring the flag's expiry forward rather than run two minutes of ticks.
@@ -5826,7 +6012,11 @@ fn killing_the_target_ends_the_attack() {
         "the creature is dead and gone"
     );
     assert_eq!(
-        world.state.registry.get::<Combat>(player_entity).unwrap().target,
+        world
+            .state
+            .registry
+            .get::<Combat>(player_entity)
+            .and_then(|combat| combat.target()),
         None,
         "and the attacker is no longer swinging at it"
     );
@@ -8819,13 +9009,16 @@ fn a_melee_swing_turns_the_attacker_toward_its_target() {
         .state
         .registry
         .insert(attacker_entity, Heading(Facing::walking(Direction::South)));
-    world.state.registry.insert(
-        attacker_entity,
-        Combat {
-            warmode: true,
-            target: Some(defender_serial),
-            next_swing: world.state.ticks,
-        },
+    combat::war_mode(&mut world.state, attacker, true);
+    combat::attack(&mut world.state, attacker, Some(defender_serial));
+    let due = world.state.ticks;
+    assert!(
+        world
+            .state
+            .registry
+            .get_mut::<Combat>(attacker_entity)
+            .expect("player combat state")
+            .schedule_swing(due)
     );
     let _ = packets_for(&mut world, attacker);
 
@@ -8868,6 +9061,7 @@ fn a_hidden_wrestler_arms_an_immediate_target_bound_ambush() {
         .registry
         .insert(attacker_entity, openshard_state::Hidden);
 
+    combat::war_mode(&mut world.state, attacker, true);
     combat::attack(&mut world.state, attacker, Some(defender_serial));
 
     assert_eq!(
@@ -8876,8 +9070,8 @@ fn a_hidden_wrestler_arms_an_immediate_target_bound_ambush() {
             .registry
             .get::<Combat>(attacker_entity)
             .unwrap()
-            .next_swing,
-        world.state.ticks,
+            .next_swing(),
+        Some(world.state.ticks),
         "an ambush does not wait through the normal first swing timer"
     );
     assert_eq!(
@@ -8911,6 +9105,7 @@ fn three_recent_wrestling_steps_shorten_only_the_next_new_engagement() {
         3
     );
 
+    combat::war_mode(&mut world.state, attacker, true);
     combat::attack(&mut world.state, attacker, Some(defender_serial));
 
     assert_eq!(
@@ -8919,8 +9114,8 @@ fn three_recent_wrestling_steps_shorten_only_the_next_new_engagement() {
             .registry
             .get::<Combat>(attacker_entity)
             .unwrap()
-            .next_swing,
-        world.state.ticks + WRESTLING_SWING_TICKS / 2,
+            .next_swing(),
+        Some(world.state.ticks + WRESTLING_SWING_TICKS / 2),
         "intercept spends the footwork on first contact, not every following hit"
     );
     assert!(
@@ -8956,14 +9151,14 @@ fn a_wrestlers_third_consecutive_hit_is_a_combo_and_restores_stamina() {
     );
 
     for _ in 0..3 {
-        world.state.registry.insert(
-            attacker_entity,
-            Combat {
-                warmode: true,
-                target: Some(defender_serial),
-                next_swing: world.state.ticks,
-            },
-        );
+        let due = world.state.ticks;
+        let combat = world
+            .state
+            .registry
+            .get_mut::<Combat>(attacker_entity)
+            .expect("player combat state");
+        assert!(combat.enter_war());
+        assert!(combat.aim(defender_serial, due));
         combat::swings(&mut world.state);
     }
 
@@ -14590,7 +14785,7 @@ fn a_creature_does_not_notice_prey_through_a_shut_door() {
         world
             .registry()
             .get::<Combat>(creature)
-            .and_then(|c| c.target)
+            .and_then(|combat| combat.target())
             .is_none(),
         "a shut door hides prey — no aggro through it"
     );
@@ -14605,7 +14800,10 @@ fn a_creature_does_not_notice_prey_through_a_shut_door() {
         world.tick(now);
     }
     assert_eq!(
-        world.registry().get::<Combat>(creature).and_then(|c| c.target),
+        world
+            .registry()
+            .get::<Combat>(creature)
+            .and_then(|combat| combat.target()),
         Some(player_serial),
         "an open doorway is a sight line"
     );
@@ -14695,7 +14893,7 @@ fn an_unreachable_quarry_is_given_up_not_wall_humped() {
         world
             .registry()
             .get::<Combat>(creature)
-            .and_then(|c| c.target)
+            .and_then(|combat| combat.target())
             .is_none(),
         "and the doomed chase was dropped"
     );
@@ -15958,14 +16156,14 @@ fn a_human_chaser_opens_the_door_in_its_way() {
     let now = tick_until(&mut world, now, AI_THINK_TICKS * 2, |w| {
         w.registry()
             .get::<Combat>(creature)
-            .and_then(|c| c.target)
+            .and_then(|combat| combat.target())
             .is_some()
     });
     assert!(
         world
             .registry()
             .get::<Combat>(creature)
-            .and_then(|c| c.target)
+            .and_then(|combat| combat.target())
             .is_some(),
         "through the open doorway it noticed the player"
     );
@@ -16058,8 +16256,8 @@ fn a_defensive_creature_answers_the_blow() {
     world.tick(now);
     world.tick(now);
     let combat = world.registry().get::<Combat>(creature).expect("engaged");
-    assert_eq!(combat.target, Some(player_serial), "it turned on its attacker");
-    assert!(combat.warmode, "and it means it");
+    assert_eq!(combat.target(), Some(player_serial), "it turned on its attacker");
+    assert!(combat.warmode(), "and it means it");
     assert_eq!(
         world.state.registry.get::<Heading>(creature),
         Some(&Heading(Facing::walking(Direction::North))),
@@ -16085,7 +16283,7 @@ fn a_passive_creature_runs_from_its_attacker() {
     });
     world.tick(now);
     let combat = world.registry().get::<Combat>(creature).expect("aware");
-    assert!(!combat.warmode, "fauna does not fight back");
+    assert!(!combat.warmode(), "fauna does not fight back");
     let mut later = now;
     for _ in 0..(AI_THINK_TICKS * 8) {
         later += TICK_INTERVAL;
@@ -17172,7 +17370,7 @@ fn no_volley_passes_a_shut_door() {
         world
             .registry()
             .get::<Combat>(archer)
-            .and_then(|c| c.target)
+            .and_then(|combat| combat.target())
             .is_some(),
         "it took aim through the open door"
     );
@@ -17325,11 +17523,7 @@ fn lod_an_engaged_creature_keeps_simulating() {
     // Engage it and let it think again this coming tick.
     world.state.registry.insert(
         creature,
-        Combat {
-            warmode: true,
-            target: Some(target),
-            next_swing: openshard_state::WorldTick::ZERO,
-        },
+        Combat::creature_engaged(target, openshard_state::WorldTick::ZERO),
     );
     world
         .state

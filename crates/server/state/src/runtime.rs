@@ -26,7 +26,7 @@ use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::ground::Ground;
 use openshard_movement::{Footing, MapTerrain, NavigationGraph};
 use openshard_protocol::casting::SpellId;
-use openshard_protocol::combat::HealthBar;
+use openshard_protocol::combat::{AttackTarget, HealthBar, WarMode};
 use openshard_protocol::feedback::{Animation, NewAnimation, PlaySound};
 use openshard_protocol::items::WorldItem;
 use openshard_protocol::localized;
@@ -58,6 +58,7 @@ use crate::region::{Region, Regions};
 use crate::rng::Rng;
 use crate::sectors::{Occupant, Sectors, VIEW_RANGE};
 use crate::skill::Skill;
+use crate::weapon::{LAYER_ONE_HANDED, LAYER_TWO_HANDED, WeaponAnimation, weapon_animation, weapon_data};
 
 /// A character's height above the ground when the facet has no map to ask.
 const Z_WITHOUT_A_MAP: i8 = 0;
@@ -2411,18 +2412,39 @@ impl WorldState {
         }
     }
 
+    /// The equipped weapon's human swing, read at the moment it is needed.
+    ///
+    /// The one-handed layer has the same priority as combat's damage lookup.
+    /// Unknown hand items are skipped, so a torch cannot turn a real weapon in
+    /// the other hand back into wrestling.
+    fn equipped_weapon_animation(&self, mobile: Serial) -> WeaponAnimation {
+        [LAYER_ONE_HANDED, LAYER_TWO_HANDED]
+            .into_iter()
+            .find_map(|layer| {
+                self.registry
+                    .query::<Equipped>()
+                    .find(|(_, worn)| worn.mobile == mobile && worn.layer == layer)
+                    .and_then(|(item, worn)| {
+                        self.registry
+                            .get::<Drawn>(item)
+                            .and_then(|drawn| weapon_data(drawn.id))
+                            .map(|weapon| weapon_animation(weapon, worn.layer))
+                    })
+            })
+            .unwrap_or(WeaponAnimation::Wrestle)
+    }
+
     /// Animate `mobile` performing `action` — a swing, a death throe, a cast
     /// gesture — for everyone who can see it.
     ///
     /// The wire is per-client, not per-packet: a modern client (7.0.0.0+) gets the
     /// `0xE2` new-animation packet, where the server names a body-agnostic
-    /// [`AnimationType`](Action) and the client picks the frames for that body —
-    /// which is why a swing needs no body table there. An older client gets the
-    /// `0x6E` classic packet, whose action id *is* body-specific, so it is chosen
-    /// off a coarse humanoid-vs-creature split (the same `body_opens_doors` line
-    /// the door AI uses). The split is deliberately rough: exact per-weapon,
-    /// per-body actions want the animation tables the references key off body id,
-    /// and the modern path — the one the test clients take — does not need them.
+    /// [`AnimationType`](Action), plus the equipped weapon's sub-action for a
+    /// human attack, and the client picks that body's frames. An older client
+    /// gets the `0x6E` classic packet, whose action id *is* body-specific; human
+    /// attacks use that same weapon motion directly, while creatures still use
+    /// the coarse `body_opens_doors` split. Exact per-creature actions need the
+    /// body tables the references key off body id.
     pub fn animate(&mut self, mobile: EntityId, action: Action) {
         let Some(serial) = self.registry.serial_of(mobile) else {
             return;
@@ -2431,14 +2453,23 @@ impl WorldState {
             .registry
             .get::<Body>(mobile)
             .is_some_and(|body| body_opens_doors(body.id));
+        // An `0xE2` attack is only a category. Its sub-action is where the
+        // weapon motion lives, and zero means wrestling. Read the equipped item
+        // at the swing, just as combat reads its damage at the swing: taking an
+        // axe off therefore needs no mirrored state to restore bare hands.
+        let weapon_animation = if action == Action::Attack && humanoid {
+            self.equipped_weapon_animation(serial)
+        } else {
+            WeaponAnimation::Wrestle
+        };
         // Built once each; the per-recipient choice is only which to send.
         let new_packet = ServerPacket::NewAnimation(NewAnimation {
             serial,
             animation_type: action.animation_type(),
-            action: action.sub_action(),
+            action: action.sub_action(weapon_animation),
             delay: 0,
         });
-        let (old_action, frames) = action.classic_action(humanoid);
+        let (old_action, frames) = action.classic_action(humanoid, weapon_animation);
         let old_packet = ServerPacket::Animation(Animation {
             serial,
             action: old_action,
@@ -2507,23 +2538,24 @@ impl Action {
     /// `AnimationType.Attack` with the number of the swing it wants
     /// (`DoHarvestingEffect`, the `Core.SA` branch), because mining, chopping and
     /// casting a line are three different motions and none of them is "attack".
-    const fn sub_action(self) -> u16 {
+    const fn sub_action(self, weapon: WeaponAnimation) -> u16 {
         match self {
+            Self::Attack => weapon.sub_action(),
             Self::Mine => 3,
             Self::Fish => 6,
             Self::Chop => 7,
-            _ => 0,
+            Self::Die | Self::Cast | Self::Bow => 0,
         }
     }
 
     /// The `0x6E` classic action id and frame count, which *are* body-specific.
-    /// The humanoid ids are ServUO's people-animation values (Wrestle 31, human
-    /// die 21, human directed-cast 16); the creature ids its monster-group values
-    /// (attack 4, die 2, cast 12). A coarse split until weapon and body tables
-    /// land — good enough for the old 2D client, which is the minority path.
-    const fn classic_action(self, humanoid: bool) -> (u16, u16) {
+    /// The humanoid ids are ServUO's people-animation values (the equipped
+    /// weapon's 9..19 group, Wrestle 31 unarmed, human die 21, human
+    /// directed-cast 16); the creature ids its monster-group values (attack 4,
+    /// die 2, cast 12). Creature bodies remain a coarse split.
+    const fn classic_action(self, humanoid: bool, weapon: WeaponAnimation) -> (u16, u16) {
         match (self, humanoid) {
-            (Self::Attack, true) => (31, 7), // WeaponAnimation.Wrestle
+            (Self::Attack, true) => (weapon.group(), 7),
             (Self::Attack, false) => (4, 4), // monster attack1
             (Self::Die, true) => (21, 6),    // human die
             (Self::Die, false) => (2, 4),    // monster die
@@ -3418,6 +3450,47 @@ impl WorldState {
         self.disrupt(mobile);
     }
 
+    /// End every active part of `mobile`'s fight.
+    ///
+    /// [`Combat`] has two different ownership rules which must not leak into
+    /// each caller. For a connected player it is session state and exists for
+    /// the whole time the player is in the world and changes only through named
+    /// transitions. For an NPC it is an engagement attached only while
+    /// that creature is fighting, so ending the fight removes it.
+    ///
+    /// Keeping the distinction here prevents death, Hiding and Peacemaking from
+    /// deleting a player's ability to process later war-mode and attack
+    /// requests. The two packets settle the same transition at the client: a
+    /// player cannot retain a drawn war stance or target after the server has
+    /// ended their fight.
+    pub fn disengage(&mut self, mobile: EntityId) {
+        let was_war = self
+            .registry
+            .get::<Combat>(mobile)
+            .is_some_and(|combat| combat.warmode());
+        let connection = self
+            .registry
+            .get::<Client>(mobile)
+            .map(|client| client.connection);
+        if let Some(connection) = connection {
+            let Some(combat) = self.registry.get_mut::<Combat>(mobile) else {
+                debug_assert!(false, "a connected player must carry combat session state");
+                return;
+            };
+            combat.leave_combat();
+            self.send_packet(connection, &ServerPacket::WarMode(WarMode { war: false }));
+            self.send_packet(
+                connection,
+                &ServerPacket::AttackTarget(AttackTarget { target: None }),
+            );
+        } else {
+            self.registry.remove::<Combat>(mobile);
+        }
+        if was_war {
+            self.broadcast_move(mobile);
+        }
+    }
+
     /// Take a mobile off every screen but its own — the mirror of
     /// [`break_cover`](Self::break_cover), and the only place a mobile becomes
     /// hidden.
@@ -3689,7 +3762,11 @@ impl WorldState {
     /// [`walks_through_bodies`]: Self::walks_through_bodies
     #[must_use]
     pub fn stance_of(&self, entity: EntityId) -> StatusFlags {
-        let war = StatusFlags::of_stance(self.registry.get::<Combat>(entity).is_some_and(|c| c.warmode));
+        let war = StatusFlags::of_stance(
+            self.registry
+                .get::<Combat>(entity)
+                .is_some_and(|combat| combat.warmode()),
+        );
         if self.walks_through_bodies(entity) {
             war.with(StatusFlags::IGNORE_MOBILES)
         } else {
@@ -4075,6 +4152,7 @@ mod tests {
 
     use openshard_movement::scene::Scene;
     use openshard_protocol::direction::Direction;
+    use openshard_protocol::serial::SerialKind;
     use openshard_tiles::TileData;
 
     /// One block of flat ground with a wall on (4, 4), and the table that says
@@ -4132,6 +4210,38 @@ mod tests {
         state.registry.insert(entity, Position(at));
         state.place_mobile(Facet(0), entity, at);
         entity
+    }
+
+    #[test]
+    fn an_equipped_axe_selects_an_axe_swing() {
+        let mut state = a_shard();
+        let (_, wielder) = state.registry.spawn_with_serial(SerialKind::Mobile).unwrap();
+        assert_eq!(
+            state.equipped_weapon_animation(wielder),
+            WeaponAnimation::Wrestle,
+            "an empty hand is the only hand that should punch"
+        );
+
+        let (axe, _) = state.registry.spawn_with_serial(SerialKind::Item).unwrap();
+        state.registry.insert(
+            axe,
+            Drawn {
+                id: openshard_protocol::wire::Graphic(0x0F49),
+                hue: Hue::NONE,
+            },
+        );
+        state.registry.insert(
+            axe,
+            Equipped {
+                mobile: wielder,
+                layer: LAYER_ONE_HANDED,
+            },
+        );
+
+        assert_eq!(
+            state.equipped_weapon_animation(wielder),
+            WeaponAnimation::SlashTwoHanded
+        );
     }
 
     /// **Who is in the way, and who only looks it.**

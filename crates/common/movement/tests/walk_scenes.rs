@@ -619,6 +619,34 @@ fn a_villa_stair_carries_a_body_to_its_first_floor() {
     );
 }
 
+/// The `0x22` walk acknowledgement carries no position, so the client has to
+/// predict the same live surfaces the shard just used.  Reading the bare map
+/// here leaves a body at ground level: neither this stair nor this first floor
+/// exists in the facet files, because the villa was placed at runtime.
+#[test]
+fn a_client_predicts_the_height_of_a_placed_villas_stair_and_floor() {
+    use openshard_map::grid::Tile;
+    use openshard_map::overlay::Doors;
+    use openshard_movement::{Footing, predict_step};
+
+    let (scene, live) = a_villa();
+    let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
+    let ground = Point::new(5, 6, 0);
+
+    let tread_z = predict_step(&footing, ground, Tile::new(5, 5));
+    assert_eq!(tread_z, 4, "the live stair was ignored in the predicted z");
+
+    let tread = Point::new(5, 5, tread_z as i8);
+    let floor_z = predict_step(&footing, tread, Tile::new(5, 4));
+    assert_eq!(floor_z, 7, "the live first floor was ignored in the predicted z");
+
+    assert_eq!(
+        scene.terrain().predict_step(ground, 5, 5),
+        0,
+        "the fixture must prove that the static map alone cannot predict the placed house",
+    );
+}
+
 /// And the search plans that climb, for a body standing under the floor it is
 /// sent to.
 ///

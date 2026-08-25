@@ -586,7 +586,11 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction
 
     // Keep after a target that is still alive and in sight — close in if out of
     // reach, and leave the hitting to `swings`.
-    if let Some(target_serial) = state.registry.get::<Combat>(creature).and_then(|c| c.target) {
+    if let Some(target_serial) = state
+        .registry
+        .get::<Combat>(creature)
+        .and_then(|combat| combat.target())
+    {
         if let Some(target_pos) = foe_in_sight(state, creature, target_serial, pos, facet, chase_limit(sight))
         {
             if should_flee(state, creature, brain) {
@@ -627,14 +631,9 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction
     if sight.0 > 0 && brain.aggression == Aggression::Aggressive {
         if let Some(prey) = nearest_player_in_sight(state, creature, pos, facet, sight) {
             let next_swing = state.ticks + combat::swing_speed(state, creature);
-            state.registry.insert(
-                creature,
-                Combat {
-                    warmode: true,
-                    target: Some(prey),
-                    next_swing,
-                },
-            );
+            state
+                .registry
+                .insert(creature, Combat::creature_engaged(prey, next_swing));
             // A growl on the aggro transition — the creature announces itself the
             // moment it notices prey, and only a creature growls (a human does not).
             let growl = combat::anger_sound(state, creature);
@@ -949,7 +948,7 @@ fn flee_step(
 ) -> Option<Direction> {
     // A runner does not also swing; drop the guard while running.
     if let Some(combat) = state.registry.get_mut::<Combat>(creature) {
-        combat.warmode = false;
+        combat.flee();
     }
     let away = direction_toward(threat, from).unwrap_or(Direction::South);
     for turn in [0u8, 1, 7, 2, 6, 3, 5] {
@@ -1005,7 +1004,7 @@ pub fn retaliate(state: &mut WorldState, blows: &[MobileDamaged]) {
         let engaged = state
             .registry
             .get::<Combat>(victim)
-            .and_then(|c| c.target)
+            .and_then(|combat| combat.target())
             .is_some();
         let Some(attacker) = state.registry.entity_of(by) else {
             continue;
@@ -1013,16 +1012,12 @@ pub fn retaliate(state: &mut WorldState, blows: &[MobileDamaged]) {
         if engaged {
             continue;
         }
-        let warmode = brain.aggression != Aggression::Passive;
         let next_swing = state.ticks + combat::swing_speed(state, victim);
-        state.registry.insert(
-            victim,
-            Combat {
-                warmode,
-                target: Some(by),
-                next_swing,
-            },
-        );
+        let combat = match brain.aggression {
+            Aggression::Passive => Combat::creature_threatened(by),
+            _ => Combat::creature_engaged(by, next_swing),
+        };
+        state.registry.insert(victim, combat);
         // Retaliation is a visible decision, not just a target stored for a
         // later swing.  Turn now so the creature acknowledges its attacker
         // during the swing delay (and passive fauna faces the threat it flees).

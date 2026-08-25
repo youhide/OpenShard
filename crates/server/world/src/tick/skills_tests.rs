@@ -19,8 +19,8 @@ use openshard_protocol::world::Aggression;
 use openshard_skills::DEFAULT_SKILL_DELAY_TICKS;
 use openshard_state::Skill;
 use openshard_state::components::{
-    Contained, Corpse, CorpseBody, Drawn, Equipped, HearsGhosts, Hidden, Hitpoints, Mana, Meditating, Name,
-    POISON_POTION_GRAPHIC, PoisonCharges, Poisoned, Stealthing,
+    Combat, Contained, Corpse, CorpseBody, Drawn, Equipped, HearsGhosts, Hidden, Hitpoints, Mana, Meditating,
+    Name, POISON_POTION_GRAPHIC, PoisonCharges, Poisoned, Stealthing,
 };
 
 /// Give the player a skill outright, so a roll is a sure thing.
@@ -895,6 +895,19 @@ fn hiding_takes_you_off_every_screen_and_a_word_puts_you_back() {
     world.tick(now);
     assert!(world.state.can_see_mobile(onlooker, entity), "seen to start");
     let _ = packets_for(&mut world, watcher);
+    world.queue(Command::WarMode {
+        connection: hider,
+        war: true,
+    });
+    world.tick(now);
+    assert!(
+        world
+            .state
+            .registry
+            .get::<Combat>(entity)
+            .is_some_and(|combat| combat.warmode())
+    );
+    let _ = packets_for(&mut world, hider);
 
     world.queue(Command::UseSkillButton {
         connection: hider,
@@ -905,6 +918,20 @@ fn hiding_takes_you_off_every_screen_and_a_word_puts_you_back() {
         world.state.registry.has::<Hidden>(entity),
         "a grandmaster hides: {:?}",
         clilocs(&mut world, hider)
+    );
+    assert!(
+        world
+            .state
+            .registry
+            .get::<Combat>(entity)
+            .is_some_and(|combat| combat.is_at_peace()),
+        "hiding ends the fight without deleting the player's combat capability"
+    );
+    assert!(
+        packets_for(&mut world, hider)
+            .iter()
+            .any(|packet| packet.as_slice() == [0x72, 0x00, 0x00, 0x32, 0x00]),
+        "the client is settled at peace too"
     );
     assert!(!world.state.can_see_mobile(onlooker, entity));
     let serial = world.state.registry.serial_of(entity).unwrap();
@@ -928,6 +955,27 @@ fn hiding_takes_you_off_every_screen_and_a_word_puts_you_back() {
         "speaking gives you away"
     );
     assert!(world.state.can_see_mobile(onlooker, entity));
+
+    // The same session can fight again. Previously Hiding removed `Combat`, so
+    // both commands were acknowledged while mutating nothing.
+    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    world.queue(Command::WarMode {
+        connection: hider,
+        war: true,
+    });
+    world.queue(Command::Attack {
+        connection: hider,
+        target: Some(target),
+    });
+    world.tick(now);
+    assert!(
+        world
+            .state
+            .registry
+            .get::<Combat>(entity)
+            .is_some_and(|combat| combat.warmode() && combat.target() == Some(target)),
+        "a player can re-engage after hiding"
+    );
 }
 
 #[test]

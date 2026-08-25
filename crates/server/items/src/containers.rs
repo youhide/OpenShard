@@ -273,7 +273,7 @@ pub(crate) fn open_paperdoll(
     if state
         .registry
         .get::<Combat>(mobile)
-        .is_some_and(|combat| combat.warmode)
+        .is_some_and(|combat| combat.warmode())
     {
         flags = flags.with(PaperdollFlags::WARMODE);
     }

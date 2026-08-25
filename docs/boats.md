@@ -574,10 +574,10 @@ a ship that sails.
   tie-goes-to-the-lower, `carries` asks for equality instead. Both were the
   production path before the projection existed; they and `blocks_at` now have
   no caller outside tests. Either they read the overlay or they go.
-- **This client has no notion of a boat at all.** `clutter` expands no multis —
-  only a designed house's `HouseShape` — so a ship is invisible to the client's
-  own step rule *and* to `predict_step`, which draws the body the instant a key
-  goes down. The survey's median pier stands **seven** above the deck it boards
-  onto, so every boarding is seven units of disagreement that a `0x22` carries
-  no position to correct. B2 is about what the *shard* sends; this is the other
-  end of it, and `docs/client.md` does not mention boats anywhere.
+- ~~**This client has no notion of a boat at all.**~~ **Repaired 2026-08-25.**
+  Every known multi is expanded into its drawn components, `clutter::project`
+  lays their `Cover`s into the live overlay, and the online and offline walk
+  paths now call `movement::predict_step` over the complete `Footing`. A deck or
+  player-house stair therefore contributes the same predicted `z` the shard's
+  step rule chooses; `0x22` no longer has an uncorrected height disagreement to
+  carry.

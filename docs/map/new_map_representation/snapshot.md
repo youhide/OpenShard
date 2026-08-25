@@ -204,15 +204,17 @@ else borrows its map from that owner.
 **The network thread is transport, not a map reader.** It emits decoded packet
 mutations; the event-loop owner applies them to its `WorldView` and its `Walk`.
 It also receives an already encoded step packet to send. Consequently the
-prediction, including the terrain lookup and the step sequence, stays beside
-`MapSnapshot`; no `Arc<WorldMap>` crosses into `link::connect`.
+prediction, including the base terrain, live overlay and step sequence, stays
+beside `Ground`; no `Arc<WorldMap>` crosses into `link::connect`.
 
 *The reason is [direction C](plan.md#c--patches-and-the-resolved-snapshot), and
 it is worth stating in full because the shape it was in was not wrong today.*
 The shard thread held an `Arc<WorldMap>` — immutable, uncontended, no lock
-anywhere — and read it for exactly one thing: `predict_step`, the **height** of
-the tile a `0x02` is asking for. Not walkability; `predict_step` cannot refuse.
-That is correct as long as nothing ever publishes.
+anywhere — and read it for exactly one thing: the map-only half of
+`predict_step`, the **height** of the tile a `0x02` is asking for. The event-loop
+owner now reads the complete `Footing`, including runtime houses and ships,
+while still predicting a height rather than a refusal. That is correct as long
+as nothing ever publishes.
 
 C publishes. Its mutability is "apply to the touched chunks, rehash, and publish
 a new snapshot atomically between ticks" — a new immutable version, not a

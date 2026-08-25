@@ -384,10 +384,11 @@ impl Walk {
     /// a static a body can stand on) is — and says nothing, since a `0x22`
     /// carries no position. A caller with no map passes `|_, _| None` and gets
     /// the old flat prediction, which is honest; a guessed height would be
-    /// indistinguishable from a real one. `openshard_movement::MapTerrain`'s
-    /// `predict_step` is the answer a caller with a map wants: it is the server's
-    /// own step rule, so a stair climbs and a pier's deck is stood on rather than
-    /// the water under it, and it never refuses (see below).
+    /// indistinguishable from a real one. [`openshard_movement::predict_step`]
+    /// is the answer a caller with a [`Footing`](openshard_movement::Footing)
+    /// wants: it reads both the facet and what the live world laid over it, so a
+    /// placed house's stair climbs and a ship's deck is stood on rather than the
+    /// ground or water under it, and it never predicts a refusal (see below).
     ///
     /// Deliberately not `openshard_movement::Terrain::can_step`: this predicts a
     /// *height*, and it must not predict a *refusal*. Whether a step is allowed

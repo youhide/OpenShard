@@ -70,7 +70,7 @@ pub(super) fn hiding(state: &mut WorldState, actor: EntityId) {
     if roll_skill_band(state, actor, skill, crate::SkillBand::new(0, 1000)) {
         // Hiding drops war mode: ServUO's `Hidden = true` setter clears it, and a
         // hider still visibly squared up would be a contradiction on every screen.
-        state.registry.remove::<Combat>(actor);
+        state.disengage(actor);
         state.conceal(actor);
         state.localized_message(actor, HIDDEN_WELL, "");
     } else {
@@ -268,7 +268,10 @@ fn somebody_is_fighting(state: &WorldState, actor: EntityId, range: u32) -> bool
     };
     // Your own combatant, if they are near enough to watch you do it.
     if let Some(combat) = state.registry.get::<Combat>(actor) {
-        if let Some(target) = combat.target.and_then(|t| state.registry.entity_of(t)) {
+        if let Some(target) = combat
+            .target()
+            .and_then(|target| state.registry.entity_of(target))
+        {
             if state
                 .registry
                 .get::<Position>(target)
@@ -289,7 +292,7 @@ fn somebody_is_fighting(state: &WorldState, actor: EntityId, range: u32) -> bool
                 && state
                     .registry
                     .get::<Combat>(entity)
-                    .is_some_and(|combat| combat.target == Some(serial))
+                    .is_some_and(|combat| combat.target() == Some(serial))
         })
 }
 

@@ -267,12 +267,18 @@ fn animation_hold(takes: Duration) -> Duration {
 fn modern_action(kind: BodyKind, animation_type: u16, sub_action: u16) -> Option<(u16, u16)> {
     let human = matches!(kind, BodyKind::Human);
     match animation_type {
-        // Attack.  Harvesting is sent as Attack with a nonzero sub-action.
+        // Attack. The sub-action is ServUO's weapon motion; harvesting uses the
+        // same ids because it deliberately asks for a particular tool swing.
         0 => Some(match (human, sub_action) {
-            (true, 3) => (11, 5), // mine
-            (true, 6) => (12, 5), // fish
-            (true, 7) => (13, 6), // chop
-            (true, _) => (31, 7), // wrestle
+            (true, 1) => (18, 7), // bow
+            (true, 2) => (19, 7), // crossbow
+            (true, 3) => (11, 5), // one-handed bash / mine
+            (true, 4) => (9, 7),  // one-handed slash
+            (true, 5) => (10, 7), // one-handed pierce
+            (true, 6) => (12, 5), // two-handed bash / fish
+            (true, 7) => (13, 6), // two-handed slash / chop
+            (true, 8) => (14, 7), // two-handed pierce
+            (true, _) => (31, 7), // wrestle / unknown
             (false, _) => match kind {
                 BodyKind::Monster => (4, 4), // HighAnimationGroup.Attack1
                 BodyKind::Animal => (5, 4),  // LowAnimationGroup.Attack1
@@ -1514,6 +1520,23 @@ mod tests {
                 "body {} advances its attack",
                 body.0
             );
+        }
+    }
+
+    #[test]
+    fn a_modern_human_attack_uses_the_weapon_sub_action() {
+        for (sub_action, expected) in [
+            (0, (31, 7)), // fists
+            (3, (11, 5)), // one-handed bash
+            (4, (9, 7)),  // one-handed slash
+            (5, (10, 7)), // one-handed pierce
+            (6, (12, 5)), // two-handed bash
+            (7, (13, 6)), // axe / two-handed slash
+            (8, (14, 7)), // two-handed pierce
+            (1, (18, 7)), // bow
+            (2, (19, 7)), // crossbow
+        ] {
+            assert_eq!(modern_action(BodyKind::Human, 0, sub_action), Some(expected));
         }
     }
 
