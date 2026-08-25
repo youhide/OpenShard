@@ -12,7 +12,8 @@ chunk to an editor that commits.
 | [`mechanics.md`](mechanics.md) | How a changeable map works: base, patch, snapshot; chunks; what goes stale; how a chunk reaches the client. Where a decision is not made, it says so and names what would settle it. |
 | [`plan.md`](plan.md) | Seven directions with the code each one touches, in order, with what "done" means for each, plus one deferred on purpose. A0 and A are refactors with no feature in them. |
 | [`snapshot.md`](snapshot.md) | 🚩 **The plan being executed first.** Directions A0 and A on their own — the block order gets a type, and the map gets one revisioned owner. No format, no patches, no network. Start a session here. |
-| [`to_the_client.md`](to_the_client.md) | 🚩 **The plan being executed now.** Direction E on its own: the pipe, chosen off measurements rather than preference, and five phases from "the client's world is a parameter" to "an operator types `.setland` and a connected screen changes". |
+| [`to_the_client.md`](to_the_client.md) | Direction E on its own: the pipe, chosen off measurements rather than preference, and five phases from "the client's world is a parameter" to "an operator types `.setland` and a connected screen changes". **All five built.** |
+| [`what_a_change_costs.md`](what_a_change_costs.md) | 🚩 **The plan being executed now.** What era S has left once A0, A, B, C and E are in: direction D in full, plus the four things B, C and E left standing and the one the track has borrowed since its first line. Six nodes — one version 2 of the file, products keyed by the chunk they were built from, a block replaced where it stands, a folded log, revert as a verb, and the `tiledata`/multis a shard still takes from somebody's install. |
 | [`client_today.md`](client_today.md) | What direction A takes a handle to, measured: the layout `WorldMap` actually has, what each bake costs in memory and on disk, and the ranked backlog found while inventorying the readers. |
 
 Read them in that order. `overview.md` is the only one that has to be read to
@@ -141,4 +142,19 @@ the stale answer is recognised by its revision and the question is asked again.
 What is left of E is the rest of that backlog, and none of it is load-bearing:
 the untested joining in `link::play`, a base set that could store its chunks
 deflated, and the small cache manners — a world that moved by an empty patch, and
-nothing sweeping an orphaned one.
+nothing sweeping an orphaned one. The deflating is taken by S1 below, since a
+version of the file is a thing to bump once.
+
+## What is left, and where a session starts
+
+[`what_a_change_costs.md`](what_a_change_costs.md). The representation works;
+what it does not yet do is charge the right price for a change. A one-tile
+publish rebakes the span index at both ends (115.4 ms each), drops the coarse
+router rather than pay 11.6 s for it, rebuilds the client's whole statics run
+(16.3 ms), and makes every derived product of all 7,168 chunks unreachable
+because one revision covers the facet. Every boot after it replays the whole
+log. And a shard still asks the player's install what a tile *is*, because a base
+set replaces `map` and `statics` and not `tiledata.mul` or the multis.
+
+Six nodes, S1 to S6, in that document, with S3 — the block replaced where it
+stands — allowed to jump the queue if the editor lands first.

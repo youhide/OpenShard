@@ -62,6 +62,15 @@ bakes and editor polish remain. Start at its
 [`client_today.md`](new_map_representation/client_today.md) for the measured
 backlog era R spends.
 
+**What is left of the representation itself is one document:**
+[`what_a_change_costs.md`](new_map_representation/what_a_change_costs.md) — the
+map we can change works, and a change to it still costs a facet. Six nodes: one
+version 2 of the base set (deflated chunks, a hash per chunk, a minted world id),
+products keyed by the chunk they were built from rather than by the facet's
+revision, a block replaced where it stands instead of a 115.4 ms rebake at both
+ends, a folded log, revert as a verb, and the `tiledata` and multis a shard still
+borrows from somebody's UO install.
+
 ## The readers
 
 | | |

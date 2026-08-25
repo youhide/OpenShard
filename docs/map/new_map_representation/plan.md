@@ -214,6 +214,12 @@ a free optimisation, until `Order` is made total across distinct tiles.
 
 **Goal.** Nothing baked outlives the world it was baked from.
 
+> **Being executed now, with the rest of era S:**
+> [`what_a_change_costs.md`](what_a_change_costs.md). This direction is its S2
+> and S3; that document also carries the four things B, C and E left standing —
+> a version 2 of the file, a folded log, revert as a verb, and the `tiledata`
+> and multis a shard still takes from an install.
+
 - Replace the file stamp in [`bake.rs`](../../../crates/common/movement/src/bake.rs#L22)
   with the source revision, and do the same for the building flood, the occluder
   bake, the minimap cache — see
