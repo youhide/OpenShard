@@ -59,7 +59,8 @@ ground — `.tile`, `.setland`, `.addstatic`, `.rmstatic` — and the whole of w
 that adds over the command line is an *order*: the world moves first, because
 applying a patch is the only honest way to ask whether it applies, and the log is
 written second, so a log that refuses puts the world back. The span bake follows
-the ground and the coarse router is dropped, because a graph baked over the world
+the ground, and so does the coarse router since S3 — over the chunks the patch
+named, where it used to be dropped outright because a graph baked over the world
 before the edit is a graph of somewhere else.
 See [`mapedit`](../../../crates/server/world/src/mapedit.rs) and the
 [handoff](handoffs/2026-08-24-the-ground-moves-while-people-stand-on-it.md).
@@ -147,14 +148,16 @@ version of the file is a thing to bump once.
 
 ## What is left, and where a session starts
 
-[`what_a_change_costs.md`](what_a_change_costs.md). The representation works;
-what it does not yet do is charge the right price for a change. A one-tile
-publish rebakes the span index at both ends (115.4 ms each), drops the coarse
-router rather than pay 11.6 s for it, rebuilds the client's whole statics run
-(16.3 ms), and makes every derived product of all 7,168 chunks unreachable
-because one revision covers the facet. Every boot after it replays the whole
-log. And a shard still asks the player's install what a tile *is*, because a base
-set replaces `map` and `statics` and not `tiledata.mul` or the multis.
+[`what_a_change_costs.md`](what_a_change_costs.md). The representation works, and
+since S1–S3 it charges the right price for a change: a one-tile publish used to
+rebake the span index at both ends (115.4 ms each), drop the coarse router rather
+than pay 11.6 s for it, rebuild the client's whole statics run (16.3 ms) and make
+every derived product of all 7,168 chunks unreachable because one revision covers
+the facet — it is 0.3 ms, 80 ms, 0.6 ms and a carry now. What is left is that
+every boot still replays the whole log (S4), that `revert` is a word no operator
+can type (S5), and that a shard still asks the player's install what a tile *is*,
+because a base set replaces `map` and `statics` and not `tiledata.mul` or the
+multis (S6).
 
 Six nodes, S1 to S6, in that document, with S3 — the block replaced where it
 stands — allowed to jump the queue if the editor lands first.

@@ -61,15 +61,19 @@ existing doors-open attempt, which cuts the resulting route at the real refusal.
 
 ## G1 — the graph follows a patch
 
-> **Queued, and it is the last third of
-> [`what_a_change_costs.md`](new_map_representation/what_a_change_costs.md)'s
-> S3.** The other two thirds are built — the span bake and `WorldMap`'s statics
-> both follow a publish locally now — and this is the one artefact that still
-> does not: `FacetState::publish` **drops** the router, because a whole-facet
-> rebuild is 11.6 s on a tick and a graph of the world as it stood is a router
-> planning through a wall somebody just built. Dropping it costs long routes
-> until the shard is rebaked and restarted. This is the plan for the third
-> answer.
+> **Built.** The last third of
+> [`what_a_change_costs.md`](new_map_representation/what_a_change_costs.md)'s S3,
+> and the artefact that used to be **dropped** on every publish: a whole-facet
+> rebuild is half a minute on a tick, and a graph of the world as it stood is a
+> router planning through a wall somebody just built, so `FacetState::publish`
+> took the router away and told the operator to rebake offline.
+>
+> `NavigationGraph::rebake_chunks(footing, chunks)` is the answer, and both ends
+> call it — the shard's `FacetState::publish` and `undo`, and the client's
+> `ground_moved`. Measured on Felucca, one chunk, in the profile a `cargo run`
+> builds: **28.0 s → 80 ms**, with the graph coming back node for node and edge
+> for edge the same as a whole bake (71,545 and 416,122, the counts N4 recorded).
+> What follows is that plan, with what the doing of it added marked as such.
 
 **It is the same fix, for the third time.** The span index and the statics run
 each held a facet-wide packed array addressed by a prefix sum, and a prefix sum
@@ -121,6 +125,58 @@ the same facet baked whole** — the differential oracle
 for spans, and this wants its equivalent over `find_long_path`, because a graph
 that agrees node-for-node is not the claim and a graph that agrees *route*-for-
 route is.
+
+### What the doing of it added
+
+- **There is one construction, not two.** `NavigationGraph::build` *is*
+  `rebake_regions` over every region of the facet, so "the facet patched into
+  shape" and "the facet baked whole" are the same code over the same ground
+  rather than two implementations somebody has to keep agreeing. What that cost
+  is the facet-wide sampling pass: a bake holds one `RegionPlaces` per region it
+  is working over instead of one array over the whole facet, which is the same
+  memory and the same work, and it is what lets the small case exist at all.
+- **The oracle is the graph's shape, not its routes.** The unit tests compare
+  *places and the costs between them* — a `NodeId` is an index and two
+  constructions may number the same places differently — which is strictly
+  stronger than route parity: two graphs offering the same crossings at the same
+  prices propose the same corridors by construction. Route parity would pass on
+  a graph that had quietly lost a portal nothing sampled asks about.
+- **The rings are owed different work.** The regions whose ground moved are
+  rebuilt whole. The ring around them keeps its **intra-region** edges — its
+  places did not move, so its routes stand — and only rebuilds them when its
+  node set comes back different, which is what took the measured cost from
+  111 ms to 80. Its borders are all walked either way, because that is what
+  recovers its node set, and that is why the ring beyond is sampled.
+- **A run that did not change is not written.** Most of the second ring comes
+  back exactly as it was, and rewriting it would manufacture garbage out of a
+  publish that moved nothing there — a brush is a stream of publishes, so this
+  is the difference between a session that repacks and one that does not.
+- **The garbage rule is the span layer's, and its answer is not.** Dead entries
+  are never compacted during a session until they outweigh the live; where
+  `SpanIndex` then bakes the facet whole, this **repacks** — one walk of what is
+  live, renumbering nodes, because a facet-wide bake is what the node exists to
+  stop paying.
+- **The file carries the tables.** `OSNAV` format 6: the two prefix-sum offset
+  arrays became `base`/`count` runs, written as they stand — garbage and all —
+  so saving a graph a publish has already moved is the same operation as saving
+  one straight off a bake. A version 5 artifact is refused by name and rebaked.
+- **The widening is argued, not caught.** The first ring is taken over the
+  chunks' tiles grown one west and north, and no scene turns that growth into a
+  wrong answer: over bare land this step rule climbs any height at all, so a land
+  edit does not disconnect ground. What the growth buys is that every region
+  whose *places* moved is inside the rebuilt set, which is what makes a border
+  between a rebuilt region and a merely-sampled one unable to mint a node — the
+  claim `intern_node` fails loudly on.
+
+### What is left, measured
+
+**80 ms is the chunk's price, not the edit's.** A chunk is 64 tiles and a region
+is 32, so one `.setland` names four regions before the growth and nine after it,
+and the ring makes twenty-five. The shard's own publish holds the **tiles** the
+patch names — `Patch::touched_chunks` is derived from them — so naming those
+instead would put the first ring at one region and roughly halve the area. The
+client cannot: a chunk off the wire is its unit, and it is told nothing finer.
+That asymmetry is the whole of the argument for doing it, and against.
 
 ## Out of scope
 

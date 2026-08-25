@@ -32,15 +32,17 @@
 //!
 //! # What a commit costs
 //!
-//! The span bake over the facet, which is 0.07 s on Felucca and is paid inside
-//! [`FacetState::publish`](openshard_state::FacetState::publish) — and **the
-//! coarse router, which is dropped**. Rebuilding that one is a 52-second offline
-//! bake; keeping it would be a router planning through a wall somebody just
-//! built. Long routes fall back on the exact search until the shard is rebaked
-//! and restarted, and the operator is told so.
+//! Two bakes, both paid inside
+//! [`FacetState::publish`](openshard_state::FacetState::publish) and **both
+//! local** since direction D: the span index over the chunks the patch named
+//! (0.3 ms on Felucca, where a facet-wide bake was 109.7), and the coarse router
+//! over the two rings of regions around them (80 ms, where a facet-wide bake is
+//! half a minute — see `docs/map/navigation_graph.md`'s G1).
 //!
-//! Both are facet-wide for an edit that touches one chunk, and both are direction
-//! D's to make local.
+//! The router used to be **dropped** here rather than rebuilt, because a
+//! facet-wide bake is not something a tick can do and a router of the world as it
+//! stood plans through a wall somebody just built. Long routes fell back on the
+//! exact search until the shard was rebaked and restarted.
 //!
 //! # And then everybody standing on it is told
 //!

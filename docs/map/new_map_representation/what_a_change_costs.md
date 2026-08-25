@@ -1,11 +1,13 @@
 # What a change costs, and what the world still borrows
 
-> **Status: the plan being executed now.** A0, A, B, C and E are built — the
-> shard owns its world, a patch survives a restart, and a publish reaches a
-> connected client. What is left of era S is this: **direction
-> [D](plan.md#d--derived-data-keyed-by-revision) in full**, plus four things the
-> doing of B, C and E left standing and one the track has borrowed since its
-> first line. Six nodes, S1 to S6, in order, each with what "done" means.
+> **Status: the plan being executed now, and half of it is done.** A0, A, B, C
+> and E are built — the shard owns its world, a patch survives a restart, and a
+> publish reaches a connected client — and so are **S1, S2 and S3**: the file
+> knows itself, a product keeps what nothing moved, and a change costs what it
+> moved at both ends. What is left is **S4, S5 and S6**. Six nodes in order,
+> each with what "done" means; direction
+> [D](plan.md#d--derived-data-keyed-by-revision) is the one S2 and S3 were
+> made of.
 >
 > [`plan.md`](plan.md) holds the directions and their reasoning;
 > [`mechanics.md`](mechanics.md) holds the model. This is the executable half,
@@ -25,16 +27,21 @@ is the whole conflict model and also what makes a publish atomic.
 value. A client of ours takes the facet off the wire and keeps it under a
 `WorldId`.
 
-What is *not* finished is the price. Today one operator typing `.setland` costs
-this:
+What was *not* finished is the price. One operator typing `.setland` used to cost
+this — the first four rows are what S2 and S3 have since answered, and the last
+is S4:
 
-| What a one-tile publish moves | What it costs | Where |
+| What a one-tile publish moves | What it cost | What it costs now |
 |---|---|---|
-| the span index | **115.4 ms**, on the shard's tick *and* on the client's event-loop thread | [`publish_cost.rs`](../../../crates/common/movement/tests/publish_cost.rs) |
-| the coarse graph | **11.6 s** if rebuilt, so it is **dropped outright** | [`mapedit::commit`](../../../crates/server/world/src/mapedit.rs) |
-| the client's `WorldMap` | **16.3 ms** of the window's 132, because one block's item count may have moved | [`chunk::apply`](../../../crates/common/map/src/chunk.rs) |
-| every product of every **untouched** chunk | unreachable — one revision covers the whole facet | [`radar.md` §10.2](../radar.md) |
-| every subsequent boot | the whole log replayed, forever | [`basemap::load`](../../../crates/common/basemap/src/lib.rs) |
+| the span index | **115.4 ms**, on the shard's tick *and* on the client's event-loop thread | 0.3 / 0.4 ms |
+| the coarse graph | **11.6 s** if rebuilt, so it was **dropped outright** | 80 ms |
+| the client's `WorldMap` | **16.3 ms** of the window's 132, because one block's item count may have moved | 0.6 ms |
+| every product of every **untouched** chunk | unreachable — one revision covers the whole facet | carried |
+| every subsequent boot | the whole log replayed, forever | still, until S4 |
+
+Where they are: [`publish_cost.rs`](../../../crates/common/movement/tests/publish_cost.rs)
+for the first three, [`radar.md` §10.2](../radar.md) for the fourth and
+[`basemap::load`](../../../crates/common/basemap/src/lib.rs) for the last.
 
 And one thing the world still borrows: a base set replaces `map`/`statics`, and
 **not** `tiledata.mul` or the multis. A shard with no UO install still cannot
@@ -198,15 +205,28 @@ sum *is* the ordering, so re-laying one block in place moves every run after it.
   between `chunk::apply` and O(the chunks that arrived).
 - **The coarse graph is D's own**, and it is the third: `touched_chunks` names
   the 32×32 regions to rebuild, plus the half a naive implementation forgets —
-  the neighbouring regions whose answer *crossed* into the changed chunk. Until
-  this lands, `mapedit::commit` drops the router on every publish, which is
-  correct and is not free.
+  the neighbouring regions whose answer *crossed* into the changed chunk. It used
+  to be dropped on every publish, which was correct and was not free.
 
 **Done when** a one-chunk publish is O(the chunk) at both ends, measured against
 today's numbers by the test that produced them
 ([`publish_cost.rs`](../../../crates/common/movement/tests/publish_cost.rs)
 extended to the client's `apply`), and `mapedit::commit` rebuilds the coarse
 graph instead of dropping it.
+
+**Built, all three.** Measured by that test on Felucca, one `.setland`, in the
+profile a `cargo run` builds:
+
+| | before | after |
+|---|---:|---:|
+| the span index, on the tick | 109.7 ms | **0.3 ms** |
+| the span index, at the window | 128.6 ms | **0.4 ms** |
+| `WorldMap`'s statics, a publish that adds one | 3.9–5.6 ms | **0.4 / 0.6 ms** |
+| the coarse graph | dropped, 28.0 s to rebuild | **80 ms** |
+
+The graph's is [`navigation_graph.md`'s G1](../navigation_graph.md#g1--the-graph-follows-a-patch),
+which holds what the doing of it added and the one thing left in it: 80 ms is the
+price of the *chunk*, and the shard knows the tiles.
 
 ## S4 — the log is folded
 
@@ -302,24 +322,19 @@ S1 is built. S2 turned out not to depend on it — the carry needs a list of wha
 moved and not a hash of what did not — so the only ordering left is S4 behind
 S1's world id. S5 and S6 are independent of all of it.
 
-**S2's cache half is built**: `RadarCache::moved(facet, revision, touched)`
-carries every product no touched chunk lies under, at every level, and leaves
-the ones over the edit retained and stale the way a facet-wide bump leaves all
-of them. It closes two things the same call was always going to close —
-[`radar.md` §10.2](../radar.md) in the cache, and a sweep that a publish used to
-finish silently — and makes `invalidate_tile` test-only for good.
+**S1, S2 and S3 are built.** What is left of era S is S4, S5 and S6.
 
-**S2's one caller is in the client's publish path**, which is
-`net_command.rs` — the file the editor work is currently rewriting. The one-line
-switch from `set_revision` to `moved` waits for that tree to settle rather than
-being merged into somebody else's half-finished edit. What it needs beside it is
-the coordinate change from a map chunk to a base radar chunk: they share the
-64-tile divisor, which `openshard_map::chunk`'s own header records as a decision,
-so it is a rename and not a resampling — and it belongs to the caller, which is
-the one place holding both types.
+**S2 is closed whole**: `RadarCache::moved(facet, revision, touched)` carries
+every product no touched chunk lies under, at every level, and leaves the ones
+over the edit retained and stale the way a facet-wide bump leaves all of them —
+and the client's publish path calls it. It closes two things the same call was
+always going to close — [`radar.md` §10.2](../radar.md) in the cache, and a sweep
+that a publish used to finish silently — and makes `invalidate_tile` test-only
+for good. The coordinate change from a map chunk to a base radar chunk lives at
+that caller, which is the one place holding both types.
 
-**S3 may go first**, and should if the editor
-([`../editor.md`](../editor.md)) lands before it: a brush is a stream of
-publishes, and 115 ms on the tick and another 115 on the window is what a person
-feels as the tool being unusable. Nothing in S1 or S2 gets harder for having
-waited.
+**S3 is closed whole**, and the numbers are in the table above: the span bake,
+`WorldMap`'s statics and the coarse graph all follow a publish over the chunks it
+named. The graph's is the one with something left in it — see
+[`navigation_graph.md`'s G1](../navigation_graph.md#g1--the-graph-follows-a-patch),
+which says why 80 ms is the price of the chunk rather than of the edit.
