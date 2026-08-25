@@ -228,11 +228,31 @@ fn the_span_bake_follows_a_live_patch() {
     clean(&base_set, &log);
 }
 
-/// The router is baked over the world as it stood, so an edit retires it. It is
-/// dropped rather than quietly kept, because a graph of somewhere else is worse
-/// than no graph at all.
+/// A graph baked whole over the world this shard is holding now.
+fn graph_of(state: &WorldState) -> NavigationGraph {
+    let facet = state.facet_state(FACET);
+    let tiles = TileData::empty();
+    let base = facet.ground().snapshot().expect("the fixture has ground");
+    let spans = SpanIndex::build(base.map(), &tiles);
+    let nothing_placed = openshard_map::overlay::Overlay::default();
+    let footing = Footing::new(
+        Some(MapTerrain::new(base.map(), &tiles, &spans)),
+        &nothing_placed,
+        Doors::AsTheyStand,
+    );
+    NavigationGraph::build(&footing, facet.width(), facet.height()).expect("a facet this size has a graph")
+}
+
+/// The router is baked over the world as it stood, so an edit moves it — over
+/// the chunks the patch named, and not by being dropped.
+///
+/// It *was* dropped, on the argument that a graph of somewhere else is worse
+/// than no graph at all and a facet-wide rebuild is half a minute on a tick.
+/// `docs/map/navigation_graph.md`'s G1 is what replaced the first half of that
+/// with the second: the regions the chunks cover, their neighbours, and the ring
+/// beyond for edges only.
 #[test]
-fn a_live_patch_retires_the_coarse_router() {
+fn a_live_patch_moves_the_coarse_router_with_the_ground() {
     let (base_set, log) = base_set("router");
     let mut state = shard(&base_set, true, true);
     assert!(
@@ -243,9 +263,19 @@ fn a_live_patch_retires_the_coarse_router() {
     let patch = a_wall_of_ground(&state, (START.0 + 1, START.1), 60);
     mapedit::commit(&mut state, FACET, &patch).expect("the world in hand");
 
-    assert!(
-        state.facet_state(FACET).coarse_router().is_none(),
-        "the graph was built over the world before the edit, so it is gone"
+    let router = state
+        .facet_state(FACET)
+        .coarse_router()
+        .expect("the graph followed the ground instead of being given up");
+    // The claim this fixture can make is that the router is *there* and is a
+    // router of this world: a one-region scene has no borders and therefore no
+    // portals, so what it says is the same either way. That a rebaked graph
+    // holds what a whole bake holds is asserted where the graph is —
+    // `navigation`'s own `rebake` oracles, over scenes with regions to cross.
+    assert_eq!(
+        router.counts(),
+        graph_of(&state).counts(),
+        "and a router of the world the patch made"
     );
 
     clean(&base_set, &log);
