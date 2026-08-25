@@ -2,8 +2,8 @@
 //!
 //! `openshard-basemap`'s own tests cover a patch against a world in a file. This
 //! is the half that only exists in a shard: the world in memory moves, the log
-//! beside the base set records it, the span bake follows, the coarse router is
-//! dropped — and a step a player was allowed a moment ago is refused.
+//! beside the base set records it, the span bake and the coarse router follow it
+//! — and a step a player was allowed a moment ago is refused.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

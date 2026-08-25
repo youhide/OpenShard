@@ -178,6 +178,17 @@ instead would put the first ring at one region and roughly halve the area. The
 client cannot: a chunk off the wire is its unit, and it is told nothing finer.
 That asymmetry is the whole of the argument for doing it, and against.
 
+**The outer ring is sampled to recover a node set, not to answer anything.** A
+border between a rebuilt region and a merely-sampled one cannot have changed — it
+is argued above, and the sampled side's places and labels are read only so that
+the border can be walked again and the rebuilt side's *complete* node list come
+out of it. What would remove that cost is knowing which border made each node, so
+that a region could keep the nodes of its unaffected borders and rebuild only the
+rest. It is not free to know: a place at a region's corner is named by two
+borders, and a node dropped because one of them stopped naming it while the other
+still does is a node the graph loses silently. Measure before believing it is
+worth it — the ring is sampling and component labelling, not floods.
+
 ## Out of scope
 
 - Multiple graph levels. A single automatic graph is enough for this pass.
