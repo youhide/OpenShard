@@ -72,7 +72,8 @@ migrations too many:
   manifest is **0.27 MiB** — [`chunk.rs`'s own size table](../../../crates/common/map/src/chunk.rs)
   measured it while choosing the chunk size, and the argument that killed a
   manifest at 8×8 (17.5 MiB, a ninth of the set it indexes) does not survive the
-  size that was chosen.
+  size that was chosen. What it is *for* is integrity, the mint below and S4's
+  squash; S2 turned out not to need it, and the reasoning is there.
 - **The header carries a minted world id.** Today `identity_of` hashes the whole
   base set at boot. That is right for E3's question and wrong for S4's: a squash
   rewrites the bytes without changing the world, and every client would refetch a
@@ -108,31 +109,43 @@ rather than a plausible world.
 
 **Goal.** A publish invalidates what it moved, and nothing else.
 
-Needs S1. Today every bake and cache that has a revision at all keys on the
-*facet's* revision, which one publish moves for all 7,168 chunks at once.
-[`radar.md` §10.2](../radar.md) states the debt from the reader's side —
-*"a chunk whose content did not change should keep its identity across a facet's
-revision"* — and names the shard that gives the path a production writer as the
-one who owes it. That is us, as of C's second half.
+Independent of S1, as it turned out. Today every bake and cache that has a
+revision at all keys on the *facet's* revision, which one publish moves for all
+7,168 chunks at once. [`radar.md` §10.2](../radar.md) states the debt from the
+reader's side — *"a chunk whose content did not change should keep its identity
+across a facet's revision"* — and names the shard that gives the path a
+production writer as the one who owes it. That is us, as of C's second half.
 
-- `MapSnapshot` holds the per-chunk hashes it was loaded with — 7,168 × 8 B =
-  **57 KiB** — and `publish` rehashes **only** the chunks
-  [`Patch::touched_chunks`](../../../crates/common/map/src/patch.rs) names.
-  `take_chunks` on the client does the same with the chunks it was handed.
-- A reader's key stops being `(facet, chunk, facet revision)` and becomes
-  `(facet, chunk, chunk hash)`. The radar cache
-  ([`client_today.md`](client_today.md) finding 4) and the two bakes that already
-  carry a `MapRevision` — the navigation bake and the building flood — are the
-  three callers; the occluder measurements, keyed to file mtimes, are the fourth
-  and the one with no revision at all today.
+**The mechanism is a carry, not a second key.** The first draft of this node
+keyed a product by the hash of the chunk it was built from, and that was taken
+back before it was built, on two counts. It would have made every world loaded
+from a UO install hash its whole facet at startup — the playground's world is one
+of those — where the alternative costs nothing; and the ladder's coarse products
+have no content of their own to hash, so a parent's key would have had to be
+*combined* out of its children's rather than simply compared. What replaces it:
+
+- `RadarCache::moved(facet, revision, touched)` — the facet moved, and these are
+  the base chunks that changed. Products covering a touched square are dropped
+  and marked dirty; **every other product is re-keyed to the new revision**, at
+  every level, because a square nothing touched builds the same pixels it already
+  holds. The touched list projects up the ladder the way
+  [`invalidate_tile`](../../../crates/client/render/src/radar.rs) already
+  projects a tile.
+- **The key stays, and stays fail-closed.** A facet whose revision moves without
+  a `moved` call still leaves every product unreachable, which is exactly what
+  happens today. The carry is what a caller who *knows* what changed is allowed
+  to claim; nothing is trusted by default.
+- The two bakes that carry a `MapRevision` — the navigation bake and the building
+  flood — are facet-wide artefacts with no per-chunk products, so they refuse
+  themselves on a publish and stay S3's problem. The occluder measurements, keyed
+  to file mtimes, are the one reader with no revision at all.
 - **`invalidate_tile` stays test-only**, and this is the node that makes that
   final rather than pending: a chunk is sixteen thousand tiles, a publish names
-  chunks, and a per-tile invalidation would be a second vocabulary for the same
-  fact.
+  chunks, and a per-tile invalidation is a second vocabulary for the same fact.
 
 **Done when** a publish that touched one chunk leaves the products of the other
-7,167 valid — asserted on the radar cache directly, and on a bake by rebuilding
-it after a publish and showing that the untouched chunks' entries were reused.
+7,167 reachable at the new revision, asserted on the radar cache, and the
+client's publish path calls `moved` where it now calls `set_revision`.
 
 ## S3 — a block is replaced where it stands
 
@@ -258,9 +271,15 @@ UO install present at either end, art excepted and named as the exception.
 
 **S1 → S2 → S3 → S4 → S5 → S6.**
 
-S1 and S2 are one thought split at the file's edge, and everything about
-invalidation is downstream of them. S4 needs S1's world id. S5 and S6 are
-independent of all of it.
+S1 is built. S2 turned out not to depend on it — the carry needs a list of what
+moved and not a hash of what did not — so the only ordering left is S4 behind
+S1's world id. S5 and S6 are independent of all of it.
+
+**S2's one caller is in the client's publish path**, which is
+`net_command.rs` — the file the editor work is currently rewriting. The cache
+half is `client/render` and lands on its own; the one-line switch from
+`set_revision` to `moved` waits for that tree to settle rather than being
+merged into somebody else's half-finished edit.
 
 **S3 may go first**, and should if the editor
 ([`../editor.md`](../editor.md)) lands before it: a brush is a stream of
