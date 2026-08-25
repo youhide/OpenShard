@@ -65,10 +65,38 @@ tens of milliseconds against the 0.12–0.19 s a Felucca read already takes. If 
 turns out to matter, the answer is not to stop checking: it is that S2 wants the
 hashes in the snapshot anyway, so they will be computed once for both jobs.
 
+**Measured on Felucca since**, by the migration this version bump obliges — a
+re-import with `--verify`, which is a write followed by a full read back with
+every record inflated and hashed: 5.1 s to import and write, 1.2 s for the
+read-back over all 7,168 chunks. The expectation above holds, and the file went
+from 107.6 MB to 22.6 MB now that the chunks are stored deflated.
+
 `BaseError::Chunk` is now nearly unreachable through this crate's own writer — a
 record that inflates to its length and hashes to its entry and is still not a
 chunk is a file somebody else wrote. Its test builds exactly that by hand, so the
 variant keeps a caller.
+
+## Filed: the migration is diagnosed twice, and neither time by name
+
+A version 1 base set left in a working tree does not report itself as one. The
+playground panics twice — `load_world(config).expect("a world")` in
+[`in_process.rs`](../../../../crates/e2e/shard/src/in_process.rs) kills the shard
+thread with the real reason, and the main thread then panics on `RecvError` from
+the readiness channel, which says nothing at all. The `BaseError::Version`
+`Display` is exact and names the fix; what loses it is that it is printed by a
+background thread and immediately followed by a second, emptier panic.
+
+Two things are worth doing about it, neither of which is S2's: the readiness
+channel should carry the boot error rather than be dropped, so the surviving
+panic is the one with the reason in it; and the boot path is the place that
+knows a re-import is the migration, so a version mismatch is the one
+`BaseError` whose message could say so.
+
+The client's cache does not have this problem — `cache::read` turns any
+`BaseError` into `CacheError::Unreadable`, and every variant of that already
+means *fetch the facet instead*. A stale cache file survives under its old
+identity until [`sweep`](../../../../crates/client/net/src/cache.rs) ranks it
+out, which is what that ranking is for.
 
 ## What is next
 
