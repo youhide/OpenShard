@@ -69,19 +69,55 @@ the unit this layer bakes in, and it is a ninth of the work either way.
   of the facet, all against a whole bake. This is N8's third "done when", the one
   that is not a number.
 
-## What is next, in S3
+## The second artefact, the same session: a block's statics are addressed
 
-The span layer was 115 ms of it at both ends and is now 0.3. What is left of
-[`what_a_change_costs.md`](../new_map_representation/what_a_change_costs.md)'s S3
-is the other two, and they are not one problem:
+`WorldMap` held its statics as one facet-wide run addressed by a **prefix sum**,
+which is the same illness one crate down: a block whose item count moved pushed
+every static after it and repaired 458,752 offsets. Measured before: 0.02 ms to
+**1.3 ms** depending on how much of the facet stood behind the block, and
+3.9–5.6 ms for a publish that added an item.
 
-- **`WorldMap`'s statics** — the same shape and the same fix: a per-block
-  `base`+`count` table in place of the prefix sum, 1.75 MiB on a 150 MiB world,
-  which is the only thing between `chunk::apply` and O(the chunks that arrived).
-  A `.setland` moves no statics so it does not show in the number above; a
-  publish that *adds* an item is 3.9–5.6 ms.
-- **The coarse graph**, direction D's own and the 11.6 s one: `mapedit::commit`
-  drops the router on every publish, which is correct and is not free.
-  `touched_chunks` names the 32×32 regions to rebuild, plus the half a naive
-  implementation forgets — the neighbours whose answer *crossed* into the changed
-  chunk. The seam this handoff found is that same half, one scale down.
+`blocks: Vec<BlockRun>` — `base` and `count` per block — replaces it, and the
+three writers become local:
+
+- **A run that kept its length is written where it stands**, which is every edit
+  to the *ground*: relocating it would manufacture garbage out of a publish that
+  moved no statics at all.
+- **A removal closes its own gap** inside the block and drops the count; only an
+  **addition** has nowhere to put its item and goes to the end.
+- `replace_blocks` no longer rebuilds the span between the first named block and
+  the last — there is no span, so scattered blocks cost nothing extra and the
+  `splice` is gone.
+- Orphaned runs are counted and repacked once they outweigh the live ones, which
+  is the span layer's rule verbatim. `static_count` answers what is reachable.
+
+The price is the 1.75 MiB S3 named: 458,752 blocks × 8 bytes against the prefix
+sum's 4. The read path is the same two reads it always was.
+
+**Measured now**, by the same test — a publish that adds a static, which is the
+one the layout is about: **0.4 ms** on the shard and **0.6 ms** at the window,
+where the span half alone used to be 109 ms.
+
+The oracle is `an_edited_facet_holds_what_an_imported_one_does`: a facet grown,
+shrunk and replaced into shape holds what the same facet built by `from_parts`
+holds, block for block and tile for tile. The byte-identity oracles
+(`writing_the_same_facet_twice_writes_the_same_bytes`, the install-versus-base-set
+terrain sweep) pass unchanged.
+
+## What is next: the third artefact, and it is the same fix again
+
+**The coarse graph.** `FacetState::publish` still drops the router — 11.6 s to
+rebuild whole — and the plan for the local answer is now written down as
+[`navigation_graph.md`'s G1](../navigation_graph.md#g1--the-graph-follows-a-patch).
+Three things it says, so the next session does not re-derive them:
+
+- the graph holds **two** prefix sums (`region_offsets` over regions,
+  `edge_offsets` over nodes) and both want the same table this session put in
+  twice;
+- a `NodeId` is an index that *other regions' edges point at*, so a rebuilt
+  region has to keep each surviving place's number — the bake already interns by
+  place and throws the map away at `compact`;
+- the area is **two rings and a half**: the touched regions grown by a tile,
+  their neighbours (a portal is a fact about a border), and edges only in the
+  ring beyond. That first ring's tile of growth is this session's seam, one scale
+  up.

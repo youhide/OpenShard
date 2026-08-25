@@ -59,6 +59,69 @@ of a static region remains a caller-side refusal: the static graph is not
 rebuilt for live doors, crates or mobiles. The client then falls through to its
 existing doors-open attempt, which cuts the resulting route at the real refusal.
 
+## G1 — the graph follows a patch
+
+> **Queued, and it is the last third of
+> [`what_a_change_costs.md`](new_map_representation/what_a_change_costs.md)'s
+> S3.** The other two thirds are built — the span bake and `WorldMap`'s statics
+> both follow a publish locally now — and this is the one artefact that still
+> does not: `FacetState::publish` **drops** the router, because a whole-facet
+> rebuild is 11.6 s on a tick and a graph of the world as it stood is a router
+> planning through a wall somebody just built. Dropping it costs long routes
+> until the shard is rebaked and restarted. This is the plan for the third
+> answer.
+
+**It is the same fix, for the third time.** The span index and the statics run
+each held a facet-wide packed array addressed by a prefix sum, and a prefix sum
+*is* an ordering: re-laying one block moved everything after it. Both were
+answered by a table of `base` and `count`, a rebuilt piece appended and its entry
+repointed. This graph holds two such arrays, and neither is a table:
+
+| | addressed by | what one rebuilt region moves |
+|---|---|---|
+| `region_nodes` | `region_offsets`, a prefix sum over regions | every later region's nodes |
+| `edge_targets` / `edge_costs` | `edge_offsets`, a prefix sum **over nodes** | every later node's edges |
+
+So the first two steps are mechanical and are exactly what the other two
+artefacts did.
+
+**The third is not mechanical, and it is this graph's own: a `NodeId` is an
+index, and other regions' edges point at it.** `edge_targets` holds node numbers,
+so a rebuilt region that renumbered its nodes would silently repoint its
+neighbours' edges at somebody else. What makes that tractable is that the bake
+already interns a node by *place* — `build_nodes: BTreeMap<(x, y, z), NodeId>`,
+kept only while building and then dropped. A local rebake has to keep that
+identity instead: **a place that still has a node keeps its number**, a place
+that lost one leaves a dead entry, a new place takes a number at the end.
+
+**The area, and it is two rings rather than one.** Sampled from what the span
+layer's N8 found one scale down, which is the same mistake in miniature:
+
+1. The **regions covering the touched chunks, grown by one tile** west and north
+   — a column's height is the average of the four cells meeting at its north-west
+   corner, so an edit is read by the column before it. Their places, components,
+   portals and intra-region edges are all rebuilt.
+2. Their **eight neighbours**, because a portal is a fact about a *border*: the
+   node on the far side of A|B belongs to B, and a border that gained or lost a
+   crossing changes B's node set — which changes what B's intra-region routing is
+   between.
+3. And the ring beyond that, for **edges only**. C's portal edges into B are
+   rebuilt because B's were; C's intra-region edges are not, because C's own
+   places and node set did not move. This is where the cascade stops, and saying
+   so is half of what this node is.
+
+**What must not change**: the router refuses a stale graph rather than answering
+from it, so the rebake belongs beside `Ground::publish` in `FacetState` — the
+same seam that already writes the ground and its span bake in one statement.
+
+**Done when** `FacetState::publish` rebuilds the coarse graph instead of dropping
+it, in time a tick can absorb; and **a facet patched into shape routes exactly as
+the same facet baked whole** — the differential oracle
+[`publish_locality`](../../crates/common/movement/tests/publish_locality.rs) is
+for spans, and this wants its equivalent over `find_long_path`, because a graph
+that agrees node-for-node is not the claim and a graph that agrees *route*-for-
+route is.
+
 ## Out of scope
 
 - Multiple graph levels. A single automatic graph is enough for this pass.
