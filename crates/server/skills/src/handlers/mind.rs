@@ -11,7 +11,7 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::wire::{ClilocId, SoundId};
-use openshard_state::components::{Equipped, HearsGhosts, Hitpoints, Mana, Meditating, Spellbook};
+use openshard_state::components::{HearsGhosts, Hitpoints, Mana, Meditating, Spellbook};
 use openshard_state::weapon::{LAYER_ONE_HANDED, LAYER_TWO_HANDED};
 use openshard_state::{Skill, TICKS_PER_SECOND, WorldState};
 
@@ -152,9 +152,8 @@ fn hands_free(state: &WorldState, actor: EntityId) -> bool {
     let Some(serial) = state.registry.serial_of(actor) else {
         return true;
     };
-    !state.registry.query::<Equipped>().any(|(item, worn)| {
-        worn.mobile == serial
-            && (worn.layer == LAYER_ONE_HANDED || worn.layer == LAYER_TWO_HANDED)
+    !openshard_state::equipped_items(state, serial).any(|(item, worn)| {
+        (worn.layer == LAYER_ONE_HANDED || worn.layer == LAYER_TWO_HANDED)
             && !state.registry.has::<Spellbook>(item)
     })
 }

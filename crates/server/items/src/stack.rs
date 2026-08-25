@@ -24,12 +24,17 @@ pub fn merge_onto(state: &mut WorldState, connection: ConnectionId, held: HeldIt
     // ground it is reach-checked against the player's tile and redrawn with a
     // `0x1A`; inside a container it is reach-checked through its container and
     // redrawn with a `0x25` to every open gump, as `give` does.
-    if let Some(&Position(target_pos)) = state.registry.get::<Position>(target) {
+    let target_location = item_location(state, target);
+    if let Some(ItemLocation::Settled(SettledItemLocation::Ground {
+        facet,
+        position: target_pos,
+    })) = target_location
+    {
         let Some(&Position(player_pos)) = state.registry.get::<Position>(player) else {
             bounce(state, connection, held, DragCancelReason::Other);
             return;
         };
-        if state.facet_of(target) != state.facet_of(player) || !in_range(target_pos, player_pos, ITEM_REACH) {
+        if facet != state.facet_of(player) || !in_range(target_pos, player_pos, ITEM_REACH) {
             bounce(state, connection, held, DragCancelReason::OutOfRange);
             return;
         }
@@ -44,10 +49,9 @@ pub fn merge_onto(state: &mut WorldState, connection: ConnectionId, held: HeldIt
             bounce(state, connection, held, DragCancelReason::Other);
             return;
         }
-        state.take_held(connection);
-        state.registry.despawn(held.entity);
+        despawn_item(state, held.entity);
         debug!("stacks merged");
-    } else if let Some(&contained) = state.registry.get::<Contained>(target) {
+    } else if let Some(ItemLocation::Settled(SettledItemLocation::Contained(contained))) = target_location {
         let container = contained.container;
         let reachable = state
             .registry
@@ -64,10 +68,9 @@ pub fn merge_onto(state: &mut WorldState, connection: ConnectionId, held: HeldIt
             bounce(state, connection, held, DragCancelReason::Other);
             return;
         }
-        state.take_held(connection);
         // The dragged stack was on a cursor, on no screen and in no gump, so
         // despawning it needs no packet of its own.
-        state.registry.despawn(held.entity);
+        despawn_item(state, held.entity);
         debug!("stacks merged in a container");
     } else {
         // Worn, or nowhere placeable: nothing to merge onto.

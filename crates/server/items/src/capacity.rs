@@ -104,8 +104,10 @@ pub fn check_hold(
         at = state
             .registry
             .entity_of(serial)
-            .and_then(|entity| state.registry.get::<Contained>(entity))
-            .map(|held| held.container);
+            .and_then(|entity| match item_location(state, entity) {
+                Some(ItemLocation::Settled(SettledItemLocation::Contained(held))) => Some(held.container),
+                _ => None,
+            });
     }
     None
 }
@@ -138,9 +140,15 @@ fn weight_ceiling(state: &WorldState, container: Serial) -> u16 {
     let is_player_backpack = state
         .registry
         .entity_of(container)
-        .and_then(|entity| state.registry.get::<Equipped>(entity))
-        .filter(|worn| worn.layer == BACKPACK_LAYER)
-        .and_then(|worn| state.registry.entity_of(worn.mobile))
+        .and_then(|entity| match item_location(state, entity) {
+            Some(ItemLocation::Settled(SettledItemLocation::Equipped(worn)))
+                if worn.layer == BACKPACK_LAYER =>
+            {
+                Some(worn.mobile)
+            }
+            _ => None,
+        })
+        .and_then(|mobile| state.registry.entity_of(mobile))
         .is_some_and(|owner| state.registry.has::<openshard_state::components::Client>(owner));
     if is_player_backpack && state.gameplay.is_ml() {
         PLAYER_BACKPACK_MAX_WEIGHT

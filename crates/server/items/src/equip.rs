@@ -24,7 +24,9 @@ pub fn equip_worn_item(
         }
     };
     state.registry.insert(entity, Drawn { id: graphic, hue });
-    state.registry.insert(entity, Equipped { mobile, layer });
+    let equipped = Equipped { mobile, layer };
+    establish_item_location(state, entity, ItemLocation::equipped(equipped))
+        .expect("new clothing has one valid paperdoll location");
     debug!(%serial, graphic = graphic.0, layer = layer.0, "clothing equipped");
     Some(entity)
 }
@@ -101,14 +103,12 @@ pub fn equip_item(
         return;
     }
 
-    state.take_held(connection);
-    state.registry.insert(
-        held.entity,
-        Equipped {
-            mobile: wearer_serial,
-            layer,
-        },
-    );
+    let equipped = Equipped {
+        mobile: wearer_serial,
+        layer,
+    };
+    relocate_item(state, held.entity, ItemLocation::equipped(equipped))
+        .expect("an accepted equip has one valid paperdoll location");
     broadcast_equip(state, held.entity, wearer);
     debug!(item = item.0, layer = layer.0, "equipped");
 }
@@ -141,9 +141,8 @@ fn hands_conflict(state: &WorldState, mobile: Serial, graphic: Graphic, layer: L
     if !one_hand {
         return false;
     }
-    state.registry.query::<Equipped>().any(|(item, worn)| {
-        worn.mobile == mobile
-            && worn.layer == LAYER_TWO_HANDED
+    equipped_items(state, mobile).any(|(item, worn)| {
+        worn.layer == LAYER_TWO_HANDED
             && state
                 .registry
                 .get::<Drawn>(item)
@@ -158,35 +157,35 @@ fn hands_conflict(state: &WorldState, mobile: Serial, graphic: Graphic, layer: L
 /// to be released. One level deep — a backpack of loose items — which is all a
 /// character has until nested containers and inventory persistence land.
 pub fn despawn_belongings(state: &mut WorldState, mobile: Serial) {
-    let worn: Vec<(EntityId, Serial)> = state
-        .registry
-        .query::<Equipped>()
-        .filter(|(_, worn)| worn.mobile == mobile)
+    let worn: Vec<(EntityId, Serial)> = equipped_items(state, mobile)
         .filter_map(|(item, _)| Some((item, state.registry.serial_of(item)?)))
         .collect();
     let worn_serials: Vec<Serial> = worn.iter().map(|(_, serial)| *serial).collect();
 
     let inside: Vec<EntityId> = state
         .registry
-        .query::<Contained>()
-        .filter(|(_, held)| worn_serials.contains(&held.container))
+        .query::<ItemLocation>()
+        .filter(|(_, location)| {
+            matches!(
+                location,
+                ItemLocation::Settled(SettledItemLocation::Contained(held))
+                    if worn_serials.contains(&held.container)
+            )
+        })
         .map(|(item, _)| item)
         .collect();
     for item in inside {
-        state.registry.despawn(item);
+        despawn_item(state, item);
     }
     for (item, serial) in worn {
         state.open_containers.remove(&serial);
-        state.registry.despawn(item);
+        despawn_item(state, item);
     }
 }
 
 /// Whether a mobile already wears something on a layer.
 pub fn layer_taken(state: &WorldState, mobile: Serial, layer: Layer) -> bool {
-    state
-        .registry
-        .query::<Equipped>()
-        .any(|(_, worn)| worn.mobile == mobile && worn.layer == layer)
+    equipped_items(state, mobile).any(|(_, worn)| worn.layer == layer)
 }
 
 /// Tell everyone who can see `mobile`, and the mobile itself if it is a
@@ -227,7 +226,11 @@ pub fn equip_audience(state: &WorldState, mobile: EntityId) -> Vec<EntityId> {
 /// Build the `0x2E` for a worn item.
 pub fn equip_packet(state: &WorldState, item: EntityId) -> Option<EquipUpdate> {
     let serial = state.registry.serial_of(item)?;
-    let Equipped { mobile, layer } = *state.registry.get::<Equipped>(item)?;
+    let ItemLocation::Settled(SettledItemLocation::Equipped(Equipped { mobile, layer })) =
+        item_location(state, item)?
+    else {
+        return None;
+    };
     let Drawn { id, hue } = *state.registry.get::<Drawn>(item)?;
     Some(EquipUpdate {
         item: serial,

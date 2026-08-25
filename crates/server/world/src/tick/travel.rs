@@ -18,8 +18,7 @@ use openshard_protocol::gump::{
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::wire::{Graphic, SoundId};
 use openshard_state::components::{
-    Combat, Contained, CriminalUntil, Equipped, Position, RECALL_RUNE_GRAPHIC, RuneMark, Runebook,
-    RunebookEntry,
+    Combat, CriminalUntil, Position, RECALL_RUNE_GRAPHIC, RuneMark, Runebook, RunebookEntry,
 };
 
 use super::*;
@@ -248,32 +247,32 @@ impl World {
         let Some(owner) = self.state.registry.serial_of(mobile) else {
             return false;
         };
-        let Some(pack) = self
-            .state
-            .registry
-            .query::<Equipped>()
-            .find(|(_, worn)| worn.mobile == owner && worn.layer == items::BACKPACK_LAYER)
+        let Some(pack) = openshard_state::equipped_items(&self.state, owner)
+            .find(|(_, worn)| worn.layer == items::BACKPACK_LAYER)
             .and_then(|(pack, _)| self.state.registry.serial_of(pack))
         else {
             return false;
         };
         // Walk out through the nesting: a rune in a pouch in the pack counts,
         // which is where anyone who owns sixteen of them keeps them.
-        let mut container = self
-            .state
-            .registry
-            .get::<Contained>(item)
-            .map(|held| held.container);
+        let mut container = match openshard_state::item_location(&self.state, item) {
+            Some(LiveItemLocation::Settled(openshard_state::SettledItemLocation::Contained(held))) => {
+                Some(held.container)
+            }
+            _ => None,
+        };
         for _ in 0..MAX_CONTAINER_DEPTH {
             match container {
                 Some(serial) if serial == pack => return true,
                 Some(serial) => {
-                    container = self
-                        .state
-                        .registry
-                        .entity_of(serial)
-                        .and_then(|outer| self.state.registry.get::<Contained>(outer))
-                        .map(|held| held.container);
+                    container = self.state.registry.entity_of(serial).and_then(|outer| {
+                        match openshard_state::item_location(&self.state, outer) {
+                            Some(LiveItemLocation::Settled(
+                                openshard_state::SettledItemLocation::Contained(held),
+                            )) => Some(held.container),
+                            _ => None,
+                        }
+                    });
                 }
                 None => return false,
             }

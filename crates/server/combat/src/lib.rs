@@ -23,11 +23,10 @@ use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::wire::{Graphic, SoundId};
 use openshard_protocol::world::{Point, PoisonLevel};
 use openshard_state::components::{
-    BehaviourBuffs, Body, Client, Combat, CriminalUntil, DamageType, Equipped, Frozen, Ghost, Guard, Hidden,
-    Hitpoints, MeleeDamage, MurderDecay, Murders, PoisonCharges, Poisoned, Position, RangedAttack,
-    Resistance, Skills, Stamina, Stats, SwingSpeed, WrestlingAmbushCooldown, WrestlingCombo,
-    WrestlingInterceptCooldown, WrestlingOpener, WrestlingStride, body_is_female, body_opens_doors,
-    creature_base_sound,
+    BehaviourBuffs, Body, Client, Combat, CriminalUntil, DamageType, Frozen, Ghost, Guard, Hidden, Hitpoints,
+    MeleeDamage, MurderDecay, Murders, PoisonCharges, Poisoned, Position, RangedAttack, Resistance, Skills,
+    Stamina, Stats, SwingSpeed, WrestlingAmbushCooldown, WrestlingCombo, WrestlingInterceptCooldown,
+    WrestlingOpener, WrestlingStride, body_is_female, body_opens_doors, creature_base_sound,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::weapon::{LAYER_ONE_HANDED, LAYER_TWO_HANDED};
@@ -961,12 +960,8 @@ fn deliver_weapon_poison(state: &mut WorldState, attacker: EntityId, target: Ser
     };
     // The item on a weapon layer, whatever it is — the poison is on the *item*, so
     // this does not go through the weapon table.
-    let Some(weapon) = state
-        .registry
-        .query::<Equipped>()
-        .find(|(_, worn)| {
-            worn.mobile == serial && (worn.layer == LAYER_ONE_HANDED || worn.layer == LAYER_TWO_HANDED)
-        })
+    let Some(weapon) = openshard_state::equipped_items(state, serial)
+        .find(|(_, worn)| worn.layer == LAYER_ONE_HANDED || worn.layer == LAYER_TWO_HANDED)
         .map(|(entity, _)| entity)
     else {
         return;

@@ -120,10 +120,8 @@ pub fn open_worn_container(state: &mut WorldState, connection: ConnectionId, pla
     let Some(mobile) = state.registry.serial_of(player) else {
         return;
     };
-    let worn = state
-        .registry
-        .query::<Equipped>()
-        .find(|(item, eq)| eq.mobile == mobile && eq.layer == layer && state.registry.has::<Container>(*item))
+    let worn = equipped_items(state, mobile)
+        .find(|(item, eq)| eq.layer == layer && state.registry.has::<Container>(*item))
         .map(|(item, _)| item);
     if let Some(item) = worn {
         if let Some(serial) = state.registry.serial_of(item) {
@@ -229,25 +227,30 @@ pub fn in_reach(state: &WorldState, container: EntityId, player: EntityId) -> bo
         return false;
     };
     // Where the container effectively is: its own ground tile, or its wearer's.
-    let anchor = if let Some(&Position(pos)) = state.registry.get::<Position>(container) {
-        Some((state.facet_of(container), pos))
-    } else if let Some(&Equipped { mobile, .. }) = state.registry.get::<Equipped>(container) {
-        if Some(mobile) == state.registry.serial_of(player) {
-            return true; // one's own worn pack is always in reach
+    let anchor = match item_location(state, container) {
+        Some(ItemLocation::Settled(SettledItemLocation::Ground { facet, position })) => {
+            Some((facet, position))
         }
-        state
-            .registry
-            .entity_of(mobile)
-            .and_then(|wearer| Some((state.facet_of(wearer), state.registry.get::<Position>(wearer)?.0)))
-    } else if let Some(&Contained { container: outer, .. }) = state.registry.get::<Contained>(container) {
-        // Nested — a spellbook in the pack, a bag in a bag: in reach when the
-        // container holding it is. Recurse to that one's own reach test.
-        return state
-            .registry
-            .entity_of(outer)
-            .is_some_and(|outer| in_reach(state, outer, player));
-    } else {
-        None
+        Some(ItemLocation::Settled(SettledItemLocation::Equipped(Equipped { mobile, .. }))) => {
+            if Some(mobile) == state.registry.serial_of(player) {
+                return true; // one's own worn pack is always in reach
+            }
+            state
+                .registry
+                .entity_of(mobile)
+                .and_then(|wearer| Some((state.facet_of(wearer), state.registry.get::<Position>(wearer)?.0)))
+        }
+        Some(ItemLocation::Settled(SettledItemLocation::Contained(Contained {
+            container: outer, ..
+        }))) => {
+            // Nested — a spellbook in the pack, a bag in a bag: in reach when the
+            // container holding it is. Recurse to that one's own reach test.
+            return state
+                .registry
+                .entity_of(outer)
+                .is_some_and(|outer| in_reach(state, outer, player));
+        }
+        Some(ItemLocation::Held { .. }) | None => None,
     };
     let Some((facet, at)) = anchor else {
         return false;
@@ -293,31 +296,20 @@ pub(crate) fn open_paperdoll(
 
 /// Everything inside a container, as the wire records `0x3C`/`0x25` need.
 pub fn contents_of(state: &WorldState, container: Serial) -> Vec<ContainedItem> {
-    state
-        .registry
-        .query::<Contained>()
-        .filter(|(_, held)| held.container == container)
+    contained_items(state, container)
         .filter_map(|(entity, _)| contained_record(state, entity))
         .collect()
 }
 
 /// How many items a container already holds — the next free grid slot.
 pub fn item_count(state: &WorldState, container: Serial) -> u8 {
-    state
-        .registry
-        .query::<Contained>()
-        .filter(|(_, held)| held.container == container)
-        .count()
-        .min(u8::MAX as usize) as u8
+    contained_items(state, container).count().min(u8::MAX as usize) as u8
 }
 
 /// How many of `graphic` a container holds, counting stack amounts.
 #[must_use]
 pub fn count_in_container(state: &WorldState, container: Serial, graphic: Graphic) -> u32 {
-    state
-        .registry
-        .query::<Contained>()
-        .filter(|(_, held)| held.container == container)
+    contained_items(state, container)
         .filter(|(entity, _)| {
             state
                 .registry
@@ -341,10 +333,7 @@ pub fn take_from_container(state: &mut WorldState, container: Serial, graphic: G
     if count == 0 {
         return true;
     }
-    let matches: Vec<(EntityId, u16)> = state
-        .registry
-        .query::<Contained>()
-        .filter(|(_, held)| held.container == container)
+    let matches: Vec<(EntityId, u16)> = contained_items(state, container)
         .filter(|(entity, _)| {
             state
                 .registry
@@ -371,7 +360,7 @@ pub fn take_from_container(state: &mut WorldState, container: Serial, graphic: G
             // screen, so despawning it is all it takes.
             remaining -= amount;
             let serial = state.registry.serial_of(entity);
-            state.registry.despawn(entity);
+            despawn_item(state, entity);
             if let Some(serial) = serial {
                 tell_watchers_removed(state, container, serial);
             }
@@ -403,14 +392,13 @@ pub fn place_one(
         return None;
     };
     state.registry.insert(entity, Drawn { id: graphic, hue });
-    state.registry.insert(
-        entity,
-        Contained {
-            container,
-            position: GumpPoint::new(60, 60),
-            grid: GridSlot(0),
-        },
-    );
+    let contained = Contained {
+        container,
+        position: GumpPoint::new(60, 60),
+        grid: GridSlot(0),
+    };
+    establish_item_location(state, entity, ItemLocation::contained(contained))
+        .expect("a newly placed item has one valid container parent");
     if amount > 1 {
         state.registry.insert(entity, Amount(amount));
     }
@@ -443,14 +431,13 @@ pub fn spawn_contained_leftover(
     state.registry.insert(leftover, Drawn { id, hue });
     state.registry.insert(leftover, Stackable);
     set_stack_amount(state, leftover, amount);
-    state.registry.insert(
-        leftover,
-        Contained {
-            container: contained.container,
-            position: contained.position,
-            grid: contained.grid,
-        },
-    );
+    let location = Contained {
+        container: contained.container,
+        position: contained.position,
+        grid: contained.grid,
+    };
+    establish_item_location(state, leftover, ItemLocation::contained(location))
+        .expect("a contained split remainder has one valid parent");
     tell_watchers_updated(state, contained.container, leftover);
     Some(leftover)
 }
@@ -485,14 +472,13 @@ pub fn give(
             return None;
         };
         state.registry.insert(entity, Drawn { id: graphic, hue });
-        state.registry.insert(
-            entity,
-            Contained {
-                container,
-                position: GumpPoint::new(60, 60),
-                grid: GridSlot(0),
-            },
-        );
+        let contained = Contained {
+            container,
+            position: GumpPoint::new(60, 60),
+            grid: GridSlot(0),
+        };
+        establish_item_location(state, entity, ItemLocation::contained(contained))
+            .expect("a newly given book has one valid container parent");
         if graphic == SPELLBOOK_GRAPHIC {
             state.registry.insert(entity, Spellbook::default());
         } else {
@@ -502,10 +488,7 @@ pub fn give(
         return Some(entity);
     }
     // Every pile of the same art already in there, in registry order.
-    let piles: Vec<EntityId> = state
-        .registry
-        .query::<Contained>()
-        .filter(|(_, held)| held.container == container)
+    let piles: Vec<EntityId> = contained_items(state, container)
         .filter(|(entity, _)| {
             state.registry.has::<Stackable>(*entity)
                 && state
@@ -545,14 +528,13 @@ pub fn give(
             return last;
         };
         state.registry.insert(entity, Drawn { id: graphic, hue });
-        state.registry.insert(
-            entity,
-            Contained {
-                container,
-                position: GumpPoint::new(60, 60),
-                grid: GridSlot(0),
-            },
-        );
+        let contained = Contained {
+            container,
+            position: GumpPoint::new(60, 60),
+            grid: GridSlot(0),
+        };
+        establish_item_location(state, entity, ItemLocation::contained(contained))
+            .expect("a newly given stack has one valid container parent");
         state.registry.insert(entity, Amount(take));
         state.registry.insert(entity, Stackable);
         tell_watchers_updated(state, container, entity);
@@ -576,7 +558,7 @@ pub fn remove_from_stack(state: &mut WorldState, container: Serial, item: Entity
         if let Some(serial) = state.registry.serial_of(item) {
             tell_watchers_removed(state, container, serial);
         }
-        state.registry.despawn(item);
+        despawn_item(state, item);
     } else {
         state.registry.insert(item, Amount(have - take));
         tell_watchers_updated(state, container, item);
@@ -657,7 +639,11 @@ pub fn contained_record(state: &WorldState, entity: EntityId) -> Option<Containe
     let serial = state.registry.serial_of(entity)?;
     // Component and record now carry the same three types, so this is a copy
     // rather than a conversion — which is the point of having swept them.
-    let Contained { position, grid, .. } = *state.registry.get::<Contained>(entity)?;
+    let ItemLocation::Settled(SettledItemLocation::Contained(Contained { position, grid, .. })) =
+        item_location(state, entity)?
+    else {
+        return None;
+    };
     let Drawn { id, hue } = *state.registry.get::<Drawn>(entity)?;
     let amount = state.registry.get::<Amount>(entity).map_or(1, |a| a.0);
     Some(ContainedItem {

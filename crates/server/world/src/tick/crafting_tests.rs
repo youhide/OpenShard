@@ -65,14 +65,16 @@ fn give(world: &mut World, connection: ConnectionId, graphic: Graphic, hue: Hue,
     let backpack = items::backpack_of(&world.state, owner).expect("a backpack");
     let (item, _) = world.state.registry.spawn_with_serial(SerialKind::Item).unwrap();
     world.state.registry.insert(item, Drawn { id: graphic, hue });
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         item,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: backpack,
             position: GumpPoint::new(20, 20),
             grid: GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
     if amount > 1 {
         world.state.registry.insert(item, Amount(amount));
         world

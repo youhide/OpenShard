@@ -108,8 +108,8 @@ pub fn armor_data(graphic: Graphic) -> Option<&'static ArmorData> {
     ARMOR.iter().find(|a| a.graphic == graphic)
 }
 
-use crate::WorldState;
-use crate::components::{Armor, Drawn, Equipped, Quality};
+use crate::components::{Armor, Drawn, Quality};
+use crate::{WorldState, equipped_items};
 use openshard_entities::EntityId;
 use openshard_protocol::wire::{Graphic, Hue, Layer};
 
@@ -171,9 +171,7 @@ pub fn piece_rating(state: &WorldState, item: EntityId) -> u16 {
 #[must_use]
 pub fn worn_on_layer(state: &WorldState, mobile: EntityId, layer: Layer) -> Option<EntityId> {
     let serial = state.registry.serial_of(mobile)?;
-    state
-        .registry
-        .query::<Equipped>()
+    equipped_items(state, serial)
         .find(|(_, worn)| worn.mobile == serial && worn.layer == layer)
         .map(|(entity, _)| entity)
 }
@@ -190,10 +188,7 @@ pub fn worn_armor_rating(state: &WorldState, mobile: EntityId) -> u16 {
     let Some(serial) = state.registry.serial_of(mobile) else {
         return 0;
     };
-    let hundredths: u32 = state
-        .registry
-        .query::<Equipped>()
-        .filter(|(_, worn)| worn.mobile == serial)
+    let hundredths: u32 = equipped_items(state, serial)
         .map(|(item, worn)| u32::from(piece_rating(state, item)) * layer_coverage(worn.layer))
         .sum();
     u16::try_from(hundredths / 100).unwrap_or(u16::MAX)

@@ -68,7 +68,10 @@ use openshard_state::components::{
 use openshard_state::facet_rules::FacetRules;
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
-use openshard_state::{FacetState, Gameplay, Outbound, TICKS_PER_SECOND, TooltipMode, WorldHome, WorldState};
+use openshard_state::{
+    FacetState, Gameplay, ItemLocation as LiveItemLocation, Outbound, TICKS_PER_SECOND, TooltipMode,
+    WorldHome, WorldState, establish_item_location, relocate_item,
+};
 
 use openshard_ai as ai;
 use openshard_chat as chat;
@@ -1211,7 +1214,12 @@ impl World {
                     ) {
                         (Some(player), Some(target))
                             if self.state.registry.has::<Container>(target)
-                                && self.state.registry.has::<Contained>(target) =>
+                                && matches!(
+                                    openshard_state::item_location(&self.state, target),
+                                    Some(LiveItemLocation::Settled(
+                                        openshard_state::SettledItemLocation::Contained(_)
+                                    ))
+                                ) =>
                         {
                             !skills::snooping(&mut self.state, player, target)
                         }
@@ -1559,10 +1567,8 @@ impl World {
     }
 
     fn disconnect(&mut self, connection: ConnectionId) {
-        // The world's own row for this client goes first: it is what made the
-        // connection addressable, and there is nothing left to say to a socket
-        // that is gone. Unconditional, because a connection that never picked a
-        // character has one of these and nothing else below.
+        // Release a held item while the connection row still exists: the item
+        // edge and the cursor reverse projection are one transition now.
         //
         // One `remove` for everything the connection was in the middle of — what
         // it was last told about the light, the music and its own numbers goes
@@ -1571,10 +1577,14 @@ impl World {
         // a cave. Only the cursor needs an answer, because an item on it is
         // nowhere — off the ground and out of any container — until something puts
         // it back.
-        let held = self.state.forget_connection(connection).and_then(|row| row.held);
+        let held = self.state.held_of(connection);
         if let Some(held) = held {
             items::restore(&mut self.state, held);
         }
+        // The world's own row for this client can now go. Unconditional,
+        // because a connection that never picked a character has one of these
+        // and nothing else below.
+        self.state.forget_connection(connection);
 
         let Some(entity) = self.state.players.remove(&connection) else {
             return;

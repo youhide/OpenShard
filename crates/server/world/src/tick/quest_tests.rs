@@ -603,14 +603,16 @@ fn put_silk(world: &mut World, container: Serial, amount: u16) -> EntityId {
     );
     world.state.registry.insert(item, Amount(amount));
     world.state.registry.insert(item, Stackable);
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         item,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container,
             position: GumpPoint::new(0, 0),
             grid: GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
     item
 }
 

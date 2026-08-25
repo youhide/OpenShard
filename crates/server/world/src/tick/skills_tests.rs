@@ -461,13 +461,15 @@ fn meditation_wants_free_hands() {
             hue: openshard_protocol::wire::Hue(0),
         },
     );
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         sword,
-        Equipped {
+        openshard_state::ItemLocation::equipped(Equipped {
             mobile: owner,
             layer: Layer(1),
-        },
-    );
+        }),
+    )
+    .unwrap();
     let _ = packets_for(&mut world, player);
 
     world.queue(Command::UseSkillButton {
@@ -510,13 +512,15 @@ fn a_trance_doubles_the_rate_mana_comes_back_at() {
             hue: openshard_protocol::wire::Hue(0),
         },
     );
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         plate,
-        Equipped {
+        openshard_state::ItemLocation::equipped(Equipped {
             mobile: owner,
             layer: Layer(0x0D),
-        },
-    );
+        }),
+    )
+    .unwrap();
     assert!(
         openshard_magic::mana_regen_ticks(&world.state, entity) > entranced,
         "a mage in plate regenerates like a warrior"
@@ -648,13 +652,15 @@ fn poisoning_coats_a_blade_and_the_blade_spends_its_doses() {
     );
 
     // Wield it and hit something: the target is poisoned and a dose is gone.
-    world.state.registry.insert(
+    openshard_state::relocate_item(
+        &mut world.state,
         blade,
-        Equipped {
+        openshard_state::ItemLocation::equipped(Equipped {
             mobile: owner,
             layer: Layer(1),
-        },
-    );
+        }),
+    )
+    .unwrap();
     let victim = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 200, now);
     world.queue(Command::WarMode {
         connection: player,
@@ -1061,14 +1067,16 @@ fn give_instrument(world: &mut World, connection: ConnectionId, graphic: Graphic
             hue: Hue(0),
         },
     );
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         item,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: backpack,
             position: GumpPoint::new(20, 20),
             grid: GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
     world
         .state
         .registry
@@ -1179,14 +1187,16 @@ fn give_item(world: &mut World, connection: ConnectionId, graphic: Graphic) -> S
             hue: Hue(0),
         },
     );
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         item,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: backpack,
             position: GumpPoint::new(20, 20),
             grid: GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
     serial
 }
 

@@ -21,12 +21,18 @@ pub fn consume(state: &mut WorldState, serial: Serial, amount: u16) -> bool {
     // asked of anything else is treated as a whole-item removal below.
     let have = amount_of(state, entity);
     let partial = amount != 0 && amount < have && state.registry.has::<Stackable>(entity);
+    let location = item_location(state, entity);
     if partial {
-        if let Some(&Contained { container, .. }) = state.registry.get::<Contained>(entity) {
+        if let Some(ItemLocation::Settled(SettledItemLocation::Contained(Contained { container, .. }))) =
+            location
+        {
             remove_from_stack(state, container, entity, amount);
             return true;
         }
-        if state.registry.has::<Position>(entity) {
+        if matches!(
+            location,
+            Some(ItemLocation::Settled(SettledItemLocation::Ground { .. }))
+        ) {
             set_stack_amount(state, entity, have - amount);
             redraw_ground_item(state, entity);
             return true;
@@ -48,7 +54,6 @@ pub fn consume(state: &mut WorldState, serial: Serial, amount: u16) -> bool {
         })
         .collect();
     for connection in holders {
-        state.take_held(connection);
         reject_drag(state, connection, DragCancelReason::Other);
         // The lifter's authoritative view still projects the item at its
         // origin: a successful lift intentionally echoed no Remove to that
@@ -59,26 +64,31 @@ pub fn consume(state: &mut WorldState, serial: Serial, amount: u16) -> bool {
 
     // Whole-item removal, dispatched on where the item lives (the three location
     // components are mutually exclusive).
-    if state.registry.has::<Position>(entity) {
-        remove_ground_item(state, entity, serial);
-    } else if let Some(&Contained { container, .. }) = state.registry.get::<Contained>(entity) {
-        // A contained item is on no sector grid and no screen; the only client
-        // that need hear are those with the container's gump open.
-        tell_watchers_removed(state, container, serial);
-        despawn_contents(state, serial);
-        state.registry.despawn(entity);
-    } else if let Some(&Equipped { mobile, .. }) = state.registry.get::<Equipped>(entity) {
-        if let Some(wearer) = state.registry.entity_of(mobile) {
-            broadcast_unequip(state, serial, wearer);
+    match location {
+        Some(ItemLocation::Settled(SettledItemLocation::Ground { .. })) => {
+            remove_ground_item(state, entity, serial);
         }
-        // A worn container someone had open is gone; forget it as `despawn_belongings` does.
-        state.open_containers.remove(&serial);
-        despawn_contents(state, serial);
-        state.registry.despawn(entity);
-    } else {
-        // In limbo — held on a cursor, off every grid and screen; despawn is all.
-        despawn_contents(state, serial);
-        state.registry.despawn(entity);
+        Some(ItemLocation::Settled(SettledItemLocation::Contained(Contained { container, .. }))) => {
+            // A contained item is on no sector grid and no screen; the only client
+            // that need hear are those with the container's gump open.
+            tell_watchers_removed(state, container, serial);
+            despawn_contents(state, serial);
+            despawn_item(state, entity);
+        }
+        Some(ItemLocation::Settled(SettledItemLocation::Equipped(Equipped { mobile, .. }))) => {
+            if let Some(wearer) = state.registry.entity_of(mobile) {
+                broadcast_unequip(state, serial, wearer);
+            }
+            // A worn container someone had open is gone; forget it as `despawn_belongings` does.
+            state.open_containers.remove(&serial);
+            despawn_contents(state, serial);
+            despawn_item(state, entity);
+        }
+        Some(ItemLocation::Held { .. }) | None => {
+            // In limbo — held on a cursor, off every grid and screen; despawn is all.
+            despawn_contents(state, serial);
+            despawn_item(state, entity);
+        }
     }
     true
 }

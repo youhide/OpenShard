@@ -423,11 +423,8 @@ impl World {
         // backpack came back with its inventory; only a character that restored
         // none — a brand-new one, or one whose save predates item persistence —
         // gets a fresh starter bag.
-        let has_backpack = self
-            .state
-            .registry
-            .query::<Equipped>()
-            .any(|(_, worn)| worn.mobile == serial && worn.layer == items::BACKPACK_LAYER);
+        let has_backpack = openshard_state::equipped_items(&self.state, serial)
+            .any(|(_, worn)| worn.layer == items::BACKPACK_LAYER);
         if !restored || !has_backpack {
             items::equip_new_container(
                 &mut self.state,
@@ -443,11 +440,8 @@ impl World {
         // persists with the character and its contents survive a restart — which is
         // what makes a bank worth anything. A returning character's came back with
         // its saved inventory; a new one gets an empty one.
-        let has_bank = self
-            .state
-            .registry
-            .query::<Equipped>()
-            .any(|(_, worn)| worn.mobile == serial && worn.layer == npc::BANK_LAYER);
+        let has_bank = openshard_state::equipped_items(&self.state, serial)
+            .any(|(_, worn)| worn.layer == npc::BANK_LAYER);
         if !has_bank {
             items::equip_new_container(
                 &mut self.state,

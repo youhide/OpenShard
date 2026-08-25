@@ -50,14 +50,17 @@ fn put_in(world: &mut World, container: Serial, graphic: u16, amount: u16) -> En
     );
     world.state.registry.insert(item, Amount(amount));
     world.state.registry.insert(item, Stackable);
-    world.state.registry.insert(
+    let contained = Contained {
+        container,
+        position: GumpPoint::new(40, 65),
+        grid: GridSlot(0),
+    };
+    openshard_state::establish_item_location(
+        &mut world.state,
         item,
-        Contained {
-            container,
-            position: GumpPoint::new(40, 65),
-            grid: GridSlot(0),
-        },
-    );
+        openshard_state::ItemLocation::contained(contained),
+    )
+    .unwrap();
     item
 }
 
@@ -73,7 +76,12 @@ fn wear(world: &mut World, connection: ConnectionId, graphic: u16, layer: Layer)
             hue: openshard_protocol::wire::Hue(0),
         },
     );
-    world.state.registry.insert(item, Equipped { mobile, layer });
+    openshard_state::establish_item_location(
+        &mut world.state,
+        item,
+        openshard_state::ItemLocation::equipped(Equipped { mobile, layer }),
+    )
+    .unwrap();
     item
 }
 
@@ -108,14 +116,16 @@ fn the_status_bar_counts_the_gold_in_the_pack() {
             gump: openshard_protocol::wire::Graphic(0x003C),
         },
     );
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         pouch,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: pack,
             position: GumpPoint::new(10, 10),
             grid: GridSlot(1),
-        },
-    );
+        }),
+    )
+    .unwrap();
     put_in(&mut world, pouch_serial, GOLD, 500);
 
     assert_eq!(
@@ -170,14 +180,16 @@ fn the_bank_box_is_not_carried() {
     );
 
     // The same coins, banked.
-    world.state.registry.insert(
+    openshard_state::relocate_item(
+        &mut world.state,
         purse,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: bank,
             position: GumpPoint::new(40, 65),
             grid: GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
     assert_eq!(
         items::total_weight(&world.state, player, BODY_WEIGHT),
         empty,
@@ -206,21 +218,20 @@ fn a_lifted_pile_is_still_carried() {
     let packed = items::total_weight(&world.state, player, BODY_WEIGHT);
 
     // Onto the cursor: out of the container, into the drag.
-    world.state.registry.remove::<Contained>(purse);
-    world
-        .state
-        .hold(
+    let origin = Contained {
+        container: pack,
+        position: GumpPoint::new(40, 65),
+        grid: GridSlot(0),
+    };
+    openshard_state::relocate_item(
+        &mut world.state,
+        purse,
+        openshard_state::ItemLocation::Held {
             connection,
-            openshard_state::HeldItem {
-                entity: purse,
-                origin: openshard_state::Origin::Container(Contained {
-                    container: pack,
-                    position: GumpPoint::new(40, 65),
-                    grid: GridSlot(0),
-                }),
-            },
-        )
-        .expect("the test cursor is empty");
+            origin: openshard_state::SettledItemLocation::Contained(origin),
+        },
+    )
+    .unwrap();
 
     assert_eq!(
         items::total_weight(&world.state, player, BODY_WEIGHT),
@@ -642,14 +653,16 @@ fn a_purse_inside_the_bank_is_still_banked() {
             gump: openshard_protocol::wire::Graphic(0x003C),
         },
     );
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         pouch,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: bank,
             position: GumpPoint::new(10, 10),
             grid: GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
     put_in(&mut world, pouch_serial, GOLD, 700);
     put_in(&mut world, bank, GOLD, 300);
 

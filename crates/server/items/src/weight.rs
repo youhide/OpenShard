@@ -95,7 +95,10 @@ impl Contents {
 #[must_use]
 pub fn contents_index(state: &WorldState) -> Contents {
     let mut index = Contents::default();
-    for (entity, held) in state.registry.query::<Contained>() {
+    for (entity, location) in state.registry.query::<ItemLocation>() {
+        let ItemLocation::Settled(SettledItemLocation::Contained(held)) = *location else {
+            continue;
+        };
         index.0.entry(held.container).or_default().push(entity);
     }
     index
@@ -129,10 +132,8 @@ pub fn carried_with(state: &WorldState, contents: &Contents, mobile: EntityId) -
     };
     let mut out = Vec::new();
     let mut visited = Vec::new();
-    let worn: Vec<EntityId> = state
-        .registry
-        .query::<Equipped>()
-        .filter(|(_, worn)| worn.mobile == serial && worn.layer != BANK_LAYER)
+    let worn: Vec<EntityId> = equipped_items(state, serial)
+        .filter(|(_, worn)| worn.layer != BANK_LAYER)
         .map(|(entity, _)| entity)
         .collect();
     for item in worn {
@@ -193,12 +194,8 @@ pub fn banked_with(state: &WorldState, contents: &Contents, mobile: EntityId) ->
     let Some(serial) = state.registry.serial_of(mobile) else {
         return Vec::new();
     };
-    let Some(bank) = state
-        .registry
-        .query::<Equipped>()
-        .find(|(item, worn)| {
-            worn.mobile == serial && worn.layer == BANK_LAYER && state.registry.has::<Container>(*item)
-        })
+    let Some(bank) = equipped_items(state, serial)
+        .find(|(item, worn)| worn.layer == BANK_LAYER && state.registry.has::<Container>(*item))
         .map(|(item, _)| item)
     else {
         return Vec::new();
@@ -294,11 +291,15 @@ pub fn owner_of_container(state: &WorldState, container: Serial) -> Option<Entit
     // future bug could make it a cycle, and a hang is worse than a wrong answer.
     for _ in 0..16 {
         let entity = state.registry.entity_of(current)?;
-        if let Some(worn) = state.registry.get::<Equipped>(entity) {
-            return state.registry.entity_of(worn.mobile);
+        match item_location(state, entity)? {
+            ItemLocation::Settled(SettledItemLocation::Equipped(worn)) => {
+                return state.registry.entity_of(worn.mobile);
+            }
+            ItemLocation::Settled(SettledItemLocation::Contained(contained)) => {
+                current = contained.container;
+            }
+            _ => return None,
         }
-        let contained = state.registry.get::<Contained>(entity)?;
-        current = contained.container;
     }
     None
 }

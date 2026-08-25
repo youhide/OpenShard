@@ -45,8 +45,8 @@ use openshard_tiles::TileData;
 use crate::boat::Plank;
 use crate::components::{
     Access, Amount, Body, Client, Combat, Contained, CorpseBody, CraftedBy, Drawn, Equipped, Ghost, Heading,
-    HearsGhosts, Hidden, Hitpoints, InRegion, Meditating, Movement, Name, Position, Quality, Staff, Stamina,
-    Stealthing, TradeWindow, body_opens_doors,
+    HearsGhosts, Hidden, Hitpoints, InRegion, ItemLocation, Meditating, Movement, Name, Position, Quality,
+    SettledItemLocation, Staff, Stamina, Stealthing, TradeWindow, body_opens_doors,
 };
 use crate::connection::Connection;
 use crate::dialogue::Dialogue;
@@ -871,7 +871,7 @@ pub struct FacetUndo {
 /// is refused — dropped out of reach, into nothing — has to put the item back
 /// exactly where it was, and by then it is off the ground (and out of any
 /// container) with no place of its own to return to.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct HeldItem {
     /// The lifted item.
     pub entity: EntityId,
@@ -889,7 +889,7 @@ impl std::fmt::Debug for FacetState {
 }
 
 /// Where a held item came from, so a cancelled drag can put it back.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Origin {
     /// It was on the ground.
     Ground {
@@ -968,13 +968,14 @@ impl Trade {
 /// not call), not field privacy. Nothing here is a static; a test builds as many
 /// as it likes.
 /// The worn-items index behind [`WorldState::equipment_of`] — a cache of which
-/// items each mobile has on, and the `Equipped` column version it was built from.
+/// items each mobile has on, and the `ItemLocation` column version it was built
+/// from.
 ///
 /// Not a mirror: nothing maintains it. It is rebuilt whole the first time it is
 /// read after the column changes, which the column reports for itself.
 #[derive(Debug, Default)]
 pub struct WornIndex {
-    /// The `Registry::column_version::<Equipped>` this was built from.
+    /// The `Registry::column_version::<ItemLocation>` this was built from.
     version: u64,
     /// Mobile serial -> the item entities it is wearing.
     by_mobile: HashMap<Serial, Vec<EntityId>>,
@@ -2421,9 +2422,8 @@ impl WorldState {
         [LAYER_ONE_HANDED, LAYER_TWO_HANDED]
             .into_iter()
             .find_map(|layer| {
-                self.registry
-                    .query::<Equipped>()
-                    .find(|(_, worn)| worn.mobile == mobile && worn.layer == layer)
+                crate::equipped_items(self, mobile)
+                    .find(|(_, worn)| worn.layer == layer)
                     .and_then(|(item, worn)| {
                         self.registry
                             .get::<Drawn>(item)
@@ -3357,8 +3357,14 @@ impl WorldState {
             .collect();
         let stored = self
             .registry
-            .query::<Contained>()
-            .filter(|(_, held)| secures.contains(&held.container))
+            .query::<ItemLocation>()
+            .filter(|(_, location)| {
+                matches!(
+                    location,
+                    ItemLocation::Settled(SettledItemLocation::Contained(held))
+                        if secures.contains(&held.container)
+                )
+            })
             .count();
         stored + more <= entry.storage() as usize
     }
@@ -3818,11 +3824,13 @@ impl WorldState {
     /// and only membership is what the version tracks.
     #[must_use]
     pub fn equipment_of(&mut self, mobile: Serial) -> Vec<Equipment> {
-        let version = self.registry.column_version::<Equipped>();
+        let version = self.registry.column_version::<ItemLocation>();
         if self.worn.version != version {
             self.worn.by_mobile.clear();
-            for (item, worn) in self.registry.query::<Equipped>() {
-                self.worn.by_mobile.entry(worn.mobile).or_default().push(item);
+            for (item, location) in self.registry.query::<ItemLocation>() {
+                if let ItemLocation::Settled(SettledItemLocation::Equipped(worn)) = *location {
+                    self.worn.by_mobile.entry(worn.mobile).or_default().push(item);
+                }
             }
             self.worn.version = version;
         }
@@ -3839,7 +3847,11 @@ impl WorldState {
                     return None;
                 }
                 let serial = self.registry.serial_of(item)?;
-                let worn = self.registry.get::<Equipped>(item)?;
+                let ItemLocation::Settled(SettledItemLocation::Equipped(worn)) =
+                    *self.registry.get::<ItemLocation>(item)?
+                else {
+                    return None;
+                };
                 let Drawn { id, hue } = *self.registry.get::<Drawn>(item)?;
                 Some(Equipment {
                     serial,
@@ -4001,29 +4013,6 @@ impl WorldState {
     #[must_use]
     pub fn held_of(&self, connection: ConnectionId) -> Option<HeldItem> {
         self.connections.get(&connection).and_then(|row| row.held)
-    }
-
-    /// Put an item on `connection`'s empty cursor.
-    ///
-    /// Refuses both a missing connection and an occupied cursor. Replacing the
-    /// old value would orphan the first item in limbo, so callers must reserve
-    /// the cursor successfully before detaching a new item from its origin.
-    pub fn hold(&mut self, connection: ConnectionId, held: HeldItem) -> Result<(), HeldItem> {
-        let Some(row) = self.connections.get_mut(&connection) else {
-            return Err(held);
-        };
-        if row.held.is_some() {
-            return Err(held);
-        }
-        row.held = Some(held);
-        Ok(())
-    }
-
-    /// Take whatever is on `connection`'s cursor off it.
-    pub fn take_held(&mut self, connection: ConnectionId) -> Option<HeldItem> {
-        self.connections
-            .get_mut(&connection)
-            .and_then(|row| row.held.take())
     }
 
     /// Who to answer for `entity`, and in which dialect: its connection and that
@@ -4215,7 +4204,14 @@ mod tests {
     #[test]
     fn an_equipped_axe_selects_an_axe_swing() {
         let mut state = a_shard();
-        let (_, wielder) = state.registry.spawn_with_serial(SerialKind::Mobile).unwrap();
+        let (wielder_entity, wielder) = state.registry.spawn_with_serial(SerialKind::Mobile).unwrap();
+        state.registry.insert(
+            wielder_entity,
+            Body {
+                id: openshard_protocol::wire::Graphic(0x0190),
+                hue: Hue::NONE,
+            },
+        );
         assert_eq!(
             state.equipped_weapon_animation(wielder),
             WeaponAnimation::Wrestle,
@@ -4230,13 +4226,11 @@ mod tests {
                 hue: Hue::NONE,
             },
         );
-        state.registry.insert(
-            axe,
-            Equipped {
-                mobile: wielder,
-                layer: LAYER_ONE_HANDED,
-            },
-        );
+        let equipped = Equipped {
+            mobile: wielder,
+            layer: LAYER_ONE_HANDED,
+        };
+        crate::establish_item_location(&mut state, axe, ItemLocation::equipped(equipped)).unwrap();
 
         assert_eq!(
             state.equipped_weapon_animation(wielder),

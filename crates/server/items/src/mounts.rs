@@ -63,13 +63,12 @@ pub fn try_mount(state: &mut WorldState, player: EntityId, target: EntityId, tar
             hue,
         },
     );
-    state.registry.insert(
-        item,
-        Equipped {
-            mobile: rider_serial,
-            layer: MOUNT_LAYER,
-        },
-    );
+    let equipped = Equipped {
+        mobile: rider_serial,
+        layer: MOUNT_LAYER,
+    };
+    establish_item_location(state, item, ItemLocation::equipped(equipped))
+        .expect("a saddle has one valid mount-layer parent");
 
     // The creature leaves the world: off every screen, off the sector grid,
     // without a position — the same limbo a lifted item sits in — until the
@@ -113,7 +112,7 @@ pub fn dismount(state: &mut WorldState, player: EntityId) {
             }
         }
     }
-    state.registry.despawn(item);
+    despawn_item(state, item);
 
     // The creature lands on the first open tile beside the rider, at the floor z
     // the terrain computes for it — not the rider's own z carried verbatim.

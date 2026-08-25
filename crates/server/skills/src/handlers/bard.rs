@@ -16,9 +16,7 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::wire::{ClilocId, CursorId};
-use openshard_state::components::{
-    Contained, Discorded, Drawn, Equipped, Hitpoints, Instrument, Mana, Pacified, Skills, Stamina,
-};
+use openshard_state::components::{Discorded, Drawn, Hitpoints, Instrument, Mana, Pacified, Skills, Stamina};
 use openshard_state::instrument::instrument_data;
 use openshard_state::{Skill, TICKS_PER_SECOND, TargetPurpose, WorldState};
 
@@ -119,10 +117,7 @@ pub fn base_difficulty(state: &WorldState, target: EntityId) -> i32 {
 fn instrument_in_pack(state: &WorldState, bard: EntityId) -> Option<EntityId> {
     let serial = state.registry.serial_of(bard)?;
     let backpack = openshard_items::backpack_of(state, serial)?;
-    state
-        .registry
-        .query::<Contained>()
-        .filter(|(_, held)| held.container == backpack)
+    openshard_state::contained_items(state, backpack)
         .map(|(entity, _)| entity)
         .find(|&entity| {
             state
@@ -387,7 +382,12 @@ pub fn expire_songs(state: &mut WorldState) {
 /// ServUO's `BaseInstrument.OnDoubleClick`: it plays, it trains, and it spends a
 /// use. The one bard skill with no target at all.
 pub fn play_instrument(state: &mut WorldState, bard: EntityId, item: EntityId) {
-    if state.registry.get::<Equipped>(item).is_some() {
+    if matches!(
+        openshard_state::item_location(state, item),
+        Some(openshard_state::ItemLocation::Settled(
+            openshard_state::SettledItemLocation::Equipped(_)
+        ))
+    ) {
         return; // worn, not carried: not something you can strike up
     }
     let well = check_musicianship(state, bard);

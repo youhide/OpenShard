@@ -23,7 +23,7 @@ use openshard_state::armor::{
     LAYER_ARMS, LAYER_CHEST, LAYER_GLOVES, LAYER_GORGET, LAYER_HELM, LAYER_LEGS, LAYER_SHIELD, MedAllowance,
     armor_data, hit_layer, layer_coverage, piece_rating, worn_armor_rating, worn_on_layer,
 };
-use openshard_state::components::{Drawn, Equipped};
+use openshard_state::components::Drawn;
 
 /// How much a mobile's worn armour gets in the way of meditating, in hundredths
 /// of a rating point — ServUO's `RegenRates.GetArmorOffset`.
@@ -40,10 +40,8 @@ pub fn meditation_offset(state: &WorldState, mobile: EntityId) -> u32 {
     let Some(serial) = state.registry.serial_of(mobile) else {
         return 0;
     };
-    let hundredths: u32 = state
-        .registry
-        .query::<Equipped>()
-        .filter(|(_, worn)| worn.mobile == serial && MEDITATION_LAYERS.contains(&worn.layer))
+    let hundredths: u32 = openshard_state::equipped_items(state, serial)
+        .filter(|(_, worn)| MEDITATION_LAYERS.contains(&worn.layer))
         .map(|(item, _)| {
             let rating = u32::from(piece_rating(state, item)) * 100;
             match state

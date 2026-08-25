@@ -320,11 +320,7 @@ impl World {
     /// what it wears), taking it off every watcher's screen first.
     fn despawn_mobile(&mut self, entity: EntityId) {
         if let Some(serial) = self.state.registry.serial_of(entity) {
-            let worn: Vec<EntityId> = self
-                .state
-                .registry
-                .query::<Equipped>()
-                .filter(|(_, worn)| worn.mobile == serial)
+            let worn: Vec<EntityId> = openshard_state::equipped_items(&self.state, serial)
                 .map(|(item, _)| item)
                 .collect();
             for item in worn {
@@ -344,11 +340,7 @@ impl World {
     /// on their own, so no `0x1D` is owed — the holder's removal took them.
     fn despawn_item_tree(&mut self, item: EntityId) {
         if let Some(serial) = self.state.registry.serial_of(item) {
-            let contents: Vec<EntityId> = self
-                .state
-                .registry
-                .query::<Contained>()
-                .filter(|(_, held)| held.container == serial)
+            let contents: Vec<EntityId> = openshard_state::contained_items(&self.state, serial)
                 .map(|(child, _)| child)
                 .collect();
             for child in contents {

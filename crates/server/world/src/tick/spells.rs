@@ -619,20 +619,19 @@ impl World {
         };
         self.state.registry.query::<Spellbook>().any(|(book, mask)| {
             mask.has(spell)
-                && self
-                    .state
-                    .registry
-                    .get::<Contained>(book)
-                    .is_some_and(|c| c.container == pack)
+                && matches!(
+                    openshard_state::item_location(&self.state, book),
+                    Some(LiveItemLocation::Settled(
+                        openshard_state::SettledItemLocation::Contained(c)
+                    )) if c.container == pack
+                )
         })
     }
 
     /// The backpack reagents come out of, or `None` if the caster wears no pack.
     pub(super) fn caster_pack(&self, caster: Serial) -> Option<Serial> {
-        self.state
-            .registry
-            .query::<Equipped>()
-            .find(|(_, worn)| worn.mobile == caster && worn.layer == items::BACKPACK_LAYER)
+        openshard_state::equipped_items(&self.state, caster)
+            .find(|(_, worn)| worn.layer == items::BACKPACK_LAYER)
             .and_then(|(item, _)| self.state.registry.serial_of(item))
     }
 

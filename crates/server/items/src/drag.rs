@@ -79,22 +79,26 @@ pub fn pick_up(state: &mut WorldState, connection: ConnectionId, serial: RawSeri
         return;
     }
     // Nor is somebody's hair. See `FIXED_LAYERS`.
-    if state
-        .registry
-        .get::<Equipped>(item)
-        .is_some_and(|worn| FIXED_LAYERS.contains(&worn.layer))
-    {
+    let location = item_location(state, item);
+    if matches!(
+        location,
+        Some(ItemLocation::Settled(SettledItemLocation::Equipped(worn)))
+            if FIXED_LAYERS.contains(&worn.layer)
+    ) {
         reject_drag(state, connection, DragCancelReason::CannotLift);
         return;
     }
 
     // Where it is now decides how it is lifted and where a cancelled drag
     // will put it back.
-    if let Some(&Position(item_pos)) = state.registry.get::<Position>(item) {
+    if let Some(ItemLocation::Settled(SettledItemLocation::Ground {
+        facet,
+        position: item_pos,
+    })) = location
+    {
         let Some(&Position(player_pos)) = state.registry.get::<Position>(player) else {
             return;
         };
-        let facet = state.facet_of(item);
         if facet != state.facet_of(player) || !in_range(item_pos, player_pos, ITEM_REACH) {
             reject_drag(state, connection, DragCancelReason::OutOfRange);
             return;
@@ -106,10 +110,6 @@ pub fn pick_up(state: &mut WorldState, connection: ConnectionId, serial: RawSeri
                 facet,
             },
         };
-        if state.hold(connection, held).is_err() {
-            reject_drag(state, connection, DragCancelReason::AlreadyHolding);
-            return;
-        }
         // Taking part of a stack: leave the remainder behind as a new pile
         // and lift the original, now reduced to what was taken. The original
         // keeps its serial and goes to the cursor — the client's drag and its
@@ -139,29 +139,24 @@ pub fn pick_up(state: &mut WorldState, connection: ConnectionId, serial: RawSeri
                 state.forget(watcher, item, item_serial);
             }
         }
-        state.registry.remove::<Position>(item);
         // Off the ground, off the decay clock.
         state.registry.remove::<Decays>(item);
-    } else if let Some(&contained) = state.registry.get::<Contained>(item) {
+        relocate_item(
+            state,
+            item,
+            ItemLocation::Held {
+                connection,
+                origin: settled_from_origin(held.origin),
+            },
+        )
+        .expect("a lifted ground item has one cursor parent");
+    } else if let Some(ItemLocation::Settled(SettledItemLocation::Contained(contained))) = location {
         // Both halves of a secure trade are visible to both players, but only
         // the owner of a half may remove its contents.  Visibility is not
         // authority: otherwise a partner could lift an offered item straight
         // into their own pack before either checkbox was ticked.
         if trade_container_owner(state, contained.container).is_some_and(|owner| owner != player) {
             reject_drag(state, connection, DragCancelReason::CannotLift);
-            return;
-        }
-        if state
-            .hold(
-                connection,
-                HeldItem {
-                    entity: item,
-                    origin: Origin::Container(contained),
-                },
-            )
-            .is_err()
-        {
-            reject_drag(state, connection, DragCancelReason::AlreadyHolding);
             return;
         }
         // Taking part of a stack out of a container: leave the remainder behind
@@ -185,25 +180,28 @@ pub fn pick_up(state: &mut WorldState, connection: ConnectionId, serial: RawSeri
         // take something back is the whole point.
         note_looter(state, contained.container, player);
         tell_watchers_removed_except(state, contained.container, item_serial, Some(connection));
-        state.registry.remove::<Contained>(item);
-    } else if let Some(&worn) = state.registry.get::<Equipped>(item) {
-        if state
-            .hold(
+        relocate_item(
+            state,
+            item,
+            ItemLocation::Held {
                 connection,
-                HeldItem {
-                    entity: item,
-                    origin: Origin::Worn(worn),
-                },
-            )
-            .is_err()
-        {
-            reject_drag(state, connection, DragCancelReason::AlreadyHolding);
-            return;
-        }
+                origin: SettledItemLocation::Contained(contained),
+            },
+        )
+        .expect("a lifted contained item has one cursor parent");
+    } else if let Some(ItemLocation::Settled(SettledItemLocation::Equipped(worn))) = location {
         // Off a mobile. The picker's own client drags it off the paperdoll;
         // everyone else watching the mobile is told to forget it, because
         // they knew it only as part of that mobile.
-        state.registry.remove::<Equipped>(item);
+        relocate_item(
+            state,
+            item,
+            ItemLocation::Held {
+                connection,
+                origin: SettledItemLocation::Equipped(worn),
+            },
+        )
+        .expect("a lifted worn item has one cursor parent");
         if let Some(mobile) = state.registry.entity_of(worn.mobile) {
             for watcher in equip_audience(state, mobile) {
                 if watcher == player {
@@ -286,7 +284,6 @@ pub fn drop_item(
         return;
     }
 
-    state.take_held(connection);
     place_on_ground(state, held.entity, position, state.facet_of(player));
     debug!(serial = serial.0, "dropped on the ground");
 }
@@ -354,15 +351,13 @@ pub fn drop_into_container(
     }
 
     let grid = item_count(state, container_serial);
-    state.take_held(connection);
-    state.registry.insert(
-        held.entity,
-        Contained {
-            container: container_serial,
-            position: at,
-            grid: GridSlot(grid),
-        },
-    );
+    let contained = Contained {
+        container: container_serial,
+        position: at,
+        grid: GridSlot(grid),
+    };
+    relocate_item(state, held.entity, ItemLocation::contained(contained))
+        .expect("an accepted container drop has one valid parent");
     // Tell the client, whose gump is open, that the item is now inside.
     if let (Some(version), Some(record)) =
         (state.version_of(connection), contained_record(state, held.entity))
@@ -455,8 +450,7 @@ fn drop_onto_runebook(state: &mut WorldState, connection: ConnectionId, held: He
         owned.charges += taken as u8;
         state.registry.insert(book, owned);
         if taken >= held_amount {
-            state.take_held(connection);
-            state.registry.despawn(held.entity);
+            despawn_item(state, held.entity);
         } else {
             // Put the remainder back where it came from, still a pile.
             let left = u16::try_from(held_amount - taken).unwrap_or(u16::MAX);
@@ -499,8 +493,7 @@ fn drop_onto_runebook(state: &mut WorldState, connection: ConnectionId, held: He
         owned.default_entry = Some(0);
     }
     state.registry.insert(book, owned);
-    state.take_held(connection);
-    state.registry.despawn(held.entity);
+    despawn_item(state, held.entity);
     state.system_message(player, "You bind the rune into the book.");
     tell_watchers_updated(state, book_serial, book);
 }
@@ -536,8 +529,7 @@ fn drop_scroll_on_book(state: &mut WorldState, connection: ConnectionId, held: H
     }
     mask.learn(spell);
     state.registry.insert(book, mask);
-    state.take_held(connection);
-    state.registry.despawn(held.entity);
+    despawn_item(state, held.entity);
     // Refresh the open book so the new spell appears at once.
     state.send_packet(
         connection,
@@ -554,7 +546,6 @@ fn drop_scroll_on_book(state: &mut WorldState, connection: ConnectionId, held: H
 /// Put a held item back where it was lifted and tell the client the drag is
 /// off, so it stops showing the item on the cursor.
 pub fn bounce(state: &mut WorldState, connection: ConnectionId, held: HeldItem, reason: DragCancelReason) {
-    state.take_held(connection);
     restore(state, held);
     reject_drag(state, connection, reason);
 }
@@ -574,10 +565,12 @@ pub fn restore(state: &mut WorldState, held: HeldItem) {
             place_on_ground(state, held.entity, position, facet);
         }
         Origin::Container(contained) => {
-            state.registry.insert(held.entity, contained);
+            relocate_item(state, held.entity, ItemLocation::contained(contained))
+                .expect("a bounced item returns to its one container parent");
         }
         Origin::Worn(worn) => {
-            state.registry.insert(held.entity, worn);
+            relocate_item(state, held.entity, ItemLocation::equipped(worn))
+                .expect("a bounced item returns to its one paperdoll parent");
             // Back on the mobile, and back on every screen that shows it.
             if let Some(mobile) = state.registry.entity_of(worn.mobile) {
                 broadcast_equip(state, held.entity, mobile);

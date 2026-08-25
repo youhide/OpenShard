@@ -272,7 +272,11 @@ impl World {
         let mut records = Vec::new();
         let mut containers: Vec<Serial> = Vec::new();
 
-        for (item, worn) in registry.query::<Equipped>() {
+        for (item, live) in registry.query::<LiveItemLocation>() {
+            let LiveItemLocation::Settled(openshard_state::SettledItemLocation::Equipped(worn)) = *live
+            else {
+                continue;
+            };
             if worn.mobile != owner {
                 continue;
             }
@@ -305,7 +309,11 @@ impl World {
         }
 
         while let Some(container) = containers.pop() {
-            for (item, held) in registry.query::<Contained>() {
+            for (item, live) in registry.query::<LiveItemLocation>() {
+                let LiveItemLocation::Settled(openshard_state::SettledItemLocation::Contained(held)) = *live
+                else {
+                    continue;
+                };
                 if held.container != container {
                     continue;
                 }
@@ -333,7 +341,14 @@ impl World {
     pub(super) fn ground_items(&self) -> Vec<ItemRecord> {
         let registry = &self.state.registry;
         let mut records = Vec::new();
-        for (item, Position(at)) in registry.query::<Position>() {
+        for (item, live) in registry.query::<LiveItemLocation>() {
+            let LiveItemLocation::Settled(openshard_state::SettledItemLocation::Ground {
+                facet,
+                position: at,
+            }) = *live
+            else {
+                continue;
+            };
             // A drawable thing on the ground: a graphic, not a mobile (which carries
             // a Body), not decoration (which `decorate:` re-lays), and not a
             // field tile (transient like a cast in flight — it does not persist, and
@@ -368,7 +383,6 @@ impl World {
             {
                 continue;
             }
-            let facet = self.state.facet_of(item);
             let location = ItemLocation::Ground {
                 facet: facet.0,
                 x: at.x,
@@ -1152,8 +1166,8 @@ impl World {
                 hue: Hue(record.hue),
             },
         );
-        self.state.registry.insert(entity, Position(position));
-        self.state.registry.insert(entity, facet);
+        establish_item_location(&mut self.state, entity, LiveItemLocation::ground(facet, position))
+            .expect("a restored ground item has one valid location");
         if record.graphic == openshard_state::components::CORPSE_GRAPHIC.0 {
             self.state.registry.insert(
                 entity,
@@ -1323,13 +1337,12 @@ impl World {
             };
             match record.location {
                 ItemLocation::Equipped { mobile, layer } => {
-                    self.state.registry.insert(
-                        entity,
-                        Equipped {
-                            mobile,
-                            layer: Layer(layer),
-                        },
-                    );
+                    let equipped = Equipped {
+                        mobile,
+                        layer: Layer(layer),
+                    };
+                    establish_item_location(&mut self.state, entity, LiveItemLocation::equipped(equipped))
+                        .expect("restored worn item has one valid wearer");
                     // A saved mount: rebuild the ridden creature the saddle
                     // stands for and put the rider back in the saddle.
                     if Layer(layer) == items::MOUNT_LAYER {
@@ -1342,14 +1355,13 @@ impl World {
                     y,
                     grid,
                 } => {
-                    self.state.registry.insert(
-                        entity,
-                        Contained {
-                            container,
-                            position: GumpPoint::new(i32::from(x), i32::from(y)),
-                            grid: GridSlot(grid),
-                        },
-                    );
+                    let contained = Contained {
+                        container,
+                        position: GumpPoint::new(i32::from(x), i32::from(y)),
+                        grid: GridSlot(grid),
+                    };
+                    establish_item_location(&mut self.state, entity, LiveItemLocation::contained(contained))
+                        .expect("restored contained item has one valid container");
                 }
                 // An owned item is never on the ground; ignore a stray one rather
                 // than drop it into the world at 0,0.
@@ -1637,8 +1649,8 @@ impl World {
                     hue: Hue(record.hue),
                 },
             );
-            self.state.registry.insert(entity, Position(position));
-            self.state.registry.insert(entity, facet);
+            establish_item_location(&mut self.state, entity, LiveItemLocation::ground(facet, position))
+                .expect("restored decoration has one valid ground location");
             self.state.registry.insert(entity, Decoration);
             // The lock, on either kind: a door that was locked at the save comes back
             // locked, or a shard's set-piece unbars itself at every reboot.

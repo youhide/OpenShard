@@ -45,6 +45,7 @@ pub mod facet_rules;
 pub mod guild;
 pub mod harvest;
 pub mod instrument;
+pub mod item_location;
 pub mod obstruct;
 pub mod party;
 pub mod quest;
@@ -65,17 +66,22 @@ pub use components::{
     Brain, Client, Combat, Contained, Container, CorpseBody, CriminalUntil, DEFAULT_SKILL_CAP, Decays,
     Decoration, Discorded, Door, Drawn, EMPTY_BOTTLE_GRAPHIC, Equipped, FIELD_HEIGHT, Fame, Field, FieldKind,
     Frozen, Ghost, Guard, GuildCandidate, GuildMember, Harvesting, Heading, HearsGhosts, Hidden, Hitpoints,
-    House, HouseDeed, HouseDesign, HouseDoor, HouseSign, InRegion, Instrument, Karma, KeyValue, LastStatGain,
-    Lock, LockKind, LockedDown, MOONGATE_GRAPHIC, MOONGATE_REACH, Mana, Meditating, MeleeDamage, Moongate,
-    Movement, MurderDecay, Murders, Name, NightHome, Npc, POISON_POTION_GRAPHIC, Pacified, PartyCandidate,
-    PartyMember, PoisonCharges, Poisoned, Position, RECALL_RUNE_GRAPHIC, RUNEBOOK_ENTRIES, RUNEBOOK_GRAPHIC,
-    Resistance, RuneMark, Runebook, RunebookEntry, Seated, SkillCooldown, Skills, SpawnedBy, Stackable,
-    Stamina, Standing, StatEffectKind, StatLock, StatLocks, StatMod, StatMods, Stats, Stealthing, SwingSpeed,
-    Title, Tool, TradeWindow, Trap, TrapKind, WrestlingAmbushCooldown, WrestlingCombo,
-    WrestlingInterceptCooldown, WrestlingOpener, WrestlingStride, effect, is_debuff, stat_shift,
+    House, HouseDeed, HouseDesign, HouseDoor, HouseSign, InRegion, Instrument, ItemLocation, Karma, KeyValue,
+    LastStatGain, Lock, LockKind, LockedDown, MOONGATE_GRAPHIC, MOONGATE_REACH, Mana, Meditating,
+    MeleeDamage, Moongate, Movement, MurderDecay, Murders, Name, NightHome, Npc, POISON_POTION_GRAPHIC,
+    Pacified, PartyCandidate, PartyMember, PoisonCharges, Poisoned, Position, RECALL_RUNE_GRAPHIC,
+    RUNEBOOK_ENTRIES, RUNEBOOK_GRAPHIC, Resistance, RuneMark, Runebook, RunebookEntry, Seated,
+    SettledItemLocation, SkillCooldown, Skills, SpawnedBy, Stackable, Stamina, Standing, StatEffectKind,
+    StatLock, StatLocks, StatMod, StatMods, Stats, Stealthing, SwingSpeed, Title, Tool, TradeWindow, Trap,
+    TrapKind, WrestlingAmbushCooldown, WrestlingCombo, WrestlingInterceptCooldown, WrestlingOpener,
+    WrestlingStride, effect, is_debuff, stat_shift,
 };
 pub use dialogue::{Dialogue, SpeechEntry, SpeechTable};
 pub use guild::{Alliance, AllianceId, Alliances, Guild, GuildId, Guilds, Rank, Removal};
+pub use item_location::{
+    ItemGraphViolation, LocationError, audit_item_graph, contained_items, despawn_item, equipped_items,
+    establish_item_location, item_location, relocate_item, settled_from_origin,
+};
 pub use obstruct::{DOOR_HEIGHT, Obstacle, Obstructions};
 pub use openshard_protocol::world::{DamageType, RangedRange};
 pub use party::{Parties, Party, PartyId};

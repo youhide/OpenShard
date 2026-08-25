@@ -13,7 +13,7 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::wire::Graphic;
-use openshard_state::components::{Drawn, Equipped, Weapon};
+use openshard_state::components::{Drawn, Weapon};
 use openshard_state::weapon::{LAYER_ONE_HANDED, WeaponData, WeaponSkill, weapon_data};
 use openshard_state::weapon::{LAYER_TWO_HANDED, WeaponKind};
 use openshard_state::{Skill, WorldState};
@@ -62,10 +62,8 @@ pub fn equipped_weapon(state: &WorldState, mobile: EntityId) -> Option<WeaponDat
     let item = [LAYER_ONE_HANDED, LAYER_TWO_HANDED]
         .into_iter()
         .find_map(|layer| {
-            state
-                .registry
-                .query::<Equipped>()
-                .find(|(_, worn)| worn.mobile == serial && worn.layer == layer)
+            openshard_state::equipped_items(state, serial)
+                .find(|(_, worn)| worn.layer == layer)
                 .map(|(entity, _)| entity)
         })?;
     let base = state

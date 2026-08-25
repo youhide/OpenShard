@@ -352,9 +352,14 @@ fn escrowed(state: &WorldState, index: TradeIndex) -> Vec<Serial> {
     };
     let mut items: Vec<Serial> = state
         .registry
-        .query::<Contained>()
-        .filter(|(_, held)| {
-            held.container == trade.from.container_serial || held.container == trade.to.container_serial
+        .query::<ItemLocation>()
+        .filter(|(_, location)| {
+            matches!(
+                location,
+                ItemLocation::Settled(SettledItemLocation::Contained(held))
+                    if held.container == trade.from.container_serial
+                        || held.container == trade.to.container_serial
+            )
         })
         .filter_map(|(entity, _)| state.registry.serial_of(entity))
         .collect();
@@ -391,19 +396,17 @@ fn hand_over(state: &mut WorldState, items: &[EntityId], receiver: EntityId) {
     for &item in items {
         if let Some(pack) = pack {
             let grid = item_count(state, pack);
-            state.registry.insert(
-                item,
-                Contained {
-                    container: pack,
-                    position: GumpPoint::new(0, 0),
-                    grid: GridSlot(grid),
-                },
-            );
+            let contained = Contained {
+                container: pack,
+                position: GumpPoint::new(0, 0),
+                grid: GridSlot(grid),
+            };
+            relocate_item(state, item, ItemLocation::contained(contained))
+                .expect("settled trade goods have one receiver-pack parent");
             tell_watchers_updated(state, pack, item);
         } else {
             // No pack to put it in — a corner ServUO does not have, since
             // every player has one. Better on the floor than nowhere.
-            state.registry.remove::<Contained>(item);
             if let Some(&Position(at)) = state.registry.get::<Position>(receiver) {
                 place_on_ground(state, item, at, state.facet_of(receiver));
             }
@@ -413,10 +416,7 @@ fn hand_over(state: &mut WorldState, items: &[EntityId], receiver: EntityId) {
 
 /// The entities inside a container, as a list that survives mutating them.
 fn contents_of_entity(state: &WorldState, container: Serial) -> Vec<EntityId> {
-    state
-        .registry
-        .query::<Contained>()
-        .filter(|(_, held)| held.container == container)
+    contained_items(state, container)
         .map(|(entity, _)| entity)
         .collect()
 }
@@ -458,7 +458,7 @@ fn close(state: &mut WorldState, index: TradeIndex) {
 
 /// Take one escrow container out of the world.
 fn despawn_escrow(state: &mut WorldState, container: EntityId) {
-    state.registry.despawn(container);
+    despawn_item(state, container);
 }
 
 /// The client shut its window: end the trade it names.

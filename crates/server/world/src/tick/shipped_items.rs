@@ -87,7 +87,7 @@ impl World {
 mod tests {
     use super::*;
     use crate::tick::tests::{enter, serial_of, world};
-    use openshard_state::components::{Amount, Contained, Equipped, Hitpoints};
+    use openshard_state::components::{Amount, Hitpoints};
     use std::time::Instant;
 
     /// A logged-in player, and two of `graphic` in its pack.
@@ -95,20 +95,13 @@ mod tests {
         let connection = enter(world, now);
         let player = world.state.players[&connection];
         let owner = serial_of(world, connection);
-        let backpack = world
-            .state
-            .registry
-            .query::<Equipped>()
-            .find(|(_, worn)| worn.mobile == owner && worn.layer == items::BACKPACK_LAYER)
+        let backpack = openshard_state::equipped_items(&world.state, owner)
+            .find(|(_, worn)| worn.layer == items::BACKPACK_LAYER)
             .map(|(entity, _)| world.state.registry.serial_of(entity).unwrap())
             .expect("the player wears a backpack");
         // Two, so the potion test can show that one bottle goes and not the lot.
         world.add_loot(backpack, graphic, Hue(0), 2, true);
-        let item = world
-            .state
-            .registry
-            .query::<Contained>()
-            .filter(|(_, held)| held.container == backpack)
+        let item = openshard_state::contained_items(&world.state, backpack)
             .map(|(entity, _)| entity)
             .find(|&entity| {
                 world

@@ -91,14 +91,16 @@ fn give_tool(world: &mut World, connection: ConnectionId, graphic: Graphic) -> E
             hue: Hue(0),
         },
     );
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         item,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: backpack,
             position: GumpPoint::new(20, 20),
             grid: GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
     items::apply_core_defaults(&mut world.state, item, graphic);
     item
 }

@@ -19,8 +19,8 @@ use openshard_protocol::casting::SpellId;
 use openshard_protocol::items::DropDestination;
 use openshard_protocol::serial::RawSerial;
 use openshard_state::components::{
-    Contained, CriminalUntil, Decays, InRegion, Mana, Moongate, Movement, Position, RECALL_RUNE_GRAPHIC,
-    RuneMark, SPELLBOOK_GRAPHIC, Spellbook,
+    CriminalUntil, Decays, InRegion, Mana, Moongate, Movement, Position, RECALL_RUNE_GRAPHIC, RuneMark,
+    SPELLBOOK_GRAPHIC, Spellbook,
 };
 use openshard_state::{Region, RegionFlags, RegionId, RegionRect};
 
@@ -539,9 +539,12 @@ fn a_rune_on_the_floor_cannot_be_marked_but_can_be_recalled_from() {
 
     // Mark it while it is still in the pack, then drop it at the caster's feet.
     cast_at(&mut world, connection, MARK, rune_serial, now);
-    world.state.registry.remove::<Contained>(rune);
-    world.state.registry.insert(rune, Position(at));
-    world.state.registry.insert(rune, Facet(0));
+    openshard_state::relocate_item(
+        &mut world.state,
+        rune,
+        openshard_state::ItemLocation::ground(Facet(0), at),
+    )
+    .unwrap();
 
     // Marking it again is refused now it is not carried.
     world.state.registry.remove::<RuneMark>(rune);

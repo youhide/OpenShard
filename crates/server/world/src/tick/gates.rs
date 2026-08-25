@@ -144,8 +144,8 @@ impl World {
                 hue: Hue(0),
             },
         );
-        self.state.registry.insert(entity, Position(at));
-        self.state.registry.insert(entity, facet);
+        establish_item_location(&mut self.state, entity, LiveItemLocation::ground(facet, at))
+            .expect("fresh moongate has one valid ground location");
         self.state.registry.insert(entity, gate);
         self.state.place_item(facet, entity, at);
         // No obstruction, ever: a gate is walked *into*. Blocking the tile is how
@@ -185,8 +185,12 @@ impl World {
                     hue: Hue(0),
                 },
             );
-            self.state.registry.insert(entity, Position(gate.at));
-            self.state.registry.insert(entity, gate.facet);
+            establish_item_location(
+                &mut self.state,
+                entity,
+                LiveItemLocation::ground(gate.facet, gate.at),
+            )
+            .expect("fresh public moongate has one valid ground location");
             self.state.registry.insert(entity, Decoration);
             self.state
                 .registry

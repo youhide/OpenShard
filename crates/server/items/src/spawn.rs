@@ -71,8 +71,8 @@ pub fn spawn_item(
         }
     };
     state.registry.insert(entity, Drawn { id: graphic, hue });
-    state.registry.insert(entity, Position(position));
-    state.registry.insert(entity, facet);
+    establish_item_location(state, entity, ItemLocation::ground(facet, position))
+        .expect("a newly spawned ground item has one valid location");
     // Only a real stack carries an amount; a single item stays a bare graphic.
     if amount > 1 {
         state.registry.insert(entity, Amount(amount));
@@ -143,7 +143,9 @@ pub fn equip_new_container(
     };
     state.registry.insert(entity, Drawn { id: graphic, hue });
     state.registry.insert(entity, Container { gump });
-    state.registry.insert(entity, Equipped { mobile, layer });
+    let equipped = Equipped { mobile, layer };
+    establish_item_location(state, entity, ItemLocation::equipped(equipped))
+        .expect("a newly equipped container has one valid location");
     debug!(%serial, graphic = graphic.0, layer = layer.0, "container equipped");
     Some(entity)
 }
@@ -173,8 +175,8 @@ pub fn spawn_leftover(
     state.registry.insert(leftover, Drawn { id, hue });
     state.registry.insert(leftover, Stackable);
     set_stack_amount(state, leftover, amount);
-    state.registry.insert(leftover, Position(position));
-    state.registry.insert(leftover, facet);
+    establish_item_location(state, leftover, ItemLocation::ground(facet, position))
+        .expect("a split remainder has one valid ground location");
     mark_decay(state, leftover);
     state.place_item(facet, leftover, position);
     state.reveal(leftover);
@@ -182,8 +184,8 @@ pub fn spawn_leftover(
 
 /// Land an item on the ground at `position` and draw it for everyone in range.
 pub fn place_on_ground(state: &mut WorldState, item: EntityId, position: Point, facet: Facet) {
-    state.registry.insert(item, Position(position));
-    state.registry.insert(item, facet);
+    relocate_item(state, item, ItemLocation::ground(facet, position))
+        .expect("a ground drop must have a valid canonical location");
     // Back on the ground, back on the decay clock.
     mark_decay(state, item);
     state.place_item(facet, item, position);

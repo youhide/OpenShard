@@ -200,7 +200,10 @@ pub(super) fn stealing(state: &mut WorldState, actor: EntityId, item: EntityId) 
     let skill = Skill::Stealing;
     // Only something in somebody else's pack can be stolen: the ground is a lift
     // and your own pack is not theft.
-    let Some(&Contained { container, .. }) = state.registry.get::<Contained>(item) else {
+    let Some(openshard_state::ItemLocation::Settled(openshard_state::SettledItemLocation::Contained(
+        Contained { container, .. },
+    ))) = openshard_state::item_location(state, item)
+    else {
         state.localized_message(actor, CANNOT_STEAL, "");
         return None;
     };

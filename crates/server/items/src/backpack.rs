@@ -21,14 +21,8 @@ pub const BACKPACK_LAYER: Layer = Layer(0x15);
 /// floor of wherever it happened to be standing.
 #[must_use]
 pub fn backpack_of(state: &WorldState, mobile: Serial) -> Option<Serial> {
-    state
-        .registry
-        .query::<Equipped>()
-        .find(|(item, equipped)| {
-            equipped.mobile == mobile
-                && equipped.layer == BACKPACK_LAYER
-                && state.registry.has::<Container>(*item)
-        })
+    equipped_items(state, mobile)
+        .find(|(item, equipped)| equipped.layer == BACKPACK_LAYER && state.registry.has::<Container>(*item))
         .and_then(|(item, _)| state.registry.serial_of(item))
 }
 
@@ -94,17 +88,13 @@ fn room_for(
     stackable: bool,
 ) -> bool {
     let merges = (stackable || graphic == GOLD_GRAPHIC)
-        && state
-            .registry
-            .query::<Contained>()
-            .filter(|(_, held)| held.container == backpack)
-            .any(|(entity, _)| {
-                state.registry.has::<Stackable>(entity)
-                    && state
-                        .registry
-                        .get::<Drawn>(entity)
-                        .is_some_and(|drawn| drawn.id == graphic && drawn.hue == hue)
-            });
+        && contained_items(state, backpack).any(|(entity, _)| {
+            state.registry.has::<Stackable>(entity)
+                && state
+                    .registry
+                    .get::<Drawn>(entity)
+                    .is_some_and(|drawn| drawn.id == graphic && drawn.hue == hue)
+        });
     let each = if graphic == GOLD_GRAPHIC {
         crate::GOLD_WEIGHT_HUNDREDTHS
     } else {
@@ -145,15 +135,12 @@ pub fn take_from_backpack_of_hue(
     let Some(backpack) = backpack_of(state, mobile) else {
         return 0;
     };
-    let piles: Vec<(Serial, u16)> = state
-        .registry
-        .query::<Contained>()
-        .filter(|(item, held)| {
-            held.container == backpack
-                && state
-                    .registry
-                    .get::<Drawn>(*item)
-                    .is_some_and(|g| g.id == graphic && hue.is_none_or(|want| g.hue == want))
+    let piles: Vec<(Serial, u16)> = contained_items(state, backpack)
+        .filter(|(item, _)| {
+            state
+                .registry
+                .get::<Drawn>(*item)
+                .is_some_and(|g| g.id == graphic && hue.is_none_or(|want| g.hue == want))
         })
         .filter_map(|(item, _)| {
             state

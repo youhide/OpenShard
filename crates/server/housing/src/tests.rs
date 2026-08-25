@@ -210,6 +210,12 @@ fn an_item(state: &mut WorldState, at: Point, container: bool) -> EntityId {
     );
     state.registry.insert(entity, Position(at));
     state.registry.insert(entity, Facet(0));
+    openshard_state::establish_item_location(
+        state,
+        entity,
+        openshard_state::ItemLocation::ground(Facet(0), at),
+    )
+    .unwrap();
     if container {
         state.registry.insert(
             entity,
@@ -1352,15 +1358,16 @@ fn the_storage_ceiling_counts_what_is_in_the_secures() {
     assert_eq!(stored(&state, house), 0);
     for _ in 0..3 {
         let item = an_item(&mut state, at, false);
-        state.registry.remove::<Position>(item);
-        state.registry.insert(
+        openshard_state::relocate_item(
+            &mut state,
             item,
-            openshard_state::components::Contained {
+            openshard_state::ItemLocation::contained(openshard_state::components::Contained {
                 container: chest_serial,
                 position: openshard_protocol::gump::GumpPoint::new(0, 0),
                 grid: openshard_protocol::containers::GridSlot(0),
-            },
-        );
+            }),
+        )
+        .unwrap();
     }
     assert_eq!(stored(&state, house), 3);
     assert!(has_room_for(&state, house, allowance(&state, house).storage - 3));
@@ -1454,15 +1461,16 @@ fn a_collapsed_house_leaves_a_crate_and_no_walls() {
     lock_down(&mut state, master, house, chest, Some(Standing::Friend)).unwrap();
     let chest_serial = state.registry.serial_of(chest).unwrap();
     let inside = an_item(&mut state, at, false);
-    state.registry.remove::<Position>(inside);
-    state.registry.insert(
+    openshard_state::relocate_item(
+        &mut state,
         inside,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: chest_serial,
             position: openshard_protocol::gump::GumpPoint::new(0, 0),
             grid: openshard_protocol::containers::GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
     // And a loose barrel nobody pinned, which is not the house's to move.
     let loose = an_item(&mut state, at, false);
 

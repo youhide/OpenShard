@@ -34,8 +34,8 @@ use openshard_entities::EntityId;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
-use openshard_state::WorldState;
 use openshard_state::components::{Contained, Drawn, House, HouseDoor, HouseSign, LockedDown, Position};
+use openshard_state::{ItemLocation, WorldState, establish_item_location, relocate_item};
 
 /// The crate a demolished house's contents land in — ServUO's `MovingCrate`,
 /// graphic and hue both.
@@ -203,8 +203,15 @@ pub fn demolish(state: &mut WorldState, house: EntityId) -> Option<EntityId> {
         .collect();
     let stored: Vec<EntityId> = state
         .registry
-        .query::<Contained>()
-        .filter(|(_, held)| secures.contains(&held.container))
+        .query::<openshard_state::ItemLocation>()
+        .filter(|(_, location)| {
+            matches!(
+                location,
+                openshard_state::ItemLocation::Settled(
+                    openshard_state::SettledItemLocation::Contained(held)
+                ) if secures.contains(&held.container)
+            )
+        })
         .map(|(entity, _)| entity)
         .collect();
 
@@ -285,8 +292,8 @@ fn pack_into_a_crate(
             gump: Graphic(CRATE_GUMP),
         },
     );
-    state.registry.insert(crate_entity, Position(at));
-    state.registry.insert(crate_entity, facet);
+    establish_item_location(state, crate_entity, ItemLocation::ground(facet, at))
+        .expect("a fresh moving crate has one valid ground location");
     state.place_item(facet, crate_entity, at);
 
     // The secures go in whole — a chest keeps its contents, and the things
@@ -306,10 +313,12 @@ fn pack_into_a_crate(
         .iter()
         .copied()
         .filter(|&item| {
-            state
-                .registry
-                .get::<Contained>(item)
-                .is_none_or(|held| !already_inside.contains(&held.container))
+            !matches!(
+                openshard_state::item_location(state, item),
+                Some(ItemLocation::Settled(
+                    openshard_state::SettledItemLocation::Contained(held)
+                )) if already_inside.contains(&held.container)
+            )
         })
         .collect::<Vec<_>>();
 
@@ -320,15 +329,13 @@ fn pack_into_a_crate(
         // despawned — this is the half of `take_off_the_ground` that keeps the
         // entity, which is the whole point of a crate.
         forget_everywhere(state, item);
-        state.registry.remove::<Position>(item);
-        state.registry.insert(
-            item,
-            Contained {
-                container: crate_serial,
-                position: openshard_protocol::gump::GumpPoint::new(0, 0),
-                grid: openshard_protocol::containers::GridSlot(u8::try_from(slot).unwrap_or(u8::MAX)),
-            },
-        );
+        let contained = Contained {
+            container: crate_serial,
+            position: openshard_protocol::gump::GumpPoint::new(0, 0),
+            grid: openshard_protocol::containers::GridSlot(u8::try_from(slot).unwrap_or(u8::MAX)),
+        };
+        relocate_item(state, item, ItemLocation::contained(contained))
+            .expect("packing a house item creates one valid ownership edge");
     }
     Some(crate_entity)
 }

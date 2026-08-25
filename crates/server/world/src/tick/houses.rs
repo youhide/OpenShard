@@ -23,10 +23,8 @@ use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::target::{MultiTargetRequest, TargetKind};
 use openshard_protocol::wire::{CursorId, Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
-use openshard_state::TargetPurpose;
-use openshard_state::components::{
-    Client, Contained, Drawn, House, HouseDeed, HouseDesign, HouseSign, Position,
-};
+use openshard_state::components::{Client, Drawn, House, HouseDeed, HouseDesign, HouseSign, Position};
+use openshard_state::{ItemLocation as LiveItemLocation, TargetPurpose, establish_item_location};
 use tracing::{info, warn};
 
 use super::World;
@@ -135,7 +133,6 @@ impl World {
                     hue: Hue(0),
                 },
             );
-            self.state.registry.insert(entity, Position(at));
             self.state.registry.insert(
                 entity,
                 openshard_state::components::Boat {
@@ -143,7 +140,8 @@ impl World {
                     owner: record.owner,
                 },
             );
-            self.state.registry.insert(entity, facet);
+            establish_item_location(&mut self.state, entity, LiveItemLocation::ground(facet, at))
+                .expect("a restored boat has one valid berth");
             self.state.place_item(facet, entity, at);
             // The hull-and-deck split, recomputed. A shard with no client files
             // gets a ship that draws on every client and carries nobody — the
@@ -241,7 +239,6 @@ impl World {
                     hue: Hue(0),
                 },
             );
-            self.state.registry.insert(entity, Position(at));
             self.state.registry.insert(
                 entity,
                 House {
@@ -258,7 +255,8 @@ impl World {
                     lockdowns: record.lockdowns,
                 },
             );
-            self.state.registry.insert(entity, facet);
+            establish_item_location(&mut self.state, entity, LiveItemLocation::ground(facet, at))
+                .expect("a restored house has one valid plot");
             self.state.place_item(facet, entity, at);
             // The design, if this house has one. Put on before the footprint is
             // computed, because the footprint is computed *from* it.
@@ -336,12 +334,12 @@ impl World {
         // Still theirs. A deed in somebody else's pack is not a deed you hold,
         // and the walk up the containment tree is `items`' own — a deed in a bag
         // in the backpack is carried as surely as one loose in it.
-        let carried = self
-            .state
-            .registry
-            .get::<Contained>(deed)
-            .and_then(|held| items::owner_of_container(&self.state, held.container))
-            == Some(actor);
+        let carried = match openshard_state::item_location(&self.state, deed) {
+            Some(LiveItemLocation::Settled(openshard_state::SettledItemLocation::Contained(held))) => {
+                items::owner_of_container(&self.state, held.container) == Some(actor)
+            }
+            _ => false,
+        };
         if !carried {
             self.state.system_message(actor, "You no longer have that deed.");
             return;

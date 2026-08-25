@@ -270,14 +270,17 @@ impl World {
         };
         if theft.took {
             if let Some(backpack) = items::backpack_of(&self.state, thief) {
-                self.state.registry.insert(
+                let contained = openshard_state::components::Contained {
+                    container: backpack,
+                    position: GumpPoint::new(60, 60),
+                    grid: GridSlot(0),
+                };
+                relocate_item(
+                    &mut self.state,
                     theft.item,
-                    openshard_state::components::Contained {
-                        container: backpack,
-                        position: GumpPoint::new(60, 60),
-                        grid: GridSlot(0),
-                    },
-                );
+                    LiveItemLocation::contained(contained),
+                )
+                .expect("a stolen item moved to the thief's pack has one owner");
             }
         }
         // Caught or not, reaching into somebody's pack is a crime — ServUO flags a

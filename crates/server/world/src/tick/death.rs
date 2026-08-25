@@ -183,7 +183,7 @@ impl World {
         let Some(&Client { connection, .. }) = self.state.registry.get::<Client>(entity) else {
             return;
         };
-        let Some(held) = self.state.take_held(connection) else {
+        let Some(held) = self.state.held_of(connection) else {
             return;
         };
 
@@ -207,14 +207,17 @@ impl World {
                 }
             }
         }
-        self.state.registry.insert(
+        let contained = Contained {
+            container,
+            position: GumpPoint::new(40 + i32::try_from(slot).unwrap_or(0) * 12, 60),
+            grid: GridSlot(0),
+        };
+        relocate_item(
+            &mut self.state,
             held.entity,
-            Contained {
-                container,
-                position: GumpPoint::new(40 + i32::try_from(slot).unwrap_or(0) * 12, 60),
-                grid: GridSlot(0),
-            },
-        );
+            LiveItemLocation::contained(contained),
+        )
+        .expect("a held item moved to its corpse has one valid owner");
 
         // The client performed the lift locally, so moving the server-side item
         // is not enough: explicitly close the drag transaction on its cursor.
@@ -397,17 +400,12 @@ impl World {
     /// list, not the `seen` set, so despawning it here and redrawing the mobile is
     /// the whole of taking it off.
     fn strip_death_shroud(&mut self, mobile: Serial) {
-        let shroud: Option<EntityId> = self
-            .state
-            .registry
-            .query::<Equipped>()
-            .find(|(item, worn)| {
-                worn.mobile == mobile
-                    && self
-                        .state
-                        .registry
-                        .get::<Drawn>(*item)
-                        .is_some_and(|g| g.id == DEATH_SHROUD_GRAPHIC)
+        let shroud: Option<EntityId> = openshard_state::equipped_items(&self.state, mobile)
+            .find(|(item, _)| {
+                self.state
+                    .registry
+                    .get::<Drawn>(*item)
+                    .is_some_and(|g| g.id == DEATH_SHROUD_GRAPHIC)
             })
             .map(|(item, _)| item);
         if let Some(item) = shroud {
@@ -428,13 +426,12 @@ impl World {
                 hue: Hue(0),
             },
         );
-        self.state.registry.insert(
-            item,
-            Equipped {
-                mobile,
-                layer: OUTER_TORSO_LAYER,
-            },
-        );
+        let equipped = Equipped {
+            mobile,
+            layer: OUTER_TORSO_LAYER,
+        };
+        establish_item_location(&mut self.state, item, LiveItemLocation::equipped(equipped))
+            .expect("a fresh death shroud has one valid wearer");
     }
 
     /// Give a resurrected player the shard's minimal fighting kit. Their former
@@ -626,8 +623,8 @@ impl World {
                 },
             );
         }
-        self.state.registry.insert(entity, Position(at));
-        self.state.registry.insert(entity, facet);
+        establish_item_location(&mut self.state, entity, LiveItemLocation::ground(facet, at))
+            .expect("a fresh corpse has one valid ground location");
         self.state
             .registry
             .insert(entity, Container { gump: CORPSE_GUMP });
@@ -657,11 +654,8 @@ impl World {
     /// bank box — those are worn containers it walks away (as a ghost) still
     /// holding, not loot for the corpse. The worn *gear* still drops.
     fn move_gear_to_corpse(&mut self, mobile: Serial, container: Serial, keep: &[Layer]) {
-        let worn: Vec<(usize, EntityId, Layer)> = self
-            .state
-            .registry
-            .query::<Equipped>()
-            .filter(|(_, equipped)| equipped.mobile == mobile && !keep.contains(&equipped.layer))
+        let worn: Vec<(usize, EntityId, Layer)> = openshard_state::equipped_items(&self.state, mobile)
+            .filter(|(_, equipped)| !keep.contains(&equipped.layer))
             .enumerate()
             .map(|(slot, (entity, equipped))| (slot, entity, equipped.layer))
             .collect();
@@ -680,15 +674,13 @@ impl World {
             }
         }
         for (slot, item, _) in worn {
-            self.state.registry.remove::<Equipped>(item);
-            self.state.registry.insert(
-                item,
-                Contained {
-                    container,
-                    position: GumpPoint::new(40 + i32::try_from(slot).unwrap_or(0) * 12, 60),
-                    grid: GridSlot(0),
-                },
-            );
+            let contained = Contained {
+                container,
+                position: GumpPoint::new(40 + i32::try_from(slot).unwrap_or(0) * 12, 60),
+                grid: GridSlot(0),
+            };
+            relocate_item(&mut self.state, item, LiveItemLocation::contained(contained))
+                .expect("worn gear moved to its corpse has one valid owner");
         }
     }
 
@@ -735,14 +727,13 @@ impl World {
                 (food, 85, 100),
             ] {
                 if let Some(item) = item {
-                    self.state.registry.insert(
-                        item,
-                        Contained {
-                            container: corpse,
-                            position: GumpPoint::new(x, y),
-                            grid: GridSlot(0),
-                        },
-                    );
+                    let contained = Contained {
+                        container: corpse,
+                        position: GumpPoint::new(x, y),
+                        grid: GridSlot(0),
+                    };
+                    relocate_item(&mut self.state, item, LiveItemLocation::contained(contained))
+                        .expect("arranging corpse loot preserves its one owner");
                 }
             }
             return;

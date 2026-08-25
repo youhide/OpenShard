@@ -18,10 +18,10 @@ use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::vendor::{BuyLine, BuyList, Purchase, Sale, SellLine, SellList};
 use openshard_protocol::wire::{Graphic, Hue, Layer};
 use openshard_state::components::{
-    Amount, Contained, Drawn, Equipped, Name, Position, Price, Restock, StockRecord, Vendor,
+    Amount, Contained, Drawn, Name, Position, Price, Restock, StockRecord, Vendor,
 };
 use openshard_state::sectors::in_range;
-use openshard_state::{TooltipMode, WorldState};
+use openshard_state::{ItemLocation, TooltipMode, WorldState, establish_item_location};
 use tracing::debug;
 
 use crate::GOLD_GRAPHIC;
@@ -69,10 +69,8 @@ fn stock_of(state: &WorldState, vendor: EntityId) -> Option<(EntityId, Serial)> 
         return None;
     }
     let vendor_serial = state.registry.serial_of(vendor)?;
-    state
-        .registry
-        .query::<Equipped>()
-        .find(|(_, worn)| worn.mobile == vendor_serial && worn.layer == STOCK_LAYER)
+    openshard_state::equipped_items(state, vendor_serial)
+        .find(|(_, worn)| worn.layer == STOCK_LAYER)
         .map(|(entity, _)| entity)
         .and_then(|entity| state.registry.serial_of(entity).map(|s| (entity, s)))
 }
@@ -145,14 +143,13 @@ fn place_stock_line(state: &mut WorldState, stock_serial: Serial, line: &StockLi
             hue: line.hue,
         },
     );
-    state.registry.insert(
-        entity,
-        Contained {
-            container: stock_serial,
-            position: GumpPoint::new(50, 50),
-            grid: GridSlot(0),
-        },
-    );
+    let contained = Contained {
+        container: stock_serial,
+        position: GumpPoint::new(50, 50),
+        grid: GridSlot(0),
+    };
+    establish_item_location(state, entity, ItemLocation::contained(contained))
+        .expect("fresh vendor stock has one valid shelf");
     state.registry.insert(entity, line.amount);
     state.registry.insert(entity, line.price);
     state.registry.insert(entity, Name(line.name.clone()));
@@ -178,10 +175,7 @@ fn restock_if_due(state: &mut WorldState, vendor: EntityId, stock_serial: Serial
         return;
     }
     for line in &record.lines {
-        let existing = state
-            .registry
-            .query::<Contained>()
-            .filter(|(_, held)| held.container == stock_serial)
+        let existing = openshard_state::contained_items(state, stock_serial)
             .filter(|(item, _)| {
                 state
                     .registry
@@ -375,7 +369,12 @@ pub fn buy(state: &mut WorldState, connection: ConnectionId, vendor_serial: RawS
         else {
             continue;
         };
-        let held_in = state.registry.get::<Contained>(item).map(|c| c.container);
+        let held_in = match openshard_state::item_location(state, item) {
+            Some(ItemLocation::Settled(openshard_state::SettledItemLocation::Contained(c))) => {
+                Some(c.container)
+            }
+            _ => None,
+        };
         if held_in != Some(stock_serial) {
             continue;
         }
@@ -455,10 +454,7 @@ pub fn offer_sell_list(state: &mut WorldState, connection: ConnectionId, actor: 
     // What the vendor stocks, and at what price — the catalogue a sale is
     // judged against.
     let catalogue = stock_prices(state, stock_serial);
-    let lines: Vec<SellLine> = state
-        .registry
-        .query::<Contained>()
-        .filter(|(_, held)| held.container == backpack)
+    let lines: Vec<SellLine> = openshard_state::contained_items(state, backpack)
         .filter_map(|(entity, _)| {
             let &Drawn { id, hue } = state.registry.get::<Drawn>(entity)?;
             let price = sell_price(*catalogue.iter().find(|(g, _)| *g == id).map(|(_, p)| p)?);
@@ -519,7 +515,11 @@ pub fn sell(state: &mut WorldState, connection: ConnectionId, vendor_serial: Raw
         let Some(item) = sale.serial.validate().and_then(|s| state.registry.entity_of(s)) else {
             continue;
         };
-        if state.registry.get::<Contained>(item).map(|c| c.container) != Some(backpack) {
+        if !matches!(
+            openshard_state::item_location(state, item),
+            Some(ItemLocation::Settled(openshard_state::SettledItemLocation::Contained(c)))
+                if c.container == backpack
+        ) {
             continue;
         }
         let Some(&Drawn { id, .. }) = state.registry.get::<Drawn>(item) else {
@@ -549,10 +549,7 @@ fn sell_price(buy: u32) -> u16 {
 
 /// Every (graphic, unit price) the vendor's crate holds.
 fn stock_prices(state: &WorldState, stock_serial: Serial) -> Vec<(Graphic, u32)> {
-    state
-        .registry
-        .query::<Contained>()
-        .filter(|(_, held)| held.container == stock_serial)
+    openshard_state::contained_items(state, stock_serial)
         .filter_map(|(entity, _)| {
             let graphic = state.registry.get::<Drawn>(entity)?.id;
             let price = state.registry.get::<Price>(entity).map_or(1, |p| p.0);
@@ -603,10 +600,8 @@ fn vendor_says(state: &mut WorldState, vendor: EntityId, text: &str) {
 /// The serial of the container `mobile` wears at `layer`, if any.
 fn worn_container(state: &WorldState, mobile: EntityId, layer: Layer) -> Option<Serial> {
     let serial = state.registry.serial_of(mobile)?;
-    state
-        .registry
-        .query::<Equipped>()
-        .find(|(_, worn)| worn.mobile == serial && worn.layer == layer)
+    openshard_state::equipped_items(state, serial)
+        .find(|(_, worn)| worn.layer == layer)
         .and_then(|(entity, _)| state.registry.serial_of(entity))
 }
 

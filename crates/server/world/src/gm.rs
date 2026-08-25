@@ -22,7 +22,7 @@ use openshard_protocol::speech::{Font, SpokenMessage, TalkMode};
 use openshard_protocol::target::{TargetCursor, TargetKind};
 use openshard_protocol::wire::{CursorId, Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
-use openshard_state::components::{Client, Equipped, Position, SPELLBOOK_GRAPHIC, Spellbook, Staff, Stats};
+use openshard_state::components::{Client, Position, SPELLBOOK_GRAPHIC, Spellbook, Staff, Stats};
 use openshard_state::{HouseChange, TargetPurpose, WorldState};
 
 use openshard_items as items;
@@ -635,10 +635,8 @@ fn full_spellbook(state: &mut WorldState, actor: EntityId) {
     let Some(actor_serial) = state.registry.serial_of(actor) else {
         return;
     };
-    let backpack = state
-        .registry
-        .query::<Equipped>()
-        .find(|(_, worn)| worn.mobile == actor_serial && worn.layer == openshard_items::BACKPACK_LAYER)
+    let backpack = openshard_state::equipped_items(state, actor_serial)
+        .find(|(_, worn)| worn.layer == openshard_items::BACKPACK_LAYER)
         .and_then(|(entity, _)| state.registry.serial_of(entity));
     let Some(backpack) = backpack else {
         notify(state, actor, "You have no backpack.");

@@ -37,9 +37,9 @@ use openshard_map::grid::Tile;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{Hue, MultiId};
 use openshard_protocol::world::{Facet, Point};
-use openshard_state::WorldState;
 use openshard_state::boat::Plank;
 use openshard_state::components::{Boat, Drawn, Movement, Position, Sailing};
+use openshard_state::{ItemLocation, WorldState, establish_item_location};
 
 /// Why a boat could not be launched.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -176,9 +176,9 @@ pub fn place(
             hue: Hue(0),
         },
     );
-    state.registry.insert(entity, Position(at));
     state.registry.insert(entity, Boat { multi, owner });
-    state.registry.insert(entity, facet);
+    establish_item_location(state, entity, ItemLocation::ground(facet, at))
+        .expect("a fresh boat has one valid berth");
     // On the sector grid like any item, so a client sailing into view is told
     // about it by the ordinary interest sweep rather than by a path of its own.
     state.place_item(facet, entity, at);

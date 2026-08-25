@@ -1201,6 +1201,11 @@ fn logging_out_while_holding_an_item_returns_it_to_the_ground() {
         packets_for(&mut world, watcher).iter().any(|p| p[0] == 0x1A),
         "and the player still online sees it reappear"
     );
+    assert_eq!(
+        openshard_state::audit_item_graph(&world.state),
+        Vec::new(),
+        "logout leaves no item between cursor and ground"
+    );
 }
 
 #[test]
@@ -1637,6 +1642,11 @@ fn dropping_an_item_into_your_worn_backpack_stores_it() {
     assert!(
         world.state.held_of(player).is_none(),
         "and off the cursor, not bounced"
+    );
+    assert_eq!(
+        openshard_state::audit_item_graph(&world.state),
+        Vec::new(),
+        "the backpack view and canonical graph agree after drop"
     );
 }
 
@@ -3623,13 +3633,15 @@ fn a_dead_player_leaves_a_corpse_but_keeps_its_backpack() {
             hue: openshard_protocol::wire::Hue(0),
         },
     );
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         robe,
-        Equipped {
+        openshard_state::ItemLocation::equipped(Equipped {
             mobile: serial_obj,
             layer: Layer(0x16),
-        },
-    );
+        }),
+    )
+    .unwrap();
 
     world.queue(Command::Damage {
         serial,
@@ -3731,13 +3743,15 @@ fn a_weapon_on_the_cursor_when_its_owner_dies_falls_into_the_corpse() {
             hue: Hue(0),
         },
     );
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         axe,
-        Equipped {
+        openshard_state::ItemLocation::equipped(Equipped {
             mobile,
             layer: openshard_state::weapon::LAYER_TWO_HANDED,
-        },
-    );
+        }),
+    )
+    .unwrap();
 
     world.queue(Command::PickUpItem {
         connection: player,
@@ -3798,6 +3812,11 @@ fn a_weapon_on_the_cursor_when_its_owner_dies_falls_into_the_corpse() {
             .iter()
             .any(|packet| packet.first() == Some(&0x27)),
         "the dead player's client is told to release its drag cursor"
+    );
+    assert_eq!(
+        openshard_state::audit_item_graph(&world.state),
+        Vec::new(),
+        "death leaves corpse loot, backpack and shroud in one sound graph"
     );
 }
 
@@ -8679,14 +8698,16 @@ fn reagents_are_consumed_on_a_cast_and_a_short_pack_fizzles() {
                 hue: openshard_protocol::wire::Hue(0),
             },
         );
-        world.state.registry.insert(
+        openshard_state::establish_item_location(
+            &mut world.state,
             item,
-            Contained {
+            openshard_state::ItemLocation::contained(Contained {
                 container,
                 position: GumpPoint::new(0, 0),
                 grid: GridSlot(0),
-            },
-        );
+            }),
+        )
+        .unwrap();
     }
 
     let spell = |reagents: Vec<(Graphic, u16)>| Command::CastSpell {
@@ -8763,14 +8784,16 @@ fn consuming_a_reagent_redraws_an_open_pack() {
             hue: openshard_protocol::wire::Hue(0),
         },
     );
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         item,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container,
             position: GumpPoint::new(0, 0),
             grid: GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
 
     // Open it, then clear what has been sent so far.
     world.queue(Command::DoubleClick {
@@ -10932,14 +10955,16 @@ fn a_characters_inventory_survives_a_logout_and_restore() {
     );
     home.state.registry.insert(gold, Amount(500));
     home.state.registry.insert(gold, Stackable);
-    home.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut home.state,
         gold,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: backpack_serial,
             position: GumpPoint::new(40, 65),
             grid: GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
 
     // What persistence would carry: the backpack (worn) and the gold (inside).
     let records = home.inventory_of(entity);
@@ -11042,14 +11067,16 @@ fn a_spellbook_keeps_its_spells_across_a_logout_and_restore() {
         },
     );
     home.state.registry.insert(book, Spellbook(learned));
-    home.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut home.state,
         book,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: backpack_serial,
             position: GumpPoint::new(40, 65),
             grid: GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
 
     // The sweep carries the mask.
     let records = home.inventory_of(entity);
@@ -11119,14 +11146,16 @@ fn a_relogin_in_the_same_run_keeps_the_inventory() {
         },
     );
     world.state.registry.insert(gold, Amount(300));
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         gold,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: backpack_serial,
             position: GumpPoint::new(0, 0),
             grid: GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
 
     // Log out and, in the same world, log the same character back in.
     world.queue(Command::Disconnect { connection: conn });
@@ -11780,14 +11809,16 @@ fn a_snapshot_saves_an_idle_online_character_and_the_ground() {
             hue: openshard_protocol::wire::Hue(0),
         },
     );
-    world.state.registry.insert(
+    openshard_state::establish_item_location(
+        &mut world.state,
         bagged,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: backpack_serial,
             position: GumpPoint::new(0, 0),
             grid: GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
     items::spawn_item(
         &mut world.state,
         openshard_protocol::wire::Graphic(0x1BFB),
@@ -18033,15 +18064,16 @@ fn a_deed_raises_the_house_cursor_and_answering_it_builds() {
     // placement re-checks.
     let owner = world.state.registry.serial_of(player).unwrap();
     let backpack = items::backpack_of(&world.state, owner).expect("a backpack");
-    world.state.registry.remove::<Position>(deed);
-    world.state.registry.insert(
+    openshard_state::relocate_item(
+        &mut world.state,
         deed,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: backpack,
             position: GumpPoint::new(20, 20),
             grid: openshard_protocol::containers::GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
     let deed_serial = world.state.registry.serial_of(deed).unwrap();
     let _ = packets_for(&mut world, connection);
 
@@ -18282,15 +18314,16 @@ fn a_deed_for_a_foundation_builds_a_house_with_a_design() {
     // Into the pack: a deed on the ground is not one you hold, which the
     // placement re-checks.
     let backpack = items::backpack_of(&world.state, owner).expect("a backpack");
-    world.state.registry.remove::<Position>(deed);
-    world.state.registry.insert(
+    openshard_state::relocate_item(
+        &mut world.state,
         deed,
-        Contained {
+        openshard_state::ItemLocation::contained(Contained {
             container: backpack,
             position: GumpPoint::new(20, 20),
             grid: openshard_protocol::containers::GridSlot(0),
-        },
-    );
+        }),
+    )
+    .unwrap();
     let deed_serial = world.state.registry.serial_of(deed).unwrap();
     let _ = packets_for(&mut world, connection);
 

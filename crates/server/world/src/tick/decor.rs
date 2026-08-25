@@ -150,8 +150,8 @@ impl World {
             return None;
         };
         self.state.registry.insert(entity, Drawn { id: graphic, hue });
-        self.state.registry.insert(entity, Position(position));
-        self.state.registry.insert(entity, facet);
+        establish_item_location(&mut self.state, entity, LiveItemLocation::ground(facet, position))
+            .expect("fresh decoration has one valid ground location");
         self.state.registry.insert(entity, Decoration);
         // Placed art covers its tile the way ServUO treats any non-movable
         // item; doors refine this to a door obstacle right after. It covers

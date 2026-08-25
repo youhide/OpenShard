@@ -1,10 +1,10 @@
 //! Items: spawning, the drag protocol, stacking, decay, containers, and gear.
 //!
 //! A gameplay system in its own crate, operating on the shared [`WorldState`].
-//! An item is an entity in exactly one of three places — on the ground
-//! ([`Position`]), inside a container ([`Contained`]), or worn ([`Equipped`]) —
-//! and these functions move it between them: spawn it, lift it onto a cursor,
-//! drop it, stack or split it, decay it, put it in a container, wear it. Reach
+//! An item has exactly one canonical [`ItemLocation`]: ground, container,
+//! paperdoll, or a connection cursor. These functions move it between them:
+//! spawn it, lift it, drop it, stack or split it, decay it, put it in a
+//! container, wear it. Reach
 //! and layer checks are server-authoritative; the client's word is never taken.
 //!
 //! The drawing goes through [`WorldState`]'s interest machinery (`reveal`,
@@ -35,7 +35,11 @@ use openshard_state::components::{
     mount_item_for, scroll_spell,
 };
 use openshard_state::sectors::in_range;
-use openshard_state::{HeldItem, Origin, Outbound, TICKS_PER_SECOND, TradeWindow, WorldState};
+use openshard_state::{
+    HeldItem, ItemLocation, Origin, Outbound, SettledItemLocation, TICKS_PER_SECOND, TradeWindow, WorldState,
+    contained_items, despawn_item, equipped_items, establish_item_location, item_location, relocate_item,
+    settled_from_origin,
+};
 use tracing::{debug, warn};
 
 mod backpack;

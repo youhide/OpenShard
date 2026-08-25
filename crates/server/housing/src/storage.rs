@@ -44,7 +44,7 @@ use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
 use openshard_protocol::serial::Serial;
 use openshard_state::WorldState;
-use openshard_state::components::{Contained, Container, House, LockedDown, Position, Standing};
+use openshard_state::components::{Container, House, LockedDown, Position, Standing};
 
 /// How many lockdowns a house gets per tile of its own footprint. See the module
 /// header for where the 4 comes from.
@@ -172,8 +172,15 @@ pub fn stored(state: &WorldState, house: EntityId) -> usize {
         .collect();
     state
         .registry
-        .query::<Contained>()
-        .filter(|(_, held)| secures.contains(&held.container))
+        .query::<openshard_state::ItemLocation>()
+        .filter(|(_, location)| {
+            matches!(
+                location,
+                openshard_state::ItemLocation::Settled(
+                    openshard_state::SettledItemLocation::Contained(held)
+                ) if secures.contains(&held.container)
+            )
+        })
         .count()
 }
 

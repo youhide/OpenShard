@@ -47,7 +47,7 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{Graphic, Hue, MultiId};
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{Drawn, House, Position};
-use openshard_state::{FacetState, WorldState};
+use openshard_state::{FacetState, ItemLocation, WorldState, establish_item_location};
 use openshard_uofiles::multi::Component;
 
 /// The first customisable-house foundation id, and the last.
@@ -265,7 +265,6 @@ pub fn place(
             hue: Hue(0),
         },
     );
-    state.registry.insert(entity, Position(at));
     state.registry.insert(
         entity,
         House {
@@ -281,7 +280,8 @@ pub fn place(
             lockdowns: u32::try_from(storage::allowance_for(covered.len()).lockdowns).unwrap_or(u32::MAX),
         },
     );
-    state.registry.insert(entity, facet);
+    establish_item_location(state, entity, ItemLocation::ground(facet, at))
+        .expect("a fresh house has one valid plot");
     // Before the walls go in and before the sign hangs: both read the house's
     // *own* shape now, and a foundation's is its design rather than its multi.
     if let Some(components) = design {
@@ -378,11 +378,11 @@ pub fn hang_sign(
             hue: Hue(0),
         },
     );
-    state.registry.insert(sign, Position(spot));
     state
         .registry
         .insert(sign, openshard_state::components::HouseSign { house: serial });
-    state.registry.insert(sign, facet);
+    establish_item_location(state, sign, ItemLocation::ground(facet, spot))
+        .expect("a fresh house sign has one valid ground location");
     state.place_item(facet, sign, spot);
     Some(sign)
 }

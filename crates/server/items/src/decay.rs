@@ -64,22 +64,19 @@ pub(crate) fn remove_ground_item(state: &mut WorldState, item: EntityId, serial:
     }
     despawn_contents(state, serial);
     state.unplace(facet, item);
-    state.registry.despawn(item);
+    despawn_item(state, item);
 }
 
 /// Despawn everything directly inside `container`, and recursively inside any
 /// container among them. Used when a decaying or consumed container rots away.
 pub(crate) fn despawn_contents(state: &mut WorldState, container: Serial) {
-    let contained: Vec<EntityId> = state
-        .registry
-        .query::<Contained>()
-        .filter(|(_, c)| c.container == container)
+    let contained: Vec<EntityId> = contained_items(state, container)
         .map(|(entity, _)| entity)
         .collect();
     for entity in contained {
         if let Some(serial) = state.registry.serial_of(entity) {
             despawn_contents(state, serial);
-            state.registry.despawn(entity);
+            despawn_item(state, entity);
         }
     }
 }

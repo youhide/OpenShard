@@ -80,8 +80,8 @@ impl World {
                 hue: Hue(0),
             },
         );
-        self.state.registry.insert(entity, Position(pos));
-        self.state.registry.insert(entity, facet);
+        establish_item_location(&mut self.state, entity, LiveItemLocation::ground(facet, pos))
+            .expect("fresh field tile has one valid ground location");
         self.state.registry.insert(entity, field);
         self.state.place_item(facet, entity, pos);
         if field.blocks {

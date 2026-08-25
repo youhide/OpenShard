@@ -11,7 +11,7 @@ use openshard_protocol::serial::SerialKind;
 use openshard_protocol::wire::{Graphic, Hue, MultiId};
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{Decoration, Door, Drawn, HouseDoor, Position};
-use openshard_state::{WorldState, WorldTick};
+use openshard_state::{ItemLocation, WorldState, WorldTick, establish_item_location};
 
 #[derive(Clone, Copy)]
 enum Material {
@@ -254,8 +254,8 @@ fn spawn(
             hue: Hue::NONE,
         },
     );
-    state.registry.insert(entity, Position(at));
-    state.registry.insert(entity, facet);
+    establish_item_location(state, entity, ItemLocation::ground(facet, at))
+        .expect("a fresh house door has one valid ground location");
     // Decoration is the existing persistence boundary for a functional door.
     // It says this fixture is fixed world content rather than loose loot.
     state.registry.insert(entity, Decoration);

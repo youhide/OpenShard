@@ -169,6 +169,84 @@ pub struct Equipped {
     pub layer: Layer,
 }
 
+/// The one authoritative answer to "where is this item?" while it is settled.
+///
+/// The live world historically represented these alternatives by three separate
+/// component columns (`Position`, [`Contained`], [`Equipped`]).  Those columns
+/// are useful projections for spatial and outfit queries, but three independent
+/// facts cannot make their exclusivity true: a bad transition can leave an item
+/// in two columns, or in none.  `SettledItemLocation` is the sum type the rule
+/// was missing.  It is also what a held item's origin remembers so a rejected
+/// drag has exactly one place to restore.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum SettledItemLocation {
+    /// Loose on a facet at a world coordinate.
+    Ground {
+        /// Which facet owns the spatial entry.
+        facet: Facet,
+        /// Where the item lies.
+        position: Point,
+    },
+    /// Inside exactly one container.
+    Contained(Contained),
+    /// Worn by exactly one mobile on exactly one paperdoll layer.
+    Equipped(Equipped),
+}
+
+/// The canonical parent of an item in the live ownership graph.
+///
+/// Every item will carry exactly one of these.  Ground, a container, a mobile,
+/// and a connection cursor are the graph's four possible parents; containers
+/// may themselves be children, which makes an inventory a forest rather than a
+/// collection of owner-maintained child lists.  Reverse lookups such as
+/// `contents_of(container)` and `equipment_of(mobile)` are indexes over this
+/// component, never another source of ownership truth.
+///
+/// `Held` retains the settled origin as part of the state.  A cursor therefore
+/// does not put an item into an unrepresentable limbo, and a bounce never has to
+/// reconstruct where it came from from side tables.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ItemLocation {
+    /// The item is not on a cursor and has this one settled parent.
+    Settled(SettledItemLocation),
+    /// The item is on one connection's cursor, temporarily detached from its
+    /// settled parent.
+    Held {
+        /// The cursor that owns the drag transaction.
+        connection: ConnectionId,
+        /// Where a refused or interrupted drag restores it.
+        origin: SettledItemLocation,
+    },
+}
+
+impl ItemLocation {
+    /// A loose item on the ground.
+    #[must_use]
+    pub const fn ground(facet: Facet, position: Point) -> Self {
+        Self::Settled(SettledItemLocation::Ground { facet, position })
+    }
+
+    /// An item inside a container.
+    #[must_use]
+    pub const fn contained(contained: Contained) -> Self {
+        Self::Settled(SettledItemLocation::Contained(contained))
+    }
+
+    /// An item worn on a paperdoll.
+    #[must_use]
+    pub const fn equipped(equipped: Equipped) -> Self {
+        Self::Settled(SettledItemLocation::Equipped(equipped))
+    }
+
+    /// The settled place, or the place a held item came from.
+    #[must_use]
+    pub const fn origin(self) -> SettledItemLocation {
+        match self {
+            Self::Settled(location) | Self::Held { origin: location, .. } => location,
+        }
+    }
+}
+
 /// Marks a container as one half of a secure trade window.
 ///
 /// A trade escrow is an ordinary [`Container`] worn on a layer no player can
