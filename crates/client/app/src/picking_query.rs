@@ -1104,6 +1104,8 @@ impl App {
                 .selected
                 .map(|identity| self.resolve_selection(identity)),
             editor_preview: self.map_editor.preview_tiles(self.resources.map()),
+            editor_static_preview: self.map_editor.static_preview_at(self.resources.map(), pick),
+            editor_static_draft: self.map_editor.static_draft_previews(self.resources.map()),
             health_bars: self.health_bars(camera, drawn_mobiles),
             goal: self.steer.goal().map(|at| self.tile_info(Tile::new(at.x, at.y))),
             ttf_active: self.resources.ttf_font.is_some(),

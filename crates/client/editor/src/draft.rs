@@ -319,6 +319,29 @@ impl Draft {
         &self.dirty_chunks
     }
 
+    /// Statics present in the preview beyond the multiset already drawn by the
+    /// authoritative base.
+    ///
+    /// Matching by value rather than by ordinal matters after a removal: the
+    /// surviving base suffix may move to an earlier ordinal, but it is still
+    /// already visible in the world and must not be drawn a second time as an
+    /// editor ghost.
+    #[must_use]
+    pub fn added_statics(&self, base: &WorldMap) -> Vec<StaticItem> {
+        let mut added = Vec::new();
+        for at in &self.dirty_tiles {
+            let mut already_drawn = self.original(at).statics.clone();
+            for item in self.statics_at(base, at.x, at.y) {
+                if let Some(index) = already_drawn.iter().position(|base| *base == item) {
+                    already_drawn.remove(index);
+                } else {
+                    added.push(item);
+                }
+            }
+        }
+        added
+    }
+
     /// Canonical operation count of the patch the draft would currently make.
     #[must_use]
     pub fn op_count(&self, base: &WorldMap) -> usize {
@@ -723,6 +746,28 @@ mod tests {
         assert!(draft.statics_at(&base, AT.x, AT.y).is_empty());
         assert!(draft.redo());
         assert_eq!(draft.statics_at(&base, AT.x, AT.y)[0].tile, Graphic(2));
+    }
+
+    #[test]
+    fn added_static_preview_excludes_base_statics_that_moved_ordinal() {
+        let mut base = flat();
+        let first = rock(1, AT.x, AT.y);
+        let second = rock(2, AT.x, AT.y);
+        base.place_static(first);
+        base.place_static(second);
+        let mut draft = Draft::new(FACET, MapRevision::INITIAL);
+        apply(&mut draft, &base, Tool::RemoveStatic(StaticId(0)), AT);
+        let placement = StaticPlacement {
+            tile: Graphic(3),
+            height: StaticHeight::OnGround,
+            hue: Hue::NONE,
+        };
+        apply(&mut draft, &base, Tool::PlaceStatic(placement), AT);
+
+        let added = draft.added_statics(&base);
+
+        assert_eq!(added.len(), 1);
+        assert_eq!(added[0].tile, Graphic(3));
     }
 
     #[test]

@@ -7,3 +7,4 @@
 cc eed806263727cf388f17eddf9e7a8c863be8fd617c09c327292281a1d011ce50 # shrinks to fx = 104.044914, fy = 104.14152, fz = 0.15605178, tx = 96.316414, ty = 96.16241, tz = 0.4803915
 cc 5e259552be2bb0e16ae452b1c435bb4a0addd23bf6ed5c7a8bee7a27115e8a9b # shrinks to fx = 104.73556, fy = 95.0, fz = 4.8480706, tx = 100.23301, ty = 100.34729, tz = 0.04252062
 cc ea1ed56997fa8e7546adf4320e9d01f28a76d2f86e7a96a74c73bbda985313e5 # shrinks to tile_x = 0, tile_y = -6, off_x = 0.0, off_y = 1.0000002
+cc 0f2e0fe886e446485d887e50a2f4c50503395a3e5e854b579577b7149a13b1a7 # shrinks to min_x = -18, min_y = 9, min_z = 13, size_x = 1, size_y = 4, size_z = 4, from_x = 16.394917, from_y = -29.34924, from_z = 27.264797, to_x = -23.121681, to_y = 19.25107, to_z = 14.326241, t = 0.87047356

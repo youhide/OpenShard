@@ -2398,11 +2398,11 @@ const BRUTE_STEP: f32 = 0.0002;
 /// The exemption's own predicate, and closed on purpose — see
 /// [`brute_force_blocked`]'s doc for why the tie on a boundary is resolved
 /// towards the exemption rather than by `floor()`.
-fn in_column(point: [f32; 3], tile: (i32, i32)) -> bool {
-    point[0] >= tile.0 as f32
-        && point[0] <= tile.0 as f32 + 1.0
-        && point[1] >= tile.1 as f32
-        && point[1] <= tile.1 as f32 + 1.0
+fn in_column(point: [f64; 3], tile: (i32, i32)) -> bool {
+    point[0] >= f64::from(tile.0)
+        && point[0] <= f64::from(tile.0) + 1.0
+        && point[1] >= f64::from(tile.1)
+        && point[1] <= f64::from(tile.1) + 1.0
 }
 
 /// The parameter interval of the segment `from`→`to` that lies inside the box
@@ -2610,7 +2610,10 @@ fn a_vertical_ray_meets_what_stands_over_it_whatever_shape_it_is() {
 ///
 /// Deliberately dumb, the way `docs/lighting_raymarch.md` step 4 asks: fixed
 /// steps along the line and a point-in-box test against **every solid in the
-/// frame**, with no DDA and — since 2026-08-09 — no cell lookup either.
+/// frame**, with no DDA and — since 2026-08-09 — no cell lookup either. The
+/// points are interpolated in `f64` from their `f32` ends: rounding a point of
+/// a ray that clears a row by less than one `f32` unit back onto the row would
+/// turn this control into a false blocker.
 /// It shares no arithmetic with `light::walk_cells` or `blit.wgsl`'s `walk`, so
 /// a bug the two of them share — the shape this whole doc is about — cannot hide
 /// from it the way a second DDA rewrite could.
@@ -2655,14 +2658,16 @@ fn brute_force_blocked(
     skip_last: bool,
     occlusion: &occlusion::Occlusion,
 ) -> bool {
+    let from = [f64::from(from[0]), f64::from(from[1]), f64::from(from[2])];
+    let to = [f64::from(to[0]), f64::from(to[1]), f64::from(to[2])];
     let delta = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
     let ground = (delta[0] * delta[0] + delta[1] * delta[1]).sqrt();
-    let steps = ((ground / BRUTE_STEP).ceil() as u32).max(1);
+    let steps = ((ground / f64::from(BRUTE_STEP)).ceil() as u32).max(1);
     // Interior points only: the two ends stand where they are drawn, on the
     // geometry they are a point of, and asking whether an endpoint is "inside"
     // its own surface is not a question this oracle exists to answer.
     for step in 1..steps {
-        let t = step as f32 / steps as f32;
+        let t = f64::from(step) / f64::from(steps);
         let point = [
             from[0] + delta[0] * t,
             from[1] + delta[1] * t,
@@ -2678,12 +2683,12 @@ fn brute_force_blocked(
                 solid.space.min,
             );
             let (min, max) = (solid.space.min, solid.space.max);
-            let inside = f64::from(point[0]) >= min.x
-                && f64::from(point[0]) <= max.x
-                && f64::from(point[1]) >= min.y
-                && f64::from(point[1]) <= max.y
-                && f64::from(point[2]) >= min.z
-                && f64::from(point[2]) <= max.z;
+            let inside = point[0] >= min.x
+                && point[0] <= max.x
+                && point[1] >= min.y
+                && point[1] <= max.y
+                && point[2] >= min.z
+                && point[2] <= max.z;
             if inside {
                 return true;
             }

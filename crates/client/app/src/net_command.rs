@@ -284,6 +284,11 @@ impl App {
             revision.get()
         );
         self.map_editor.ground_at(facet, revision);
+        // `covered` means every map graphic in the rectangle has been offered
+        // to the atlases. The camera has not moved, but the contents under it
+        // just did: without forgetting that promise, a newly placed static is
+        // absent from the atlas and vanishes when its editor ghost is cleared.
+        crate::graphics::invalidate_atlas_coverage(&mut self.graphics.covered);
         // The blocks those chunks cover, which is what the composited pictures
         // of the ground are addressed by. One rectangle per chunk rather than
         // one over all of them: two edits at opposite ends of a facet would
@@ -570,6 +575,11 @@ impl App {
                     .ground
                     .set_base(Some(*snapshot), &self.resources.tiledata);
                 self.map_editor.ground_at(facet, revision);
+                // Usually the first ground arrives under `None` already. A
+                // replacement is different: the same visible rectangle now
+                // names different art, so it must be offered again just like a
+                // chunk publish above.
+                crate::graphics::invalidate_atlas_coverage(&mut self.graphics.covered);
                 if replaced {
                     if let Some(window) = self.window.as_mut() {
                         window.composites.clear();

@@ -284,6 +284,10 @@ pub struct Hud {
     pub selected: Option<Selection>,
     /// Tiles changed by the local, uncommitted map-editor draft.
     pub editor_preview: Vec<crate::editor_mode::PreviewTile>,
+    /// Where the next static-placement click would anchor its sprite.
+    pub editor_static_preview: Option<(openshard_protocol::world::Point, Graphic)>,
+    /// Unpublished statics already placed in the local draft.
+    pub editor_static_draft: Vec<openshard_map::map::StaticItem>,
     pub health_bars: Vec<HealthBar>,
     pub draw: openshard_client_render::frame::Draw,
     pub cutaway_disabled: bool,

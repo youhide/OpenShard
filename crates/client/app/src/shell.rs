@@ -534,7 +534,7 @@ impl Shell {
                 )),
                 ..Default::default()
             },
-            |ui| draw_world_overlays(ui.ctx(), hud, camera, free),
+            |ui| draw_world_overlays(ui.ctx(), hud, camera, free, map_editor),
         );
         debug_assert_eq!(
             world_overlay.pixels_per_point,
@@ -1926,7 +1926,13 @@ fn prism_editor(ui: &mut egui::Ui, graphic: Graphic, prism: Prism, request: &mut
 /// Taken out of [`layout`] with the rest of the panels' bodies, and for the same
 /// reason — what is left in `layout` is then the arrangement, one screenful of
 /// it, and nothing else.
-fn draw_world_overlays(context: &egui::Context, hud: &Hud, camera: Camera, viewport: egui::Rect) {
+fn draw_world_overlays(
+    context: &egui::Context,
+    hud: &Hud,
+    camera: Camera,
+    viewport: egui::Rect,
+    map_editor: &mut crate::editor_mode::MapEditor,
+) {
     // Every panel has claimed its edge by now, so what is left of the root `Ui`
     // is the world's own rectangle — the very rect `Shell::run` reads back a
     // moment later and hands the camera. Read *here*, at the foot of the layout
@@ -1980,6 +1986,23 @@ fn draw_world_overlays(context: &egui::Context, hud: &Hud, camera: Camera, viewp
             egui::Color32::from_rgba_unmultiplied(255, 70, 220, 45),
             egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 90, 225)),
         ));
+    }
+    for item in &hud.editor_static_draft {
+        if let Some(texture) = map_editor.static_preview_texture(context, item.tile) {
+            draw_editor_static_preview(
+                &world,
+                &camera,
+                openshard_protocol::world::Point::new(item.x, item.y, item.z),
+                texture,
+                viewport.min,
+                205,
+            );
+        }
+    }
+    if let Some((at, graphic)) = hud.editor_static_preview {
+        if let Some(texture) = map_editor.static_preview_texture(context, graphic) {
+            draw_editor_static_preview(&world, &camera, at, texture, viewport.min, 135);
+        }
     }
     draw_health_bars(&world, &camera, &hud.health_bars, viewport.min);
     // The tile marker, and only when the tile is what is lit: an item under the
@@ -3016,6 +3039,38 @@ fn facet_corners(
         .tile_facet(point, corners)
         .map(|corner| viewport_origin + egui::vec2(corner.x * scale, corner.y * scale))
         .to_vec()
+}
+
+/// Draw selected static art where the renderer would anchor it after a click.
+fn draw_editor_static_preview(
+    painter: &egui::Painter,
+    camera: &Camera,
+    at: openshard_protocol::world::Point,
+    texture: &egui::TextureHandle,
+    viewport_origin: egui::Pos2,
+    alpha: u8,
+) {
+    let [width, height] = texture.size();
+    let centre = camera.to_screen(at);
+    let left = centre.x - (i32::try_from(width).unwrap_or(i32::MAX) >> 1);
+    let top = centre.y + openshard_client_render::camera::TILE_HEIGHT / 2
+        - i32::try_from(height).unwrap_or(i32::MAX);
+    let top_left = openshard_client_render::camera::ViewPoint::new(left as f32, top as f32);
+    let bottom_right = openshard_client_render::camera::ViewPoint::new(
+        left as f32 + width as f32,
+        top as f32 + height as f32,
+    );
+    let scale = 1.0 / painter.ctx().pixels_per_point();
+    let place = |point| {
+        let point = camera.to_viewport_exact(point);
+        viewport_origin + egui::vec2(point.x * scale, point.y * scale)
+    };
+    painter.image(
+        texture.id(),
+        egui::Rect::from_two_pos(place(top_left), place(bottom_right)),
+        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+        egui::Color32::from_white_alpha(alpha),
+    );
 }
 
 /// Where a tile's centre falls there — the route's own polyline runs through

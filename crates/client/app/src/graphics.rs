@@ -16,6 +16,17 @@ use openshard_client_render::impostor::Fringe;
 use openshard_client_render::interiors::{FloorView, ZSliceView};
 use openshard_client_render::occlusion;
 
+/// Make the next frame offer the whole visible map to the resident atlases.
+///
+/// `covered` is a promise about map *contents*, not only camera position. A
+/// publish can put a previously unseen land or static graphic inside a tile the
+/// camera has already covered; keeping the old rectangle would make the delta
+/// walk empty and leave that graphic unpacked until the camera moved or the
+/// client re-entered the world.
+pub(crate) fn invalidate_atlas_coverage(covered: &mut Option<TileBounds>) {
+    *covered = None;
+}
+
 /// What the cursor is allowed to light up.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum HighlightTarget {
@@ -242,7 +253,33 @@ pub struct GraphicsSettings {
     /// here that is wrong in silence: an atlas rebuilt behind this field's back
     /// forgets graphics that this still claims were offered, and the tiles that
     /// needed them simply stop being drawn — along one edge, at one camera
-    /// position. So it is set from exactly two places, both of which have just
-    /// finished packing, and cleared before anything that forgets.
+    /// position. A map publish changes the other half of that promise: a tile
+    /// inside this rectangle can start referring to art that was never offered.
+    /// So it is set only after packing and cleared whenever either the atlas or
+    /// the map contents under the rectangle change.
     pub covered: Option<TileBounds>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A publish under a stationary camera used to leave `covered` untouched.
+    /// The next frame consequently walked an empty delta, so the committed
+    /// static disappeared with its editor ghost and only a reconnect packed its
+    /// art. `None` is the frame loop's instruction to walk the complete lit
+    /// rectangle again.
+    #[test]
+    fn a_map_publish_invalidates_atlas_coverage() {
+        let mut covered = Some(TileBounds {
+            min_x: 10,
+            max_x: 20,
+            min_y: 30,
+            max_y: 40,
+        });
+
+        invalidate_atlas_coverage(&mut covered);
+
+        assert_eq!(covered, None);
+    }
 }

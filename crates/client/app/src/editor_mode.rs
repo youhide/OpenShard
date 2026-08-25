@@ -5,6 +5,7 @@
 //! authoritative map. The draft stays a sparse projection over the current
 //! snapshot until the shard accepts it and the accepted revision arrives.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use openshard_client_editor::draft::Draft;
@@ -13,7 +14,7 @@ use openshard_client_editor::tools::{
     Tool,
 };
 use openshard_client_editor::{AssetId, Catalog, KindFilter, PaletteState};
-use openshard_map::map::WorldMap;
+use openshard_map::map::{StaticItem, WorldMap};
 use openshard_map::patch::{PatchOp, StaticId};
 use openshard_map::snapshot::MapRevision;
 use openshard_protocol::access::AccessLevel;
@@ -59,13 +60,20 @@ pub(crate) struct PreviewTile {
     pub(crate) corners: [i8; 4],
 }
 
+struct PreviewTexture {
+    image: egui::ColorImage,
+    panel: egui::TextureHandle,
+    overlay: Option<egui::TextureHandle>,
+}
+
 pub(crate) struct MapEditor {
     active: bool,
     catalogue: Option<Catalog>,
     catalogue_error: Option<String>,
     palette: PaletteState,
     matches: Vec<AssetId>,
-    preview: Option<(AssetId, egui::TextureHandle)>,
+    previews: BTreeMap<AssetId, Option<PreviewTexture>>,
+    draft_static_assets: BTreeSet<AssetId>,
     tool: ActiveTool,
     brush: Brush,
     strength: u8,
@@ -95,7 +103,8 @@ impl MapEditor {
             catalogue_error,
             palette,
             matches,
-            preview: None,
+            previews: BTreeMap::new(),
+            draft_static_assets: BTreeSet::new(),
             tool: ActiveTool::PaintLand,
             brush: Brush::default(),
             strength: 1,
@@ -136,6 +145,15 @@ impl MapEditor {
     /// Whether the active tool needs a static rather than a ground coordinate.
     pub(crate) const fn removes_static(&self) -> bool {
         matches!(self.tool, ActiveTool::RemoveStatic)
+    }
+
+    fn select_asset(&mut self, id: AssetId) {
+        self.palette.select(id);
+        self.tool = match id {
+            AssetId::Land(_) => ActiveTool::PaintLand,
+            AssetId::Static(_) => ActiveTool::PlaceStatic,
+        };
+        self.message = None;
     }
 
     /// Resolve the topmost visible matching static to its preview ordinal.
@@ -186,6 +204,9 @@ impl MapEditor {
         }
         match draft.apply_gesture(map, gesture.finish()) {
             Ok(_) => {
+                if let Tool::PlaceStatic(placement) = tool {
+                    self.draft_static_assets.insert(AssetId::Static(placement.tile));
+                }
                 self.commit = CommitState::Ready;
                 self.message = None;
             }
@@ -287,6 +308,7 @@ impl MapEditor {
             && self.draft.as_ref().is_some_and(|draft| draft.facet() == facet)
         {
             self.draft = None;
+            self.draft_static_assets.clear();
             self.commit = CommitState::Ready;
             self.message = Some(format!("committed revision {}", revision.get()));
         } else if self
@@ -331,6 +353,58 @@ impl MapEditor {
                 }
             })
             .collect()
+    }
+
+    /// Where the selected static would be placed by the next world click.
+    pub(crate) fn static_preview_at(
+        &self,
+        map: &WorldMap,
+        pick: &crate::diagnostics::Pick,
+    ) -> Option<(openshard_protocol::world::Point, Graphic)> {
+        if !self.active || self.tool != ActiveTool::PlaceStatic {
+            return None;
+        }
+        let Some(AssetId::Static(graphic)) = self.palette.selected() else {
+            return None;
+        };
+        let (x, y) = pick.static_.map_or_else(
+            || pick.tile.as_ref().map(|tile| (tile.at.x, tile.at.y)),
+            |picked| Some((picked.at.x, picked.at.y)),
+        )?;
+        let z = self
+            .draft
+            .as_ref()
+            .and_then(|draft| draft.land(map, x, y))
+            .or_else(|| map.land(x, y))?
+            .z;
+        Some((openshard_protocol::world::Point::new(x, y, z), graphic))
+    }
+
+    /// Every unpublished static that is not already drawn by the base map.
+    pub(crate) fn static_draft_previews(&self, map: &WorldMap) -> Vec<StaticItem> {
+        if !self.active {
+            return Vec::new();
+        }
+        self.draft
+            .as_ref()
+            .map_or_else(Vec::new, |draft| draft.added_statics(map))
+    }
+
+    /// Texture owned by the world-overlay egui context for one preview static.
+    pub(crate) fn static_preview_texture(
+        &mut self,
+        context: &egui::Context,
+        id: Graphic,
+    ) -> Option<&egui::TextureHandle> {
+        let preview = self.previews.get_mut(&AssetId::Static(id))?.as_mut()?;
+        if preview.overlay.is_none() {
+            preview.overlay = Some(context.load_texture(
+                format!("map-editor-overlay-static-{:#06x}", id.0),
+                preview.image.clone(),
+                egui::TextureOptions::NEAREST,
+            ));
+        }
+        preview.overlay.as_ref()
     }
 
     /// Draw and directly update local editor controls. Returns whether Commit
@@ -391,6 +465,7 @@ impl MapEditor {
                     let dirty = self.draft.as_ref().is_some_and(Draft::is_dirty);
                     if ui.add_enabled(dirty, egui::Button::new("Discard")).clicked() {
                         self.draft = None;
+                        self.draft_static_assets.clear();
                         self.commit = CommitState::Ready;
                         self.message = None;
                     }
@@ -452,55 +527,79 @@ impl MapEditor {
         if changed {
             self.matches = catalogue.matching(&self.palette);
         }
+        ui.horizontal(|ui| {
+            ui.add_sized([88.0, 20.0], egui::Label::new(egui::RichText::new("ID").strong()));
+            ui.label(egui::RichText::new("Art").strong());
+        });
         let mut selected = None;
+        let mut visible = Vec::new();
         egui::ScrollArea::vertical()
-            .max_height(260.0)
-            .show_rows(ui, 20.0, self.matches.len(), |ui, rows| {
-                for id in &self.matches[rows] {
-                    let entry = catalogue.entry(*id);
-                    let kind = match id {
-                        AssetId::Land(_) => "land",
-                        AssetId::Static(_) => "static",
-                    };
-                    let label = format!("{kind} {:#06x}  {}", id.raw(), entry.name.unwrap_or("(unnamed)"));
-                    if ui
-                        .selectable_label(self.palette.selected() == Some(*id), label)
-                        .clicked()
-                    {
-                        selected = Some(*id);
-                    }
-                }
-            });
-        if let Some(id) = selected {
-            self.palette.select(id);
-            self.preview = None;
-            match catalogue.preview(id) {
-                Ok(Some(image)) => {
-                    let size = [usize::from(image.width()), usize::from(image.height())];
-                    let pixels = image
-                        .pixels()
-                        .iter()
-                        .map(|pixel| {
-                            let color = pixel.rgb8();
-                            if matches!(id, AssetId::Static(_)) && pixel.is_transparent() {
-                                egui::Color32::TRANSPARENT
-                            } else {
-                                egui::Color32::from_rgb(color.red, color.green, color.blue)
+            .max_height(360.0)
+            .show_rows(ui, 56.0, self.matches.len(), |ui, rows| {
+                egui::Grid::new("map-editor-catalogue-table")
+                    .num_columns(2)
+                    .striped(true)
+                    .min_row_height(48.0)
+                    .min_col_width(88.0)
+                    .show(ui, |ui| {
+                        for id in &self.matches[rows] {
+                            visible.push(*id);
+                            let entry = catalogue.entry(*id);
+                            let prefix = match id {
+                                AssetId::Land(_) => "L",
+                                AssetId::Static(_) => "S",
+                            };
+                            let label = format!("{prefix} {:#06x}", id.raw());
+                            let id_clicked = ui
+                                .selectable_label(self.palette.selected() == Some(*id), label)
+                                .on_hover_text(entry.name.unwrap_or("unnamed"))
+                                .clicked();
+
+                            if !self.previews.contains_key(id) {
+                                match preview_texture(catalogue, ui.ctx(), *id) {
+                                    Ok(texture) => {
+                                        self.previews.insert(*id, texture);
+                                    }
+                                    Err(error) => {
+                                        self.previews.insert(*id, None);
+                                        self.message = Some(error.to_string());
+                                    }
+                                }
                             }
-                        })
-                        .collect();
-                    let texture = ui.ctx().load_texture(
-                        format!("map-editor-{:?}-{:#06x}", id.kind(), id.raw()),
-                        egui::ColorImage::new(size, pixels),
-                        egui::TextureOptions::NEAREST,
-                    );
-                    self.preview = Some((id, texture));
-                    self.message = None;
-                }
-                Ok(None) => self.message = Some("this catalogue entry has no art".to_owned()),
-                Err(error) => self.message = Some(error.to_string()),
-            }
+                            let art_clicked = match self.previews.get(id).and_then(Option::as_ref) {
+                                Some(texture) => ui
+                                    .add(
+                                        egui::Image::from_texture(&texture.panel)
+                                            .max_size(egui::vec2(44.0, 44.0))
+                                            .sense(egui::Sense::click()),
+                                    )
+                                    .on_hover_text(entry.name.unwrap_or("unnamed"))
+                                    .clicked(),
+                                None => {
+                                    ui.add_sized([44.0, 44.0], egui::Label::new("—"));
+                                    false
+                                }
+                            };
+                            if id_clicked || art_clicked {
+                                selected = Some(*id);
+                            }
+                            ui.end_row();
+                        }
+                    });
+            });
+        let selected_before_click = self.palette.selected();
+        self.previews.retain(|id, _| {
+            visible.contains(id)
+                || selected_before_click == Some(*id)
+                || self.draft_static_assets.contains(id)
+        });
+        if let Some(id) = selected {
+            self.select_asset(id);
         }
+        let catalogue = self
+            .catalogue
+            .as_ref()
+            .expect("the unavailable catalogue returned at the top of the panel");
         if let Some(id) = self.palette.selected() {
             let entry = catalogue.entry(id);
             ui.small(format!(
@@ -508,13 +607,49 @@ impl MapEditor {
                 id.raw(),
                 entry.name.unwrap_or("unnamed")
             ));
-            if let Some((previewed, texture)) = &self.preview {
-                if *previewed == id {
-                    ui.add(egui::Image::from_texture(texture).max_size(egui::vec2(128.0, 128.0)));
-                }
+            ui.small(match id {
+                AssetId::Land(_) => "Click a world tile to paint it.",
+                AssetId::Static(_) => "Click a world tile to place it.",
+            });
+            if let Some(texture) = self.previews.get(&id).and_then(Option::as_ref) {
+                ui.add(egui::Image::from_texture(&texture.panel).max_size(egui::vec2(128.0, 128.0)));
             }
         }
     }
+}
+
+fn preview_texture(
+    catalogue: &Catalog,
+    context: &egui::Context,
+    id: AssetId,
+) -> Result<Option<PreviewTexture>, openshard_uofiles::art::ArtError> {
+    let Some(image) = catalogue.preview(id)? else {
+        return Ok(None);
+    };
+    let size = [usize::from(image.width()), usize::from(image.height())];
+    let pixels = image
+        .pixels()
+        .iter()
+        .map(|pixel| {
+            let color = pixel.rgb8();
+            if matches!(id, AssetId::Static(_)) && pixel.is_transparent() {
+                egui::Color32::TRANSPARENT
+            } else {
+                egui::Color32::from_rgb(color.red, color.green, color.blue)
+            }
+        })
+        .collect();
+    let image = egui::ColorImage::new(size, pixels);
+    let panel = context.load_texture(
+        format!("map-editor-{:?}-{:#06x}", id.kind(), id.raw()),
+        image.clone(),
+        egui::TextureOptions::NEAREST,
+    );
+    Ok(Some(PreviewTexture {
+        image,
+        panel,
+        overlay: None,
+    }))
 }
 
 fn wire_op(op: PatchOp) -> MapEditOp {
@@ -596,8 +731,10 @@ impl crate::app::App {
 #[cfg(test)]
 mod tests {
     use openshard_protocol::access::AccessLevel;
+    use openshard_protocol::wire::Graphic;
+    use openshard_tiles::LandTileId;
 
-    use super::MapEditor;
+    use super::{ActiveTool, AssetId, MapEditor};
 
     #[test]
     fn a_player_cannot_enter_editor_mode() {
@@ -637,5 +774,23 @@ mod tests {
         editor.set_active(false, AccessLevel::Administrator);
 
         assert!(!editor.active());
+    }
+
+    #[test]
+    fn selecting_static_art_arms_the_placement_tool() {
+        let mut editor = MapEditor::with_catalogue(None, None);
+
+        editor.select_asset(AssetId::Static(Graphic(0x0eed)));
+
+        assert_eq!(editor.tool, ActiveTool::PlaceStatic);
+    }
+
+    #[test]
+    fn selecting_land_art_arms_the_paint_tool() {
+        let mut editor = MapEditor::with_catalogue(None, None);
+
+        editor.select_asset(AssetId::Land(LandTileId(3)));
+
+        assert_eq!(editor.tool, ActiveTool::PaintLand);
     }
 }
