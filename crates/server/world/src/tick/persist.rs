@@ -1,7 +1,7 @@
 use super::*;
 use openshard_persistence::{
-    CorpseData, DoneQuestRecord, EffectRecord, PetData, QuestRecord, RestockRecord, RunebookData,
-    RunebookEntryData, WorldRecord,
+    CorpseData, CorpseEquipmentData, DoneQuestRecord, EffectRecord, PetData, QuestRecord, RestockRecord,
+    RunebookData, RunebookEntryData, WorldRecord,
 };
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::identity::CharacterName;
@@ -429,6 +429,14 @@ impl World {
                 facing: registry
                     .get::<openshard_state::components::CorpseBody>(item)
                     .map_or(0, |corpse| corpse.facing.to_bits()),
+                equipment: story
+                    .equipment
+                    .iter()
+                    .map(|item| CorpseEquipmentData {
+                        item: item.item,
+                        layer: item.layer.0,
+                    })
+                    .collect(),
             }),
             // And the poison on it, bottled or smeared: all four potions are the
             // same graphic, so an unsaved bottle comes back empty.
@@ -1741,6 +1749,14 @@ fn corpse_from(story: &CorpseData) -> Corpse {
         killer: story.killer.clone(),
         examined_by: story.examined_by.clone(),
         looters: story.looters.clone(),
+        equipment: story
+            .equipment
+            .iter()
+            .map(|item| openshard_protocol::items::CorpseEquipmentItem {
+                item: item.item,
+                layer: Layer(item.layer),
+            })
+            .collect(),
     }
 }
 

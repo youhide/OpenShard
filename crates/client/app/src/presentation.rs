@@ -1892,10 +1892,12 @@ impl App {
         let (hud, hud_timings) = self.hud(camera, &pick, &cutaway, drawn_mobiles.as_deref());
         let ui_hud_cost = ui_started.elapsed();
         let painting = self.window.as_ref().map(|screen| Arc::clone(&screen.window));
+        let authority = self.authority();
         let ui_layout_started = Instant::now();
         let ui = match (self.shell.as_mut(), painting.as_ref()) {
             (Some(shell), Some(window)) => {
-                let (request, output) = shell.run(window, &hud, camera, &self.world);
+                let (request, output) =
+                    shell.run(window, &hud, camera, &self.world, &mut self.map_editor, authority);
                 let viewport = shell.viewport();
                 Some((request, output, viewport))
             }

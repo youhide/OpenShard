@@ -22,6 +22,7 @@ use openshard_protocol::casting::SpellId;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::identity::AccountName;
+use openshard_protocol::items::CorpseEquipmentItem;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::skill::SkillLock;
 use openshard_protocol::wire::{Graphic, Hue, Layer, SoundId};
@@ -1502,6 +1503,11 @@ pub struct Corpse {
     pub examined_by: Option<String>,
     /// Everyone who has taken something off it, in the order they did.
     pub looters: Vec<String>,
+    /// Which items were worn by the body, and on which layers, before they
+    /// moved into this corpse container.  A container listing carries the item
+    /// pictures but not these layers; retaining this pairing is what lets the
+    /// client dress the corpse after it opens the loot window.
+    pub equipment: Vec<CorpseEquipmentItem>,
 }
 
 /// The death shroud a fresh ghost wears — item `0x204E` on the outer-torso

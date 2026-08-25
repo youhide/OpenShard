@@ -2579,6 +2579,7 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "openshard-client-artscan",
+ "openshard-client-editor",
  "openshard-client-net",
  "openshard-client-render",
  "openshard-commands",
@@ -2611,6 +2612,16 @@ dependencies = [
  "openshard-client-render",
  "openshard-map",
  "openshard-movement",
+ "openshard-protocol",
+ "openshard-tiles",
+ "openshard-uofiles",
+]
+
+[[package]]
+name = "openshard-client-editor"
+version = "0.0.1"
+dependencies = [
+ "openshard-map",
  "openshard-protocol",
  "openshard-tiles",
  "openshard-uofiles",

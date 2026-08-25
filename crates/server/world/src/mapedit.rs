@@ -57,12 +57,21 @@
 
 use openshard_basemap::patches;
 use openshard_gateway::ConnectionId;
-use openshard_map::patch::{Patch, PatchError};
+use std::collections::BTreeMap;
+
+use openshard_map::map::{LandCell, StaticItem};
+use openshard_map::patch::{Patch, PatchAuthor, PatchError, PatchOp, PatchTime, StaticId};
 use openshard_map::snapshot::MapRevision;
+use openshard_protocol::access::AccessLevel;
 use openshard_protocol::chunks::{Changes, ChunkAt, MAX_MOVED, PublishNotice, WorldRevision};
+use openshard_protocol::mapedit::{
+    EditTile, MapEditOp, MapEditOutcome, MapEditRefusal, MapEditReply, MapEditRequest,
+};
 use openshard_protocol::server_packet::ServerPacket;
+use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Facet;
 use openshard_state::WorldState;
+use openshard_tiles::LandTileId;
 
 /// Why a live edit could not be committed.
 #[derive(Debug)]
@@ -153,6 +162,238 @@ pub fn commit(state: &mut WorldState, facet: Facet, patch: &Patch) -> Result<Map
             Err(CommitError::NotLogged(source))
         }
     }
+}
+
+/// Validate, attribute and commit one request delivered by an in-world
+/// connection, then answer that connection exactly once.
+///
+/// The request is syntactically bounded by `openshard-protocol`; this is the
+/// semantic boundary.  It reads permission and author from the authenticated
+/// connection row, checks the facet and exact parent, compiles reversible
+/// `PatchOp`s from the server's own snapshot, and only then enters [`commit`]'s
+/// apply → log → publish/announce path.
+pub(crate) fn request(state: &mut WorldState, connection: ConnectionId, request: &MapEditRequest) {
+    // Copy authenticated facts out before any mutable world work.  A missing
+    // row has no authority and supplies no fallback author: fail closed.
+    let Some((access, author)) = state
+        .connection(connection)
+        .map(|row| (row.access, row.account.to_string()))
+    else {
+        refuse(
+            state,
+            connection,
+            request.facet,
+            WorldRevision(0),
+            MapEditRefusal::NotAuthorized,
+        );
+        return;
+    };
+    if !access.allows(AccessLevel::GameMaster) {
+        refuse(
+            state,
+            connection,
+            request.facet,
+            WorldRevision(0),
+            MapEditRefusal::NotAuthorized,
+        );
+        return;
+    }
+
+    let Some(facet_state) = state.facet_state_if_loaded(request.facet) else {
+        refuse(
+            state,
+            connection,
+            request.facet,
+            WorldRevision(0),
+            MapEditRefusal::UnknownFacet,
+        );
+        return;
+    };
+    let Some(snapshot) = facet_state.ground().snapshot() else {
+        refuse(
+            state,
+            connection,
+            request.facet,
+            WorldRevision(0),
+            MapEditRefusal::NoGround,
+        );
+        return;
+    };
+    let current = WorldRevision(snapshot.revision().get());
+    if request.ops.is_empty() {
+        refuse(
+            state,
+            connection,
+            request.facet,
+            current,
+            MapEditRefusal::EmptyDraft,
+        );
+        return;
+    }
+    if request.parent != current {
+        refuse(
+            state,
+            connection,
+            request.facet,
+            current,
+            MapEditRefusal::Conflict,
+        );
+        return;
+    }
+
+    let ops = match compile(snapshot.map(), &request.ops) {
+        Ok(ops) => ops,
+        Err(reason) => {
+            refuse(state, connection, request.facet, current, reason);
+            return;
+        }
+    };
+    let patch = Patch::new(
+        request.facet,
+        MapRevision::decoded(request.parent.0),
+        PatchAuthor(author),
+        PatchTime(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_secs()),
+        ),
+        ops,
+    );
+
+    match commit(state, request.facet, &patch) {
+        Ok(revision) => state.send_packet(
+            connection,
+            &ServerPacket::MapEditReply(MapEditReply {
+                facet: request.facet,
+                revision: WorldRevision(revision.get()),
+                outcome: MapEditOutcome::Accepted,
+            }),
+        ),
+        Err(error) => {
+            let reason = match error {
+                CommitError::NotOurWorld { .. } => MapEditRefusal::NotOurWorld,
+                CommitError::NotLogged(_) => MapEditRefusal::Storage,
+                CommitError::Refused(PatchError::Conflict { .. }) => MapEditRefusal::Conflict,
+                CommitError::Refused(PatchError::OffMap { .. }) => MapEditRefusal::OffMap,
+                CommitError::Refused(PatchError::NoSuchStatic { .. }) => MapEditRefusal::NoSuchStatic,
+                // These three mean the snapshot changed between compilation and
+                // apply.  A tick is single-threaded, so they are defensive, but
+                // conflict is still the only honest recovery instruction.
+                CommitError::Refused(
+                    PatchError::WrongFacet { .. }
+                    | PatchError::LandNotAsRecorded { .. }
+                    | PatchError::StaticNotAsRecorded { .. },
+                ) => MapEditRefusal::Conflict,
+                CommitError::Refused(PatchError::NoGround) => MapEditRefusal::NoGround,
+                // `PatchError` is non-exhaustive across the crate boundary: a
+                // new disagreement must fail closed until it gets a wire name.
+                CommitError::Refused(_) => MapEditRefusal::Conflict,
+            };
+            refuse(
+                state,
+                connection,
+                request.facet,
+                current_revision(state, request.facet),
+                reason,
+            );
+        }
+    }
+}
+
+/// Compile wire operations against a scratch view of every touched tile.
+///
+/// The scratch maps are what make order real: two `SetLand`s on one tile, or an
+/// add followed by a remove, record the intermediate `was` value just as
+/// `patch::apply` will observe it.  Reading every op from the original snapshot
+/// instead would construct a batch that passes validation and then refuses
+/// itself halfway through.
+fn compile(
+    map: &openshard_map::map::WorldMap,
+    requested: &[MapEditOp],
+) -> Result<Vec<PatchOp>, MapEditRefusal> {
+    let mut land = BTreeMap::<EditTile, LandCell>::new();
+    let mut statics = BTreeMap::<EditTile, Vec<StaticItem>>::new();
+    let mut compiled = Vec::with_capacity(requested.len());
+
+    for op in requested {
+        let at = match *op {
+            MapEditOp::SetLand { at, .. }
+            | MapEditOp::AddStatic { at, .. }
+            | MapEditOp::RemoveStatic { at, .. } => at,
+        };
+        let (x, y) = (at.x.0, at.y.0);
+        if !map.contains(x, y) {
+            return Err(MapEditRefusal::OffMap);
+        }
+        match *op {
+            MapEditOp::SetLand { tile, z, .. } => {
+                let was = *land
+                    .entry(at)
+                    .or_insert_with(|| map.land(x, y).expect("contains was checked"));
+                let now = LandCell {
+                    tile: LandTileId(tile.get()),
+                    z: z.0,
+                };
+                compiled.push(PatchOp::SetLand { x, y, was, now });
+                land.insert(at, now);
+            }
+            MapEditOp::AddStatic { graphic, z, hue, .. } => {
+                let item = StaticItem {
+                    tile: Graphic(graphic.0),
+                    x,
+                    y,
+                    z: z.0,
+                    hue: Hue(hue.0),
+                };
+                statics
+                    .entry(at)
+                    .or_insert_with(|| map.statics_at(x, y).copied().collect())
+                    .push(item);
+                compiled.push(PatchOp::AddStatic { item });
+            }
+            MapEditOp::RemoveStatic { which, .. } => {
+                let standing = statics
+                    .entry(at)
+                    .or_insert_with(|| map.statics_at(x, y).copied().collect());
+                let index = usize::from(which.0);
+                let Some(was) = standing.get(index).copied() else {
+                    return Err(MapEditRefusal::NoSuchStatic);
+                };
+                standing.remove(index);
+                compiled.push(PatchOp::RemoveStatic {
+                    which: StaticId(which.0),
+                    was,
+                });
+            }
+        }
+    }
+    Ok(compiled)
+}
+
+fn current_revision(state: &WorldState, facet: Facet) -> WorldRevision {
+    state
+        .facet_state_if_loaded(facet)
+        .and_then(|facet| facet.ground().snapshot())
+        .map_or(WorldRevision(0), |snapshot| {
+            WorldRevision(snapshot.revision().get())
+        })
+}
+
+fn refuse(
+    state: &mut WorldState,
+    connection: ConnectionId,
+    facet: Facet,
+    revision: WorldRevision,
+    reason: MapEditRefusal,
+) {
+    state.send_packet(
+        connection,
+        &ServerPacket::MapEditReply(MapEditReply {
+            facet,
+            revision,
+            outcome: MapEditOutcome::Refused(reason),
+        }),
+    );
 }
 
 /// Tell everyone standing on `facet` that its ground has moved.

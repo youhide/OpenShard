@@ -63,6 +63,7 @@ mod diagnostics;
 /// The walk, held against an oracle. Tests only — see its module docs.
 #[cfg(test)]
 mod dst;
+mod editor_mode;
 mod event_loop;
 mod frame_geometry;
 mod frames;
@@ -1248,6 +1249,7 @@ pub fn run<D: Dial + Send + 'static>(
         last_frame: Instant::now(),
         window: None,
         pending: shell::Request::default(),
+        map_editor: editor_mode::MapEditor::open(dir),
         picking: picking::Picking::default(),
         windows: windows::Windows {
             own_windows: Vec::new(),

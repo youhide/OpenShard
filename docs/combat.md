@@ -7,11 +7,12 @@ a ghost standing over it; and the body is a container somebody loots. Six
 milestones written apart would each re-take the same four decisions about whose
 fact a thing is and which end draws it.
 
-The loop already runs. **All of it is on the server** — `openshard-combat`
-aims, swings, resolves damage, records murder, kills, and `world`'s `reap` lays
-the corpse and raises the ghost. What is missing is entirely at this end: the
-client cannot *see* any of it. That is what this plan is: the picture of a fight
-that is already happening.
+The loop now runs end to end. `openshard-combat` aims, swings, resolves damage,
+records murder and kills; `world` lays the corpse and raises the ghost; the
+client folds the answers and draws the stance, aim, health, actions, death and
+corpse. The phases below are retained as the implementation record, with the
+remaining adjacent work called out explicitly rather than leaving the opening
+table to describe an earlier revision.
 
 > Read [`client.md`](client.md) first for how a window, a packet arm and a
 > renderer are put together here — every phase below is that shape again. This
@@ -19,39 +20,30 @@ that is already happening.
 
 ## What is already there, and what is missing
 
-**The server owes nothing.** `crates/server/combat/src/lib.rs` has `attack`,
+**The server owns the rules.** `crates/server/combat/src/lib.rs` has `attack`,
 `swings`, `volleys`, `damage`, `die`, `war_mode`, poison, criminality and murder
 decay; `crates/server/world/src/tick/death.rs` has `lay_corpse`, the ghost, the
 death shroud, the seven-minute rot and the loot hooks;
 `crates/server/server/src/dispatch.rs:143` turns a `0x05` into
 `Command::Attack`. A `.set` on hits or an NPC that fights back exercises the
-whole of it today, unseen.
+whole of it today, visibly.
 
-**The wire is mostly there, in one direction.** Every packet in the loop has an
-`EncodePacket` because the server writes it. What the *client* needs is the
-other half, and this is the whole of the gap:
+**The wire and client now complete the loop.** The former gap was closed in
+P1–P6; this table is the current contract, not a proposal:
 
 | packet | direction | server writes | client decodes | client draws |
 |---|---|---|---|---|
-| `0x05` attack request | → server | n/a (decodes) | **no encoder** | — |
-| `0x72` war mode | both | yes | yes | the toggle only |
-| `0xAA` attack target | → client | yes | **no** | — |
-| `0xA1` health bar | → client | yes | **no** | — |
-| `0x11` mobile status | → client | yes | yes | **nothing reads it** |
-| `0x6E` animation | → client | yes | **no** | — |
-| `0xE2` new animation | → client | yes | **no** | — |
-| `0x2C` death status | → client | yes | yes | the tonemap's grey (P4) |
-| `0x54` sound | → client | yes | **no** | — (M6) |
-| `0x70`/`0xC0` effects | → client | yes | **no** | — |
-| `0x1A` world item | → client | yes, **no direction** | yes, **refuses direction** | as a static |
-| `0x07`/`0x08`/`0x13` lift, drop, equip | → server | n/a (decodes) | **never sent** | — |
-| `0x27` drag cancel | → client | yes | **no** | — |
-| `0x89` corpse equipment | → client | **no such packet** | — | — |
-
-"No decoder" means `ServerPacket::decode` answers `Ok(None)` and the byte stream
-steps over it in silence — the trap `client.md` already has a backlog entry
-about. Every row above is a thing a shard is saying to this client that the
-client does not hear.
+| `0x05` attack request | → server | n/a (decodes) | client encodes | starts/stops aim |
+| `0x72` war mode | both | yes | yes | war toggle and stance |
+| `0xAA` attack target | → client | yes | yes | target ring |
+| `0xA1` health bar | → client | yes | yes | overhead bar and damage feedback |
+| `0x11` mobile status | → client | yes | yes | own status window |
+| `0x6E` / `0xE2` animation | → client | yes | yes | one-shot swing/death action |
+| `0x2C` death status | → client | yes | yes | dead-state greyscale and interaction gates |
+| `0x54` sound | → client | yes | yes | audio playback |
+| `0x1A` world item | → client | yes, with corpse direction | yes | corpse body animation |
+| `0x07`/`0x08`/`0x13` and `0x27` | both | yes | yes | lift, drop, equip and rollback |
+| `0x89` corpse equipment | → client | yes, when a corpse opens | yes | corpse worn layers once its contents arrive |
 
 **The client's own machinery is further along than it looks.** Three pieces this
 plan leans on exist and are tested: `mobiles::pick` answers which body is under
@@ -365,16 +357,13 @@ draws as described.
    and the thing that is clicked are two different rectangles. `items::pick`
    grows the same fork the collector has, or `corpses::pick` sits beside it;
    decide when the code is in front of you, and write down which and why.
-5. Equipment on the corpse is **out of scope, and the reason is a packet this
-   engine does not have at all**: the reference draws a corpse's worn layers out
-   of the items inside it, and it learns which layer each one is on from
-   **`0x89` — corpse equipment**, a serial followed by `(layer + 1, item
-   serial)` pairs terminated by a zero byte (`PacketHandlers.CorpseEquipment`).
-   `0x3C` carries no layer field, so without `0x89` a corpse's contents are a
-   list of things with no idea what any of them was worn as. Not in
-   `openshard_protocol`, not sent by our shard, and the gear is in the corpse
-   container already — so this is a wire feature with a server half, and it
-   belongs to P6 where the container is open anyway.
+5. Corpse equipment lands with looting: `0x89` carries the corpse serial and
+   `(layer + 1, item serial)` pairs terminated by zero, while the `0x3C` that
+   opens its container carries those items' graphics. The server captures the
+   pair before stripping `Equipped`, persists it with the corpse, and sends it
+   when the container opens. The client keeps the two packet facts separately
+   and joins them whenever it rebuilds the corpse picture, so either arrival
+   order draws the same layers.
 
 **Done when:** a slain creature leaves a corpse of *its* body on the ground;
 corpses face different ways; a corpse that comes into view falls and then lies
@@ -396,13 +385,23 @@ it.
    decoder. This is the first *drag* in this client, and it is a gesture with
    its own state: what is on the cursor, where it came from, and what happens
    when the shard says no.
-3. The layer on a contained item — P5's item 5 — which is what would let a
-   corpse be drawn dressed.
+3. The layer on a contained item — P5's item 5 — now arrives as `0x89`; once
+   the `0x3C` listing has supplied its graphics, the corpse is redrawn dressed.
 
 **Done when:** an item can be dragged out of a corpse into the backpack and back;
 a refused drag puts the item back where it was rather than losing it; and a
 corpse whose last item is taken still stands there until it rots (the shard's
 rule, not the client's).
+
+#### Built
+
+All six phases are now in the client. The final wire seam is corpse equipment:
+the layer relation is saved before worn gear moves into the corpse, survives a
+restart, is sent as `0x89` with the opened corpse's `0x3C`, and is joined to the
+container graphics on the client. A corpse therefore remains an animated body
+from first sight and gains the equipment it was carrying as soon as its loot
+listing is known; lifting an item removes it from that listing and thus from the
+next rendered corpse frame.
 
 ## What this plan does not cover
 
@@ -450,6 +449,7 @@ rule, not the client's).
   or `decode_packet` takes the table as a parameter; the second is the honest
   shape and the first is one line.
 - **The war stance is the first thing that reads equipment for a *reason*.**
-  D2's deferred armed variants, `MobileView.IsCovered`, and P6's corpse layers
-  are three features waiting on one field — the wire graphic `crowd::worn`
-  discards. Whoever adds it should land all three.
+  D2's deferred armed variants and `MobileView.IsCovered` are still waiting on
+  the wire graphic `crowd::worn` discards. Corpse layers no longer are: their
+  wire relationship is `0x89`, which is now retained and rendered when the
+  corpse container is opened.

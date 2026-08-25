@@ -9,6 +9,7 @@ use openshard_protocol::casting::SpellId;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::gump::{RawButtonId, RawGumpId, RawGumpKey, RawSwitchId};
 use openshard_protocol::items::ItemAmount;
+use openshard_protocol::mapedit::MapEditRequest;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::skill::SkillLock;
 use openshard_protocol::speech::TalkMode;
@@ -110,6 +111,11 @@ pub enum Outgoing {
     /// named — a design is a few hundred tiles, and the whole point of the
     /// revision riding with the draw is that the ask is rare.
     QueryDesign(Serial),
+    /// Commit one bounded editor draft against the revision it was built from.
+    ///
+    /// The request deliberately has no author or authority field: the shard
+    /// derives both from this established session before it accepts anything.
+    CommitMapEdit(MapEditRequest),
 }
 
 impl Outgoing {
@@ -157,13 +163,18 @@ impl Outgoing {
                 serial: openshard_protocol::serial::RawSerial(house.raw()),
             }
             .encode(),
+            Self::CommitMapEdit(request) => request.encode(),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use openshard_protocol::chunks::WorldRevision;
+    use openshard_protocol::extended::ExtendedRequest;
+    use openshard_protocol::mapedit::{EditLandTile, EditTile, EditX, EditY, EditZ, MapEditOp};
     use openshard_protocol::serial::Serial;
+    use openshard_protocol::world::Facet;
 
     use super::*;
 
@@ -182,6 +193,28 @@ mod tests {
         assert_eq!(
             Outgoing::QuestLog.encode(player, ClientVersion::new(7, 0, 45, 65)),
             crate::doll::quest_log(player)
+        );
+    }
+
+    #[test]
+    fn a_map_edit_action_survives_the_extended_envelope() {
+        let request = MapEditRequest {
+            facet: Facet(0),
+            parent: WorldRevision(12),
+            ops: vec![MapEditOp::SetLand {
+                at: EditTile {
+                    x: EditX(100),
+                    y: EditY(200),
+                },
+                tile: EditLandTile::from_wire(9).expect("a land tile"),
+                z: EditZ(-3),
+            }],
+        };
+        let bytes = Outgoing::CommitMapEdit(request.clone())
+            .encode(Serial::new(0x0000_002A).unwrap(), ClientVersion::TOL);
+        assert_eq!(
+            ExtendedRequest::decode(&bytes).expect("the typed action encoded one 0xBF"),
+            ExtendedRequest::MapEdit(request)
         );
     }
 }

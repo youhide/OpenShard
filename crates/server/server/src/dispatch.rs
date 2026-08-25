@@ -232,6 +232,13 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
                 facet: request.facet,
                 revision: request.revision,
             }),
+            // Kept whole: authority, attribution, coordinates and the parent
+            // are all world/session questions.  This seam only attaches the
+            // connection id; the request deliberately carries no author.
+            ExtendedRequest::MapEdit(request) => Some(Command::CommitMapEdit {
+                connection: id,
+                request,
+            }),
             ExtendedRequest::Unknown(subcommand) => {
                 debug!(%id, subcommand = format!("0x{subcommand:02X}"), "unhandled 0xBF");
                 None
@@ -323,6 +330,30 @@ pub(crate) fn start_cities(facets: &[u8], start: (u16, u16)) -> Vec<StartLocatio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_map_edit_attaches_only_the_connection_before_entering_the_tick() {
+        let request = openshard_protocol::mapedit::MapEditRequest {
+            facet: Facet(2),
+            parent: openshard_protocol::chunks::WorldRevision(7),
+            ops: vec![openshard_protocol::mapedit::MapEditOp::SetLand {
+                at: openshard_protocol::mapedit::EditTile {
+                    x: openshard_protocol::mapedit::EditX(3),
+                    y: openshard_protocol::mapedit::EditY(4),
+                },
+                tile: openshard_protocol::mapedit::EditLandTile::from_wire(9).unwrap(),
+                z: openshard_protocol::mapedit::EditZ(5),
+            }],
+        };
+        let connection = ConnectionId::from_raw(42);
+        assert_eq!(
+            dispatch_world_packet(
+                ClientPacket::Extended(ExtendedRequest::MapEdit(request.clone())),
+                connection,
+            ),
+            Some(Command::CommitMapEdit { connection, request })
+        );
+    }
 
     #[test]
     fn a_facet_zero_shard_offers_the_classic_towns() {

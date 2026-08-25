@@ -1263,6 +1263,9 @@ impl World {
                 facet,
                 revision,
             } => self.changes_request(connection, facet, revision),
+            Command::CommitMapEdit { connection, request } => {
+                crate::mapedit::request(&mut self.state, connection, &request);
+            }
             Command::ContextMenuSelect {
                 connection,
                 serial,
@@ -1662,6 +1665,8 @@ mod crafting_tests;
 mod harvest_tests;
 #[cfg(test)]
 mod interest_tests;
+#[cfg(test)]
+mod mapedit_tests;
 #[cfg(test)]
 mod persistence_tests;
 #[cfg(test)]

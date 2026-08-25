@@ -261,6 +261,12 @@ pub(crate) struct App {
     /// keyboard and mouse event here already has: they arrive between frames and
     /// land on the next one.
     pub(crate) pending: shell::Request,
+    /// The privileged map-editor mode.
+    ///
+    /// Application state rather than egui state: the panel only asks for a
+    /// transition, while future tools and drafts need one authoritative local
+    /// answer even when the panel is closed.
+    pub(crate) map_editor: crate::editor_mode::MapEditor,
     /// What is under the cursor, and what the last click named — see
     /// [`picking::Picking`].
     pub(crate) picking: picking::Picking,

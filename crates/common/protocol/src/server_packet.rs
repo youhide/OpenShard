@@ -31,7 +31,7 @@ use crate::error::{DecodeError, expect_id};
 use crate::feature::Feature;
 use crate::feedback::{Animation, GraphicalEffect, HuedEffect, NewAnimation, PlaySound};
 use crate::gump::{CloseGump, GumpDisplay};
-use crate::items::{DragCancel, EquipUpdate, WorldItem};
+use crate::items::{CorpseEquipment, DragCancel, EquipUpdate, WorldItem};
 use crate::login::{
     CharacterList, CharacterListUpdate, DeleteReject, LoginDenied, Relay, ShardList,
     supported_features_length,
@@ -118,6 +118,8 @@ pub enum ServerPacket {
     Remove(Remove),
     /// `0x88` — open a mobile's paperdoll.
     OpenPaperdoll(OpenPaperdoll),
+    /// `0x89` — the layers the items in a corpse container occupied on its body.
+    CorpseEquipment(CorpseEquipment),
     /// `0x11` — a mobile's full status.
     MobileStatus(MobileStatus),
     /// `0x77` — move a mobile the client already knows about.
@@ -175,6 +177,9 @@ pub enum ServerPacket {
     /// `0xBF` subcommand `0xE008` — what moved since the revision a client says
     /// it already holds, so that a cache asks only for the difference.
     ChangesReply(crate::chunks::ChangesReply),
+    /// `0xBF` subcommand `0xE00A` — acceptance or a typed refusal of one live
+    /// map-editor commit.
+    MapEditReply(crate::mapedit::MapEditReply),
     /// `0xDC` — the tooltip revision for one object.
     TooltipRevision(TooltipRevision),
     /// `0xD6` — the property list itself, answering a client's batch query.
@@ -246,6 +251,7 @@ impl ServerPacket {
             Self::MapChange(_) => MapChange::ID,
             Self::Remove(_) => <Remove as EncodePacket>::ID,
             Self::OpenPaperdoll(_) => <OpenPaperdoll as EncodePacket>::ID,
+            Self::CorpseEquipment(_) => <CorpseEquipment as EncodePacket>::ID,
             Self::MobileStatus(_) => <MobileStatus as EncodePacket>::ID,
             Self::MobileMove(_) => <MobileMove as EncodePacket>::ID,
             Self::MobileIncoming(_) => <MobileIncoming as EncodePacket>::ID,
@@ -266,6 +272,7 @@ impl ServerPacket {
             Self::PublishNotice(_) => <crate::chunks::PublishNotice as EncodePacket>::ID,
             Self::ChunkRefused(_) => <crate::chunks::ChunkRefused as EncodePacket>::ID,
             Self::ChangesReply(_) => <crate::chunks::ChangesReply as EncodePacket>::ID,
+            Self::MapEditReply(_) => <crate::mapedit::MapEditReply as EncodePacket>::ID,
             Self::PropertyListReply(_) => <PropertyListReply as EncodePacket>::ID,
             Self::PartyMemberList(_) => <PartyMemberList as EncodePacket>::ID,
             Self::PartyRemoveMember(_) => <PartyRemoveMember as EncodePacket>::ID,
@@ -325,6 +332,7 @@ impl ServerPacket {
             Self::MapChange(_) => MapChange::LENGTH,
             Self::Remove(_) => Remove::LENGTH,
             Self::OpenPaperdoll(_) => <OpenPaperdoll as EncodePacket>::LENGTH,
+            Self::CorpseEquipment(_) => <CorpseEquipment as EncodePacket>::LENGTH,
             Self::MobileStatus(_) => MobileStatus::LENGTH,
             Self::MobileMove(_) => MobileMove::LENGTH,
             Self::MobileIncoming(_) => MobileIncoming::LENGTH,
@@ -345,6 +353,7 @@ impl ServerPacket {
             Self::PublishNotice(_) => <crate::chunks::PublishNotice as EncodePacket>::LENGTH,
             Self::ChunkRefused(_) => <crate::chunks::ChunkRefused as EncodePacket>::LENGTH,
             Self::ChangesReply(_) => <crate::chunks::ChangesReply as EncodePacket>::LENGTH,
+            Self::MapEditReply(_) => <crate::mapedit::MapEditReply as EncodePacket>::LENGTH,
             Self::PropertyListReply(_) => PropertyListReply::LENGTH,
             Self::PartyMemberList(_) => PartyMemberList::LENGTH,
             Self::PartyRemoveMember(_) => PartyRemoveMember::LENGTH,
@@ -406,6 +415,7 @@ impl ServerPacket {
             Self::MapChange(packet) => packet.encode_body(out, version),
             Self::Remove(packet) => packet.encode_body(out, version),
             Self::OpenPaperdoll(packet) => packet.encode_body(out, version),
+            Self::CorpseEquipment(packet) => packet.encode_body(out, version),
             Self::MobileStatus(packet) => packet.encode_body(out, version),
             Self::MobileMove(packet) => packet.encode_body(out, version),
             Self::MobileIncoming(packet) => packet.encode_body(out, version),
@@ -426,6 +436,7 @@ impl ServerPacket {
             Self::PublishNotice(packet) => packet.encode_body(out, version),
             Self::ChunkRefused(packet) => packet.encode_body(out, version),
             Self::ChangesReply(packet) => packet.encode_body(out, version),
+            Self::MapEditReply(packet) => packet.encode_body(out, version),
             Self::PropertyListReply(packet) => packet.encode_body(out, version),
             Self::PartyMemberList(packet) => packet.encode_body(out, version),
             Self::PartyRemoveMember(packet) => packet.encode_body(out, version),
@@ -508,6 +519,9 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
         crate::chunks::ChangesReply::SUBCOMMAND => decode_server(packet, version)
             .map(ServerPacket::ChangesReply)
             .map_err(ServerDecodeError::ChangesReply)?,
+        crate::mapedit::MapEditReply::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::MapEditReply)
+            .map_err(ServerDecodeError::MapEditReply)?,
         crate::party::SUBCOMMAND => return decode_party(packet, version),
         _ => return Ok(None),
     }))
@@ -660,6 +674,9 @@ impl ServerPacket {
             <OpenPaperdoll as DecodePacket>::ID => decode_server(packet, version)
                 .map(Self::OpenPaperdoll)
                 .map_err(ServerDecodeError::OpenPaperdoll)?,
+            <CorpseEquipment as DecodePacket>::ID => decode_server(packet, version)
+                .map(Self::CorpseEquipment)
+                .map_err(ServerDecodeError::CorpseEquipment)?,
             // What a mobile is wearing, one layer at a time. Without this arm a
             // body was dressed once, by the `0x78` that drew it, and never
             // again — and a vendor's stock crate, which arrives as nothing but
@@ -793,6 +810,8 @@ pub enum ServerDecodeError {
     ContainerContents(DecodeError),
     /// `0x88` did not decode.
     OpenPaperdoll(DecodeError),
+    /// `0x89` did not decode.
+    CorpseEquipment(DecodeError),
     /// `0x72` did not decode.
     WarMode(DecodeError),
     /// `0xAA` did not decode.
@@ -846,6 +865,8 @@ pub enum ServerDecodeError {
     ChunkRefused(DecodeError),
     /// `0xBF 0xE008` did not decode.
     ChangesReply(DecodeError),
+    /// `0xBF 0xE00A` did not decode.
+    MapEditReply(DecodeError),
     /// `0xD6` did not decode.
     PropertyListReply(DecodeError),
     /// A `0xBF` subcommand `0x06` did not decode. One variant for all four,
@@ -886,6 +907,7 @@ impl fmt::Display for ServerDecodeError {
             Self::PublishNotice(error) => ("0xBF 0xE005 publish notice", error),
             Self::ChunkRefused(error) => ("0xBF 0xE006 chunk refused", error),
             Self::ChangesReply(error) => ("0xBF 0xE008 changes reply", error),
+            Self::MapEditReply(error) => ("0xBF 0xE00A map-edit reply", error),
             Self::PropertyListReply(error) => ("0xD6 property list", error),
             Self::Party(error) => ("0xBF 0x06 party", error),
             Self::CloseGump(error) => ("0xBF 0x04 close gump", error),
@@ -894,6 +916,7 @@ impl fmt::Display for ServerDecodeError {
             Self::AddToContainer(error) => ("0x25 add to container", error),
             Self::ContainerContents(error) => ("0x3C container contents", error),
             Self::OpenPaperdoll(error) => ("0x88 paperdoll", error),
+            Self::CorpseEquipment(error) => ("0x89 corpse equipment", error),
             Self::WarMode(error) => ("0x72 war mode", error),
             Self::AttackTarget(error) => ("0xAA attack target", error),
             Self::Health(error) => ("0xA1 health bar", error),
@@ -1006,6 +1029,7 @@ pub fn server_packet_length(id: u8, version: ClientVersion) -> Option<PacketLeng
         0x85 => DeleteReject::LENGTH,
         0x86 => CharacterListUpdate::LENGTH,
         0x88 => <OpenPaperdoll as EncodePacket>::LENGTH,
+        0x89 => CorpseEquipment::LENGTH,
         0x8C => <Relay as EncodePacket>::LENGTH,
         0x9E => SellList::LENGTH,
         0xA1 => HealthBar::LENGTH,
@@ -1152,6 +1176,7 @@ mod tests {
         MapChange,
         Remove,
         OpenPaperdoll,
+        CorpseEquipment,
         MobileStatus,
         MobileMove,
         MobileIncoming,
@@ -1171,6 +1196,7 @@ mod tests {
         PublishNotice,
         ChunkRefused,
         ChangesReply,
+        MapEditReply,
         TooltipRevision,
         PropertyListReply,
         PartyMemberList,
@@ -1327,6 +1353,13 @@ mod tests {
                 serial,
                 text: "Lord British".to_owned(),
                 flags: crate::mobile::PaperdollFlags::NONE,
+            }),
+            ServerPacket::CorpseEquipment(CorpseEquipment {
+                corpse: serial,
+                items: vec![crate::items::CorpseEquipmentItem {
+                    layer: crate::wire::Layer::TORSO,
+                    item: Serial::new(0x4000_0001).unwrap(),
+                }],
             }),
             ServerPacket::MobileStatus(MobileStatus {
                 serial,
@@ -1575,6 +1608,11 @@ mod tests {
                     crate::chunks::ChunkAt { x: 21, y: 25 },
                     crate::chunks::ChunkAt { x: 22, y: 25 },
                 ]),
+            }),
+            ServerPacket::MapEditReply(crate::mapedit::MapEditReply {
+                facet: crate::world::Facet(0),
+                revision: crate::chunks::WorldRevision(4),
+                outcome: crate::mapedit::MapEditOutcome::Accepted,
             }),
         ]
     }

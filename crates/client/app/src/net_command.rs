@@ -283,6 +283,7 @@ impl App {
             chunks.len(),
             revision.get()
         );
+        self.map_editor.ground_at(facet, revision);
         // The blocks those chunks cover, which is what the composited pictures
         // of the ground are addressed by. One rectangle per chunk rather than
         // one over all of them: two edits at opposite ends of a facet would
@@ -516,6 +517,7 @@ impl App {
                 self.resources
                     .ground
                     .set_base(Some(*snapshot), &self.resources.tiledata);
+                self.map_editor.ground_at(facet, revision);
                 if replaced {
                     if let Some(window) = self.window.as_mut() {
                         window.composites.clear();
@@ -684,6 +686,12 @@ impl App {
     }
 
     fn apply_packet(&mut self, packet: &ServerPacket, movement: Option<link::Movement>) {
+        if let ServerPacket::MapEditReply(reply) = packet {
+            self.map_editor.on_reply(*reply);
+            if let Some(snapshot) = self.resources.ground.snapshot() {
+                self.map_editor.ground_at(snapshot.facet(), snapshot.revision());
+            }
+        }
         // A vendor catalogue has no wire-level close packet: closing it is a
         // local decision, so `locally_closed` keeps the stale catalogue in the
         // last view snapshot from immediately reappearing.  Conversely every
@@ -1025,6 +1033,27 @@ impl App {
             }
             match item.payload {
                 WorldItemPayload::Corpse { body, facing } => {
+                    // `0x3C` tells us the corpse container's item pictures and
+                    // `0x89` tells us which layers they occupied. Either packet
+                    // may arrive first, so this projection joins only the pairs
+                    // already known and is re-run for every world mutation.
+                    let corpse_equipment: Vec<_> = view
+                        .corpse_equipment
+                        .get(serial)
+                        .into_iter()
+                        .flat_map(|layers| layers.iter())
+                        .filter_map(|layer| {
+                            view.contents
+                                .get(serial)
+                                .and_then(|items| items.iter().find(|item| item.serial == layer.item))
+                                .map(|item| openshard_protocol::mobile::Equipment {
+                                    serial: item.serial,
+                                    graphic: item.graphic,
+                                    layer: layer.layer,
+                                    hue: item.hue,
+                                })
+                        })
+                        .collect();
                     self.world.presentation.corpses.push((
                         Some(*serial),
                         self.world.presentation.crowd.corpse(
@@ -1033,6 +1062,7 @@ impl App {
                             body,
                             facing,
                             item.hue,
+                            crowd::worn(&corpse_equipment, &self.resources.tiledata).into(),
                         ),
                     ));
                 }

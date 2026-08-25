@@ -1073,6 +1073,22 @@ pub struct CorpseData {
     /// did before this was carried at all.
     #[serde(default)]
     pub facing: u8,
+    /// The item/layer pairs the corpse equipment packet needs after a restart.
+    /// The contained item records retain the pictures; this retains the one
+    /// relationship those records do not encode.
+    #[serde(default)]
+    pub equipment: Vec<CorpseEquipmentData>,
+}
+
+/// One saved `0x89` relationship. It is nested in [`CorpseData`] because both
+/// values only have a meaning while the corpse item itself exists.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct CorpseEquipmentData {
+    /// The contained item's stable wire serial.
+    #[serde(with = "serial")]
+    pub item: Serial,
+    /// The layer it occupied on the living body.
+    pub layer: u8,
 }
 
 /// One creature kind a spawn region may put down, as saved — a plain mirror of
@@ -1596,6 +1612,10 @@ mod tests {
                     examined_by: Some("Mordred".into()),
                     looters: vec!["Vesper".into()],
                     facing: 6,
+                    equipment: vec![CorpseEquipmentData {
+                        item: Serial::new(0x4000_0003).unwrap(),
+                        layer: 0x0D,
+                    }],
                 }),
                 poison: Some((2, 14)),
                 trap: Some(TrapRecord {

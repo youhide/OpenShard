@@ -200,6 +200,83 @@ impl ItemFlags {
 /// stack amount.
 pub const CORPSE_GRAPHIC: Graphic = Graphic(0x2006);
 
+/// One item which was worn when a corpse was made.
+///
+/// `0x89` cannot carry the item's graphic: the matching `0x3C` container list
+/// already does that.  Its job is the fact that list lacks — which slot each
+/// of those items occupied on the body that died.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CorpseEquipmentItem {
+    /// The layer occupied on the living body.
+    pub layer: Layer,
+    /// The item now held by the corpse container.
+    pub item: Serial,
+}
+
+/// `0x89` — connect a corpse container's items to the layers they were worn on.
+///
+/// The body starts with the corpse serial, then repeats `(layer + 1, item
+/// serial)` pairs, terminated by a zero layer byte.  The `+ 1` is wire syntax:
+/// [`Layer::ONE_HANDED`] is zero, so writing a bare layer would make the first
+/// valid slot indistinguishable from the terminator.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct CorpseEquipment {
+    /// The `0x2006` world item which owns the equipment.
+    pub corpse: Serial,
+    /// The worn item and layer pairs, in the order the shard chose to send.
+    pub items: Vec<CorpseEquipmentItem>,
+}
+
+impl EncodePacket for CorpseEquipment {
+    const ID: u8 = 0x89;
+    const LENGTH: PacketLength = PacketLength::Variable;
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u32(self.corpse.raw());
+        for item in &self.items {
+            // Layers this engine sends fit in the classic range, whose final
+            // value remains below the zero terminator after adding one.
+            let wire_layer = item
+                .layer
+                .0
+                .checked_add(1)
+                .expect("0x89 cannot encode layer 0xFF");
+            out.u8(wire_layer);
+            out.u32(item.item.raw());
+        }
+        out.u8(0);
+    }
+}
+
+impl DecodePacket for CorpseEquipment {
+    const ID: u8 = 0x89;
+
+    fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
+        let raw_corpse = reader.u32()?;
+        let corpse = Serial::new(raw_corpse).ok_or(DecodeError::UnknownValue {
+            field: "corpse equipment corpse serial",
+            value: raw_corpse,
+        })?;
+        let mut items = Vec::new();
+        loop {
+            let wire_layer = reader.u8()?;
+            if wire_layer == 0 {
+                break;
+            }
+            let raw_item = reader.u32()?;
+            let item = Serial::new(raw_item).ok_or(DecodeError::UnknownValue {
+                field: "corpse equipment item serial",
+                value: raw_item,
+            })?;
+            items.push(CorpseEquipmentItem {
+                layer: Layer(wire_layer - 1),
+                item,
+            });
+        }
+        Ok(Self { corpse, items })
+    }
+}
+
 /// `0x1A` — draw an item on the ground the client has not seen. Variable length.
 ///
 /// # The shape is a nest of optional fields
@@ -1168,5 +1245,44 @@ mod tests {
         assert_eq!(packet[8], 1); // layer
         assert_eq!(&packet[9..13], &0x0000_0001u32.to_be_bytes());
         assert_eq!(&packet[13..15], &0x0021u16.to_be_bytes());
+    }
+
+    #[test]
+    fn corpse_equipment_keeps_each_contained_item_on_its_layer() {
+        let corpse = Serial::new(0x4000_002A).unwrap();
+        let shirt = Serial::new(0x4000_002B).unwrap();
+        let weapon = Serial::new(0x4000_002C).unwrap();
+        let packet = CorpseEquipment {
+            corpse,
+            items: vec![
+                CorpseEquipmentItem {
+                    layer: Layer::TORSO,
+                    item: shirt,
+                },
+                CorpseEquipmentItem {
+                    layer: Layer::ONE_HANDED,
+                    item: weapon,
+                },
+            ],
+        };
+        let bytes = encode_packet(&packet, version());
+        assert_eq!(bytes[0], 0x89);
+        assert_eq!(u16::from_be_bytes([bytes[1], bytes[2]]) as usize, bytes.len());
+        assert_eq!(
+            bytes[7],
+            Layer::TORSO.0 + 1,
+            "the first layer is not the terminator"
+        );
+        assert_eq!(bytes[12], Layer::ONE_HANDED.0 + 1);
+        assert_eq!(bytes.last(), Some(&0), "the layer list ends explicitly");
+
+        let crate::server_packet::ServerPacket::CorpseEquipment(heard) =
+            crate::server_packet::ServerPacket::decode(&bytes, version())
+                .unwrap()
+                .expect("0x89 has a server decoder")
+        else {
+            panic!("0x89 decoded as another server packet");
+        };
+        assert_eq!(heard, packet);
     }
 }

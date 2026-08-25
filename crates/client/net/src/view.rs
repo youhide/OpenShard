@@ -34,6 +34,7 @@ use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::gump::layout::{Element, parse};
 use openshard_protocol::gump::{GumpId, GumpKey, GumpPoint};
+use openshard_protocol::items::CorpseEquipmentItem;
 use openshard_protocol::items::WorldItemPayload;
 use openshard_protocol::mobile::{Equipment, Notoriety, PaperdollFlags, StatusFlags, Vitals};
 use openshard_protocol::properties::PropertyEntry;
@@ -404,6 +405,10 @@ pub struct WorldView {
     /// here: a container's icons overlap, and the shard's order is the order the
     /// reference client draws them in.
     pub contents: FxHashMap<Serial, Vec<ContainedItem>>,
+    /// The layers the items in a corpse container occupied on the body that
+    /// died. `0x3C` supplies their graphics; `0x89` supplies this relationship.
+    /// Keeping the packets separate preserves either arrival order.
+    pub corpse_equipment: FxHashMap<Serial, Vec<CorpseEquipmentItem>>,
     /// The one target cursor the shard currently has open for this player.
     pub target: Option<OpenTarget>,
     /// Buy catalogues currently opened by NPC vendors, keyed by vendor serial.
@@ -727,6 +732,7 @@ impl WorldView {
             gumps: Vec::new(),
             containers: FxHashMap::default(),
             contents: FxHashMap::default(),
+            corpse_equipment: FxHashMap::default(),
             target: None,
             vendor_buys: FxHashMap::default(),
             vendor_sells: FxHashMap::default(),
@@ -1286,6 +1292,12 @@ impl WorldView {
                     changed
                 }
             },
+            ServerPacket::CorpseEquipment(equipment) => {
+                let changed = self.corpse_equipment.get(&equipment.corpse) != Some(&equipment.items);
+                self.corpse_equipment
+                    .insert(equipment.corpse, equipment.items.clone());
+                changed
+            }
             ServerPacket::BuyList(list) => {
                 self.pending_vendor_buys
                     .insert(list.container, list.lines.clone());
@@ -1460,6 +1472,10 @@ impl WorldView {
                 // A container that is itself removed takes its window with it.
                 let had_window = self.containers.remove(&remove.serial).is_some();
                 self.contents.remove(&remove.serial);
+                let had_corpse_equipment = self.corpse_equipment.remove(&remove.serial).is_some();
+                for equipment in self.corpse_equipment.values_mut() {
+                    equipment.retain(|worn| worn.item != remove.serial);
+                }
                 // A spellbook may be held by that container or lie on the
                 // ground; either way a removed book cannot keep its spell
                 // page open, and a reused serial must not inherit its mask.
@@ -1486,6 +1502,7 @@ impl WorldView {
                     || had_item
                     || was_held
                     || had_window
+                    || had_corpse_equipment
                     || had_spellbook
                     || had_vendor
                     || had_paperdoll
@@ -1611,7 +1628,9 @@ mod tests {
     use openshard_protocol::combat::WarMode;
     use openshard_protocol::containers::{AddToContainer, ContainerContents};
     use openshard_protocol::direction::Direction;
-    use openshard_protocol::items::{ItemAmount, ItemFlags, WorldItem, WorldItemPayload};
+    use openshard_protocol::items::{
+        CorpseEquipment, CorpseEquipmentItem, ItemAmount, ItemFlags, WorldItem, WorldItemPayload,
+    };
     use openshard_protocol::mobile::{MobileIncoming, MobileMove, MobileStatus, Remove};
     use openshard_protocol::skill::SkillLock;
     use openshard_protocol::world::{DeathStatus, PlayerUpdate};
@@ -2319,6 +2338,27 @@ mod tests {
             openshard_protocol::combat::AttackTarget { target: None }
         )));
         assert_eq!(view.player.attacking, None);
+    }
+
+    #[test]
+    fn corpse_equipment_keeps_layers_separate_from_the_container_listing() {
+        let mut view = WorldView::entered(start());
+        let corpse = Serial::new(0x4000_002A).unwrap();
+        let shirt = Serial::new(0x4000_002B).unwrap();
+        let packet = CorpseEquipment {
+            corpse,
+            items: vec![CorpseEquipmentItem {
+                layer: openshard_protocol::wire::Layer::TORSO,
+                item: shirt,
+            }],
+        };
+
+        assert!(view.apply(&ServerPacket::CorpseEquipment(packet.clone())));
+        assert_eq!(view.corpse_equipment.get(&corpse), Some(&packet.items));
+        assert!(
+            !view.apply(&ServerPacket::CorpseEquipment(packet)),
+            "the same layer mapping is a settled fact"
+        );
     }
 
     #[test]

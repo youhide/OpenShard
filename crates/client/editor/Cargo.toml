@@ -1,0 +1,23 @@
+[package]
+name = "openshard-client-editor"
+description = "UI-independent models for editing an OpenShard map."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Brushes compile directly to the map layer's three canonical patch operations.
+openshard-map.workspace = true
+# Tile ids and their definitions are domain data. `uofiles` only reads the
+# client's two files and decodes art on demand for a visible catalogue row.
+openshard-tiles.workspace = true
+openshard-uofiles.workspace = true
+# A static's art id is the wire's `Graphic`, as it is everywhere else in the
+# project; the editor must not create a second id space for the same art.
+openshard-protocol.workspace = true

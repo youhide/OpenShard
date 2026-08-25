@@ -10,6 +10,7 @@
 //! shell draws from — the frame's answer to "what are the panels allowed to
 //! know".
 
+use openshard_client_net::action::Outgoing;
 use openshard_client_render::bench::{self, Metrics};
 use openshard_client_render::camera::{self, Camera, TileBounds};
 use openshard_client_render::control::Follow;
@@ -773,6 +774,28 @@ impl App {
         if request.frame_dump {
             self.request_frame_dump();
         }
+        // Re-check when the delayed request is applied rather than trusting
+        // the authority under which the button was drawn. A notice or a
+        // disconnect may have landed in the intervening frame.
+        let authority = self.authority();
+        if let Some(active) = request.editor_mode {
+            self.map_editor.set_active(active, authority);
+        }
+        self.map_editor.reconcile(authority);
+        if request.commit_map_edit && self.map_editor.active() && self.world.shard.link().is_some() {
+            let edit = {
+                let snapshot = self
+                    .resources
+                    .ground
+                    .snapshot()
+                    .expect("the shell only runs after ground arrives");
+                self.map_editor
+                    .commit_request(snapshot.map(), snapshot.facet(), snapshot.revision())
+            };
+            if let (Some(link), Some(edit)) = (self.world.shard.link(), edit) {
+                link.act(Outgoing::CommitMapEdit(edit));
+            }
+        }
         // The rebake button. A client with no facet open has nothing to bake a
         // graph *of*, and that is the state the button is disabled in anyway —
         // this is the second net, because a facet is the worker's own argument.
@@ -1080,6 +1103,7 @@ impl App {
                 .picking
                 .selected
                 .map(|identity| self.resolve_selection(identity)),
+            editor_preview: self.map_editor.preview_tiles(self.resources.map()),
             health_bars: self.health_bars(camera, drawn_mobiles),
             goal: self.steer.goal().map(|at| self.tile_info(Tile::new(at.x, at.y))),
             ttf_active: self.resources.ttf_font.is_some(),

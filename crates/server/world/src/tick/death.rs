@@ -575,15 +575,29 @@ impl World {
     /// bank box — those are worn containers it walks away (as a ghost) still
     /// holding, not loot for the corpse. The worn *gear* still drops.
     fn move_gear_to_corpse(&mut self, mobile: Serial, container: Serial, keep: &[Layer]) {
-        let worn: Vec<(usize, EntityId)> = self
+        let worn: Vec<(usize, EntityId, Layer)> = self
             .state
             .registry
             .query::<Equipped>()
             .filter(|(_, equipped)| equipped.mobile == mobile && !keep.contains(&equipped.layer))
             .enumerate()
-            .map(|(slot, (entity, _))| (slot, entity))
+            .map(|(slot, (entity, equipped))| (slot, entity, equipped.layer))
             .collect();
-        for (slot, item) in worn {
+        let equipment = worn
+            .iter()
+            .filter_map(|(_, item, layer)| {
+                self.state
+                    .registry
+                    .serial_of(*item)
+                    .map(|item| openshard_protocol::items::CorpseEquipmentItem { layer: *layer, item })
+            })
+            .collect();
+        if let Some(corpse) = self.state.registry.entity_of(container) {
+            if let Some(story) = self.state.registry.get_mut::<Corpse>(corpse) {
+                story.equipment = equipment;
+            }
+        }
+        for (slot, item, _) in worn {
             self.state.registry.remove::<Equipped>(item);
             self.state.registry.insert(
                 item,

@@ -282,6 +282,8 @@ pub struct Hud {
     pub highlight: HighlightTarget,
     pub highlight_style: HighlightStyle,
     pub selected: Option<Selection>,
+    /// Tiles changed by the local, uncommitted map-editor draft.
+    pub editor_preview: Vec<crate::editor_mode::PreviewTile>,
     pub health_bars: Vec<HealthBar>,
     pub draw: openshard_client_render::frame::Draw,
     pub cutaway_disabled: bool,

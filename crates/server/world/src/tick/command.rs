@@ -936,6 +936,17 @@ pub enum Command {
         /// the answer accounts for.
         revision: openshard_protocol::chunks::WorldRevision,
     },
+    /// A client of ours asked to commit a map-editor draft (`0xBF` `0xE009`).
+    ///
+    /// This carries no author or authority.  Both are read from `connection`'s
+    /// authenticated row when the tick applies it, so neither can be forged by
+    /// a packet.
+    CommitMapEdit {
+        /// Which authenticated connection submitted the draft.
+        connection: ConnectionId,
+        /// Facet, exact parent and bounded canonical operations.
+        request: openshard_protocol::mapedit::MapEditRequest,
+    },
     /// A client picked a context-menu entry (`0xBF` `0x15`).
     ContextMenuSelect {
         /// Which connection asked.

@@ -660,10 +660,11 @@ impl crate::app::App {
     /// What the shard holds this character's authority at, or
     /// [`AccessLevel::Player`] before there is a view to ask.
     ///
-    /// The one reader is the speech line's completer. It is asked at every
-    /// keystroke rather than copied onto [`Chat`] — see [`Chat::refresh`] — and
-    /// the answer is always the view's, never this end's opinion: nothing here
-    /// gates anything, the shard refuses what it refuses.
+    /// The speech-line completer asks at every keystroke rather than copying the
+    /// value onto [`Chat`] — see [`Chat::refresh`] — and the map editor asks
+    /// before offering its privileged UI. The answer is always the view's,
+    /// never this end's opinion: server-side actions still enforce their own
+    /// authority independently.
     pub(crate) fn authority(&self) -> AccessLevel {
         self.world
             .authoritative

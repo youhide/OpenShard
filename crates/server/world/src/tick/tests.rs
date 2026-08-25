@@ -19,8 +19,8 @@ use openshard_protocol::world::{Aggression, RangedRange, RawStepSequence};
 use openshard_skills::SkillUsed;
 use openshard_state::components::Riding;
 use openshard_state::components::{
-    Amount, Contained, Container, CorpseBody, CriminalUntil, Decays, Drawn, Equipped, MurderDecay, Murders,
-    Route, RouteRefused, Skills, Stackable,
+    Amount, Contained, Container, Corpse, CorpseBody, CriminalUntil, Decays, Drawn, Equipped, MurderDecay,
+    Murders, Route, RouteRefused, Skills, Stackable,
 };
 use openshard_state::components::{Banker, SwingSpeed, WrestlingCombo, WrestlingOpener, WrestlingStride};
 use openshard_state::sectors::distance;
@@ -3604,6 +3604,38 @@ fn a_dead_player_leaves_a_corpse_but_keeps_its_backpack() {
     assert!(
         world.registry().get::<Equipped>(robe).is_none(),
         "and no longer worn"
+    );
+    assert_eq!(
+        world
+            .registry()
+            .get::<Corpse>(corpse)
+            .map(|story| story.equipment.as_slice()),
+        Some(
+            &[openshard_protocol::items::CorpseEquipmentItem {
+                layer: Layer(0x16),
+                item: robe_serial,
+            }][..]
+        ),
+        "the corpse retains the layer after the robe has left the living body"
+    );
+    // A ghost cannot interact with anything, including its own corpse. A second
+    // living character in the same starting tile is the client that asks the
+    // container path which emits the layer map.
+    let looter = enter(&mut world, now);
+    let _ = packets_for(&mut world, looter);
+    world.queue(Command::DoubleClick {
+        connection: looter,
+        request: UseRequest::Use(RawSerial(corpse_serial.raw())),
+    });
+    world.tick(now);
+    let packets = packets_for(&mut world, looter);
+    assert!(
+        packets.iter().any(|packet| packet.first() == Some(&0x89)),
+        "opening a corpse sends the layer map beside its contents: {packets:?}"
+    );
+    assert!(
+        packets.iter().any(|packet| packet.first() == Some(&0x24)),
+        "the living client opens the corpse"
     );
 
     // The backpack is still worn on the (now ghost) player.

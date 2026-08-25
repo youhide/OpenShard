@@ -722,6 +722,12 @@ impl ApplicationHandler<()> for App {
                             y: tile.at.y,
                         }),
                     };
+                    if self.map_editor.active() {
+                        self.apply_map_editor_click(camera);
+                        self.input.last_click = None;
+                        self.ask_redraw();
+                        return;
+                    }
                     // **In war mode, a single click on a body is an attack.**
                     // The reference client's own gesture, and the reason the
                     // stance exists at all: at peace the same click selects and

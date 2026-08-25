@@ -183,6 +183,19 @@ pub(crate) fn open_container(
             items: contents.clone(),
         }),
     );
+    // A corpse's contents have the item pictures, but a `0x3C` deliberately
+    // has no field for the layers those items occupied on the living body.  The
+    // companion `0x89` supplies that one relationship once the client has the
+    // pictures it names; an ordinary chest has no such fact and sends nothing.
+    if let Some(story) = state.registry.get::<Corpse>(container) {
+        state.send_packet(
+            connection,
+            &ServerPacket::CorpseEquipment(CorpseEquipment {
+                corpse: container_serial,
+                items: story.equipment.clone(),
+            }),
+        );
+    }
     // Remember it is open, so a later change to its contents can be pushed here.
     state
         .open_containers

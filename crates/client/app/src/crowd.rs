@@ -954,7 +954,15 @@ impl Crowd {
     /// why the facing has to come off the wire rather than be picked here: a
     /// corpse drawn facing anywhere but the way the death animation just played
     /// spins on the ground the moment it settles.
-    pub fn corpse(&mut self, who: Who, at: Point, body: Graphic, facing: Direction, hue: Hue) -> Mobile {
+    pub fn corpse(
+        &mut self,
+        who: Who,
+        at: Point,
+        body: Graphic,
+        facing: Direction,
+        hue: Hue,
+        equipment: std::rc::Rc<[EquipmentLayer]>,
+    ) -> Mobile {
         let facing = Facing::walking(facing);
         let group = BodyKind::of(body).dying();
         // The fall this corpse was promised, if the shard named one: `0xAF` said
@@ -1017,7 +1025,7 @@ impl Crowd {
                 from: None,
                 hue,
                 drawn: tracked.drawn,
-                equipment: Vec::new().into(),
+                equipment: equipment.clone(),
             };
         }
         tracked.at = at;
@@ -1041,7 +1049,7 @@ impl Crowd {
             from: None,
             hue,
             drawn: tracked.drawn,
-            equipment: Vec::new().into(),
+            equipment,
         }
     }
 
@@ -2854,10 +2862,24 @@ mod tests {
         let mut crowd = Crowd::default();
         let at = Point::new(10, 10, 0);
         let skeleton = Graphic(0x0038);
-        let corpse = crowd.corpse(serial(0x4000_0001), at, skeleton, Direction::SouthEast, Hue::NONE);
+        let equipment: std::rc::Rc<[EquipmentLayer]> = vec![EquipmentLayer {
+            graphic: openshard_tiles::AnimId(0x01),
+            hue: Hue(0x0455),
+            layer: openshard_protocol::wire::Layer::TORSO,
+        }]
+        .into();
+        let corpse = crowd.corpse(
+            serial(0x4000_0001),
+            at,
+            skeleton,
+            Direction::SouthEast,
+            Hue::NONE,
+            equipment.clone(),
+        );
 
         assert_eq!(corpse.group, BodyKind::Monster.dying());
         assert_eq!(corpse.at, at);
+        assert_eq!(corpse.equipment, equipment, "the corpse keeps its worn layers");
         crowd.advance(Duration::from_secs(10));
         assert_eq!(
             crowd.group_for(serial(0x4000_0001)),
@@ -2898,7 +2920,14 @@ mod tests {
             Some(corpse.expect("a real corpse serial")),
         );
 
-        let falling = crowd.corpse(corpse, at, skeleton, Direction::SouthEast, Hue::NONE);
+        let falling = crowd.corpse(
+            corpse,
+            at,
+            skeleton,
+            Direction::SouthEast,
+            Hue::NONE,
+            Vec::new().into(),
+        );
         assert_eq!(falling.group, BodyKind::Monster.dying());
         assert_eq!(
             crowd.frame_for(corpse, AnimationFrameCount(4)),
@@ -2955,8 +2984,22 @@ mod tests {
             Some(second_corpse.expect("a real corpse serial")),
         );
 
-        let one = crowd.corpse(first_corpse, at, skeleton, Direction::West, Hue::NONE);
-        let two = crowd.corpse(second_corpse, at, skeleton, Direction::East, Hue::NONE);
+        let one = crowd.corpse(
+            first_corpse,
+            at,
+            skeleton,
+            Direction::West,
+            Hue::NONE,
+            Vec::new().into(),
+        );
+        let two = crowd.corpse(
+            second_corpse,
+            at,
+            skeleton,
+            Direction::East,
+            Hue::NONE,
+            Vec::new().into(),
+        );
         assert_eq!(one.facing, Direction::West);
         assert_eq!(
             two.facing,
@@ -2997,7 +3040,14 @@ mod tests {
         });
 
         let corpse = serial(0x4000_0001);
-        crowd.corpse(corpse, at, skeleton, Direction::West, Hue::NONE);
+        crowd.corpse(
+            corpse,
+            at,
+            skeleton,
+            Direction::West,
+            Hue::NONE,
+            Vec::new().into(),
+        );
         assert_eq!(
             crowd.frame_for(corpse, AnimationFrameCount(4)),
             3,
@@ -3077,11 +3127,25 @@ mod tests {
             Some(corpse.expect("a real corpse serial")),
         );
 
-        let falling = crowd.corpse(corpse, at, skeleton, Direction::West, Hue::NONE);
+        let falling = crowd.corpse(
+            corpse,
+            at,
+            skeleton,
+            Direction::West,
+            Hue::NONE,
+            Vec::new().into(),
+        );
         assert_eq!(falling.facing, Direction::West, "it falls the way it faced");
         crowd.advance(Duration::from_millis(400));
 
-        let settled = crowd.corpse(corpse, at, skeleton, Direction::West, Hue::NONE);
+        let settled = crowd.corpse(
+            corpse,
+            at,
+            skeleton,
+            Direction::West,
+            Hue::NONE,
+            Vec::new().into(),
+        );
         assert_eq!(
             settled.facing,
             Direction::West,

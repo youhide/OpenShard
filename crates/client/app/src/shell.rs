@@ -163,6 +163,12 @@ pub struct Request {
     /// starts work rather than setting a state, so a `bool` that stayed true
     /// would start it again on every frame after.
     pub rebake_navigation: bool,
+    /// Enter or leave map-editor mode under the authority held when this
+    /// request is applied.
+    pub editor_mode: Option<bool>,
+    /// Publish the current editor draft after the event-loop owner rechecks
+    /// authority, facet and revision.
+    pub commit_map_edit: bool,
 }
 
 /// What the script picker asked for.
@@ -452,6 +458,8 @@ impl Shell {
         hud: &Hud,
         camera: Camera,
         world: &WorldState,
+        map_editor: &mut crate::editor_mode::MapEditor,
+        authority: openshard_protocol::access::AccessLevel,
     ) -> (Request, egui::FullOutput) {
         let input = self.state.take_egui_input(window);
         let mut request = Request::default();
@@ -461,7 +469,7 @@ impl Shell {
         let mut free = egui::Rect::from_min_size(egui::Pos2::ZERO, self.context.content_rect().size());
         let desk = &mut self.desk;
         let output = self.context.run_ui(input, |ui| {
-            request = layout(ui, hud, camera, world, desk);
+            request = layout(ui, hud, camera, world, map_editor, authority, desk);
             // **No party invitation here any more.** It was an `egui::Window`
             // with a Join and a Decline on it, drawn over the gump layer with
             // its own font and its own frame — and, because egui is painted on
@@ -669,7 +677,15 @@ impl Shell {
 /// than egui's. Building the paperdoll and containers here would decide M4
 /// without arguing it; the speech line already had that argument, in the
 /// commit that moved it off this file.
-fn layout(root: &mut egui::Ui, hud: &Hud, camera: Camera, world: &WorldState, desk: &mut Desk) -> Request {
+fn layout(
+    root: &mut egui::Ui,
+    hud: &Hud,
+    camera: Camera,
+    world: &WorldState,
+    map_editor: &mut crate::editor_mode::MapEditor,
+    authority: openshard_protocol::access::AccessLevel,
+    desk: &mut Desk,
+) -> Request {
     let mut request = Request::default();
     // egui 0.35 hands the frame a root `Ui`: panels are shown inside it and
     // what is left of it is the world's viewport, while windows float over the
@@ -762,6 +778,15 @@ fn layout(root: &mut egui::Ui, hud: &Hud, camera: Camera, world: &WorldState, de
             {
                 desk.open = !desk.open;
             }
+            // Hidden rather than disabled for ordinary players: editor mode is
+            // staff vocabulary, just like staff commands in the speech-line
+            // completer. The shard remains the authority for every eventual
+            // commit; this gate only stops the client offering an unusable UI.
+            if crate::editor_mode::MapEditor::available_to(authority)
+                && ui.selectable_label(map_editor.active(), "map editor").clicked()
+            {
+                request.editor_mode = Some(!map_editor.active());
+            }
             // This stays on the ordinary status strip rather than hidden in a
             // developer tab: an intermittent roof/LOD artifact must be saved
             // at the moment it is seen, not after navigating a panel. F12 is
@@ -781,6 +806,11 @@ fn layout(root: &mut egui::Ui, hud: &Hud, camera: Camera, world: &WorldState, de
             ui.label(format!("{}%", (ui.ctx().zoom_factor() * 100.0).round()));
         });
     });
+
+    if map_editor.active() && crate::editor_mode::MapEditor::available_to(authority) && map_editor.panel(root)
+    {
+        request.commit_map_edit = true;
+    }
 
     // One window, five tabs. Five floating windows is five things to place, and
     // — with nothing saving them — five things to place again on every launch;
@@ -1932,6 +1962,24 @@ fn draw_world_overlays(context: &egui::Context, hud: &Hud, camera: Camera, viewp
     // cover the marker that says what the *next* click would do.
     if let Some(route) = &hud.route {
         draw_route(&world, &camera, route, viewport.min);
+    }
+    for tile in &hud.editor_preview {
+        let corners = facet_corners(
+            &world,
+            &camera,
+            openshard_protocol::world::Point {
+                x: tile.x,
+                y: tile.y,
+                z: tile.corners[0],
+            },
+            tile.corners,
+            viewport.min,
+        );
+        world.add(egui::Shape::convex_polygon(
+            corners,
+            egui::Color32::from_rgba_unmultiplied(255, 70, 220, 45),
+            egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 90, 225)),
+        ));
     }
     draw_health_bars(&world, &camera, &hud.health_bars, viewport.min);
     // The tile marker, and only when the tile is what is lit: an item under the
