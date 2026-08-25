@@ -110,7 +110,8 @@ fn world_of_ours(tag: &str, base: MapRevision) -> (World, PathBuf) {
     std::fs::remove_file(&path).ok();
     std::fs::remove_file(openshard_basemap::patches::log_path(&path)).ok();
     let written = MapSnapshot::restored(Facet(0), base, ground());
-    openshard_basemap::write(&path, &written).expect("a writable temp dir");
+    openshard_basemap::write(&path, &written, openshard_basemap::Identity::Mint)
+        .expect("a writable temp dir");
 
     let loaded = openshard_basemap::load(&path).expect("the base set just written");
     let home = WorldHome {

@@ -53,7 +53,12 @@ fn world(tag: &str) -> (PathBuf, PathBuf) {
         },
         |_, _| GROUND,
     );
-    write(&base_set, &MapSnapshot::new(FACET, map)).expect("a writable temp dir");
+    write(
+        &base_set,
+        &MapSnapshot::new(FACET, map),
+        openshard_basemap::Identity::Mint,
+    )
+    .expect("a writable temp dir");
     (base_set, log)
 }
 

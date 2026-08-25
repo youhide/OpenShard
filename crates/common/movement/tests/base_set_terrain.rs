@@ -71,7 +71,8 @@ fn a_base_set_walks_and_sees_exactly_as_the_install_does() {
         facet.0,
         std::process::id()
     ));
-    openshard_basemap::write(&path, &installed).expect("a writable temp dir");
+    openshard_basemap::write(&path, &installed, openshard_basemap::Identity::Mint)
+        .expect("a writable temp dir");
     let restored = openshard_basemap::read(&path).expect("the base set we just wrote");
     std::fs::remove_file(&path).ok();
 

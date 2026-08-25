@@ -76,9 +76,11 @@ migrations too many:
 - **The header carries a minted world id.** Today `identity_of` hashes the whole
   base set at boot. That is right for E3's question and wrong for S4's: a squash
   rewrites the bytes without changing the world, and every client would refetch a
-  facet nothing moved in. So the id is **minted at import** — as the same hash of
-  the same bytes, so nothing about E3 changes — written into the header, and
-  **carried** by every later rewrite of the file.
+  facet nothing moved in. So the id is **minted at import**, written into the
+  header, and **carried** by every later rewrite of the file. It is minted over
+  the *manifest* rather than over the file, for two reasons that are one: a hash
+  of the file cannot be minted from inside the file it goes in, and a hash of the
+  chunks' content does not move when a compressor is upgraded under it.
 
 **Decisions, taken here.**
 

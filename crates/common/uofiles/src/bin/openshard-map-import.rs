@@ -89,13 +89,17 @@ fn import(cli: &Cli, facet: Facet) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let written = openshard_basemap::write(&path, &snapshot)?;
+    // An import is where a world begins, so this is the one caller that mints an
+    // identity rather than carrying one. Printed, because it is what a client's
+    // cache and every later squash of this world will be filed under.
+    let written = openshard_basemap::write(&path, &snapshot, openshard_basemap::Identity::Mint)?;
     eprintln!(
-        "map import +{:.3}s: {} chunks, {} statics, {} bytes; wrote {}",
+        "map import +{:.3}s: {} chunks, {} statics, {} bytes, world {:016x}; wrote {}",
         started.elapsed().as_secs_f64(),
         written.chunks,
         written.statics,
         written.bytes,
+        written.world.0,
         path.display(),
     );
 

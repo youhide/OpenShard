@@ -25,7 +25,7 @@
 //! # The file
 //!
 //! ```text
-//! header, 26 bytes
+//! header, 34 bytes
 //!   0  4  magic "OSBS"
 //!   4  1  version
 //!   5  1  facet
@@ -33,10 +33,13 @@
 //!  14  4  blocks wide         u32
 //!  18  4  blocks down         u32
 //!  22  4  chunk count         u32
+//!  26  8  world identity      u64
 //! table, (count + 1) x u64 -- where each chunk's bytes start, and where the
 //!                             last one ends
-//! chunks, each `openshard_map::codec`'s canonical bytes, in the order
-//!         `openshard_map::chunk::chunks_of` gives them
+//! manifest, count x 12    -- per chunk: the hash of its record, u64, and how
+//!                            long that record is once inflated, u32
+//! chunks, each `openshard_map::codec`'s canonical bytes, deflated whole, in the
+//!         order `openshard_map::chunk::chunks_of` gives them
 //! ```
 //!
 //! The table is redundant today: a chunk's own header says how long it is, so a
@@ -46,12 +49,37 @@
 //! scan away without it, and 57 KiB on a Felucca-sized facet is not a reason to
 //! close that door.
 //!
+//! # What version 2 added, and why all three at once
+//!
+//! `docs/map/new_map_representation/what_a_change_costs.md`'s S1. A version byte
+//! names a layout, so three changes that were each worth a bump are one bump:
+//!
+//! - **The chunks are deflated.** 107,528,650 bytes of Felucca become
+//!   22,363,473 on the same content, at the level and through the pair
+//!   [`openshard_protocol::chunks::deflate`] already carries the wire's chunks
+//!   at. The client's cache is the caller that wanted it most: it keeps a whole
+//!   facet per world it has seen.
+//! - **The manifest carries a hash per chunk.** It is what makes "did *this*
+//!   square move" answerable without re-encoding a facet, which is what a
+//!   product keyed by the chunk it was built from needs (S2). At 64 tiles a
+//!   chunk it costs 84 KiB on Felucca; the argument that refused a manifest at
+//!   8×8 was 17.5 MiB, a ninth of the set it indexes, and it does not survive
+//!   the chunk size that was chosen. It is also read *back*: a chunk whose bytes
+//!   do not hash to what the manifest says is refused by name rather than
+//!   decoded into a plausible square.
+//! - **The header carries the world's identity.** It used to be a hash of the
+//!   whole file taken at boot, which answers E3's question and not S4's: a
+//!   squash rewrites a world's bytes without making it a different world, and
+//!   every client would have refetched a facet nothing moved in. So the identity
+//!   is **minted from the content once** — [`Identity::Mint`] — and **carried**
+//!   by every later write of that world.
+//!
 //! The facet's size in blocks is in the header rather than derived from the
 //! chunks, for the reason [`openshard_map::chunk::assemble`] asks for it: a set
 //! missing its last chunk column would otherwise assemble happily into a
 //! narrower world, and a narrower world parses perfectly.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use openshard_map::chunk::{self, AssemblyError, Chunk};
@@ -59,6 +87,7 @@ use openshard_map::codec::{self, DecodeError};
 use openshard_map::grid::BlockExtent;
 use openshard_map::patch::PatchError;
 use openshard_map::snapshot::{MapRevision, MapSnapshot};
+use openshard_protocol::chunks::InflatedLength;
 use openshard_protocol::world::{Facet, WorldId};
 
 pub mod patches;
@@ -67,13 +96,21 @@ pub mod patches;
 const MAGIC: [u8; 4] = *b"OSBS";
 
 /// The layout this module writes and the only one it reads.
-const VERSION: u8 = 1;
+///
+/// Version 1 is refused rather than converted, and that is not a hardship: a
+/// base set is a bake of an install or an export of a world, so there is nothing
+/// in one that is not reproducible by writing it again. A converter would be a
+/// second write path with no second caller.
+const VERSION: u8 = 2;
 
 /// Bytes before the table.
-const HEADER_BYTES: usize = 26;
+const HEADER_BYTES: usize = 34;
 
 /// Bytes a table entry takes.
 const ENTRY_BYTES: usize = 8;
+
+/// Bytes a manifest entry takes: the record's hash, and its inflated length.
+const MANIFEST_BYTES: usize = 12;
 
 /// Where a facet's base set lives by default.
 ///
@@ -144,6 +181,30 @@ pub enum BaseError {
         /// What the header claims.
         found: usize,
     },
+    /// One of the chunks is not the deflate stream the manifest says it is.
+    NotDeflated {
+        /// Which file.
+        path: PathBuf,
+        /// Which chunk of it, counted in the file's own order.
+        at: usize,
+    },
+    /// One of the chunks does not hash to what the manifest says it does.
+    ///
+    /// The manifest is written from the same bytes the chunk is, so this is a
+    /// file that changed under itself — a torn write, a half-finished copy, two
+    /// writers interleaved. It is refused here rather than decoded, because a
+    /// chunk record with a byte moved in it decodes into a *plausible* square
+    /// and there is nothing downstream that could tell.
+    HashMismatch {
+        /// Which file.
+        path: PathBuf,
+        /// Which chunk of it, counted in the file's own order.
+        at: usize,
+        /// What the manifest claims the record hashes to.
+        wanted: u64,
+        /// What it hashes to.
+        found: u64,
+    },
     /// One of the chunks is not a chunk.
     Chunk {
         /// Which file.
@@ -210,6 +271,21 @@ impl std::fmt::Display for BaseError {
                 "{} holds {found} chunks, and a facet of the size in its header has {wanted}",
                 path.display()
             ),
+            Self::NotDeflated { path, at } => write!(
+                f,
+                "{}: chunk {at} did not inflate to the length its manifest entry declares",
+                path.display()
+            ),
+            Self::HashMismatch {
+                path,
+                at,
+                wanted,
+                found,
+            } => write!(
+                f,
+                "{}: chunk {at} hashes to {found:016x} and its manifest entry says {wanted:016x}",
+                path.display()
+            ),
             Self::Chunk { path, at, source } => {
                 write!(f, "{}: chunk {at} is not one: {source}", path.display())
             }
@@ -246,6 +322,31 @@ pub struct Written {
     pub statics: usize,
     /// How long the file is.
     pub bytes: usize,
+    /// The identity the file went out under — minted here, or the one the
+    /// caller carried in.
+    pub world: WorldId,
+}
+
+/// Whose world the file about to be written is.
+///
+/// **The one thing a base set cannot work out for itself**, and the reason it is
+/// asked rather than derived: a world's identity has to survive the world being
+/// rewritten. A squash rewrites every byte of a set without making it a
+/// different world, and a client's cache is a copy of a world that belongs to
+/// the shard that served it. Both would be a new world under an identity taken
+/// from the file that happens to hold them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Identity {
+    /// A world being written for the first time: mint one from its content.
+    ///
+    /// `openshard-map-import` is the caller — an import is where a world
+    /// begins — and a generator would be the other one.
+    Mint,
+    /// A world that already has an identity, being written again.
+    ///
+    /// The client's chunk cache, and the squash that folds a patch log into a
+    /// new base set.
+    Keep(WorldId),
 }
 
 /// Write a published facet out as a base set.
@@ -257,22 +358,41 @@ pub struct Written {
 /// # Errors
 ///
 /// [`BaseError::Write`] if the file cannot be written.
-pub fn write(path: impl AsRef<Path>, snapshot: &MapSnapshot) -> Result<Written, BaseError> {
+pub fn write(
+    path: impl AsRef<Path>,
+    snapshot: &MapSnapshot,
+    identity: Identity,
+) -> Result<Written, BaseError> {
     let path = path.as_ref();
     let extent = snapshot.map().extent();
 
     // Encoded up front rather than streamed: the table has to be written before
     // the chunks, and it cannot be filled in until every length is known. A
-    // facet is about 110 MiB of blobs, which is less than loading one costs.
+    // facet is about 110 MiB of records, which is less than loading one costs —
+    // and about 22 MiB of them once deflated, which is what is held here.
     let mut blobs = Vec::new();
+    let mut manifest = Vec::new();
     let mut statics = 0;
     for at in chunk::chunks_of(extent) {
         let chunk = Chunk::of(snapshot, at).expect("a chunk of the facet it was cut from");
         statics += chunk.static_count();
-        blobs.push(codec::encode(&chunk));
+        let record = codec::encode(&chunk);
+        // The hash is of the *record*, not of the deflate stream: what a reader
+        // downstream keys on is the chunk's content, and two builds of a
+        // compressor are allowed to disagree about the bytes it packs into.
+        manifest.push((
+            fnv1a64(&record),
+            u32::try_from(record.len()).expect("a chunk record of fewer than four billion bytes"),
+        ));
+        blobs.push(openshard_protocol::chunks::deflate(&record));
     }
 
-    let table_bytes = (blobs.len() + 1) * ENTRY_BYTES;
+    let world = match identity {
+        Identity::Keep(world) => world,
+        Identity::Mint => mint(&manifest),
+    };
+
+    let table_bytes = (blobs.len() + 1) * ENTRY_BYTES + blobs.len() * MANIFEST_BYTES;
     let mut out = Vec::with_capacity(HEADER_BYTES + table_bytes);
     out.extend_from_slice(&MAGIC);
     out.push(VERSION);
@@ -281,12 +401,17 @@ pub fn write(path: impl AsRef<Path>, snapshot: &MapSnapshot) -> Result<Written, 
     out.extend_from_slice(&extent.wide.to_le_bytes());
     out.extend_from_slice(&extent.down.to_le_bytes());
     out.extend_from_slice(&(blobs.len() as u32).to_le_bytes());
+    out.extend_from_slice(&world.0.to_le_bytes());
 
     let mut offset = (HEADER_BYTES + table_bytes) as u64;
     out.extend_from_slice(&offset.to_le_bytes());
     for blob in &blobs {
         offset += blob.len() as u64;
         out.extend_from_slice(&offset.to_le_bytes());
+    }
+    for (hash, inflated) in &manifest {
+        out.extend_from_slice(&hash.to_le_bytes());
+        out.extend_from_slice(&inflated.to_le_bytes());
     }
 
     let bytes = offset as usize;
@@ -308,7 +433,24 @@ pub fn write(path: impl AsRef<Path>, snapshot: &MapSnapshot) -> Result<Written, 
         chunks: blobs.len(),
         statics,
         bytes,
+        world,
     })
+}
+
+/// Mint a world's identity out of what its chunks hash to.
+///
+/// **Over the manifest rather than over the file**, and the difference is the
+/// whole point: the file holds a compressor's output and a header that carries
+/// this very number, so a hash of it could not be minted from inside it and
+/// would move with a compressor upgrade. The manifest is content — the same
+/// facet imported twice on two machines produces the same hashes in the same
+/// order, and therefore the same world.
+fn mint(manifest: &[(u64, u32)]) -> WorldId {
+    let mut bytes = Vec::with_capacity(manifest.len() * 8);
+    for (hash, _) in manifest {
+        bytes.extend_from_slice(&hash.to_le_bytes());
+    }
+    WorldId(fnv1a64(&bytes))
 }
 
 /// Read a base set back into the facet it was written from.
@@ -358,7 +500,8 @@ pub fn read(path: impl AsRef<Path>) -> Result<MapSnapshot, BaseError> {
         });
     }
 
-    let table_end = HEADER_BYTES + (count + 1) * ENTRY_BYTES;
+    let manifest_at = HEADER_BYTES + (count + 1) * ENTRY_BYTES;
+    let table_end = manifest_at + count * MANIFEST_BYTES;
     if bytes.len() < table_end {
         return Err(BaseError::Truncated {
             path: path.to_owned(),
@@ -366,9 +509,18 @@ pub fn read(path: impl AsRef<Path>) -> Result<MapSnapshot, BaseError> {
             found: bytes.len(),
         });
     }
-    let table: Vec<u64> = bytes[HEADER_BYTES..table_end]
+    let table: Vec<u64> = bytes[HEADER_BYTES..manifest_at]
         .chunks_exact(ENTRY_BYTES)
         .map(|entry| u64::from_le_bytes(entry.try_into().expect("eight bytes")))
+        .collect();
+    let manifest: Vec<(u64, InflatedLength)> = bytes[manifest_at..table_end]
+        .chunks_exact(MANIFEST_BYTES)
+        .map(|entry| {
+            (
+                u64::from_le_bytes(entry[..8].try_into().expect("eight bytes")),
+                InflatedLength(u32::from_le_bytes(entry[8..].try_into().expect("four bytes"))),
+            )
+        })
         .collect();
 
     // Every entry rises and stays inside the file, checked before any of them
@@ -389,7 +541,25 @@ pub fn read(path: impl AsRef<Path>) -> Result<MapSnapshot, BaseError> {
     let mut chunks = Vec::with_capacity(count);
     for at in 0..count {
         let blob = &bytes[table[at] as usize..table[at + 1] as usize];
-        chunks.push(codec::decode(blob).map_err(|source| BaseError::Chunk {
+        let (wanted, inflated) = manifest[at];
+        let Some(record) = openshard_protocol::chunks::inflate(blob, inflated) else {
+            return Err(BaseError::NotDeflated {
+                path: path.to_owned(),
+                at,
+            });
+        };
+        // Before the decode rather than after it: a record with a byte moved in
+        // it decodes into a square that is wrong and looks like every other one.
+        let found = fnv1a64(&record);
+        if found != wanted {
+            return Err(BaseError::HashMismatch {
+                path: path.to_owned(),
+                at,
+                wanted,
+                found,
+            });
+        }
+        chunks.push(codec::decode(&record).map_err(|source| BaseError::Chunk {
             path: path.to_owned(),
             at,
             source,
@@ -403,7 +573,7 @@ pub fn read(path: impl AsRef<Path>) -> Result<MapSnapshot, BaseError> {
     Ok(MapSnapshot::restored(facet, revision, map))
 }
 
-/// Which world a base set *is*, by its own bytes.
+/// Which world a base set *is*, by the identity in its header.
 ///
 /// **The question a facet number cannot answer.** Two shards both serving facet
 /// 0 serve two different Feluccas and both call the first revision of it 1, so a
@@ -419,30 +589,62 @@ pub fn read(path: impl AsRef<Path>) -> Result<MapSnapshot, BaseError> {
 /// revision — which is a log taken apart by hand, and the append-only rule in
 /// [`patches`] is what makes that not a thing that happens.
 ///
-/// FNV-1a, 64 bits, over the file exactly as it sits — [`patches`]'s own
-/// checksum one width up, and for the same reason: an identity that has to be
-/// the same on two machines and in every future build of this engine, not a
-/// defence against anybody. A hash from a crate whose value changes with its
-/// version would silently orphan every cache on an upgrade.
+/// **Minted once and carried, rather than taken off the file each time.** It
+/// used to be a hash of the whole file, which says the same thing right up until
+/// a world is written again: a squash folds a log into a new base set without
+/// making it a different world, and a client's cache is somebody else's world in
+/// a file of ours. Both would come back under a name nobody had served. What
+/// mints it is [`Identity::Mint`] and it is FNV-1a over what the chunks
+/// hash to — [`patches`]'s own checksum one width up, and for the same reason:
+/// an identity that has to be the same on two machines and in every future build
+/// of this engine, not a defence against anybody. A hash from a crate whose
+/// value changes with its version would silently orphan every cache on an
+/// upgrade.
+///
+/// Reads the header alone, so it costs a seek where [`read`] costs a facet.
 ///
 /// # Errors
 ///
-/// [`BaseError::Read`] if the file cannot be read, and
+/// [`BaseError::Read`] if the file cannot be read,
 /// [`BaseError::NotABaseSet`] for a file that is not one — the magic is checked
 /// here rather than trusted, because an identity taken over somebody else's file
-/// is a name for a world this shard is not serving.
+/// is a name for a world this shard is not serving — and [`BaseError::Version`]
+/// for a layout whose header this one cannot read.
 pub fn identity_of(base_set: impl AsRef<Path>) -> Result<WorldId, BaseError> {
     let path = base_set.as_ref();
-    let bytes = std::fs::read(path).map_err(|source| BaseError::Read {
+    let mut header = [0_u8; HEADER_BYTES];
+    let mut file = std::fs::File::open(path).map_err(|source| BaseError::Read {
         path: path.to_owned(),
         source,
     })?;
-    if bytes.len() < HEADER_BYTES || bytes[..4] != MAGIC {
+    if let Err(source) = file.read_exact(&mut header) {
+        // A file too short to hold a header is not one, whatever else it is;
+        // anything else went wrong at the disk and says so.
+        return Err(if source.kind() == std::io::ErrorKind::UnexpectedEof {
+            BaseError::NotABaseSet {
+                path: path.to_owned(),
+            }
+        } else {
+            BaseError::Read {
+                path: path.to_owned(),
+                source,
+            }
+        });
+    }
+    if header[..4] != MAGIC {
         return Err(BaseError::NotABaseSet {
             path: path.to_owned(),
         });
     }
-    Ok(WorldId(fnv1a64(&bytes)))
+    if header[4] != VERSION {
+        return Err(BaseError::Version {
+            path: path.to_owned(),
+            found: header[4],
+        });
+    }
+    Ok(WorldId(u64::from_le_bytes(
+        header[26..34].try_into().expect("eight bytes"),
+    )))
 }
 
 /// FNV-1a, 64 bits.

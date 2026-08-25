@@ -408,11 +408,18 @@ pub struct Kept {
 /// the world it is holding.
 pub fn write(dir: &Path, notice: WorldNotice, world: &MapSnapshot) -> Result<Kept, CacheError> {
     let path = path_for(dir, notice)?;
+    let identity = notice.world.ok_or(CacheError::Unnamed { facet: notice.facet })?;
     let writing = path.with_extension(format!("{EXTENSION}.writing"));
-    openshard_basemap::write(&writing, world).map_err(|source| CacheError::Unreadable {
-        path: writing.clone(),
-        source,
-    })?;
+    // The shard's name for its world, carried into our copy of it rather than a
+    // fresh one minted here: this file is somebody else's world, and a world
+    // that changed identity by being cached is a world every later comparison
+    // is about the wrong thing.
+    openshard_basemap::write(&writing, world, openshard_basemap::Identity::Keep(identity)).map_err(
+        |source| CacheError::Unreadable {
+            path: writing.clone(),
+            source,
+        },
+    )?;
     std::fs::rename(&writing, &path).map_err(|source| {
         // The half-written file is left where it is rather than removed: it is
         // named for this world too, so the next run's rename replaces it, and a
@@ -747,7 +754,12 @@ mod tests {
                 z: 0,
             },
         );
-        openshard_basemap::write(&path, &MapSnapshot::new(FACET, wider)).expect("a temp dir");
+        openshard_basemap::write(
+            &path,
+            &MapSnapshot::new(FACET, wider),
+            openshard_basemap::Identity::Keep(WORLD),
+        )
+        .expect("a temp dir");
         assert!(matches!(
             read(&dir, notice()),
             Err(CacheError::NotThisWorld { .. })

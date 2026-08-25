@@ -50,7 +50,12 @@ fn base_set(dir: &Path) -> (PathBuf, PathBuf) {
         tile: LandTileId(3),
         z: 0,
     });
-    openshard_basemap::write(&path, &MapSnapshot::new(FACET, map)).expect("a writable temp dir");
+    openshard_basemap::write(
+        &path,
+        &MapSnapshot::new(FACET, map),
+        openshard_basemap::Identity::Mint,
+    )
+    .expect("a writable temp dir");
     (path, log)
 }
 

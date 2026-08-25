@@ -4,7 +4,7 @@
 //! chunks: three of its four chunks are edge chunks, so a reader that assumed
 //! every chunk was eight blocks by eight would fail here rather than on Tokuno.
 
-use openshard_basemap::{BaseError, read, write};
+use openshard_basemap::{BaseError, Identity, read, write};
 use openshard_map::grid::BlockExtent;
 use openshard_map::map::{LandCell, StaticItem, WorldMap};
 use openshard_map::snapshot::{MapRevision, MapSnapshot};
@@ -70,8 +70,46 @@ fn a_map() -> WorldMap {
 fn written(tag: &str) -> (std::path::PathBuf, MapSnapshot) {
     let path = path(tag);
     let snapshot = snapshot();
-    write(&path, &snapshot).expect("a writable temp dir");
+    write(&path, &snapshot, Identity::Mint).expect("a writable temp dir");
     (path, snapshot)
+}
+
+/// Where the offsets table starts: the header is 34 bytes.
+const TABLE: usize = 34;
+
+/// FNV-1a, 64 bits — the file's own spelling, written out again here.
+///
+/// Duplicated on purpose rather than exported: the format pins this hash, so a
+/// test that computes it independently is what holds the file to the algorithm
+/// it says it uses, and it is what lets a fixture below build a manifest entry
+/// the reader will accept.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// Where chunk `at`'s bytes start and end, and what its manifest entry says.
+fn entry(bytes: &[u8], count: usize, at: usize) -> (usize, usize, u64, u32) {
+    let offset = |which: usize| {
+        let start = TABLE + which * 8;
+        u64::from_le_bytes(bytes[start..start + 8].try_into().unwrap()) as usize
+    };
+    let manifest = TABLE + (count + 1) * 8 + at * 12;
+    (
+        offset(at),
+        offset(at + 1),
+        u64::from_le_bytes(bytes[manifest..manifest + 8].try_into().unwrap()),
+        u32::from_le_bytes(bytes[manifest + 8..manifest + 12].try_into().unwrap()),
+    )
+}
+
+/// How many chunks the header claims.
+fn count_of(bytes: &[u8]) -> usize {
+    u32::from_le_bytes(bytes[22..26].try_into().unwrap()) as usize
 }
 
 /// The acceptance test in miniature: every tile of the file is every tile of
@@ -103,13 +141,13 @@ fn a_facet_written_and_read_back_is_the_same_facet() {
 fn writing_the_same_facet_twice_writes_the_same_bytes() {
     let (first, snapshot) = written("canonical-a");
     let second = path("canonical-b");
-    write(&second, &snapshot).expect("a writable temp dir");
+    write(&second, &snapshot, Identity::Mint).expect("a writable temp dir");
     assert_eq!(std::fs::read(&first).unwrap(), std::fs::read(&second).unwrap());
 
     // And a facet read back and written again is the same file a third time —
     // the round trip is byte-identical, not merely lossless.
     let third = path("canonical-c");
-    write(&third, &read(&first).expect("a base set")).expect("a writable temp dir");
+    write(&third, &read(&first).expect("a base set"), Identity::Mint).expect("a writable temp dir");
     assert_eq!(std::fs::read(&first).unwrap(), std::fs::read(&third).unwrap());
 
     for path in [first, second, third] {
@@ -124,10 +162,10 @@ fn writing_the_same_facet_twice_writes_the_same_bytes() {
 /// every time it wrote its world would send a client back to fetching the facet
 /// on every restart, and nothing would say why.
 #[test]
-fn a_world_is_named_by_its_own_bytes() {
+fn a_world_is_named_by_its_own_content() {
     let (first, snapshot) = written("identity-a");
     let same = path("identity-b");
-    write(&same, &snapshot).expect("a writable temp dir");
+    write(&same, &snapshot, Identity::Mint).expect("a writable temp dir");
     assert_eq!(
         openshard_basemap::identity_of(&first).expect("a base set"),
         openshard_basemap::identity_of(&same).expect("a base set"),
@@ -143,12 +181,27 @@ fn a_world_is_named_by_its_own_bytes() {
             z: 12,
         },
     );
-    write(&elsewhere, &MapSnapshot::new(FACET, moved)).expect("a writable temp dir");
+    let moved = MapSnapshot::new(FACET, moved);
+    write(&elsewhere, &moved, Identity::Mint).expect("a writable temp dir");
     assert_ne!(
         openshard_basemap::identity_of(&first).expect("a base set"),
         openshard_basemap::identity_of(&elsewhere).expect("a base set"),
         "one tile of difference is a different world"
     );
+
+    // And the other half, which is what a squash and a client's cache both
+    // stand on: a world written again under the identity it already had keeps
+    // it, however much of its content moved in between. Minting from content is
+    // what names a *new* world; it is not what a rewrite of an old one does.
+    let carried = path("identity-d");
+    let known = openshard_basemap::identity_of(&first).expect("a base set");
+    write(&carried, &moved, Identity::Keep(known)).expect("a writable temp dir");
+    assert_eq!(
+        openshard_basemap::identity_of(&carried).expect("a base set"),
+        known,
+        "a carried identity survives the content moving under it"
+    );
+    std::fs::remove_file(&carried).ok();
 
     // And a file that is not a base set has no identity to take: naming a world
     // after somebody else's bytes is worse than not naming it.
@@ -182,7 +235,7 @@ fn a_recorded_revision_survives_the_round_trip() {
         |_, _| LandCell::default(),
     );
     let published = MapSnapshot::restored(Facet(3), MapRevision::decoded(97), map);
-    write(&path, &published).expect("a writable temp dir");
+    write(&path, &published, Identity::Mint).expect("a writable temp dir");
 
     let back = read(&path).expect("a base set");
     assert_eq!(back.facet(), Facet(3));
@@ -205,9 +258,15 @@ fn a_file_that_is_not_a_base_set_is_refused() {
 fn a_later_layout_is_refused_rather_than_guessed_at() {
     let (path, _) = written("version");
     let mut bytes = std::fs::read(&path).unwrap();
-    bytes[4] = 2;
+    bytes[4] = 3;
     std::fs::write(&path, &bytes).unwrap();
-    assert!(matches!(read(&path), Err(BaseError::Version { found: 2, .. })));
+    assert!(matches!(read(&path), Err(BaseError::Version { found: 3, .. })));
+    // And the identity, which reads the header alone, refuses it there too: a
+    // world named out of a layout this build cannot read is a name for nothing.
+    assert!(matches!(
+        openshard_basemap::identity_of(&path),
+        Err(BaseError::Version { found: 3, .. })
+    ));
     std::fs::remove_file(&path).ok();
 }
 
@@ -232,8 +291,8 @@ fn a_table_that_does_not_rise_is_refused() {
     let (path, _) = written("table");
     let mut bytes = std::fs::read(&path).unwrap();
     // The second entry, pointed back at the start of the first chunk's bytes.
-    let first = u64::from_le_bytes(bytes[26..34].try_into().unwrap());
-    bytes[34..42].copy_from_slice(&(first - 1).to_le_bytes());
+    let first = u64::from_le_bytes(bytes[TABLE..TABLE + 8].try_into().unwrap());
+    bytes[TABLE + 8..TABLE + 16].copy_from_slice(&(first - 1).to_le_bytes());
     std::fs::write(&path, &bytes).unwrap();
     assert!(matches!(read(&path), Err(BaseError::BadTable { at: 1, .. })));
     std::fs::remove_file(&path).ok();
@@ -243,20 +302,112 @@ fn a_table_that_does_not_rise_is_refused() {
 fn a_truncated_table_is_refused() {
     let (path, _) = written("truncated");
     let bytes = std::fs::read(&path).unwrap();
-    std::fs::write(&path, &bytes[..30]).unwrap();
+    // Past the header, so the file is a base set that says how many chunks it
+    // holds, and short of the table and manifest it says are there.
+    std::fs::write(&path, &bytes[..TABLE + 8]).unwrap();
     assert!(matches!(read(&path), Err(BaseError::Truncated { .. })));
     std::fs::remove_file(&path).ok();
 }
 
 /// A chunk that is no longer a chunk is reported as which chunk it was, rather
 /// than as a facet that would not assemble.
+///
+/// It takes a hand-built file to get here now, and that is the point of the two
+/// tests below it: a byte moved in a real file is caught by the manifest long
+/// before a decoder sees it. What is left for this variant is a record that
+/// inflates to its declared length, hashes to what the manifest says, and is
+/// still not a chunk — which is a file somebody wrote with something other than
+/// this crate.
 #[test]
 fn a_broken_chunk_is_named() {
     let (path, _) = written("broken-chunk");
     let mut bytes = std::fs::read(&path).unwrap();
-    let first = u64::from_le_bytes(bytes[26..34].try_into().unwrap()) as usize;
-    bytes[first] = b'X';
+    let count = count_of(&bytes);
+    let (start, end, _, _) = entry(&bytes, count, 0);
+
+    // A record of the right shape for the manifest and the wrong magic for a
+    // chunk. The rest of the file's chunks keep their own entries: only the
+    // first is replaced, and everything after it shifts by the difference.
+    let record = b"OSMX and then some bytes that are not a chunk record".to_vec();
+    let blob = openshard_protocol::chunks::deflate(&record);
+    let manifest = TABLE + (count + 1) * 8;
+    bytes[manifest..manifest + 8].copy_from_slice(&fnv1a64(&record).to_le_bytes());
+    bytes[manifest + 8..manifest + 12].copy_from_slice(&u32::try_from(record.len()).unwrap().to_le_bytes());
+    bytes.splice(start..end, blob.iter().copied());
+    // Every offset after the first chunk's start moves by what the blob's
+    // length changed by.
+    let moved = blob.len() as i64 - (end - start) as i64;
+    for at in 1..=count {
+        let slot = TABLE + at * 8;
+        let was = u64::from_le_bytes(bytes[slot..slot + 8].try_into().unwrap()) as i64;
+        bytes[slot..slot + 8].copy_from_slice(&((was + moved) as u64).to_le_bytes());
+    }
+
     std::fs::write(&path, &bytes).unwrap();
     assert!(matches!(read(&path), Err(BaseError::Chunk { at: 0, .. })));
+    std::fs::remove_file(&path).ok();
+}
+
+/// A byte moved inside a chunk's blob is caught by the manifest, not by luck.
+///
+/// A deflate stream with a byte changed in it usually fails to inflate at all,
+/// and sometimes inflates into something else; both are refused, and which one
+/// happened is not this test's business — what matters is that neither reaches
+/// a decoder that would build a plausible square out of it.
+#[test]
+fn a_chunk_that_changed_under_the_file_is_refused() {
+    let (path, _) = written("changed-chunk");
+    let mut bytes = std::fs::read(&path).unwrap();
+    let count = count_of(&bytes);
+    let (start, end, _, _) = entry(&bytes, count, 0);
+    // The last byte of the stream rather than the first: the header of a zlib
+    // stream is checked before anything is inflated, and the interesting case
+    // is the one that gets past it.
+    bytes[end - 1] ^= 0xFF;
+    assert!(end - start > 2, "a deflate stream is longer than its header");
+
+    std::fs::write(&path, &bytes).unwrap();
+    assert!(
+        matches!(
+            read(&path),
+            Err(BaseError::NotDeflated { at: 0, .. } | BaseError::HashMismatch { at: 0, .. })
+        ),
+        "a corrupted chunk is refused as chunk 0"
+    );
+    std::fs::remove_file(&path).ok();
+}
+
+/// The manifest is what the chunks hash to, and the chunks are deflated.
+///
+/// Both halves in one test because they are one claim about the file: the
+/// manifest describes the *record*, and what is stored is that record's deflate
+/// stream. A reader that hashed the stored bytes instead would pass every other
+/// test here and refuse every file written by a build with a different
+/// compressor in it.
+#[test]
+fn the_chunks_are_stored_deflated_and_the_manifest_is_of_the_records() {
+    let (path, _) = written("deflated");
+    let bytes = std::fs::read(&path).unwrap();
+    let count = count_of(&bytes);
+    assert_eq!(count, 4, "nine blocks square is four chunks");
+
+    let mut records = 0;
+    let mut stored = 0;
+    for at in 0..count {
+        let (start, end, hash, inflated) = entry(&bytes, count, at);
+        let record = openshard_protocol::chunks::inflate(
+            &bytes[start..end],
+            openshard_protocol::chunks::InflatedLength(inflated),
+        )
+        .expect("a chunk stored as a deflate stream of its declared length");
+        assert_eq!(fnv1a64(&record), hash, "chunk {at}'s manifest entry");
+        assert_eq!(&record[..4], b"OSMC", "chunk {at} is a chunk record");
+        records += record.len();
+        stored += end - start;
+    }
+    assert!(
+        stored < records,
+        "the file stores {stored} bytes for {records} of records"
+    );
     std::fs::remove_file(&path).ok();
 }

@@ -47,7 +47,12 @@ fn base_set(tag: &str, facet: Facet) -> (PathBuf, PathBuf) {
         },
         |_, _| GROUND,
     );
-    openshard_basemap::write(&path, &MapSnapshot::new(facet, map)).expect("a writable temp dir");
+    openshard_basemap::write(
+        &path,
+        &MapSnapshot::new(facet, map),
+        openshard_basemap::Identity::Mint,
+    )
+    .expect("a writable temp dir");
     (path, log)
 }
 

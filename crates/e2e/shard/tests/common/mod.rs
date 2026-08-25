@@ -102,7 +102,8 @@ pub fn world_of_ours(dir: &Path, client: &Path, blocks: u32, statics: &[StaticIt
         map.place_static(*item);
     }
     let snapshot = MapSnapshot::new(FACET, map);
-    openshard_basemap::write(&base_set, &snapshot).expect("a writable temp directory");
+    openshard_basemap::write(&base_set, &snapshot, openshard_basemap::Identity::Mint)
+        .expect("a writable temp directory");
 
     let tiledata = client.join("tiledata.mul");
     let tiles = openshard_uofiles::tiledata::load(&tiledata)

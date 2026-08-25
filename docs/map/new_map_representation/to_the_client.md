@@ -501,11 +501,13 @@ last clause of it.
 
 Found while writing this, and each is somebody's.
 
-- **A base set could store its chunks deflated.** 107,528,650 → 22,363,473 bytes
-  on the same content, measured above. It is a version 2 of the file and it
-  touches `openshard_basemap::write`/`read` alone — the table already makes each
-  chunk independently addressable. Not E's, because E's wire format is not the
-  file format, but E3's cache is the caller that would want it most.
+- ~~**A base set could store its chunks deflated.**~~ 107,528,650 → 22,363,473
+  bytes on the same content, measured above. **Taken**, as the first third of
+  [`what_a_change_costs.md`](what_a_change_costs.md)'s S1 — a version 2 of the
+  file, carrying this and the two other things a version byte should only be
+  spent on once. The deflating itself is now
+  `openshard_protocol::chunks::deflate`, so the file and the wire pack a chunk
+  the same way rather than in two places at two levels.
 - ~~**`WorldState::publish` answers `PatchError::NoGround` for a facet that does
   not exist**~~ — carried over from the last handoff and **fixed**: it says
   `expect("an entity's facet is always loaded")` now, which is what every other

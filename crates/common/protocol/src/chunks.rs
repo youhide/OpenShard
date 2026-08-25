@@ -112,6 +112,34 @@ pub const MAX_CHUNKS: u16 = 64;
 /// times the work.
 const DEFLATE_LEVEL: u8 = 6;
 
+/// Deflate one chunk's canonical record.
+///
+/// **Here rather than at either caller**, because the wire is no longer the only
+/// one: `openshard_basemap`'s version 2 stores a base set's chunks deflated with
+/// exactly this, so a file written by one build and read by another cannot end
+/// up at two levels. The level is not a parameter for the same reason — it is a
+/// property of the format, and a caller that could choose it could write a file
+/// this one would still read and a measurement nobody could reproduce.
+#[must_use]
+pub fn deflate(record: &[u8]) -> Vec<u8> {
+    miniz_oxide::deflate::compress_to_vec_zlib(record, DEFLATE_LEVEL)
+}
+
+/// Inflate one, bounded by the length it declared, and `None` if it is not that.
+///
+/// The bound is the whole reason an inflated length travels beside a blob — a
+/// receiver that inflates without one is a receiver a sender can make allocate
+/// anything. The **equality** is the second half of that claim and it is checked
+/// here: a stream that stops short of its declared length inflates happily under
+/// a limit, and a chunk record short of its own header decodes to a refusal
+/// somewhere far away from the blob that caused it.
+#[must_use]
+pub fn inflate(deflated: &[u8], inflated: InflatedLength) -> Option<Vec<u8>> {
+    let record =
+        miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(deflated, inflated.0 as usize).ok()?;
+    (record.len() == inflated.0 as usize).then_some(record)
+}
+
 /// A chunk's position on a facet, as the wire carries it.
 ///
 /// **Not `openshard_map::chunk::ChunkCoord`**, which is the same place in the
@@ -339,7 +367,7 @@ impl ChunkData {
         let inflated = InflatedLength(
             u32::try_from(record.len()).expect("a chunk record of fewer than four billion bytes"),
         );
-        let deflated = miniz_oxide::deflate::compress_to_vec_zlib(record, DEFLATE_LEVEL);
+        let deflated = deflate(record);
         // A zlib stream is never empty — it has a header — so `max(1)` is a
         // statement that this function always produces at least one packet
         // rather than a guard against a case that can arise.
@@ -525,9 +553,9 @@ pub fn join(fragments: &[ChunkData]) -> Result<Vec<u8>, JoinError> {
     for slice in ordered {
         deflated.extend_from_slice(slice.expect("every slot was filled"));
     }
-    // With the length as a limit, which is the whole reason it is on the wire.
-    miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&deflated, first.inflated.0 as usize)
-        .map_err(|_| JoinError::NotDeflated)
+    // With the length as a limit and as an assertion, which is the whole reason
+    // it is on the wire — see [`inflate`].
+    inflate(&deflated, first.inflated).ok_or(JoinError::NotDeflated)
 }
 
 /// `0xBF` subcommand `0xE004` — "this is the world you are standing in".

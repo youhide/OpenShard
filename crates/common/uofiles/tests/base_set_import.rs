@@ -72,7 +72,8 @@ fn felucca_imports_into_a_base_set_and_comes_back_whole() {
     let original = openshard_uofiles::map::load_facet(&dir, facet).expect("a readable facet 0");
 
     let first = path("felucca-a");
-    let written = openshard_basemap::write(&first, &original).expect("a writable temp dir");
+    let written = openshard_basemap::write(&first, &original, openshard_basemap::Identity::Mint)
+        .expect("a writable temp dir");
     assert_eq!(written.statics, original.map().static_count());
     // 7168x4096 is 112 by 64 chunks, and it divides evenly, so every one of
     // them is whole.
@@ -120,7 +121,7 @@ fn felucca_imports_into_a_base_set_and_comes_back_whole() {
 
     // And byte-identical: the facet read back writes the same file.
     let second = path("felucca-b");
-    openshard_basemap::write(&second, &back).expect("a writable temp dir");
+    openshard_basemap::write(&second, &back, openshard_basemap::Identity::Mint).expect("a writable temp dir");
     assert!(same_bytes(&first, &second), "the round trip changed the bytes");
 
     std::fs::remove_file(&first).ok();
