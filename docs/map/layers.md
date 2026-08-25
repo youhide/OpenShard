@@ -119,7 +119,47 @@ the numbers are what keep this document from being a matter of taste.
 | the coarse graph, after N4 | 11.7 s |
 
 **So the cost of a patch is the rebake, not the write.** Anyone reaching for a
-cheaper way to get statics into the base is optimising 0.1 ms next to 55 ms. The
-work that would pay is a bake with a seam smaller than a facet —
-[`navigation_spans.md`](navigation_spans.md)'s N8 — and it is queued there, not
-here.
+cheaper way to get statics into the base is optimising 0.1 ms next to a rebake
+two orders larger. The work that would pay is a bake with a seam smaller than a
+facet: [`navigation_spans.md`](navigation_spans.md)'s N8 for the spans and
+[`what_a_change_costs.md`](new_map_representation/what_a_change_costs.md)'s S3
+for the statics beside them.
+
+*Two numbers for one thing, noted rather than reconciled:* `publish_cost.rs`
+reports the span rebake at 52.9–55.2 ms on this machine and
+`what_a_change_costs.md` records 115.4 ms from an earlier run of the same test.
+Re-run it rather than picking one.
+
+## 7. Why a changed static does not migrate into the live layer
+
+The idea arrives on its own every time the rebake is measured: **when a static
+changes, take it out of the baked run and push it into the fast layer** — then
+that object is free to move for the rest of the session, and nobody waits for a
+bake.
+
+It is the right instinct about the cost and the wrong place to spend it, for
+three reasons in increasing order of weight.
+
+- **Taking it out is the expensive half.** Section 4: the live layer cannot
+  subtract. Removing a static from the base is a `Patch`, a revision and a
+  rebake — the whole price, paid up front. The scheme only starts saving on the
+  *second* edit to the *same* object, and editing a world is mostly edits to
+  different places.
+- **It changes what the thing is, on the wire and in the tick.** To live in the
+  live layer a static has to become an entity with a serial: sent to every
+  client in range, present in the tick, written to the entity store, and
+  pickable under a cursor. A castle is 3,667 components carried by *one* multi
+  id; a thousand promoted statics are a thousand entities. A static costs a tick
+  and a wire nothing at all, and this trade moves the cost off the rare publish
+  and onto every frame and every login.
+- **The saving it wants already exists, and without either.** The editor's draft
+  is local until Commit — see [`editor.md`](editor.md), slices 4 and 5: gestures
+  edit a private preview, repeated writes to one tile coalesce, undo and redo are
+  exact, and the whole draft commits as **one** patch. N edits cost one rebake,
+  which is the economy the promotion was reaching for, with the object never
+  ceasing to be a static and the half-built wall never visible to anyone else.
+
+So the answer to "can we avoid the hitch by not writing to the base" is that we
+already avoid it by not writing to the base *until the operator is done* — and
+the remaining hitch, the one at Commit, is S3's and N8's to remove by making the
+write to the base cheap rather than by routing around it.
