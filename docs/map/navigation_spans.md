@@ -958,6 +958,23 @@ overlay for the process — with `world::guide` on the client and
 
 ### N8 — the bake follows a patch
 
+> **Built**, 2026-08-25. `SpanIndex::rebake_chunks` is the partial bake and
+> `Ground`'s three writers are its only callers. Measured by the test that
+> produced the number it replaces:
+>
+> | | before | after |
+> |---|---:|---:|
+> | `Ground::publish`, the shard's tick | 109.7 ms | **0.3 ms** |
+> | `Ground::take_chunks`, the window's event-loop thread | 128.6 ms | **0.4 ms** |
+>
+> The oracle is
+> [`publish_locality`](../../crates/common/movement/tests/publish_locality.rs):
+> Felucca patched in four places — one inside a chunk and three on its edges —
+> answers what the same facet baked whole answers, over 148,996 columns around
+> the edits (60,235 of them stored) and a stride-31 sweep of everything else.
+> What is left of this node is nothing; what is left of the *cost* is the coarse
+> graph and `chunk::apply`, both named out of scope below and both S3's.
+
 Needs N1. **Not gated** — it is the one node here with its measurement in front
 of it rather than behind it, and the thing it measures is a person waiting.
 
@@ -1009,6 +1026,18 @@ exceed live ones, rebake the facet whole**. The next load builds from the map
 anyway. If [N6](#n6--an-artifact-if-a-measurement-asks-for-one) ever opens, an
 appended index must be compacted before it is written, or the file records the
 garbage.
+
+**The area is a block wider than the chunks, and that was found in the doing.**
+A column's own height is the average of the four *cells* meeting at its
+north-west corner — `WorldMap::land_and_corners` reads `(x, y)` through
+`(x+1, y+1)` — so a cell that moved is read by the columns one tile **west and
+north** of it, which across a chunk's own edge live in the block before it.
+Baking only the edited chunk's blocks leaves a one-tile seam answering for the
+world as it was, and nothing about the edited chunk itself would show it. The
+rebuilt rectangle is therefore the chunk's blocks plus one row and one column
+before them; the neighbour is rebuilt whole where only its eastern or southern
+edge could have moved, because a block is the unit this layer bakes in and it is
+a ninth of the work either way.
 
 **What must not change is `Ground`'s invariant** — `spans` is `Some` exactly when
 the world has a base, and it is a bake of *that* base. A partial rebake makes

@@ -37,7 +37,8 @@
 
 use std::fmt;
 
-use openshard_map::grid::BlockCoord;
+use openshard_map::chunk::{BLOCKS_PER_CHUNK, ChunkCoord};
+use openshard_map::grid::{BlockCoord, BlockExtent, BlockIndex};
 use openshard_map::map::{BLOCK_SIZE, CELLS_PER_BLOCK, StaticItem, WorldMap};
 use openshard_map::overlay::Cover;
 use openshard_tiles::{LAND_TILE_COUNT, TileData};
@@ -288,6 +289,21 @@ pub struct SpanIndex {
     /// What each land graphic is, indexed by
     /// [`LandTileId`](openshard_tiles::LandTileId).
     land: Vec<LandKind>,
+    /// How many of [`spans`](Self::spans) no table addresses any more.
+    ///
+    /// Zero for a facet baked whole, and it only ever grows through
+    /// [`rebake_chunks`](Self::rebake_chunks): a rebuilt block's run is
+    /// **appended** and its table repointed, which leaves the run it used to
+    /// own where it is with nothing pointing at it. That is what buys the
+    /// locality — a prefix sum *is* an ordering, and this layout has an
+    /// indirection instead — and the price is paid here, in a number.
+    ///
+    /// The garbage rule is `navigation_spans.md`'s N8 and it is deliberately
+    /// blunt: never compact during a session, except that dead spans exceeding
+    /// live ones rebake the facet whole. A publish is an operator typing, so a
+    /// session's worth of them is a few thousand blocks against a facet's
+    /// 458,752 — and the next load builds from the map anyway.
+    dead: usize,
 }
 
 impl fmt::Debug for SpanIndex {
@@ -297,6 +313,7 @@ impl fmt::Debug for SpanIndex {
             .field("tables", &self.tables.len())
             .field("columns", &self.counts.len())
             .field("spans", &self.spans.len())
+            .field("dead", &self.dead)
             .field("bytes", &self.resident_bytes())
             .finish()
     }
@@ -325,65 +342,24 @@ impl SpanIndex {
             counts: Vec::new(),
             spans: Vec::new(),
             land: land_kinds(tiles),
+            dead: 0,
         };
         let mut column = Vec::new();
         for block in extent.blocks() {
             let coord = extent.coord_of(block).expect("the extent named this block");
-            let items = map.statics_in_block(coord.x, coord.y);
-            if items.is_empty() {
+            let Some(table) = bake_block(
+                map,
+                tiles,
+                &index.land,
+                coord,
+                &mut index.spans,
+                &mut index.counts,
+                &mut column,
+            ) else {
                 // The block tier: nothing here to duck under and nothing to
                 // stand on, so every column of it is the land grid's answer.
                 continue;
-            }
-            let mut table = BlockTable {
-                base: u32::try_from(index.spans.len()).expect("a facet's spans fit a u32"),
-                occupied: 0,
-                counts: u32::try_from(index.counts.len()).expect("a facet's columns fit a u32"),
             };
-            let (origin_x, origin_y) = coord.origin();
-            // A block's items are sorted by `(y, x)`, which *is* its row-major
-            // cell order — so grouping them by tile walks the block's columns in
-            // ascending cell, and the counts can be laid down in one pass with
-            // no second sort. It is what the packed counts are addressed by as
-            // well as the spans: a count belongs to the `n`th set bit of the
-            // mask, so laying them down in any other order would hand a column
-            // its neighbour's length. The assertion below is what says so out
-            // loud: get this wrong and every column after the first reads a run
-            // belonging to somebody else, silently.
-            let mut at = 0;
-            let mut last_cell = None;
-            while at < items.len() {
-                let (x, y) = (items[at].x, items[at].y);
-                let run = items[at..].partition_point(|item| (item.y, item.x) == (y, x));
-                let cell = usize::try_from(u32::from(y) - origin_y).expect("a tile inside its own block")
-                    * BLOCK_SIZE as usize
-                    + usize::try_from(u32::from(x) - origin_x).expect("a tile inside its own block");
-                assert!(
-                    last_cell.is_none_or(|last| cell > last),
-                    "block {coord:?} hands its statics out of cell order at ({x}, {y}): \
-                     the CSR layout addresses a column by the counts of the columns before it"
-                );
-                last_cell = Some(cell);
-                surfaces_of(map, tiles, &index.land, x, y, &items[at..at + run], &mut column);
-                let held = u8::try_from(column.len()).unwrap_or_else(|_| {
-                    panic!(
-                        "({x}, {y}) holds {} standable surfaces; a count is a byte",
-                        column.len()
-                    )
-                });
-                // A column whose statics leave nothing to stand on gets no bit
-                // and no count. Not for correctness — a stored zero would sum
-                // to the same offsets and hand back the same empty slice — but
-                // because it is the population the packed counts are sized by,
-                // and a byte spent saying "nothing" is what the dense table was
-                // spending 82% of itself on.
-                if held > 0 {
-                    table.occupied |= 1 << cell;
-                    index.counts.push(held);
-                }
-                index.spans.append(&mut column);
-                at += run;
-            }
             index.blocks[block.get() as usize] =
                 u32::try_from(index.tables.len()).expect("a facet's blocks fit a u32");
             index.tables.push(table);
@@ -392,6 +368,95 @@ impl SpanIndex {
         index.tables.shrink_to_fit();
         index.counts.shrink_to_fit();
         index
+    }
+
+    /// Bring the bake back in step with a base that moved under these chunks,
+    /// and touch nothing else.
+    ///
+    /// `docs/map/navigation_spans.md`'s N8. [`build`](Self::build) walks a whole
+    /// facet — 109.7 ms on Felucca, paid on the shard's tick *and* on the
+    /// window's event-loop thread — and a publish moves one chunk of 7,168. This
+    /// is the same bake over the blocks that chunk covers: each is rebuilt onto
+    /// the end of the runs and its table repointed, which the layout allows
+    /// because a table carries its own `base` and `counts` rather than deriving
+    /// them from a running total.
+    ///
+    /// **Not public, and that is the invariant.** A partial rebake makes "a bake
+    /// of most of the base" spellable for the first time, so the only callers are
+    /// [`Ground::publish`](crate::ground::Ground::publish) and its two siblings,
+    /// which write the base in the same statement and pass the chunks they
+    /// already hold. Handing this to a caller who chose the chunks itself is
+    /// handing it the ability to leave a stale column behind.
+    ///
+    /// **The area is the chunks plus one block west and north of each**, and that
+    /// is the half a naive implementation forgets. A column's height is the
+    /// average of the four *cells* meeting at its north-west corner —
+    /// [`WorldMap::land_and_corners`] reads `(x, y)` through `(x+1, y+1)` — so a
+    /// cell that moved is read by the columns one tile west and one tile north of
+    /// it, which across a chunk's own edge live in the block before it. Baking
+    /// only the chunk's own blocks leaves a one-tile seam answering for the world
+    /// as it was.
+    pub(crate) fn rebake_chunks(&mut self, map: &WorldMap, tiles: &TileData, chunks: &[ChunkCoord]) {
+        let extent = map.extent();
+        let mut column = Vec::new();
+        for coord in blocks_under(extent, chunks) {
+            let block = extent
+                .index_of(coord)
+                .expect("blocks_under clipped to the extent");
+            self.rebake_block(map, tiles, block, coord, &mut column);
+        }
+        // The garbage rule, and the whole of it: the runs the repointing
+        // orphaned are never compacted during a session, because a publish is an
+        // operator typing and the next load bakes from the map anyway — until
+        // they outweigh what is reachable, at which point a facet-wide bake is
+        // both the cheaper answer and the one that resets the count.
+        if self.dead > self.spans.len() - self.dead {
+            *self = Self::build(map, tiles);
+        }
+    }
+
+    /// Rebuild one block's run and repoint its table at it.
+    ///
+    /// A block can arrive at any of three states and all three are ordinary: it
+    /// had a table and still has one (the table is overwritten in place, so the
+    /// tables vector does not grow under a session's worth of publishes); it had
+    /// none and now does (a new table, appended); it had one and its last static
+    /// was removed (the block goes back to [`BARE`] and its table is left
+    /// unreachable, which is the same garbage its run is and is counted the same
+    /// way).
+    fn rebake_block(
+        &mut self,
+        map: &WorldMap,
+        tiles: &TileData,
+        block: BlockIndex,
+        coord: BlockCoord,
+        column: &mut Vec<Span>,
+    ) {
+        let slot = self.blocks[block.get() as usize];
+        if slot != BARE {
+            self.dead += run_len(&self.tables[slot as usize], &self.counts);
+        }
+        let baked = bake_block(
+            map,
+            tiles,
+            &self.land,
+            coord,
+            &mut self.spans,
+            &mut self.counts,
+            column,
+        );
+        self.blocks[block.get() as usize] = match (baked, slot) {
+            (None, _) => BARE,
+            (Some(table), BARE) => {
+                let at = u32::try_from(self.tables.len()).expect("a facet's blocks fit a u32");
+                self.tables.push(table);
+                at
+            }
+            (Some(table), slot) => {
+                self.tables[slot as usize] = table;
+                slot
+            }
+        };
     }
 
     /// How much memory the bake holds, in bytes — the number
@@ -731,6 +796,126 @@ const fn kind_flags(kind: LandKind) -> Option<SpanFlags> {
 /// difference between the two tiers rather than an inconsistency: a column with
 /// statics has a *headroom* over its ground, and the byte that says so has to be
 /// stored beside the height it is a headroom above.
+/// Bake one block's columns onto the end of `spans` and `counts`, and hand back
+/// the table that addresses them — or `None` for a block with no statics at all,
+/// which is the block tier and stores nothing.
+///
+/// Append-only, and that is what makes it serve both writers: [`SpanIndex::build`]
+/// walks every block of a facet in order, and
+/// [`SpanIndex::rebake_chunks`](SpanIndex::rebake_chunks) walks the few a publish
+/// moved and repoints their tables at what this left at the end. Neither can
+/// disturb a run belonging to a block it was not asked about.
+///
+/// `column` is the caller's scratch, drained here — one allocation for a whole
+/// facet rather than one per column.
+fn bake_block(
+    map: &WorldMap,
+    tiles: &TileData,
+    land: &[LandKind],
+    coord: BlockCoord,
+    spans: &mut Vec<Span>,
+    counts: &mut Vec<u8>,
+    column: &mut Vec<Span>,
+) -> Option<BlockTable> {
+    let items = map.statics_in_block(coord.x, coord.y);
+    if items.is_empty() {
+        return None;
+    }
+    let mut table = BlockTable {
+        base: u32::try_from(spans.len()).expect("a facet's spans fit a u32"),
+        occupied: 0,
+        counts: u32::try_from(counts.len()).expect("a facet's columns fit a u32"),
+    };
+    let (origin_x, origin_y) = coord.origin();
+    // A block's items are sorted by `(y, x)`, which *is* its row-major cell
+    // order — so grouping them by tile walks the block's columns in ascending
+    // cell, and the counts can be laid down in one pass with no second sort. It
+    // is what the packed counts are addressed by as well as the spans: a count
+    // belongs to the `n`th set bit of the mask, so laying them down in any other
+    // order would hand a column its neighbour's length. The assertion below is
+    // what says so out loud: get this wrong and every column after the first
+    // reads a run belonging to somebody else, silently.
+    let mut at = 0;
+    let mut last_cell = None;
+    while at < items.len() {
+        let (x, y) = (items[at].x, items[at].y);
+        let run = items[at..].partition_point(|item| (item.y, item.x) == (y, x));
+        let cell = usize::try_from(u32::from(y) - origin_y).expect("a tile inside its own block")
+            * BLOCK_SIZE as usize
+            + usize::try_from(u32::from(x) - origin_x).expect("a tile inside its own block");
+        assert!(
+            last_cell.is_none_or(|last| cell > last),
+            "block {coord:?} hands its statics out of cell order at ({x}, {y}): \
+             the CSR layout addresses a column by the counts of the columns before it"
+        );
+        last_cell = Some(cell);
+        surfaces_of(map, tiles, land, x, y, &items[at..at + run], column);
+        let held = u8::try_from(column.len()).unwrap_or_else(|_| {
+            panic!(
+                "({x}, {y}) holds {} standable surfaces; a count is a byte",
+                column.len()
+            )
+        });
+        // A column whose statics leave nothing to stand on gets no bit and no
+        // count. Not for correctness — a stored zero would sum to the same
+        // offsets and hand back the same empty slice — but because it is the
+        // population the packed counts are sized by, and a byte spent saying
+        // "nothing" is what the dense table was spending 82% of itself on.
+        if held > 0 {
+            table.occupied |= 1 << cell;
+            counts.push(held);
+        }
+        spans.append(column);
+        at += run;
+    }
+    Some(table)
+}
+
+/// Every block whose columns a publish of these chunks could have moved, each
+/// once, clipped to the facet.
+///
+/// A chunk is [`BLOCKS_PER_CHUNK`] square, and the rectangle taken is that plus
+/// one block west and one north — see
+/// [`SpanIndex::rebake_chunks`](SpanIndex::rebake_chunks) for why the seam is
+/// there. The whole neighbouring block is rebuilt where only its eastern or
+/// southern edge could have changed: it is a ninth of the work either way, and
+/// baking a block is the unit this layer has.
+///
+/// Deduplicated, because two chunks published together overlap in that border
+/// and a block baked twice would count its own fresh run as garbage.
+fn blocks_under(extent: BlockExtent, chunks: &[ChunkCoord]) -> Vec<BlockCoord> {
+    let mut blocks = Vec::new();
+    for chunk in chunks {
+        let origin = chunk.block_origin();
+        let from = BlockCoord {
+            x: origin.x.saturating_sub(1),
+            y: origin.y.saturating_sub(1),
+        };
+        for x in from.x..=origin.x + BLOCKS_PER_CHUNK - 1 {
+            for y in from.y..=origin.y + BLOCKS_PER_CHUNK - 1 {
+                let coord = BlockCoord { x, y };
+                if extent.index_of(coord).is_some() {
+                    blocks.push(coord);
+                }
+            }
+        }
+    }
+    blocks.sort_unstable();
+    blocks.dedup();
+    blocks
+}
+
+/// How many spans a table addresses — the length of one block's run.
+///
+/// The counts are lengths rather than offsets, so a block's run is their sum
+/// over its occupied columns. Read when a block is rebuilt, to say how much of
+/// [`SpanIndex::spans`] the repointing just orphaned.
+fn run_len(table: &BlockTable, counts: &[u8]) -> usize {
+    let at = table.counts as usize;
+    let columns = table.occupied.count_ones() as usize;
+    counts[at..at + columns].iter().copied().map(usize::from).sum()
+}
+
 fn surfaces_of(
     map: &WorldMap,
     tiles: &TileData,
@@ -887,7 +1072,13 @@ mod tests {
     use openshard_map::grid::{BlockExtent, Tile};
     use openshard_tiles::TileFlags;
 
+    use openshard_map::map::LandCell;
+    use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime, Undo};
+    use openshard_protocol::world::Facet;
+    use openshard_tiles::LandTileId;
+
     use super::*;
+    use crate::ground::Ground;
     use crate::scene::Scene;
     use crate::surfaces::stand_surfaces;
     use crate::terrain::MapTerrain;
@@ -1414,5 +1605,250 @@ mod tests {
             assert!(compared > 100_000, "only {compared} steps compared");
             assert!(landed > 10_000, "only {landed} of them landed anywhere");
         }
+    }
+
+    // ---- N8: the bake follows a patch -------------------------------------
+
+    /// A scene as a facet a publish can land on. [`Ground`] is the only door the
+    /// partial rebake is reached through, so every test below goes through it
+    /// rather than calling [`SpanIndex::rebake_chunks`] itself.
+    fn shard(scene: Scene) -> (Ground, TileData) {
+        let (base, tiles) = scene.into_shard(Facet(0));
+        (Ground::new(Some(base), &tiles), tiles)
+    }
+
+    /// The bake behind a `Ground`, for the two questions only it can answer:
+    /// how much of it is garbage, and how many tables it holds.
+    fn bake_of<'a>(ground: &'a Ground, tiles: &'a TileData) -> &'a SpanIndex {
+        ground.terrain(tiles).expect("a facet with ground").spans().index
+    }
+
+    /// **N8's oracle, and what it is done when:** a facet patched into shape
+    /// answers exactly what the same facet baked whole answers, column for
+    /// column.
+    ///
+    /// Asked as a swimmer, so no surface is filtered out of the comparison
+    /// before it is made — this compares what the bake *holds*, not what one
+    /// body would accept. The failure it exists for is a column reading its
+    /// neighbour's run, which the packing has always been one mistake away from
+    /// and which nothing else here would notice.
+    fn agrees_with_a_whole_bake(ground: &Ground, tiles: &TileData) {
+        let map = ground.snapshot().expect("a facet with ground").map();
+        let whole = SpanIndex::build(map, tiles);
+        let patched = ground
+            .terrain(tiles)
+            .expect("a facet with ground")
+            .spans()
+            .swimming(true);
+        let baked = Spans::new(map, &whole).swimming(true);
+        for y in 0..map.height() as u16 {
+            for x in 0..map.width() as u16 {
+                let held: Vec<Span> = patched.surfaces(x, y).collect();
+                let whole: Vec<Span> = baked.surfaces(x, y).collect();
+                assert_eq!(
+                    held, whole,
+                    "({x}, {y}) reads differently after a partial rebake than it does baked whole"
+                );
+            }
+        }
+    }
+
+    /// Move one cell of ground, published the way a `.setland` is.
+    fn raise(ground: &mut Ground, tiles: &TileData, x: u16, y: u16, z: i8) -> Undo {
+        raise_all(ground, tiles, &[(x, y, z)])
+    }
+
+    /// The same, for an edit that has to name several cells at once — a tile's
+    /// standing height is the average of the four that meet at its north-west
+    /// corner, so moving *one* of them moves no tile at all.
+    fn raise_all(ground: &mut Ground, tiles: &TileData, cells: &[(u16, u16, i8)]) -> Undo {
+        let base = ground.snapshot().expect("a facet with ground");
+        let ops = cells
+            .iter()
+            .map(|&(x, y, z)| {
+                PatchOp::set_land(
+                    base.map(),
+                    x,
+                    y,
+                    LandCell {
+                        tile: LandTileId(0),
+                        z,
+                    },
+                )
+                .expect("a tile on this scene")
+            })
+            .collect();
+        let patch = Patch::new(
+            Facet(0),
+            base.revision(),
+            PatchAuthor("a test".to_owned()),
+            PatchTime(0),
+            ops,
+        );
+        ground.publish(&patch, tiles).expect("the world in hand")
+    }
+
+    /// Two chunks square, with something standing on it: the smallest facet on
+    /// which "the chunk the edit is in" and "some other chunk" are different
+    /// places. A floor is stored, so the edits below have a run to move.
+    fn two_chunks() -> Scene {
+        let mut scene = Scene::flat_over(BlockExtent { wide: 16, down: 16 }, 0);
+        scene
+            .floor(10, 10, 0, 5)
+            .floor(70, 70, 0, 5)
+            .floor(100, 20, 0, 5)
+            // The seam: a column at the last tile of the first chunk, whose own
+            // height is read out of cells belonging to the *next* chunk.
+            .floor(63, 63, 0, 5);
+        scene
+    }
+
+    #[test]
+    fn a_patched_facet_answers_like_one_baked_whole() {
+        let (mut ground, tiles) = shard(two_chunks());
+        // Three edits in three different chunks, one of them under a stored
+        // column and one on bare ground.
+        raise(&mut ground, &tiles, 10, 10, 20);
+        agrees_with_a_whole_bake(&ground, &tiles);
+        raise(&mut ground, &tiles, 71, 70, -10);
+        agrees_with_a_whole_bake(&ground, &tiles);
+        let undo = raise(&mut ground, &tiles, 5, 100, 40);
+        agrees_with_a_whole_bake(&ground, &tiles);
+
+        ground.undo(&undo, &tiles);
+        agrees_with_a_whole_bake(&ground, &tiles);
+    }
+
+    /// The half a naive implementation forgets: a column's height is the average
+    /// of the four cells meeting at its north-west corner, so an edit in one
+    /// chunk is read by the column one tile west and north of it — which is in
+    /// the chunk before. Baking only the edited chunk's own blocks leaves that
+    /// column answering for the world as it was, and nothing about the edit's
+    /// own chunk would show it.
+    #[test]
+    fn a_stored_column_across_the_chunk_edge_is_rebaked_too() {
+        let (mut ground, tiles) = shard(two_chunks());
+        let seam = |ground: &Ground| -> Vec<Span> {
+            ground
+                .terrain(&tiles)
+                .expect("a facet with ground")
+                .spans()
+                .surfaces(63, 63)
+                .collect()
+        };
+        let before = seam(&ground);
+        assert_eq!(before.len(), 2, "the floor at (63, 63) and the ground under it");
+
+        // The seam column's eastern and south-eastern corners, both of them the
+        // first cells of the *next* chunk over. Two of them, because the average
+        // is taken across the gentler pair and one moved corner is the steeper
+        // one by construction.
+        raise_all(&mut ground, &tiles, &[(64, 63, -40), (64, 64, -40)]);
+
+        assert_ne!(
+            seam(&ground),
+            before,
+            "the column west of the edit reads the cell that moved"
+        );
+        agrees_with_a_whole_bake(&ground, &tiles);
+    }
+
+    /// A publish is O(what it moved): an edit in a chunk holding no statics
+    /// stores nothing new and orphans nothing, however much the rest of the
+    /// facet holds.
+    #[test]
+    fn a_publish_where_nothing_is_stored_bakes_nothing() {
+        // Three chunks square, with its only static in the first one, so the
+        // edit below is two whole chunks away from anything stored — including
+        // from the border blocks the rebake takes in.
+        let mut scene = Scene::flat_over(BlockExtent { wide: 24, down: 24 }, 0);
+        scene.floor(10, 10, 0, 5);
+        let (mut ground, tiles) = shard(scene);
+        let (spans, dead) = {
+            let bake = bake_of(&ground, &tiles);
+            (bake.span_count(), bake.dead)
+        };
+
+        raise(&mut ground, &tiles, 150, 150, 20);
+
+        let bake = bake_of(&ground, &tiles);
+        assert_eq!(bake.span_count(), spans, "nothing was appended");
+        assert_eq!(bake.dead, dead, "and nothing was orphaned");
+    }
+
+    /// A session's worth of publishes into one chunk does not grow the tables:
+    /// a block that had a table keeps its slot and has it overwritten, so only a
+    /// block gaining its first static ever appends one.
+    #[test]
+    fn republishing_a_chunk_reuses_its_tables() {
+        let (mut ground, tiles) = shard(two_chunks());
+        let tables = bake_of(&ground, &tiles).table_count();
+        for z in 1..5 {
+            raise(&mut ground, &tiles, 10, 10, z);
+        }
+        assert_eq!(
+            bake_of(&ground, &tiles).table_count(),
+            tables,
+            "a repointed table is not a second table"
+        );
+        agrees_with_a_whole_bake(&ground, &tiles);
+    }
+
+    /// The garbage rule, N8's own: dead spans are left where they are until they
+    /// outweigh the live ones, at which point the facet is baked whole and the
+    /// count goes back to nothing.
+    #[test]
+    fn dead_runs_outweighing_live_ones_bake_the_facet_whole() {
+        // One chunk, one stored column: the fastest way to a bake that is mostly
+        // garbage, which on a real facet is thousands of publishes away.
+        let mut scene = Scene::flat_over(BlockExtent { wide: 8, down: 8 }, 0);
+        scene.floor(10, 10, 0, 5);
+        let (mut ground, tiles) = shard(scene);
+
+        raise(&mut ground, &tiles, 10, 10, 6);
+        let bake = bake_of(&ground, &tiles);
+        assert_eq!(bake.dead, 2, "the column's old run is unreachable");
+        assert_eq!(bake.span_count(), 4, "and its new one is at the end");
+
+        // The second publish takes the dead past the live, which is where the
+        // rule fires.
+        raise(&mut ground, &tiles, 10, 10, 7);
+        let bake = bake_of(&ground, &tiles);
+        assert_eq!(bake.dead, 0, "a facet baked whole holds no garbage");
+        assert_eq!(bake.span_count(), 2, "and only the column that is really there");
+        agrees_with_a_whole_bake(&ground, &tiles);
+    }
+
+    /// A chunk arriving over the wire is the client's half of the same node, and
+    /// it takes the same path: the squares name themselves, so no patch is
+    /// needed to know what moved.
+    #[test]
+    fn chunks_taken_off_the_wire_rebake_where_they_landed() {
+        let (mut shard_side, tiles) = shard(two_chunks());
+        raise(&mut shard_side, &tiles, 10, 10, 30);
+        let moved = openshard_map::chunk::Chunk::of(
+            shard_side.snapshot().expect("a facet with ground"),
+            openshard_map::chunk::ChunkCoord::containing(10, 10),
+        )
+        .expect("the chunk the edit is in");
+
+        // A second facet, at the revision before the edit: the window's own.
+        let (mut window, tiles) = shard(two_chunks());
+        window
+            .take_chunks(std::slice::from_ref(&moved), &tiles)
+            .expect("one chunk of this facet");
+
+        agrees_with_a_whole_bake(&window, &tiles);
+        assert_eq!(
+            window
+                .snapshot()
+                .expect("a facet with ground")
+                .map()
+                .land(10, 10)
+                .expect("a cell of this facet")
+                .z,
+            30,
+            "the square that arrived is the ground now"
+        );
     }
 }

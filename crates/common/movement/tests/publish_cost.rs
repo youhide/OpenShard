@@ -171,18 +171,11 @@ fn what_one_setland_costs_at_each_end() {
     snapshot.publish(&patch).expect("the sample patch applies");
     let publish = start.elapsed();
 
+    // What a facet-wide bake costs, which is what both ends paid for one tile
+    // until `navigation_spans.md`'s N8. Kept as the column the two numbers below
+    // are read against: it is the same work, over 7,168 chunks instead of one.
     let bake = best_of(|| SpanIndex::build(snapshot.map(), &tiles));
 
-    println!("\nthe shard, on the tick the operator typed into:");
-    println!("  MapSnapshot::publish — the tiles the op names {}", ms(publish));
-    println!("  SpanIndex::build     — the whole facet        {}", ms(bake));
-    println!(
-        "  = Ground::publish                             {}",
-        ms(publish + bake)
-    );
-
-    // ---- the window's half ------------------------------------------------
-    //
     // The square the shard cuts and sends, out of the world after the edit.
     let at = ChunkCoord::containing(x, y);
     let cut = best_of(|| Chunk::of(&snapshot, at).expect("the sample chunk is on this facet"));
@@ -193,21 +186,51 @@ fn what_one_setland_costs_at_each_end() {
     // moves the same blocks the same amount and leaves the same facet behind.
     let written = best_of(|| snapshot.take_chunks(&chunks).expect("one chunk of this facet"));
 
-    println!("\nthe wire:");
-    println!("  Chunk::of            — one square, cut        {}", ms(cut));
-
     // `Ground::new` bakes, and that bake is outside the clock: what is being
-    // measured is what a *publish* costs a window that is already drawing.
+    // measured is what a *publish* costs an end that is already running.
     let mut ground = Ground::new(Some(snapshot), &tiles);
+
+    // The window's half: a chunk arrives, and the bake follows it.
     let take = best_of(|| {
         ground
             .take_chunks(&chunks, &tiles)
             .expect("one chunk of this facet")
     });
 
+    // The shard's half, through the door a `.setland` actually goes through.
+    // The patch is rebuilt each round against the world the round before left,
+    // so every round moves the same one tile of the same one chunk — and the
+    // world it publishes into is a world one revision further along, which is
+    // exactly what a second `.setland` is.
+    let mut z = raised.z;
+    let published = best_of(|| {
+        let base = ground.snapshot().expect("the facet it was built with");
+        let was = base.map().land(x, y).expect("the sample tile is on this facet");
+        z = z.wrapping_add(1);
+        let patch = raise(base.revision(), was, LandCell { tile: was.tile, z });
+        ground.publish(&patch, &tiles).expect("the sample patch applies")
+    });
+
+    println!("\nthe shard, on the tick the operator typed into:");
+    println!("  MapSnapshot::publish — the tiles the op names {}", ms(publish));
+    println!(
+        "  SpanIndex::build     — the whole facet        {}   (what it used to pay)",
+        ms(bake)
+    );
+    println!(
+        "  = Ground::publish    — publish and rebake     {}",
+        ms(published)
+    );
+
+    println!("\nthe wire:");
+    println!("  Chunk::of            — one square, cut        {}", ms(cut));
+
     println!("\nthe window, on the frame the publish landed — the event-loop thread:");
     println!("  chunk::apply         — the squares written in {}", ms(written));
-    println!("  SpanIndex::build     — the facet rebaked      {}", ms(bake));
+    println!(
+        "  SpanIndex::build     — the facet rebaked      {}   (what it used to pay)",
+        ms(bake)
+    );
     println!("  = Ground::take_chunks                         {}", ms(take));
     println!("\nthe hitch a person sees is the last line.");
 }

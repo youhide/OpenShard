@@ -41,7 +41,7 @@
 //! to every function that writes it, and a table that arrives after the ground
 //! did needs [`Ground::rebake`].
 
-use openshard_map::chunk::Chunk;
+use openshard_map::chunk::{Chunk, ChunkCoord};
 use openshard_map::overlay::Overlay;
 use openshard_map::patch::{Patch, PatchError, Undo};
 use openshard_map::snapshot::{MapRevision, MapSnapshot};
@@ -128,13 +128,12 @@ impl Ground {
     /// could publish through the world alone would be a caller that could forget
     /// it.
     ///
-    /// **It rebakes the whole facet**, which is 0.07 s on Felucca — measured in
-    /// `docs/map/navigation_spans.md`, and paid by whoever committed the edit
-    /// rather than by a step. A patch touches
-    /// [`Patch::touched_chunks`](openshard_map::patch::Patch::touched_chunks)
-    /// and no more, so a bake local to those chunks is the obvious next thing;
-    /// it is direction D's, and it needs a span layer that can be rebuilt in
-    /// pieces, which this one cannot.
+    /// **It rebakes the chunks the patch touched and no others** —
+    /// `navigation_spans.md`'s N8. A facet-wide bake is 109.7 ms on Felucca and
+    /// a patch moves one chunk of 7,168, and that number was paid on the tick an
+    /// operator typed into. The chunks come from
+    /// [`Patch::touched_chunks`](openshard_map::patch::Patch::touched_chunks),
+    /// which derives them from the ops rather than carrying a list beside them.
     ///
     /// # Errors
     ///
@@ -142,18 +141,19 @@ impl Ground {
     /// moved, so the bake is still the bake of the world in hand.
     pub fn publish(&mut self, patch: &Patch, tiles: &TileData) -> Result<Undo, PatchError> {
         let undo = self.world.publish(patch)?;
-        self.rebake(tiles);
+        self.rebake_chunks(&patch.touched_chunks(), tiles);
         Ok(undo)
     }
 
     /// Take back a publish that was never written down, bake and all.
     ///
-    /// The other half of [`publish`](Self::publish), and it pays the same 0.07 s
-    /// — the world it puts back is a different world from the one baked a moment
-    /// ago, by exactly the same argument.
+    /// The other half of [`publish`](Self::publish), and it is local for exactly
+    /// the same reason: the inverses touch the tiles the ops did, so the world it
+    /// puts back differs from the one baked a moment ago over
+    /// [`Undo::touched_chunks`] and nowhere else.
     pub fn undo(&mut self, undo: &Undo, tiles: &TileData) {
         self.world.undo(undo);
-        self.rebake(tiles);
+        self.rebake_chunks(&undo.touched_chunks(), tiles);
     }
 
     /// Take squares of ground the other end of the wire has published, and
@@ -175,8 +175,30 @@ impl Ground {
     /// nothing has moved, so the bake is still the bake of the world in hand.
     pub fn take_chunks(&mut self, chunks: &[Chunk], tiles: &TileData) -> Result<MapRevision, ChunksError> {
         let revision = self.world.take_chunks(chunks)?;
-        self.rebake(tiles);
+        // The squares that arrived name themselves, so this end needs no patch
+        // to know what moved — which is what makes the window's half of N8 the
+        // same call as the shard's.
+        let touched: Vec<ChunkCoord> = chunks.iter().map(|chunk| chunk.key().at).collect();
+        self.rebake_chunks(&touched, tiles);
         Ok(revision)
+    }
+
+    /// Rebake over the chunks that moved, or bake the facet whole where there is
+    /// no bake to move.
+    ///
+    /// The one seam the partial path is reached through, and it is private:
+    /// [`SpanIndex::rebake_chunks`] trusts its caller to name every chunk that
+    /// changed, and the three writers above are the callers that know. See that
+    /// method for the area it takes and why it is a block wider than the chunks.
+    fn rebake_chunks(&mut self, chunks: &[ChunkCoord], tiles: &TileData) {
+        match (&mut self.spans, self.world.snapshot()) {
+            (Some(spans), Some(base)) => spans.rebake_chunks(base.map(), tiles, chunks),
+            // A facet with no ground has nothing to bake, and one with ground and
+            // no bake is the state this type exists to prevent — either way the
+            // whole-facet path is the honest answer rather than a partial bake
+            // over a world nothing has baked yet.
+            _ => self.rebake(tiles),
+        }
     }
 
     /// The ground, the statics and the revision they are at — and no way from

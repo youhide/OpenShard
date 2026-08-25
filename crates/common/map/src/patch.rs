@@ -237,6 +237,19 @@ impl Undo {
     pub(crate) const fn to(&self) -> MapRevision {
         self.to
     }
+
+    /// Which chunks putting the world back moves, each one once.
+    ///
+    /// [`Patch::touched_chunks`] for the way back, and it exists for the same
+    /// caller: a bake over the world an undo just replaced is as stale as one
+    /// over the world a publish replaced. The inverses touch exactly the tiles
+    /// the ops did, so the answer is the same list — but it is asked of the undo
+    /// rather than remembered from the patch, because an undo is a thing that
+    /// can be held on its own.
+    #[must_use]
+    pub fn touched_chunks(&self) -> Vec<ChunkCoord> {
+        touched_chunks(&self.ops)
+    }
 }
 
 /// One committed unit of change.
@@ -331,18 +344,28 @@ impl Patch {
     /// chunk is stale the moment this patch is published.
     #[must_use]
     pub fn touched_chunks(&self) -> Vec<ChunkCoord> {
-        let mut touched: Vec<ChunkCoord> = self
-            .ops
-            .iter()
-            .map(|op| {
-                let (x, y) = op.at();
-                ChunkCoord::containing(x, y)
-            })
-            .collect();
-        touched.sort_unstable();
-        touched.dedup();
-        touched
+        touched_chunks(&self.ops)
     }
+}
+
+/// Which chunks a run of ops changes, each one once, in the order chunks are
+/// stored.
+///
+/// Shared by [`Patch::touched_chunks`] and [`Undo::touched_chunks`] because the
+/// question is the same one: an op names a tile and a tile is in one chunk. Two
+/// spellings of it would be two answers waiting to disagree, and what reads them
+/// is a bake deciding what it still holds.
+fn touched_chunks(ops: &[PatchOp]) -> Vec<ChunkCoord> {
+    let mut touched: Vec<ChunkCoord> = ops
+        .iter()
+        .map(|op| {
+            let (x, y) = op.at();
+            ChunkCoord::containing(x, y)
+        })
+        .collect();
+    touched.sort_unstable();
+    touched.dedup();
+    touched
 }
 
 /// Why a patch could not be applied.
