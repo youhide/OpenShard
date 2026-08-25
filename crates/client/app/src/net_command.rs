@@ -302,7 +302,9 @@ impl App {
             }
             self.composite_work.invalidate_blocks(blocks);
         }
-        self.derived_over_the_ground_dropped(facet, revision);
+        let moved: Vec<openshard_map::chunk::ChunkCoord> =
+            chunks.iter().map(|chunk| chunk.key().at).collect();
+        self.derived_over_the_ground_dropped(facet, revision, &moved);
     }
 
     /// Everything this end had worked out over the ground, let go of because the
@@ -312,19 +314,40 @@ impl App {
     /// What is *not* here is the composited pictures, and that is the one thing
     /// the two callers differ about: chunks name the blocks they cover and a
     /// replacement names none, so each does its own before calling this.
+    ///
+    /// `moved` is the chunks that changed, and **empty means "everything"**: a
+    /// replaced facet is a different world rather than an edited one, and there
+    /// is nothing over it to carry.
     fn derived_over_the_ground_dropped(
         &mut self,
         facet: openshard_protocol::world::Facet,
         revision: openshard_map::snapshot::MapRevision,
+        moved: &[openshard_map::chunk::ChunkCoord],
     ) {
-        // Every radar product of this facet at once, by naming the revision they
-        // were not built at. The stale pictures stay reachable through
-        // `select_ready`'s stale-exact path while the new ones rasterise, which
-        // is what keeps a minimap from blinking empty over an edit.
-        self.radar_cache.set_revision(
-            facet,
-            openshard_client_render::radar::RadarRevision(revision.get()),
-        );
+        // The radar's products, carried where the edit did not reach them. A
+        // map chunk and a base radar chunk share the 64-tile divisor, which
+        // `openshard_map::chunk`'s own header records as a decision rather than
+        // a coincidence — so this is a coordinate change and never a
+        // resampling, and it is here because this is the one place holding both
+        // types. What a touched square costs is what a facet-wide bump used to
+        // cost all 7,168 of them: the stale picture stays reachable through
+        // `select_ready` while the new one rasterises, so a minimap does not
+        // blink empty over an edit.
+        let radar_revision = openshard_client_render::radar::RadarRevision(revision.get());
+        match moved.is_empty() {
+            true => {
+                self.radar_cache.set_revision(facet, radar_revision);
+            }
+            false => {
+                self.radar_cache.moved(
+                    facet,
+                    radar_revision,
+                    moved
+                        .iter()
+                        .map(|at| openshard_client_render::radar::RadarChunkCoord::new(at.x, at.y)),
+                );
+            }
+        }
         // And this end's own answers over the ground: what is in the way, what
         // the terrain looks like from here, and the route it had planned across
         // ground that has just changed height.
@@ -333,19 +356,48 @@ impl App {
         self.route_cache = None;
         self.steer.clear_plan_cache();
         self.steer.clear_route();
-        // The coarse graph goes with it. Nothing rebuilds one over a world that
-        // moved under a running client: it is eleven seconds of flood, which is
-        // the same trade the shard makes when it publishes, and the same answer
-        // it gives its operator. Long routes are the bounded search until this
-        // client reconnects, which is when a graph is looked for beside the kept
-        // world again.
-        if self.resources.coarse.take().is_some() {
-            self.navigation = crate::diagnostics::Navigation::Absent;
-            eprintln!(
-                "the coarse navigation graph was a graph of the world before this edit and has \
-                 been dropped: long routes are the bounded search until this client reconnects"
-            );
+        // The coarse graph **follows** the ground over the chunks that moved,
+        // which is `docs/map/navigation_graph.md`'s G1 at this end — the same
+        // call the shard's own publish makes, over the same two rings. It used
+        // to be dropped here, on the argument that a whole-facet bake is half a
+        // minute of flood and there is no smaller seam; there is one now.
+        //
+        // A facet *replacement* names no chunks and is a different world rather
+        // than an edited one, so there is nothing to follow and the graph goes.
+        match moved.is_empty() {
+            false => self.coarse_follows(moved),
+            true => {
+                if self.resources.coarse.take().is_some() {
+                    self.navigation = crate::diagnostics::Navigation::Absent;
+                    eprintln!(
+                        "the coarse navigation graph was a graph of another world and has been \
+                         dropped: long routes are the bounded search until one is baked"
+                    );
+                }
+            }
         }
+    }
+
+    /// Rebake this end's coarse graph over the chunks a publish moved.
+    ///
+    /// **Over the static world and nothing live**, which is the decision every
+    /// bake of this graph makes: a door that happened to be shut when a publish
+    /// landed is not a property of the ground, and every hop is refined through
+    /// the live terrain at the query anyway.
+    fn coarse_follows(&mut self, moved: &[openshard_map::chunk::ChunkCoord]) {
+        let Some(terrain) = self.resources.ground.terrain(&self.resources.tiledata) else {
+            return;
+        };
+        let Some(coarse) = self.resources.coarse.as_mut() else {
+            return;
+        };
+        let nothing_placed = openshard_map::overlay::Overlay::default();
+        let footing = openshard_movement::Footing::new(
+            Some(terrain),
+            &nothing_placed,
+            openshard_map::overlay::Doors::AsTheyStand,
+        );
+        coarse.rebake_chunks(&footing, moved);
     }
 
     /// Rebuild the presentation from the same authoritative snapshot after a
@@ -523,7 +575,9 @@ impl App {
                         window.composites.clear();
                     }
                     self.composite_work.clear();
-                    self.derived_over_the_ground_dropped(facet, revision);
+                    // No chunks: a replacement is a different world rather than
+                    // an edited one, so nothing over it is carried.
+                    self.derived_over_the_ground_dropped(facet, revision, &[]);
                 }
                 // And the coarse graph over it, which the span bake above is
                 // not: one is 0.16 s and the other is eleven seconds of flood,

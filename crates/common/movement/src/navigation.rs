@@ -30,6 +30,7 @@ use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 
 use crate::footing::Footing;
+use openshard_map::chunk::{CHUNK_TILES, ChunkCoord};
 use openshard_map::grid::Tile;
 
 use crate::walk::steps_out_of;
@@ -88,22 +89,52 @@ pub struct NavigationGraph {
     /// One bit per tile. Region ids are a regular 32×32 grid and are computed.
     pub(crate) walkable: Vec<u8>,
     pub(crate) nodes: Vec<Node>,
-    pub(crate) region_offsets: Vec<u32>,
+    /// Which nodes stand in each region, one [`Run`] per region into
+    /// [`region_nodes`](Self::region_nodes).
+    pub(crate) region_runs: Vec<Run>,
     pub(crate) region_nodes: Vec<u32>,
-    pub(crate) edge_offsets: Vec<u32>,
+    /// Which edges leave each node, one [`Run`] per node into
+    /// [`edge_targets`](Self::edge_targets) and its parallel costs.
+    pub(crate) edge_runs: Vec<Run>,
     pub(crate) edge_targets: Vec<u32>,
     pub(crate) edge_costs: Vec<u16>,
-    // Kept only while `build` is assembling the graph, then dropped.
-    pub(crate) build_region_nodes: Vec<Vec<NodeId>>,
-    pub(crate) build_edges: Vec<Vec<Edge>>,
-    /// One node per standing place, however many entrances name it.
+    /// Entries of [`nodes`](Self::nodes) no region names any more.
+    pub(crate) dead_nodes: u32,
+    /// Entries of [`region_nodes`](Self::region_nodes) no run points at.
+    pub(crate) dead_region_nodes: u32,
+    /// Entries of [`edge_targets`](Self::edge_targets) no run points at.
     ///
-    /// A portal is directed now, so the two ways across one border are two
-    /// logical entrances and both want a node at the same place. Interning them
-    /// is what keeps a symmetric border costing what it always did — and it is
-    /// the right identity anyway: two entrances meeting at one place are one
-    /// place, not two.
-    pub(crate) build_nodes: BTreeMap<(u16, u16, i8), NodeId>,
+    /// The garbage rule is the span layer's verbatim — never compacted during a
+    /// session, until the dead outweigh the live — with one difference:
+    /// `SpanIndex` answers that by baking the facet whole, and 11.6 s is the
+    /// thing this graph's own rebake exists to stop paying. See
+    /// [`repack`](NavigationGraph::repack).
+    pub(crate) dead_edges: u32,
+}
+
+/// Where one owner's entries sit in a packed array: `base..base + count`.
+///
+/// **A table, and not a prefix sum**, which is the third time this repo has made
+/// that change and the same reason each time: a prefix sum *is* the ordering, so
+/// re-laying one owner's run moves every run after it and repairs every offset
+/// behind it. The span index's `BlockTable` and `WorldMap`'s `blocks` are the
+/// other two; `docs/map/navigation_graph.md`'s G1 is the argument in full, and
+/// what it buys here is that a publish rebuilds the regions around it instead of
+/// dropping a graph that costs 11.6 s to build.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Run {
+    pub(crate) base: u32,
+    pub(crate) count: u32,
+}
+
+impl Run {
+    /// An owner with nothing of its own: a region no portal reaches, a node no
+    /// edge leaves.
+    const NONE: Self = Self { base: 0, count: 0 };
+
+    fn range(self) -> std::ops::Range<usize> {
+        self.base as usize..self.base as usize + self.count as usize
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,7 +156,7 @@ impl Region {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct RegionId(pub(crate) usize);
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -151,47 +182,6 @@ pub(crate) struct Edge {
 /// run and a run assembled in a different order would choose a different one.
 type Entrances = BTreeMap<(usize, u16, usize, u16), Vec<(Point, Point)>>;
 
-/// Every place a body may stand on one facet, addressed by tile.
-///
-/// A column is a *list* of standing surfaces rather than one height, which is
-/// what the span layer is for and what this bake had never read. One tile's
-/// places are a contiguous run, highest first, and the census says 99.4% of the
-/// runs on Britannia hold one or none — so this is about a per-cent more
-/// entries than the one-per-tile array it replaces.
-struct Places {
-    /// `starts[tile]..starts[tile + 1]` is that tile's run.
-    starts: Vec<u32>,
-    /// The standing points themselves.
-    points: Vec<Point>,
-}
-
-impl Places {
-    /// One tile's run, by the graph's own row-major tile index.
-    fn at(&self, index: usize) -> &[Point] {
-        &self.points[self.starts[index] as usize..self.starts[index + 1] as usize]
-    }
-
-    /// How many places the facet holds.
-    fn len(&self) -> usize {
-        self.points.len()
-    }
-
-    /// The facet-wide number of the place a landing on tile `index` names, or
-    /// `None` where nothing is listed at that height.
-    ///
-    /// A landing carries its own height and that is the whole identity — the
-    /// same choice [`PathNodeKey`](crate::path) makes, and for the same reason:
-    /// a span is a fact about the map file, and a place is where feet are. The
-    /// run is one element long almost everywhere, so the walk is a comparison.
-    fn id(&self, index: usize, at: Point) -> Option<usize> {
-        let start = self.starts[index] as usize;
-        self.at(index)
-            .iter()
-            .position(|place| place.z == at.z)
-            .map(|offset| start + offset)
-    }
-}
-
 /// One region's places, numbered from zero.
 ///
 /// The two per-region passes — the component flood and the intra-region routes
@@ -203,9 +193,9 @@ impl Places {
 ///
 /// **A query builds one too**, since the endpoint join stopped being a fan-out
 /// of exact searches and became a flood — see [`NavigationGraph::local_costs`].
-/// The bake takes its places out of the facet-wide sampling it is holding
-/// ([`Self::of`]); a query holds no such thing and samples the one region it
-/// needs ([`Self::sampled`]).
+/// A bake holds one per region it is working over ([`Held`]) and a query samples
+/// the one region it needs; both go through [`Self::sampled`], which is what
+/// makes a node of a region findable in the sampling a query takes of it.
 struct RegionPlaces {
     region: Region,
     /// `offsets[cell]..offsets[cell + 1]`, in the region's row-major cell order.
@@ -215,26 +205,7 @@ struct RegionPlaces {
 }
 
 impl RegionPlaces {
-    /// The bake's, out of the facet-wide sampling it already holds.
-    fn of(graph: &NavigationGraph, places: &Places, region: Region) -> Self {
-        let cells = usize::from(region.width) * usize::from(region.height);
-        let mut offsets = Vec::with_capacity(cells + 1);
-        let mut points = Vec::with_capacity(cells);
-        offsets.push(0);
-        for y in region.top..region.top + region.height {
-            for x in region.left..region.left + region.width {
-                points.extend_from_slice(places.at(graph.index(x, y)));
-                offsets.push(points.len() as u32);
-            }
-        }
-        Self {
-            region,
-            offsets,
-            points,
-        }
-    }
-
-    /// A query's, sampled out of the ground on the spot.
+    /// Sampled out of the ground on the spot.
     ///
     /// One region is a thousand columns and [`column_places`] is what the bake
     /// asked of each of them, so this reproduces the bake's own places over the
@@ -259,24 +230,6 @@ impl RegionPlaces {
             offsets,
             points,
         }
-    }
-
-    /// These same places by their facet-wide numbers.
-    ///
-    /// The bake's alone: a label the component pass writes is read by the portal
-    /// pass, and both speak the facet's numbering. Walked again rather than kept
-    /// in the struct, because a query's region has no facet-wide sampling behind
-    /// it to number against — and this walk asks the step rule nothing.
-    fn facet_ids(&self, graph: &NavigationGraph, places: &Places) -> Vec<u32> {
-        let mut ids = Vec::with_capacity(self.points.len());
-        for y in self.region.top..self.region.top + self.region.height {
-            for x in self.region.left..self.region.left + self.region.width {
-                let index = graph.index(x, y);
-                let start = places.starts[index] as usize;
-                ids.extend((start..start + places.at(index).len()).map(|id| id as u32));
-            }
-        }
-        ids
     }
 
     fn len(&self) -> usize {
@@ -330,7 +283,261 @@ impl RegionPlaces {
     }
 }
 
-/// Every place a body may stand, one column at a time.
+/// One region's places and the strong components they fall into — the unit both
+/// a whole-facet bake and the rebake of a neighbourhood work in.
+///
+/// The two halves travel together because the portal pass wants both at once: a
+/// crossing is filed under the components it joins, and the component on the far
+/// side of a border belongs to the region on that side.
+struct RegionBake {
+    places: RegionPlaces,
+    /// One label per place, in the region's own numbering. Bake-time scratch:
+    /// the labels never enter the artifact.
+    labels: Vec<u16>,
+}
+
+/// The regions a bake is holding sampled places for.
+///
+/// **A bake reads more regions than it rebuilds.** A portal is a fact about a
+/// *border*, so every neighbour of a rebuilt region is sampled too, to be the
+/// far side of one. For [`NavigationGraph::build`] that is every region of the
+/// facet; for [`NavigationGraph::rebake_chunks`] it is the ring outside the ring
+/// — `docs/map/navigation_graph.md`'s G1 calls it two rings and a half, and this
+/// is the half.
+struct Held {
+    /// Which entry of [`bakes`](Self::bakes) a region is, or [`NOT_HELD`].
+    slot: Vec<u32>,
+    bakes: Vec<RegionBake>,
+}
+
+/// The fill of [`Held::slot`] for a region nothing sampled.
+const NOT_HELD: u32 = u32::MAX;
+
+impl Held {
+    /// Sample and label each region named, once however often it is named.
+    fn of(footing: &Footing<'_>, graph: &NavigationGraph, regions: &[RegionId]) -> Self {
+        let mut held = Self {
+            slot: vec![NOT_HELD; graph.regions.len()],
+            bakes: Vec::with_capacity(regions.len()),
+        };
+        for &region in regions {
+            if held.slot[region.0] != NOT_HELD {
+                continue;
+            }
+            let places = RegionPlaces::sampled(footing, graph.regions[region.0]);
+            let labels = component_labels(footing, &places);
+            held.slot[region.0] = held.bakes.len() as u32;
+            held.bakes.push(RegionBake { places, labels });
+        }
+        held
+    }
+
+    /// One held region. A caller that asks about a region nobody sampled is a
+    /// caller that got its own area wrong, which is a bug rather than a state.
+    fn at(&self, region: RegionId) -> &RegionBake {
+        let slot = self.slot[region.0];
+        debug_assert_ne!(slot, NOT_HELD, "a bake reads only the regions it sampled");
+        &self.bakes[slot as usize]
+    }
+}
+
+/// Which of the two borders a region owns is being walked.
+///
+/// Every border joins a region to the one east or south of it, so naming the
+/// pair from its north-west side names each border exactly once however it was
+/// reached — see [`NavigationGraph::borders_of`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Side {
+    East,
+    South,
+}
+
+/// One side of a border: which region, and what a bake sampled of it.
+#[derive(Clone, Copy)]
+struct Bank<'a> {
+    id: RegionId,
+    bake: &'a RegionBake,
+}
+
+/// The fill of [`Rebuild::region_slot`] for a region whose node list stands.
+const NOT_REBUILT: u32 = u32::MAX;
+/// The fill of [`Rebuild::node_slot`] for a node whose edges are not being
+/// rewritten.
+const NOT_REWRITTEN: u32 = u32::MAX;
+
+/// Everything one rebake is assembling, before any of it is written into the
+/// graph's own arrays.
+///
+/// Assembled apart from the graph because a rebake has to be able to say
+/// "these are the edges this node has now" rather than "these are edges this
+/// node has as well": a border pass produces a node's portal edges from
+/// scratch, and the ones it had before are exactly what must not survive.
+struct Rebuild {
+    /// Which entry of [`nodes`](Self::nodes) a region's new list is, or
+    /// [`NOT_REBUILT`].
+    region_slot: Vec<u32>,
+    /// Whether the ground under a region is what moved. The rebuilt regions are
+    /// these and their neighbours, and the difference is what the neighbours are
+    /// allowed to keep: their places did not move, so their intra-region routes
+    /// stand unless their node set came back different.
+    moved: Vec<bool>,
+    nodes: Vec<(RegionId, Vec<NodeId>)>,
+    /// Which entry of [`edges`](Self::edges) a node's new list is, or
+    /// [`NOT_REWRITTEN`].
+    node_slot: Vec<u32>,
+    edges: Vec<(NodeId, Vec<Edge>)>,
+    /// One node per standing place, however many entrances name it — seeded
+    /// with what the graph already holds, which is the whole of how a local
+    /// rebake keeps a `NodeId` meaning what it meant.
+    interned: BTreeMap<(u16, u16, i8), NodeId>,
+}
+
+impl Rebuild {
+    fn of(graph: &NavigationGraph, held: &Held, rebuilt: &[RegionId], moved: &[RegionId]) -> Self {
+        let mut build = Self {
+            region_slot: vec![NOT_REBUILT; graph.regions.len()],
+            moved: vec![false; graph.regions.len()],
+            nodes: Vec::with_capacity(rebuilt.len()),
+            node_slot: vec![NOT_REWRITTEN; graph.nodes.len()],
+            edges: Vec::new(),
+            interned: BTreeMap::new(),
+        };
+        for &region in moved {
+            build.moved[region.0] = true;
+        }
+        for &region in rebuilt {
+            if build.region_slot[region.0] != NOT_REBUILT {
+                continue;
+            }
+            build.region_slot[region.0] = build.nodes.len() as u32;
+            build.nodes.push((region, Vec::new()));
+        }
+        for (index, &slot) in held.slot.iter().enumerate() {
+            if slot == NOT_HELD {
+                continue;
+            }
+            let region = RegionId(index);
+            let rebuilt = build.region_slot[index] != NOT_REBUILT;
+            for node in graph.nodes_in_region(region).collect::<Vec<_>>() {
+                let point = graph.nodes[node.0].point;
+                build.interned.insert((point.x, point.y, point.z), node);
+                // What a node keeps depends on which of the three tiers its
+                // region is in, and each answer is a claim about what this
+                // rebake is entitled to have an opinion about:
+                //
+                // - **the ground moved under it**: nothing. The passes below
+                //   mint its portals and its intra-region routes again.
+                // - **rebuilt because a neighbour moved**: its own
+                //   intra-region edges, because its places did not move. Every
+                //   border it has is walked again, so its portals are minted
+                //   again — and if its node set comes back the same, the routes
+                //   kept here are the answer and the floods are not run.
+                // - **sampled only**, to be the far side of a border:
+                //   everything that does not point into the rebuilt area, which
+                //   is its own routes and its portals to the world beyond.
+                let kept: Vec<Edge> = match (rebuilt, build.moved[index]) {
+                    (true, true) => Vec::new(),
+                    (true, false) => graph
+                        .edges_from(node)
+                        .filter(|edge| graph.node_region(edge.to) == region)
+                        .collect(),
+                    (false, _) => graph
+                        .edges_from(node)
+                        .filter(|edge| build.region_slot[graph.node_region(edge.to).0] == NOT_REBUILT)
+                        .collect(),
+                };
+                build.node_slot[node.0] = build.edges.len() as u32;
+                build.edges.push((node, kept));
+            }
+        }
+        build
+    }
+
+    /// The new node list of a region being rebuilt, or `None` for one that keeps
+    /// the list it has.
+    fn listing(&mut self, region: RegionId) -> Option<&mut Vec<NodeId>> {
+        let slot = self.region_slot[region.0];
+        (slot != NOT_REBUILT).then(|| &mut self.nodes[slot as usize].1)
+    }
+
+    /// The same list, to read.
+    fn listed(&self, region: RegionId) -> Option<&[NodeId]> {
+        let slot = self.region_slot[region.0];
+        (slot != NOT_REBUILT).then(|| self.nodes[slot as usize].1.as_slice())
+    }
+
+    /// Whether the ground under this region is what a publish moved, as against
+    /// a region rebuilt because it is next to one that was.
+    fn has_moved(&self, region: RegionId) -> bool {
+        self.moved[region.0]
+    }
+
+    /// Put a node on its region's new list, if that region has one. A place is
+    /// named by up to four entrances and each of them interns it, so the list is
+    /// checked rather than appended to blindly.
+    fn list(&mut self, region: RegionId, node: NodeId) {
+        let Some(nodes) = self.listing(region) else {
+            return;
+        };
+        if !nodes.contains(&node) {
+            nodes.push(node);
+        }
+    }
+
+    /// Start an edge list for a node that did not exist a moment ago.
+    fn open(&mut self, node: NodeId) {
+        debug_assert_eq!(self.node_slot.len(), node.0, "nodes are minted in order");
+        self.node_slot.push(self.edges.len() as u32);
+        self.edges.push((node, Vec::new()));
+    }
+
+    fn add_edge(&mut self, from: NodeId, to: NodeId, cost: u32) {
+        self.edges_of(from).push(Edge { to, cost });
+    }
+
+    /// The list a node's edges are being assembled in.
+    fn edges_of(&mut self, node: NodeId) -> &mut Vec<Edge> {
+        let slot = self.node_slot[node.0];
+        debug_assert_ne!(slot, NOT_REWRITTEN, "an edge is minted only where its node is");
+        &mut self.edges[slot as usize].1
+    }
+}
+
+/// Every step across a region border out of one tile, filed under the entrance
+/// it belongs to.
+///
+/// One crossing per *place* on the tile, and one direction. The pair that used
+/// to stand here asked the step both ways and kept it only where both succeeded
+/// — which deleted every asymmetric border from the graph, and the step rule is
+/// asymmetric by design.
+///
+/// A landing with no place listed is skipped rather than invented. Over the bare
+/// map that cannot happen — [`column_places`] keeps a superset of every landing
+/// — and over a footing with a live world in it, skipping is the conservative
+/// answer a bake owes: a refusal, not a promise.
+fn crossings(
+    footing: &Footing<'_>,
+    from: Bank<'_>,
+    to: Bank<'_>,
+    tile: Tile,
+    direction: Direction,
+    out: &mut Entrances,
+) {
+    for slot in from.bake.places.column(tile.x, tile.y) {
+        let at = from.bake.places.points[slot];
+        let Some(landing) = step_allowed(footing, at, direction) else {
+            continue;
+        };
+        let Some(landed) = to.bake.places.slot(landing) else {
+            continue;
+        };
+        out.entry((from.id.0, from.bake.labels[slot], to.id.0, to.bake.labels[landed]))
+            .or_default()
+            .push((at, landing));
+    }
+}
+
+/// One column's places, appended to `out` in the order its spans are stored.
 ///
 /// **The map's spans and not `ground_z`**, which is the first half of N4. The
 /// old sampler took one height per tile and that height was `average_land_z` —
@@ -354,30 +561,11 @@ impl RegionPlaces {
 /// over an empty overlay by design — a door that happened to be shut is not a
 /// property of the ground, see `docs/map/navigation_graph_bake.md` — so on the
 /// shard's own artifact this only ever drops what the map itself refuses.
-fn sample(footing: &Footing<'_>, width: u32, height: u32) -> Places {
-    let cells = width as usize * height as usize;
-    let mut starts = Vec::with_capacity(cells + 1);
-    let mut points = Vec::with_capacity(cells);
-    // The census caps a column at twelve spans on Britannia; the buffer is
-    // reused rather than sized, because a base set is a world nobody has
-    // counted.
-    let mut column: Vec<i8> = Vec::with_capacity(16);
-    starts.push(0);
-    for y in 0..height as u16 {
-        for x in 0..width as u16 {
-            column_places(footing, x, y, &mut column, &mut points);
-            starts.push(points.len() as u32);
-        }
-    }
-    Places { starts, points }
-}
-
-/// One column's places, appended to `out` in the order its spans are stored.
 ///
-/// The whole of what [`sample`] does to one column, and a *query* reads it again
-/// — [`RegionPlaces::sampled`] samples one region on the spot, and what it
-/// produces has to be exactly what the bake produced or a node of that region
-/// would have no slot in it. One function is what says so.
+/// One function, and a *query* reads it again — [`RegionPlaces::sampled`] is
+/// what both a bake and a join take of a region, and what one produces has to be
+/// exactly what the other does or a node of that region would have no slot in
+/// it.
 ///
 /// `column` is the caller's scratch buffer, reused rather than sized.
 fn column_places(footing: &Footing<'_>, x: u16, y: u16, column: &mut Vec<i8>, out: &mut Vec<Point>) {
@@ -403,6 +591,121 @@ fn column_places(footing: &Footing<'_>, x: u16, y: u16, column: &mut Vec<i8>, ou
     }
 }
 
+/// Mark the strongly connected components of one region's places.
+///
+/// Bake-time scratch data: the labels never enter the artifact. **One label per
+/// place**, so a bridge deck and the road beneath it are two components of one
+/// region rather than one component of one tile.
+///
+/// `u16` numbers a region's components, which is a whole region's worth of
+/// places and then some: the deepest column on Britannia holds twelve spans, so
+/// a 32×32 region holds at most twelve thousand of them. The counter checks
+/// rather than wraps, because a base set is a world nobody has counted.
+fn component_labels(footing: &Footing<'_>, local: &RegionPlaces) -> Vec<u16> {
+    let cells = local.len();
+    let mut labels = vec![NO_COMPONENT; cells];
+    if cells == 0 {
+        return labels;
+    }
+    // Out-degree is bounded by the eight directions and in-degree is not: two
+    // places of one neighbouring column can land on the same place — which is
+    // exactly what a stair does, and what a fixed eight-slot array here used to
+    // make an out-of-bounds panic.
+    let mut outgoing = vec![[NO_NEIGHBOR; Direction::ALL.len()]; cells];
+    let mut outgoing_len = vec![0_u8; cells];
+
+    for from_index in 0..cells {
+        // The whole expansion at once. Eight `step_allowed` calls would resolve
+        // the place being stepped off eight times over and each cardinal
+        // neighbour twice — the same waste `find_path` stopped paying in N3, on
+        // the pass that walks every place of the facet.
+        for next in steps_out_of(footing, local.points[from_index])
+            .into_iter()
+            .flatten()
+        {
+            let Some(next_index) = local.slot(next) else {
+                continue;
+            };
+            let out_at = usize::from(outgoing_len[from_index]);
+            outgoing[from_index][out_at] = next_index as u32;
+            outgoing_len[from_index] += 1;
+        }
+    }
+
+    // The same edges the other way round, counting-sorted into one run per place
+    // rather than a vector per place: Kosaraju's second pass walks them and a
+    // region has a thousand of them.
+    let mut incoming_offsets = vec![0_u32; cells + 1];
+    for from_index in 0..cells {
+        for &to in &outgoing[from_index][..usize::from(outgoing_len[from_index])] {
+            incoming_offsets[to as usize + 1] += 1;
+        }
+    }
+    for index in 0..cells {
+        incoming_offsets[index + 1] += incoming_offsets[index];
+    }
+    let mut filled = incoming_offsets.clone();
+    let mut incoming = vec![0_u32; incoming_offsets[cells] as usize];
+    for from_index in 0..cells {
+        for &to in &outgoing[from_index][..usize::from(outgoing_len[from_index])] {
+            incoming[filled[to as usize] as usize] = from_index as u32;
+            filled[to as usize] += 1;
+        }
+    }
+
+    // Kosaraju's algorithm keeps directed height transitions honest — and since
+    // N4 there are some: a ledge a body steps off and cannot climb back onto is
+    // an edge one way and no edge the other.
+    let mut seen = vec![false; cells];
+    let mut finish = Vec::with_capacity(cells);
+    for root in 0..cells {
+        if seen[root] {
+            continue;
+        }
+        seen[root] = true;
+        let mut stack = vec![(root, 0_u8)];
+        while let Some((at, next)) = stack.last_mut() {
+            if usize::from(*next) < usize::from(outgoing_len[*at]) {
+                let neighbor = outgoing[*at][usize::from(*next)] as usize;
+                *next += 1;
+                if !seen[neighbor] {
+                    seen[neighbor] = true;
+                    stack.push((neighbor, 0));
+                }
+            } else {
+                finish.push(*at);
+                stack.pop();
+            }
+        }
+    }
+
+    let mut component = NO_COMPONENT;
+    for root in finish.into_iter().rev() {
+        if labels[root] != NO_COMPONENT {
+            continue;
+        }
+        component = component
+            .checked_add(1)
+            .expect("a region has at most one component per standing place");
+        let mut stack = vec![root];
+        while let Some(at) = stack.pop() {
+            let label = &mut labels[at];
+            if *label != NO_COMPONENT {
+                continue;
+            }
+            *label = component;
+            let run = incoming_offsets[at] as usize..incoming_offsets[at + 1] as usize;
+            for &neighbor in &incoming[run] {
+                let neighbor = neighbor as usize;
+                if labels[neighbor] == NO_COMPONENT {
+                    stack.push(neighbor);
+                }
+            }
+        }
+    }
+    labels
+}
+
 impl NavigationGraph {
     /// Extract a static graph from one facet. Empty and unrepresentable facets
     /// cannot be addressed by `Point` and therefore have no graph.
@@ -413,55 +716,42 @@ impl NavigationGraph {
             return None;
         }
         let started = Instant::now();
-        eprintln!("navigation graph: sampling {width}x{height} terrain");
         let cells = width as usize * height as usize;
-        let places = sample(footing, width, height);
-        eprintln!(
-            "navigation graph +{:.3}s: terrain sampled, {} places over {cells} columns",
-            started.elapsed().as_secs_f64(),
-            places.len(),
-        );
-
         let mut graph = Self {
             width,
             height,
             regions: Vec::new(),
             walkable: vec![0; cells.div_ceil(8)],
             nodes: Vec::new(),
-            region_offsets: Vec::new(),
+            region_runs: Vec::new(),
             region_nodes: Vec::new(),
-            edge_offsets: Vec::new(),
+            edge_runs: Vec::new(),
             edge_targets: Vec::new(),
             edge_costs: Vec::new(),
-            build_region_nodes: Vec::new(),
-            build_edges: Vec::new(),
-            build_nodes: BTreeMap::new(),
+            dead_nodes: 0,
+            dead_region_nodes: 0,
+            dead_edges: 0,
         };
-        graph.partition(&places);
+        graph.partition();
         eprintln!(
-            "navigation graph +{:.3}s: partitioned into {} regions",
-            started.elapsed().as_secs_f64(),
+            "navigation graph: {}x{} terrain, partitioned into {} regions",
+            width,
+            height,
             graph.regions.len()
         );
-        let components = graph.component_labels(footing, &places);
-        graph.portals(footing, &places, &components);
-        eprintln!(
-            "navigation graph +{:.3}s: {} portal nodes found; calculating intra-region routes",
-            started.elapsed().as_secs_f64(),
-            graph.nodes.len()
-        );
-        graph.intra_edges(footing, &places);
-        for edges in &mut graph.build_edges {
-            edges.sort_unstable_by_key(|edge| (edge.to, edge.cost));
-            edges.dedup_by_key(|edge| edge.to);
-        }
+        // **A whole facet is every region rebaked**, and that is the one thing
+        // this call says that the sequence it replaced did not: there is a single
+        // construction, so a facet patched into shape and a facet baked whole are
+        // not two implementations that have to be kept agreeing. See
+        // [`rebake_regions`](Self::rebake_regions).
+        let all: Vec<RegionId> = (0..graph.regions.len()).map(RegionId).collect();
+        graph.rebake_regions(footing, &all, &all);
         eprintln!(
             "navigation graph +{:.3}s: ready ({} nodes, {} edges)",
             started.elapsed().as_secs_f64(),
             graph.nodes.len(),
-            graph.build_edges.iter().map(Vec::len).sum::<usize>()
+            graph.edge_targets.len()
         );
-        graph.compact();
         Some(graph)
     }
 
@@ -480,11 +770,25 @@ impl NavigationGraph {
         usize::from(y) * self.width as usize + usize::from(x)
     }
 
+    /// Which region a point is in, if a body could be standing there.
+    ///
+    /// The walkable bit is what an *endpoint* is joined to the graph by, which
+    /// is why this question and [`region_containing`](Self::region_containing)
+    /// are two questions: where a place is, is a fact about the grid, and
+    /// whether anything stands there is a fact about the ground.
     fn region_at(&self, point: Point) -> Option<RegionId> {
-        (u32::from(point.x) < self.width
-            && u32::from(point.y) < self.height
-            && self.is_walkable(point.x, point.y))
-        .then(|| {
+        self.is_walkable(point.x, point.y)
+            .then(|| self.region_containing(point))
+            .flatten()
+    }
+
+    /// Which region a point is in, whatever stands there.
+    ///
+    /// A node keeps its region while a rebake is taking its place away — the
+    /// tile's walkable bit is already the new world's by then, and asking this
+    /// the other way round is how a dying node's edges become unfindable.
+    fn region_containing(&self, point: Point) -> Option<RegionId> {
+        (u32::from(point.x) < self.width && u32::from(point.y) < self.height).then(|| {
             RegionId(
                 usize::from(point.y) / REGION_SIZE as usize * self.regions_across()
                     + usize::from(point.x) / REGION_SIZE as usize,
@@ -496,264 +800,380 @@ impl NavigationGraph {
         (self.width as usize).div_ceil(REGION_SIZE as usize)
     }
 
+    fn regions_down(&self) -> usize {
+        (self.height as usize).div_ceil(REGION_SIZE as usize)
+    }
+
     fn is_walkable(&self, x: u16, y: u16) -> bool {
         let index = self.index(x, y);
         self.walkable[index / 8] & (1 << (index % 8)) != 0
     }
 
-    fn set_walkable(&mut self, x: u16, y: u16) {
+    fn set_walkable(&mut self, x: u16, y: u16, walkable: bool) {
         let index = self.index(x, y);
-        self.walkable[index / 8] |= 1 << (index % 8);
+        let bit = 1 << (index % 8);
+        match walkable {
+            true => self.walkable[index / 8] |= bit,
+            false => self.walkable[index / 8] &= !bit,
+        }
     }
 
-    fn partition(&mut self, places: &Places) {
+    /// The 32×32 grid itself, and nothing standing on it.
+    ///
+    /// The regions are a *computation* over the facet's extent — `region_at`
+    /// derives one from a point without reading anything here — so this is the
+    /// one part of the graph a rebake never has to revisit.
+    fn partition(&mut self) {
         for top in (0..self.height).step_by(REGION_SIZE as usize) {
             for left in (0..self.width).step_by(REGION_SIZE as usize) {
-                let width = REGION_SIZE.min(self.width - left) as u16;
-                let height = REGION_SIZE.min(self.height - top) as u16;
                 self.regions.push(Region {
                     left: left as u16,
                     top: top as u16,
-                    width,
-                    height,
+                    width: REGION_SIZE.min(self.width - left) as u16,
+                    height: REGION_SIZE.min(self.height - top) as u16,
                 });
-                self.build_region_nodes.push(Vec::new());
-                for y in top as u16..top as u16 + height {
-                    for x in left as u16..left as u16 + width {
-                        // A tile is walkable when *something* stands on it,
-                        // whatever height that is. The bit is what an endpoint
-                        // is joined to the graph by, and an endpoint carries a z
-                        // nobody promised — see `path::goal_node`.
-                        let index = self.index(x, y);
-                        if !places.at(index).is_empty() {
-                            self.set_walkable(x, y);
-                        }
-                    }
-                }
+                self.region_runs.push(Run::NONE);
             }
         }
     }
 
-    /// Mark strongly connected static components in each region.  These are
-    /// bake-time scratch data: the labels never enter the artifact.
+    /// Rewrite one region's walkable bits from the places just sampled for it.
     ///
-    /// **One label per place**, so a bridge deck and the road beneath it are two
-    /// components of one region rather than one component of one tile.
+    /// A tile is walkable when *something* stands on it, whatever height that
+    /// is. The bit is what an endpoint is joined to the graph by, and an endpoint
+    /// carries a z nobody promised — see `path::goal_node`.
     ///
-    /// `u16` numbers a region's components, which is a whole region's worth of
-    /// places and then some: the deepest column on Britannia holds twelve spans,
-    /// so a 32×32 region holds at most twelve thousand of them. The counter
-    /// checks rather than wraps, because a base set is a world nobody has
-    /// counted.
-    fn component_labels(&self, footing: &Footing<'_>, places: &Places) -> Vec<u16> {
-        let mut labels = vec![NO_COMPONENT; places.len()];
-        for &region in &self.regions {
-            let local = RegionPlaces::of(self, places, region);
-            let ids = local.facet_ids(self, places);
-            let cells = local.len();
-            if cells == 0 {
+    /// **Written both ways**, unlike the pass this replaces: a whole-facet bake
+    /// starts from a bitmap of zeroes and only ever sets, and a rebake starts
+    /// from the bits of the world before the edit — where a tile whose last
+    /// standing surface was just dug away has to lose its bit.
+    fn region_walkable(&mut self, held: &Held, region: RegionId) {
+        let rectangle = self.regions[region.0];
+        let places = &held.at(region).places;
+        for y in rectangle.top..rectangle.top + rectangle.height {
+            for x in rectangle.left..rectangle.left + rectangle.width {
+                self.set_walkable(x, y, !places.column(x, y).is_empty());
+            }
+        }
+    }
+
+    /// Bring the graph back in step with ground that moved under these chunks.
+    ///
+    /// `docs/map/navigation_graph.md`'s **G1**, and the third artefact of
+    /// `what_a_change_costs.md`'s S3: the span index and `WorldMap`'s statics
+    /// already follow a publish locally, and this is the one that used to be
+    /// *dropped* instead — 11.6 s to build, on a tick an operator typed into.
+    ///
+    /// **The area is two rings and a half**, and each of the three is a different
+    /// claim:
+    ///
+    /// 1. The regions the chunks cover, **grown by one tile west and north** —
+    ///    a column's height is the average of the four cells meeting at its
+    ///    north-west corner, so a cell that moved is read by the column before
+    ///    it. Their places, components, portals and intra-region edges are all
+    ///    rebuilt. This is the span layer's own seam, one scale up.
+    /// 2. Their **neighbours**, because a portal is a fact about a *border*: the
+    ///    node on the far side of A|B belongs to B, so a border that gained or
+    ///    lost a crossing changes B's node set — and that changes what B's
+    ///    intra-region routing is between.
+    /// 3. And the ring beyond, for **edges only**: C's portal edges into B are
+    ///    rebuilt because B's were, and C's own places, nodes and intra-region
+    ///    edges are not, because nothing under C moved. That is where the
+    ///    cascade stops, and saying so is half of what this is.
+    ///
+    /// **It trusts its caller to name every chunk that changed**, exactly as
+    /// [`SpanIndex::rebake_chunks`](crate::spans::SpanIndex::rebake_chunks)
+    /// does — a caller that named too few leaves a region routing over the world
+    /// as it was.
+    pub fn rebake_chunks(&mut self, footing: &Footing<'_>, chunks: &[ChunkCoord]) {
+        let (moved, rebuilt) = self.regions_around(chunks);
+        if rebuilt.is_empty() {
+            return;
+        }
+        self.rebake_regions(footing, &rebuilt, &moved);
+    }
+
+    /// The two rings [`rebake_chunks`](Self::rebake_chunks) works over: the
+    /// regions whose ground moved, and those plus every neighbour of one.
+    ///
+    /// Both, rather than the union alone, because they are not owed the same
+    /// work — see [`rebake_regions`](Self::rebake_regions).
+    fn regions_around(&self, chunks: &[ChunkCoord]) -> (Vec<RegionId>, Vec<RegionId>) {
+        let across = self.regions_across();
+        let down = self.regions_down();
+        let mut moved = std::collections::BTreeSet::new();
+        for chunk in chunks {
+            let (x, y) = chunk.origin();
+            if x >= self.width || y >= self.height {
                 continue;
             }
-            // Out-degree is bounded by the eight directions and in-degree is
-            // not: two places of one neighbouring column can land on the same
-            // place — which is exactly what a stair does, and what a fixed
-            // eight-slot array here used to make an out-of-bounds panic.
-            let mut outgoing = vec![[NO_NEIGHBOR; Direction::ALL.len()]; cells];
-            let mut outgoing_len = vec![0_u8; cells];
-
-            for from_index in 0..cells {
-                // The whole expansion at once. Eight `step_allowed` calls would
-                // resolve the place being stepped off eight times over and each
-                // cardinal neighbour twice — the same waste `find_path` stopped
-                // paying in N3, on the pass that walks every place of the facet.
-                for next in steps_out_of(footing, local.points[from_index])
-                    .into_iter()
-                    .flatten()
-                {
-                    let Some(next_index) = local.slot(next) else {
-                        continue;
-                    };
-                    let out_at = usize::from(outgoing_len[from_index]);
-                    outgoing[from_index][out_at] = next_index as u32;
-                    outgoing_len[from_index] += 1;
-                }
-            }
-
-            // The same edges the other way round, counting-sorted into one run
-            // per place rather than a vector per place: Kosaraju's second pass
-            // walks them and a region has a thousand of them.
-            let mut incoming_offsets = vec![0_u32; cells + 1];
-            for from_index in 0..cells {
-                for &to in &outgoing[from_index][..usize::from(outgoing_len[from_index])] {
-                    incoming_offsets[to as usize + 1] += 1;
-                }
-            }
-            for index in 0..cells {
-                incoming_offsets[index + 1] += incoming_offsets[index];
-            }
-            let mut filled = incoming_offsets.clone();
-            let mut incoming = vec![0_u32; incoming_offsets[cells] as usize];
-            for from_index in 0..cells {
-                for &to in &outgoing[from_index][..usize::from(outgoing_len[from_index])] {
-                    incoming[filled[to as usize] as usize] = from_index as u32;
-                    filled[to as usize] += 1;
-                }
-            }
-
-            // Kosaraju's algorithm keeps directed height transitions honest —
-            // and since N4 there are some: a ledge a body steps off and cannot
-            // climb back onto is an edge one way and no edge the other.
-            let mut seen = vec![false; cells];
-            let mut finish = Vec::with_capacity(cells);
-            for root in 0..cells {
-                if seen[root] {
-                    continue;
-                }
-                seen[root] = true;
-                let mut stack = vec![(root, 0_u8)];
-                while let Some((at, next)) = stack.last_mut() {
-                    if usize::from(*next) < usize::from(outgoing_len[*at]) {
-                        let neighbor = outgoing[*at][usize::from(*next)] as usize;
-                        *next += 1;
-                        if !seen[neighbor] {
-                            seen[neighbor] = true;
-                            stack.push((neighbor, 0));
-                        }
-                    } else {
-                        finish.push(*at);
-                        stack.pop();
-                    }
-                }
-            }
-
-            let mut component = NO_COMPONENT;
-            for root in finish.into_iter().rev() {
-                if labels[ids[root] as usize] != NO_COMPONENT {
-                    continue;
-                }
-                component = component
-                    .checked_add(1)
-                    .expect("a region has at most one component per standing place");
-                let mut stack = vec![root];
-                while let Some(at) = stack.pop() {
-                    let label = &mut labels[ids[at] as usize];
-                    if *label != NO_COMPONENT {
-                        continue;
-                    }
-                    *label = component;
-                    let run = incoming_offsets[at] as usize..incoming_offsets[at + 1] as usize;
-                    for &neighbor in &incoming[run] {
-                        let neighbor = neighbor as usize;
-                        if labels[ids[neighbor] as usize] == NO_COMPONENT {
-                            stack.push(neighbor);
-                        }
-                    }
+            // The columns this chunk moved, in tiles: its own, and **one west
+            // and one north** — a column's height is the average of the four
+            // cells meeting at its north-west corner, so a cell that moved is
+            // read by the column before it. Clipped to the facet at the far end,
+            // which is what a chunk on its eastern or southern edge needs.
+            let left = x.saturating_sub(1);
+            let top = y.saturating_sub(1);
+            let right = (x + CHUNK_TILES - 1).min(self.width - 1);
+            let bottom = (y + CHUNK_TILES - 1).min(self.height - 1);
+            for row in (top / REGION_SIZE) as usize..=(bottom / REGION_SIZE) as usize {
+                for column in (left / REGION_SIZE) as usize..=(right / REGION_SIZE) as usize {
+                    moved.insert((column, row));
                 }
             }
         }
-        labels
+        // The second ring, which is every neighbour of a region whose ground
+        // moved — eight rather than four, because saying "a corner shares no
+        // border" is a claim about the portal pass that this set does not have
+        // to make.
+        let mut rebuilt = std::collections::BTreeSet::new();
+        for &(column, row) in &moved {
+            for row in row.saturating_sub(1)..=(row + 1).min(down - 1) {
+                for column in column.saturating_sub(1)..=(column + 1).min(across - 1) {
+                    rebuilt.insert(RegionId(row * across + column));
+                }
+            }
+        }
+        let moved = moved
+            .into_iter()
+            .map(|(column, row)| RegionId(row * across + column))
+            .collect();
+        (moved, rebuilt.into_iter().collect())
     }
 
+    /// Rebuild the node set and the edges of every region named, and the borders
+    /// they share with their neighbours.
+    ///
+    /// **The one construction**, whether it is a whole facet or the
+    /// neighbourhood of a publish: [`build`](Self::build) calls it with every
+    /// region of the facet, and [`rebake_chunks`](Self::rebake_chunks) with two
+    /// rings around an edit. A facet patched into shape and a facet baked whole
+    /// are then the same code over the same ground rather than two
+    /// implementations somebody has to keep agreeing.
+    ///
+    /// `moved` is the subset whose *ground* changed, and it is what tells the
+    /// outer ring from the inner: a region rebuilt only because its neighbour
+    /// moved keeps its places, and therefore keeps its intra-region routes
+    /// unless its node set came back different.
+    fn rebake_regions(&mut self, footing: &Footing<'_>, rebuilt: &[RegionId], moved: &[RegionId]) {
+        // What has to be sampled: the regions being rebuilt, and the far side of
+        // every border they touch.
+        let mut wanted = Vec::with_capacity(rebuilt.len() * 5);
+        for &region in rebuilt {
+            wanted.push(region);
+            wanted.extend(self.beside(region));
+        }
+        let held = Held::of(footing, self, &wanted);
+
+        // The walkable bits first: `region_at` reads them, and every pass below
+        // asks it which region a place is in.
+        for &region in rebuilt {
+            self.region_walkable(&held, region);
+        }
+
+        let mut build = Rebuild::of(self, &held, rebuilt, moved);
+        for (region, side) in self.borders_of(rebuilt) {
+            self.border_portals(footing, &held, &mut build, region, side);
+        }
+        for &region in rebuilt {
+            // **What a region's intra-region routes depend on**: its own places,
+            // and which of them are nodes. A region in the outer of the two
+            // rebuilt rings has the places it had — nothing under it moved — so
+            // if its node set came back the same, so did every route between
+            // them, and the floods below are the expensive half of a rebake.
+            // Its edges were kept rather than cleared for exactly this.
+            let unmoved_ring = !build.has_moved(region) && !self.node_set_changed(&build, region);
+            if unmoved_ring {
+                continue;
+            }
+            let nodes = self.nodes_of_either(&build, region);
+            self.strip_intra(&mut build, region, &nodes);
+            self.intra_edges(footing, &held, &mut build, region);
+        }
+        self.write_back(build);
+        self.repack_if_mostly_dead();
+    }
+
+    /// Whether a region's node list came back different from the one it holds.
+    fn node_set_changed(&self, build: &Rebuild, region: RegionId) -> bool {
+        let Some(nodes) = build.listed(region) else {
+            return false;
+        };
+        let mut now: Vec<u32> = nodes.iter().map(|node| node.0 as u32).collect();
+        let mut was: Vec<u32> = self.region_nodes[self.region_runs[region.0].range()].to_vec();
+        now.sort_unstable();
+        was.sort_unstable();
+        now != was
+    }
+
+    /// Every node this rebake has, or had, in one region — which is what has to
+    /// be cleared of intra-region edges before they are worked out again.
+    fn nodes_of_either(&self, build: &Rebuild, region: RegionId) -> Vec<NodeId> {
+        let mut nodes: Vec<NodeId> = self.nodes_in_region(region).collect();
+        if let Some(listed) = build.listed(region) {
+            for &node in listed {
+                if !nodes.contains(&node) {
+                    nodes.push(node);
+                }
+            }
+        }
+        nodes
+    }
+
+    /// Take a region's own intra-region edges back out of the lists a rebake is
+    /// assembling, leaving the portal edges the border passes just put in.
+    fn strip_intra(&self, build: &mut Rebuild, region: RegionId, nodes: &[NodeId]) {
+        for &node in nodes {
+            let regions: Vec<RegionId> = build
+                .edges_of(node)
+                .iter()
+                .map(|edge| self.node_region(edge.to))
+                .collect();
+            let mut at = 0;
+            build.edges_of(node).retain(|_| {
+                let keep = regions[at] != region;
+                at += 1;
+                keep
+            });
+        }
+    }
+
+    /// Every border with a rebuilt region on at least one side, each named once.
+    ///
+    /// A border belongs to the region on its north-west side, so the pair
+    /// `(region, side)` names one and the same border however it is reached — a
+    /// rebuilt region's own east border, and the east border of the region to its
+    /// west.
+    fn borders_of(&self, rebuilt: &[RegionId]) -> Vec<(RegionId, Side)> {
+        let across = self.regions_across();
+        let mut borders = std::collections::BTreeSet::new();
+        for &region in rebuilt {
+            let (column, row) = (region.0 % across, region.0 / across);
+            if column + 1 < across {
+                borders.insert((region.0, Side::East));
+            }
+            if column > 0 {
+                borders.insert((region.0 - 1, Side::East));
+            }
+            if row + 1 < self.regions_down() {
+                borders.insert((region.0, Side::South));
+            }
+            if row > 0 {
+                borders.insert((region.0 - across, Side::South));
+            }
+        }
+        borders
+            .into_iter()
+            .map(|(region, side)| (RegionId(region), side))
+            .collect()
+    }
+
+    /// The regions sharing a border with this one.
+    fn beside(&self, region: RegionId) -> Vec<RegionId> {
+        let across = self.regions_across();
+        let (column, row) = (region.0 % across, region.0 / across);
+        let mut beside = Vec::with_capacity(4);
+        if column + 1 < across {
+            beside.push(RegionId(region.0 + 1));
+        }
+        if column > 0 {
+            beside.push(RegionId(region.0 - 1));
+        }
+        if row + 1 < self.regions_down() {
+            beside.push(RegionId(region.0 + across));
+        }
+        if row > 0 {
+            beside.push(RegionId(region.0 - across));
+        }
+        beside
+    }
+
+    /// One border's portals, as the nodes and edges they mint.
+    ///
     /// Adjacent raw crossings share a logical entrance when they connect the
-    /// same strong components.  This lets an isolated tree on a border remain
-    /// a local obstacle instead of multiplying portal nodes.
+    /// same strong components. This lets an isolated tree on a border remain a
+    /// local obstacle instead of multiplying portal nodes.
     ///
     /// **Each way across is its own entrance**, which is the second half of N4:
-    /// an entrance is now keyed by where a step *starts* as well as where it
-    /// ends, so a border a body can cross one way and not the other is a portal
-    /// rather than nothing at all. Where both ways exist — which is nearly
-    /// everywhere — the two runs cover the same stretch of border, choose the
-    /// same representatives, and intern the same pair of nodes, so a symmetric
-    /// border costs exactly what it always did.
-    fn portals(&mut self, footing: &Footing<'_>, places: &Places, components: &[u16]) {
-        for x in
-            ((REGION_SIZE - 1) as u16..(self.width as u16).saturating_sub(1)).step_by(REGION_SIZE as usize)
-        {
-            let mut entrances = Entrances::new();
-            for y in 0..self.height as u16 {
-                let side = Direction::East;
-                self.crossings(footing, places, components, Tile::new(x, y), side, &mut entrances);
-                let side = Direction::West;
-                self.crossings(
-                    footing,
-                    places,
-                    components,
-                    Tile::new(x + 1, y),
-                    side,
-                    &mut entrances,
-                );
-            }
-            for crossings in entrances.into_values() {
-                self.add_portal(&crossings);
-            }
-        }
-        for y in
-            ((REGION_SIZE - 1) as u16..(self.height as u16).saturating_sub(1)).step_by(REGION_SIZE as usize)
-        {
-            let mut entrances = Entrances::new();
-            for x in 0..self.width as u16 {
-                let side = Direction::South;
-                self.crossings(footing, places, components, Tile::new(x, y), side, &mut entrances);
-                let side = Direction::North;
-                self.crossings(
-                    footing,
-                    places,
-                    components,
-                    Tile::new(x, y + 1),
-                    side,
-                    &mut entrances,
-                );
-            }
-            for crossings in entrances.into_values() {
-                self.add_portal(&crossings);
-            }
-        }
-    }
-
-    /// Every step across a region border out of one tile, filed under the
-    /// entrance it belongs to.
+    /// an entrance is keyed by where a step *starts* as well as where it ends, so
+    /// a border a body can cross one way and not the other is a portal rather
+    /// than nothing at all. Where both ways exist — which is nearly everywhere —
+    /// the two runs cover the same stretch of border, choose the same
+    /// representatives, and intern the same pair of nodes, so a symmetric border
+    /// costs exactly what it always did.
     ///
-    /// One crossing per *place* on the tile, and one direction. The pair that
-    /// used to stand here asked the step both ways and kept it only where both
-    /// succeeded — which deleted every asymmetric border from the graph, and the
-    /// step rule is asymmetric by design.
-    ///
-    /// A landing with no place listed is skipped rather than invented. Over the
-    /// bare map that cannot happen — [`sample`] keeps a superset of every
-    /// landing — and over a footing with a live world in it, skipping is the
-    /// conservative answer a bake owes: a refusal, not a promise.
-    fn crossings(
-        &self,
+    /// **One border at a time**, where this used to sweep a facet-long line: an
+    /// entrance was always keyed by the pair of regions it joins, so a run never
+    /// spanned more than one pair — and one pair at a time is the shape the
+    /// rebake of a neighbourhood needs.
+    fn border_portals(
+        &mut self,
         footing: &Footing<'_>,
-        places: &Places,
-        components: &[u16],
-        tile: Tile,
-        direction: Direction,
-        out: &mut Entrances,
+        held: &Held,
+        build: &mut Rebuild,
+        first: RegionId,
+        side: Side,
     ) {
-        let index = self.index(tile.x, tile.y);
-        for offset in 0..places.at(index).len() {
-            let from = places.at(index)[offset];
-            let Some(to) = step_allowed(footing, from, direction) else {
-                continue;
-            };
-            let Some(landed) = places.id(self.index(to.x, to.y), to) else {
-                continue;
-            };
-            let first = self
-                .region_at(from)
-                .expect("a place's own tile is walkable and on the map");
-            let second = self
-                .region_at(to)
-                .expect("a landing's own tile is walkable and on the map");
-            out.entry((
-                first.0,
-                components[places.starts[index] as usize + offset],
-                second.0,
-                components[landed],
-            ))
-            .or_default()
-            .push((from, to));
+        let second = match side {
+            Side::East => RegionId(first.0 + 1),
+            Side::South => RegionId(first.0 + self.regions_across()),
+        };
+        let near = Bank {
+            id: first,
+            bake: held.at(first),
+        };
+        let far = Bank {
+            id: second,
+            bake: held.at(second),
+        };
+        let rectangle = self.regions[first.0];
+        let mut entrances = Entrances::new();
+        match side {
+            Side::East => {
+                let x = rectangle.left + rectangle.width - 1;
+                for y in rectangle.top..rectangle.top + rectangle.height {
+                    crossings(
+                        footing,
+                        near,
+                        far,
+                        Tile::new(x, y),
+                        Direction::East,
+                        &mut entrances,
+                    );
+                    crossings(
+                        footing,
+                        far,
+                        near,
+                        Tile::new(x + 1, y),
+                        Direction::West,
+                        &mut entrances,
+                    );
+                }
+            }
+            Side::South => {
+                let y = rectangle.top + rectangle.height - 1;
+                for x in rectangle.left..rectangle.left + rectangle.width {
+                    crossings(
+                        footing,
+                        near,
+                        far,
+                        Tile::new(x, y),
+                        Direction::South,
+                        &mut entrances,
+                    );
+                    crossings(
+                        footing,
+                        far,
+                        near,
+                        Tile::new(x, y + 1),
+                        Direction::North,
+                        &mut entrances,
+                    );
+                }
+            }
+        }
+        for run in entrances.into_values() {
+            self.add_portal(build, &run);
         }
     }
 
@@ -763,125 +1183,285 @@ impl NavigationGraph {
     /// run, both ends of a wide one — and what changed is that a crossing buys
     /// **one** edge. Its reverse, where the ground allows one, arrives as its own
     /// entrance and its own edge over the same interned nodes.
-    fn add_portal(&mut self, run: &[(Point, Point)]) {
+    fn add_portal(&mut self, build: &mut Rebuild, run: &[(Point, Point)]) {
         let ids: Vec<_> = match run.len() {
             0 => return,
             1..WIDE_PORTAL => vec![(run.len() - 1) / 2],
             _ => vec![0, run.len() - 1],
         };
         for index in ids {
-            let first_id = self.intern_node(run[index].0);
-            let second_id = self.intern_node(run[index].1);
-            self.add_edge(first_id, second_id, 1);
+            let first_id = self.intern_node(build, run[index].0);
+            let second_id = self.intern_node(build, run[index].1);
+            build.add_edge(first_id, second_id, 1);
         }
     }
 
     /// The node one standing place is, minted the first time an entrance names
     /// it.
     ///
-    /// Interned rather than pushed, because a place is now named by up to two
+    /// Interned rather than pushed, because a place is named by up to two
     /// entrances — the way in and the way out — and by the entrances of a
     /// perpendicular border where they meet at a corner. Two nodes at one place
     /// would be two names for one thing, and would double the intra-region
     /// routing every one of them pays for.
-    fn intern_node(&mut self, point: Point) -> NodeId {
-        if let Some(&id) = self.build_nodes.get(&(point.x, point.y, point.z)) {
-            return id;
-        }
+    ///
+    /// **The interning table is seeded with the nodes the graph already holds**,
+    /// which is what makes a local rebake possible at all: a `NodeId` is an index
+    /// *other regions' edges point at*, so a place that still has a node has to
+    /// keep its number. A place that lost its node leaves a dead entry behind and
+    /// a place that gained one takes a number at the end.
+    fn intern_node(&mut self, build: &mut Rebuild, point: Point) -> NodeId {
         let region = self
             .region_at(point)
             .expect("a portal endpoint is a place on the map");
+        if let Some(&id) = build.interned.get(&(point.x, point.y, point.z)) {
+            build.list(region, id);
+            return id;
+        }
         let id = NodeId(self.nodes.len());
         self.nodes.push(Node { point });
-        self.build_edges.push(Vec::new());
-        self.build_region_nodes[region.0].push(id);
-        self.build_nodes.insert((point.x, point.y, point.z), id);
+        self.edge_runs.push(Run::NONE);
+        build.open(id);
+        build.interned.insert((point.x, point.y, point.z), id);
+        // A portal endpoint outside the rebuilt regions is always a node the
+        // graph already holds — that is exactly what makes the ring beyond them
+        // "edges only", so a *new* node there would mean the area was chosen
+        // wrong rather than that the world has one more place in it.
+        build
+            .listing(region)
+            .expect("a new portal endpoint stands in a region this rebake is rebuilding")
+            .push(id);
         id
     }
 
-    fn add_edge(&mut self, from: NodeId, to: NodeId, cost: u32) {
-        self.build_edges[from.0].push(Edge { to, cost });
-    }
-
-    fn intra_edges(&mut self, footing: &Footing<'_>, places: &Places) {
-        for region in 0..self.regions.len() {
-            let nodes = self.build_region_nodes[region].clone();
-            // A region with one entrance has nothing to route between, and a
-            // facet is mostly such regions — the traversal below is the bake's
-            // whole cost, so not starting it is worth the branch.
-            if nodes.len() < 2 {
-                continue;
-            }
-            let local = RegionPlaces::of(self, places, self.regions[region]);
-            // The other nodes are the whole of what each traversal is for, so
-            // they are resolved once and handed to it: a flood that has costed
-            // all of them has nothing left to learn about this region.
-            let slots: Vec<usize> = nodes
-                .iter()
-                .map(|&node| {
-                    local
-                        .slot(self.nodes[node.0].point)
-                        .expect("a node is a place of its own region")
-                })
-                .collect();
-            for &from in &nodes {
-                // The bake pays for nothing: what a flood cost is a *query's*
-                // question, and this one runs once at build time with a whole
-                // facet's worth of time to do it in.
-                let (costs, _) = region_costs(footing, &local, self.nodes[from.0].point, &slots);
-                for (index, &to) in nodes.iter().enumerate() {
-                    if from == to {
-                        continue;
-                    }
-                    if let Some(cost) = costs[slots[index]] {
-                        self.add_edge(from, to, cost);
-                    }
+    /// What it costs to cross one region between its own portals.
+    fn intra_edges(&mut self, footing: &Footing<'_>, held: &Held, build: &mut Rebuild, region: RegionId) {
+        let nodes = build
+            .listing(region)
+            .expect("a rebuilt region has a node list")
+            .clone();
+        // A region with one entrance has nothing to route between, and a facet is
+        // mostly such regions — the traversal below is the bake's whole cost, so
+        // not starting it is worth the branch.
+        if nodes.len() < 2 {
+            return;
+        }
+        let local = &held.at(region).places;
+        // The other nodes are the whole of what each traversal is for, so they
+        // are resolved once and handed to it: a flood that has costed all of them
+        // has nothing left to learn about this region.
+        let slots: Vec<usize> = nodes
+            .iter()
+            .map(|&node| {
+                local
+                    .slot(self.nodes[node.0].point)
+                    .expect("a node is a place of its own region")
+            })
+            .collect();
+        for &from in &nodes {
+            // The bake pays for nothing: what a flood cost is a *query's*
+            // question, and this one runs with a whole region's worth of time to
+            // do it in.
+            let (costs, _) = region_costs(footing, local, self.nodes[from.0].point, &slots);
+            for (index, &to) in nodes.iter().enumerate() {
+                if from == to {
+                    continue;
+                }
+                if let Some(cost) = costs[slots[index]] {
+                    build.add_edge(from, to, cost);
                 }
             }
         }
     }
 
-    fn compact(&mut self) {
-        self.region_offsets.push(0);
-        for nodes in &self.build_region_nodes {
-            self.region_nodes.extend(nodes.iter().map(|id| id.0 as u32));
-            self.region_offsets.push(self.region_nodes.len() as u32);
+    /// Write everything a rebake assembled into the graph's own arrays.
+    ///
+    /// **A run that did not change is not written at all**, which matters more
+    /// here than it does one layer down: most of the second ring around an edit
+    /// comes back byte for byte as it was, and rewriting it would manufacture
+    /// garbage out of a publish that moved nothing there.
+    fn write_back(&mut self, build: Rebuild) {
+        for (node, mut edges) in build.edges {
+            edges.sort_unstable_by_key(|edge| (edge.to, edge.cost));
+            edges.dedup_by_key(|edge| edge.to);
+            self.place_edges(node, &edges);
         }
-        self.edge_offsets.push(0);
-        for edges in &self.build_edges {
-            self.edge_targets
-                .extend(edges.iter().map(|edge| edge.to.0 as u32));
-            self.edge_costs.extend(
-                edges
+        for (region, nodes) in build.nodes {
+            let ids: Vec<u32> = nodes.iter().map(|node| node.0 as u32).collect();
+            self.place_nodes(region, &ids);
+        }
+    }
+
+    /// Repoint one region at its new node list.
+    ///
+    /// A list that fits where it stood is written there and a longer one goes to
+    /// the end — the table's whole purpose, and what a prefix sum forbids.
+    fn place_nodes(&mut self, region: RegionId, ids: &[u32]) {
+        let was = self.region_runs[region.0];
+        if self.region_nodes[was.range()] == *ids {
+            return;
+        }
+        // A node no place named this time round: its edges are already cleared
+        // (every node of a rebuilt region is written above, with whatever the
+        // passes gave it, which for this one is nothing), and nothing points at
+        // it, because every edge into a rebuilt region was rewritten too.
+        for &node in &self.region_nodes[was.range()] {
+            if !ids.contains(&node) {
+                self.dead_nodes += 1;
+            }
+        }
+        let count = ids.len() as u32;
+        let base = match count <= was.count {
+            true => was.base,
+            false => self.region_nodes.len() as u32,
+        };
+        if count <= was.count {
+            self.region_nodes[base as usize..base as usize + ids.len()].copy_from_slice(ids);
+            self.dead_region_nodes += was.count - count;
+        } else {
+            self.region_nodes.extend_from_slice(ids);
+            self.dead_region_nodes += was.count;
+        }
+        self.region_runs[region.0] = Run { base, count };
+    }
+
+    /// Repoint one node at its new edge list. [`place_nodes`](Self::place_nodes)
+    /// one level down, over the two parallel arrays an edge is.
+    fn place_edges(&mut self, node: NodeId, edges: &[Edge]) {
+        let was = self.edge_runs[node.0];
+        let unchanged = was.count as usize == edges.len()
+            && self.edge_targets[was.range()]
+                .iter()
+                .zip(&self.edge_costs[was.range()])
+                .zip(edges)
+                .all(|((&to, &cost), edge)| to as usize == edge.to.0 && u32::from(cost) == edge.cost);
+        if unchanged {
+            return;
+        }
+        let count = edges.len() as u32;
+        let base = match count <= was.count {
+            true => was.base,
+            false => self.edge_targets.len() as u32,
+        };
+        for (offset, edge) in edges.iter().enumerate() {
+            let cost = u16::try_from(edge.cost).expect("a 32×32 region route fits in u16");
+            match count <= was.count {
+                true => {
+                    self.edge_targets[base as usize + offset] = edge.to.0 as u32;
+                    self.edge_costs[base as usize + offset] = cost;
+                }
+                false => {
+                    self.edge_targets.push(edge.to.0 as u32);
+                    self.edge_costs.push(cost);
+                }
+            }
+        }
+        self.dead_edges += match count <= was.count {
+            true => was.count - count,
+            false => was.count,
+        };
+        self.edge_runs[node.0] = Run { base, count };
+    }
+
+    /// The garbage rule, and it is the span layer's verbatim — *never compact
+    /// during a session, until the dead outweigh the live* — with one difference
+    /// that matters: `SpanIndex` answers it by baking the facet whole, and
+    /// 11.6 s is the thing this file exists to stop paying. So the answer here is
+    /// a **repack**: one walk of what is live, at no point asking the ground
+    /// anything.
+    fn repack_if_mostly_dead(&mut self) {
+        let dead = self.dead_nodes as usize + self.dead_region_nodes as usize + self.dead_edges as usize;
+        let live = self.nodes.len() + self.region_nodes.len() + self.edge_targets.len() - dead;
+        if dead > live {
+            self.repack();
+        }
+    }
+
+    /// Drop every entry no run points at, and renumber what is left.
+    ///
+    /// A `NodeId` is an index and nothing outside this graph holds one — a query
+    /// resolves its endpoints against the regions every time it is asked — so
+    /// renumbering is a private matter, which is what makes this cheap enough to
+    /// be the answer to garbage.
+    fn repack(&mut self) {
+        let mut renumbered = vec![NO_NEIGHBOR; self.nodes.len()];
+        let mut nodes = Vec::with_capacity(self.nodes.len() - self.dead_nodes as usize);
+        for run in &self.region_runs {
+            for &node in &self.region_nodes[run.range()] {
+                renumbered[node as usize] = nodes.len() as u32;
+                nodes.push(self.nodes[node as usize]);
+            }
+        }
+        let mut region_nodes = Vec::with_capacity(nodes.len());
+        let mut region_runs = Vec::with_capacity(self.regions.len());
+        for run in &self.region_runs {
+            let base = region_nodes.len() as u32;
+            region_nodes.extend(
+                self.region_nodes[run.range()]
                     .iter()
-                    .map(|edge| u16::try_from(edge.cost).expect("a 32×32 region route fits in u16")),
+                    .map(|&node| renumbered[node as usize]),
             );
-            self.edge_offsets.push(self.edge_targets.len() as u32);
+            region_runs.push(Run {
+                base,
+                count: run.count,
+            });
         }
-        self.build_region_nodes = Vec::new();
-        self.build_edges = Vec::new();
-        self.build_nodes = BTreeMap::new();
+        let mut edge_runs = Vec::with_capacity(nodes.len());
+        let mut edge_targets = Vec::with_capacity(self.edge_targets.len());
+        let mut edge_costs = Vec::with_capacity(self.edge_costs.len());
+        let mut order: Vec<usize> = (0..self.nodes.len())
+            .filter(|&node| renumbered[node] != NO_NEIGHBOR)
+            .collect();
+        order.sort_unstable_by_key(|&node| renumbered[node]);
+        for node in order {
+            let run = self.edge_runs[node];
+            let base = edge_targets.len() as u32;
+            for (&to, &cost) in self.edge_targets[run.range()]
+                .iter()
+                .zip(&self.edge_costs[run.range()])
+            {
+                // An edge into a node nothing lists any more is dropped rather
+                // than renumbered. It cannot happen — every edge into a rebuilt
+                // region is rewritten by the rebake that killed the node — and
+                // dropping it is the only honest answer if it ever does.
+                if renumbered[to as usize] == NO_NEIGHBOR {
+                    continue;
+                }
+                edge_targets.push(renumbered[to as usize]);
+                edge_costs.push(cost);
+            }
+            edge_runs.push(Run {
+                base,
+                count: (edge_targets.len() as u32) - base,
+            });
+        }
+        self.nodes = nodes;
+        self.region_nodes = region_nodes;
+        self.region_runs = region_runs;
+        self.edge_runs = edge_runs;
+        self.edge_targets = edge_targets;
+        self.edge_costs = edge_costs;
+        self.dead_nodes = 0;
+        self.dead_region_nodes = 0;
+        self.dead_edges = 0;
     }
 
     fn node_region(&self, node: NodeId) -> RegionId {
-        self.region_at(self.nodes[node.0].point)
-            .expect("every node is walkable and inside the map")
+        self.region_containing(self.nodes[node.0].point)
+            .expect("every node is inside the map")
     }
 
     fn nodes_in_region(&self, region: RegionId) -> impl Iterator<Item = NodeId> + '_ {
-        let start = self.region_offsets[region.0] as usize;
-        let end = self.region_offsets[region.0 + 1] as usize;
-        self.region_nodes[start..end]
+        self.region_nodes[self.region_runs[region.0].range()]
             .iter()
             .map(|&id| NodeId(id as usize))
     }
 
     fn edges_from(&self, node: NodeId) -> impl Iterator<Item = Edge> + '_ {
-        let start = self.edge_offsets[node.0] as usize;
-        let end = self.edge_offsets[node.0 + 1] as usize;
-        self.edge_targets[start..end]
+        let run = self.edge_runs[node.0].range();
+        self.edge_targets[run.clone()]
             .iter()
-            .zip(&self.edge_costs[start..end])
+            .zip(&self.edge_costs[run])
             .map(|(&to, &cost)| Edge {
                 to: NodeId(to as usize),
                 cost: u32::from(cost),
@@ -1939,5 +2519,401 @@ mod tests {
                 prop_assert_eq!(end(&terrain.footing(), from, &route), to);
             }
         }
+    }
+}
+
+/// G1's oracle, on scenes: **a facet patched into shape holds the graph the same
+/// facet baked whole holds.**
+///
+/// Compared as *places and costs* rather than as bytes, because a `NodeId` is an
+/// index and two constructions are free to number the same places differently —
+/// see [`NavigationGraph::shape`]. What that leaves is the only claim worth
+/// making: the two graphs offer the same crossings between the same standing
+/// places at the same prices, so every route either of them proposes, the other
+/// proposes too.
+#[cfg(test)]
+mod rebake {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use super::*;
+    use crate::ground::Ground;
+    use crate::scene::Scene;
+    use openshard_map::map::LandCell;
+    use openshard_map::overlay::{Doors, Overlay};
+    use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
+    use openshard_protocol::world::Facet;
+    use openshard_tiles::TileData;
+
+    /// A place, and every place it can be crossed to, with what the crossing
+    /// costs.
+    type Shape = BTreeMap<(u16, u16, i8), BTreeSet<((u16, u16, i8), u32)>>;
+
+    impl NavigationGraph {
+        /// The graph as the world it describes rather than as the numbers it
+        /// holds: which places are nodes, and what it costs to get between them.
+        ///
+        /// Dead entries fall out on their own — a node no region lists is not
+        /// walked here, which is exactly what makes a repack invisible to
+        /// everything above.
+        fn shape(&self) -> Shape {
+            let mut shape = Shape::new();
+            for region in 0..self.regions.len() {
+                for node in self.nodes_in_region(RegionId(region)) {
+                    let at = self.nodes[node.0].point;
+                    let edges = self
+                        .edges_from(node)
+                        .map(|edge| {
+                            let to = self.nodes[edge.to.0].point;
+                            ((to.x, to.y, to.z), edge.cost)
+                        })
+                        .collect();
+                    let was = shape.insert((at.x, at.y, at.z), edges);
+                    assert!(was.is_none(), "a place is one node and one region's");
+                }
+            }
+            shape
+        }
+    }
+
+    /// A facet three regions square, which is what it takes to have a region
+    /// with neighbours on every side — and two chunks square, so a chunk's edge
+    /// and a region's are two different seams.
+    fn scene() -> Scene {
+        let mut scene = Scene::flat_holding(95, 95, 0);
+        // Something for the portal pass to have an opinion about: a wall down
+        // the middle with one gap in it, and a plateau a body can walk up onto
+        // from one side only.
+        for y in 0..96 {
+            if y != 40 {
+                scene.wall(48, y, 0, 20);
+            }
+        }
+        for y in 8..24 {
+            for x in 8..24 {
+                scene.ground(x, y, 10);
+            }
+        }
+        for y in 8..24 {
+            scene.stair(24, y, 0, 10);
+        }
+        scene
+    }
+
+    fn shard(scene: Scene) -> (Ground, TileData) {
+        let (base, tiles) = scene.into_shard(Facet(0));
+        (Ground::new(Some(base), &tiles), tiles)
+    }
+
+    /// The graph a whole-facet bake gives this ground.
+    fn baked(ground: &Ground, tiles: &TileData) -> NavigationGraph {
+        let nothing_placed = Overlay::default();
+        let footing = Footing::new(ground.terrain(tiles), &nothing_placed, Doors::AsTheyStand);
+        let (width, height) = match ground.snapshot() {
+            Some(base) => (base.map().width(), base.map().height()),
+            None => unreachable!("the fixture has ground"),
+        };
+        NavigationGraph::build(&footing, width, height).expect("a facet the graph can address")
+    }
+
+    /// Raise these cells by forty, published the way a `.setland` is — and hand
+    /// back the chunks the patch moved, which is what the caller owes a rebake.
+    ///
+    /// **Cells rather than tiles, and never one of them alone.** A tile stands
+    /// at the average of the four cells meeting at its north-west corner, and
+    /// that average is taken over whichever *diagonal* of the four is the flatter
+    /// — so raising a single cell raises no tile at all, which would make a
+    /// fixture that looks like an edit and is not one.
+    fn raise(ground: &mut Ground, tiles: &TileData, cells: &[(u16, u16)]) -> Vec<ChunkCoord> {
+        let base = ground.snapshot().expect("the fixture has ground");
+        let ops = cells
+            .iter()
+            .map(|&(x, y)| {
+                let was = base.map().land(x, y).expect("a cell on this facet");
+                PatchOp::set_land(
+                    base.map(),
+                    x,
+                    y,
+                    LandCell {
+                        tile: was.tile,
+                        z: was.z.saturating_add(40),
+                    },
+                )
+                .expect("a cell on this facet")
+            })
+            .collect();
+        let patch = Patch::new(
+            Facet(0),
+            base.revision(),
+            PatchAuthor("the rebake oracle".to_owned()),
+            PatchTime(0),
+            ops,
+        );
+        ground.publish(&patch, tiles).expect("the sample patch applies");
+        patch.touched_chunks()
+    }
+
+    /// The four cells a tile stands on the average of.
+    fn under(x: u16, y: u16) -> [(u16, u16); 4] {
+        [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)]
+    }
+
+    /// Put a wall where a body used to walk, which is the edit that takes a
+    /// crossing *away* rather than moving one.
+    ///
+    /// The graphic is the fixture's own wall, copied out of the block it stands
+    /// in: a static of a graphic the tile table has never heard of would be an
+    /// item with no height, which is a weaker edit than the one this is for.
+    fn wall_at(ground: &mut Ground, tiles: &TileData, x: u16, y: u16) -> Vec<ChunkCoord> {
+        let base = ground.snapshot().expect("the fixture has ground");
+        // Block (6, 1) is where the fixture's wall crosses x = 48, y = 8.
+        let standing = *base
+            .map()
+            .statics_in_block(6, 1)
+            .first()
+            .expect("the fixture's wall stands in this block");
+        let op = PatchOp::add_static(
+            base.map(),
+            openshard_map::map::StaticItem {
+                x,
+                y,
+                z: 0,
+                ..standing
+            },
+        )
+        .expect("a tile on this facet");
+        let patch = Patch::new(
+            Facet(0),
+            base.revision(),
+            PatchAuthor("the rebake oracle".to_owned()),
+            PatchTime(0),
+            vec![op],
+        );
+        ground.publish(&patch, tiles).expect("the sample patch applies");
+        patch.touched_chunks()
+    }
+
+    /// Rebake the graph over the ground as it now stands.
+    fn follow(graph: &mut NavigationGraph, ground: &Ground, tiles: &TileData, chunks: &[ChunkCoord]) {
+        let nothing_placed = Overlay::default();
+        let footing = Footing::new(ground.terrain(tiles), &nothing_placed, Doors::AsTheyStand);
+        graph.rebake_chunks(&footing, chunks);
+    }
+
+    /// The oracle itself, over the positions an edit can land on: inside a
+    /// region, on a region's own first column and row, on the corner where both
+    /// meet, and on a chunk's edge — which is a different seam from a region's,
+    /// because a chunk is two regions wide.
+    ///
+    /// The edges are the point. A column's height is the average of the four
+    /// cells meeting at its north-west corner, so an edit at `x % 32 == 0` is
+    /// read by a column in the region to the west, and a rebake that took only
+    /// the edited region would leave that column answering for the world as it
+    /// was — with nothing about the edited region itself showing it.
+    #[test]
+    fn a_patched_graph_holds_what_a_whole_bake_holds() {
+        let mut moved = 0;
+        for (x, y) in [(40, 40), (32, 40), (40, 32), (32, 32), (64, 64), (63, 63)] {
+            let (mut ground, tiles) = shard(scene());
+            let mut graph = baked(&ground, &tiles);
+            let before = graph.shape();
+
+            let chunks = wall_at(&mut ground, &tiles, x, y);
+            follow(&mut graph, &ground, &tiles, &chunks);
+
+            assert_eq!(
+                graph.shape(),
+                baked(&ground, &tiles).shape(),
+                "an edit at ({x}, {y}) left a seam"
+            );
+            moved += usize::from(graph.shape() != before);
+        }
+        assert!(moved > 0, "no edit moved the graph, so this oracle is asleep");
+    }
+
+    /// The same, for an edit to the *ground* rather than to what stands on it —
+    /// the `.setland` an operator actually types, and the op whose read area is
+    /// wider than the cell it names.
+    #[test]
+    fn a_raised_cell_is_followed_the_same_way() {
+        for (x, y) in [(40, 40), (32, 40), (40, 32), (64, 64)] {
+            let (mut ground, tiles) = shard(scene());
+            let mut graph = baked(&ground, &tiles);
+
+            let chunks = raise(&mut ground, &tiles, &under(x, y));
+            follow(&mut graph, &ground, &tiles, &chunks);
+
+            assert_eq!(
+                graph.shape(),
+                baked(&ground, &tiles).shape(),
+                "a raise at ({x}, {y}) left a seam"
+            );
+        }
+    }
+
+    /// A crossing taken away, which is the edit a rebake can get wrong in a way
+    /// a rebake of *more* ground cannot: a place that should not be a node any
+    /// more, with edges still pointing at it.
+    #[test]
+    fn a_way_across_that_was_walled_off_leaves_nothing_behind() {
+        let (mut ground, tiles) = shard(scene());
+        let mut graph = baked(&ground, &tiles);
+        // The fixture's wall runs the height of the facet with one gap in it, so
+        // "an edge from one side of x = 48 to the other" is a fact about that gap
+        // and about nothing else.
+        let across = |shape: &Shape| {
+            shape
+                .iter()
+                .any(|(&(x, _, _), edges)| x < 48 && edges.iter().any(|&((to, _, _), _)| to > 48))
+        };
+        assert!(
+            across(&graph.shape()),
+            "the gap is a way across before it is walled"
+        );
+
+        let chunks = wall_at(&mut ground, &tiles, 48, 40);
+        follow(&mut graph, &ground, &tiles, &chunks);
+
+        let whole = baked(&ground, &tiles);
+        assert_eq!(graph.shape(), whole.shape());
+        assert!(!across(&graph.shape()), "and nothing crosses it after");
+        // The nodes the edit orphaned are still entries in `nodes`, which is the
+        // point of the accounting: garbage is unreachable rather than absent,
+        // until it outweighs the living.
+        assert!(
+            graph.nodes.len() >= whole.nodes.len(),
+            "a rebake leaves its garbage where it is until a repack"
+        );
+    }
+
+    /// The locality claim itself: a publish leaves the runs of a region it did
+    /// not name exactly where they stood. A prefix sum could not do this, and it
+    /// is the whole reason the addressing changed.
+    #[test]
+    fn a_publish_leaves_a_distant_regions_run_where_it_was() {
+        let (mut ground, tiles) = shard(scene());
+        let mut graph = baked(&ground, &tiles);
+        let far = RegionId(graph.regions.len() - 1);
+        let was = graph.region_runs[far.0];
+        let nodes: Vec<_> = graph.nodes_in_region(far).collect();
+        let edges: Vec<_> = nodes.iter().map(|&node| graph.edge_runs[node.0]).collect();
+
+        let chunks = wall_at(&mut ground, &tiles, 8, 8);
+        follow(&mut graph, &ground, &tiles, &chunks);
+
+        assert_eq!(graph.region_runs[far.0], was, "a far region's list did not move");
+        assert_eq!(
+            nodes
+                .iter()
+                .map(|&node| graph.edge_runs[node.0])
+                .collect::<Vec<_>>(),
+            edges,
+            "and neither did its nodes' edges"
+        );
+    }
+
+    /// And a publish that changed no crossing at all writes nothing, which is
+    /// the other half of the same rule: a run is rewritten because it differs,
+    /// not because a pass looked at it. Without that, a brush stroke over open
+    /// ground would manufacture garbage out of edits that moved nothing.
+    #[test]
+    fn a_publish_that_moved_no_crossing_leaves_no_garbage() {
+        let (mut ground, tiles) = shard(scene());
+        let mut graph = baked(&ground, &tiles);
+        let before = graph.shape();
+
+        let chunks = raise(&mut ground, &tiles, &under(40, 40));
+        follow(&mut graph, &ground, &tiles, &chunks);
+
+        assert_eq!(
+            graph.shape(),
+            before,
+            "the fixture's open ground routes as it did"
+        );
+        assert_eq!((graph.dead_edges, graph.dead_region_nodes), (0, 0));
+    }
+
+    /// The garbage rule. Publishing the same tile up and down leaves orphaned
+    /// runs behind every time, and once they outweigh the living the graph packs
+    /// itself — which has to be invisible to everything above it.
+    #[test]
+    fn garbage_is_repacked_once_it_outweighs_the_living() {
+        let (mut ground, tiles) = shard(scene());
+        let mut graph = baked(&ground, &tiles);
+        let mut packed = false;
+        for round in 0..40_u16 {
+            let x = 40 + round % 2;
+            let chunks = raise(&mut ground, &tiles, &under(x, 40));
+            follow(&mut graph, &ground, &tiles, &chunks);
+            packed |= graph.dead_edges == 0 && graph.dead_region_nodes == 0 && round > 0;
+            assert_eq!(
+                graph.shape(),
+                baked(&ground, &tiles).shape(),
+                "round {round} disagrees with a whole bake"
+            );
+        }
+        assert!(packed, "forty publishes never reached the repack rule");
+    }
+
+    /// An edit whose read area crosses a chunk's edge, on a facet wide enough
+    /// for the rings to be smaller than it.
+    ///
+    /// The five-region facet is what makes this different from the tests above:
+    /// on a three-region one the second ring is the whole world, so "the region
+    /// after next" is not a place and nothing here could be missed.
+    ///
+    /// **On the widening, honestly.** The first ring is taken over the chunks'
+    /// tiles *grown one west and north*, and no scene here turns that growth into
+    /// a wrong answer — over bare land this step rule climbs any height at all, a
+    /// slope being walkable and the two-unit limit being a rule about statics, so
+    /// a land edit does not disconnect ground and the component split that would
+    /// carry a change two regions out cannot be built out of one. What the growth
+    /// buys is the argument rather than a caught failure: with it, every region
+    /// whose *places* moved is inside the rebuilt set, which is what makes a
+    /// border between a rebuilt region and a merely-sampled one unable to mint a
+    /// node — and that is the claim [`NavigationGraph::intern_node`] fails loudly
+    /// on. It is also the rule the span layer below already follows for the same
+    /// reason, one scale down.
+    #[test]
+    fn an_edit_across_a_chunk_edge_is_followed_on_a_facet_with_room() {
+        // Five regions square, so that "one region further out" is a place
+        // rather than the edge of the facet.
+        let mut scene = Scene::flat_holding(159, 159, 0);
+        // A region cut in half but for one gap, and the gap is on the column an
+        // edit in the chunk to its east moves.
+        for x in 32..63 {
+            scene.wall(x, 48, 0, 20);
+        }
+        // A ceiling over the gap, so that ground coming up under it is a change
+        // to what stands there rather than only to how high it is.
+        scene.floor(63, 48, 20, 2);
+        let (mut ground, tiles) = shard(scene);
+        let mut graph = baked(&ground, &tiles);
+        let before = graph.shape();
+
+        // The two cells of tile (63, 48) that lie east of the chunk edge — the
+        // other diagonal stays where it is, and a tile stands on the average of
+        // the flatter of the two.
+        let chunks = raise(&mut ground, &tiles, &[(64, 48), (64, 49)]);
+        follow(&mut graph, &ground, &tiles, &chunks);
+
+        let whole = baked(&ground, &tiles);
+        assert_eq!(
+            graph.shape(),
+            whole.shape(),
+            "the edit reached further than the rebuilt regions"
+        );
+        assert_ne!(graph.shape(), before, "the ground under the ceiling moved");
+    }
+
+    /// A facet with no graph is a facet a publish leaves without one: nothing on
+    /// a tick can bake one out of nothing, and a graph that appeared halfway
+    /// through a session would be a graph nobody stamped.
+    #[test]
+    fn a_rebake_of_nothing_is_nothing() {
+        let (ground, tiles) = shard(scene());
+        let mut graph = baked(&ground, &tiles);
+        let before = graph.shape();
+        follow(&mut graph, &ground, &tiles, &[]);
+        assert_eq!(graph.shape(), before, "no chunks moved, so nothing was rebaked");
     }
 }

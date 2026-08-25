@@ -19,10 +19,19 @@ use openshard_map::snapshot::{MapRevision, MapSnapshot};
 use openshard_protocol::world::{Facet, Point};
 
 use crate::NavigationGraph;
-use crate::navigation::{Node, Region};
+use crate::navigation::{Node, Region, Run};
 
 const MAGIC: &[u8; 8] = b"OSNAV\0\r\n";
-const FORMAT_VERSION: u32 = 5;
+/// Increment whenever the bytes change shape, whatever the graph in them means.
+///
+/// 6 is `docs/map/navigation_graph.md`'s G1: the two prefix-sum offset arrays
+/// became tables of `base` and `count`, so that a publish can re-lay one
+/// region's nodes and one node's edges where they stand. The graph a version 5
+/// file holds is still a graph this code would agree with — it is the
+/// *addressing* that moved — so a stale artifact is rebaked rather than
+/// converted, which is what every other version bump in this repo has decided
+/// for a derived file.
+const FORMAT_VERSION: u32 = 6;
 /// Increment whenever graph construction or static movement semantics change.
 ///
 /// 4 is `docs/map/navigation_spans.md`'s N4: a node is a standing place rather
@@ -630,9 +639,7 @@ fn encode(mut w: impl Write, g: &NavigationGraph, stamp: &Stamp) -> io::Result<(
     put_u64(&mut w, g.regions.len() as u64)?;
     put_u64(&mut w, g.walkable.len() as u64)?;
     put_u64(&mut w, g.nodes.len() as u64)?;
-    put_u64(&mut w, g.region_offsets.len() as u64)?;
     put_u64(&mut w, g.region_nodes.len() as u64)?;
-    put_u64(&mut w, g.edge_offsets.len() as u64)?;
     put_u64(&mut w, g.edge_targets.len() as u64)?;
     for r in &g.regions {
         put_u16(&mut w, r.left)?;
@@ -646,14 +653,20 @@ fn encode(mut w: impl Write, g: &NavigationGraph, stamp: &Stamp) -> io::Result<(
         put_u16(&mut w, n.point.y)?;
         w.write_all(&[n.point.z as u8])?;
     }
-    for &offset in &g.region_offsets {
-        put_u32(&mut w, offset)?;
+    // The tables, and they are what the file carries now: a run is written as it
+    // stands, dead entries and all, so that saving a graph a publish has already
+    // moved is the same operation as saving one straight off a bake. See
+    // `NavigationGraph::Run`, and `docs/map/navigation_graph.md`'s G1.
+    for run in &g.region_runs {
+        put_u32(&mut w, run.base)?;
+        put_u32(&mut w, run.count)?;
     }
     for &node in &g.region_nodes {
         put_u32(&mut w, node)?;
     }
-    for &offset in &g.edge_offsets {
-        put_u32(&mut w, offset)?;
+    for run in &g.edge_runs {
+        put_u32(&mut w, run.base)?;
+        put_u32(&mut w, run.count)?;
     }
     for &target in &g.edge_targets {
         put_u32(&mut w, target)?;
@@ -742,17 +755,16 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<NavigationGraph
     let nr = r.count()?;
     let nw = r.count()?;
     let nn = r.count()?;
-    let nro = r.count()?;
     let nrn = r.count()?;
-    let neo = r.count()?;
     let ne = r.count()?;
+    // Two `u32`s per run, where an offsets array carried one per owner plus a
+    // terminator — the eight bytes a region and a node each cost the file, and
+    // 0.4 MB on Britannia's 7.4.
     let minimum = nr
-        .checked_mul(8)
+        .checked_mul(16)
         .and_then(|n| n.checked_add(nw))
-        .and_then(|n| n.checked_add(nn.checked_mul(5)?))
-        .and_then(|n| n.checked_add(nro.checked_mul(4)?))
+        .and_then(|n| n.checked_add(nn.checked_mul(13)?))
         .and_then(|n| n.checked_add(nrn.checked_mul(4)?))
-        .and_then(|n| n.checked_add(neo.checked_mul(4)?))
         .and_then(|n| n.checked_add(ne.checked_mul(6)?))
         .ok_or_else(|| corrupt(path, "collection sizes overflow"))?;
     if minimum > r.remaining() {
@@ -763,7 +775,7 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<NavigationGraph
         .ok_or_else(|| corrupt(path, "dimension overflow"))?;
     let regions_across = (width as usize).div_ceil(32);
     let expected_regions = regions_across * (height as usize).div_ceil(32);
-    if nr != expected_regions || nw != cells.div_ceil(8) || nro != nr + 1 || neo != nn + 1 {
+    if nr != expected_regions || nw != cells.div_ceil(8) {
         return Err(corrupt(path, "inconsistent collection lengths"));
     }
     let mut regions = Vec::with_capacity(nr);
@@ -795,9 +807,9 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<NavigationGraph
             point: Point::new(x, y, z),
         });
     }
-    let region_offsets = take_u32s(&mut r, nro)?;
+    let region_runs = take_runs(&mut r, nr)?;
     let region_nodes = take_u32s(&mut r, nrn)?;
-    let edge_offsets = take_u32s(&mut r, neo)?;
+    let edge_runs = take_runs(&mut r, nn)?;
     let edge_targets = take_u32s(&mut r, ne)?;
     let mut edge_costs = Vec::with_capacity(ne);
     for _ in 0..ne {
@@ -817,16 +829,23 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<NavigationGraph
             return Err(corrupt(path, format!("region {i} is outside the map")));
         }
     }
-    valid_offsets(path, &region_offsets, nrn, "region")?;
-    valid_offsets(path, &edge_offsets, ne, "edge")?;
+    let listed = valid_runs(path, &region_runs, nrn, "region")?;
+    let reachable = valid_runs(path, &edge_runs, ne, "edge")?;
     if region_nodes.iter().any(|&node| node as usize >= nn)
         || edge_targets.iter().any(|&node| node as usize >= nn)
         || edge_costs.iter().any(|&cost| cost > 1023)
     {
         return Err(corrupt(path, "node index is out of range"));
     }
-    for region in 0..nr {
-        for &node in &region_nodes[region_offsets[region] as usize..region_offsets[region + 1] as usize] {
+    // A node stands in exactly one region, and a file that lists one twice is a
+    // file whose regions disagree about where a place is.
+    let mut named = vec![false; nn];
+    for (region, run) in region_runs.iter().enumerate() {
+        for &node in &region_nodes[run.base as usize..run.base as usize + run.count as usize] {
+            if named[node as usize] {
+                return Err(corrupt(path, "a node is listed by two regions"));
+            }
+            named[node as usize] = true;
             let point = nodes[node as usize].point;
             let actual = usize::from(point.y) / 32 * regions_across + usize::from(point.x) / 32;
             if actual != region {
@@ -839,15 +858,18 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<NavigationGraph
         height,
         regions,
         walkable,
+        // What no run points at is garbage a publish left behind, and it is
+        // counted rather than refused: a saved graph is allowed to be one an
+        // edit has already moved. See `NavigationGraph::repack`.
+        dead_nodes: (nn - named.iter().filter(|listed| **listed).count()) as u32,
+        dead_region_nodes: (nrn - listed) as u32,
+        dead_edges: (ne - reachable) as u32,
         nodes,
-        region_offsets,
+        region_runs,
         region_nodes,
-        edge_offsets,
+        edge_runs,
         edge_targets,
         edge_costs,
-        build_nodes: std::collections::BTreeMap::new(),
-        build_region_nodes: Vec::new(),
-        build_edges: Vec::new(),
     })
 }
 
@@ -920,18 +942,39 @@ fn take_u32s(r: &mut Reader<'_>, count: usize) -> Result<Vec<u32>, Error> {
     Ok(values)
 }
 
-fn valid_offsets(path: &Path, offsets: &[u32], items: usize, name: &str) -> Result<(), Error> {
-    if offsets.first() != Some(&0)
-        || offsets.last().copied() != Some(items as u32)
-        || offsets.windows(2).any(|pair| pair[0] > pair[1])
-    {
-        Err(corrupt(
-            path,
-            format!("{name} offsets are not monotonic and bounded"),
-        ))
-    } else {
-        Ok(())
+fn take_runs(r: &mut Reader<'_>, count: usize) -> Result<Vec<Run>, Error> {
+    r.require_items(count, 8)?;
+    let mut runs = Vec::with_capacity(count);
+    for _ in 0..count {
+        runs.push(Run {
+            base: r.u32()?,
+            count: r.u32()?,
+        });
     }
+    Ok(runs)
+}
+
+/// Check that every run lies inside the array it addresses, and answer how many
+/// of that array's entries are reachable through one.
+///
+/// The rest is garbage a publish left behind — legal, counted, and repacked once
+/// it outweighs the live. What is *not* legal is a run reaching past the end of
+/// what it addresses, which is a file the reader would follow into somebody
+/// else's numbers.
+fn valid_runs(path: &Path, runs: &[Run], items: usize, name: &str) -> Result<usize, Error> {
+    let mut reachable = 0_usize;
+    for run in runs {
+        let end = (run.base as usize)
+            .checked_add(run.count as usize)
+            .filter(|&end| end <= items)
+            .ok_or_else(|| corrupt(path, format!("a {name} run reaches past its array")))?;
+        let _ = end;
+        reachable += run.count as usize;
+    }
+    if reachable > items {
+        return Err(corrupt(path, format!("{name} runs overlap")));
+    }
+    Ok(reachable)
 }
 fn put_u16(w: &mut impl Write, n: u16) -> io::Result<()> {
     w.write_all(&n.to_le_bytes())
@@ -1056,6 +1099,36 @@ mod tests {
                 Weight::EXACT
             ),
         );
+        let _ = fs::remove_file(path);
+    }
+
+    /// A graph a publish has already moved is a graph the file has to carry as
+    /// it stands — runs out of order, garbage between them and all.
+    ///
+    /// The alternative would be to pack it on the way out, and that would make
+    /// `save` an operation whose result depends on how the graph in hand was
+    /// arrived at. What a file holds is the graph, not the history of the graph.
+    #[test]
+    fn a_rebaked_graph_round_trips_with_its_garbage() {
+        let mut blocked = BTreeSet::new();
+        for y in 0..64 {
+            if y != 40 {
+                blocked.insert((48, y));
+            }
+        }
+        let terrain = Grid::new(96, 64, &blocked);
+        let mut graph = NavigationGraph::build(&terrain.footing(), 96, 64).unwrap();
+        // A rebake over the same ground: nothing about the world moved, so the
+        // graph is the same graph — but it has been through the write-back, and
+        // this is the file's side of that.
+        graph.rebake_chunks(
+            &terrain.footing(),
+            &[openshard_map::chunk::ChunkCoord::containing(48, 40)],
+        );
+        let path = temp("rebaked.bin");
+        let s = stamp();
+        save(&path, &graph, &s).unwrap();
+        assert_eq!(load(&path, &s).unwrap(), graph);
         let _ = fs::remove_file(path);
     }
 

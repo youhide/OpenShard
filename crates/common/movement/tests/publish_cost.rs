@@ -283,4 +283,43 @@ fn what_one_setland_costs_at_each_end() {
     println!("  Ground::publish      — one static added       {}", ms(grew));
     println!("  Ground::take_chunks  — that chunk, arriving   {}", ms(arrived));
     println!("\nthe hitch a person sees is the last line of each pair.");
+
+    // ---- the third artefact, and the one that used to be dropped -----------
+    //
+    // The coarse graph. `FacetState::publish` took it away on every publish
+    // because a whole-facet bake is the number printed first below, on a tick;
+    // `navigation_graph.md`'s G1 is the rebake of two rings around the edit,
+    // which is the number printed after it.
+    let nothing_placed = openshard_map::overlay::Overlay::default();
+    let footing = openshard_movement::Footing::new(
+        ground.terrain(&tiles),
+        &nothing_placed,
+        openshard_map::overlay::Doors::AsTheyStand,
+    );
+    let start = Instant::now();
+    let (width, height) = {
+        let base = ground.snapshot().expect("the facet it was built with");
+        (base.map().width(), base.map().height())
+    };
+    let mut graph = openshard_movement::NavigationGraph::build(&footing, width, height)
+        .expect("a facet the graph can address");
+    let whole = start.elapsed();
+    let (regions, nodes, edges) = graph.counts();
+
+    // One chunk, which is what a `.setland` moves — the same chunk the numbers
+    // above are about. Repeatable because the ground under it does not move
+    // between rounds: every round rebakes the same two rings over the same
+    // world, which is the work a publish there would cost.
+    let moved = vec![at];
+    let rebaked = best_of(|| {
+        graph.rebake_chunks(&footing, &moved);
+    });
+
+    println!("\nthe coarse graph, on the same tick:");
+    println!(
+        "  NavigationGraph::build — the whole facet    {}   (what a publish used to drop)",
+        ms(whole)
+    );
+    println!("  = rebake_chunks        — two rings of it    {}", ms(rebaked));
+    println!("  {regions} regions, {nodes} nodes, {edges} edges");
 }

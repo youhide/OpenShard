@@ -689,16 +689,15 @@ impl FacetState {
 
     /// Publish a patch into this facet's ground, while players stand on it.
     ///
-    /// Two things move and they move together. The span bake follows the ground
-    /// inside [`Ground`], which is that type's whole invariant. **The coarse
-    /// graph does not follow: it is dropped**, because there is no such thing as
-    /// rebuilding it here — it is a 52-second offline bake — and a graph built
-    /// over the world as it stood before the edit is a graph of somewhere else.
-    /// Dropping it costs long routes until the shard is rebaked and restarted;
-    /// keeping it would cost a router that confidently plans through a wall
-    /// somebody just published. `docs/map/new_map_representation/plan.md`'s
-    /// direction D is what makes the rebuild local and cheap enough to do here,
-    /// and until then this is the honest half of the trade.
+    /// **Three things move and they move together.** The span bake follows the
+    /// ground inside [`Ground`], which is that type's whole invariant, and the
+    /// coarse graph follows it here — over the chunks the patch named and no
+    /// others. It used to be **dropped**, on the honest argument that a
+    /// whole-facet rebuild is 11.6 s on a tick and a graph of the world as it
+    /// stood is a router planning through a wall somebody just built; what
+    /// changed is `docs/map/navigation_graph.md`'s G1, which makes the rebuild
+    /// local — the regions the chunks cover, their neighbours, and the ring
+    /// beyond for edges only.
     ///
     /// What comes back is the way back — see [`FacetUndo`]. A caller that has
     /// nowhere durable to write the patch down **must** use it: a world that
@@ -711,19 +710,45 @@ impl FacetState {
     /// here has moved, the coarse graph included.
     pub fn publish(&mut self, patch: &Patch, tiles: &TileData) -> Result<FacetUndo, PatchError> {
         let map = self.ground.publish(patch, tiles)?;
-        Ok(FacetUndo {
-            map,
-            coarse: self.coarse.take(),
-        })
+        self.follow(&patch.touched_chunks(), tiles);
+        Ok(FacetUndo { map })
     }
 
     /// Take back a publish that was never written down, coarse graph and all.
     ///
-    /// The graph goes back because it was never stale: the world it describes is
-    /// the world this call restores.
+    /// The graph follows the way back for the reason it follows the way out: an
+    /// undo puts a different world under it, over the chunks its own inverses
+    /// touch.
     pub fn undo(&mut self, undo: FacetUndo, tiles: &TileData) {
         self.ground.undo(&undo.map, tiles);
-        self.coarse = undo.coarse;
+        self.follow(&undo.map.touched_chunks(), tiles);
+    }
+
+    /// Bring the coarse graph back in step with ground that has just moved.
+    ///
+    /// **Over the static world and nothing live**, which is the same decision
+    /// `bake::build` makes and for the same reason: a graph is a facet's static
+    /// connectivity, so a door that happens to be shut while a publish lands is
+    /// not a property of the ground. Every hop is still refined through the live
+    /// terrain at the query.
+    ///
+    /// A facet with no graph stays without one. Nothing here can bake a facet
+    /// from nothing on a tick, and a graph that appeared halfway through a
+    /// session would be a graph nobody stamped.
+    fn follow(&mut self, chunks: &[openshard_map::chunk::ChunkCoord], tiles: &TileData) {
+        let Some(terrain) = self.ground.terrain(tiles) else {
+            return;
+        };
+        let Some(coarse) = self.coarse.as_mut() else {
+            return;
+        };
+        let nothing_placed = openshard_map::overlay::Overlay::default();
+        let footing = Footing::new(
+            Some(terrain),
+            &nothing_placed,
+            openshard_map::overlay::Doors::AsTheyStand,
+        );
+        coarse.rebake_chunks(&footing, chunks);
     }
 
     /// Put `entity`'s `cover` on `(x, y)`.
@@ -809,11 +834,11 @@ pub struct WorldHome {
 
 /// Everything a facet has to put back if a publish is taken back.
 ///
-/// [`Undo`] is the map's half and it is the whole of what `openshard-map` can
-/// know about; the coarse graph is this crate's, and it is here for the same
-/// reason the two travel together in [`FacetState::publish`] — a facet holding
-/// the old world and no router, or the new world and the old router, are both
-/// states nobody should be able to spell.
+/// [`Undo`] is the map's half, and since G1 it is the whole of it: the coarse
+/// graph used to travel in here because a publish *dropped* it and only an undo
+/// could hand it back. It follows the ground both ways now, over the chunks the
+/// inverses touch, so what a caller has to carry is the ground's own way back
+/// and nothing else.
 ///
 /// It is deliberately not `Clone`: there is exactly one way back from one
 /// publish, and a second copy of it would be a second attempt to walk it.
@@ -821,8 +846,6 @@ pub struct WorldHome {
 pub struct FacetUndo {
     /// The ground's way back, and the revision it goes back to.
     map: Undo,
-    /// The router the publish dropped, if there was one.
-    coarse: Option<NavigationGraph>,
 }
 
 /// An item on a cursor: the entity, and where it was lifted from.
