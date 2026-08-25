@@ -14,6 +14,7 @@
 
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
+use openshard_uofiles::hues::full;
 
 use crate::atlas::{FontAtlas, TextSize, TtfAtlas};
 use crate::camera::ViewPixel;
@@ -38,9 +39,8 @@ pub struct Label<'a> {
     pub anchor: ViewPixel,
     /// The line itself. `fonts.mul` is a single-byte table of
     /// [`openshard_uofiles::font::CHARS_PER_FONT`] entries starting at code
-    /// point 0, so this is read as bytes rather than as `char`s — a UTF-8
-    /// multi-byte sequence has no entry in the table any more than a raw
-    /// high byte would, and both are silently skipped rather than boxed.
+    /// point `0x20`; [`legacy_byte`] encodes Unicode Cyrillic into the
+    /// file's CP1251 slots before looking a glyph up.
     pub text: &'a str,
     /// Which face to draw it in.
     pub font: Font,
@@ -48,6 +48,33 @@ pub struct Label<'a> {
     pub hue: Hue,
     /// Where it sorts. See [`crate::depth`].
     pub depth: f32,
+}
+
+/// One Unicode character as `fonts.mul` stores it.
+///
+/// The file is a CP1251 table, not UTF-8. Its Cyrillic entries are present —
+/// `А` is byte `0xC0`, `я` is `0xFF`, and the two yo letters have their normal
+/// CP1251 slots — but iterating a Rust string as bytes turns each one into two
+/// invalid glyph requests. Latin-1 stays byte-for-code-point, which preserves
+/// the client face's punctuation and western-European entries.
+fn legacy_byte(ch: char) -> Option<u8> {
+    match ch {
+        '\u{0401}' => Some(0xA8),
+        '\u{0451}' => Some(0xB8),
+        '\u{0410}'..='\u{042F}' => Some(0xC0 + (ch as u8 - 0x10)),
+        '\u{0430}'..='\u{044F}' => Some(0xE0 + (ch as u8 - 0x30)),
+        _ => u8::try_from(ch as u32).ok(),
+    }
+}
+
+/// The legacy text palette always uses its full hue ramp.
+///
+/// Its near-black contour and grey body deliberately occupy different source
+/// indexes. Keeping a wire partial flag here colours only the body and leaves
+/// a permanently black contour; dropping it makes both indexes select their
+/// own rungs of the same 32-colour hue, just as a fully hued robe does.
+fn bitmap_font_hue(hue: Hue) -> Hue {
+    full(hue)
 }
 
 /// Every label as quads, glyph by glyph.
@@ -60,9 +87,11 @@ pub struct Label<'a> {
 pub fn collect(labels: &[Label<'_>], atlas: &FontAtlas) -> Vec<SpriteQuad> {
     let mut quads = Vec::new();
     for label in labels {
+        let hue = bitmap_font_hue(label.hue);
         let glyphs: Vec<_> = label
             .text
-            .bytes()
+            .chars()
+            .filter_map(legacy_byte)
             .filter_map(|byte| atlas.glyph(label.font, byte))
             .collect();
         let total_width: i32 = glyphs.iter().map(|sprite| i32::from(sprite.width)).sum();
@@ -78,7 +107,7 @@ pub fn collect(labels: &[Label<'_>], atlas: &FontAtlas) -> Vec<SpriteQuad> {
                     },
                     region: sprite.region,
                     depth: label.depth,
-                    hue: u32::from(label.hue.0),
+                    hue: u32::from(hue.0),
                     // Letters over a head are a message, not a thing standing
                     // in the street: no place, and so never dimmed by night.
                     place: crate::place::Place::NOWHERE,
@@ -236,7 +265,7 @@ pub fn collect_screen_ttf(labels: &[ScreenLabel<'_>], atlas: &TtfAtlas, size: Te
 pub struct GumpLabel<'a> {
     /// The line's top-left corner, in gump pixels.
     pub at: GumpPixel,
-    /// The line itself — see [`Label::text`] for the byte-table contract.
+    /// The line itself — see [`Label::text`] for the CP1251-table contract.
     pub text: &'a str,
     /// Which face to draw it in.
     pub font: Font,
@@ -303,8 +332,9 @@ fn glyph_drop(font: Font, char: u8) -> i32 {
 pub fn collect_gump(labels: &[GumpLabel<'_>], atlas: &FontAtlas) -> Vec<SpriteQuad> {
     let mut quads = Vec::new();
     for label in labels {
+        let hue = bitmap_font_hue(label.hue);
         let mut x = label.at.x;
-        for byte in label.text.bytes() {
+        for byte in label.text.chars().filter_map(legacy_byte) {
             let Some(sprite) = atlas.glyph(label.font, byte) else {
                 continue;
             };
@@ -328,7 +358,7 @@ pub fn collect_gump(labels: &[GumpLabel<'_>], atlas: &FontAtlas) -> Vec<SpriteQu
                     // No depth test in this pass; see `crate::gump`'s module
                     // docs for why an interface has none.
                     depth: 0.0,
-                    hue: u32::from(label.hue.0),
+                    hue: u32::from(hue.0),
                     place: crate::place::Place::NOWHERE,
                     twin: 0,
                     owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
@@ -340,21 +370,6 @@ pub fn collect_gump(labels: &[GumpLabel<'_>], atlas: &FontAtlas) -> Vec<SpriteQu
     }
     quads
 }
-
-/// Roughly how far below the top of a line a TrueType face's baseline sits,
-/// as a share of the atlas's own rasterization height.
-///
-/// [`collect_gump`] has [`glyph_drop`]'s table for this because a
-/// `fonts.mul` glyph carries no baseline of its own — see that function's
-/// doc. A TrueType glyph does, per character (`TtfGlyph::baseline_from_top`),
-/// but the *line's* baseline — where every glyph's own offset is measured
-/// from — is a face metric this crate never reads (`openshard_uofiles::ttf_font`'s
-/// "One face, not ten" doc explains why there is only a pixel height to ask
-/// for, not a parsed `hhea` table), so this is a working approximation
-/// rather than a measured one. Purely cosmetic: a line a few pixels off its
-/// nominal box still reads fine, which is what lets this stand in for a
-/// metric nobody has built a reader for yet.
-const BASELINE_SHARE: f32 = 0.8;
 
 /// [`collect_gump`]'s TrueType twin, on the same terms [`collect_ttf`] is
 /// [`collect`]'s: `char`s and a per-glyph advance instead of `fonts.mul`
@@ -378,7 +393,13 @@ const BASELINE_SHARE: f32 = 0.8;
 /// A `char` the atlas never packed is skipped and does not advance the line,
 /// [`collect_gump`]'s contract carried over unchanged.
 pub fn collect_gump_ttf(labels: &[GumpLabel<'_>], atlas: &TtfAtlas, size: TextSize) -> Vec<SpriteQuad> {
-    let baseline_from_top = (size.pixels() * BASELINE_SHARE).round() as i32;
+    // The atlas remembers the source face's line metrics when it grows.  A
+    // manually-packed test atlas has none, so retain the historical fallback
+    // only for that artificial case rather than guessing in a real frame.
+    let baseline_from_top = atlas.line_metrics(size).map_or_else(
+        || (size.pixels() * 0.8).round() as i32,
+        |metrics| metrics.baseline_from_top,
+    );
     let mut quads = Vec::new();
     for label in labels {
         let mut x = label.at.x;
@@ -428,11 +449,12 @@ pub fn gump_width_ttf(text: &str, atlas: &TtfAtlas, size: TextSize) -> i32 {
         .sum()
 }
 
-/// The pixel width of `text` set in `font`, the same per-byte advance
+/// The pixel width of `text` set in `font`, the same CP1251-byte advance
 /// [`collect_gump`] walks by — what places a caret at a byte offset into a
 /// line rather than always at its end.
 pub fn gump_width(text: &str, font: Font, atlas: &FontAtlas) -> i32 {
-    text.bytes()
+    text.chars()
+        .filter_map(legacy_byte)
         .filter_map(|byte| atlas.glyph(font, byte))
         .map(|sprite| i32::from(sprite.width))
         .sum()
@@ -518,6 +540,74 @@ mod tests {
         );
         assert_eq!(quads[0].rect.x, 96.0, "100 - 8/2");
         assert_eq!(quads[1].rect.x, 102.0);
+    }
+
+    /// A bitmap font uses the full palette. Its contour and body are separate
+    /// source indices, so an incoming partial bit must not freeze the contour
+    /// in its original near-black ink.
+    #[test]
+    fn bitmap_font_hue_colours_the_contour_as_well_as_the_body() {
+        let atlas = atlas();
+        let quads = collect(
+            &[Label {
+                anchor: ViewPixel { x: 100, y: 50 },
+                text: "H",
+                font: Font(0),
+                hue: Hue(0x8000 | 42),
+                depth: 0.5,
+            }],
+            &atlas,
+        );
+        assert_eq!(quads[0].hue, 42);
+    }
+
+    #[test]
+    fn cyrillic_is_encoded_to_the_glyphs_fonts_mul_actually_holds() {
+        let atlas = FontAtlas::pack([
+            (
+                GlyphKey {
+                    font: Font(0),
+                    char: 0xC0,
+                },
+                glyph(1, 1),
+            ),
+            (
+                GlyphKey {
+                    font: Font(0),
+                    char: 0xFF,
+                },
+                glyph(2, 1),
+            ),
+            (
+                GlyphKey {
+                    font: Font(0),
+                    char: 0xA8,
+                },
+                glyph(3, 1),
+            ),
+            (
+                GlyphKey {
+                    font: Font(0),
+                    char: 0xB8,
+                },
+                glyph(4, 1),
+            ),
+        ])
+        .expect("four CP1251 glyphs fit");
+        let label = Label {
+            anchor: ViewPixel { x: 50, y: 10 },
+            text: "АяЁё",
+            font: Font(0),
+            hue: Hue::NONE,
+            depth: 0.0,
+        };
+        let quads = collect(&[label], &atlas);
+        assert_eq!(
+            quads.len(),
+            4,
+            "each Unicode Cyrillic letter found its CP1251 glyph"
+        );
+        assert_eq!(gump_width("АяЁё", Font(0), &atlas), 10, "1 + 2 + 3 + 4");
     }
 
     /// A byte the atlas has no glyph for — here, everything but 'H' and 'i' —
@@ -790,6 +880,22 @@ mod tests {
             (16.0, 20.0 + LOWERCASE_DROP[GUMP_FACE.0 as usize] as f32),
             "the next glyph starts where the first ended, and hangs lower"
         );
+    }
+
+    #[test]
+    fn gump_bitmap_text_uses_the_same_full_hue_rule() {
+        let font = font_of([(b'A', 6, 10)]);
+        let quads = collect_gump(
+            &[GumpLabel {
+                at: GumpPixel::default(),
+                hue: Hue(0x8000 | 42),
+                clip: None,
+                text: "A",
+                font: GUMP_FACE,
+            }],
+            &font,
+        );
+        assert_eq!(quads[0].hue, 42);
     }
 
     /// `{ croppedtext }` crops and never wraps or squeezes: the glyph that would

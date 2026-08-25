@@ -86,6 +86,13 @@ TrueType face is loaded, which is already true today.
 cannot be asked for. `fonts.mul` remains the whole picture when no face is
 loaded.
 
+**D7 — A line height is measured ink/metrics, never its nominal request.** A
+bitmap face uses the visible height of its actual `M` glyph plus two pixels of
+air; `fonts.mul` cell padding does not become leading. A TrueType face uses
+its `ascent`, `descent` and `line_gap` from `fontdue`, retained in the atlas at
+each raster size. The same result feeds draw and hit-test paths, so selecting a
+different F1 face cannot make the chat control's box drift from its glyphs.
+
 ## Phases
 
 **All four are built** (2026-08-20). What each was:
@@ -132,11 +139,12 @@ than in two subsystems that would drift.
   hand at each call site (`Font(1)` in four places). Worth folding into the
   same role table as the sizes, so "which face, at what size" is one answer per
   role rather than two answers in two places.
-- **The chat box's line height is the speech size, flat.** `chat::line_height`
-  answers `speech.pixels()` for a TrueType face, which reproduces the old
-  16-pixel step at the default size exactly and leaves no air at all above a
-  tall glyph. A real face has ascent and descent metrics; `fontdue` exposes
-  them and nothing here reads them yet.
+- **Cross-family visual calibration.** F1 exposes an exact raster size for a
+  configured TrueType face and an exact `fonts.mul` face for bitmap text. Line
+  baselines and rows are now measured, but an operator who wants one *particular*
+  TTF family's capitals to match one bitmap face's capitals still chooses that
+  visual size deliberately; there is no universal ratio between unrelated
+  typefaces.
 - **A window that is magnified re-rasterizes its captions.** `WindowScale` is
   folded into the size (D4), so dragging that slider asks for a new size per
   step — which is correct and is also the drag most likely to fill the atlas

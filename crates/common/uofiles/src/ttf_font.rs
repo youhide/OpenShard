@@ -1,12 +1,13 @@
 //! A TrueType face for the code points `fonts.mul` never shipped.
 //!
-//! `fonts.mul`'s ten faces (see [`crate::font`]) cover Latin text and a
-//! handful of symbols, `0x20` to `0xFF` — no Cyrillic, no anything else. This
-//! rasterizes whichever TrueType face an operator points a shard at instead —
-//! see [`TtfFont::open`]. Nothing is bundled: a face is copyrighted the same
-//! way a client's own files are (see the crate doc's "no client files" rule),
-//! so this reads one from a path the same way [`crate::font::AsciiFonts`]
-//! reads `fonts.mul` from a client install, rather than embedding one.
+//! `fonts.mul`'s ten faces (see [`crate::font`]) are a single-byte CP1251
+//! table: they cover Latin and Cyrillic, but not Unicode generally. This
+//! rasterizes whichever TrueType face an operator points a shard at for the
+//! scripts or typography that table cannot provide — see [`TtfFont::open`].
+//! Nothing is bundled: a face is copyrighted the same way a client's own files
+//! are (see the crate doc's "no client files" rule), so this reads one from a
+//! path the same way [`crate::font::AsciiFonts`] reads `fonts.mul` from a
+//! client install, rather than embedding one.
 //!
 //! # One face, not ten
 //!
@@ -122,6 +123,20 @@ pub struct TtfGlyph {
     pub advance: u16,
 }
 
+/// The measured vertical grid a TrueType face asks text lines to use.
+///
+/// `fontdue` obtains these from the face's horizontal metrics; unlike a glyph
+/// bitmap, they do not change between an `M`, a `g`, or Cyrillic `ф` at the
+/// same size.  Keeping this beside the glyph data removes the former guessed
+/// `80%` baseline from UI layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TtfLineMetrics {
+    /// Pixels from a line's top to its baseline.
+    pub baseline_from_top: i32,
+    /// Pixels to advance to the next line, including the face's designed gap.
+    pub line_height: i32,
+}
+
 /// An operator-supplied TrueType face, ready to rasterize.
 pub struct TtfFont {
     font: Font,
@@ -181,6 +196,33 @@ impl TtfFont {
             image,
             baseline_from_top: baseline_from_top(metrics.height as i32, metrics.ymin),
             advance: metrics.advance_width.ceil() as u16,
+        }
+    }
+
+    /// The face's real baseline and line step at `pixel_height`.
+    ///
+    /// A malformed face is allowed to omit horizontal metrics.  In that rare
+    /// case a one-em high line with an 80%-down baseline is a safe fallback;
+    /// normal OpenType faces take the measured path, and callers never need a
+    /// per-character approximation.
+    #[must_use]
+    pub fn line_metrics(&self, pixel_height: f32) -> TtfLineMetrics {
+        let fallback = || TtfLineMetrics {
+            baseline_from_top: (pixel_height * 0.8).round() as i32,
+            line_height: pixel_height.round() as i32,
+        };
+        let Some(metrics) = self.font.horizontal_line_metrics(pixel_height) else {
+            return fallback();
+        };
+        let baseline_from_top = metrics.ascent.ceil() as i32;
+        let line_height = metrics.new_line_size.ceil() as i32;
+        // A broken metric table must not create a zero-height input field.
+        match (baseline_from_top > 0, line_height > 0) {
+            (true, true) => TtfLineMetrics {
+                baseline_from_top,
+                line_height,
+            },
+            _ => fallback(),
         }
     }
 }
@@ -322,6 +364,22 @@ mod tests {
         let glyph = font.glyph('Я', 16.0);
         assert!(glyph.image.width() > 0 && glyph.image.height() > 0);
         assert!(glyph.advance > 0);
+    }
+
+    /// The UI's line grid is read from the face, not inferred from a nominal
+    /// 16px request or one particular glyph.  `g` is included to ensure the
+    /// descent has somewhere to live under the common baseline.
+    #[test]
+    fn a_real_face_exposes_a_positive_baseline_and_line_step() {
+        let Some(font) = test_font() else { return };
+        let metrics = font.line_metrics(16.0);
+        let descender = font.glyph('g', 16.0);
+        assert!(metrics.baseline_from_top > 0);
+        assert!(metrics.line_height >= metrics.baseline_from_top);
+        assert!(
+            metrics.line_height >= descender.baseline_from_top,
+            "the line must reach the shared baseline even for a descender"
+        );
     }
 
     /// A space draws no ink, but still has to move the pen — a caller that

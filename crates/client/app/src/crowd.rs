@@ -42,7 +42,9 @@ use openshard_client_render::follow::Gaze;
 use openshard_client_render::mobiles::{EquipmentLayer, Mobile};
 use openshard_movement::step_hold;
 use openshard_protocol::direction::{Direction, Facing};
-use openshard_protocol::feedback::{Animation, AnimationFrameCount, NewAnimation};
+use openshard_protocol::feedback::{
+    Animation, AnimationFrameCount, DEFAULT_ANIMATION_FRAME_MS, NewAnimation, SwingTiming,
+};
 use openshard_protocol::mobile::Equipment;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::Font;
@@ -375,7 +377,54 @@ struct ActionAnimation {
     forward: bool,
     repeat: bool,
     delay: Duration,
+    /// Exact server interval for a combat wind-up. Unlike `delay`, this uses a
+    /// staged anticipation/hold/release timeline rather than spacing six pieces
+    /// of sprite art several hundred milliseconds apart.
+    duration: Option<Duration>,
     elapsed: Duration,
+}
+
+impl ActionAnimation {
+    fn frame(self, available: u16) -> u16 {
+        let frames = self.frames.0.clamp(1, available);
+        let frame = self.duration.map_or_else(
+            || {
+                let ticks = self.elapsed.as_nanos() / self.delay.as_nanos().max(1);
+                (ticks % u128::from(frames)) as u16
+            },
+            |duration| staged_swing_frame(self.elapsed, duration, self.delay, frames),
+        );
+        if self.forward { frame } else { frames - 1 - frame }
+    }
+}
+
+/// Place sparse classic attack art on a readable wind-up timeline.
+///
+/// Long attacks enter frame one at the ordinary cadence, hold that anticipation
+/// pose, then play every remaining strike frame at that same cadence immediately
+/// before impact. Short attacks are compressed evenly because there is no room
+/// for a hold. This keeps both ends visible without turning a six-frame sprite
+/// into six seconds of apparent freezes.
+fn staged_swing_frame(elapsed: Duration, duration: Duration, cadence: Duration, frames: u16) -> u16 {
+    if frames <= 2 || duration <= cadence.saturating_mul(u32::from(frames)) {
+        let progress = elapsed.as_nanos().saturating_mul(u128::from(frames)) / duration.as_nanos().max(1);
+        return u16::try_from(progress.min(u128::from(frames - 1))).unwrap_or(frames - 1);
+    }
+
+    const ANTICIPATION_FRAME: u16 = 1;
+    if elapsed < cadence {
+        return 0;
+    }
+    let release_frames = frames - ANTICIPATION_FRAME - 1;
+    let release_span = cadence.saturating_mul(u32::from(release_frames));
+    let release_at = duration.saturating_sub(release_span);
+    if elapsed < release_at {
+        return ANTICIPATION_FRAME;
+    }
+    let released = elapsed.saturating_sub(release_at).as_nanos() / cadence.as_nanos().max(1);
+    ANTICIPATION_FRAME
+        + 1
+        + u16::try_from(released.min(u128::from(release_frames - 1))).unwrap_or(release_frames - 1)
 }
 
 /// Who a tracked body is.
@@ -442,6 +491,8 @@ pub struct Crowd {
     ///
     /// A stack and not one line: see [`SPEECH_STACK`].
     speech: HashMap<Who, Vec<Speech>>,
+    /// Server-owned duration for the immediately following action, by mobile.
+    swing_timings: HashMap<Serial, Duration>,
     /// Real time since this crowd was built. Its own clock rather than an
     /// `Instant`, so every rule here can be tested by handing it durations.
     now: Duration,
@@ -474,6 +525,7 @@ impl Default for Crowd {
             tracked: HashMap::new(),
             falls: HashMap::new(),
             speech: HashMap::new(),
+            swing_timings: HashMap::new(),
             now: Duration::ZERO,
             commanded: None,
             ease: Ease::NONE,
@@ -553,9 +605,12 @@ impl Crowd {
         for tracked in self.tracked.values_mut() {
             let action_done = if let Some(action) = tracked.action.as_mut() {
                 action.elapsed += dt;
-                let ticks = action.elapsed.as_millis() / action.delay.as_millis().max(1);
+                let ticks = action.elapsed.as_nanos() / action.delay.as_nanos().max(1);
                 !action.repeat
-                    && ticks >= u128::from(action.frames.0.max(1)) * u128::from(action.repeats.max(1))
+                    && action.duration.map_or_else(
+                        || ticks >= u128::from(action.frames.0.max(1)) * u128::from(action.repeats.max(1)),
+                        |duration| action.elapsed >= duration,
+                    )
             } else {
                 false
             };
@@ -904,12 +959,7 @@ impl Crowd {
                 return available - 1;
             }
             match tracked.action {
-                Some(action) => {
-                    let ticks = action.elapsed.as_millis() / action.delay.as_millis().max(1);
-                    let frames = action.frames.0.clamp(1, available);
-                    let frame = (ticks % u128::from(frames)) as u16;
-                    if action.forward { frame } else { frames - 1 - frame }
-                }
+                Some(action) => action.frame(available),
                 None => tracked.clock.frame(frame_count),
             }
         })
@@ -1065,6 +1115,7 @@ impl Crowd {
 
     /// Play a server-selected classic body action until it finishes.
     pub fn play(&mut self, animation: Animation) {
+        let duration = self.swing_timings.remove(&animation.serial);
         let Some(tracked) = self.tracked.get_mut(&Some(animation.serial)) else {
             return;
         };
@@ -1079,10 +1130,11 @@ impl Crowd {
             // The classic packet uses zero for the client's normal mobile
             // animation cadence rather than for a one-millisecond interval.
             delay: Duration::from_millis(if animation.delay == 0 {
-                80
+                DEFAULT_ANIMATION_FRAME_MS
             } else {
                 u64::from(animation.delay)
             }),
+            duration,
             elapsed: Duration::ZERO,
         });
         tracked.change_to(AnimationGroup(group));
@@ -1110,6 +1162,16 @@ impl Crowd {
             repeat: false,
             delay: animation.delay,
         });
+    }
+
+    /// Apply the server's duration to this mobile's immediately following action.
+    pub fn time_swing(&mut self, timing: SwingTiming) {
+        let duration = Duration::from_millis(u64::from(timing.duration.millis()));
+        if duration.is_zero() {
+            self.swing_timings.remove(&timing.serial);
+        } else {
+            self.swing_timings.insert(timing.serial, duration);
+        }
     }
 
     /// Where this body is drawn now, in the sub-pixel form the sprite and the
@@ -1538,6 +1600,55 @@ mod tests {
         ] {
             assert_eq!(modern_action(BodyKind::Human, 0, sub_action), Some(expected));
         }
+    }
+
+    #[test]
+    fn server_timing_stages_a_readable_axe_windup_and_release() {
+        let who = serial(1);
+        let mobile = who.expect("a serial");
+        let mut crowd = Crowd::default();
+        crowd.see(
+            who,
+            Point::new(10, 10, 0),
+            Graphic(PLAYER),
+            Facing::walking(Direction::South),
+            Hue::NONE,
+            false,
+        );
+        crowd.time_swing(SwingTiming {
+            serial: mobile,
+            duration: openshard_protocol::feedback::SwingDuration(4_800),
+        });
+        crowd.play_new(NewAnimation {
+            serial: mobile,
+            animation_type: 0,
+            action: 7,
+            delay: 0,
+        });
+
+        assert_eq!(crowd.group_for(who), Some(AnimationGroup(13)));
+        crowd.advance(Duration::from_millis(79));
+        assert_eq!(crowd.frame_for(who, AnimationFrameCount(6)), 0);
+        crowd.advance(Duration::from_millis(1));
+        assert_eq!(crowd.frame_for(who, AnimationFrameCount(6)), 1);
+        crowd.advance(Duration::from_millis(4_399));
+        assert_eq!(
+            crowd.frame_for(who, AnimationFrameCount(6)),
+            1,
+            "the raised-weapon anticipation remains readable during a long wind-up"
+        );
+        crowd.advance(Duration::from_millis(1));
+        assert_eq!(crowd.frame_for(who, AnimationFrameCount(6)), 2);
+        crowd.advance(Duration::from_millis(239));
+        assert_eq!(crowd.frame_for(who, AnimationFrameCount(6)), 4);
+        crowd.advance(Duration::from_millis(1));
+        assert_eq!(crowd.frame_for(who, AnimationFrameCount(6)), 5);
+        crowd.advance(Duration::from_millis(80));
+        assert_eq!(
+            crowd.group_for(who),
+            Some(BodyKind::Human.standing()),
+            "the action occupies the complete server-supplied 4.8 seconds"
+        );
     }
 
     /// A movement update may change the displayed group before the one-shot

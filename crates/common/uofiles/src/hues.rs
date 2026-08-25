@@ -198,6 +198,27 @@ pub const fn is_partial(hue: Hue) -> bool {
     hue.0 & HUE_PARTIAL_FLAG != 0
 }
 
+/// Ask for the partial form of a real hue.
+///
+/// A partial flag without an index is not meaningful: [`Hue::NONE`] still
+/// means "leave the pixels alone", just as it does on the wire.
+pub const fn partial(hue: Hue) -> Hue {
+    if hue.0 & HUE_INDEX_MASK == 0 {
+        Hue::NONE
+    } else {
+        Hue(hue.0 | HUE_PARTIAL_FLAG)
+    }
+}
+
+/// Remove a partial-hue request without changing its palette index.
+///
+/// `fonts.mul` uses different source palette indexes for ink and contour.
+/// Its renderer needs the full ramp for those distinct pixels to stay
+/// independently colourable, even when a caller passed a hue with this flag.
+pub const fn full(hue: Hue) -> Hue {
+    Hue(hue.0 & !HUE_PARTIAL_FLAG)
+}
+
 /// Read a NUL-padded name field.
 fn read_name(raw: &[u8]) -> String {
     let field = &raw[..raw.len().min(NAME_BYTES)];
@@ -290,6 +311,13 @@ mod tests {
         assert!(is_partial(Hue(3 | HUE_PARTIAL_FLAG)));
         assert!(!is_partial(Hue(3)));
         assert!(!is_partial(Hue::NONE));
+    }
+
+    #[test]
+    fn making_none_partial_keeps_it_none() {
+        assert_eq!(partial(Hue::NONE), Hue::NONE);
+        assert_eq!(partial(Hue(3)), Hue(3 | HUE_PARTIAL_FLAG));
+        assert_eq!(full(Hue(3 | HUE_PARTIAL_FLAG)), Hue(3));
     }
 
     #[test]

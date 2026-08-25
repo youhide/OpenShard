@@ -1256,6 +1256,10 @@ impl World {
         let Some(records) = self.pending_inventories.remove(&owner) else {
             return false;
         };
+        // Only entities this restore actually bound may be placed in pass two.
+        // Looking a serial up in the whole registry there would mistake a stale
+        // or otherwise colliding live entity for the one whose spawn failed.
+        let mut restored = HashMap::with_capacity(records.len());
         // Pass one: the entities, so a container exists before its contents point
         // at it.
         for record in &records {
@@ -1265,6 +1269,7 @@ impl World {
                 self.state.registry.despawn(entity);
                 continue;
             }
+            restored.insert(serial, entity);
             self.state.registry.insert(
                 entity,
                 Drawn {
@@ -1332,7 +1337,9 @@ impl World {
         }
         // Pass two: where each item goes.
         for record in &records {
-            let Some(entity) = self.state.registry.entity_of(record.serial) else {
+            // `remove` also makes a duplicate input record harmless: one serial
+            // describes one entity and receives one canonical ownership edge.
+            let Some(entity) = restored.remove(&record.serial) else {
                 continue;
             };
             match record.location {

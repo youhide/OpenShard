@@ -118,10 +118,9 @@ struct Cli {
     /// Draw overhead speech through this TrueType or OpenType face instead of
     /// `fonts.mul`.
     ///
-    /// `fonts.mul` only defines Latin text and a handful of symbols — no
-    /// Cyrillic, no anything past `0xFF` — so a shard whose players type in
-    /// one of those scripts needs this set, to a `.ttf`/`.otf` on this
-    /// machine. Nothing is bundled with the engine — see
+    /// `fonts.mul` is CP1251 and therefore covers Cyrillic, but cannot cover
+    /// Unicode generally or offer another typeface. A shard that needs those
+    /// chooses this `.ttf`/`.otf` on the local machine. Nothing is bundled — see
     /// `openshard_uofiles::ttf_font`'s doc for why. Unset draws the classic
     /// client's own bitmap faces, unchanged; there is no mixing the two within
     /// one line — see `openshard_client_render::text::collect_ttf`'s doc for

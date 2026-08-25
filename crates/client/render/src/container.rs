@@ -156,6 +156,123 @@ pub fn size(atlas: &GumpAtlas, gump: Graphic) -> Option<(i32, i32)> {
     Some((i32::from(sprite.width), i32::from(sprite.height)))
 }
 
+/// The part of a container gump in which item icons may live.
+///
+/// These are edges, not a width and height: ClassicUO's `containers.txt`
+/// calls the four values `LEFT TOP RIGHT BOTTOM`, and its drop path clamps an
+/// icon's top-left corner between the first pair and the second pair less the
+/// icon's own size.  A container's background is deliberately larger — its
+/// rim, straps, lid and minimizer are window furniture rather than inventory
+/// space.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ContentBounds {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+impl ContentBounds {
+    const fn new(left: i32, top: i32, right: i32, bottom: i32) -> Self {
+        Self {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+}
+
+/// ClassicUO's stock container item bounds, keyed by the gump named in `0x24`.
+///
+/// Unknown custom gumps use ClassicUO's own fallback. Keeping this table on the
+/// client side is important: the protocol sends the gump id and item positions,
+/// but never sends this inner rectangle.
+#[must_use]
+pub const fn content_bounds(gump: Graphic) -> ContentBounds {
+    match gump.0 {
+        0x0007 => ContentBounds::new(30, 30, 270, 170),
+        0x0009 => ContentBounds::new(20, 85, 124, 196),
+        0x003C | 0x775E | 0x7760 | 0x7762 | 0x9CE4 | 0x9CE5 | 0x9CE7 => ContentBounds::new(44, 65, 186, 159),
+        0x003D => ContentBounds::new(29, 34, 137, 128),
+        0x003E => ContentBounds::new(33, 36, 142, 148),
+        0x003F => ContentBounds::new(19, 47, 182, 123),
+        0x0040 => ContentBounds::new(16, 38, 152, 125),
+        0x0041 => ContentBounds::new(40, 30, 139, 123),
+        0x0042 | 0x0049 | 0x004A => ContentBounds::new(18, 105, 162, 178),
+        0x0043 | 0x004B | 0x266A | 0x266B => ContentBounds::new(16, 51, 184, 124),
+        0x0044 => ContentBounds::new(20, 10, 170, 100),
+        0x0047 => ContentBounds::new(16, 10, 148, 138),
+        0x0048 | 0x0051 => ContentBounds::new(16, 10, 154, 94),
+        0x004C => ContentBounds::new(46, 74, 196, 184),
+        0x004D => ContentBounds::new(76, 12, 140, 68),
+        0x004E | 0x004F => ContentBounds::new(24, 18, 100, 152),
+        0x0052 => ContentBounds::new(0, 0, 110, 62),
+        0x0102 => ContentBounds::new(35, 10, 190, 95),
+        0x0103 => ContentBounds::new(41, 21, 173, 104),
+        0x0104..=0x0107 | 0x0109..=0x010E | 0x9CD9 => ContentBounds::new(10, 10, 160, 105),
+        0x0108 => ContentBounds::new(10, 10, 160, 105),
+        0x0116 => ContentBounds::new(40, 25, 140, 110),
+        0x011A | 0x06D3..=0x06D6 => ContentBounds::new(10, 65, 125, 160),
+        0x011B | 0x011F => ContentBounds::new(45, 10, 175, 95),
+        0x011C => ContentBounds::new(37, 10, 175, 105),
+        0x011D => ContentBounds::new(43, 10, 165, 110),
+        0x011E => ContentBounds::new(30, 22, 263, 106),
+        0x0120 => ContentBounds::new(56, 30, 160, 107),
+        0x0121 => ContentBounds::new(77, 32, 162, 107),
+        0x0123 => ContentBounds::new(36, 19, 111, 157),
+        0x0484 => ContentBounds::new(0, 45, 175, 125),
+        0x058E => ContentBounds::new(50, 150, 348, 250),
+        0x06E5 | 0x06E6 => ContentBounds::new(66, 74, 306, 520),
+        0x06E7 | 0x06E8 | 0x06EA | 0x9CDB | 0x9CDD | 0x9CDF | 0x9CE3 => ContentBounds::new(50, 60, 548, 308),
+        0x06E9 => ContentBounds::new(60, 80, 318, 324),
+        0x091A => ContentBounds::new(0, 0, 282, 230),
+        0x092E => ContentBounds::new(0, 0, 282, 210),
+        0x2A63 => ContentBounds::new(60, 33, 460, 348),
+        0x4D0C => ContentBounds::new(25, 65, 220, 155),
+        0x777A => ContentBounds::new(32, 40, 184, 116),
+        _ => ContentBounds::new(44, 65, 186, 159),
+    }
+}
+
+/// Clamp one icon's top-left coordinate into its container's item rectangle.
+///
+/// The displayed graphic matters for piles (gold, for example, changes art as
+/// its amount grows). When the icon is packed, its far edge is kept inside the
+/// right and bottom bounds just as ClassicUO does. Missing art still receives
+/// the lower-bound correction, but is not assigned a guessed size.
+#[must_use]
+pub fn clamp_item_at(
+    gump: Graphic,
+    graphic: Graphic,
+    amount: ItemAmount,
+    at: openshard_protocol::gump::GumpPoint,
+    atlas: &GumpAtlas,
+) -> openshard_protocol::gump::GumpPoint {
+    let bounds = content_bounds(gump);
+    let mut x = at.x;
+    let mut y = at.y;
+    if let Some(sprite) = atlas.sprite(GumpArt::Item(displayed_graphic(graphic, amount))) {
+        let rightmost = bounds.right - i32::from(sprite.width);
+        let bottommost = bounds.bottom - i32::from(sprite.height);
+        if x > rightmost {
+            x = rightmost;
+        }
+        if y > bottommost {
+            y = bottommost;
+        }
+    }
+    // This order intentionally matches ClassicUO. It also handles an icon
+    // larger than the whole content rectangle without `clamp`'s min/max panic.
+    if x < bounds.left {
+        x = bounds.left;
+    }
+    if y < bounds.top {
+        y = bounds.top;
+    }
+    openshard_protocol::gump::GumpPoint::new(x, y)
+}
+
 /// How big an action button is: [`ACTION_UP`]'s own size, or `None` until it
 /// has been packed.
 ///
@@ -430,6 +547,35 @@ mod tests {
             size(&atlas(), Graphic(0x9999)),
             None,
             "art nobody packed has no size"
+        );
+    }
+
+    /// The backpack's visible leather is not all inventory space. ClassicUO's
+    /// stock bounds begin at (44, 65), end at (186, 159), and reserve enough
+    /// room at the far edges for the icon itself.
+    #[test]
+    fn backpack_items_stay_inside_the_classic_content_bounds() {
+        let atlas = atlas();
+        assert_eq!(content_bounds(BAG), ContentBounds::new(44, 65, 186, 159));
+        assert_eq!(
+            clamp_item_at(BAG, CANDLE, ItemAmount(1), GumpPoint::new(0, 0), &atlas,),
+            GumpPoint::new(44, 65),
+            "the straps and upper rim are outside the item area"
+        );
+        assert_eq!(
+            clamp_item_at(BAG, CANDLE, ItemAmount(1), GumpPoint::new(999, 999), &atlas,),
+            GumpPoint::new(186 - 10, 159 - 20),
+            "the whole 10x20 icon, not only its top-left pixel, stays inside"
+        );
+    }
+
+    /// A pile's displayed art determines its footprint. Six coins draw the
+    /// 12x10 pile rather than the base coin's 8x8 sprite.
+    #[test]
+    fn content_clamping_measures_the_displayed_pile() {
+        assert_eq!(
+            clamp_item_at(BAG, COIN, ItemAmount(6), GumpPoint::new(999, 999), &atlas(),),
+            GumpPoint::new(186 - 12, 159 - 10)
         );
     }
 

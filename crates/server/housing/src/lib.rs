@@ -312,25 +312,51 @@ pub fn place(
 /// The graphic a house sign draws as — ServUO's `HouseSign`.
 pub const SIGN_GRAPHIC: u16 = 0x0BD2;
 
-/// How far above the house's own z the sign hangs. ServUO's `SetSign(x, y, 7)`.
+/// How far above a customisable foundation's z its derived sign hangs.
 const SIGN_Z: i16 = 7;
+
+/// The sign offset explicitly declared by each classic ServUO house.
+///
+/// A classic multi's bounds describe everything it draws, not where its sign
+/// belongs. In particular, the guild house (`0x74`) spans from `-7` to `+7`,
+/// while its sign is attached at `(4, 8, 16)`, beside the entrance. Falling
+/// back to a corner of that box puts the plaque on the opposite side of the
+/// building and at the wrong height.
+fn classic_sign_offset(multi: MultiId) -> Option<(i16, i16, i16)> {
+    match multi.0 {
+        0x0064 | 0x0066 | 0x0068 | 0x006A | 0x006C | 0x006E => Some((2, 4, 5)),
+        0x0074 => Some((4, 8, 16)),
+        0x0076 | 0x0078 => Some((2, 8, 16)),
+        0x007A => Some((5, 8, 16)),
+        0x007C => Some((5, 12, 16)),
+        0x007E => Some((5, 17, 16)),
+        0x008C => Some((1, 8, 16)),
+        0x0096 => Some((1, 8, 11)),
+        0x0098 => Some((1, 4, 5)),
+        0x009A => Some((5, 8, 20)),
+        0x009C => Some((4, 6, 24)),
+        0x009E => Some((3, 8, 24)),
+        0x00A0 => Some((3, 4, 7)),
+        0x00A2 => Some((3, 4, 5)),
+        _ => None,
+    }
+}
 
 /// Where a house's sign hangs, or `None` on a shard with no multi table.
 ///
-/// # The one sign position the reference derives
+/// # Classic houses declare; foundations derive
 ///
 /// ServUO's classic houses each declare theirs — `SetSign(2, 4, 5)`,
-/// `SetSign(5, 12, 16)`, fourteen of them. Unlike the doors now held in
-/// `classic_doors`, only one sign position is needed for every shape, including
-/// a designed one, so this remains derived from the bounds.
+/// `SetSign(5, 12, 16)`, fourteen house types. They are not generally a corner
+/// of the multi: the explicit per-type table is used for them just as it is for
+/// their doors.
 ///
-/// Its **customisable** houses do not have that luxury, because the multi is
+/// **Customisable** houses do not have that luxury, because the multi is
 /// built at run time, so `HouseFoundation` computes one: `x = Components.Min.X`,
 /// `y = Components.Height - 1 - Components.Center.Y`, `z = 7`. Reduce it against
 /// [`Multi::center`](openshard_uofiles::multi::Multi::center)'s own definition
-/// and the y is just `max_y` — so the rule is **the box's west-south corner**,
-/// and it is derivable for every multi rather than only for the ones somebody
-/// typed a number for.
+/// and the y is just `max_y` — so their rule is the box's west-south corner.
+/// Unknown non-foundation multis retain that derived fallback.
 ///
 /// The hanger (`0xB98`) that ServUO puts on the same tile is left out. It draws
 /// a bracket and does nothing, and one more entity per house is one more to
@@ -343,9 +369,14 @@ pub fn sign_spot(
     design: Option<&[Component]>,
 ) -> Option<Point> {
     let box_ = openshard_uofiles::multi::bounds(shape_of(design, state, multi))?;
-    let x = u16::try_from(i32::from(at.x) + i32::from(box_.min_x)).ok()?;
-    let y = u16::try_from(i32::from(at.y) + i32::from(box_.max_y)).ok()?;
-    let z = i8::try_from(i32::from(at.z) + i32::from(SIGN_Z)).ok()?;
+    let classic = match design {
+        None => classic_sign_offset(multi),
+        Some(_) => None,
+    };
+    let (dx, dy, dz) = classic.unwrap_or((box_.min_x, box_.max_y, SIGN_Z));
+    let x = u16::try_from(i32::from(at.x) + i32::from(dx)).ok()?;
+    let y = u16::try_from(i32::from(at.y) + i32::from(dy)).ok()?;
+    let z = i8::try_from(i32::from(at.z) + i32::from(dz)).ok()?;
     Some(Point::new(x, y, z))
 }
 

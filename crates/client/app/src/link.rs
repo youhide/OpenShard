@@ -30,7 +30,7 @@ use openshard_client_net::walk::{Moved, Walk};
 use openshard_protocol::chunks::{
     Changes, ChangesReply, ChangesRequest, PublishNotice, WorldNotice, WorldRevision,
 };
-use openshard_protocol::feedback::{Animation, NewAnimation};
+use openshard_protocol::feedback::{Animation, NewAnimation, SwingTiming};
 use openshard_protocol::gump::GumpId;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::items::ItemAmount;
@@ -184,6 +184,8 @@ pub enum Update {
     Animation(Animation),
     /// The server asked one mobile to play a modern, body-agnostic animation.
     NewAnimation(NewAnimation),
+    /// The exact duration of the immediately following swing animation.
+    SwingTiming(SwingTiming),
     /// A designed house's picture, still as bytes.
     ///
     /// The one packet that crosses this seam undecoded, and it has a reason:
@@ -1436,6 +1438,9 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                 }
                 if let openshard_protocol::server_packet::ServerPacket::NewAnimation(animation) = packet {
                     report(Update::NewAnimation(animation));
+                }
+                if let openshard_protocol::server_packet::ServerPacket::SwingTiming(timing) = packet {
+                    report(Update::SwingTiming(timing));
                 }
                 // Undivided: which packets move the player is [`Walk`]'s answer
                 // and `Walk` belongs to the owner. The desync a fold can find,

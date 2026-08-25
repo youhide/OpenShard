@@ -114,8 +114,9 @@ save_seconds = 180
 combat_era = 1
 
 # The swing formula's numerator (Sphere's SpeedScaleFactor). Larger is slower.
-# Pre-AoS is 15000; AoS uses 40000.
-speed_scale_factor = 15000
+# OpenShard's responsive pre-AoS pace is 10000; classic Sphere is 15000.
+# AoS uses 40000.
+speed_scale_factor = 10000
 
 # Shard-specific critical hits (not a classic-UO rule). The chance is per mille:
 # 50 = 5%. A critical multiplies normally scaled weapon/archery damage before

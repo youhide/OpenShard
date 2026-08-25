@@ -29,7 +29,7 @@ use crate::containers::{
 use crate::context::ContextMenu;
 use crate::error::{DecodeError, expect_id};
 use crate::feature::Feature;
-use crate::feedback::{Animation, GraphicalEffect, HuedEffect, NewAnimation, PlaySound};
+use crate::feedback::{Animation, GraphicalEffect, HuedEffect, NewAnimation, PlaySound, SwingTiming};
 use crate::gump::{CloseGump, GumpDisplay};
 use crate::items::{CorpseEquipment, DragCancel, EquipUpdate, WorldItem};
 use crate::login::{
@@ -74,6 +74,8 @@ pub enum ServerPacket {
     Animation(Animation),
     /// `0xE2` — the 7.0.0.0+ mobile animation.
     NewAnimation(NewAnimation),
+    /// `0xBF 0xE00B` — how long the immediately following swing occupies.
+    SwingTiming(SwingTiming),
     /// `0x70` — an uncoloured graphical effect.
     Effect(GraphicalEffect),
     /// `0xC0` — a graphical effect with a hue and a render mode.
@@ -229,6 +231,7 @@ impl ServerPacket {
             Self::PlaySound(_) => <PlaySound as EncodePacket>::ID,
             Self::Animation(_) => <Animation as EncodePacket>::ID,
             Self::NewAnimation(_) => <NewAnimation as EncodePacket>::ID,
+            Self::SwingTiming(_) => <SwingTiming as EncodePacket>::ID,
             Self::Effect(_) => GraphicalEffect::ID,
             Self::HuedEffect(_) => HuedEffect::ID,
             Self::LoginDenied(_) => <LoginDenied as EncodePacket>::ID,
@@ -310,6 +313,7 @@ impl ServerPacket {
             Self::PlaySound(_) => <PlaySound as EncodePacket>::LENGTH,
             Self::Animation(_) => Animation::LENGTH,
             Self::NewAnimation(_) => NewAnimation::LENGTH,
+            Self::SwingTiming(_) => SwingTiming::LENGTH,
             Self::Effect(_) => GraphicalEffect::LENGTH,
             Self::HuedEffect(_) => HuedEffect::LENGTH,
             Self::LoginDenied(_) => <LoginDenied as EncodePacket>::LENGTH,
@@ -393,6 +397,7 @@ impl ServerPacket {
             Self::PlaySound(packet) => packet.encode_body(out, version),
             Self::Animation(packet) => packet.encode_body(out, version),
             Self::NewAnimation(packet) => packet.encode_body(out, version),
+            Self::SwingTiming(packet) => packet.encode_body(out, version),
             Self::Effect(packet) => packet.encode_body(out, version),
             Self::HuedEffect(packet) => packet.encode_body(out, version),
             Self::LoginDenied(packet) => packet.encode_body(out, version),
@@ -522,6 +527,9 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
         crate::mapedit::MapEditReply::SUBCOMMAND => decode_server(packet, version)
             .map(ServerPacket::MapEditReply)
             .map_err(ServerDecodeError::MapEditReply)?,
+        SwingTiming::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::SwingTiming)
+            .map_err(ServerDecodeError::SwingTiming)?,
         crate::party::SUBCOMMAND => return decode_party(packet, version),
         _ => return Ok(None),
     }))
@@ -867,6 +875,8 @@ pub enum ServerDecodeError {
     ChangesReply(DecodeError),
     /// `0xBF 0xE00A` did not decode.
     MapEditReply(DecodeError),
+    /// `0xBF 0xE00B` did not decode.
+    SwingTiming(DecodeError),
     /// `0xD6` did not decode.
     PropertyListReply(DecodeError),
     /// A `0xBF` subcommand `0x06` did not decode. One variant for all four,
@@ -908,6 +918,7 @@ impl fmt::Display for ServerDecodeError {
             Self::ChunkRefused(error) => ("0xBF 0xE006 chunk refused", error),
             Self::ChangesReply(error) => ("0xBF 0xE008 changes reply", error),
             Self::MapEditReply(error) => ("0xBF 0xE00A map-edit reply", error),
+            Self::SwingTiming(error) => ("0xBF 0xE00B swing timing", error),
             Self::PropertyListReply(error) => ("0xD6 property list", error),
             Self::Party(error) => ("0xBF 0x06 party", error),
             Self::CloseGump(error) => ("0xBF 0x04 close gump", error),
@@ -1154,6 +1165,7 @@ mod tests {
         PlaySound,
         Animation,
         NewAnimation,
+        SwingTiming,
         Effect,
         HuedEffect,
         LoginDenied,
@@ -1266,6 +1278,10 @@ mod tests {
                 animation_type: 1,
                 action: 0,
                 delay: 0,
+            }),
+            ServerPacket::SwingTiming(SwingTiming {
+                serial,
+                duration: crate::feedback::SwingDuration(5_000),
             }),
             ServerPacket::Effect(effect),
             ServerPacket::HuedEffect(HuedEffect {

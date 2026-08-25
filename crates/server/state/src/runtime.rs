@@ -27,7 +27,7 @@ use openshard_movement::ground::Ground;
 use openshard_movement::{Footing, MapTerrain, NavigationGraph};
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::combat::{AttackTarget, HealthBar, WarMode};
-use openshard_protocol::feedback::{Animation, NewAnimation, PlaySound};
+use openshard_protocol::feedback::{Animation, NewAnimation, PlaySound, SwingDuration, SwingTiming};
 use openshard_protocol::items::WorldItem;
 use openshard_protocol::localized;
 use openshard_protocol::mobile::{Equipment, MobileIncoming, MobileMove, Notoriety, Remove, StatusFlags};
@@ -41,12 +41,13 @@ use openshard_protocol::world::{
 };
 use openshard_protocol::{access::AccessLevel, feature::Feature, version::ClientVersion};
 use openshard_tiles::TileData;
+use openshard_uofiles::anim::BodyKind;
 
 use crate::boat::Plank;
 use crate::components::{
     Access, Amount, Body, Client, Combat, Contained, CorpseBody, CraftedBy, Drawn, Equipped, Ghost, Heading,
     HearsGhosts, Hidden, Hitpoints, InRegion, ItemLocation, Meditating, Movement, Name, Position, Quality,
-    SettledItemLocation, Staff, Stamina, Stealthing, TradeWindow, body_opens_doors,
+    SettledItemLocation, Staff, Stamina, Stealthing, SwingWindup, TradeWindow, body_opens_doors,
 };
 use crate::connection::Connection;
 use crate::dialogue::Dialogue;
@@ -348,7 +349,7 @@ impl Default for Gameplay {
     fn default() -> Self {
         Self {
             combat_era: CombatEra::new(1),
-            speed_scale_factor: 15000,
+            speed_scale_factor: 10000,
             critical_chance: 50,
             critical_damage_percent: 150,
             skill_cap: 1000,
@@ -2441,18 +2442,36 @@ impl WorldState {
     /// `0xE2` new-animation packet, where the server names a body-agnostic
     /// [`AnimationType`](Action), plus the equipped weapon's sub-action for a
     /// human attack, and the client picks that body's frames. An older client
-    /// gets the `0x6E` classic packet, whose action id *is* body-specific; human
-    /// attacks use that same weapon motion directly, while creatures still use
-    /// the coarse `body_opens_doors` split. Exact per-creature actions need the
-    /// body tables the references key off body id.
+    /// gets the `0x6E` classic packet, whose action id *is* body-specific.  The
+    /// exact animation table is selected from the body's graphic: animal bodies
+    /// use the low-animation death group (8), not a monster's group (2). Human
+    /// attacks additionally use their equipped weapon motion.
     pub fn animate(&mut self, mobile: EntityId, action: Action) {
+        self.animate_inner(mobile, action, None);
+    }
+
+    /// Begin an action now and tell OpenShard clients how long it occupies.
+    ///
+    /// The timing extension is emitted immediately before the ordinary action
+    /// packet for each observer. Damage and all other gameplay still use the
+    /// server tick; this only lets the picture cover that exact interval.
+    pub fn animate_timed(&mut self, mobile: EntityId, action: Action, duration_ticks: u64) {
+        let duration_ms = duration_ticks
+            .saturating_mul(1_000 / TICKS_PER_SECOND)
+            .min(u64::from(u32::MAX)) as u32;
+        self.animate_inner(mobile, action, Some(duration_ms));
+    }
+
+    fn animate_inner(&mut self, mobile: EntityId, action: Action, duration_ms: Option<u32>) {
         let Some(serial) = self.registry.serial_of(mobile) else {
             return;
         };
-        let humanoid = self
-            .registry
-            .get::<Body>(mobile)
-            .is_some_and(|body| body_opens_doors(body.id));
+        let body = self.registry.get::<Body>(mobile).copied();
+        let humanoid = body.is_some_and(|body| body_opens_doors(body.id));
+        // A body that was not supplied used the monster fallback before this
+        // table was introduced; retain that answer for malformed/incomplete
+        // mobiles, while every real body selects its client-file layout.
+        let animation_kind = body.map_or(BodyKind::Monster, |body| BodyKind::of(body.id));
         // An `0xE2` attack is only a category. Its sub-action is where the
         // weapon motion lives, and zero means wrestling. Read the equipped item
         // at the swing, just as combat reads its damage at the swing: taking an
@@ -2469,7 +2488,7 @@ impl WorldState {
             action: action.sub_action(weapon_animation),
             delay: 0,
         });
-        let (old_action, frames) = action.classic_action(humanoid, weapon_animation);
+        let (old_action, frames) = action.classic_action(animation_kind, humanoid, weapon_animation);
         let old_packet = ServerPacket::Animation(Animation {
             serial,
             action: old_action,
@@ -2481,6 +2500,16 @@ impl WorldState {
         });
 
         for (connection, version) in self.audience_of(mobile) {
+            if let Some(duration_ms) = duration_ms {
+                self.outbox.push(Outbound {
+                    connection,
+                    packet: ServerPacket::SwingTiming(SwingTiming {
+                        serial,
+                        duration: SwingDuration(duration_ms),
+                    })
+                    .encode(version),
+                });
+            }
             let packet = if version.supports(Feature::NewMobileAnimation) {
                 &new_packet
             } else {
@@ -2551,16 +2580,21 @@ impl Action {
     /// The `0x6E` classic action id and frame count, which *are* body-specific.
     /// The humanoid ids are ServUO's people-animation values (the equipped
     /// weapon's 9..19 group, Wrestle 31 unarmed, human die 21, human
-    /// directed-cast 16); the creature ids its monster-group values (attack 4,
-    /// die 2, cast 12). Creature bodies remain a coarse split.
-    const fn classic_action(self, humanoid: bool, weapon: WeaponAnimation) -> (u16, u16) {
+    /// directed-cast 16). The low animal table and high monster table use
+    /// different death groups: 8 and 2 respectively.
+    const fn classic_action(self, kind: BodyKind, humanoid: bool, weapon: WeaponAnimation) -> (u16, u16) {
+        // `body_opens_doors` is a gameplay distinction: an orc has hands, but
+        // it still reads the high-monster animation table. Death therefore
+        // cannot share the attack's `humanoid` shortcut.
         match (self, humanoid) {
-            (Self::Attack, true) => (weapon.group(), 7),
+            (Self::Attack, true) => (weapon.group(), weapon.frame_count()),
             (Self::Attack, false) => (4, 4), // monster attack1
-            (Self::Die, true) => (21, 6),    // human die
-            (Self::Die, false) => (2, 4),    // monster die
-            (Self::Cast, true) => (16, 7),   // human directed-cast
-            (Self::Cast, false) => (12, 7),  // monster cast
+            (Self::Die, _) => (
+                kind.dying().index() as u16,
+                if matches!(kind, BodyKind::Human) { 6 } else { 4 },
+            ),
+            (Self::Cast, true) => (16, 7),  // human directed-cast
+            (Self::Cast, false) => (12, 7), // monster cast
             // Only a person bows; a creature that is asked for money simply looks
             // at you, so the classic path animates nothing body-specific for it.
             (Self::Bow, true) => (32, 5), // human bow
@@ -3470,6 +3504,7 @@ impl WorldState {
     /// player cannot retain a drawn war stance or target after the server has
     /// ended their fight.
     pub fn disengage(&mut self, mobile: EntityId) {
+        self.registry.remove::<SwingWindup>(mobile);
         let was_war = self
             .registry
             .get::<Combat>(mobile)
@@ -4142,7 +4177,32 @@ mod tests {
     use openshard_movement::scene::Scene;
     use openshard_protocol::direction::Direction;
     use openshard_protocol::serial::SerialKind;
+    use openshard_protocol::wire::Graphic;
     use openshard_tiles::TileData;
+
+    #[test]
+    fn classic_death_uses_the_body_animation_table_not_the_gameplay_body_type() {
+        // `0x00EA`/`0x00ED` are deer and hind. They are low-animation bodies,
+        // so their Die1 is group 8; group 2 is a high monster's Die1 and has no
+        // death frames for them. An orc is the inverse trap: it opens doors, but
+        // it remains a high-animation body and must not be sent human group 21.
+        for (body, expected) in [
+            (Graphic(0x0011), (2, 4)),  // orc: high monster
+            (Graphic(0x00EA), (8, 4)),  // deer: low animal
+            (Graphic(0x00ED), (8, 4)),  // hind: low animal
+            (Graphic(0x0190), (21, 6)), // human
+        ] {
+            let kind = BodyKind::of(body);
+            let (group, frames) =
+                Action::Die.classic_action(kind, body_opens_doors(body), WeaponAnimation::Wrestle);
+            assert_eq!(
+                (group, frames),
+                expected,
+                "body {:#06x} must use its own animation table",
+                body.0
+            );
+        }
+    }
 
     /// One block of flat ground with a wall on (4, 4), and the table that says
     /// the wall is twenty tall and solid.

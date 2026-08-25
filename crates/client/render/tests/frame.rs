@@ -2274,6 +2274,71 @@ fn a_full_hue_replaces_the_pixel_by_its_red_channel_regardless_of_its_own_colour
     );
 }
 
+/// `fonts.mul` face 3, the ordinary speech face, draws its contour with
+/// `0x0844` (red index 2) and its body with `0x4E73` (red index 19). A font
+/// hue must therefore use a full ramp: the two source codes deliberately name
+/// two independently authored colours, just as a two-tone robe does.
+#[test]
+fn a_font_contour_and_body_take_their_own_hue_rungs() {
+    let Some((device, queue)) = gpu() else {
+        return;
+    };
+    const GRAPHIC: Graphic = Graphic(2);
+    const CONTOUR_INDEX: usize = 2;
+    const BODY_INDEX: usize = 19;
+
+    let contour = Color16(0x0844);
+    let body = Color16(0x4E73);
+    assert_eq!(contour.red() as usize, CONTOUR_INDEX);
+    assert_eq!(body.red() as usize, BODY_INDEX);
+    let atlas = StaticAtlas::pack([(GRAPHIC, Image::new(2, 1, vec![contour, body]))]).expect("sprite fits");
+    let sprite = atlas.sprite(GRAPHIC).expect("packed");
+
+    let contour_colour = Color16(0b0_11111_00000_00000); // red
+    let body_colour = Color16(0b0_00000_11111_00000); // green
+    let mut ramp_colours = [Color16::TRANSPARENT; 32];
+    ramp_colours[CONTOUR_INDEX] = contour_colour;
+    ramp_colours[BODY_INDEX] = body_colour;
+    let hue_ramp = HueRamp::build(&one_hue_group(ramp_colours));
+    let land = LandAtlas::pack([]).expect("nothing fits trivially");
+    let texmaps = TexmapAtlas::pack([]).expect("nothing fits trivially");
+    let quad = SpriteQuad {
+        rect: Rect {
+            x: 0.0,
+            y: 0.0,
+            width: f32::from(sprite.width),
+            height: f32::from(sprite.height),
+        },
+        region: sprite.region,
+        depth: 0.5,
+        hue: 1,
+        place: Place::NOWHERE,
+        twin: 0,
+        owner: 0,
+        volumes: openshard_client_render::impostor::Range::default(),
+    };
+    let frame = render_hued(
+        &device,
+        &queue,
+        &land,
+        &texmaps,
+        &atlas,
+        &[quad],
+        &hue_ramp,
+        wgpu::TextureFormat::Rgba8Unorm,
+    );
+    let contour_rgb = contour_colour.rgb8();
+    let body_rgb = body_colour.rgb8();
+    assert_eq!(
+        frame.pixel(0, 0),
+        [contour_rgb.red, contour_rgb.green, contour_rgb.blue, u8::MAX]
+    );
+    assert_eq!(
+        frame.pixel(1, 0),
+        [body_rgb.red, body_rgb.green, body_rgb.blue, u8::MAX]
+    );
+}
+
 /// Draw one static pass with a real hue ramp bound, and read the result back.
 ///
 /// [`render_both`] always binds an empty ramp — nothing it draws asks for a

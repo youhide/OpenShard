@@ -68,18 +68,30 @@ impl App {
         }
     }
 
-    /// Hold Tab to enter war mode and release it to return to peace mode.
+    /// Toggle war mode on Tab's first press.
     ///
-    /// This is ClassicUO's default Tab behaviour. The remembered key state
-    /// makes operating-system repeat events harmless and lets focus/UI loss
-    /// release a stance whose physical key-up would otherwise never arrive.
+    /// The remembered key state makes operating-system repeat events harmless.
+    /// Releasing Tab merely arms its next press; it never sends a second packet
+    /// that could immediately undo a short key press before the shard replies.
     pub(crate) fn set_war_mode_held(&mut self, held: bool) {
         if self.input.war_mode_held == held {
             return;
         }
         self.input.war_mode_held = held;
+        if !held {
+            return;
+        }
+        let Some(war) = self
+            .world
+            .authoritative
+            .view
+            .as_ref()
+            .map(|view| !view.player.war)
+        else {
+            return;
+        };
         if let Some(link) = self.world.shard.link() {
-            link.war_mode(held);
+            link.war_mode(war);
         }
     }
 

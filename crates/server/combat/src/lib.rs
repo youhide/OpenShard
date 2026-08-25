@@ -9,8 +9,9 @@
 //!
 //! [`swings`] is the interactive half, run each tick against the tick counter so
 //! it reads no clock: a combatant in war mode with a target in reach strikes on
-//! its timer. AI drives the same machinery — a brain that hands a creature a
-//! `Combat` is fought by `swings` exactly as a player is.
+//! its timer. A due timer held out of reach becomes a fresh complete swing when
+//! the target enters reach. AI drives the same machinery — a brain that hands a
+//! creature a `Combat` is fought by `swings` exactly as a player is.
 
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
@@ -25,8 +26,9 @@ use openshard_protocol::world::{Point, PoisonLevel};
 use openshard_state::components::{
     BehaviourBuffs, Body, Client, Combat, CriminalUntil, DamageType, Frozen, Ghost, Guard, Hidden, Hitpoints,
     MeleeDamage, MurderDecay, Murders, PoisonCharges, Poisoned, Position, RangedAttack, Resistance, Skills,
-    Stamina, Stats, SwingSpeed, WrestlingAmbushCooldown, WrestlingCombo, WrestlingInterceptCooldown,
-    WrestlingOpener, WrestlingStride, body_is_female, body_opens_doors, creature_base_sound,
+    Stamina, Stats, SwingSpeed, SwingWindup, WrestlingAmbushCooldown, WrestlingCombo,
+    WrestlingInterceptCooldown, WrestlingOpener, WrestlingStride, body_is_female, body_opens_doors,
+    creature_base_sound,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::weapon::{LAYER_ONE_HANDED, LAYER_TWO_HANDED};
@@ -484,6 +486,12 @@ pub fn attack(state: &mut WorldState, connection: ConnectionId, target: Option<S
         );
         return;
     }
+    // Face a reachable target immediately. `prepare_swings` starts the gesture
+    // this tick and tells the client how long it lasts before impact.
+    state.registry.remove::<SwingWindup>(player);
+    if melee_reachable(state, player, target_entity) {
+        state.face_toward(player, target_entity);
+    }
     if ambush {
         state.registry.insert(
             player,
@@ -577,8 +585,7 @@ pub fn retaliate_players(state: &mut WorldState, blows: &[MobileDamaged]) {
 ///
 /// The interactive half of combat, run each tick against the tick counter so it
 /// reads no clock. A swing lands when the attacker is in war mode, has a target
-/// within [`MELEE_RANGE`] on the same facet, and its timer is up; out of reach it
-/// simply waits, its timer unspent, so the blow falls the instant the gap closes.
+/// within [`MELEE_RANGE`] on the same facet, and its prepared timer is up.
 /// Loose every ranged attack whose timer is up: a warlike combatant with a
 /// [`RangedAttack`], a target inside its reach but beyond arm's length, and a
 /// clear line to it fires — through [`damage`], the one door all damage passes,
@@ -717,10 +724,6 @@ pub fn swings(state: &mut WorldState) {
         {
             continue;
         }
-        // Use WorldState's common turn path instead of only broadcasting a
-        // `0x77`: the owner of this mobile ignores that packet, and needs the
-        // accompanying `0x20` to show a combat turn after turning manually.
-        state.face_point(attacker, target_pos);
         // The attacker's serial rides along so a lethal blow can be blamed —
         // `damage` is the one place murder is tallied, melee or spell alike.
         let by = state.registry.serial_of(attacker);
@@ -732,6 +735,16 @@ pub fn swings(state: &mut WorldState) {
         {
             continue;
         }
+        let already_animated = state
+            .registry
+            .remove::<SwingWindup>(attacker)
+            .is_some_and(|windup| windup.target == target_serial && now == windup.completes_at);
+        if !already_animated {
+            // Direct callers and instant concealed openers did not pass through
+            // the wind-up turn. Use the common path: the owner ignores `0x77`
+            // and needs the accompanying `0x20` player update.
+            state.face_point(attacker, target_pos);
+        }
         // The opener is captured before revealing the attacker and spent on this
         // attempt even on a miss.  Cover is a way into a fight, never a permanent
         // accuracy aura.
@@ -740,7 +753,12 @@ pub fn swings(state: &mut WorldState) {
         // `RevealingAction` in the combat timer, before the blow is even rolled.
         state.break_cover(attacker);
         // The swing animates whether it lands or not — a miss still gestures.
-        state.animate(attacker, Action::Attack);
+        // In the normal tick path `prepare_swings` already played it so its last frame
+        // meets this impact. Direct callers and concealed instant openers have
+        // no prepared window and retain the safe animate-at-impact fallback.
+        if !already_animated {
+            state.animate(attacker, Action::Attack);
+        }
         // Roll to hit (and train the weapon skill by trying). A miss whistles past
         // and does no damage; the timer resets either way.
         if !check_hit(state, attacker, target, if ambush { 25 } else { 0 }) {
@@ -780,6 +798,67 @@ pub fn swings(state: &mut WorldState) {
         if target_is_dead(state, target_serial) {
             clear_target(state, attacker);
         }
+    }
+}
+
+/// Begin each reachable melee animation now and stretch it to its impact.
+///
+/// The server owns the timer, including operator combat settings, dexterity,
+/// scripted [`SwingSpeed`], range and live sight. Sending the ordinary action at
+/// the start of that authoritative interval keeps the client synchronized
+/// without asking it to duplicate rules it cannot fully know. If a due swing
+/// was held out of reach, its impact is moved one full swing interval ahead
+/// when the fighters meet instead of landing before a frame can be shown.
+pub fn prepare_swings(state: &mut WorldState) {
+    let now = state.ticks;
+    let pending: Vec<(EntityId, Serial, WorldTick)> = state
+        .registry
+        .query::<Combat>()
+        .filter_map(|(attacker, combat)| {
+            (combat.warmode() && attackable(state, attacker))
+                .then(|| Some((attacker, combat.target()?, combat.next_swing()?)))?
+        })
+        .collect();
+
+    for (attacker, target_serial, due) in pending {
+        if state.registry.has::<RangedAttack>(attacker)
+            || state.registry.has::<Hidden>(attacker)
+            || state
+                .registry
+                .has::<openshard_state::components::Pacified>(attacker)
+        {
+            continue;
+        }
+        let Some(target) = state.registry.entity_of(target_serial) else {
+            continue;
+        };
+        if !attackable(state, target) || !melee_reachable(state, attacker, target) {
+            continue;
+        }
+        if state
+            .registry
+            .get::<SwingWindup>(attacker)
+            .is_some_and(|windup| windup.target == target_serial && windup.completes_at == due && now <= due)
+        {
+            continue;
+        }
+
+        let impact = if due > now {
+            due
+        } else {
+            now.saturating_add(swing_speed(state, attacker).max(1))
+        };
+        set_next_swing(state, attacker, impact);
+        state.face_toward(attacker, target);
+        state.break_cover(attacker);
+        state.animate_timed(attacker, Action::Attack, impact.saturating_sub(now));
+        state.registry.insert(
+            attacker,
+            SwingWindup {
+                target: target_serial,
+                completes_at: impact,
+            },
+        );
     }
 }
 
@@ -895,9 +974,28 @@ pub fn set_next_swing(state: &mut WorldState, attacker: EntityId, tick: WorldTic
 
 /// Stop a combatant attacking whatever it was.
 pub fn clear_target(state: &mut WorldState, attacker: EntityId) {
+    state.registry.remove::<SwingWindup>(attacker);
     if let Some(combat) = state.registry.get_mut::<Combat>(attacker) {
         combat.clear_target();
     }
+}
+
+/// Whether a melee gesture can actually belong to this target.
+///
+/// Kept identical to the range/facet/sight half of [`swings`]. A distant target
+/// is an aim, not a reason to slash empty air; [`prepare_swings`] opens its animation
+/// window when the attacker reaches it.
+fn melee_reachable(state: &WorldState, attacker: EntityId, target: EntityId) -> bool {
+    let (Some(&Position(from)), Some(&Position(to))) = (
+        state.registry.get::<Position>(attacker),
+        state.registry.get::<Position>(target),
+    ) else {
+        return false;
+    };
+    let facet = state.facet_of(attacker);
+    state.facet_of(target) == facet
+        && in_range(from, to, MELEE_RANGE)
+        && openshard_movement::sight_clear(&state.footing(facet, Doors::AsTheyStand), from, to)
 }
 
 /// Turn a mobile grey for `gameplay.criminal_ticks`, or push the timer out if it is

@@ -87,6 +87,7 @@ pub(crate) struct ServerUpdateAudit {
     movements: BTreeMap<&'static str, u64>,
     animations: u64,
     new_animations: u64,
+    swing_timings: u64,
     dropped: u64,
 }
 
@@ -662,6 +663,10 @@ impl App {
             }
             crate::link::Update::NewAnimation(_) => {
                 sweep.server_updates.new_animations += 1;
+                true
+            }
+            crate::link::Update::SwingTiming(_) => {
+                sweep.server_updates.swing_timings += 1;
                 true
             }
             // And not the ground, nor the graph baked over it: neither is the

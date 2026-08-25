@@ -129,6 +129,25 @@ impl WeaponAnimation {
             Self::PierceTwoHanded => 8,
         }
     }
+
+    /// Frames in this human attack group.
+    ///
+    /// This is the same mapping the client uses for modern action sub-types.
+    /// Keeping it beside the weapon motion lets the server open the animation
+    /// window exactly far enough ahead of the authoritative impact tick.
+    #[must_use]
+    pub const fn frame_count(self) -> u16 {
+        match self {
+            Self::BashOneHanded | Self::BashTwoHanded => 5,
+            Self::SlashTwoHanded => 6,
+            Self::SlashOneHanded
+            | Self::PierceOneHanded
+            | Self::PierceTwoHanded
+            | Self::ShootBow
+            | Self::ShootCrossbow
+            | Self::Wrestle => 7,
+        }
+    }
 }
 
 /// One weapon's combat numbers, keyed by its item [`Drawn`](crate::Drawn) id.

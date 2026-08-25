@@ -88,11 +88,12 @@ pub struct GameplayConfig {
     /// implemented — each turns dexterity and a weapon's era-appropriate speed
     /// (`old`/`aos`/`ml`) into a swing interval. Anything else is rejected rather
     /// than silently run as pre-AoS. Set `speed_scale_factor` to match the era
-    /// (15000 pre-AoS, 40000 AoS, 80000 SE; ML ignores it).
+    /// (15000 classic pre-AoS, 40000 AoS, 80000 SE; ML ignores it).
     #[serde(default = "default_combat_era")]
     pub combat_era: CombatEra,
     /// Sphere's `SpeedScaleFactor`: the numerator of the swing formula. Larger is
-    /// slower. The pre-AoS default is 15000; AoS uses 40000, SE 80000.
+    /// slower. OpenShard's quicker pre-AoS default is 10000 (the classic value
+    /// is 15000); AoS uses 40000, SE 80000.
     #[serde(default = "default_speed_scale_factor")]
     pub speed_scale_factor: u64,
     /// Chance, in per-mille, that a landed weapon or ranged blow is critical.
@@ -342,7 +343,7 @@ fn default_combat_era() -> CombatEra {
     CombatEra(1)
 }
 fn default_speed_scale_factor() -> u64 {
-    15000
+    10000
 }
 fn default_critical_chance() -> u16 {
     50

@@ -884,6 +884,19 @@ fn a_real_fonts_mul_parses_to_ten_plausible_faces() {
     assert_eq!((a.width(), a.height()), (12, 21), "font 3's 'A'");
     let space = fonts.glyph(Font(3), 0x20).unwrap();
     assert_eq!((space.width(), space.height()), (6, 20), "font 3's space");
+
+    // The upper half of this 0x20..=0xFF table is CP1251, not "unused
+    // extended ASCII": these are the four Unicode edge cases the renderer
+    // maps to it (`А`, `я`, `Ё`, `ё`).  Pin the actual file here so a future
+    // client with a different code page cannot quietly turn Cyrillic typing
+    // back into empty UTF-8 lead/continuation bytes.
+    for (byte, name) in [(0xC0, "А"), (0xFF, "я"), (0xA8, "Ё"), (0xB8, "ё")] {
+        let glyph = fonts.glyph(Font::DEFAULT, byte).unwrap();
+        assert!(
+            glyph.ink_bounds().is_some(),
+            "font 3's CP1251 {name} ({byte:#04X}) has no visible ink"
+        );
+    }
 }
 
 /// The skill names, and the claim the whole window rests on: the id a name sits

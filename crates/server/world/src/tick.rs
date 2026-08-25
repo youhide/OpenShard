@@ -657,7 +657,12 @@ impl World {
         for (serial, direction) in npc::live(&mut self.state) {
             self.step(serial, direction);
         }
+        // Begin reachable swings immediately and tell the client the exact
+        // server-owned interval to their impact. A second pass starts the next
+        // gesture in the same tick after a blow resets its timer.
+        combat::prepare_swings(&mut self.state);
         combat::swings(&mut self.state);
+        combat::prepare_swings(&mut self.state);
         combat::volleys(&mut self.state);
         // A poisoner who fumbled a dose onto themselves. `skills` decides it and
         // says so; applying poison is combat's one door, and this is the tick
@@ -679,6 +684,16 @@ impl World {
                 continue;
             };
             items::give(&mut self.state, backpack, items::GOLD_GRAPHIC, Hue(0), beg.gold);
+            // ServUO's `Begging` plays the amount-sensitive gold drop sound at
+            // the beggar after the coins have reached their pack.
+            self.state.play_sound(
+                beg.entity,
+                items::drop_sound(
+                    items::GOLD_GRAPHIC,
+                    u16::try_from(beg.gold).unwrap_or(u16::MAX),
+                    openshard_protocol::wire::SoundId(0x0048),
+                ),
+            );
         }
         combat::expire_criminality(&mut self.state);
         combat::decay_murders(&mut self.state);

@@ -337,6 +337,12 @@ impl Shell {
         self.desk.fonts
     }
 
+    /// The face F1 has chosen for this run. Availability is the app's fact —
+    /// this is only the remembered preference.
+    pub fn font_face(&self) -> crate::desk::FontFace {
+        self.desk.font_face
+    }
+
     /// How big the client's own windows are drawn right now — the Windows
     /// tab's own number, and [`Shell::tuning`]'s reason again.
     ///
@@ -854,7 +860,16 @@ fn layout(
                 Tab::World => world_panel(ui, hud, world, &mut request),
                 Tab::Tile => tile_tab(ui, hud, world, &mut request),
                 Tab::Light => light_panel(ui, hud, &mut desk.light, &mut request),
-                Tab::Chat => chat_panel(ui, &mut desk.chat, &mut desk.fonts, hud.ttf_active),
+                Tab::Chat => chat_panel(
+                    ui,
+                    &mut desk.chat,
+                    &mut desk.fonts,
+                    &mut desk.font_face,
+                    &mut desk.override_all_fonts,
+                    &mut desk.bitmap_font,
+                    hud.ttf_active,
+                    hud.ttf_available,
+                ),
                 Tab::Audio => audio_panel(ui, &mut desk.audio, &mut request),
                 Tab::Windows => windows_panel(ui, &mut desk.window_scale),
             });
@@ -1089,7 +1104,7 @@ fn audio_panel(ui: &mut egui::Ui, audio: &mut crate::desk::Audio, request: &mut 
 /// How big the HUD chat box's glyphs draw, and what colour the player's own
 /// line takes.
 ///
-/// `ttf_active` — `App::ttf_font.is_some()` — picks which kind of size control
+/// `ttf_active` picks which kind of size control
 /// is shown, because the two faces are sized by two different kinds of number
 /// and only one face draws in a given run. A TrueType face has a **real size
 /// in pixels** per kind of text ([`crate::desk::FontSizes`]); `fonts.mul` has
@@ -1100,11 +1115,56 @@ fn chat_panel(
     ui: &mut egui::Ui,
     chat: &mut crate::desk::Chat,
     fonts: &mut crate::desk::FontSizes,
+    face: &mut crate::desk::FontFace,
+    override_all_fonts: &mut bool,
+    bitmap_font: &mut crate::desk::BitmapFont,
     ttf_active: bool,
+    ttf_available: bool,
 ) {
-    use crate::desk::ChatScale;
+    use crate::desk::{BitmapFont, ChatScale, FontFace};
     use openshard_client_render::atlas::TextSize;
 
+    ui.label("Face");
+    ui.radio_value(
+        face,
+        FontFace::Automatic,
+        "Automatic (use configured TrueType when available)",
+    );
+    ui.radio_value(face, FontFace::Classic, "Classic bitmap (fonts.mul)");
+    ui.add_enabled_ui(ttf_available, |ui| {
+        ui.radio_value(face, FontFace::TrueType, "Configured TrueType");
+    });
+    if !ttf_available {
+        ui.label(
+            egui::RichText::new("Start with --ttf-font to make a TrueType face available.")
+                .small()
+                .weak(),
+        );
+    }
+    if !ttf_active {
+        ui.separator();
+        ui.checkbox(override_all_fonts, "Override all bitmap fonts");
+        ui.add_enabled_ui(*override_all_fonts, |ui| {
+            let mut selected = bitmap_font.index();
+            egui::ComboBox::from_label("classic face")
+                .selected_text(format!("fonts.mul #{selected}"))
+                .show_ui(ui, |ui| {
+                    for index in 0..BitmapFont::COUNT {
+                        ui.selectable_value(&mut selected, index, format!("fonts.mul #{index}"));
+                    }
+                });
+            *bitmap_font = BitmapFont::new(selected);
+        });
+        ui.label(
+            egui::RichText::new(
+                "When on, speech, chat, tooltips, window captions and pile counts use this face. \
+                 When off, each packet/window keeps the face it asked for.",
+            )
+            .small()
+            .weak(),
+        );
+    }
+    ui.separator();
     ui.label("Size");
     if ttf_active {
         // One row per role, each a real pixel size — see `FontSizes`. A tenth
@@ -1182,6 +1242,9 @@ fn chat_panel(
     if ui.button("back to the defaults").clicked() {
         *chat = crate::desk::Chat::default();
         *fonts = crate::desk::FontSizes::default();
+        *face = FontFace::default();
+        *override_all_fonts = false;
+        *bitmap_font = BitmapFont::default();
     }
 }
 

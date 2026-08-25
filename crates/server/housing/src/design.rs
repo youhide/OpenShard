@@ -253,9 +253,9 @@ pub fn redesign(
 
 /// Take the old sign down and hang a new one.
 ///
-/// The sign sits on the west-south corner of the house's *box*, so a design that
-/// changes the box moves it. Moving the existing entity would do as well and
-/// costs a serial less; it is spawned fresh because
+/// A designed house's sign sits on the west-south corner of its *box*, so a
+/// design that changes the box moves it. Moving the existing entity would do as
+/// well and costs a serial less; it is spawned fresh because
 /// [`hang_sign`](crate::hang_sign) is the one place that knows where a sign goes
 /// and what it is made of, and two places that know would drift.
 fn rehang_sign(state: &mut WorldState, house: EntityId, facet: Facet, at: Point, multi: MultiId) {

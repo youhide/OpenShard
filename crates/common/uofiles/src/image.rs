@@ -10,6 +10,20 @@ use std::fmt;
 
 use crate::color::Color16;
 
+/// The smallest rectangle containing every non-transparent pixel in an
+/// [`Image`].
+///
+/// Kept in image-local coordinates: a font glyph uses it to measure real ink,
+/// while an atlas image can use the same answer without pretending its empty
+/// margins belong to a screen coordinate system.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InkBounds {
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+}
+
 /// A decoded sprite: a rectangle of pixels, transparent where nothing is drawn.
 ///
 /// Row-major, `width * height` long. Transparency is [`Color16::TRANSPARENT`]
@@ -83,6 +97,36 @@ impl Image {
             .get(y as usize * self.width as usize + x as usize)
             .copied()
     }
+
+    /// The bounds of visible ink, excluding transparent padding.
+    #[must_use]
+    pub fn ink_bounds(&self) -> Option<InkBounds> {
+        let mut left = self.width;
+        let mut top = self.height;
+        let mut right = 0;
+        let mut bottom = 0;
+        let mut any = false;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if self.pixel(x, y).is_some_and(|pixel| !pixel.is_transparent()) {
+                    left = left.min(x);
+                    top = top.min(y);
+                    right = right.max(x);
+                    bottom = bottom.max(y);
+                    any = true;
+                }
+            }
+        }
+        if !any {
+            return None;
+        }
+        Some(InkBounds {
+            x: left,
+            y: top,
+            width: right - left + 1,
+            height: bottom - top + 1,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -115,5 +159,44 @@ mod tests {
     #[should_panic(expected = "fill its rectangle")]
     fn pixels_that_do_not_fill_the_rectangle_are_a_bug_and_not_an_image() {
         let _ = Image::new(4, 4, vec![Color16(0); 15]);
+    }
+
+    #[test]
+    fn ink_bounds_excludes_the_transparent_margin() {
+        let image = Image::new(
+            5,
+            4,
+            vec![
+                Color16(0),
+                Color16(0),
+                Color16(0),
+                Color16(0),
+                Color16(0), // row 0
+                Color16(0),
+                Color16(7),
+                Color16(0),
+                Color16(0),
+                Color16(0), // row 1
+                Color16(0),
+                Color16(0),
+                Color16(9),
+                Color16(0),
+                Color16(0), // row 2
+                Color16(0),
+                Color16(0),
+                Color16(0),
+                Color16(0),
+                Color16(0), // row 3
+            ],
+        );
+        assert_eq!(
+            image.ink_bounds(),
+            Some(InkBounds {
+                x: 1,
+                y: 1,
+                width: 2,
+                height: 2,
+            })
+        );
     }
 }

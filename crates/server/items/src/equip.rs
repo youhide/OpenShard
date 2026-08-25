@@ -154,31 +154,29 @@ fn hands_conflict(state: &WorldState, mobile: Serial, graphic: Graphic, layer: L
 ///
 /// Called when the mobile itself is leaving and its belongings are not persisted
 /// yet, so they must not outlive it as orphans equipped on a serial that is about
-/// to be released. One level deep — a backpack of loose items — which is all a
-/// character has until nested containers and inventory persistence land.
+/// to be released. Walk the whole ownership subtree: inventory persistence saves
+/// nested containers at every depth, so logout must remove that same whole tree.
 pub fn despawn_belongings(state: &mut WorldState, mobile: Serial) {
-    let worn: Vec<(EntityId, Serial)> = equipped_items(state, mobile)
-        .filter_map(|(item, _)| Some((item, state.registry.serial_of(item)?)))
+    let worn: Vec<(EntityId, Option<Serial>)> = equipped_items(state, mobile)
+        .map(|(item, _)| (item, state.registry.serial_of(item)))
         .collect();
-    let worn_serials: Vec<Serial> = worn.iter().map(|(_, serial)| *serial).collect();
 
-    let inside: Vec<EntityId> = state
-        .registry
-        .query::<ItemLocation>()
-        .filter(|(_, location)| {
-            matches!(
-                location,
-                ItemLocation::Settled(SettledItemLocation::Contained(held))
-                    if worn_serials.contains(&held.container)
-            )
-        })
-        .map(|(item, _)| item)
-        .collect();
-    for item in inside {
-        despawn_item(state, item);
+    let mut belongings = worn;
+    let mut containers: Vec<Serial> = belongings.iter().filter_map(|(_, serial)| *serial).collect();
+    while let Some(container) = containers.pop() {
+        let children: Vec<(EntityId, Option<Serial>)> = contained_items(state, container)
+            .map(|(item, _)| (item, state.registry.serial_of(item)))
+            .collect();
+        containers.extend(children.iter().filter_map(|(_, serial)| *serial));
+        belongings.extend(children);
     }
-    for (item, serial) in worn {
-        state.open_containers.remove(&serial);
+
+    // Children first keeps no live canonical edge pointing at an entity already
+    // removed from the registry, even within this short teardown operation.
+    for (item, serial) in belongings.into_iter().rev() {
+        if let Some(serial) = serial {
+            state.open_containers.remove(&serial);
+        }
         despawn_item(state, item);
     }
 }

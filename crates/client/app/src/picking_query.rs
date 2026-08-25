@@ -397,6 +397,39 @@ impl App {
         self.shell.as_ref().map_or(self.desk.fonts, shell::Shell::fonts)
     }
 
+    /// Whether this frame uses the optional TrueType face.
+    ///
+    /// The loaded face stays resident whichever choice F1 makes, so changing
+    /// between it and `fonts.mul` neither reparses a file nor invalidates the
+    /// screen's glyph atlas.
+    pub(crate) fn ttf_active(&self) -> bool {
+        let face = self
+            .shell
+            .as_ref()
+            .map_or(self.desk.font_face, shell::Shell::font_face);
+        face.uses_ttf(self.resources.ttf_font.is_some())
+    }
+
+    /// The player's optional classic-face override for this frame.
+    ///
+    /// A configured TrueType face is already one face for every role, so the
+    /// bitmap override has meaning only on the `fonts.mul` path.  Read through
+    /// `Shell` while F1 is open for the same live-preview contract as
+    /// [`Self::font_sizes`].
+    pub(crate) fn bitmap_font_override(&self) -> Option<openshard_protocol::speech::Font> {
+        if self.ttf_active() {
+            return None;
+        }
+        let (enabled, font) =
+            self.shell
+                .as_ref()
+                .map_or((self.desk.override_all_fonts, self.desk.bitmap_font), |shell| {
+                    let desk = shell.desk();
+                    (desk.override_all_fonts, desk.bitmap_font)
+                });
+        enabled.then_some(font.font())
+    }
+
     /// What `common/movement` makes of the ground on screen — the HUD's terrain
     /// overlay, gathered only while it is switched on.
     ///
@@ -1114,7 +1147,8 @@ impl App {
             editor_static_draft: self.map_editor.static_draft_previews(self.resources.map()),
             health_bars: self.health_bars(camera, drawn_mobiles),
             goal: self.steer.goal().map(|at| self.tile_info(Tile::new(at.x, at.y))),
-            ttf_active: self.resources.ttf_font.is_some(),
+            ttf_active: self.ttf_active(),
+            ttf_available: self.resources.ttf_font.is_some(),
             navigation: self.navigation.clone(),
             refusal: self.steer.refusal(),
             composites: self

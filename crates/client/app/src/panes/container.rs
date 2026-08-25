@@ -60,9 +60,10 @@ const HOVER_OFFSET: GumpPixel = GumpPixel::new(14, 18);
 ///
 /// The backpack stays authoritative about the grid slots and any stack merge;
 /// this only keeps the icons from landing in one heap on the way there.
-const SWEEP_ORIGIN: GumpPoint = GumpPoint::new(20, 20);
+const SWEEP_ORIGIN: GumpPoint = GumpPoint::new(44, 65);
 const SWEEP_STEP: i32 = 18;
 const SWEEP_COLUMNS: usize = 6;
+const SWEEP_ROWS: usize = 5;
 
 /// The one graphic this client wields on a double click instead of asking the
 /// shard to *use* it.
@@ -311,7 +312,7 @@ fn take_all(contents: &[ContainedItem], backpack: Serial) -> Vec<Effect> {
         .enumerate()
         .flat_map(|(index, item)| {
             let column = (index % SWEEP_COLUMNS) as i32;
-            let row = (index / SWEEP_COLUMNS) as i32;
+            let row = ((index / SWEEP_COLUMNS) % SWEEP_ROWS) as i32;
             [
                 Effect::Net(Outgoing::PickUp {
                     item: item.serial,
@@ -627,6 +628,17 @@ impl ContainerPane {
             // see `PaneFrame::cursor`'s doc — so only the grab offset inside
             // the icon is left to subtract.
             let at = GumpPoint::new(ctx.frame.cursor.x - grab.x, ctx.frame.cursor.y - grab.y);
+            let Some(&gump) = ctx.frame.view.containers.get(&self.container) else {
+                return Response::ignored();
+            };
+            let drag = hand.drag();
+            let at = container::clamp_item_at(
+                gump,
+                drag.item.graphic,
+                drag.item.amount,
+                at,
+                ctx.frame.files.gump_atlas,
+            );
             return Response::changed().with(Effect::Drop(PendingDrop::Container {
                 container: self.container,
                 at,
@@ -809,7 +821,11 @@ impl ContainerPane {
 
     pub(super) fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         let gump = *frame.view.containers.get(&self.container)?;
-        let contents = self.recall_contents(frame.view, frame.hand);
+        let mut contents = self.recall_contents(frame.view, frame.hand);
+        for item in &mut contents {
+            item.at =
+                container::clamp_item_at(gump, item.graphic, item.amount, item.at, frame.files.gump_atlas);
+        }
         let action = self
             .action_button(frame)
             .map(|(_, button)| (button, container::action_face(self.action_hovered)));
@@ -981,7 +997,8 @@ mod tests {
     }
 
     /// A sweep is one lift and one drop per item, in the bag's own order and
-    /// laid out six to a row so the icons do not land in one heap.
+    /// laid out six to a row inside the backpack's ClassicUO content bounds so
+    /// the icons do not land in one heap or on the leather rim.
     #[test]
     fn a_sweep_names_every_item_twice_and_the_backpack_once() {
         let pack = serial(0x4000_0100);
@@ -995,14 +1012,18 @@ mod tests {
             panic!("the second effect of a pair is the drop");
         };
         assert_eq!(*container, pack);
-        assert_eq!(*at, GumpPoint::new(20, 20), "the first lands at the origin");
+        assert_eq!(
+            *at,
+            GumpPoint::new(44, 65),
+            "the first lands at the content origin"
+        );
 
         let Effect::Net(Outgoing::DropInto { at, .. }) = &effects[13] else {
             panic!("the seventh pair's drop");
         };
         assert_eq!(
             *at,
-            GumpPoint::new(20, 38),
+            GumpPoint::new(44, 83),
             "the seventh item starts the second row"
         );
     }
@@ -1192,6 +1213,78 @@ mod tests {
         );
     }
 
+    /// Coordinates in `0x3C` are not trusted as the size of the usable area:
+    /// the wire has no bounds field. The gump id supplies ClassicUO's inner
+    /// rectangle, so even an old/out-of-range server coordinate is projected
+    /// back onto the backpack's cloth rather than its rim.
+    #[test]
+    fn layout_clamps_existing_items_to_the_backpack_content_bounds() {
+        const BAG: Graphic = Graphic(0x003C);
+        const CANDLE: Graphic = Graphic(0x0A28);
+        let files = fixture::Install::shipping([
+            (GumpArt::Gump(BAG), (200, 200)),
+            (GumpArt::Item(CANDLE), (10, 20)),
+        ]);
+        let bag = serial(0x4000_0100);
+        let mut view = bare_view();
+        view.containers.insert(bag, BAG);
+        view.contents.insert(
+            bag,
+            vec![ContainedItem {
+                at: GumpPoint::new(999, 999),
+                ..item(0x4000_0001, CANDLE, 1)
+            }],
+        );
+
+        let pane = ContainerPane::new(bag);
+        let drawn = pane
+            .layout(&files.ctx(&view, None, GumpPixel::new(0, 0), false).frame)
+            .expect("an open backpack lays out");
+        let Drawn::Container(window) = drawn else {
+            panic!("a container pane draws a container window");
+        };
+        assert_eq!(window.contents[0].at, GumpPoint::new(176, 139));
+        assert_eq!(
+            window.pictures[1].at,
+            GumpPixel::new(176, 139),
+            "the carried record and the rendered icon use the same clamped coordinate"
+        );
+    }
+
+    /// Releasing on the backpack's lower furniture sends the corrected item
+    /// coordinate, not the raw pointer position. The 10x20 icon therefore fits
+    /// wholly before ClassicUO's right=186 and bottom=159 edges.
+    #[test]
+    fn a_drop_is_clamped_to_the_backpack_content_bounds() {
+        use crate::hand::ItemDrag;
+
+        const BAG: Graphic = Graphic(0x003C);
+        const CANDLE: Graphic = Graphic(0x0A28);
+        let files = fixture::Install::shipping([
+            (GumpArt::Gump(BAG), (200, 200)),
+            (GumpArt::Item(CANDLE), (10, 20)),
+        ]);
+        let bag = serial(0x4000_0100);
+        let mut view = bare_view();
+        view.containers.insert(bag, BAG);
+
+        let held = item(0x4000_0001, CANDLE, 1);
+        let mut ctx = files.ctx(&view, None, GumpPixel::new(195, 195), true);
+        ctx.frame.hand = Some(Hand::Held(ItemDrag {
+            item: held,
+            origin: DragOrigin::Ground,
+            grab: GumpPixel::new(0, 0),
+        }));
+
+        let mut pane = ContainerPane::new(bag);
+        let answer = pane.handle(Input::Release(Button::Left), &ctx);
+        assert!(matches!(
+            answer.out.as_slice(),
+            [Effect::Drop(PendingDrop::Container { container, at })]
+                if *container == bag && *at == GumpPoint::new(176, 139)
+        ));
+    }
+
     /// `recall_contents` reuses exactly what was left for it — the case
     /// `art` and `layout` hit every ordinary redraw — rather than answering
     /// with a fresh (and here, deliberately *different*) computation. Proves
@@ -1291,14 +1384,14 @@ mod tests {
         view.contents.insert(
             bag,
             vec![ContainedItem {
-                at: GumpPoint::new(20, 20),
+                at: GumpPoint::new(60, 80),
                 ..item(0x4000_0001, CANDLE, 1)
             }],
         );
 
         let mut pane = ContainerPane::new(bag);
-        // Inside the candle's own icon, at (20, 20) sized 10×20.
-        let icon = GumpPixel::new(25, 30);
+        // Inside the candle's own icon, at (60, 80) sized 10×20.
+        let icon = GumpPixel::new(65, 90);
         let laid_out = pane
             .layout(&files.ctx(&view, None, icon, true).frame)
             .expect("a bag with a gump in the view lays itself out");

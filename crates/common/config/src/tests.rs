@@ -394,11 +394,11 @@ fn a_missing_file_says_which_one() {
 
 #[test]
 fn gameplay_defaults_to_the_pre_aos_feel() {
-    // A config from before [gameplay] existed still parses and means the same
-    // numbers the constants used to hold.
+    // A config from before [gameplay] existed still parses into the shipped
+    // pre-AoS rules.
     let g = config(MINIMAL).gameplay;
     assert_eq!(g.combat_era, CombatEra::new(1));
-    assert_eq!(g.speed_scale_factor, 15000);
+    assert_eq!(g.speed_scale_factor, 10000);
     assert_eq!((g.critical_chance, g.critical_damage_percent), (50, 150));
     assert_eq!(g.skill_cap, 1000);
     assert_eq!(

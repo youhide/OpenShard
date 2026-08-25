@@ -146,6 +146,8 @@ pub(crate) fn draw_gump_windows(
     hover: &[String],
     scale: crate::desk::WindowScale,
     fonts: crate::desk::FontSizes,
+    ttf_active: bool,
+    bitmap_font_override: Option<openshard_protocol::speech::Font>,
     shell: Option<&shell::Shell>,
     window: &mut Screen,
     encoder: &mut wgpu::CommandEncoder,
@@ -573,8 +575,9 @@ pub(crate) fn draw_gump_windows(
                         magnify,
                         density: frame.scale,
                         size: if count { fonts.stack_count } else { fonts.window },
+                        bitmap_font_override,
                     },
-                    resources.ttf_font.as_ref(),
+                    ttf_active.then_some(resources.ttf_font.as_ref()).flatten(),
                     &resources.font_atlas,
                     window.ttf_atlas.as_mut(),
                     bitmap_quads,
@@ -633,8 +636,9 @@ pub(crate) fn draw_gump_windows(
                         magnify,
                         density: frame.scale,
                         size: fonts.stack_count,
+                        bitmap_font_override,
                     },
-                    resources.ttf_font.as_ref(),
+                    ttf_active.then_some(resources.ttf_font.as_ref()).flatten(),
                     &resources.font_atlas,
                     window.ttf_atlas.as_mut(),
                     bitmap_quads,
@@ -654,7 +658,8 @@ pub(crate) fn draw_gump_windows(
         if !hover.is_empty() {
             let step = tooltip_line_step(
                 &resources.font_atlas,
-                resources.ttf_font.as_ref().map(|_| fonts.tooltip),
+                ttf_active.then_some(fonts.tooltip),
+                bitmap_font_override.unwrap_or(TOOLTIP_FONT),
             );
             let labels: Vec<_> = hover
                 .iter()
@@ -686,8 +691,9 @@ pub(crate) fn draw_gump_windows(
                     magnify: 1.0,
                     density: frame.scale,
                     size: fonts.tooltip,
+                    bitmap_font_override,
                 },
-                resources.ttf_font.as_ref(),
+                ttf_active.then_some(resources.ttf_font.as_ref()).flatten(),
                 &resources.font_atlas,
                 window.ttf_atlas.as_mut(),
                 bitmap_quads,
@@ -721,6 +727,10 @@ struct WindowText<'a> {
     density: f32,
     /// The size captions are drawn at, before either of the two above.
     size: openshard_client_render::atlas::TextSize,
+    /// The active F1 classic-face override, if any.  Role classification is
+    /// done before this replacement, so an overridden pile count keeps the
+    /// count's scale even though it uses the selected glyphs.
+    bitmap_font_override: Option<openshard_protocol::speech::Font>,
 }
 
 /// Draw one window's captions, through whichever face this client is running.
@@ -772,8 +782,12 @@ fn window_text(
         };
         let mut quads = Vec::new();
         for (label, scissor) in text.labels {
+            let label = openshard_client_render::text::GumpLabel {
+                font: text.bitmap_font_override.unwrap_or(label.font),
+                ..*label
+            };
             let mut line =
-                openshard_client_render::text::collect_gump(std::slice::from_ref(label), font_atlas);
+                openshard_client_render::text::collect_gump(std::slice::from_ref(&label), font_atlas);
             // Cut in the window's own pixels, before the placement below
             // magnifies what survived: a row and its viewport are both the
             // sheet's own unmagnified coordinates, and cutting after would be
@@ -854,24 +868,25 @@ const TOOLTIP_OFFSET: gump_art::GumpPixel = gump_art::GumpPixel { x: 14, y: 18 }
 ///
 /// Read off the face rather than written down: `fonts.mul` holds ten faces of
 /// different heights, and a number fixed here would be wrong the moment a
-/// tooltip was drawn in another one. A capital `M` is the measure — full height
-/// in every face and no descender — plus two pixels so consecutive lines do not
-/// touch. The fallback is only reachable with a font atlas that packed no `M`,
-/// which is a broken `fonts.mul` rather than a case to be right about.
+/// tooltip was drawn in another one. A capital `M`'s actual *ink* height is
+/// the measure — transparent padding in a glyph cell does not count — plus two
+/// pixels so consecutive lines do not touch. The fallback is only reachable
+/// with a font atlas that packed no `M`, which is a broken `fonts.mul` rather
+/// than a case to be right about.
 fn tooltip_line_step(
     fonts: &openshard_client_render::atlas::FontAtlas,
     truetype: Option<openshard_client_render::atlas::TextSize>,
+    bitmap_font: openshard_protocol::speech::Font,
 ) -> i32 {
-    // A TrueType face has a size, and the step is that size plus the same two
-    // pixels of air: nothing has to be measured off a glyph, because the
-    // number the player asked for *is* the height. `fonts.mul` has no such
-    // number, which is what the `M` below is for.
+    // A TrueType face has a requested size, and the step is that size plus the
+    // same two pixels of air. Bitmap faces have no continuous size, so their
+    // real `M` ink below is the only honest measure.
     if let Some(size) = truetype {
         return size.pixels().round() as i32 + 2;
     }
     fonts
-        .glyph(TOOLTIP_FONT, b'M')
-        .map_or(16, |sprite| i32::from(sprite.height) + 2)
+        .glyph_ink_height(bitmap_font, b'M')
+        .map_or(16, |height| i32::from(height) + 2)
 }
 
 /// Records every world-space pass into `encoder`, from the ground up to the

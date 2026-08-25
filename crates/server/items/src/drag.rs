@@ -285,6 +285,14 @@ pub fn drop_item(
     }
 
     place_on_ground(state, held.entity, position, state.facet_of(player));
+    let graphic = state
+        .registry
+        .get::<Drawn>(held.entity)
+        .map_or(Graphic(0), |drawn| drawn.id);
+    state.play_sound_to(
+        player,
+        drop_sound(graphic, amount_of(state, held.entity), SoundId(0x0042)),
+    );
     debug!(serial = serial.0, "dropped on the ground");
 }
 
@@ -358,6 +366,14 @@ pub fn drop_into_container(
     };
     relocate_item(state, held.entity, ItemLocation::contained(contained))
         .expect("an accepted container drop has one valid parent");
+    let graphic = state
+        .registry
+        .get::<Drawn>(held.entity)
+        .map_or(Graphic(0), |drawn| drawn.id);
+    state.play_sound_to(
+        player,
+        drop_sound(graphic, amount_of(state, held.entity), SoundId(0x0048)),
+    );
     // Tell the client, whose gump is open, that the item is now inside.
     if let (Some(version), Some(record)) =
         (state.version_of(connection), contained_record(state, held.entity))

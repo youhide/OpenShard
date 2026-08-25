@@ -117,6 +117,7 @@ fn ground_scene(land: u16, fits: bool) -> Scene {
 fn multis(components: Vec<Component>) -> Multis {
     Multis::of([
         Multi::new(COTTAGE, components.clone()),
+        Multi::new(0x0074, components.clone()),
         Multi::new(FOUNDATION, components),
     ])
 }
@@ -1044,15 +1045,10 @@ fn a_ban_puts_out_whoever_is_already_inside() {
     );
 }
 
-/// The sign hangs on the box's west-south corner, seven above the house's z.
-///
-/// The numbers rather than the rule, because the rule is one reduction away from
-/// ServUO's `SetSign(Components.Min.X, Components.Height - 1 - Components.Center.Y, 7)`
-/// and a reduction is exactly the kind of thing that is right on paper and off
-/// by one in the tree. The cottage's box runs from -1 to +1 on both axes, so the
-/// corner is one west and one south of the origin.
+/// A classic house uses the sign offset its house type declares, rather than
+/// deriving one from the bounds of the multi it draws.
 #[test]
-fn a_house_hangs_its_sign_on_the_corner_of_its_box() {
+fn a_classic_house_hangs_its_sign_at_its_declared_offset() {
     let mut state = world_with(cottage());
     let (actor, owner) = an_actor(&mut state);
     let at = Point::new(10, 10, 0);
@@ -1061,7 +1057,7 @@ fn a_house_hangs_its_sign_on_the_corner_of_its_box() {
 
     assert_eq!(
         sign_spot(&state, at, MultiId(COTTAGE), None),
-        Some(Point::new(9, 11, 7))
+        Some(Point::new(12, 14, 5))
     );
     let signs: Vec<_> = state
         .registry
@@ -1072,7 +1068,7 @@ fn a_house_hangs_its_sign_on_the_corner_of_its_box() {
     assert_eq!(signs[0].1, serial, "the sign names another house");
     assert_eq!(
         state.registry.get::<Position>(signs[0].0).map(|p| p.0),
-        Some(Point::new(9, 11, 7))
+        Some(Point::new(12, 14, 5))
     );
     assert_eq!(
         state.registry.get::<Drawn>(signs[0].0).map(|drawn| drawn.id),
@@ -1085,6 +1081,17 @@ fn a_house_hangs_its_sign_on_the_corner_of_its_box() {
             .serial_of(signs[0].0)
             .is_some_and(|serial| serial.is_item()),
         "the sign took a mobile serial"
+    );
+}
+
+/// Regression for the guild house reported at 1340,1894: its box starts seven
+/// tiles west, but its plaque belongs four east, eight south and sixteen up.
+#[test]
+fn a_guild_house_sign_is_beside_its_entrance_not_at_its_box_corner() {
+    let state = world_with(cottage());
+    assert_eq!(
+        sign_spot(&state, Point::new(1340, 1894, 0), MultiId(0x0074), None),
+        Some(Point::new(1344, 1902, 16))
     );
 }
 

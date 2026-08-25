@@ -313,10 +313,11 @@ pub struct Hud {
     pub composites: CompositeTelemetry,
     /// The radar's chosen levels, fallback tally and three budgets.
     pub radar: RadarTelemetry,
-    /// Whether `App::ttf_font` is set — which of the Chat tab's two size
-    /// sliders, `ChatScale`'s or `TtfScale`'s, is the one actually drawing
-    /// anything this run. See `desk::TtfScale`'s own doc.
+    /// Whether this frame draws the supplied TrueType face rather than
+    /// `fonts.mul`.
     pub ttf_active: bool,
+    /// Whether F1 can choose the supplied TrueType face at all.
+    pub ttf_available: bool,
     /// The coarse graph: one of it, building, or none — see [`Navigation`].
     pub navigation: Navigation,
     /// Why the standing move order is not reaching its destination, if it is

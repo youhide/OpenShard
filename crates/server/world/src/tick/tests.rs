@@ -14,7 +14,7 @@ use openshard_protocol::mobile::Remove;
 use openshard_protocol::packet::encode_packet;
 use openshard_protocol::serial::RawSerial;
 use openshard_protocol::skill::SkillLock;
-use openshard_protocol::wire::{Graphic, Hue, RawSkillId};
+use openshard_protocol::wire::{Graphic, Hue, RawSkillId, SoundId};
 use openshard_protocol::world::{Aggression, RangedRange, RawStepSequence};
 use openshard_skills::SkillUsed;
 use openshard_state::components::Riding;
@@ -40,8 +40,13 @@ pub(super) const AI_THINK_TICKS: u64 = 16 + 16 / openshard_npc::BEAT_JITTER_FRAC
 
 /// Ticks a bare-handed, default-dexterity mobile waits between swings under
 /// the default rules — the pace the combat tests reckon against. `dex 100`,
-/// wrestling, era 1, scale 15000: thirty ticks.
-const WRESTLING_SWING_TICKS: u64 = swing_ticks(100, WRESTLING_SPEED, 1, 15000);
+/// wrestling, era 1, scale 10000: twenty ticks (one second).
+const WRESTLING_SWING_TICKS: u64 = swing_ticks(100, WRESTLING_SPEED, 1, 10000);
+
+#[test]
+fn bare_hands_take_one_second_at_default_dexterity() {
+    assert_eq!(WRESTLING_SWING_TICKS, TICKS_PER_SECOND);
+}
 
 pub(super) fn world() -> World {
     World::new(START)
@@ -1059,6 +1064,15 @@ fn picking_up_then_dropping_moves_an_item_on_everyone_elses_screen() {
         packets_for(&mut world, watcher).iter().any(|p| p[0] == 0x1A),
         "and to draw it again where it was dropped"
     );
+    let drop_sound = items::drop_sound(Graphic(GOLD), 1, SoundId(0x0042))
+        .0
+        .to_be_bytes();
+    assert!(
+        packets_for(&mut world, picker)
+            .iter()
+            .any(|packet| packet[0] == 0x54 && packet[2..4] == drop_sound),
+        "a successful drop plays its sound for the player who made it"
+    );
 }
 
 #[test]
@@ -1614,8 +1628,7 @@ fn dropping_an_item_into_your_worn_backpack_stores_it() {
         .get::<Position>(world.state.players[&player])
         .unwrap()
         .0;
-    spawn_item_at(&mut world, here, now);
-    let item_serial = loose_item_serial(&world);
+    let item_serial = spawn_plain_item_at(&mut world, here, now);
     let item = entity(&world, item_serial);
 
     world.queue(Command::PickUpItem {
@@ -1642,6 +1655,12 @@ fn dropping_an_item_into_your_worn_backpack_stores_it() {
     assert!(
         world.state.held_of(player).is_none(),
         "and off the cursor, not bounced"
+    );
+    assert!(
+        packets_for(&mut world, player).iter().any(|packet| {
+            packet.len() >= 4 && packet[0] == 0x54 && packet[2..4] == 0x0048_u16.to_be_bytes()
+        }),
+        "a successful backpack drop plays the container sound (0x0048)"
     );
     assert_eq!(
         openshard_state::audit_item_graph(&world.state),
@@ -3900,15 +3919,23 @@ fn resurrection_brings_a_ghost_back() {
     );
 
     // Exercise the two requests that used to become no-ops after resurrection,
-    // then make their freshly-armed swing due immediately. This proves the
-    // session-long row remained functional across the transition.
+    // then follow the freshly-armed swing through its visible lead-in and
+    // impact. This proves both the session-long combat row and the exact weapon
+    // animation survived the transition.
     let target = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
     let target_entity = entity(&world, target);
     engage(&mut world, player, target, now);
+    let opening = packets_for(&mut world, player);
+    assert!(
+        opening
+            .iter()
+            .any(|packet| packet[0] == 0xE2 && packet[7..9] == [0x00, 0x07]),
+        "the resurrection axe visibly begins its two-handed slash immediately"
+    );
     let combat = world
         .state
         .registry
-        .get_mut::<Combat>(player_entity)
+        .get::<Combat>(player_entity)
         .expect("combat is a player-session invariant");
     assert!(combat.warmode(), "war mode is recorded after resurrection");
     assert_eq!(
@@ -3916,14 +3943,47 @@ fn resurrection_brings_a_ghost_back() {
         Some(target),
         "the target is recorded after resurrection"
     );
-    assert!(combat.schedule_swing(openshard_state::WorldTick::ZERO));
-    world.tick(now);
+    let impact = combat.next_swing().expect("an aimed combat row has an impact");
+    let duration_ms = u32::try_from((impact - world.state.ticks) * 50).unwrap();
+    let timing_at = opening
+        .iter()
+        .position(|packet| {
+            packet.len() == 13
+                && packet[0] == 0xBF
+                && packet[3..5] == [0xE0, 0x0B]
+                && packet[9..13] == duration_ms.to_be_bytes()
+        })
+        .expect("the server sends the complete axe wind-up duration before impact");
+    let animation_at = opening
+        .iter()
+        .position(|packet| packet[0] == 0xE2 && packet[7..9] == [0x00, 0x07])
+        .expect("the paired axe animation");
+    assert_eq!(
+        animation_at,
+        timing_at + 1,
+        "the timing is immediately followed by the action it stretches"
+    );
+    while world.state.ticks < impact {
+        world.tick(now);
+    }
     assert!(
         world
             .registry()
             .get::<Hitpoints>(target_entity)
             .is_some_and(|hits| hits.current < 50),
         "the resurrected player lands a blow"
+    );
+    let repeat = packets_for(&mut world, player);
+    assert_eq!(
+        repeat.iter().filter(|packet| packet[0] == 0xE2).count(),
+        1,
+        "impact starts exactly one next swing instead of replaying the completed one"
+    );
+    assert!(
+        repeat
+            .iter()
+            .any(|packet| packet[0] == 0xBF && packet[3..5] == [0xE0, 0x0B]),
+        "the repeated swing receives its own authoritative duration"
     );
 }
 
@@ -4483,7 +4543,20 @@ fn a_landed_blow_plays_a_hit_sound() {
     let player = enter(&mut world, now);
     let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
     engage(&mut world, player, mob, now);
-    let _ = packets_for(&mut world, player); // drain up to the first swing
+    let opening = packets_for(&mut world, player);
+    assert!(
+        opening.iter().any(|packet| packet[0] == 0xE2 && packet[9] == 0),
+        "the visible swing starts as soon as the server schedules it"
+    );
+    assert!(
+        opening.iter().any(|packet| {
+            packet.len() == 13
+                && packet[0] == 0xBF
+                && packet[3..5] == [0xE0, 0x0B]
+                && packet[9..13] == 1_000_u32.to_be_bytes()
+        }),
+        "the client is told that the wrestling wind-up occupies one second"
+    );
 
     for _ in 0..WRESTLING_SWING_TICKS {
         world.tick(now);
@@ -4496,9 +4569,10 @@ fn a_landed_blow_plays_a_hit_sound() {
             .any(|p| p[0] == 0x54 && p.len() >= 4 && p[2..4] == fists),
         "a human blow plays the fists thwack (0x0137), not a creature's sound"
     );
-    assert!(
-        packets.iter().any(|p| p[0] == 0xE2),
-        "and swings — a 0xE2 animation to the modern (TOL) client"
+    assert_eq!(
+        packets.iter().filter(|packet| packet[0] == 0xE2).count(),
+        1,
+        "impact starts exactly one next swing instead of replaying the one just finished"
     );
 }
 
@@ -5060,6 +5134,46 @@ fn no_swing_out_of_reach() {
     );
 }
 
+#[test]
+fn reaching_an_overdue_target_opens_a_full_windup_before_damage() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let player_entity = world.state.players[&player];
+    world.state.registry.remove::<Skills>(player_entity);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 5, START.1, 0), 50, now);
+    let mob_entity = entity(&world, mob);
+    engage(&mut world, player, mob, now);
+    for _ in 0..=WRESTLING_SWING_TICKS {
+        world.tick(now);
+    }
+    let _ = packets_for(&mut world, player);
+
+    world
+        .state
+        .teleport(mob_entity, Point::new(START.0 + 1, START.1, 0));
+    world.tick(now);
+    let lead = openshard_combat::swing_speed(&world.state, player_entity);
+    assert_eq!(lead, WRESTLING_SWING_TICKS);
+    assert_eq!(world.registry().get::<Hitpoints>(mob_entity).unwrap().current, 50);
+    assert!(
+        packets_for(&mut world, player).iter().any(|packet| {
+            packet[0] == 0xBF && packet.len() == 13 && packet[9..13] == 1_000_u32.to_be_bytes()
+        }),
+        "coming into reach starts the overdue swing instead of landing it invisibly"
+    );
+
+    for _ in 1..lead {
+        world.tick(now);
+    }
+    assert_eq!(world.registry().get::<Hitpoints>(mob_entity).unwrap().current, 50);
+    world.tick(now);
+    assert!(
+        world.registry().get::<Hitpoints>(mob_entity).unwrap().current < 50,
+        "damage lands only when the visible action window ends"
+    );
+}
+
 // `no_melee_swing_through_an_adjacent_wall` was here, and it was fiction.
 //
 // It put a mobile on the tile next to the player and a `sight_clear` that
@@ -5115,7 +5229,8 @@ fn a_wielded_weapon_sets_the_swing_pace() {
         "bare-handed is wrestling pace"
     );
 
-    // Longsword (old_speed 35) beats wrestling (base 50): fewer ticks per swing.
+    // Longsword (old_speed 35) keeps its own pace rather than inheriting the
+    // bare-hand base (50).
     let sword = items::equip_worn_item(
         &mut world.state,
         serial,
@@ -5956,8 +6071,14 @@ fn swing_speed_sets_the_cadence() {
     let mob_entity = entity(&world, mob);
     engage(&mut world, player, mob, now);
 
-    // Five is fewer than the default interval, but a full fast one.
+    // Five is fewer than the default interval. The configured pace still wins;
+    // the client compresses the seven visible frames into those five ticks.
     const _: () = assert!(5 < WRESTLING_SWING_TICKS);
+    assert!(
+        packets_for(&mut world, player).iter().any(|packet| {
+            packet[0] == 0xBF && packet.len() == 13 && packet[9..13] == 250_u32.to_be_bytes()
+        })
+    );
     for _ in 0..5 {
         world.tick(now);
     }
@@ -9034,6 +9155,7 @@ fn a_melee_swing_turns_the_attacker_toward_its_target() {
         .insert(attacker_entity, Heading(Facing::walking(Direction::South)));
     combat::war_mode(&mut world.state, attacker, true);
     combat::attack(&mut world.state, attacker, Some(defender_serial));
+    let turn = packets_for(&mut world, attacker);
     let due = world.state.ticks;
     assert!(
         world
@@ -9043,8 +9165,6 @@ fn a_melee_swing_turns_the_attacker_toward_its_target() {
             .expect("player combat state")
             .schedule_swing(due)
     );
-    let _ = packets_for(&mut world, attacker);
-
     combat::swings(&mut world.state);
 
     assert_eq!(
@@ -9062,10 +9182,16 @@ fn a_melee_swing_turns_the_attacker_toward_its_target() {
         "the next AI/player step agrees with the displayed heading"
     );
     assert!(
-        packets_for(&mut world, attacker).iter().any(|packet| {
+        turn.iter().any(|packet| {
             packet.first() == Some(&0x20) && packet.get(17) == Some(&Direction::East.to_bits())
         }),
-        "the attacking player receives its combat turn as a player update"
+        "target selection immediately turns the attacking player toward its opponent"
+    );
+    assert!(
+        packets_for(&mut world, attacker)
+            .iter()
+            .all(|packet| packet.first() != Some(&0x20)),
+        "impact does not repeat the already-confirmed combat turn"
     );
 }
 
@@ -11137,6 +11263,33 @@ fn a_relogin_in_the_same_run_keeps_the_inventory() {
         .find(|(_, w)| w.layer == items::BACKPACK_LAYER)
         .unwrap();
     let backpack_serial = world.registry().serial_of(backpack).unwrap();
+    // Put the gold two levels down. Logout used to despawn only direct backpack
+    // contents, leaving this gold alive; restore then found the stale serial and
+    // panicked while trying to establish its already-established location.
+    let (bag, bag_serial) = world.state.registry.spawn_with_serial(SerialKind::Item).unwrap();
+    world.state.registry.insert(
+        bag,
+        Drawn {
+            id: openshard_protocol::wire::Graphic(0x0E76),
+            hue: openshard_protocol::wire::Hue(0),
+        },
+    );
+    world.state.registry.insert(
+        bag,
+        Container {
+            gump: openshard_protocol::wire::Graphic(0x003C),
+        },
+    );
+    openshard_state::establish_item_location(
+        &mut world.state,
+        bag,
+        openshard_state::ItemLocation::contained(Contained {
+            container: backpack_serial,
+            position: GumpPoint::new(0, 0),
+            grid: GridSlot(0),
+        }),
+    )
+    .unwrap();
     let (gold, gold_serial) = world.state.registry.spawn_with_serial(SerialKind::Item).unwrap();
     world.state.registry.insert(
         gold,
@@ -11150,7 +11303,7 @@ fn a_relogin_in_the_same_run_keeps_the_inventory() {
         &mut world.state,
         gold,
         openshard_state::ItemLocation::contained(Contained {
-            container: backpack_serial,
+            container: bag_serial,
             position: GumpPoint::new(0, 0),
             grid: GridSlot(0),
         }),
@@ -11184,6 +11337,10 @@ fn a_relogin_in_the_same_run_keeps_the_inventory() {
         .entity_of(gold_serial)
         .expect("the gold came back on relog");
     assert_eq!(world.registry().get::<Amount>(gold).unwrap().0, 300);
+    assert_eq!(
+        world.registry().get::<Contained>(gold).unwrap().container,
+        bag_serial
+    );
 }
 
 #[test]

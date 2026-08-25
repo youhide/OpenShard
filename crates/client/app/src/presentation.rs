@@ -2139,6 +2139,8 @@ impl App {
             raster: Duration::ZERO,
             built: 0,
         };
+        let ttf_active = self.ttf_active();
+        let bitmap_font_override = self.bitmap_font_override();
         let Some(window) = self.window.as_mut() else {
             return;
         };
@@ -2480,7 +2482,7 @@ impl App {
         // `WorldText` and `draw_world_text`, which keep it below every
         // client window rather than folding it into the HUD.
         let encode_started = Instant::now();
-        let world_text = match self.resources.ttf_font.is_some() {
+        let world_text = match ttf_active {
             true => {
                 // Nothing is packed here. Growing the atlas needs the size
                 // each line is drawn at, and world text is packed by the
@@ -2527,7 +2529,7 @@ impl App {
                     .map(|(anchor, line, font, hue)| Label {
                         anchor: *anchor,
                         text: line.as_str(),
-                        font: *font,
+                        font: bitmap_font_override.unwrap_or(*font),
                         hue: *hue,
                         // Nearer than anything the world draws, rather than
                         // an `Order` of its own: speech reads as an overlay
@@ -2646,6 +2648,8 @@ impl App {
             &hover,
             window_scale,
             fonts,
+            ttf_active,
+            bitmap_font_override,
             self.shell.as_ref(),
             window,
             &mut encoder,
@@ -2692,6 +2696,8 @@ impl App {
             &view,
             chat_style,
             fonts,
+            ttf_active,
+            bitmap_font_override,
             &mut window_text_quads,
             &mut window_ttf_quads,
         );

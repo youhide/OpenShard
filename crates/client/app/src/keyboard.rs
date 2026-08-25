@@ -186,8 +186,8 @@ impl Edit {
 /// * **The arrows**, which are held rather than pressed — a step is due every
 ///   step's length while one is down, on our clock and not the operating
 ///   system's repeat rate. See [`crate::keys::Held`].
-/// * **`Tab`**, war mode, which is also held: down is war and up is peace, so it
-///   is the one binding that acts on a release as well as a press.
+/// * **`Tab`**, war mode, whose press toggles the stance. Its release is still
+///   observed solely to make the next press a new toggle.
 /// * **`Escape`**, which takes the topmost window down, and so is answered by
 ///   the window layer before the world is asked at all.
 ///

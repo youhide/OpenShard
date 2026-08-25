@@ -9,9 +9,30 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::wire::SoundId;
+use openshard_protocol::wire::{Graphic, SoundId};
 use openshard_protocol::world::{MusicId, Point};
+use openshard_uofiles::anim::{BodyKind, is_ghost};
+
+/// A locally inferred human footfall.
+///
+/// Footsteps are deliberately not server packets.  The classic protocol tells
+/// a client where a mobile is, and ClassicUO turns its local walking state into
+/// the two alternating shoe sounds.  Keeping the event shaped that way means a
+/// predicted player step is heard immediately, while a stranger's is heard
+/// when their movement update arrives.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Footstep {
+    /// `None` is the offline player before a shard assigns a serial.
+    pub who: Option<Serial>,
+    pub body: Graphic,
+    pub at: Point,
+    pub running: bool,
+    pub mounted: bool,
+    pub hidden: bool,
+    pub dead: bool,
+}
 
 /// Owns the optional platform output and the installed client audio assets.
 pub(crate) struct Audio {
@@ -51,6 +72,40 @@ impl Audio {
         }
     }
 
+    /// Play the client-owned sound made by a human completing a step.
+    pub(crate) fn play_footstep(&mut self, step: Footstep, listener: Point) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(audio) = self.native.as_mut() {
+            audio.play_footstep(step, listener);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (step, listener);
+        }
+    }
+
+    /// Play the client-owned sound of opening or closing a classic container
+    /// gump.  `0x24` carries only the gump art, so this belongs here rather
+    /// than in the shard's world-sound packet stream.
+    pub(crate) fn play_container_sound(&mut self, gump: Graphic, opening: bool, listener: Point) {
+        let Some((open, close)) = container_sounds(gump) else {
+            return;
+        };
+        self.play_ui_sound(if opening { open } else { close }, listener);
+    }
+
+    /// Play an unpositioned client UI effect at the listener's ear.
+    pub(crate) fn play_ui_sound(&mut self, sound: SoundId, listener: Point) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(audio) = self.native.as_mut() {
+            audio.play_sound(sound, listener, listener);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (sound, listener);
+        }
+    }
+
     /// Give the music its next turn, once a frame.
     ///
     /// A looping track has to be started again when it ends, and the mixer owns
@@ -81,6 +136,20 @@ impl Audio {
     }
 }
 
+/// ClassicUO's stock `ContainerManager` sounds.  Custom gumps deliberately
+/// stay silent: ClassicUO's fallback record does too.
+fn container_sounds(gump: Graphic) -> Option<(SoundId, SoundId)> {
+    let sounds = match gump.0 {
+        0x003C | 0x003D | 0x0103 | 0x775E | 0x7760 | 0x7762 => (0x0048, 0x0058),
+        0x003E | 0x0048 | 0x004D | 0x0051 | 0x0104..=0x0107 | 0x010C..=0x010E => (0x002F, 0x002E),
+        0x003F | 0x0041 | 0x0102 | 0x0108 => (0x004F, 0x0058),
+        0x0040 | 0x0042..=0x0044 | 0x0049..=0x004C | 0x004E..=0x004F | 0x0109..=0x010B => (0x002D, 0x002C),
+        0x2A63 => (0x0187, 0x01C9),
+        _ => return None,
+    };
+    Some((SoundId(sounds.0), SoundId(sounds.1)))
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 struct NativeAudio {
     output: rodio::MixerDeviceSink,
@@ -93,8 +162,18 @@ struct NativeAudio {
     /// marks as playing once.
     looping: Option<PathBuf>,
     effect_volume: f32,
+    footsteps: HashMap<Option<Serial>, FootstepState>,
     unheard: HashSet<SoundId>,
     missing_tracks: HashSet<MusicId>,
+}
+
+/// The alternating sole of one walker.  It belongs to a mobile, not to the
+/// mixer: two people walking together must not make each other skip a beat.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, Default)]
+struct FootstepState {
+    next: Option<std::time::Instant>,
+    offset: u16,
 }
 
 /// A track as an installation names it: the file, without its extension, and
@@ -138,6 +217,7 @@ impl NativeAudio {
             music_names: music_names(client_dir),
             looping: None,
             effect_volume,
+            footsteps: HashMap::new(),
             unheard: HashSet::new(),
             missing_tracks: HashSet::new(),
         })
@@ -159,24 +239,36 @@ impl NativeAudio {
                 return;
             }
         };
-        use rodio::Source;
+        let [left, right] = world_volume(self.effect_volume, at, listener);
+        if left == 0.0 && right == 0.0 {
+            return;
+        }
         let source = rodio::buffer::SamplesBuffer::new(
             std::num::NonZeroU16::new(sound.channels).unwrap_or(std::num::NonZeroU16::MIN),
             std::num::NonZeroU32::new(sound.sample_rate).unwrap_or(std::num::NonZeroU32::MIN),
             sound.samples,
-        )
-        .amplify(self.effect_volume);
-        // World coordinates are deliberately left in tile units: Rodio's
-        // spatial attenuation is then the same distance that decided whether
-        // the shard broadcast the packet at all.
-        let emitter = point(at);
-        let origin = point(listener);
-        self.output.mixer().add(rodio::source::Spatial::new(
-            source,
-            emitter,
-            [origin[0] - 0.5, origin[1], origin[2]],
-            [origin[0] + 0.5, origin[1], origin[2]],
-        ));
+        );
+        // Rodio's `Spatial` uses inverse-square attenuation.  Its coordinates
+        // were tile coordinates here, so an effect ten tiles away was 1/100 as
+        // loud and most sounds seemed absent.  ClassicUO instead fades linearly
+        // over its 18-tile view.
+        self.output
+            .mixer()
+            .add(rodio::source::ChannelVolume::new(source, vec![left, right]));
+    }
+
+    fn play_footstep(&mut self, step: Footstep, listener: Point) {
+        if BodyKind::of(step.body) != BodyKind::Human || step.hidden || step.dead || is_ghost(step.body) {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let state = self.footsteps.entry(step.who).or_default();
+        if state.next.is_some_and(|next| now < next) {
+            return;
+        }
+        let (sound, delay) = footstep_sound(state, step);
+        state.next = Some(now + delay);
+        self.play_sound(sound, step.at, listener);
     }
 
     fn play_music(&mut self, track: MusicId) {
@@ -285,8 +377,35 @@ fn start_track(player: &rodio::Player, source: impl rodio::Source + Send + 'stat
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn point(point: Point) -> [f32; 3] {
-    [f32::from(point.x), f32::from(point.y), f32::from(point.z)]
+fn world_volume(effect_volume: f32, at: Point, listener: Point) -> [f32; 2] {
+    // ClassicUO's `AudioManager.PlaySoundWithDistance`: the view is 18 tiles,
+    // and the falloff is linear, including along a diagonal (Chebyshev range).
+    const VIEW_RANGE: u16 = 18;
+    let dx = i32::from(at.x) - i32::from(listener.x);
+    let dy = i32::from(at.y) - i32::from(listener.y);
+    let distance = dx.unsigned_abs().max(dy.unsigned_abs()) as u16;
+    let gain = effect_volume * (1.0 - f32::from(distance) / f32::from(VIEW_RANGE + 1));
+    if distance > VIEW_RANGE || gain <= 0.0 {
+        return [0.0, 0.0];
+    }
+    // ClassicUO leaves effects mono; distance changes their volume but not
+    // their balance.
+    [gain, gain]
+}
+
+/// ClassicUO's footstep selection and its 1.3x cadence, separated from device
+/// time so the table remains testable without an audio output.
+#[cfg(not(target_arch = "wasm32"))]
+fn footstep_sound(state: &mut FootstepState, step: Footstep) -> (SoundId, std::time::Duration) {
+    if step.mounted && step.running {
+        (SoundId(0x0129), std::time::Duration::from_millis(195))
+    } else if step.mounted {
+        (SoundId(0x012B), std::time::Duration::from_millis(455))
+    } else {
+        let sound = SoundId(0x012B + state.offset);
+        state.offset = (state.offset + 1) % 2;
+        (sound, std::time::Duration::from_millis(520))
+    }
 }
 
 /// Collect native music files once, accepting the capitalisation and file type
@@ -465,7 +584,9 @@ fn classic_track(track: MusicId) -> Option<Track> {
 mod tests {
     use std::num::{NonZeroU16, NonZeroU32};
 
+    use openshard_protocol::wire::{Graphic, SoundId};
     use openshard_protocol::world::MusicId;
+    use openshard_protocol::world::Point;
 
     /// A short buffer of silence — enough to be a source, and nothing is ever
     /// asked to play it.
@@ -600,6 +721,65 @@ mod tests {
         assert!(
             !player.is_paused(),
             "the music player is paused by `clear` and must be resumed after the track is queued"
+        );
+    }
+
+    #[test]
+    fn world_effects_fade_linearly_through_the_view() {
+        let listener = Point::new(100, 100, 0);
+        let here = super::world_volume(0.8, listener, listener);
+        let far = super::world_volume(0.8, Point::new(118, 100, 0), listener);
+        let absent = super::world_volume(0.8, Point::new(119, 100, 0), listener);
+        assert_eq!(here, [0.8, 0.8]);
+        assert!(
+            far[0] > 0.02 && far[1] > 0.02,
+            "the edge of sight is still audible"
+        );
+        assert_eq!(absent, [0.0, 0.0]);
+    }
+
+    #[test]
+    fn classic_container_gumps_keep_their_open_and_close_sounds() {
+        assert_eq!(
+            super::container_sounds(Graphic(0x003C)),
+            Some((SoundId(0x0048), SoundId(0x0058))),
+            "the classic backpack opens and closes audibly"
+        );
+        assert_eq!(
+            super::container_sounds(Graphic(0x003E)),
+            Some((SoundId(0x002F), SoundId(0x002E))),
+            "a chest keeps its own latch sounds"
+        );
+        assert_eq!(super::container_sounds(Graphic(0x9999)), None);
+    }
+
+    #[test]
+    fn classic_footsteps_alternate_and_keep_their_mounted_cadence() {
+        let step = |mounted, running| super::Footstep {
+            who: None,
+            body: Graphic(400),
+            at: Point::new(0, 0, 0),
+            running,
+            mounted,
+            hidden: false,
+            dead: false,
+        };
+        let mut state = super::FootstepState::default();
+        assert_eq!(
+            super::footstep_sound(&mut state, step(false, false)),
+            (SoundId(0x012B), std::time::Duration::from_millis(520))
+        );
+        assert_eq!(
+            super::footstep_sound(&mut state, step(false, true)),
+            (SoundId(0x012C), std::time::Duration::from_millis(520))
+        );
+        assert_eq!(
+            super::footstep_sound(&mut state, step(true, false)),
+            (SoundId(0x012B), std::time::Duration::from_millis(455))
+        );
+        assert_eq!(
+            super::footstep_sound(&mut state, step(true, true)),
+            (SoundId(0x0129), std::time::Duration::from_millis(195))
         );
     }
 }

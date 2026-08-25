@@ -1,5 +1,26 @@
 use super::*;
 
+/// ServUO's three coin clinks, chosen by the pile that was set down.
+const GOLD_DROP_SOUNDS: [SoundId; 3] = [SoundId(0x02E4), SoundId(0x02E5), SoundId(0x02E6)];
+
+/// The sound an item makes when it lands, or the destination's ordinary sound
+/// when the item has no sound of its own.
+///
+/// Gold is the one classic item whose sound depends on its amount: one coin,
+/// a handful, and a pile each ring differently.  This is ServUO's
+/// `Gold.GetDropSound`; carrying the rule beside stack merging prevents the
+/// backpack, ground and container paths from choosing different coin sounds.
+pub fn drop_sound(graphic: Graphic, amount: u16, fallback: SoundId) -> SoundId {
+    if graphic != GOLD_GRAPHIC {
+        return fallback;
+    }
+    match amount {
+        0 | 1 => GOLD_DROP_SOUNDS[0],
+        2..=5 => GOLD_DROP_SOUNDS[1],
+        _ => GOLD_DROP_SOUNDS[2],
+    }
+}
+
 /// Whether two items are one pile waiting to happen: both stackable, same
 /// graphic and hue, and not the same entity.
 pub fn can_stack(state: &WorldState, a: EntityId, b: EntityId) -> bool {
@@ -50,6 +71,12 @@ pub fn merge_onto(state: &mut WorldState, connection: ConnectionId, held: HeldIt
             return;
         }
         despawn_item(state, held.entity);
+        let sound = drop_sound(
+            state.registry.get::<Drawn>(target).expect("a stack has art").id,
+            amount_of(state, target),
+            SoundId(0x0042),
+        );
+        state.play_sound_to(player, sound);
         debug!("stacks merged");
     } else if let Some(ItemLocation::Settled(SettledItemLocation::Contained(contained))) = target_location {
         let container = contained.container;
@@ -71,6 +98,12 @@ pub fn merge_onto(state: &mut WorldState, connection: ConnectionId, held: HeldIt
         // The dragged stack was on a cursor, on no screen and in no gump, so
         // despawning it needs no packet of its own.
         despawn_item(state, held.entity);
+        let sound = drop_sound(
+            state.registry.get::<Drawn>(target).expect("a stack has art").id,
+            amount_of(state, target),
+            SoundId(0x0048),
+        );
+        state.play_sound_to(player, sound);
         debug!("stacks merged in a container");
     } else {
         // Worn, or nowhere placeable: nothing to merge onto.
@@ -140,5 +173,19 @@ pub fn redraw_ground_item(state: &mut WorldState, item: EntityId) {
         if let Some(packet) = state.draw_packet(watcher, item, version) {
             state.outbox.push(Outbound { connection, packet });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gold_uses_the_classic_amount_sensitive_clinks() {
+        let fallback = SoundId(0x0048);
+        assert_eq!(drop_sound(GOLD_GRAPHIC, 1, fallback), SoundId(0x02E4));
+        assert_eq!(drop_sound(GOLD_GRAPHIC, 5, fallback), SoundId(0x02E5));
+        assert_eq!(drop_sound(GOLD_GRAPHIC, 6, fallback), SoundId(0x02E6));
+        assert_eq!(drop_sound(Graphic(0x0F5E), 1, fallback), fallback);
     }
 }

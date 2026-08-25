@@ -17,14 +17,25 @@ use openshard_protocol::items::{CORPSE_GRAPHIC, WorldItemPayload};
 use openshard_protocol::localized;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::speech::LocalizedMessage;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{Graphic, Hue, Layer, SoundId};
 use openshard_protocol::world::Point;
 use openshard_uofiles::anim::is_ghost;
 use openshard_uofiles::cliloc::{Cliloc, ClilocNumber};
 
 use crate::app::App;
+use crate::audio::Footstep;
 use crate::world::{MotionRenderState, advance_presentation_to, footing};
 use crate::{clutter, crowd, link};
+
+/// Whether two authoritative positions are one ordinary movement step apart.
+/// A relocation must not sound like somebody walked across the map.
+fn is_step(from: Point, to: Point) -> bool {
+    from != to && from.x.abs_diff(to.x) <= 1 && from.y.abs_diff(to.y) <= 1
+}
+
+fn mounted(equipment: &[openshard_protocol::mobile::Equipment]) -> bool {
+    equipment.iter().any(|item| item.layer == Layer::MOUNT)
+}
 
 /// The navigation worker's whole body: find the graph beside this world, or
 /// build it and keep it there.
@@ -465,6 +476,14 @@ impl App {
             ),
             link::Update::Animation(_) => ("animation", String::new()),
             link::Update::NewAnimation(_) => ("new animation", String::new()),
+            link::Update::SwingTiming(timing) => (
+                "swing timing",
+                format!(
+                    "serial={} duration_ms={}",
+                    timing.serial,
+                    timing.duration.millis()
+                ),
+            ),
             link::Update::Design(bytes) => ("design", format!("bytes={}", bytes.len())),
             link::Update::Ground { snapshot, .. } => (
                 "ground",
@@ -521,6 +540,7 @@ impl App {
             link::Update::Mutation { packet } => self.fold_incoming(&packet),
             link::Update::Animation(animation) => self.world.presentation.crowd.play(animation),
             link::Update::NewAnimation(animation) => self.world.presentation.crowd.play_new(animation),
+            link::Update::SwingTiming(timing) => self.world.presentation.crowd.time_swing(timing),
             // The connection ended, for any of the reasons the shard thread
             // returns: the socket closed, a packet would not frame, the player
             // logged out. Three things happen and the reason for all three is
@@ -673,8 +693,13 @@ impl App {
 
     /// Apply a local UI mutation on the same thread that owns `WorldView`.
     pub(crate) fn apply_close_window(&mut self, target: link::CloseTarget) {
+        let listener = self.world.motion.planning_state().position;
         let Some(view) = self.world.authoritative.view.as_mut() else {
             return;
+        };
+        let container_gump = match target {
+            link::CloseTarget::Container(serial) => view.containers.get(&serial).copied(),
+            _ => None,
         };
         match target {
             link::CloseTarget::Paperdoll(serial) => view.paperdoll_closed(serial),
@@ -682,6 +707,9 @@ impl App {
             link::CloseTarget::Gump(gump_id) => view.gump_closed(gump_id),
             link::CloseTarget::Spellbook(serial) => view.spellbook_closed(serial),
         };
+        if let Some(gump) = container_gump {
+            self.audio.play_container_sound(gump, false, listener);
+        }
     }
 
     /// Apply one network mutation on the event-loop thread. This is the only
@@ -750,6 +778,7 @@ impl App {
     }
 
     fn apply_packet(&mut self, packet: &ServerPacket, movement: Option<link::Movement>) {
+        let listener = self.world.motion.planning_state().position;
         if let ServerPacket::MapEditReply(reply) = packet {
             self.map_editor.on_reply(*reply);
             if let Some(snapshot) = self.resources.ground.snapshot() {
@@ -768,6 +797,13 @@ impl App {
                     .locally_closed
                     .remove(&crate::windows::WindowSubject::Vendor(open.container));
             }
+            self.audio.play_container_sound(open.gump, true, listener);
+        }
+        // ClassicUO opens its spellbook gump when this packet arrives and
+        // plays the standard page sound.  The book content is the whole
+        // opening packet in this client too; later casts do not replay it.
+        if matches!(packet, ServerPacket::SpellbookContent(_)) {
+            self.audio.play_ui_sound(SoundId(0x0055), listener);
         }
         // And the same for a dialog, for the same reason one layer over: a reply
         // button closes the window at this end (see `App::answer_gump`), so a
@@ -839,8 +875,34 @@ impl App {
         // identical packet must play twice, while a view fold can correctly be
         // a no-op.  Take the listener from the same authoritative anchor the
         // camera follows, before this packet has a chance to replace it.
-        self.audio
-            .play_packet(packet, self.world.motion.planning_state().position);
+        self.audio.play_packet(packet, listener);
+        // Footsteps are a client effect, not a server packet.  A `0x77` gives
+        // us the completed remote step; its preceding snapshot supplies the
+        // mount layer that the short move packet does not carry.  Do this before
+        // folding the packet so a first sighting and a teleport stay silent.
+        if let ServerPacket::MobileMove(moved) = packet {
+            if let Some(previous) = self
+                .world
+                .authoritative
+                .view
+                .as_ref()
+                .and_then(|view| view.mobiles.get(&moved.serial))
+                .filter(|previous| is_step(previous.position, moved.position))
+            {
+                self.audio.play_footstep(
+                    Footstep {
+                        who: Some(moved.serial),
+                        body: moved.body,
+                        at: moved.position,
+                        running: moved.facing.running,
+                        mounted: mounted(&previous.equipment),
+                        hidden: moved.flags.0 & 0x80 != 0,
+                        dead: false,
+                    },
+                    listener,
+                );
+            }
+        }
         let Some(mut view) = self.world.authoritative.view.take() else {
             return;
         };
@@ -925,7 +987,29 @@ impl App {
         body: link::Body,
         sequence: openshard_protocol::world::StepSequence,
     ) {
+        let from = self.world.motion.planning_state();
         self.world.motion.accept_local(body, sequence);
+        if is_step(from.position, body.predicted.position) {
+            let (mounted, dead) = self
+                .world
+                .authoritative
+                .view
+                .as_ref()
+                .map(|view| (mounted(&view.player.equipment), view.player.dead))
+                .unwrap_or((false, false));
+            self.audio.play_footstep(
+                Footstep {
+                    who: self.world.me(),
+                    body: self.world.presentation.player.body,
+                    at: body.predicted.position,
+                    running: body.predicted.facing.running,
+                    mounted,
+                    hidden: false,
+                    dead,
+                },
+                body.predicted.position,
+            );
+        }
         self.world.presentation.crowd.commanding(self.world.me());
         self.project_player_motion();
         // Keep the roof decision on the same predicted body *only* when the

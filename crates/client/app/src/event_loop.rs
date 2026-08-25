@@ -280,10 +280,10 @@ impl ApplicationHandler<()> for App {
                     }
                     return;
                 }
-                // ClassicUO's default Tab action is held: it enters war mode
-                // on the first press and returns to peace mode on release.
-                // Handle both states before the pressed-only hotkeys below so
-                // an operating-system repeat cannot act as another press.
+                // Tab toggles war mode on its first press. Handle both states
+                // before the pressed-only hotkeys below so an operating-system
+                // repeat cannot act as another press; release merely resets
+                // the remembered key state.
                 //
                 // This arm is reached at all only because egui is never handed a
                 // `Tab` — see `keyboard::egui_may_see`. It used to be reached

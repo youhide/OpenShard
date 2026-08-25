@@ -26,6 +26,7 @@ use std::path::Path;
 
 use openshard_client_render::atlas::TextSize;
 use openshard_client_render::light;
+use openshard_protocol::speech::Font;
 use serde::{Deserialize, Serialize};
 
 /// Where the state lives: beside `openshard.toml`, in the working directory.
@@ -454,6 +455,85 @@ pub struct FontSizes {
     pub stack_count: TextSize,
 }
 
+/// Which text face the client draws when an operator supplied a TrueType font.
+///
+/// `Automatic` keeps the behaviour of every saved desk made before this choice
+/// existed: use the supplied face when there is one, otherwise the classic
+/// bitmap face. The other two choices are remembered from F1.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FontFace {
+    #[default]
+    Automatic,
+    Classic,
+    TrueType,
+}
+
+impl FontFace {
+    /// Whether this choice draws the supplied TrueType face.
+    pub const fn uses_ttf(self, available: bool) -> bool {
+        match self {
+            Self::Automatic => available,
+            Self::Classic => false,
+            Self::TrueType => available,
+        }
+    }
+}
+
+/// One of the ten bitmap faces a client ships in `fonts.mul`.
+///
+/// Kept separate from the wire [`Font`]: a packet may carry any `u16` and is
+/// validated by the asset atlas at draw time, while this is a player setting
+/// with exactly ten meaningful choices.  The manual serde implementation
+/// makes a hand-edited `client_ui.toml` stay inside that table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BitmapFont(u16);
+
+impl BitmapFont {
+    /// How many faces `fonts.mul` contains.
+    pub const COUNT: u16 = openshard_uofiles::font::FONT_COUNT as u16;
+
+    /// Build a face selection, clamped to a real face.
+    #[must_use]
+    pub const fn new(face: u16) -> Self {
+        Self(if face >= Self::COUNT {
+            Self::COUNT - 1
+        } else {
+            face
+        })
+    }
+
+    /// Its `fonts.mul` index, for the F1 selector.
+    #[must_use]
+    pub const fn index(self) -> u16 {
+        self.0
+    }
+
+    /// The wire-font value every bitmap text collector expects.
+    #[must_use]
+    pub const fn font(self) -> Font {
+        Font(self.0)
+    }
+}
+
+impl Default for BitmapFont {
+    fn default() -> Self {
+        Self::new(Font::DEFAULT.0)
+    }
+}
+
+impl Serialize for BitmapFont {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for BitmapFont {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self::new(u16::deserialize(deserializer)?))
+    }
+}
+
 impl Default for FontSizes {
     /// Sixteen for a voice, fourteen for a window, eleven for a count.
     ///
@@ -645,6 +725,15 @@ pub struct Desk {
     /// the same reason the window's own place is — a person who has found the
     /// size they can read should not have to find it again every launch.
     pub fonts: FontSizes,
+    /// Which face draws text when this run has an operator-supplied TTF.
+    pub font_face: FontFace,
+    /// Replace every bitmap font requested by the shard or one of this
+    /// client's windows with [`Desk::bitmap_font`].  This is the reference
+    /// client's "override all fonts" setting; off preserves the packet's
+    /// chosen face exactly.
+    pub override_all_fonts: bool,
+    /// The classic face used while [`Desk::override_all_fonts`] is on.
+    pub bitmap_font: BitmapFont,
     /// What the audio mixer has been turned to — [`Audio`].
     pub audio: Audio,
     /// Movement preferences, saved beside the rest of the client UI state.
@@ -681,6 +770,9 @@ impl Default for Desk {
             zoom: Zoom::default(),
             window_scale: WindowScale::default(),
             fonts: FontSizes::default(),
+            font_face: FontFace::default(),
+            override_all_fonts: false,
+            bitmap_font: BitmapFont::default(),
             light: Light::new(),
             window: None,
             chat: Chat::default(),
@@ -822,6 +914,9 @@ mod tests {
                 tooltip: TextSize::new(12.5),
                 stack_count: TextSize::new(9.5),
             },
+            font_face: FontFace::Classic,
+            override_all_fonts: true,
+            bitmap_font: BitmapFont::new(7),
             audio: Audio {
                 effects: 0.25,
                 music: 0.75,
@@ -841,6 +936,9 @@ mod tests {
         assert_eq!(back.window, desk.window);
         assert_eq!(back.light, desk.light);
         assert_eq!(back.chat, desk.chat);
+        assert_eq!(back.font_face, desk.font_face);
+        assert_eq!(back.override_all_fonts, desk.override_all_fonts);
+        assert_eq!(back.bitmap_font, desk.bitmap_font);
         assert_eq!(back.audio, desk.audio);
         assert_eq!(back.movement.always_run, desk.movement.always_run);
         assert_eq!(back.movement.auto_open_doors, desk.movement.auto_open_doors);
@@ -856,6 +954,22 @@ mod tests {
     #[test]
     fn the_saved_light_is_the_renderers_own_default() {
         assert_eq!(Light::new().tuning(), light::Tuning::DEFAULT);
+    }
+
+    #[test]
+    fn automatic_font_choice_preserves_the_old_startup_rule() {
+        assert!(FontFace::Automatic.uses_ttf(true));
+        assert!(!FontFace::Automatic.uses_ttf(false));
+        assert!(!FontFace::Classic.uses_ttf(true));
+        assert!(FontFace::TrueType.uses_ttf(true));
+        assert!(!FontFace::TrueType.uses_ttf(false));
+    }
+
+    #[test]
+    fn a_hand_edited_bitmap_font_stays_inside_fonts_mul() {
+        let desk: Desk = toml::from_str("override_all_fonts = true\nbitmap_font = 999").unwrap();
+        assert!(desk.override_all_fonts);
+        assert_eq!(desk.bitmap_font.index(), BitmapFont::COUNT - 1);
     }
 
     /// And a hand-edited file is an input: every number in it goes through the

@@ -29,7 +29,7 @@ use openshard_uofiles::color::Rgb8;
 use openshard_uofiles::font::{AsciiFonts, FONT_COUNT};
 use openshard_uofiles::image::Image;
 use openshard_uofiles::texmaps::{TexMapError, TexMaps};
-use openshard_uofiles::ttf_font::{TtfFont, TtfGlyph};
+use openshard_uofiles::ttf_font::{TtfFont, TtfGlyph, TtfLineMetrics};
 
 /// The atlas texture's side, in pixels.
 ///
@@ -2148,6 +2148,10 @@ pub struct GlyphKey {
 /// but allocate no texture rectangle.
 pub struct FontAtlas {
     sprites: BTreeMap<GlyphKey, Sprite>,
+    /// Visible (not cell) height of each glyph.  `fonts.mul` cells include
+    /// transparent top and bottom padding, so UI line spacing must not use a
+    /// sprite rectangle as though every row were ink.
+    ink_heights: BTreeMap<GlyphKey, u16>,
     /// `ATLAS_SIDE * ATLAS_SIDE` RGBA8 pixels, row-major.
     pixels: Vec<u8>,
 }
@@ -2201,6 +2205,10 @@ impl FontAtlas {
         let side = ATLAS_SIDE as usize;
         let mut pixels = vec![0u8; side * side * 4];
         let mut sprites = BTreeMap::new();
+        let ink_heights = images
+            .iter()
+            .filter_map(|(key, image)| image.ink_bounds().map(|bounds| (*key, bounds.height)))
+            .collect();
         let wanted = images.len();
         let mut shelf = Shelf::default();
 
@@ -2254,7 +2262,11 @@ impl FontAtlas {
             );
         }
 
-        Ok(Self { sprites, pixels })
+        Ok(Self {
+            sprites,
+            ink_heights,
+            pixels,
+        })
     }
 
     /// The atlas texture's side in pixels. Square, like every other atlas here.
@@ -2282,6 +2294,12 @@ impl FontAtlas {
     /// `fonts.mul`'s 224-entry table.
     pub fn glyph(&self, font: Font, char: u8) -> Option<Sprite> {
         self.sprites.get(&GlyphKey { font, char }).copied()
+    }
+
+    /// Visible ink height of a packed glyph, excluding transparent padding.
+    #[must_use]
+    pub fn glyph_ink_height(&self, font: Font, char: u8) -> Option<u16> {
+        self.ink_heights.get(&GlyphKey { font, char }).copied()
     }
 }
 
@@ -2388,6 +2406,11 @@ pub struct TtfAtlas {
     /// count be smaller than a spoken line without a second texture, a second
     /// bind group and a second pass; see `docs/text_sizes.md`'s D2.
     sprites: BTreeMap<(char, TextSize), TtfSprite>,
+    /// The source face's baseline and line step for every rasterized size.
+    /// Stored with the atlas because layout only receives an atlas after glyphs
+    /// have been grown; it must not recreate or separately own the TTF parser
+    /// merely to position a line.
+    metrics: BTreeMap<TextSize, TtfLineMetrics>,
     /// Every (character, size) ever asked for, whether or not it drew ink.
     /// Same purpose as the other atlases' `asked` sets: a character with no
     /// glyph — impossible for a TrueType face, which always has `.notdef` —
@@ -2416,6 +2439,7 @@ impl TtfAtlas {
         let side = ATLAS_SIDE as usize;
         Self {
             sprites: BTreeMap::new(),
+            metrics: BTreeMap::new(),
             asked: BTreeSet::new(),
             shelf: Shelf::default(),
             pixels: vec![0u8; side * side * 4],
@@ -2450,6 +2474,9 @@ impl TtfAtlas {
         wanted: impl IntoIterator<Item = char>,
     ) -> Result<(), AtlasError> {
         let wanted: BTreeSet<char> = wanted.into_iter().collect();
+        self.metrics
+            .entry(size)
+            .or_insert_with(|| font.line_metrics(size.pixels()));
         let fresh: Vec<char> = wanted
             .into_iter()
             .filter(|&ch| !self.asked.contains(&(ch, size)))
@@ -2505,6 +2532,7 @@ impl TtfAtlas {
     /// is what the old re-bake on every size change cost *every* time.
     pub fn reset(&mut self) {
         self.sprites.clear();
+        self.metrics.clear();
         self.asked.clear();
         self.shelf = Shelf::default();
         self.pixels.fill(0);
@@ -2644,6 +2672,14 @@ impl TtfAtlas {
     /// spoken line's size the moment somebody had spoken.
     pub fn glyph(&self, ch: char, size: TextSize) -> Option<TtfSprite> {
         self.sprites.get(&(ch, size)).copied()
+    }
+
+    /// The source face's measured line grid at `size`, if this atlas has been
+    /// grown through a real [`TtfFont`].  Test-only [`Self::pack`] atlases have
+    /// glyph placement data but intentionally no invented face metrics.
+    #[must_use]
+    pub fn line_metrics(&self, size: TextSize) -> Option<TtfLineMetrics> {
+        self.metrics.get(&size).copied()
     }
 }
 
@@ -3214,6 +3250,48 @@ mod tests {
         let space = atlas.glyph(Font(0), b' ').expect("spacing entry is retained");
         assert_eq!((space.width, space.height), (40, 0));
         assert_eq!((space.region.du, space.region.dv), (0.0, 0.0));
+    }
+
+    /// Chat and tooltip rows are spaced from actual ink, not a `fonts.mul`
+    /// cell whose transparent leading rows happen to make one face taller.
+    #[test]
+    fn a_glyphs_ink_height_excludes_its_transparent_cell_padding() {
+        let atlas = FontAtlas::pack([(
+            GlyphKey {
+                font: Font(3),
+                char: b'M',
+            },
+            Image::new(
+                3,
+                7,
+                vec![
+                    Color16(0),
+                    Color16(0),
+                    Color16(0),
+                    Color16(0),
+                    Color16(7),
+                    Color16(0),
+                    Color16(0),
+                    Color16(7),
+                    Color16(0),
+                    Color16(0),
+                    Color16(7),
+                    Color16(0),
+                    Color16(0),
+                    Color16(0),
+                    Color16(0),
+                    Color16(0),
+                    Color16(0),
+                    Color16(0),
+                    Color16(0),
+                    Color16(0),
+                    Color16(0),
+                ],
+            ),
+        )])
+        .expect("one glyph fits");
+        assert_eq!(atlas.glyph(Font(3), b'M').unwrap().height, 7);
+        assert_eq!(atlas.glyph_ink_height(Font(3), b'M'), Some(3));
     }
 
     /// The same character in two different faces is two different glyphs, not

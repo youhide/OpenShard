@@ -33,12 +33,94 @@
 //! `HuedEffect` today, so there is nothing to classify against; wrapping it
 //! would be a guess with no caller to check it against.
 
+use crate::access::OPENSHARD_SUBCOMMANDS;
 use crate::codec::PacketWriter;
 use crate::packet::{DecodePacket, EncodePacket, PacketLength};
 use crate::serial::{Serial, raw_or_none};
 use crate::version::ClientVersion;
 use crate::wire::{Graphic, Hue, SoundId};
 use crate::world::Point;
+
+/// The ordinary client cadence for a mobile-animation frame.
+///
+/// A zero `delay` in either animation packet means this value rather than an
+/// instantaneous action. Shared by the server's wind-up scheduler and the
+/// client's action clock so the impact window is measured from one fact.
+pub const DEFAULT_ANIMATION_FRAME_MS: u64 = 80;
+
+/// A swing interval expressed in milliseconds on the wire.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SwingDuration(pub u32);
+
+impl SwingDuration {
+    /// Duration in milliseconds.
+    #[must_use]
+    pub const fn millis(self) -> u32 {
+        self.0
+    }
+}
+
+/// `0xBF` subcommand `0xE00B` — a swing animation begins now and occupies the
+/// supplied duration before its authoritative impact.
+///
+/// The stock animation packets can only carry an eight-bit per-frame delay,
+/// which cannot represent a several-second heavy swing. This OpenShard
+/// extension carries the whole duration as `u32`; it is sent immediately before
+/// the ordinary `0x6E`/`0xE2`, so a client that understands it stretches that
+/// action and a stock client simply ignores the unknown extended command.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SwingTiming {
+    /// The mobile whose next animation this timing belongs to.
+    pub serial: Serial,
+    /// Total time from the first frame to the impact.
+    pub duration: SwingDuration,
+}
+
+impl SwingTiming {
+    /// The extended-command envelope.
+    pub const ID: u8 = 0xBF;
+    /// The first OpenShard subcommand after the map-edit request/reply pair.
+    pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 11;
+    /// Id, length, subcommand, serial and duration.
+    pub const LENGTH_BYTES: u16 = 13;
+}
+
+impl EncodePacket for SwingTiming {
+    const ID: u8 = Self::ID;
+    const LENGTH: PacketLength = PacketLength::Fixed(Self::LENGTH_BYTES);
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u16(Self::LENGTH_BYTES);
+        out.u16(Self::SUBCOMMAND);
+        out.u32(self.serial.raw());
+        out.u32(self.duration.0);
+    }
+}
+
+impl DecodePacket for SwingTiming {
+    const ID: u8 = Self::ID;
+
+    fn decode_body(
+        reader: &mut crate::codec::PacketReader<'_>,
+        _version: ClientVersion,
+    ) -> Result<Self, crate::error::DecodeError> {
+        let subcommand = reader.u16()?;
+        if subcommand != Self::SUBCOMMAND {
+            return Err(crate::error::DecodeError::UnknownValue {
+                field: "0xBF subcommand for swing timing",
+                value: u32::from(subcommand),
+            });
+        }
+        let serial = Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
+            field: "swing timing serial",
+            value: 0,
+        })?;
+        Ok(Self {
+            serial,
+            duration: SwingDuration(reader.u32()?),
+        })
+    }
+}
 
 /// `0x54` — play a sound at a world location. 12 bytes.
 ///
@@ -327,7 +409,7 @@ impl EncodePacket for HuedEffect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::encode_packet;
+    use crate::packet::{decode_packet, encode_packet};
 
     fn version() -> ClientVersion {
         ClientVersion::new(7, 0, 45, 65)
@@ -402,6 +484,22 @@ mod tests {
         assert_eq!(&packet[5..7], &[0x00, 0x05], "type");
         assert_eq!(&packet[7..9], &[0x00, 0x09], "action");
         assert_eq!(packet[9], 0x01, "delay");
+    }
+
+    #[test]
+    fn swing_timing_carries_a_multi_second_duration() {
+        let timing = SwingTiming {
+            serial: mobile(0x0000_1234),
+            duration: SwingDuration(5_000),
+        };
+        let packet = encode_packet(&timing, version());
+        assert_eq!(packet.len(), usize::from(SwingTiming::LENGTH_BYTES));
+        assert_eq!(packet[0], SwingTiming::ID);
+        assert_eq!(&packet[1..3], &SwingTiming::LENGTH_BYTES.to_be_bytes());
+        assert_eq!(&packet[3..5], &SwingTiming::SUBCOMMAND.to_be_bytes());
+        assert_eq!(&packet[5..9], &0x0000_1234_u32.to_be_bytes());
+        assert_eq!(&packet[9..13], &5_000_u32.to_be_bytes());
+        assert_eq!(decode_packet::<SwingTiming>(&packet, version()), Ok(timing));
     }
 
     #[test]

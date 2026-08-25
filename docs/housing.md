@@ -400,15 +400,14 @@ plaque and not for a person.
 a lookup this engine has no verb for and *picking* one is what the reference's own
 sign does. When the sign exists it is a window over exactly these five calls.
 
-**The sign is up, and its position is the one number the reference derives.**
-ServUO's fourteen classic houses each declare theirs — `SetSign(2, 4, 5)`,
-`SetSign(5, 12, 16)` — which is the same per-house-type table the doors are, and
-for the same reason it is not copied. But its *customisable* houses cannot have
-one, because the multi is built at run time, so `HouseFoundation` computes a spot:
-`Components.Min.X`, `Components.Height - 1 - Components.Center.Y`, `z + 7`.
-Reduce that against `Multi::center`'s own definition and the y is just `max_y` —
-so the rule is **the box's west-south corner**, and it holds for every multi
-rather than only the ones somebody typed a number for.
+**The sign is up.** ServUO's fourteen classic house types each declare theirs —
+`SetSign(2, 4, 5)`, `SetSign(5, 12, 16)` — which is the same kind of
+per-house-type table as the doors and is kept alongside the placement rule. Its
+*customisable* houses cannot have one, because the multi is built at run time,
+so `HouseFoundation` computes a spot: `Components.Min.X`,
+`Components.Height - 1 - Components.Center.Y`, `z + 7`. Reduce that against
+`Multi::center`'s own definition and the y is just `max_y` — so the rule for a
+designed foundation is **the box's west-south corner**.
 
 The arithmetic is `uofiles::multi::bounds`, pulled out of `Multi::new` and made
 public so the sign asks the same function the centre was computed by. A second

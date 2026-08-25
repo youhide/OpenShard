@@ -294,8 +294,9 @@ impl World {
                 openshard_protocol::wire::MultiId(record.multi),
             );
             // Rebuilt rather than restored, for the module header's reason: the
-            // sign's spot is a pure function of the multi's box, and a saved copy
-            // of it would go stale the day the operator updates their install.
+            // sign's spot is a pure function of the classic house type or a
+            // designed foundation's box, and a saved copy would go stale when a
+            // design changes.
             // A shard with no client files gets no sign, the same bargain the
             // walls make.
             openshard_housing::hang_sign(

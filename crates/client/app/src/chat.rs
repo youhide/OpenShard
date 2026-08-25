@@ -158,19 +158,39 @@ pub(crate) fn room_above(canvas_height: i32, line_height: i32) -> usize {
 /// One row of the chat column, in gump pixels.
 ///
 /// The two faces are spaced by two different things, because they are sized by
-/// two different things: `fonts.mul` has a fixed height per face and an
-/// integer `desk::ChatScale` on top of it, and a TrueType face has a real
-/// size — [`desk::FontSizes::speech`] — which is already in the gump pixels
-/// this answers in. So the TrueType row is the size the player asked for, and
-/// the rows move apart when they turn it up rather than staying put and
-/// overlapping. See `docs/text_sizes.md`.
+/// two different things: `fonts.mul` uses the selected face's measured visible
+/// `M` height and an integer `desk::ChatScale`; a TrueType face uses its
+/// measured ascent/descent/line-gap at [`desk::FontSizes::speech`].  Both are
+/// real rows, not nominal raster sizes, so changing a face cannot make the
+/// pointer and the rendered chat disagree. See `docs/text_sizes.md`.
 ///
 /// A function and not a line inside the draw, for [`channel_width`]'s reason:
 /// the pointer has to land on the same row the frame drew.
-pub(crate) fn line_height(truetype: bool, chat_style: desk::Chat, fonts: desk::FontSizes) -> i32 {
+pub(crate) fn line_height(
+    truetype: bool,
+    chat_style: desk::Chat,
+    fonts: desk::FontSizes,
+    bitmap_font: Font,
+    font_atlas: &openshard_client_render::atlas::FontAtlas,
+    ttf_font: Option<&openshard_uofiles::ttf_font::TtfFont>,
+    density: f32,
+) -> i32 {
     match truetype {
-        true => fonts.speech.pixels().round() as i32,
-        false => CHAT_LINE_HEIGHT * chat_style.scale.glyph_scale_factor() as i32,
+        true => ttf_font.map_or_else(
+            || fonts.speech.pixels().round() as i32,
+            |font| {
+                let real = font
+                    .line_metrics(fonts.speech.scaled(density).pixels())
+                    .line_height;
+                (real as f32 / density).round() as i32
+            },
+        ),
+        false => {
+            font_atlas
+                .glyph_ink_height(bitmap_font, b'M')
+                .map_or(CHAT_LINE_HEIGHT, |height| i32::from(height) + 2)
+                * chat_style.scale.glyph_scale_factor() as i32
+        }
     }
 }
 
@@ -242,12 +262,13 @@ pub(crate) fn channel_width(
     ttf: Option<(&openshard_client_render::atlas::TtfAtlas, TextSize)>,
     magnify: i32,
     scale: f32,
+    bitmap_font: Font,
 ) -> i32 {
     let widest = Channel::ALL
         .iter()
         .map(|channel| match ttf {
             Some((atlas, size)) => text::gump_width_ttf(channel.label(), atlas, size),
-            None => text::gump_width(channel.label(), Font::DEFAULT, font_atlas) * magnify,
+            None => text::gump_width(channel.label(), bitmap_font, font_atlas) * magnify,
         })
         .max()
         .unwrap_or_default();
@@ -730,11 +751,12 @@ impl crate::app::App {
         };
         let scale = self.gump_scale();
         let chat_style = self.chat_style();
-        // `ttf_atlas` is `Some` exactly when a face is set (`create_window`), so
-        // this reads the face rather than the atlas and cannot pick the
-        // TrueType arithmetic for a `fonts.mul` frame.
-        let truetype = self.resources.ttf_font.is_some();
+        // `ttf_atlas` is `Some` exactly when a face was supplied at startup;
+        // F1 still chooses whether this frame draws through it or the classic
+        // bitmap atlas.
+        let truetype = self.ttf_active();
         let fonts = self.font_sizes();
+        let bitmap_font = self.bitmap_font_override().unwrap_or(Font::DEFAULT);
         // The size the frame drew this line at, density and all — the pointer
         // has to measure the button against the same glyphs that are on the
         // screen, and those were rasterized at the real size.
@@ -747,12 +769,21 @@ impl crate::app::App {
         let button = at_chat_origin(
             channel_button(
                 canvas.y,
-                line_height(truetype, chat_style, fonts),
+                line_height(
+                    truetype,
+                    chat_style,
+                    fonts,
+                    bitmap_font,
+                    &self.resources.font_atlas,
+                    self.resources.ttf_font.as_ref(),
+                    scale,
+                ),
                 channel_width(
                     &self.resources.font_atlas,
                     ttf,
                     chat_style.scale.glyph_scale_factor() as i32,
                     scale,
+                    bitmap_font,
                 ),
             ),
             origin,
@@ -788,6 +819,8 @@ pub(crate) fn draw_chat_and_speech(
     view: &wgpu::TextureView,
     chat_style: desk::Chat,
     fonts: desk::FontSizes,
+    ttf_active: bool,
+    bitmap_font_override: Option<Font>,
     window_text_quads: &mut Vec<SpriteQuad>,
     window_ttf_quads: &mut Vec<SpriteQuad>,
 ) {
@@ -800,8 +833,16 @@ pub(crate) fn draw_chat_and_speech(
     // this is that arithmetic done once for where the corner is
     // rather than for every quad in it.
     let (origin, canvas) = chat_canvas(shell, window, scale);
-    let font = Font::DEFAULT;
-    let line_height = line_height(resources.ttf_font.is_some(), chat_style, fonts);
+    let font = bitmap_font_override.unwrap_or(Font::DEFAULT);
+    let line_height = line_height(
+        ttf_active,
+        chat_style,
+        fonts,
+        font,
+        &resources.font_atlas,
+        resources.ttf_font.as_ref(),
+        scale,
+    );
     let input_at = GumpPixel::new(
         origin.x + CHAT_MARGIN,
         origin.y + canvas.y - CHAT_MARGIN - line_height,
@@ -869,7 +910,7 @@ pub(crate) fn draw_chat_and_speech(
                 true => line.text.clone(),
                 false => format!("{}: {}", line.name, line.text),
             };
-            rows.push((at, line.hue, line.font, text));
+            rows.push((at, line.hue, bitmap_font_override.unwrap_or(line.font), text));
         }
     }
     // What stands on the input line beside the button: the line as typed, or —
@@ -910,13 +951,14 @@ pub(crate) fn draw_chat_and_speech(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| (elapsed.as_millis() / 500) % 2 == 0)
         .unwrap_or(true);
-    // `fonts.mul` has no Cyrillic past `0xFF` — see `run`'s
-    // `--ttf-font` doc — and this is the box a player actually reads
-    // what they typed back from, so unlike the dialog captions
-    // `window_text_quads` carries below, this switches to `App::ttf_font`
-    // and `Screen::ttf_gump_pass` whenever one is set rather than
-    // drawing a line nobody can read the second half of.
-    if let Some(font) = &resources.ttf_font {
+    // `fonts.mul` is CP1251 and carries Cyrillic; F1 may deliberately select
+    // it for its pixel look. The choice reaches this input line as well as
+    // every other text role.
+    if ttf_active {
+        let font = resources
+            .ttf_font
+            .as_ref()
+            .expect("an active TrueType choice has a configured face");
         let atlas = window
             .ttf_atlas
             .as_mut()
@@ -960,7 +1002,13 @@ pub(crate) fn draw_chat_and_speech(
             channel_button(
                 canvas.y,
                 line_height,
-                channel_width(&resources.font_atlas, Some((&*atlas, speech_size)), 1, scale),
+                channel_width(
+                    &resources.font_atlas,
+                    Some((&*atlas, speech_size)),
+                    1,
+                    scale,
+                    Font::DEFAULT,
+                ),
             ),
             origin,
         );
@@ -1049,7 +1097,7 @@ pub(crate) fn draw_chat_and_speech(
             channel_button(
                 canvas.y,
                 line_height,
-                channel_width(&resources.font_atlas, None, magnify, scale),
+                channel_width(&resources.font_atlas, None, magnify, scale, font),
             ),
             origin,
         );
@@ -1140,9 +1188,13 @@ pub(crate) fn draw_chat_and_speech(
 
 #[cfg(test)]
 mod tests {
+    use openshard_client_render::atlas::{FontAtlas, GlyphKey};
     use openshard_client_render::gump::GumpPixel;
     use openshard_commands::StaffCommand;
     use openshard_protocol::access::AccessLevel;
+    use openshard_protocol::speech::Font;
+    use openshard_uofiles::color::Color16;
+    use openshard_uofiles::image::Image;
 
     use super::{Channel, Chat, Offer};
 
@@ -1166,6 +1218,45 @@ mod tests {
         };
         chat.insert(line, authority);
         chat
+    }
+
+    #[test]
+    fn a_bitmap_chat_row_uses_visible_ink_not_the_glyph_cell_height() {
+        let atlas = FontAtlas::pack([(
+            GlyphKey {
+                font: Font(0),
+                char: b'M',
+            },
+            Image::new(
+                1,
+                9,
+                vec![
+                    Color16(0),
+                    Color16(0),
+                    Color16(7),
+                    Color16(7),
+                    Color16(7),
+                    Color16(0),
+                    Color16(0),
+                    Color16(0),
+                    Color16(0),
+                ],
+            ),
+        )])
+        .expect("one glyph fits");
+        assert_eq!(
+            super::line_height(
+                false,
+                crate::desk::Chat::default(),
+                crate::desk::FontSizes::default(),
+                Font(0),
+                &atlas,
+                None,
+                1.0,
+            ),
+            10,
+            "(three visible rows plus two pixels of air) at the default 2x bitmap scale, not the nine-row cell"
+        );
     }
 
     #[test]

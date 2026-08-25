@@ -28,9 +28,8 @@ pub struct Input {
     pub ctrl_held: bool,
     /// Whether Shift is held; a stack drag reads it to request a partial amount.
     pub shift_held: bool,
-    /// Whether Tab is currently held for war mode. It must be remembered here
-    /// rather than inferred from key-repeat events, which do not describe a
-    /// second press and must not produce a second request.
+    /// Whether Tab is currently held. It prevents key-repeat events from
+    /// toggling war mode again; the key release only permits the next toggle.
     pub war_mode_held: bool,
     /// When the last left click landed, or `None` when the one before it
     /// already made a pair.

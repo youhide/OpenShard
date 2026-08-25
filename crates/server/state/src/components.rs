@@ -2306,6 +2306,19 @@ pub struct SwingSpeed {
     pub ticks: u64,
 }
 
+/// A melee swing whose gesture has begun and is stretched to its scheduled impact.
+///
+/// Combat consumes this at the scheduled impact instead of playing the same
+/// full-body action twice. It is target-bound and tick-bound so a rescheduled
+/// blow cannot mistake an older gesture for its own.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct SwingWindup {
+    /// The opponent the visible preparation belongs to.
+    pub target: Serial,
+    /// When that prepared swing was scheduled to land.
+    pub completes_at: WorldTick,
+}
+
 /// A mobile's armour: how much of each kind of blow it shrugs off, as a
 /// percentage. Zero everywhere is no protection.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
