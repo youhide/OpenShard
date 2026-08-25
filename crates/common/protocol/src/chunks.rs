@@ -104,25 +104,56 @@ pub const FRAGMENT_BYTES: usize = 8_192;
 /// half of what was asked for would be this end inventing a request.
 pub const MAX_CHUNKS: u16 = 64;
 
-/// What a chunk's bytes are deflated at.
+/// How hard a chunk's record is packed, which is a property of where it is going.
 ///
-/// Six, which is what the measurements in the module header were taken at and
-/// what [`crate::design`] already uses for a house's planes. Deflate's own
-/// default, and the level above it buys single-digit percentages for several
-/// times the work.
-const DEFLATE_LEVEL: u8 = 6;
+/// **Not a knob.** There are exactly two, one per destination, and both are
+/// measured — `openshard-uofiles`'s `base_set_cost` example is what measured
+/// them and what any argument about changing one has to re-run. A caller does
+/// not choose a number; it says which of the two things it is writing, so a file
+/// written by one build cannot be read as a different level by another.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DeflateLevel(u8);
 
-/// Deflate one chunk's canonical record.
+impl DeflateLevel {
+    /// One chunk into one packet, at six.
+    ///
+    /// What the module header's measurements were taken at, and what
+    /// [`crate::design`] already uses for a house's planes. Here the *size* is
+    /// what matters and the time does not: a chunk is half a millisecond, and it
+    /// is sent one at a time to a client that asked.
+    pub const PACKET: Self = Self(6);
+
+    /// A whole facet into one file, at one.
+    ///
+    /// Where the time is what matters, because this is 7,168 chunks in one call
+    /// on a thread somebody is waiting on — an import, a client keeping the
+    /// ground it was given, a squash. Measured on Felucca, over 107,528,650
+    /// bytes of records:
+    ///
+    /// | level | deflated | of the records | deflating |
+    /// |---|---|---|---|
+    /// | **1** | **29,698,618** | **27.6%** | **0.50 s** |
+    /// | 2 | 25,013,830 | 23.3% | 0.86 s |
+    /// | 3 | 23,040,738 | 21.4% | 1.38 s |
+    /// | 6 | 22,469,130 | 20.9% | 3.73 s |
+    ///
+    /// Six buys 6.9 MB of disk for 3.2 seconds on a path a person waits on, and
+    /// `overview.md` refuses that trade by name: thrift is not a goal. One still
+    /// takes the file from 107.6 MB to 29.8, and a whole base set write from
+    /// 4.2 s to 0.56.
+    pub const BASE_SET: Self = Self(1);
+}
+
+/// Deflate one chunk's canonical record for where it is going.
 ///
 /// **Here rather than at either caller**, because the wire is no longer the only
-/// one: `openshard_basemap`'s version 2 stores a base set's chunks deflated with
-/// exactly this, so a file written by one build and read by another cannot end
-/// up at two levels. The level is not a parameter for the same reason — it is a
-/// property of the format, and a caller that could choose it could write a file
-/// this one would still read and a measurement nobody could reproduce.
+/// one: `openshard_basemap`'s version 2 stores a base set's chunks deflated
+/// through this same function, so the two ends cannot drift into two
+/// implementations of one idea. What they do *not* share is the level, and
+/// [`DeflateLevel`] is where that is argued.
 #[must_use]
-pub fn deflate(record: &[u8]) -> Vec<u8> {
-    miniz_oxide::deflate::compress_to_vec_zlib(record, DEFLATE_LEVEL)
+pub fn deflate(record: &[u8], level: DeflateLevel) -> Vec<u8> {
+    miniz_oxide::deflate::compress_to_vec_zlib(record, level.0)
 }
 
 /// Inflate one, bounded by the length it declared, and `None` if it is not that.
@@ -367,7 +398,7 @@ impl ChunkData {
         let inflated = InflatedLength(
             u32::try_from(record.len()).expect("a chunk record of fewer than four billion bytes"),
         );
-        let deflated = deflate(record);
+        let deflated = deflate(record, DeflateLevel::PACKET);
         // A zlib stream is never empty — it has a header — so `max(1)` is a
         // statement that this function always produces at least one packet
         // rather than a guard against a case that can arise.

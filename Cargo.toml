@@ -118,6 +118,19 @@ opt-level = 2
 opt-level = 1
 [profile.dev.package.openshard-tiles]
 opt-level = 2
+# The same argument, and version 2 of the base set is what made it true here:
+# `read` now inflates every chunk and hashes every record against the manifest,
+# and the hash is a byte-at-a-time FNV-1a over 107,528,650 bytes. Measured by
+# `openshard-uofiles`'s `base_set_cost` example, fastest of three:
+#
+#                       opt 0    here   release
+#   base set write      969.6   578.0     561.1
+#   base set read       830.5   446.9     436.3
+#
+# The deflating is not in that difference — `miniz_oxide` is a dependency and the
+# glob above already gives it 2. What is, is our own two loops.
+[profile.dev.package.openshard-basemap]
+opt-level = 2
 
 [workspace.dependencies]
 # Fast non-cryptographic hashing for hot integer-keyed maps.

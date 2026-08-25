@@ -71,6 +71,35 @@ every record inflated and hashed: 5.1 s to import and write, 1.2 s for the
 read-back over all 7,168 chunks. The expectation above holds, and the file went
 from 107.6 MB to 22.6 MB now that the chunks are stored deflated.
 
+**And then measured phase by phase, which moved the level.** Those five seconds
+were the deflate and nothing else, so the question "can we afford this, and can
+we get back out of it" got an example of its own —
+`openshard-uofiles`'s `base_set_cost`, fastest of three, because this
+workstation runs an indexer while it is measured:
+
+| level | deflated | of the records | deflating |
+|---|---|---|---|
+| **1** | **29,698,618** | **27.6%** | **0.50 s** |
+| 2 | 25,013,830 | 23.3% | 0.86 s |
+| 3 | 23,040,738 | 21.4% | 1.38 s |
+| 6 | 22,469,130 | 20.9% | 3.73 s |
+
+The wire's six buys 6.9 MB for 3.2 seconds on a path a person waits on, and it
+had already made [`link.rs`](../../../../crates/client/app/src/link.rs)'s own
+justification for writing the cache whole — *"the write is a tenth of a second
+against a fetch that was seconds"* — false. **The file now packs at level one**
+and the wire keeps six: `DeflateLevel::BASE_SET` and `DeflateLevel::PACKET`, one
+per destination, with the table above in the type. Whole `write` is 578 ms and
+`read` 447 ms, against 150 ms and 123 ms for version 1 — and the read moves 78 MB
+less off the disk to do it.
+
+**`openshard-basemap` is now in the dev profile's opt-level list**, which is what
+took that read from 830 ms to 447: its two loops are byte-at-a-time FNV-1a over
+107 MB, and `[profile.dev.package."*"]` does not reach a workspace member. The
+deflating was never in that difference — `miniz_oxide` is a dependency and had
+`opt-level = 2` all along, which is why level six cost the same 4 s in release as
+in dev.
+
 `BaseError::Chunk` is now nearly unreachable through this crate's own writer — a
 record that inflates to its length and hashes to its entry and is still not a
 chunk is a file somebody else wrote. Its test builds exactly that by hand, so the

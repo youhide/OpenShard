@@ -60,11 +60,16 @@ without touching it again.
 names a layout and two migrations for one quarter's worth of work is two
 migrations too many:
 
-- **Chunks are stored deflated.** 107,528,650 → 22,363,473 bytes on the same
-  content, measured in [`to_the_client.md`](to_the_client.md). It touches
-  `write`/`read` alone: the table already makes every chunk independently
-  addressable. The client's cache from E3 is the caller that wants it most, and
-  it holds a whole uncompressed Felucca per world today.
+- **Chunks are stored deflated.** 107,528,650 → 29,698,618 bytes on the same
+  content. It touches `write`/`read` alone: the table already makes every chunk
+  independently addressable. The client's cache from E3 is the caller that wants
+  it most, and it holds a whole uncompressed Felucca per world today.
+  **At level one, and that is a measurement rather than a default** — the wire's
+  level six costs 3.7 s to pack a facet against 0.5, and buys 6.9 MB. The table
+  is in
+  [`DeflateLevel`](../../../crates/common/protocol/src/chunks.rs), which is where
+  the two levels are argued: the wire sends one chunk at a time and cares about
+  the packet, the file writes 7,168 at once on a thread somebody is waiting on.
 - **The table grows a hash per chunk.** `fnv1a64` over the chunk's canonical
   bytes, which is the hash
   [`identity_of`](../../../crates/common/basemap/src/lib.rs) already uses over
@@ -101,9 +106,31 @@ migrations too many:
   caller.
 
 **Done when** a version 2 set round-trips byte-identically through
-`write`/`read`, is 22.4 MiB on Felucca, reports the same `WorldId` before and
+`write`/`read`, is 29.8 MB on Felucca, reports the same `WorldId` before and
 after a rewrite of its own bytes, and a version 1 file loads to a named error
 rather than a plausible world.
+
+**What it costs, measured** — `openshard-uofiles`'s `base_set_cost` example, on
+Felucca, fastest of three, in the dev profile a person plays under:
+
+| | version 1 | version 2 |
+|---|---|---|
+| the file | 107,528,650 B | 29,842,020 B |
+| `write` | ~150 ms | **578 ms** — deflate 435, encode 50, hash 83 |
+| `read` | 123 ms | **447 ms** — inflate 291, hash 83, the rest decode and assemble |
+
+Who pays it: an import, which is offline and once; a client keeping the world it
+was given, which is once per world and follows a fetch that was *seconds*; and a
+boot, where the read is 0.3 s slower and 78 MB lighter off the disk. Nothing on a
+tick, and nothing in a frame. The one number that had to be checked is `write`,
+because [`link.rs`](../../../crates/client/app/src/link.rs) justified writing the
+cache whole with *"the write is a tenth of a second against a fetch that was
+seconds"* — at level six it was 4.2 s and that sentence was false; at level one
+it is half a second and it holds.
+
+**`openshard-basemap` joined the dev profile's opt-level list** for the reason
+`openshard-map` is on it: at `opt-level = 0` its two byte-at-a-time loops made
+the same read 830 ms.
 
 ## S2 — a product is keyed by the chunk it was built from
 

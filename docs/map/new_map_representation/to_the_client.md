@@ -501,13 +501,17 @@ last clause of it.
 
 Found while writing this, and each is somebody's.
 
-- ~~**A base set could store its chunks deflated.**~~ 107,528,650 → 22,363,473
-  bytes on the same content, measured above. **Taken**, as the first third of
-  [`what_a_change_costs.md`](what_a_change_costs.md)'s S1 — a version 2 of the
-  file, carrying this and the two other things a version byte should only be
-  spent on once. The deflating itself is now
+- ~~**A base set could store its chunks deflated.**~~ **Taken**, as the first
+  third of [`what_a_change_costs.md`](what_a_change_costs.md)'s S1 — a version 2
+  of the file, carrying this and the two other things a version byte should only
+  be spent on once. The deflating itself is now
   `openshard_protocol::chunks::deflate`, so the file and the wire pack a chunk
-  the same way rather than in two places at two levels.
+  through one function rather than in two places.
+  **At a different level, though**, and this backlog entry is where the 22,363,473
+  above came from: that is level six, the wire's, and packing a whole facet at it
+  takes 3.7 s. The file takes level one — 29,698,618 bytes for 0.5 s — because
+  the caller that pays is E3's own cache write, whose justification in `link.rs`
+  is that it is fast against a fetch that was seconds.
 - ~~**`WorldState::publish` answers `PatchError::NoGround` for a facet that does
   not exist**~~ — carried over from the last handoff and **fixed**: it says
   `expect("an entity's facet is always loaded")` now, which is what every other

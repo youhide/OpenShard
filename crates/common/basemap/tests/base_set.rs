@@ -329,7 +329,8 @@ fn a_broken_chunk_is_named() {
     // chunk. The rest of the file's chunks keep their own entries: only the
     // first is replaced, and everything after it shifts by the difference.
     let record = b"OSMX and then some bytes that are not a chunk record".to_vec();
-    let blob = openshard_protocol::chunks::deflate(&record);
+    let blob =
+        openshard_protocol::chunks::deflate(&record, openshard_protocol::chunks::DeflateLevel::BASE_SET);
     let manifest = TABLE + (count + 1) * 8;
     bytes[manifest..manifest + 8].copy_from_slice(&fnv1a64(&record).to_le_bytes());
     bytes[manifest + 8..manifest + 12].copy_from_slice(&u32::try_from(record.len()).unwrap().to_le_bytes());

@@ -55,10 +55,12 @@
 //! names a layout, so three changes that were each worth a bump are one bump:
 //!
 //! - **The chunks are deflated.** 107,528,650 bytes of Felucca become
-//!   22,363,473 on the same content, at the level and through the pair
+//!   29,698,618 on the same content, through the pair
 //!   [`openshard_protocol::chunks::deflate`] already carries the wire's chunks
-//!   at. The client's cache is the caller that wanted it most: it keeps a whole
-//!   facet per world it has seen.
+//!   through — at [`openshard_protocol::chunks::DeflateLevel::BASE_SET`] rather
+//!   than the wire's level, and that type is where the measurement that chose it
+//!   lives. The client's cache is the caller that wanted it most: it keeps a
+//!   whole facet per world it has seen.
 //! - **The manifest carries a hash per chunk.** It is what makes "did *this*
 //!   square move" answerable without re-encoding a facet, which is what a
 //!   product keyed by the chunk it was built from needs (S2). At 64 tiles a
@@ -384,7 +386,10 @@ pub fn write(
             fnv1a64(&record),
             u32::try_from(record.len()).expect("a chunk record of fewer than four billion bytes"),
         ));
-        blobs.push(openshard_protocol::chunks::deflate(&record));
+        blobs.push(openshard_protocol::chunks::deflate(
+            &record,
+            openshard_protocol::chunks::DeflateLevel::BASE_SET,
+        ));
     }
 
     let world = match identity {

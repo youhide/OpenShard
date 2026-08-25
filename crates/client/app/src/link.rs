@@ -1361,8 +1361,15 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                             Ok(Fetched::World(snapshot)) => {
                                 // Kept before it is handed over, and on this
                                 // thread: the window has no ground yet either
-                                // way, and the write is a tenth of a second
-                                // against a fetch that was seconds. A cache that
+                                // way, and the write is half a second against a
+                                // fetch that was seconds — 578 ms on Felucca,
+                                // measured by `openshard-uofiles`'s
+                                // `base_set_cost` example after version 2 of the
+                                // file made the write deflate every chunk. That
+                                // number is what chose the deflate level; see
+                                // `openshard_protocol::chunks::DeflateLevel`,
+                                // whose level six would have made this 4.2 s and
+                                // this comment a lie. A cache that
                                 // will not be written costs the next connection
                                 // the same fetch and nothing else, so it is a
                                 // line rather than a lost connection.
