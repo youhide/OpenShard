@@ -3271,6 +3271,7 @@ fn a_walking_billboard_is_lit_where_it_is_drawn_not_where_it_is_going() {
             facing: Direction::SouthEast,
             frame: AnimationFrameIndex(0),
             from: Some(from),
+            corpse: false,
             hue: openshard_protocol::wire::Hue::NONE,
             drawn,
             equipment: Vec::new().into(),
@@ -5086,6 +5087,7 @@ fn a_mobile_is_drawn_over_the_ground_and_mirrors_with_its_facing() {
                 facing,
                 frame: AnimationFrameIndex(0),
                 from: None,
+                corpse: false,
                 hue: openshard_protocol::wire::Hue::NONE,
                 drawn: openshard_client_render::follow::Gaze::on(centre),
                 equipment: Vec::new().into(),
@@ -5581,6 +5583,7 @@ fn dump_a_frame_of_britain() {
                 frame: AnimationFrameIndex(0),
                 // Standing, so there is no second tile to sort between.
                 from: None,
+                corpse: false,
                 hue: openshard_protocol::wire::Hue::NONE,
                 // Standing where the server put them: nothing here is walking.
                 drawn: openshard_client_render::follow::Gaze::on(ground),

@@ -13,17 +13,22 @@
 
 use std::collections::BTreeMap;
 
+use openshard_gateway::ConnectionId;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::{Body, Doors};
 use openshard_movement::scene::Scene;
+use openshard_protocol::access::AccessLevel;
+use openshard_protocol::identity::AccountName;
 use openshard_protocol::serial::{Serial, SerialKind};
+use openshard_protocol::version::ClientVersion;
 use openshard_protocol::wire::{Graphic, MultiId};
 use openshard_protocol::world::{Facet, Point};
 use openshard_tiles::{TileData, TileFlags};
 use openshard_uofiles::multi::{Component, Multi, Multis};
 
 use super::*;
-use openshard_state::FacetState;
+use openshard_state::connection::Connection;
+use openshard_state::{Client, FacetState};
 
 /// A reach no storey in these tests can be out of.
 ///
@@ -260,6 +265,39 @@ fn a_house_is_an_item_whose_graphic_is_the_multi() {
     assert!(
         state.registry.serial_of(house).is_some_and(|s| s.is_item()),
         "a house took a mobile serial"
+    );
+}
+
+#[test]
+fn a_placed_house_is_revealed_to_a_stationary_client_immediately() {
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    let connection = ConnectionId::from_raw(1);
+    state.connections.insert(
+        connection,
+        Connection::new(
+            ClientVersion::new(7, 0, 0, 0),
+            AccountName::new("builder"),
+            AccessLevel::GameMaster,
+        ),
+    );
+    state.registry.insert(actor, Client { connection });
+    let watching_from = Point::new(2, 2, 0);
+    state.registry.insert(actor, Position(watching_from));
+    state.registry.insert(actor, Facet(0));
+    state.place_mobile(Facet(0), actor, watching_from);
+
+    place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
+
+    assert_eq!(
+        state
+            .outbox
+            .iter()
+            .filter(|packet| packet.packet.first() == Some(&0x1A))
+            .count(),
+        3,
+        "the client should receive the house, its door and its sign without moving"
     );
 }
 
@@ -842,6 +880,83 @@ fn a_house_adopts_the_doors_standing_inside_it() {
     );
     // And it is still an ordinary door in every other respect.
     assert!(state.registry.has::<Door>(inside));
+}
+
+/// The classic multi is only the house's picture. Its functional door is a
+/// separately placed item at the offset the house type defines.
+#[test]
+fn a_classic_house_places_its_door() {
+    use openshard_state::components::{Door, HouseDoor};
+
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
+    let house_serial = state.registry.serial_of(house).unwrap();
+
+    let doors: Vec<_> = state
+        .registry
+        .query::<HouseDoor>()
+        .filter(|(_, door)| door.house == house_serial)
+        .map(|(entity, _)| entity)
+        .collect();
+    assert_eq!(doors.len(), 1, "the cottage did not get exactly one door");
+    let door = doors[0];
+    assert_eq!(
+        state.registry.get::<Position>(door).map(|position| position.0),
+        Some(Point::new(10, 13, 7)),
+        "the door does not stand in the cottage's entrance"
+    );
+    assert_eq!(
+        state.registry.get::<Drawn>(door).map(|drawn| drawn.id),
+        Some(Graphic(0x06A5)),
+        "the wooden west-hinged leaf draws as the wrong art"
+    );
+    assert!(
+        state.registry.has::<Door>(door),
+        "the leaf is only decorative art"
+    );
+    assert!(
+        state
+            .facet_state(Facet(0))
+            .ground()
+            .live()
+            .blocker_at(Tile::new(10, 13), Body::new(7, 16), Doors::AsTheyStand)
+            .is_some(),
+        "the shut door does not close the entrance"
+    );
+}
+
+#[test]
+fn a_classic_houses_door_comes_down_with_it() {
+    use openshard_state::components::HouseDoor;
+
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let house =
+        place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner).expect("a legal spot");
+    let door = state
+        .registry
+        .query::<HouseDoor>()
+        .map(|(entity, _)| entity)
+        .next()
+        .expect("the cottage's door");
+
+    decay::demolish(&mut state, house);
+
+    assert!(
+        state.registry.serial_of(door).is_none(),
+        "the demolished house left its door behind"
+    );
+    assert!(
+        state
+            .facet_state(Facet(0))
+            .ground()
+            .live()
+            .blocker_at(Tile::new(10, 13), Body::new(7, 16), Doors::AsTheyStand)
+            .is_none(),
+        "the removed door left an invisible obstruction"
+    );
 }
 
 /// A door with no house opens for anyone, which is every door in Britannia.

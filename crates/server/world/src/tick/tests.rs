@@ -2882,7 +2882,7 @@ fn gameplay_config_reaches_the_systems() {
     // twenty-minute default's twenty-four thousand.
     let now = Instant::now();
     let gameplay = Gameplay {
-        combat_era: CombatEra::from(2),
+        combat_era: CombatEra::new(2),
         speed_scale_factor: 40000,
         skill_cap: 700,
         decay_ticks: Gameplay::ticks(5),
@@ -3669,13 +3669,13 @@ fn resurrection_brings_a_ghost_back() {
     assert!(world.state.registry.has::<Ghost>(player_entity), "dead first");
     let _ = packets_for(&mut world, player);
 
-    // `.res` spoken by the (GM) ghost raises it.
+    // `.ressurect` spoken by the (GM) ghost raises it.
     world.queue(Command::Say {
         connection: player,
         mode: RawTalkMode(0),
         hue: RawHue(0),
         font: RawFont(0),
-        text: ".res".to_owned(),
+        text: ".ressurect".to_owned(),
     });
     world.tick(now);
 
@@ -3718,6 +3718,132 @@ fn resurrection_brings_a_ghost_back() {
     assert!(
         packets.iter().any(|p| p.as_slice() == [0x2C, 0x02]),
         "the client is told it is alive again (0x2C 0x02)"
+    );
+}
+
+#[test]
+fn ghosts_cannot_be_selected_or_swung_at() {
+    let now = Instant::now();
+    let mut world = world();
+    let attacker = enter(&mut world, now);
+    let ghost = enter(&mut world, now);
+    let attacker_entity = world.state.players[&attacker];
+    let ghost_entity = world.state.players[&ghost];
+    let ghost_serial = serial_of(&world, ghost);
+    let living_body = *world
+        .registry()
+        .get::<Body>(ghost_entity)
+        .expect("a body to become a ghost from");
+    world
+        .state
+        .registry
+        .insert(ghost_entity, Ghost { body: living_body });
+    world
+        .state
+        .registry
+        .insert(ghost_entity, Hitpoints { current: 0, max: 100 });
+    let _ = packets_for(&mut world, attacker);
+
+    // A fresh player request clears the target instead of accepting a ghost's
+    // still-valid mobile serial.
+    world.queue(Command::Attack {
+        connection: attacker,
+        target: Some(ghost_serial),
+    });
+    world.tick(now);
+    assert_eq!(
+        world
+            .registry()
+            .get::<Combat>(attacker_entity)
+            .and_then(|combat| combat.target),
+        None,
+        "a ghost cannot become an attack target"
+    );
+
+    // The same is true of a target chosen before its victim died: no extra
+    // attack animation may be sent while the next AI beat is pending.
+    world.state.registry.insert(
+        attacker_entity,
+        Combat {
+            warmode: true,
+            target: Some(ghost_serial),
+            next_swing: openshard_state::WorldTick::ZERO,
+        },
+    );
+    world.tick(now);
+    assert_eq!(
+        world
+            .registry()
+            .get::<Combat>(attacker_entity)
+            .and_then(|combat| combat.target),
+        None,
+        "a ghost clears a stale combat target before swinging"
+    );
+}
+
+#[test]
+fn a_mob_immediately_forgets_a_player_who_becomes_a_ghost() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let player_entity = world.state.players[&player];
+    let player_serial = serial_of(&world, player);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let mob_entity = entity(&world, mob);
+    world.state.registry.insert(
+        mob_entity,
+        Combat {
+            warmode: true,
+            target: Some(player_serial),
+            next_swing: openshard_state::WorldTick::ZERO,
+        },
+    );
+
+    world.enter_ghost_state(player_entity, player_serial, true);
+
+    assert_eq!(
+        world
+            .registry()
+            .get::<Combat>(mob_entity)
+            .and_then(|combat| combat.target),
+        None,
+        "a mob does not retain a dead player as its quarry"
+    );
+}
+
+#[test]
+fn a_mob_cannot_see_or_reacquire_a_ghost() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let player_entity = world.state.players[&player];
+    let player_serial = serial_of(&world, player);
+    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.0, START.1 + 4, 0), 8, now);
+
+    // `enter_ghost_state` deliberately leaves the restored hit-point value
+    // alone; visibility must therefore reject the Ghost marker itself, rather
+    // than merely relying on a zero-hit-point death.
+    world.enter_ghost_state(player_entity, player_serial, true);
+    assert!(
+        world
+            .registry()
+            .get::<Hitpoints>(player_entity)
+            .is_some_and(|hits| hits.current > 0),
+        "the visibility assertion is independent of a dead player's hit points"
+    );
+    assert!(
+        !world.state.can_see_mobile(creature, player_entity),
+        "the creature cannot see the ghost"
+    );
+
+    ai::think_one(&mut world.state, creature);
+    assert_eq!(
+        world
+            .registry()
+            .get::<Combat>(creature)
+            .and_then(|combat| combat.target),
+        None,
+        "the creature does not acquire the invisible ghost as prey"
     );
 }
 
@@ -4909,7 +5035,7 @@ fn era_two_reads_the_aos_weapon_numbers() {
     // The same katana, an AoS shard: speed 46 (not 58) and damage 10..=14.
     let now = Instant::now();
     let mut world = world();
-    world.state.gameplay.combat_era = CombatEra::from(2);
+    world.state.gameplay.combat_era = CombatEra::new(2);
     let scale = world.state.gameplay.speed_scale_factor;
     let connection = enter(&mut world, now);
     let entity = world.state.players[&connection];
@@ -8237,7 +8363,7 @@ fn the_stat_bonus_is_gone_from_aos_on() {
     // (`AOS.DisableStatInfluences`), so the effective value is the base.
     let now = Instant::now();
     let mut world = World::new(START).with_gameplay(Gameplay {
-        combat_era: CombatEra::from(2),
+        combat_era: CombatEra::new(2),
         ..Gameplay::default()
     });
     let player = enter(&mut world, now);

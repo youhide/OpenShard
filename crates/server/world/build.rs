@@ -1094,7 +1094,7 @@ fn townsfolk(text: &str) -> String {
                     person.x,
                     person.y
                 );
-                format!("openshard_state::QuestKey::from({key:?})")
+                format!("openshard_state::QuestKey::new({key:?})")
             })
             .collect();
         match offers.is_empty() {

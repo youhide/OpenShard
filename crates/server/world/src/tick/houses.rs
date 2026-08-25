@@ -285,6 +285,16 @@ impl World {
                 // through a wall.
                 Err(_) => wall_less += 1,
             }
+            // Classic doors are separate saved decoration, not multi pieces.
+            // Decoration was restored before houses, so this adopts the saved
+            // leaves and creates only fixtures absent from an older save.
+            openshard_housing::install_doors(
+                &mut self.state,
+                entity,
+                facet,
+                at,
+                openshard_protocol::wire::MultiId(record.multi),
+            );
             // Rebuilt rather than restored, for the module header's reason: the
             // sign's spot is a pure function of the multi's box, and a saved copy
             // of it would go stale the day the operator updates their install.

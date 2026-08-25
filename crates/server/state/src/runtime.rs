@@ -346,7 +346,7 @@ impl Default for Gameplay {
     /// to change and takes the rest from here.
     fn default() -> Self {
         Self {
-            combat_era: CombatEra::from(1),
+            combat_era: CombatEra::new(1),
             speed_scale_factor: 15000,
             critical_chance: 50,
             critical_damage_percent: 150,

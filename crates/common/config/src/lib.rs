@@ -318,16 +318,16 @@ pub fn expansion_is_known(expansion: &str) -> bool {
 pub struct CombatEra(u8);
 
 impl CombatEra {
+    /// Keep a numeric Sphere era, including an unknown value for validation to report.
+    #[must_use]
+    pub const fn new(value: u8) -> Self {
+        Self(value)
+    }
+
     /// Returns the numeric Sphere value used in the configuration file.
     #[must_use]
     pub const fn value(self) -> u8 {
         self.0
-    }
-}
-
-impl From<u8> for CombatEra {
-    fn from(value: u8) -> Self {
-        Self(value)
     }
 }
 

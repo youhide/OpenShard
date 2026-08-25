@@ -389,11 +389,12 @@ impl App {
         if self.graphics.cutaway_disabled || !self.grounded() {
             Cutaway::OPEN
         } else {
-            Cutaway::at(
+            Cutaway::at_with_items(
                 self.resources.map(),
                 &self.resources.tiledata,
                 self.world.presentation.cutaway_at,
                 true,
+                &self.world.presentation.items,
             )
         }
     }

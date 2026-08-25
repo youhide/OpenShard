@@ -117,7 +117,7 @@ mod tests {
         assert!(crate::swing_ticks(255, 255, 1, 15000) < 10);
         // And the speed those formulas are fed comes from the era's own column.
         let sword = weapon_data(Graphic(0x0F61)).expect("longsword");
-        assert_eq!(swing_base(sword, CombatEra::from(3)), 30);
-        assert_eq!(swing_base(sword, CombatEra::from(4)), 350);
+        assert_eq!(swing_base(sword, CombatEra::new(3)), 30);
+        assert_eq!(swing_base(sword, CombatEra::new(4)), 350);
     }
 }

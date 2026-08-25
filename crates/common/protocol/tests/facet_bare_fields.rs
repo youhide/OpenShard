@@ -100,12 +100,21 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
 ];
 
-/// How many times `facet: u8` or `facet:u8` appears in `text`, counting
-/// overlapping whitespace variants once each — a plain substring count, since
-/// the field name is one word and not a type a comment could plausibly
-/// mention without meaning this one.
+/// How many times a bare `facet: u8` appears in `text`, independent of how
+/// rustfmt-able whitespace is placed around its punctuation.
 fn count_bare_facet(text: &str) -> usize {
-    text.match_indices("facet: u8").count() + text.match_indices("facet:u8").count()
+    let compact: String = text
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect();
+    compact.match_indices("facet:u8").count()
+}
+
+#[test]
+fn the_facet_counter_does_not_have_a_whitespace_escape_hatch() {
+    assert_eq!(count_bare_facet("facet: u8"), 1);
+    assert_eq!(count_bare_facet("facet : u8"), 1);
+    assert_eq!(count_bare_facet("facet:\n    u8"), 1);
 }
 
 /// Every `.rs` file under `dir`, walked recursively. No `target/` ever

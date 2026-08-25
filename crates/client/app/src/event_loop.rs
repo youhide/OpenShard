@@ -120,6 +120,27 @@ impl ApplicationHandler<()> for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // Escape puts away an armed map-editor tool before egui can consume the
+        // key for one of the editor's controls. Chat and modal panes retain
+        // their established Escape behaviour: they own the keyboard first.
+        if matches!(
+            &event,
+            WindowEvent::KeyboardInput {
+                event: winit::event::KeyEvent {
+                    physical_key: PhysicalKey::Code(KeyCode::Escape),
+                    state: ElementState::Pressed,
+                    ..
+                },
+                ..
+            }
+        ) && !self.chat.focused
+            && self.keyboard_window().is_none()
+            && self.map_editor.active()
+            && self.map_editor.cancel_tool()
+        {
+            self.ask_redraw();
+            return;
+        }
         // The UI sees everything first, and what it takes reaches neither the
         // camera nor the walk keys — otherwise a drag inside a panel pans the
         // world underneath it. egui never claims a close or a resize, so
@@ -543,8 +564,9 @@ impl ApplicationHandler<()> for App {
             }
             // A window that loses focus never hears the key come up, and a
             // character that keeps walking into a wall while its player is in
-            // another window is not what the key meant. The destination goes
-            // with it, for the same reason: nobody is watching it be walked to.
+            // another window is not what the key meant. A destination is not a
+            // held input, though: it is an already-issued move order and must
+            // survive changing virtual desktops.
             //
             // It is also half of what paces the loop — see [`App::watched`] —
             // and regaining focus has to ask for a frame, because the redraw
@@ -555,7 +577,7 @@ impl ApplicationHandler<()> for App {
                 if focused {
                     self.ask_redraw();
                 } else {
-                    self.steer.clear();
+                    self.steer.release_transient_inputs();
                     self.input.aiming = false;
                     self.input.shift_held = false;
                     self.set_war_mode_held(false);
@@ -876,12 +898,17 @@ impl ApplicationHandler<()> for App {
         // — and it is kept for the paths where that ask does not happen: `draw`
         // returns early with no window, with a swapchain it had to rebuild, and
         // on a compositor that refused to hand over a texture. Without it, one
-        // of those would stop the loop dead until the next input event. The
-        // redraw requests coalesce, so a net that fires while the display is
-        // already pacing costs a wake and no frame.
+        // of those would stop the loop dead until the next input event. An
+        // unwatched window runs the same state tick directly: a compositor need
+        // not issue a redraw for a virtual desktop it is not showing, but the
+        // client's route and network state cannot depend on one.
         if now >= self.next_tick {
             self.next_tick = now + self.redraw_interval();
-            self.ask_redraw();
+            if self.watched() {
+                self.ask_redraw();
+            } else {
+                self.tick(now);
+            }
         }
         // Three reasons to come back, so three terms: the animation clock,
         // whatever the UI is animating, and the next step a held key is owed.

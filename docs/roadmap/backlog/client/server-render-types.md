@@ -150,9 +150,9 @@ Still open, ranked by how strong the case is:
   used for the file-table offset.
 - ~~**`impostor::Volume::of(..., solid: u32)`**~~ Fixed: `Volume::solid` stays
   `Option<SolidId>` until the GPU-byte boundary; three
-  `opaque_at(&self, ..., x: u16, y: u16)` picture-local pixel coordinates sit
-  bare next to a crate that otherwise names every other pixel space
-  (`WorldPixel`, `ViewPixel`, `RealPixel`, `GumpPixel`).
+  `opaque_at` families now take `AtlasPixel`, one picture-local coordinate
+  shared by static art and animation frames, beside the crate's other named
+  pixel spaces (`WorldPixel`, `ViewPixel`, `RealPixel`, `GumpPixel`).
 
 ## Backlog: a gump dialog's own captions still can't draw Cyrillic
 

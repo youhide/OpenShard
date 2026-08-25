@@ -989,6 +989,20 @@ impl Steering {
         self.stand();
     }
 
+    /// Let go of inputs which may not have delivered their release event.
+    ///
+    /// A destination is an order, rather than a held input: it must keep its
+    /// route when the window briefly loses focus (for example, while changing
+    /// virtual desktops). Keyboard and mouse-heading movement, in contrast,
+    /// only exist while their input is held and therefore have to be released.
+    pub fn release_transient_inputs(&mut self) {
+        self.keys.clear();
+        self.mouse = None;
+        if self.goal.is_none() {
+            self.stand();
+        }
+    }
+
     /// The server put the body somewhere this end did not walk it to.
     ///
     /// A `0x21` refusing a step, or a `0x20` moving the body — `link::Body`'s
@@ -3439,21 +3453,12 @@ mod tests {
         );
     }
 
-    /// Losing focus lets go of everything, keyboard and destination alike.
+    /// Losing focus releases held inputs but keeps an already-issued route.
     #[test]
-    fn losing_focus_stops_the_walk() {
+    fn losing_focus_keeps_the_destination_order() {
         let start = Instant::now();
         let mut steering = Steering::default();
 
-        steering
-            .press(
-                Direction::South,
-                here(),
-                start,
-                Direction::South,
-                Readings::plain(open_ground()),
-            )
-            .unwrap();
         steering.go_to(
             Point::new(200, 200, 0),
             here(),
@@ -3461,17 +3466,17 @@ mod tests {
             Direction::South,
             Readings::plain(open_ground()),
         );
-        steering.clear();
-        assert_eq!(steering.goal(), None);
-        assert_eq!(steering.deadline(), None);
+        steering.release_transient_inputs();
+        assert_eq!(steering.goal(), Some(Point::new(200, 200, 0)));
+        assert!(steering.deadline().is_some());
         assert_eq!(
             steering.due(
-                at(start, 10_000),
+                at(start, 400),
                 here(),
                 Direction::South,
                 Readings::plain(open_ground())
             ),
-            None
+            Some(Facing::walking(Direction::SouthEast))
         );
     }
 

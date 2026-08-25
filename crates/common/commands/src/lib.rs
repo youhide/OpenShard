@@ -69,7 +69,7 @@ pub enum StaffCommand {
     HBan,
     /// `.hcoowner`
     HCoOwner,
-    /// `.hdemolish`
+    /// `.hdemolish [house serial]`
     HDemolish,
     /// `.hdesign <multi id>`
     HDesign,
@@ -77,7 +77,7 @@ pub enum StaffCommand {
     HDrop,
     /// `.hfriend`
     HFriend,
-    /// `.house <multi id>`
+    /// `.house <multi id> [x y z]`
     House,
     /// `.hunban`
     HUnban,
@@ -202,8 +202,10 @@ impl StaffCommand {
             Self::AddStatic => "<graphic> [z]",
             Self::RmStatic => "[nth]",
             Self::SetLand => "<tile id> [z]",
-            Self::Boat | Self::Deed | Self::HDesign | Self::House => "<multi id>",
+            Self::Boat | Self::Deed | Self::HDesign => "<multi id>",
+            Self::House => "<multi id> [x y z]",
             Self::Gm => "[on|off]",
+            Self::HDemolish => "[house serial]",
             Self::Go => "<x> <y> [z] [facet]",
             Self::Key => "<value>",
             Self::Poison => "<level 0-4>",
@@ -214,7 +216,6 @@ impl StaffCommand {
             Self::Admin
             | Self::HBan
             | Self::HCoOwner
-            | Self::HDemolish
             | Self::HDrop
             | Self::HFriend
             | Self::HUnban
@@ -245,7 +246,7 @@ impl StaffCommand {
             Self::Go => "jump to coordinates",
             Self::HBan => "click whom to ban from this house",
             Self::HCoOwner => "click whom to make a co-owner",
-            Self::HDemolish => "pull down the house you are standing in",
+            Self::HDemolish => "pull down a named house, or the one under you",
             Self::HDesign => "give this house another multi's shape",
             Self::HDrop => "click whom to strip of standing here",
             Self::HFriend => "click whom to make a friend of this house",

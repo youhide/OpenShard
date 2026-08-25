@@ -16,6 +16,7 @@ use openshard_commands::StaffCommand;
 use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
 use openshard_protocol::direction::Direction;
+use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::speech::{Font, SpokenMessage, TalkMode};
 use openshard_protocol::target::{TargetCursor, TargetKind};
@@ -84,7 +85,7 @@ pub fn run(state: &mut WorldState, actor: EntityId, rest: &str) {
         StaffCommand::HDrop => house_list(state, actor, HouseChange::Drop),
         StaffCommand::HBan => house_list(state, actor, HouseChange::Ban),
         StaffCommand::HUnban => house_list(state, actor, HouseChange::Unban),
-        StaffCommand::HDemolish => demolish_house(state, actor),
+        StaffCommand::HDemolish => demolish_house(state, actor, &args),
         StaffCommand::HDesign => design_house(state, actor, &args),
         StaffCommand::Boat => launch_boat(state, actor, &args),
         StaffCommand::Sail => sail_boat(state, actor, &args),
@@ -787,22 +788,41 @@ fn set_skill(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     );
 }
 
-/// `.house <multi id>` — put a house at your feet.
+/// `.house <multi id> [x y z]` — put a house at your feet or at an editor tile.
 ///
 /// The staff half of housing, and the whole of H1's front door: a deed and the
 /// cursor that draws the house under it are H2, and until they exist this is how
 /// a house gets onto the ground at all. The id is the multi's, hex or decimal,
 /// with or without the `0x4000` the wire carries — `place` masks either.
 ///
-/// At the operator's feet rather than at a clicked tile, `.add`'s convention,
-/// which also means the placement is somewhere they are standing and can see.
+/// With no coordinates this keeps `.add`'s at-your-feet convention. The map
+/// editor supplies all three coordinates after showing the same multi under its
+/// pointer; accepting them here keeps that UI on the ordinary housing path.
 fn place_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     let Some(raw_multi) = args.first().and_then(parse_u16) else {
-        notify(state, actor, "Usage: .house <multi id>, e.g. .house 0x64");
+        notify(state, actor, "Usage: .house <multi id> [x y z], e.g. .house 0x64");
         return;
     };
-    let Some(&Position(at)) = state.registry.get::<Position>(actor) else {
+    let Some(&Position(feet)) = state.registry.get::<Position>(actor) else {
         return;
+    };
+    let at = match args.get(1..) {
+        Some([x, y, z]) => match (x.parse::<u16>(), y.parse::<u16>(), z.parse::<i8>()) {
+            (Ok(x), Ok(y), Ok(z)) => Point::new(x, y, z),
+            _ => {
+                notify(state, actor, "House coordinates must be x y z numbers.");
+                return;
+            }
+        },
+        Some([]) => feet,
+        _ => {
+            notify(
+                state,
+                actor,
+                "Usage: .house <multi id> [x y z], e.g. .house 0x64 1400 1600 0",
+            );
+            return;
+        }
     };
     let facet = state.facet_of(actor);
     let Some(owner) = state.registry.serial_of(actor) else {
@@ -813,7 +833,10 @@ fn place_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         Ok(_) => notify(
             state,
             actor,
-            &format!("A house ({:#06x}) stands at your feet.", multi.0),
+            &format!(
+                "A house ({:#06x}) stands at ({}, {}, {}).",
+                multi.0, at.x, at.y, at.z
+            ),
         ),
         Err(refusal) => notify(state, actor, refusal.message()),
     }
@@ -851,22 +874,46 @@ fn make_deed(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     notify(state, actor, "A house deed is at your feet.");
 }
 
-/// `.hdemolish` — pull down the house you are standing in.
+/// `.hdemolish [house serial]` — pull down a named house, or the one underfoot.
 ///
 /// The sign has this button and only shows it to the owner. Staff get a command
 /// as well, because the case it is for is the one where the sign is no help: an
 /// abandoned house whose owner will never open it, standing on a plot somebody
 /// else wants.
-fn demolish_house(state: &mut WorldState, actor: EntityId) {
-    let Some(&openshard_state::components::Position(at)) =
-        state.registry.get::<openshard_state::components::Position>(actor)
-    else {
-        return;
-    };
-    let facet = state.facet_of(actor);
-    let Some(house) = openshard_housing::house_at(state, at, facet) else {
-        notify(state, actor, "You are not standing in a house.");
-        return;
+fn demolish_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
+    let house = match args {
+        [] => {
+            let Some(&openshard_state::components::Position(at)) =
+                state.registry.get::<openshard_state::components::Position>(actor)
+            else {
+                return;
+            };
+            let facet = state.facet_of(actor);
+            let Some(house) = openshard_housing::house_at(state, at, facet) else {
+                notify(state, actor, "You are not standing in a house.");
+                return;
+            };
+            house
+        }
+        [raw] => {
+            let Some(serial) = parse_u32(raw).and_then(Serial::new) else {
+                notify(state, actor, "Usage: .hdemolish [house serial]");
+                return;
+            };
+            let Some(house) = state.registry.entity_of(serial) else {
+                notify(state, actor, "That house no longer exists.");
+                return;
+            };
+            if !state.registry.has::<openshard_state::components::House>(house) {
+                notify(state, actor, "That object is not a house.");
+                return;
+            }
+            house
+        }
+        _ => {
+            notify(state, actor, "Usage: .hdemolish [house serial]");
+            return;
+        }
     };
     openshard_housing::decay::demolish(state, house);
     notify(
@@ -1075,6 +1122,13 @@ fn parse_u16(text: &&str) -> Option<u16> {
     text.strip_prefix("0x")
         .or_else(|| text.strip_prefix("0X"))
         .map_or_else(|| text.parse().ok(), |hex| u16::from_str_radix(hex, 16).ok())
+}
+
+/// Parse a `u32` written in hex or decimal — object serials use the full word.
+fn parse_u32(text: &str) -> Option<u32> {
+    text.strip_prefix("0x")
+        .or_else(|| text.strip_prefix("0X"))
+        .map_or_else(|| text.parse().ok(), |hex| u32::from_str_radix(hex, 16).ok())
 }
 
 /// Parse a signed height, decimal only.

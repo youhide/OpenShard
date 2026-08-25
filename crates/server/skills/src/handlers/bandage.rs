@@ -13,7 +13,7 @@
 //! counter.
 
 use openshard_entities::EntityId;
-use openshard_protocol::wire::{ClilocId, Graphic};
+use openshard_protocol::wire::{ClilocId, CursorId, Graphic};
 use openshard_state::components::{Bandaging, Ghost, Hitpoints, Lock, Poisoned, Stats};
 use openshard_state::{Skill, TICKS_PER_SECOND, TargetPurpose, WorldState};
 
@@ -70,7 +70,7 @@ pub fn use_bandage(state: &mut WorldState, healer: EntityId, bandage: EntityId) 
         },
     );
     state.system_message(healer, HEAL_WHOM);
-    super::send_object_cursor(state, connection, serial);
+    super::send_object_cursor(state, connection, CursorId(serial.raw()));
     true
 }
 
@@ -257,7 +257,7 @@ pub fn use_lockpick(state: &mut WorldState, picker: EntityId, pick: EntityId) ->
         },
     );
     state.localized_message(picker, PICK_WHAT, "");
-    super::send_object_cursor(state, connection, serial);
+    super::send_object_cursor(state, connection, CursorId(serial.raw()));
     true
 }
 

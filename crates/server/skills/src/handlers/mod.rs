@@ -292,19 +292,19 @@ pub fn on_item_target(
     }
 }
 
-/// A mobile's connection and wire serial, for the handlers that raise their own
+/// A mobile's connection and serial, for the handlers that raise their own
 /// cursor.
-pub(super) fn client_of(state: &WorldState, mobile: EntityId) -> Option<(ConnectionId, u32)> {
+pub(super) fn client_of(state: &WorldState, mobile: EntityId) -> Option<(ConnectionId, Serial)> {
     let client = state.registry.get::<Client>(mobile)?;
     let serial = state.registry.serial_of(mobile)?;
-    Some((client.connection, serial.raw()))
+    Some((client.connection, serial))
 }
 
-pub(super) fn send_object_cursor(state: &mut WorldState, connection: ConnectionId, cursor_id: u32) {
+pub(super) fn send_object_cursor(state: &mut WorldState, connection: ConnectionId, cursor_id: CursorId) {
     state.send_packet(
         connection,
         &ServerPacket::TargetCursor(TargetCursor {
-            cursor_id: CursorId(cursor_id),
+            cursor_id,
             kind: TargetKind::Object,
         }),
     );
@@ -333,7 +333,7 @@ pub(super) fn raise_cursor(state: &mut WorldState, actor: EntityId, skill: Skill
     };
     state.raise_target(actor, TargetPurpose::Skill { skill });
     state.localized_message(actor, prompt, "");
-    send_object_cursor(state, connection, serial.raw());
+    send_object_cursor(state, connection, CursorId(serial.raw()));
     true
 }
 

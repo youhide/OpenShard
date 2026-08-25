@@ -2238,7 +2238,7 @@ impl Occlusion {
                         "a leaf starting at {} does not fit beside its own count",
                         leaf.first.position(),
                     );
-                    leaf.first.position() << 3 | u32::from(leaf.count)
+                    leaf.first.position() << 3 | leaf.count.as_u32()
                 }
             };
             bytes.extend_from_slice(&leaf.to_le_bytes());
@@ -4633,7 +4633,7 @@ mod tests {
                 None => assert_eq!(leaf & 7, 0, "node {at} is inner and names no primitives"),
                 Some(run) => assert_eq!(
                     (leaf >> 3, leaf & 7),
-                    (run.first.position(), u32::from(run.count)),
+                    (run.first.position(), run.count.as_u32()),
                     "node {at}'s own run"
                 ),
             }

@@ -309,21 +309,21 @@ mod tests {
 
     #[test]
     fn by_era_splits_the_pre_aos_and_aos_families() {
-        assert_eq!(by_era(35, 30, CombatEra::from(0)), 35); // custom → pre-AoS numbers
-        assert_eq!(by_era(35, 30, CombatEra::from(1)), 35); // pre-AoS
-        assert_eq!(by_era(35, 30, CombatEra::from(2)), 30); // AoS
-        assert_eq!(by_era(35, 30, CombatEra::from(3)), 30); // SE → AoS family
-        assert_eq!(by_era(35, 30, CombatEra::from(4)), 30); // ML → AoS family
+        assert_eq!(by_era(35, 30, CombatEra::new(0)), 35); // custom → pre-AoS numbers
+        assert_eq!(by_era(35, 30, CombatEra::new(1)), 35); // pre-AoS
+        assert_eq!(by_era(35, 30, CombatEra::new(2)), 30); // AoS
+        assert_eq!(by_era(35, 30, CombatEra::new(3)), 30); // SE → AoS family
+        assert_eq!(by_era(35, 30, CombatEra::new(4)), 30); // ML → AoS family
     }
 
     #[test]
     fn swing_base_picks_the_eras_speed_column() {
         let sword = weapon_data(Graphic(0x0F61)).unwrap(); // old 35, aos 30, ml 350
-        assert_eq!(swing_base(sword, CombatEra::from(0)), 35);
-        assert_eq!(swing_base(sword, CombatEra::from(1)), 35);
-        assert_eq!(swing_base(sword, CombatEra::from(2)), 30);
-        assert_eq!(swing_base(sword, CombatEra::from(3)), 30);
-        assert_eq!(swing_base(sword, CombatEra::from(4)), 350);
+        assert_eq!(swing_base(sword, CombatEra::new(0)), 35);
+        assert_eq!(swing_base(sword, CombatEra::new(1)), 35);
+        assert_eq!(swing_base(sword, CombatEra::new(2)), 30);
+        assert_eq!(swing_base(sword, CombatEra::new(3)), 30);
+        assert_eq!(swing_base(sword, CombatEra::new(4)), 350);
     }
 
     #[test]

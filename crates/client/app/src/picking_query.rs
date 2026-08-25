@@ -119,7 +119,10 @@ impl App {
             .into_iter()
             .find(|(_, mobile)| mobile.at.x == x && mobile.at.y == y)
             .map(|(_, mobile)| depth::Order {
-                tile: depth::mobile_tile(mobile.at, mobile.from),
+                tile: match mobile.corpse {
+                    true => depth::corpse_tile(mobile.at),
+                    false => depth::mobile_tile(mobile.at, mobile.from),
+                },
                 priority_z: depth::mobile_priority_z(mobile.at.z),
             });
         // The height anything drawn *on* this tile belongs at: the surface a body
@@ -292,7 +295,10 @@ impl App {
                     .find(|(drawn_who, _)| *drawn_who == who)
                     .map(|(drawn_who, mobile)| {
                         let order = depth::Order {
-                            tile: depth::mobile_tile(mobile.at, mobile.from),
+                            tile: match mobile.corpse {
+                                true => depth::corpse_tile(mobile.at),
+                                false => depth::mobile_tile(mobile.at, mobile.from),
+                            },
                             priority_z: depth::mobile_priority_z(mobile.at.z),
                         };
                         let picked = PickedMobile {
@@ -1238,25 +1244,32 @@ impl App {
 }
 
 impl crate::App {
-    /// Rebuild the house drawn under a `0x99` cursor.
+    /// Rebuild the house drawn under a `0x99` cursor or the map editor.
     ///
     /// Once a frame, before the geometry is assembled, because a preview follows
     /// the *pointer* and the pointer moves between packets. Cheap when there is
-    /// no multi cursor up, which is nearly always: one `Option` test and a
+    /// no multi placement tool up, which is nearly always: one `Option` test and a
     /// `clear` over an already-empty vector.
     ///
     /// The pieces go into `presentation.multi_preview` rather than
     /// `presentation.items` — see that field for the two reasons, which are not
     /// the same reason.
     pub(crate) fn refresh_multi_preview(&mut self, camera: Camera) {
-        let multi = self
+        let target_multi = self
             .world
             .authoritative
             .view
             .as_ref()
             .and_then(|view| view.target)
             .and_then(|target| target.multi);
-        let (Some(multi), true) = (multi, self.world_owns_pointer()) else {
+        let editor_multi = self
+            .map_editor
+            .active()
+            .then(|| self.map_editor.selected_house())
+            .flatten();
+        let multi = target_multi.map(|multi| multi.0).or(editor_multi);
+        let owns_preview = target_multi.is_some_and(|_| self.world_owns_pointer()) || editor_multi.is_some();
+        let (Some(multi), true) = (multi, owns_preview) else {
             self.world.presentation.multi_preview.clear();
             return;
         };
@@ -1278,7 +1291,7 @@ impl crate::App {
             // multi the player is about to put down, and a design belongs to one
             // that already stands.
             None,
-            multi.graphic(),
+            openshard_protocol::wire::MultiId(multi).graphic(),
             at,
             openshard_protocol::wire::Hue::NONE,
         ) {

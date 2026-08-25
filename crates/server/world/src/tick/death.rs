@@ -187,6 +187,7 @@ impl World {
             .registry
             .remove::<openshard_state::components::Combat>(entity);
         self.state.registry.insert(entity, Ghost { body: living });
+        self.clear_attackers_of(serial);
         // Rise in the ghost body.
         let ghost = Body {
             id: ghost_body(living.id),
@@ -203,6 +204,28 @@ impl World {
         // living forget the ghost, ghosts and staff see it in its new body.
         self.tell_own_client_body(entity, serial, true, ghost);
         self.redraw_after_body_change(entity, serial);
+    }
+
+    /// Stop every combatant that had just killed (or was pursuing) `target`.
+    ///
+    /// A player remains a mobile when they die: their ghost occupies the same
+    /// tile as the corpse until it walks away.  A creature's brain only gets to
+    /// reconsider its target on its next beat, so leaving its [`Combat`] intact
+    /// for that interval made it keep walking toward the corpse and sometimes
+    /// try to swing at the ghost.  Death invalidates that target immediately.
+    fn clear_attackers_of(&mut self, target: Serial) {
+        let attackers: Vec<EntityId> = self
+            .state
+            .registry
+            .query::<openshard_state::components::Combat>()
+            .filter_map(|(attacker, combat)| (combat.target == Some(target)).then_some(attacker))
+            .collect();
+        for attacker in attackers {
+            combat::clear_target(&mut self.state, attacker);
+            self.state
+                .registry
+                .remove::<openshard_state::components::Route>(attacker);
+        }
     }
 
     /// Tell a player's own client its body just changed: the death status

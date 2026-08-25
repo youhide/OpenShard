@@ -397,7 +397,7 @@ fn gameplay_defaults_to_the_pre_aos_feel() {
     // A config from before [gameplay] existed still parses and means the same
     // numbers the constants used to hold.
     let g = config(MINIMAL).gameplay;
-    assert_eq!(g.combat_era, CombatEra::from(1));
+    assert_eq!(g.combat_era, CombatEra::new(1));
     assert_eq!(g.speed_scale_factor, 15000);
     assert_eq!((g.critical_chance, g.critical_damage_percent), (50, 150));
     assert_eq!(g.skill_cap, 1000);
@@ -420,7 +420,7 @@ fn combat_era_keeps_numeric_toml_representation() {
             combat_era = 3
             "#,
     );
-    assert_eq!(config.gameplay.combat_era, CombatEra::from(3));
+    assert_eq!(config.gameplay.combat_era, CombatEra::new(3));
     assert!(toml::to_string(&config).unwrap().contains("combat_era = 3"));
 }
 
@@ -446,7 +446,7 @@ fn tooltips_and_context_menus_default_on() {
 #[test]
 fn an_unknown_combat_era_is_refused() {
     let mut config = config(MINIMAL);
-    config.gameplay.combat_era = CombatEra::from(5);
+    config.gameplay.combat_era = CombatEra::new(5);
     assert!(matches!(
         config.validate(),
         Err(ConfigError::UnknownCombatEra { era: 5 })
@@ -458,7 +458,7 @@ fn every_sphere_combat_era_is_accepted() {
     // 0 (custom), 1 (pre-AoS), 2 (AoS), 3 (SE), 4 (ML) all have a swing formula.
     for era in 0..=4 {
         let mut config = config(MINIMAL);
-        config.gameplay.combat_era = CombatEra::from(era);
+        config.gameplay.combat_era = CombatEra::new(era);
         assert!(config.validate().is_ok(), "era {era} should load");
     }
 }

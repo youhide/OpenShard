@@ -44,7 +44,7 @@ pub(crate) fn try_stat_gain(state: &mut WorldState, entity: EntityId, skill: Ski
         .copied()
         .unwrap_or_default();
 
-    if state.gameplay.combat_era >= CombatEra::from(4) {
+    if state.gameplay.combat_era >= CombatEra::new(4) {
         // ML: one flat chance, then the skill's own primary/secondary stat.
         if state.rng.below(1000) >= state.gameplay.stat_gain_chance {
             return;

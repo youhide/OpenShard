@@ -224,6 +224,16 @@ pub fn mobile_tile(at: Point, from: Option<Point>) -> i32 {
     }
 }
 
+/// Which tile-depth a corpse uses.
+///
+/// A prone frame covers the immediately foreground land diamond.  Move its
+/// single depth key one tile nearer so that flat land does not cut through its
+/// lower edge. This deliberately remains a single-depth approximation: tall
+/// foreground terrain or statics may still hide part of the corpse.
+pub fn corpse_tile(at: Point) -> i32 {
+    i32::from(at.x) + i32::from(at.y) + 1
+}
+
 #[cfg(test)]
 mod tests {
     use openshard_tiles::TileFlags;
@@ -347,6 +357,20 @@ mod tests {
     #[test]
     fn a_standing_body_sorts_at_its_own_tile() {
         assert_eq!(mobile_tile(Point::new(100, 100, 0), None), 200);
+    }
+
+    #[test]
+    fn a_corpse_stays_above_the_land_its_prone_frame_overlaps() {
+        let corpse_at = Point::new(1349, 1890, 0);
+        let foreground_land = Order {
+            tile: base_for(1349, 1891),
+            priority_z: land_priority_z([0; 4]),
+        };
+        let corpse = Order {
+            tile: corpse_tile(corpse_at),
+            priority_z: mobile_priority_z(0),
+        };
+        assert!(corpse > foreground_land);
     }
 
     /// Nearer is a smaller depth, which is what makes the `Less` test and the

@@ -11,8 +11,8 @@
 
 use openshard_client_render::gump::Frame;
 use openshard_client_render::radar::{
-    BASE_CHUNK_TILES, PLAYER_MARKER, RadarCache, RadarChunk, RadarChunkCoord, RadarExtent, RadarRegion,
-    RadarTile, UNKNOWN,
+    BASE_CHUNK_TILES, PLAYER_MARKER, RadarCache, RadarChunk, RadarChunkCoord, RadarExtent, RadarLod,
+    RadarRegion, RadarTile, UNKNOWN,
 };
 use openshard_client_render::radar_pass::{
     Placement, RADAR_CHUNK_PAGE_BYTES, RadarChunkRenderer, RadarMarker, RadarOverlayRenderer,
@@ -26,7 +26,7 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 fn region(facet: Facet, origin: (u32, u32), extent: (u16, u16)) -> RadarRegion {
     RadarRegion::new(
         facet,
-        RadarTile::from(origin),
+        RadarTile::new(origin.0, origin.1),
         RadarExtent::new(extent.0, extent.1).expect("a non-empty GPU test region"),
     )
 }
@@ -59,7 +59,7 @@ fn adjacent_chunks_each_draw_their_own_pixels() {
     let facet = Facet(0);
     let solid = |x: u32, colour: Color16| {
         RadarChunk::new(
-            cache.key(facet, 0, RadarChunkCoord::new(x, 0)),
+            cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(x, 0)),
             vec![colour; usize::from(BASE_CHUNK_TILES) * usize::from(BASE_CHUNK_TILES)],
         )
         .expect("a complete chunk")
@@ -145,7 +145,7 @@ fn pages_recycled_through_eviction_each_belong_to_one_chunk() {
     let facet = Facet(0);
     let solid = |x: u32, colour: Color16| {
         RadarChunk::new(
-            cache.key(facet, 0, RadarChunkCoord::new(x, 0)),
+            cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(x, 0)),
             vec![colour; usize::from(BASE_CHUNK_TILES) * usize::from(BASE_CHUNK_TILES)],
         )
         .expect("a complete chunk")
@@ -251,7 +251,7 @@ fn two_identical_draws_grow_the_instance_buffer_once() {
     let facet = Facet(0);
     let chunk = |x: u32| {
         RadarChunk::new(
-            cache.key(facet, 0, RadarChunkCoord::new(x, 0)),
+            cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(x, 0)),
             vec![Color16(0x03E0); usize::from(BASE_CHUNK_TILES) * usize::from(BASE_CHUNK_TILES)],
         )
         .expect("a complete chunk")
@@ -317,7 +317,7 @@ fn the_page_cache_counts_its_evictions_apart_from_its_truncated_draws() {
     let facet = Facet(0);
     let chunk = |x: u32| {
         RadarChunk::new(
-            cache.key(facet, 0, RadarChunkCoord::new(x, 0)),
+            cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(x, 0)),
             vec![Color16(0x03E0); usize::from(BASE_CHUNK_TILES) * usize::from(BASE_CHUNK_TILES)],
         )
         .expect("a complete chunk")
@@ -395,7 +395,7 @@ fn a_marker_lands_on_its_tile_over_the_terrain() {
     let cache = RadarCache::default();
     let facet = Facet(0);
     let ground = RadarChunk::new(
-        cache.key(facet, 0, RadarChunkCoord::new(0, 0)),
+        cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(0, 0)),
         vec![Color16(0x7C00); usize::from(BASE_CHUNK_TILES) * usize::from(BASE_CHUNK_TILES)],
     )
     .expect("a complete chunk");
@@ -528,12 +528,12 @@ fn a_coarse_ancestor_draws_under_the_one_chunk_that_is_ready() {
     // The level-one product over all four base chunks at the origin, and the
     // one base chunk of the four that has been built.
     let coarse = RadarChunk::new(
-        cache.key(facet, 1, RadarChunkCoord::new(0, 0)),
+        cache.key(facet, RadarLod::new(1), RadarChunkCoord::new(0, 0)),
         pixels(Color16(0x03E0)),
     )
     .expect("a complete chunk");
     let fine = RadarChunk::new(
-        cache.key(facet, 0, RadarChunkCoord::new(0, 0)),
+        cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(0, 0)),
         pixels(Color16(0x7C00)),
     )
     .expect("a complete chunk");

@@ -120,7 +120,7 @@ fn carried(world: &World, connection: ConnectionId, graphic: Graphic, hue: Hue) 
 /// moves whenever ServUO's own list does. What the tests want is "something cheap
 /// a novice can make", not a particular dagger.
 fn cheapest_smithing() -> (u16, u16) {
-    let def = openshard_crafting::system(SystemId::from(0)).expect("blacksmithy");
+    let def = openshard_crafting::system(SystemId::new(0)).expect("blacksmithy");
     let (index, recipe) = def
         .recipes
         .iter()
@@ -141,7 +141,7 @@ fn craft(
     now: Instant,
 ) {
     let player = world.state.players[&connection];
-    let def = openshard_crafting::system(SystemId::from(0)).expect("blacksmithy");
+    let def = openshard_crafting::system(SystemId::new(0)).expect("blacksmithy");
     let group = def.recipes[usize::from(recipe)].group;
     openshard_crafting::open(
         &mut world.state,
@@ -200,7 +200,7 @@ fn a_smith_at_a_forge_turns_ingots_into_a_blade() {
     shop(&mut world, &[(FORGE.0, 0), (ANVIL.0, 0)]);
     let tongs = give(&mut world, connection, TONGS, Hue(0), 1);
     let (recipe, _) = cheapest_smithing();
-    let def = openshard_crafting::system(SystemId::from(0)).unwrap();
+    let def = openshard_crafting::system(SystemId::new(0)).unwrap();
     let wanted = def.recipes[usize::from(recipe)].resources[0].amount;
     let made = def.recipes[usize::from(recipe)].graphic;
     give(&mut world, connection, INGOT, Hue(0), wanted * 2);
@@ -236,7 +236,7 @@ fn the_same_smith_in_the_street_is_told_to_find_a_forge() {
     shop(&mut world, &[]);
     let tongs = give(&mut world, connection, TONGS, Hue(0), 1);
     let (recipe, _) = cheapest_smithing();
-    let def = openshard_crafting::system(SystemId::from(0)).unwrap();
+    let def = openshard_crafting::system(SystemId::new(0)).unwrap();
     let wanted = def.recipes[usize::from(recipe)].resources[0].amount;
     let made = def.recipes[usize::from(recipe)].graphic;
     give(&mut world, connection, INGOT, Hue(0), wanted * 4);
@@ -269,7 +269,7 @@ fn an_anvil_alone_is_not_a_smithy() {
     shop(&mut world, &[(ANVIL.0, 0)]);
     let tongs = give(&mut world, connection, TONGS, Hue(0), 1);
     let (recipe, _) = cheapest_smithing();
-    let def = openshard_crafting::system(SystemId::from(0)).unwrap();
+    let def = openshard_crafting::system(SystemId::new(0)).unwrap();
     give(
         &mut world,
         connection,
@@ -301,7 +301,7 @@ fn a_valorite_order_cannot_be_paid_in_iron() {
     shop(&mut world, &[(FORGE.0, 0), (ANVIL.0, 0)]);
     let tongs = give(&mut world, connection, TONGS, Hue(0), 1);
     let (recipe, _) = cheapest_smithing();
-    let def = openshard_crafting::system(SystemId::from(0)).unwrap();
+    let def = openshard_crafting::system(SystemId::new(0)).unwrap();
     let wanted = def.recipes[usize::from(recipe)].resources[0].amount;
     let made = def.recipes[usize::from(recipe)].graphic;
     give(&mut world, connection, INGOT, Hue(0), wanted * 10);
@@ -349,7 +349,7 @@ fn a_novice_is_refused_rather_than_charged_for_a_failure() {
     let connection = enter(&mut world, now);
     shop(&mut world, &[(FORGE.0, 0), (ANVIL.0, 0)]);
     let tongs = give(&mut world, connection, TONGS, Hue(0), 1);
-    let def = openshard_crafting::system(SystemId::from(0)).unwrap();
+    let def = openshard_crafting::system(SystemId::new(0)).unwrap();
     // The hardest one-material recipe in the table, which nobody at zero can try.
     let (recipe, _) = def
         .recipes
@@ -413,7 +413,7 @@ fn a_tailor_needs_no_workshop_at_all() {
             &mut world.state,
             player,
             kit,
-            SystemId::try_from(tailoring).unwrap(),
+            SystemId::from_index(tailoring).unwrap(),
             u16::try_from(index).unwrap(),
             0,
         ),
@@ -500,7 +500,7 @@ fn a_gump_reply_for_a_window_the_server_never_opened_makes_nothing() {
     shop(&mut world, &[(FORGE.0, 0), (ANVIL.0, 0)]);
     give(&mut world, connection, TONGS, Hue(0), 1);
     let (recipe, _) = cheapest_smithing();
-    let def = openshard_crafting::system(SystemId::from(0)).unwrap();
+    let def = openshard_crafting::system(SystemId::new(0)).unwrap();
     let made = def.recipes[usize::from(recipe)].graphic;
     give(
         &mut world,

@@ -1437,6 +1437,18 @@ impl App {
         // recording — see [`profile`].
         profile::frame();
         puffin::profile_scope!("draw");
+        self.tick(started);
+        let camera = *self.control.camera();
+        self.draw_from(started, camera);
+    }
+
+    /// Advance the client state once, whether a frame will be presented or not.
+    ///
+    /// An inactive or occluded window may not receive a redraw callback, but
+    /// its socket, route, replay, and animation clocks must still progress.
+    /// Keeping this work here lets `about_to_wait` run the same tick without
+    /// borrowing a surface or spending a GPU frame.
+    pub(crate) fn tick(&mut self, now: Instant) {
         // What the shard has opened, and what it has taken away: the view is
         // filled by `client/net`, which knows nothing about screens, so a
         // window appearing is this end noticing.
@@ -1448,9 +1460,7 @@ impl App {
         // move there and not here. After it returns, nothing in the frame
         // moves the world or the camera again; the snapshot below is what
         // every reader from here on is handed.
-        self.advance(started);
-        let camera = *self.control.camera();
-        self.draw_from(started, camera);
+        self.advance(now);
     }
 
     /// **Step one of three**: everything that writes. What the shell asked
@@ -1931,7 +1941,7 @@ impl App {
         // Gathered before the window is borrowed, and not inside the borrow: it
         // reads the whole of `self`, and the window is part of it.
         let want = light::lit_tiles(&camera, &tuning);
-        let wanted = self.wanted_since(camera, &tuning, self.graphics.covered);
+        let mut wanted = self.wanted_since(camera, &tuning, self.graphics.covered);
         // Only schedule immutable map-block work here.  `refresh` merely
         // reprioritises bounded requests; it does not build or upload pixels,
         // so a newly exposed far-zoom block continues through the detailed
@@ -1992,6 +2002,16 @@ impl App {
         // the draw list rebuilt per *frame* rather than per packet, because it
         // follows the pointer.
         self.refresh_multi_preview(camera);
+        // A placement preview is made of client-file statics too, but it is not
+        // part of the authoritative item list `wanted_since` scans. Ask for all
+        // of its art before this very frame is assembled; otherwise only the
+        // walls whose graphics happened to be resident for nearby scenery draw.
+        wanted
+            .statics
+            .extend(openshard_client_render::items::needed_graphics(
+                &self.world.presentation.multi_preview,
+                &self.world.presentation.tile_animations,
+            ));
 
         // How big this client's own windows draw, read before the surface is
         // borrowed below: it is the shell's live copy and not the app's loaded
@@ -3011,6 +3031,7 @@ mod tests {
             facing: Direction::East,
             frame: openshard_uofiles::anim::AnimationFrameIndex(0),
             from: None,
+            corpse: false,
             hue: Hue::NONE,
             // Deliberately an impossible stale presentation pose: the test
             // proves the frame projection replaces it from GameMotion alone.

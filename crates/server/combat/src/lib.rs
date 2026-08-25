@@ -23,7 +23,7 @@ use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::wire::{Graphic, SoundId};
 use openshard_protocol::world::{Point, PoisonLevel};
 use openshard_state::components::{
-    BehaviourBuffs, Body, Client, Combat, CriminalUntil, DamageType, Equipped, Frozen, Guard, Hidden,
+    BehaviourBuffs, Body, Client, Combat, CriminalUntil, DamageType, Equipped, Frozen, Ghost, Guard, Hidden,
     Hitpoints, MeleeDamage, MurderDecay, Murders, PoisonCharges, Poisoned, Position, RangedAttack,
     Resistance, Skills, Stamina, Stats, SwingSpeed, WrestlingAmbushCooldown, WrestlingCombo,
     WrestlingInterceptCooldown, WrestlingOpener, WrestlingStride, body_is_female, body_opens_doors,
@@ -374,13 +374,14 @@ pub fn attack(state: &mut WorldState, connection: ConnectionId, target: Option<S
         return;
     };
     // A target that cannot be attacked — a serial of zero, an item, the attacker
-    // itself, or an invulnerable mobile — clears the aim and un-highlights the
-    // client's bar.
+    // itself, a corpse/ghost, or an invulnerable mobile — clears the aim and
+    // un-highlights the client's bar.  A ghost retains its mobile serial so the
+    // client can walk it to a healer, but it is not a combat target.
     let valid = target
         .and_then(|serial| state.registry.entity_of(serial).map(|entity| (serial, entity)))
         .filter(|&(_, entity)| {
             entity != player
-                && state.registry.has::<Hitpoints>(entity)
+                && attackable(state, entity)
                 && state.notoriety_of(entity) != Notoriety::Invulnerable
         });
     let Some((serial, target_entity)) = valid else {
@@ -548,6 +549,11 @@ pub fn volleys(state: &mut WorldState) {
         .collect();
     for (attacker, target_serial, range, kind) in ready {
         let Some(target) = state.registry.entity_of(target_serial) else {
+            clear_target(state, attacker);
+            continue;
+        };
+        if !attackable(state, target) {
+            clear_target(state, attacker);
             continue;
         };
         let (Some(&Position(from)), Some(&Position(to))) = (
@@ -625,6 +631,14 @@ pub fn swings(state: &mut WorldState) {
             clear_target(state, attacker);
             continue;
         };
+        // A target may have died since combat selected it.  In particular, a
+        // player remains a mobile after death as a ghost, so just resolving its
+        // serial is not enough: without this guard monsters keep animating
+        // attacks at the ghost until their next AI beat clears the target.
+        if !attackable(state, target) {
+            clear_target(state, attacker);
+            continue;
+        }
         let (Some(&Position(attacker_pos)), Some(&Position(target_pos))) = (
             state.registry.get::<Position>(attacker),
             state.registry.get::<Position>(target),
@@ -717,11 +731,21 @@ pub fn swings(state: &mut WorldState) {
 fn target_is_dead(state: &WorldState, serial: Serial) -> bool {
     match state.registry.entity_of(serial) {
         None => true,
-        Some(entity) => state
+        Some(entity) => !attackable(state, entity),
+    }
+}
+
+/// Whether `entity` is a living mobile that combat may select and strike.
+///
+/// A dead player stays in the registry as a [`Ghost`] so it can walk and be
+/// resurrected.  Its serial and zero hit points alone therefore cannot be used
+/// as a proxy for a valid combat target.
+fn attackable(state: &WorldState, entity: EntityId) -> bool {
+    !state.registry.has::<Ghost>(entity)
+        && state
             .registry
             .get::<Hitpoints>(entity)
-            .is_some_and(|hp| hp.current == 0),
-    }
+            .is_some_and(|hp| hp.current > 0)
 }
 
 /// Sphere's murder count threshold: the fifth innocent killed makes you red.

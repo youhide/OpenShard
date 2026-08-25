@@ -25,6 +25,7 @@ use openshard_protocol::mapedit::{
 };
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Facet;
+use openshard_uofiles::multi::{Multi, Multis};
 
 /// The authority required before this client offers map editing controls.
 pub(crate) const REQUIRED_AUTHORITY: AccessLevel = AccessLevel::GameMaster;
@@ -42,6 +43,8 @@ enum ActiveTool {
     Raise,
     Lower,
     Flatten,
+    PlaceHouse,
+    RemoveHouse,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,22 +77,30 @@ pub(crate) struct MapEditor {
     matches: Vec<AssetId>,
     previews: BTreeMap<AssetId, Option<PreviewTexture>>,
     draft_static_assets: BTreeSet<AssetId>,
-    tool: ActiveTool,
+    tool: Option<ActiveTool>,
     brush: Brush,
     strength: u8,
     flatten: i8,
     draft: Option<Draft>,
     commit: CommitState,
     message: Option<String>,
+    multis: Option<std::sync::Arc<Multis>>,
+    house_search: String,
+    house_matches: Vec<u16>,
+    selected_house: Option<u16>,
+    house_previews: BTreeMap<u16, Option<egui::TextureHandle>>,
 }
 
 impl MapEditor {
     /// Open the install-backed catalogue and start in ordinary play mode.
-    pub(crate) fn open(client_dir: &Path) -> Self {
-        match Catalog::open(client_dir) {
+    pub(crate) fn open(client_dir: &Path, multis: Option<std::sync::Arc<Multis>>) -> Self {
+        let mut editor = match Catalog::open(client_dir) {
             Ok(catalogue) => Self::with_catalogue(Some(catalogue), None),
             Err(error) => Self::with_catalogue(None, Some(error.to_string())),
-        }
+        };
+        editor.multis = multis;
+        editor.refresh_house_matches();
+        editor
     }
 
     fn with_catalogue(catalogue: Option<Catalog>, catalogue_error: Option<String>) -> Self {
@@ -105,13 +116,18 @@ impl MapEditor {
             matches,
             previews: BTreeMap::new(),
             draft_static_assets: BTreeSet::new(),
-            tool: ActiveTool::PaintLand,
+            tool: Some(ActiveTool::PaintLand),
             brush: Brush::default(),
             strength: 1,
             flatten: 0,
             draft: None,
             commit: CommitState::Ready,
             message: None,
+            multis: None,
+            house_search: String::new(),
+            house_matches: Vec::new(),
+            selected_house: None,
+            house_previews: BTreeMap::new(),
         }
     }
 
@@ -144,15 +160,55 @@ impl MapEditor {
 
     /// Whether the active tool needs a static rather than a ground coordinate.
     pub(crate) const fn removes_static(&self) -> bool {
-        matches!(self.tool, ActiveTool::RemoveStatic)
+        matches!(self.tool, Some(ActiveTool::RemoveStatic))
+    }
+
+    /// The multi the next editor click places as a real house entity.
+    #[must_use]
+    pub(crate) const fn selected_house(&self) -> Option<u16> {
+        if matches!(self.tool, Some(ActiveTool::PlaceHouse)) {
+            self.selected_house
+        } else {
+            None
+        }
+    }
+
+    /// Whether the next editor click should name a house entity for demolition.
+    pub(crate) const fn removes_house(&self) -> bool {
+        matches!(self.tool, Some(ActiveTool::RemoveHouse))
+    }
+
+    /// Put away the current tool while leaving map-editor mode and its draft
+    /// open. Returns whether there was a tool to put away.
+    pub(crate) fn cancel_tool(&mut self) -> bool {
+        self.tool.take().is_some()
+    }
+
+    fn refresh_house_matches(&mut self) {
+        let query = self.house_search.trim().to_ascii_lowercase();
+        self.house_matches = self.multis.as_deref().map_or_else(Vec::new, |multis| {
+            multis
+                .iter()
+                // `multi.mul` has no semantic kind. Its low ids are ships;
+                // 0x64 is the first classic house and the housing examples'
+                // own boundary.
+                .filter(|multi| multi.id >= 0x0064)
+                .filter(|multi| {
+                    query.is_empty()
+                        || format!("{:#06x}", multi.id).contains(&query)
+                        || multi.id.to_string().contains(&query)
+                })
+                .map(|multi| multi.id)
+                .collect()
+        });
     }
 
     fn select_asset(&mut self, id: AssetId) {
         self.palette.select(id);
-        self.tool = match id {
+        self.tool = Some(match id {
             AssetId::Land(_) => ActiveTool::PaintLand,
             AssetId::Static(_) => ActiveTool::PlaceStatic,
-        };
+        });
         self.message = None;
     }
 
@@ -215,7 +271,7 @@ impl MapEditor {
     }
 
     fn tool(&mut self, static_id: Option<StaticId>) -> Option<Tool> {
-        match self.tool {
+        match self.tool? {
             ActiveTool::PaintLand => match self.palette.selected() {
                 Some(AssetId::Land(tile)) => Some(Tool::PaintLand(tile)),
                 _ => {
@@ -248,6 +304,7 @@ impl MapEditor {
                 HeightStrength::new(self.strength).expect("the editor slider excludes zero"),
             )),
             ActiveTool::Flatten => Some(Tool::Flatten(TargetHeight(self.flatten))),
+            ActiveTool::PlaceHouse | ActiveTool::RemoveHouse => None,
         }
     }
 
@@ -361,7 +418,7 @@ impl MapEditor {
         map: &WorldMap,
         pick: &crate::diagnostics::Pick,
     ) -> Option<(openshard_protocol::world::Point, Graphic)> {
-        if !self.active || self.tool != ActiveTool::PlaceStatic {
+        if !self.active || self.tool != Some(ActiveTool::PlaceStatic) {
             return None;
         }
         let Some(AssetId::Static(graphic)) = self.palette.selected() else {
@@ -426,62 +483,166 @@ impl MapEditor {
                     (ActiveTool::Raise, "Raise"),
                     (ActiveTool::Lower, "Lower"),
                     (ActiveTool::Flatten, "Flatten"),
+                    (ActiveTool::PlaceHouse, "Place house"),
+                    (ActiveTool::RemoveHouse, "Remove house"),
                 ] {
-                    ui.selectable_value(&mut self.tool, tool, label);
+                    ui.selectable_value(&mut self.tool, Some(tool), label);
                 }
-                ui.horizontal(|ui| {
-                    ui.label("Shape");
-                    ui.selectable_value(&mut self.brush.shape, BrushShape::Circle, "Circle");
-                    ui.selectable_value(&mut self.brush.shape, BrushShape::Square, "Square");
-                });
-                let mut radius = self.brush.radius.get();
-                if ui
-                    .add(egui::Slider::new(&mut radius, 0..=16).text("Radius"))
-                    .changed()
-                {
-                    self.brush.radius = BrushRadius::new(radius);
-                }
-                if matches!(self.tool, ActiveTool::Raise | ActiveTool::Lower) {
-                    ui.add(egui::Slider::new(&mut self.strength, 1..=16).text("Strength"));
-                }
-                if self.tool == ActiveTool::Flatten {
-                    ui.add(egui::Slider::new(&mut self.flatten, i8::MIN..=i8::MAX).text("Height"));
+                if self.tool == Some(ActiveTool::PlaceHouse) {
+                    self.house_catalogue(ui);
+                } else if self.tool != Some(ActiveTool::RemoveHouse) {
+                    ui.horizontal(|ui| {
+                        ui.label("Shape");
+                        ui.selectable_value(&mut self.brush.shape, BrushShape::Circle, "Circle");
+                        ui.selectable_value(&mut self.brush.shape, BrushShape::Square, "Square");
+                    });
+                    let mut radius = self.brush.radius.get();
+                    if ui
+                        .add(egui::Slider::new(&mut radius, 0..=16).text("Radius"))
+                        .changed()
+                    {
+                        self.brush.radius = BrushRadius::new(radius);
+                    }
+                    if matches!(self.tool, Some(ActiveTool::Raise | ActiveTool::Lower)) {
+                        ui.add(egui::Slider::new(&mut self.strength, 1..=16).text("Strength"));
+                    }
+                    if self.tool == Some(ActiveTool::Flatten) {
+                        ui.add(egui::Slider::new(&mut self.flatten, i8::MIN..=i8::MAX).text("Height"));
+                    }
                 }
 
                 ui.separator();
-                self.catalogue(ui);
-                ui.separator();
-                ui.horizontal(|ui| {
-                    let undo = self.draft.as_ref().is_some_and(Draft::can_undo);
-                    if ui.add_enabled(undo, egui::Button::new("Undo")).clicked() {
-                        self.draft.as_mut().unwrap().undo();
-                        self.commit = CommitState::Ready;
-                    }
-                    let redo = self.draft.as_ref().is_some_and(Draft::can_redo);
-                    if ui.add_enabled(redo, egui::Button::new("Redo")).clicked() {
-                        self.draft.as_mut().unwrap().redo();
-                        self.commit = CommitState::Ready;
-                    }
+                if !matches!(self.tool, Some(ActiveTool::PlaceHouse | ActiveTool::RemoveHouse)) {
+                    self.catalogue(ui);
+                }
+                if !matches!(self.tool, Some(ActiveTool::PlaceHouse | ActiveTool::RemoveHouse)) {
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        let undo = self.draft.as_ref().is_some_and(Draft::can_undo);
+                        if ui.add_enabled(undo, egui::Button::new("Undo")).clicked() {
+                            self.draft.as_mut().unwrap().undo();
+                            self.commit = CommitState::Ready;
+                        }
+                        let redo = self.draft.as_ref().is_some_and(Draft::can_redo);
+                        if ui.add_enabled(redo, egui::Button::new("Redo")).clicked() {
+                            self.draft.as_mut().unwrap().redo();
+                            self.commit = CommitState::Ready;
+                        }
+                        let dirty = self.draft.as_ref().is_some_and(Draft::is_dirty);
+                        if ui.add_enabled(dirty, egui::Button::new("Discard")).clicked() {
+                            self.draft = None;
+                            self.draft_static_assets.clear();
+                            self.commit = CommitState::Ready;
+                            self.message = None;
+                        }
+                    });
                     let dirty = self.draft.as_ref().is_some_and(Draft::is_dirty);
-                    if ui.add_enabled(dirty, egui::Button::new("Discard")).clicked() {
-                        self.draft = None;
-                        self.draft_static_assets.clear();
-                        self.commit = CommitState::Ready;
-                        self.message = None;
-                    }
-                });
-                let dirty = self.draft.as_ref().is_some_and(Draft::is_dirty);
-                commit_pressed = ui
-                    .add_enabled(
-                        dirty && !matches!(self.commit, CommitState::Pending | CommitState::Accepted(_)),
-                        egui::Button::new("Commit draft"),
-                    )
-                    .clicked();
+                    commit_pressed = ui
+                        .add_enabled(
+                            dirty && !matches!(self.commit, CommitState::Pending | CommitState::Accepted(_)),
+                            egui::Button::new("Commit draft"),
+                        )
+                        .clicked();
+                }
             });
         commit_pressed
     }
 
+    fn house_catalogue(&mut self, ui: &mut egui::Ui) {
+        if self.multis.is_none() {
+            ui.colored_label(egui::Color32::LIGHT_RED, "multi table is unavailable");
+            return;
+        }
+        if ui
+            .add(egui::TextEdit::singleline(&mut self.house_search).hint_text("multi id: 0x64 or 100"))
+            .changed()
+        {
+            self.refresh_house_matches();
+        }
+        ui.small("multi.mul has no house names; rows show id, footprint and piece count");
+        let mut chosen = None;
+        let multis = self.multis.as_deref().expect("checked above");
+        // Leave the selected multi's picture visible below the catalogue even
+        // on an ordinary-height window; the static-art palette can spend more
+        // height because it has no second building-sized card under its rows.
+        egui::ScrollArea::vertical().max_height(180.0).show_rows(
+            ui,
+            24.0,
+            self.house_matches.len(),
+            |ui, rows| {
+                for id in &self.house_matches[rows] {
+                    let Some(multi) = multis.get(*id) else { continue };
+                    let label = format!(
+                        "{:#06x}  {}x{}  {} pieces",
+                        id,
+                        multi.size.0,
+                        multi.size.1,
+                        multi.drawn().count()
+                    );
+                    if ui
+                        .selectable_label(self.selected_house == Some(*id), label)
+                        .clicked()
+                    {
+                        chosen = Some(*id);
+                    }
+                }
+            },
+        );
+        if let Some(id) = chosen {
+            self.selected_house = Some(id);
+        }
+        match self.selected_house {
+            Some(id) => {
+                ui.small(format!("Selected house {id:#06x}. Click the world to place it."));
+                self.house_previews.retain(|cached, _| *cached == id);
+                if !self.house_previews.contains_key(&id) {
+                    let preview = self
+                        .catalogue
+                        .as_ref()
+                        .zip(self.multis.as_deref().and_then(|multis| multis.get(id)))
+                        .map(|(catalogue, multi)| house_preview_texture(catalogue, ui.ctx(), multi))
+                        .transpose()
+                        .map(Option::flatten);
+                    match preview {
+                        Ok(texture) => {
+                            self.house_previews.insert(id, texture);
+                        }
+                        Err(error) => {
+                            self.house_previews.insert(id, None);
+                            self.message = Some(error.to_string());
+                        }
+                    }
+                }
+                match self.house_previews.get(&id).and_then(Option::as_ref) {
+                    Some(texture) => {
+                        egui::Frame::canvas(ui.style()).show(ui, |ui| {
+                            ui.add(
+                                egui::Image::from_texture(texture)
+                                    .max_size(egui::vec2(220.0, 170.0))
+                                    .maintain_aspect_ratio(true),
+                            );
+                        });
+                    }
+                    None => {
+                        ui.small("No drawable preview for this multi.");
+                    }
+                }
+            }
+            None => {
+                ui.small("Select a house, then point at the world.");
+            }
+        };
+    }
+
     fn status(&self, ui: &mut egui::Ui) {
+        if self.tool == Some(ActiveTool::PlaceHouse) {
+            ui.label("House placement is immediate and uses the shard's housing rules.");
+            return;
+        }
+        if self.tool == Some(ActiveTool::RemoveHouse) {
+            ui.label("Click any visible part of a house to remove the whole house.");
+            return;
+        }
         let (tiles, ops) = self.draft.as_ref().map_or((0, 0), |draft| {
             (draft.dirty_tiles().len(), draft.dirty_tiles().len())
         });
@@ -652,6 +813,102 @@ fn preview_texture(
     }))
 }
 
+/// Flatten a multi's component art into the same south-east isometric view as
+/// the world, for the selected-house card in the editor panel.
+fn house_preview_texture(
+    catalogue: &Catalog,
+    context: &egui::Context,
+    multi: &Multi,
+) -> Result<Option<egui::TextureHandle>, openshard_uofiles::art::ArtError> {
+    const HALF_TILE: i32 = 22;
+    const Z_STEP: i32 = 4;
+    const MAX_SOURCE_SIDE: usize = 2048;
+    const THUMBNAIL_SIDE: usize = 256;
+
+    let mut layers = Vec::new();
+    let mut bounds: Option<(i32, i32, i32, i32)> = None;
+    for component in multi.drawn().copied() {
+        let Some(image) = catalogue.preview(AssetId::Static(component.graphic))? else {
+            continue;
+        };
+        let anchor_x = (i32::from(component.dx) - i32::from(component.dy)) * HALF_TILE;
+        let anchor_y = (i32::from(component.dx) + i32::from(component.dy)) * HALF_TILE
+            - i32::from(component.dz) * Z_STEP;
+        let left = anchor_x - (i32::from(image.width()) >> 1);
+        let top = anchor_y + HALF_TILE - i32::from(image.height());
+        let right = left + i32::from(image.width());
+        let bottom = top + i32::from(image.height());
+        bounds = Some(
+            bounds.map_or((left, top, right, bottom), |(min_x, min_y, max_x, max_y)| {
+                (
+                    min_x.min(left),
+                    min_y.min(top),
+                    max_x.max(right),
+                    max_y.max(bottom),
+                )
+            }),
+        );
+        layers.push((component, image, left, top));
+    }
+    let Some((min_x, min_y, max_x, max_y)) = bounds else {
+        return Ok(None);
+    };
+    let Ok(width) = usize::try_from(max_x - min_x) else {
+        return Ok(None);
+    };
+    let Ok(height) = usize::try_from(max_y - min_y) else {
+        return Ok(None);
+    };
+    if width == 0 || height == 0 || width > MAX_SOURCE_SIDE || height > MAX_SOURCE_SIDE {
+        return Ok(None);
+    }
+
+    // The world depth key is tile x+y, then z. File order remains the stable
+    // tie-breaker for two components occupying the same cell and height.
+    layers.sort_by_key(|(component, _, _, _)| {
+        (
+            i32::from(component.dx) + i32::from(component.dy),
+            i32::from(component.dz),
+        )
+    });
+    let mut pixels = vec![egui::Color32::TRANSPARENT; width * height];
+    for (_, image, left, top) in layers {
+        let offset_x = usize::try_from(left - min_x).expect("the layer lies inside its derived bounds");
+        let offset_y = usize::try_from(top - min_y).expect("the layer lies inside its derived bounds");
+        for y in 0..usize::from(image.height()) {
+            for x in 0..usize::from(image.width()) {
+                let pixel = image.pixels()[y * usize::from(image.width()) + x];
+                if pixel.is_transparent() {
+                    continue;
+                }
+                let color = pixel.rgb8();
+                pixels[(offset_y + y) * width + offset_x + x] =
+                    egui::Color32::from_rgb(color.red, color.green, color.blue);
+            }
+        }
+    }
+
+    let divisor = width.max(height).div_ceil(THUMBNAIL_SIDE).max(1);
+    let thumb_width = width.div_ceil(divisor);
+    let thumb_height = height.div_ceil(divisor);
+    let pixels = if divisor == 1 {
+        pixels
+    } else {
+        (0..thumb_height)
+            .flat_map(|y| {
+                let pixels = &pixels;
+                (0..thumb_width).map(move |x| pixels[(y * divisor) * width + x * divisor])
+            })
+            .collect()
+    };
+    let image = egui::ColorImage::new([thumb_width, thumb_height], pixels);
+    Ok(Some(context.load_texture(
+        format!("map-editor-house-{:#06x}", multi.id),
+        image,
+        egui::TextureOptions::NEAREST,
+    )))
+}
+
 fn wire_op(op: PatchOp) -> MapEditOp {
     let at = |x, y| EditTile {
         x: EditX(x),
@@ -693,6 +950,15 @@ fn refusal(reason: MapEditRefusal) -> &'static str {
 impl crate::app::App {
     /// Turn the already-drawn cursor answer into one editor dab.
     pub(crate) fn apply_map_editor_click(&mut self, camera: openshard_client_render::camera::Camera) {
+        if self.map_editor.removes_house() {
+            if let (Some(link), Some(item)) = (self.world.shard.link(), self.picking.hover.item) {
+                link.say(
+                    format!(".hdemolish {}", item.serial),
+                    openshard_protocol::speech::TalkMode::Regular,
+                );
+            }
+            return;
+        }
         let removing_static = self.map_editor.removes_static();
         let picked = self.picking.hover.static_;
         let at = picked
@@ -704,6 +970,18 @@ impl crate::app::App {
         let Some(at) = at else {
             return;
         };
+        if let Some(multi) = self.map_editor.selected_house() {
+            let tile = self
+                .pick_tile(camera)
+                .map(|tile| openshard_protocol::world::Point::new(tile.at.x, tile.at.y, tile.stand_z.0));
+            if let (Some(link), Some(at)) = (self.world.shard.link(), tile) {
+                link.say(
+                    format!(".house {multi:#06x} {} {} {}", at.x, at.y, at.z),
+                    openshard_protocol::speech::TalkMode::Regular,
+                );
+            }
+            return;
+        }
         let snapshot = self
             .resources
             .ground
@@ -730,9 +1008,12 @@ impl crate::app::App {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use openshard_protocol::access::AccessLevel;
     use openshard_protocol::wire::Graphic;
     use openshard_tiles::LandTileId;
+    use openshard_uofiles::multi::{Component, Multi, Multis};
 
     use super::{ActiveTool, AssetId, MapEditor};
 
@@ -782,7 +1063,7 @@ mod tests {
 
         editor.select_asset(AssetId::Static(Graphic(0x0eed)));
 
-        assert_eq!(editor.tool, ActiveTool::PlaceStatic);
+        assert_eq!(editor.tool, Some(ActiveTool::PlaceStatic));
     }
 
     #[test]
@@ -791,6 +1072,55 @@ mod tests {
 
         editor.select_asset(AssetId::Land(LandTileId(3)));
 
-        assert_eq!(editor.tool, ActiveTool::PaintLand);
+        assert_eq!(editor.tool, Some(ActiveTool::PaintLand));
+    }
+
+    #[test]
+    fn a_house_selection_only_arms_house_placement_in_its_tool() {
+        let mut editor = MapEditor::with_catalogue(None, None);
+        editor.multis = Some(Arc::new(Multis::of([Multi::new(
+            0x64,
+            vec![Component {
+                graphic: Graphic(1),
+                dx: 0,
+                dy: 0,
+                dz: 0,
+                flags: 1,
+            }],
+        )])));
+        editor.refresh_house_matches();
+        editor.selected_house = Some(0x64);
+
+        assert_eq!(editor.selected_house(), None);
+        editor.tool = Some(ActiveTool::PlaceHouse);
+        assert_eq!(editor.selected_house(), Some(0x64));
+        assert_eq!(editor.house_matches, vec![0x64]);
+    }
+
+    #[test]
+    fn house_removal_is_only_armed_in_its_tool() {
+        let mut editor = MapEditor::with_catalogue(None, None);
+
+        assert!(!editor.removes_house());
+        editor.tool = Some(ActiveTool::RemoveHouse);
+        assert!(editor.removes_house());
+        assert_eq!(editor.selected_house(), None);
+    }
+
+    #[test]
+    fn cancelling_a_tool_leaves_the_editor_active_but_disarms_map_and_house_tools() {
+        let mut editor = MapEditor::with_catalogue(None, None);
+        editor.active = true;
+
+        assert!(editor.cancel_tool());
+        assert!(editor.active());
+        assert!(!editor.removes_static());
+        assert_eq!(editor.selected_house(), None);
+        assert!(!editor.cancel_tool());
+
+        editor.tool = Some(ActiveTool::PlaceHouse);
+        assert!(editor.cancel_tool());
+        assert_eq!(editor.selected_house(), None);
+        assert!(!editor.removes_house());
     }
 }

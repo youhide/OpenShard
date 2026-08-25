@@ -51,24 +51,6 @@ impl QuestKey {
     }
 }
 
-impl From<String> for QuestKey {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-impl From<&str> for QuestKey {
-    fn from(value: &str) -> Self {
-        Self(value.to_owned())
-    }
-}
-
-impl AsRef<str> for QuestKey {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-
 /// What an objective asks for.
 ///
 /// ServUO's objective classes, as one enum: the concrete list is small, closed,
@@ -270,7 +252,7 @@ mod tests {
 
     fn quest(key: &str, title: &str) -> QuestDef {
         QuestDef {
-            key: QuestKey::from(key),
+            key: QuestKey::new(key),
             title: title.to_owned(),
             ..QuestDef::default()
         }
@@ -282,7 +264,7 @@ mod tests {
         defs.set(vec![quest("rat_cull", "A Plague of Rats")]);
         defs.set(vec![quest("silk_gather", "Silk for the Spellwright")]);
         assert!(
-            defs.get(&QuestKey::from("rat_cull")).is_none(),
+            defs.get(&QuestKey::new("rat_cull")).is_none(),
             "a quest no longer defined must stop being offered"
         );
         assert_eq!(defs.len(), 1);
@@ -292,13 +274,13 @@ mod tests {
     fn a_repeated_key_keeps_the_last_definition() {
         let mut defs = QuestDefs::default();
         defs.set(vec![quest("rat_cull", "Old"), quest("rat_cull", "New")]);
-        assert_eq!(defs.get(&QuestKey::from("rat_cull")).unwrap().title, "New");
+        assert_eq!(defs.get(&QuestKey::new("rat_cull")).unwrap().title, "New");
     }
 
     #[test]
     fn an_unknown_key_is_an_answer_not_a_fault() {
         let defs = QuestDefs::default();
-        assert!(defs.get(&QuestKey::from("no_such_quest")).is_none());
+        assert!(defs.get(&QuestKey::new("no_such_quest")).is_none());
     }
 
     #[test]
@@ -331,7 +313,7 @@ mod tests {
         // this in would send all sixty-odd of them to the same town.
         let escort = shipped()
             .into_iter()
-            .find(|quest| quest.key == QuestKey::from("escort"));
+            .find(|quest| quest.key == QuestKey::new("escort"));
         let escort = escort.expect("the shard ships the escort quest");
         assert_eq!(
             escort.objectives[0].kind,

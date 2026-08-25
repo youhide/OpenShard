@@ -45,7 +45,7 @@ use openshard_uofiles::equipconv::EquipConv;
 
 use std::rc::Rc;
 
-use crate::atlas::{AnimAtlas, AnimationKey, FrameKey};
+use crate::atlas::{AnimAtlas, AnimationKey, AtlasPixel, FrameKey};
 use crate::camera::{Camera, RealPixel, ViewPixel, ViewPoint, WorldPoint};
 use crate::cutaway::Cutaway;
 use crate::depth;
@@ -93,6 +93,12 @@ pub struct Mobile {
     /// offset cannot tell "walking" from "settling", and this is a question
     /// about the step and not about the picture.
     pub from: Option<Point>,
+    /// Whether this is a corpse item lying on the ground.
+    ///
+    /// A death frame reaches into the tile immediately nearer the camera. Its
+    /// anchor remains the corpse item's tile, but the foreground land must not
+    /// cut through the body, so its depth key advances one tile.
+    pub corpse: bool,
     /// Its hue, or [`Hue::NONE`] for none.
     pub hue: Hue,
     /// Where to actually draw it, sub-pixel and with its height kept apart.
@@ -398,7 +404,10 @@ fn place(mobile: &Mobile, body: Graphic, camera: &Camera, atlas: &AnimAtlas) -> 
     // wall in the middle of a step. Which of the two tiles a step is between is
     // `depth::mobile_tile`'s to say.
     let order = depth::Order {
-        tile: depth::mobile_tile(mobile.at, mobile.from),
+        tile: match mobile.corpse {
+            true => depth::corpse_tile(mobile.at),
+            false => depth::mobile_tile(mobile.at, mobile.from),
+        },
         priority_z: depth::mobile_priority_z(mobile.at.z),
     };
     let at = cell_centre(mobile, camera);
@@ -728,7 +737,7 @@ fn opaque_under(placement: &Placement, atlas: &AnimAtlas, in_view: ViewPixel) ->
         true => width - 1 - x,
         false => x,
     };
-    atlas.opaque_at(placement.key, texel_x, y)
+    atlas.opaque_at(placement.key, AtlasPixel::new(texel_x, y))
 }
 
 /// Where a label belongs above this mobile's head, in view pixels — the
@@ -899,7 +908,7 @@ pub fn opaque_mask(mobile: &Mobile, camera: &Camera, atlas: &AnimAtlas) -> Optio
                 true => width - 1 - x,
                 false => x,
             };
-            pixels.push(atlas.opaque_at(placement.key, source_x, y));
+            pixels.push(atlas.opaque_at(placement.key, AtlasPixel::new(source_x, y)));
         }
     }
     Some(OpaqueMask {
@@ -985,6 +994,7 @@ mod tests {
             facing,
             frame: AnimationFrameIndex(0),
             from: None,
+            corpse: false,
             hue: Hue::NONE,
             drawn: Gaze::on(Point::new(x, 100, 0)),
             equipment: Vec::new().into(),
@@ -1313,6 +1323,7 @@ mod tests {
                 facing: Direction::SouthEast,
                 frame: AnimationFrameIndex(0),
                 from: None,
+                corpse: false,
                 hue: Hue::NONE,
                 drawn: Gaze::on(Point::new(100, 100, 0)),
                 equipment: Vec::new().into(),
@@ -1347,6 +1358,7 @@ mod tests {
                     facing,
                     frame: AnimationFrameIndex(0),
                     from: None,
+                    corpse: false,
                     hue: Hue::NONE,
                     drawn: Gaze::on(Point::new(100, 100, 0)),
                     equipment: Vec::new().into(),
@@ -1389,6 +1401,7 @@ mod tests {
             // One past the only frame packed.
             frame: AnimationFrameIndex(1),
             from: None,
+            corpse: false,
             hue: Hue::NONE,
             drawn: Gaze::on(Point::new(100, 100, 0)),
             equipment: Vec::new().into(),
@@ -1449,6 +1462,7 @@ mod tests {
             facing: Direction::SouthEast,
             frame: AnimationFrameIndex(0),
             from: None,
+            corpse: false,
             hue: Hue::NONE,
             drawn: Gaze::on(Point::new(100, 100, 0)),
             equipment: Vec::new().into(),
@@ -1504,6 +1518,7 @@ mod tests {
             facing: Direction::SouthEast,
             frame: AnimationFrameIndex(0),
             from: None,
+            corpse: false,
             hue: Hue::NONE,
             drawn: Gaze::on(Point::new(100, 100, 0)),
             equipment: Vec::new().into(),
@@ -1534,6 +1549,7 @@ mod tests {
             facing: Direction::SouthEast,
             frame: AnimationFrameIndex(1),
             from: None,
+            corpse: false,
             hue: Hue::NONE,
             drawn: Gaze::on(Point::new(100, 100, 0)),
             equipment: Vec::new().into(),
@@ -1559,6 +1575,7 @@ mod tests {
             facing: Direction::SouthEast,
             frame: AnimationFrameIndex(0),
             from: None,
+            corpse: false,
             hue: Hue::NONE,
             drawn: Gaze::on(Point::new(101, 100, 0)),
             equipment: Vec::new().into(),
@@ -1625,6 +1642,7 @@ mod tests {
             facing: Direction::North,
             frame: AnimationFrameIndex(0),
             from: Some(Point::new(100, 100, 0)),
+            corpse: false,
             hue: Hue::NONE,
             drawn: Gaze::on(Point::new(100, 99, 0)).back_towards(Gaze::on(Point::new(100, 100, 0)), 0.5),
             equipment: Vec::new().into(),
@@ -1674,6 +1692,7 @@ mod tests {
             facing,
             frame: AnimationFrameIndex(0),
             from: None,
+            corpse: false,
             hue: Hue::NONE,
             drawn: Gaze::on(Point::new(0, 0, 0)),
             equipment: Vec::new().into(),
@@ -1727,6 +1746,7 @@ mod tests {
             facing: Direction::SouthEast,
             frame: AnimationFrameIndex(0),
             from: None,
+            corpse: false,
             hue: Hue::NONE,
             drawn: Gaze::on(Point::new(100, 100, 0)),
             equipment: vec![worn_on_torso(AnimId(7017), Hue::NONE)].into(),
@@ -1772,6 +1792,7 @@ mod tests {
             facing: Direction::SouthEast,
             frame: AnimationFrameIndex(0),
             from: None,
+            corpse: false,
             hue: Hue::NONE,
             drawn: Gaze::on(Point::new(100, 100, 0)),
             equipment: vec![
@@ -1845,6 +1866,7 @@ mod tests {
             facing: Direction::SouthEast,
             frame: AnimationFrameIndex(0),
             from: None,
+            corpse: false,
             hue: Hue::NONE,
             drawn: Gaze::on(Point::new(100, 100, 0)),
             equipment: vec![worn_on_torso(AnimId(0), Hue::NONE)].into(),
@@ -1969,6 +1991,7 @@ mod tests {
             facing: Direction::SouthEast,
             frame: AnimationFrameIndex(0),
             from: None,
+            corpse: false,
             hue: Hue::NONE,
             drawn: Gaze::on(Point::new(100, 100, 0)),
             equipment: vec![worn_on_torso(AnimId(7017), Hue::NONE)].into(),
@@ -1995,6 +2018,7 @@ mod tests {
             facing: Direction::SouthEast,
             frame: AnimationFrameIndex(0),
             from: None,
+            corpse: false,
             hue: Hue::NONE,
             drawn: Gaze::on(Point::new(100, 100, 0)),
             equipment: vec![worn_on_torso(AnimId(7017), Hue::NONE)].into(),

@@ -1232,6 +1232,24 @@ mod tests {
         );
     }
 
+    /// A facet is a named byte, not an enum of the maps the engine happens to
+    /// ship today. Encoding and decoding therefore preserve every byte rather
+    /// than validating, masking, or narrowing it at the wire seam.
+    #[test]
+    fn every_facet_byte_round_trips_through_a_request() {
+        for raw in u8::MIN..=u8::MAX {
+            let sent = ChunkRequest {
+                facet: Facet(raw),
+                chunks: vec![ChunkAt { x: 17, y: 29 }],
+            };
+            assert_eq!(
+                ExtendedRequest::decode(&sent.encode()).unwrap(),
+                ExtendedRequest::Chunks(sent),
+                "facet {raw}"
+            );
+        }
+    }
+
     /// A request naming nothing is legal and means nothing is wanted — a client
     /// with an up-to-date cache asks for no chunks at all, which is E3's own
     /// "done".

@@ -320,7 +320,11 @@ pub(crate) fn assemble_geometry(
     // rather than pieced together from two call sites.
     let inputs = frame::Inputs {
         map: resources.map(),
-        items: &drawn_items,
+        // The preview is collected separately below with an open cutaway. It
+        // remains in `drawn_items` for the cache fingerprint, but it is not an
+        // authoritative server item and must not lose its roof or upper walls
+        // merely because the player is standing inside another building.
+        items: &world.presentation.items,
         camera: &camera,
         tiledata: &resources.tiledata,
         animations: &world.presentation.tile_animations,
@@ -396,6 +400,18 @@ pub(crate) fn assemble_geometry(
         mut map_statics,
         items: mut item_geometry,
     } = assembled;
+    let preview_geometry = items::collect(
+        &world.presentation.multi_preview,
+        &camera,
+        &resources.tiledata,
+        &world.presentation.tile_animations,
+        openshard_client_render::atlas::StaticArt::Pages(&window.atlases.statics),
+        &Cutaway::OPEN,
+        None,
+        &lighting.occlusion,
+        None,
+    );
+    item_geometry.absorb(preview_geometry);
     let mut costs = GeometryCosts {
         ground_quads: quads.len(),
         ..GeometryCosts::default()

@@ -9,7 +9,7 @@ use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
 
 use crate::animate::StaticAnimations;
-use crate::atlas::StaticArt;
+use crate::atlas::{AtlasPixel, StaticArt};
 use crate::camera::{self, Camera, RealPixel, TILE_HEIGHT, TileBounds, WorldPixel};
 use crate::cutaway::Cutaway;
 use crate::depth;
@@ -82,7 +82,7 @@ pub fn pick_with_interior<'a>(
         ) else {
             return;
         };
-        if !atlas.opaque_at(placed.showing, x, y) {
+        if !atlas.opaque_at(placed.showing, AtlasPixel::new(x, y)) {
             return;
         }
         // A later equal-order item is drawn last and therefore wins.

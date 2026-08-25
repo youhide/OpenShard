@@ -1181,6 +1181,7 @@ mod tests {
                 facing: Direction::SouthEast,
                 frame: openshard_uofiles::anim::AnimationFrameIndex(0),
                 from: None,
+                corpse: false,
                 hue: Hue::NONE,
                 drawn: Gaze::on(at),
                 equipment: Vec::new().into(),

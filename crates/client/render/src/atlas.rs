@@ -44,6 +44,24 @@ const SLOTS_PER_ROW: u32 = ATLAS_SIDE / LAND_TILE_SIZE as u32;
 /// How many graphics one atlas can hold.
 pub const CAPACITY: usize = (SLOTS_PER_ROW * SLOTS_PER_ROW) as usize;
 
+/// One pixel in an atlas source picture, before that picture is packed.
+///
+/// Static art and animation frames share this coordinate space: both answer
+/// whether a picture-local texel is opaque. It is deliberately distinct from
+/// screen, world, and gump-art pixels.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct AtlasPixel {
+    x: u16,
+    y: u16,
+}
+
+impl AtlasPixel {
+    #[must_use]
+    pub const fn new(x: u16, y: u16) -> Self {
+        Self { x, y }
+    }
+}
+
 /// What can go wrong building one.
 #[derive(Debug)]
 pub enum AtlasError {
@@ -880,10 +898,10 @@ impl StaticArt<'_> {
     }
 
     /// Whether an image texel is opaque.
-    pub fn opaque_at(self, graphic: Graphic, x: u16, y: u16) -> bool {
+    pub fn opaque_at(self, graphic: Graphic, at: AtlasPixel) -> bool {
         match self {
-            Self::Single(atlas) => atlas.opaque_at(graphic, x, y),
-            Self::Pages(atlas) => atlas.opaque_at(graphic, x, y),
+            Self::Single(atlas) => atlas.opaque_at(graphic, at),
+            Self::Pages(atlas) => atlas.opaque_at(graphic, at),
         }
     }
 
@@ -1450,17 +1468,18 @@ impl StaticAtlas {
     ///
     /// `false` for a graphic that is not packed and for a coordinate outside the
     /// picture: neither is a pixel the player can have clicked on.
-    pub fn opaque_at(&self, graphic: Graphic, x: u16, y: u16) -> bool {
+    pub fn opaque_at(&self, graphic: Graphic, at: AtlasPixel) -> bool {
         let Some(packed) = self.sprites.get(&graphic) else {
             return false;
         };
-        if x >= packed.sprite.width || y >= packed.sprite.height {
+        if at.x >= packed.sprite.width || at.y >= packed.sprite.height {
             return false;
         }
         let side = ATLAS_SIDE as usize;
         let (origin_x, origin_y) = packed.origin;
-        let at = ((origin_y as usize + usize::from(y)) * side + origin_x as usize + usize::from(x)) * 4;
-        self.pixels[at + 3] != 0
+        let index =
+            ((origin_y as usize + usize::from(at.y)) * side + origin_x as usize + usize::from(at.x)) * 4;
+        self.pixels[index + 3] != 0
     }
 }
 
@@ -1756,10 +1775,10 @@ impl StaticAtlasPages {
     }
 
     /// The CPU picking question, delegated to the page holding the graphic.
-    pub fn opaque_at(&self, graphic: Graphic, x: u16, y: u16) -> bool {
+    pub fn opaque_at(&self, graphic: Graphic, at: AtlasPixel) -> bool {
         self.page_of[graphic.0 as usize]
             .and_then(|page| self.page(page))
-            .is_some_and(|page| page.opaque_at(graphic, x, y))
+            .is_some_and(|page| page.opaque_at(graphic, at))
     }
 
     /// The measured hole, if the graphic's page supplied one.
@@ -2080,17 +2099,18 @@ impl AnimAtlas {
     ///
     /// `false` for a frame that is not packed and for a coordinate outside the
     /// picture.
-    pub fn opaque_at(&self, key: FrameKey, x: u16, y: u16) -> bool {
+    pub fn opaque_at(&self, key: FrameKey, at: AtlasPixel) -> bool {
         let Some(packed) = self.frames.get(&key) else {
             return false;
         };
-        if x >= packed.sprite.width || y >= packed.sprite.height {
+        if at.x >= packed.sprite.width || at.y >= packed.sprite.height {
             return false;
         }
         let side = ATLAS_SIDE as usize;
         let (origin_x, origin_y) = packed.origin;
-        let at = ((origin_y as usize + usize::from(y)) * side + origin_x as usize + usize::from(x)) * 4;
-        self.pixels[at + 3] != 0
+        let index =
+            ((origin_y as usize + usize::from(at.y)) * side + origin_x as usize + usize::from(at.x)) * 4;
+        self.pixels[index + 3] != 0
     }
 
     /// How many frames a body's animation has, as packed.

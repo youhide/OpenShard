@@ -6107,7 +6107,7 @@ mod tests {
 
             match ray_vs_solid(from, to, &solid) {
                 Some((entered, leaves)) => {
-                    let claims_inside = t >= entered - 1e-4 && t <= leaves + 1e-4;
+                    let claims_inside = t >= entered && t <= leaves;
                     prop_assert_eq!(
                         inside, claims_inside,
                         "t {}, point {:?}, box {:?}..{:?}, interval {}..{}",

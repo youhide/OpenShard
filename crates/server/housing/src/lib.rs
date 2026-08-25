@@ -34,6 +34,7 @@ pub mod sign;
 pub mod storage;
 
 mod access;
+mod classic_doors;
 pub use access::{ListRefusal, MAX_BANS, MAX_CO_OWNERS, MAX_FRIENDS, Standing, ban, distrust, trust, unban};
 
 #[cfg(test)]
@@ -296,8 +297,15 @@ pub fn place(
     // about it by the ordinary interest sweep rather than by a path of its own.
     state.place_item(facet, entity, at);
     block_footprint(state.facet_state_mut(facet), entity, &footprint);
-    adopt_doors(state, entity, facet, at, multi);
-    hang_sign(state, entity, facet, at, multi);
+    install_doors(state, entity, facet, at, multi);
+    let sign = hang_sign(state, entity, facet, at, multi);
+    // `place_item` only files an entity for later interest sweeps. A house
+    // built in front of a stationary client must also be drawn now, just like
+    // an ordinary item spawned on the ground.
+    state.reveal(entity);
+    if let Some(sign) = sign {
+        state.reveal(sign);
+    }
     Ok(entity)
 }
 
@@ -312,9 +320,9 @@ const SIGN_Z: i16 = 7;
 /// # The one sign position the reference derives
 ///
 /// ServUO's classic houses each declare theirs — `SetSign(2, 4, 5)`,
-/// `SetSign(5, 12, 16)`, fourteen of them — which is the same per-house-type
-/// table [`adopt_doors`] refuses to invent, and for the same reason: it is
-/// content, and nothing in a client file says it.
+/// `SetSign(5, 12, 16)`, fourteen of them. Unlike the doors now held in
+/// `classic_doors`, only one sign position is needed for every shape, including
+/// a designed one, so this remains derived from the bounds.
 ///
 /// Its **customisable** houses do not have that luxury, because the multi is
 /// built at run time, so `HouseFoundation` computes one: `x = Components.Min.X`,
@@ -381,18 +389,16 @@ pub fn hang_sign(
 
 /// Hand every door standing inside a footprint to the house.
 ///
-/// # Why a house adopts its doors rather than placing them
+/// # Why adoption still exists beside classic fixtures
 ///
 /// The obvious source is the multi itself, and it is not one: of the 326 multis
 /// a shipped `multi.mul` holds, **three** carry a door component. The reference
 /// agrees — ServUO's houses call `AddDoor` from each house class with an explicit
-/// graphic and position, which is a per-house-type table of *content* this engine
-/// does not have and should not invent.
+/// graphic and position. [`install_doors`] carries that table for classic houses.
 ///
-/// So the rule is the one a player would state: a door standing inside your house
-/// is your house's door. It is derivable from what is already on the ground, it
-/// needs no table, and it is right for a door added by a pack, by a staff command
-/// or by a later customisation system without any of them knowing about it.
+/// Adoption is the remaining rule a player would state: another door standing
+/// inside your house is your house's door too. It is right for a door added by a
+/// pack, by a staff command or by customisation with no classic catalog row.
 ///
 /// Called at placement, and again whenever a door is put down — a house cannot
 /// adopt a door that does not exist yet.
@@ -422,6 +428,16 @@ pub fn adopt_doors(state: &mut WorldState, house: EntityId, facet: Facet, at: Po
             .registry
             .insert(door, openshard_state::components::HouseDoor { house: serial });
     }
+}
+
+/// Restore or create the separately-defined doors of a classic house.
+///
+/// Public for the boot path: saved decoration is restored before houses, so
+/// this reuses those door entities and fills only fixtures missing from an old
+/// save made before classic houses installed their own doors.
+pub fn install_doors(state: &mut WorldState, house: EntityId, facet: Facet, at: Point, multi: MultiId) {
+    classic_doors::install(state, house, facet, at, multi);
+    adopt_doors(state, house, facet, at, multi);
 }
 
 /// Where a banned player is put out to.

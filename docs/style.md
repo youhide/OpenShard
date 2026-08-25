@@ -83,14 +83,6 @@ What is fine, because none of it is a coercion:
   conversion cannot smuggle a domain value past a check — see
   `protocol::error`.
 
-**Existing debt.** `protocol::identity` still carries `From<&str>` and
-`From<String>` for `AccountName`, `CharacterName`, `PlaintextPassword` and their
-`Raw` counterparts, for `impl Into<_>` parameters in test fixtures. Those are the
-banned shape, and on the validated halves they are the exact hole this rule is
-about: that module's contract is that `Accounts::verify` is the only way to a
-trusted `AccountName`, and `String::into()` is a second way that runs no check.
-They should become named constructors. Do not add more.
-
 ## A value off the wire is `Raw` until something checks it
 
 The newtype rule above says a `u16` gets a name. For a client-supplied packet

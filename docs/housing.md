@@ -367,15 +367,19 @@ A house door refuses a stranger **before** the lock is asked about, because a
 stranger at a friend's door is refused for *being* a stranger, and "that is
 locked" would send them looking for a key.
 
-**A house adopts the doors standing inside it**, and that is a rule this plan
-chose rather than inherited. The obvious source is the multi, and the shipped
-file says no: **three** of its 326 multis carry a door component. The reference
-agrees — ServUO calls `AddDoor` from each house class with an explicit graphic
-and position, which is a per-house-type table of content this engine does not
-have and should not invent. So the rule is the one a player would state: a door
-inside your house is your house's door. It needs no table and it is right for a
-door put down by a pack, by a staff command, or by a customisation system that
-does not know about it.
+**A classic house installs its doors and a house still adopts doors standing
+inside it.** The obvious source is the multi, and the shipped file says no:
+**three** of its 326 multis carry a door component. ServUO agrees — its classic
+house classes call `AddDoor` with an explicit graphic, facing and offset. That
+table is now `classic_doors`: all fourteen classic house types place their
+functional leaves with the house, reuse a restored or pack-provided leaf at the
+same frame, and link double doors by stable serial. A classic fixture comes down
+with its house; an unrelated door the house merely adopted stays behind.
+
+Adoption remains the fallback for a door put down by a pack, by a staff command,
+or by customisation whose shape has no classic catalog row. It is also repeated
+at boot after decoration restoration, so the transient `HouseDoor` relationship
+is rebuilt rather than silently lost across a restart.
 
 The adoption uses `tiles_of`, **not** the footprint, and the difference is the
 whole of it: a door stands in a *doorway*, which is by construction a gap in the

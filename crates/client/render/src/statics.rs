@@ -26,7 +26,7 @@ use openshard_tiles::TileData;
 use crate::animate::StaticAnimations;
 #[cfg(test)]
 use crate::atlas::StaticAtlas;
-use crate::atlas::{Sprite, StaticArt, StaticAtlasPage};
+use crate::atlas::{AtlasPixel, Sprite, StaticArt, StaticAtlasPage};
 use crate::camera::{Camera, TILE_HEIGHT, TileBounds, ViewPoint};
 use crate::cutaway::{self, Cutaway};
 use crate::depth;
@@ -603,7 +603,9 @@ fn collect_in_with_fades_profiled_with_interior<'a>(
             }
         } else if player_mask.is_some_and(|body| {
             placed.order > body.order()
-                && body.overlaps_opaque(placed_rect(&placed), |x, y| atlas.opaque_at(placed.showing, x, y))
+                && body.overlaps_opaque(placed_rect(&placed), |x, y| {
+                    atlas.opaque_at(placed.showing, AtlasPixel::new(x, y))
+                })
         }) {
             crate::cutaway::TRANSLUCENT_ALPHA_U8
         } else {

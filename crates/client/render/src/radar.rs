@@ -90,12 +90,6 @@ pub mod types {
         }
     }
 
-    impl From<u8> for RadarLod {
-        fn from(value: u8) -> Self {
-            Self::new(value)
-        }
-    }
-
     impl PartialEq<u8> for RadarLod {
         fn eq(&self, other: &u8) -> bool {
             self.0 == *other
@@ -131,12 +125,6 @@ pub mod types {
                 self.x.saturating_sub(u32::from(half.width()) / 2),
                 self.y.saturating_sub(u32::from(half.height()) / 2),
             )
-        }
-    }
-
-    impl From<(u32, u32)> for RadarTile {
-        fn from((x, y): (u32, u32)) -> Self {
-            Self::new(x, y)
         }
     }
 
@@ -709,8 +697,7 @@ pub fn advance(
 /// the same conversion for an out-of-facet request, whose complete chunk
 /// carries [`UNKNOWN`] along its east and south borders.
 #[must_use]
-pub fn world_tile_to_base_chunk(world: impl Into<RadarTile>) -> (RadarChunkCoord, RadarChunkLocalTile) {
-    let world = world.into();
+pub fn world_tile_to_base_chunk(world: RadarTile) -> (RadarChunkCoord, RadarChunkLocalTile) {
     let side = u32::from(BASE_CHUNK_TILES);
     (
         RadarChunkCoord::new(world.x() / side, world.y() / side),
@@ -731,8 +718,7 @@ pub fn region_base_chunks(region: RadarRegion) -> impl Iterator<Item = RadarChun
 }
 
 /// Every chunk at `lod` whose world rectangle touches `region`.
-pub fn region_chunks(region: RadarRegion, lod: impl Into<RadarLod>) -> impl Iterator<Item = RadarChunkCoord> {
-    let lod = lod.into();
+pub fn region_chunks(region: RadarRegion, lod: RadarLod) -> impl Iterator<Item = RadarChunkCoord> {
     let chunk_world = u32::from(BASE_CHUNK_TILES)
         .checked_shl(u32::from(lod.value()))
         .unwrap_or(u32::MAX);
@@ -770,7 +756,7 @@ pub fn region_base_chunks_near(
 /// [`region_chunks`] in nearest-first producer order.
 pub fn region_chunks_near(
     region: RadarRegion,
-    lod: impl Into<RadarLod>,
+    lod: RadarLod,
     centre: RadarChunkCoord,
 ) -> impl Iterator<Item = RadarChunkCoord> {
     let mut chunks: Vec<_> = region_chunks(region, lod).collect();
@@ -813,15 +799,10 @@ impl RadarChunkKey {
     /// Keeping this crate-visible prevents a window or a player marker from
     /// accidentally creating a second, position-keyed terrain cache.
     #[must_use]
-    pub(crate) fn new(
-        facet: Facet,
-        lod: impl Into<RadarLod>,
-        chunk: RadarChunkCoord,
-        revision: RadarRevision,
-    ) -> Self {
+    pub(crate) fn new(facet: Facet, lod: RadarLod, chunk: RadarChunkCoord, revision: RadarRevision) -> Self {
         Self {
             facet,
-            lod: lod.into(),
+            lod,
             chunk,
             revision,
         }
@@ -1072,7 +1053,7 @@ impl RadarCache {
 
     /// Construct a cache key under the facet's current source revision.
     #[must_use]
-    pub fn key(&self, facet: Facet, lod: impl Into<RadarLod>, chunk: RadarChunkCoord) -> RadarChunkKey {
+    pub fn key(&self, facet: Facet, lod: RadarLod, chunk: RadarChunkCoord) -> RadarChunkKey {
         RadarChunkKey::new(facet, lod, chunk, self.revision(facet))
     }
 
@@ -1253,10 +1234,10 @@ impl RadarCache {
     pub fn invalidate_tile(
         &mut self,
         facet: Facet,
-        tile: impl Into<RadarTile>,
-        max_lod: impl Into<RadarLod>,
+        tile: RadarTile,
+        max_lod: RadarLod,
     ) -> Option<RadarRevision> {
-        let max_lod = max_lod.into().min(SWEEP_LOD);
+        let max_lod = max_lod.min(SWEEP_LOD);
         let revision = RadarRevision(self.revision(facet).0.checked_add(1)?);
         self.revisions.insert(facet, revision);
         self.dirty.retain(|key| key.facet != facet);
@@ -2411,15 +2392,15 @@ mod tests {
     fn world_tiles_use_one_block_aligned_base_chunk_conversion() {
         assert_eq!(BASE_CHUNK_BLOCKS, 8);
         assert_eq!(
-            world_tile_to_base_chunk((0, 0)),
+            world_tile_to_base_chunk(RadarTile::new(0, 0)),
             (RadarChunkCoord::new(0, 0), RadarChunkLocalTile::new(0, 0))
         );
         assert_eq!(
-            world_tile_to_base_chunk((u32::from(BASE_CHUNK_TILES) - 1, 63)),
+            world_tile_to_base_chunk(RadarTile::new(u32::from(BASE_CHUNK_TILES) - 1, 63)),
             (RadarChunkCoord::new(0, 0), RadarChunkLocalTile::new(63, 63))
         );
         assert_eq!(
-            world_tile_to_base_chunk((u32::from(BASE_CHUNK_TILES), 64)),
+            world_tile_to_base_chunk(RadarTile::new(u32::from(BASE_CHUNK_TILES), 64)),
             (RadarChunkCoord::new(1, 1), RadarChunkLocalTile::new(0, 0))
         );
     }
@@ -2428,7 +2409,12 @@ mod tests {
     fn a_base_chunk_is_block_aligned_and_keeps_the_map_edge_complete() {
         let mut map = a_field();
         put(&mut map, 1, 7, 7, 1);
-        let key = RadarChunkKey::new(Facet(0), 0, RadarChunkCoord::new(0, 0), RadarRevision(7));
+        let key = RadarChunkKey::new(
+            Facet(0),
+            RadarLod::new(0),
+            RadarChunkCoord::new(0, 0),
+            RadarRevision(7),
+        );
 
         let chunk = build_base_chunk(&map, &colors(), key).expect("a level-zero key");
         let mut reference = vec![UNKNOWN; chunk_pixel_count()];
@@ -2917,7 +2903,7 @@ mod tests {
         let revision = RadarRevision(11);
         let child = |x, y, colour| {
             RadarChunk::new(
-                RadarChunkKey::new(Facet(0), 0, RadarChunkCoord::new(x, y), revision),
+                RadarChunkKey::new(Facet(0), RadarLod::new(0), RadarChunkCoord::new(x, y), revision),
                 vec![colour; chunk_pixel_count()],
             )
             .expect("a complete child")
@@ -2926,7 +2912,7 @@ mod tests {
         let northeast = child(1, 0, WHITE);
         let southwest = child(0, 1, UNKNOWN);
         let southeast = child(1, 1, BLUE);
-        let key = RadarChunkKey::new(Facet(0), 1, RadarChunkCoord::new(0, 0), revision);
+        let key = RadarChunkKey::new(Facet(0), RadarLod::new(1), RadarChunkCoord::new(0, 0), revision);
 
         let parent = build_lod_parent(
             key,
@@ -2967,14 +2953,14 @@ mod tests {
         let revision = RadarRevision(3);
         let child = |x, y| {
             RadarChunk::new(
-                RadarChunkKey::new(Facet(0), 4, RadarChunkCoord::new(x, y), revision),
+                RadarChunkKey::new(Facet(0), RadarLod::new(4), RadarChunkCoord::new(x, y), revision),
                 vec![RED; chunk_pixel_count()],
             )
             .expect("a complete child")
         };
         let side = usize::from(BASE_CHUNK_TILES);
 
-        let east_edge = RadarChunkKey::new(Facet(0), 5, RadarChunkCoord::new(3, 0), revision);
+        let east_edge = RadarChunkKey::new(Facet(0), RadarLod::new(5), RadarChunkCoord::new(3, 0), revision);
         let (northwest, southwest) = (child(6, 0), child(6, 1));
         let built = build_lod_parent(
             east_edge,
@@ -2993,7 +2979,7 @@ mod tests {
         // The same shape one parent to the west, where every child names ground
         // inside the facet: an absent one is a hole, and a reduction over a hole
         // is a picture of half the ground.
-        let inside = RadarChunkKey::new(Facet(0), 5, RadarChunkCoord::new(0, 0), revision);
+        let inside = RadarChunkKey::new(Facet(0), RadarLod::new(5), RadarChunkCoord::new(0, 0), revision);
         let (northwest, southwest) = (child(0, 0), child(0, 1));
         assert!(build_lod_parent(inside, [Some(&northwest), None, Some(&southwest), None], extent).is_none(),);
     }
@@ -3052,13 +3038,13 @@ mod tests {
         let mut cache = RadarCache::default();
         let child = |cache: &RadarCache, x, y| {
             RadarChunk::new(
-                cache.key(facet, 0, RadarChunkCoord::new(x, y)),
+                cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(x, y)),
                 vec![RED; chunk_pixel_count()],
             )
             .expect("a complete child")
         };
-        let parent = cache.key(facet, 1, RadarChunkCoord::new(0, 0));
-        let grandparent = cache.key(facet, 2, RadarChunkCoord::new(0, 0));
+        let parent = cache.key(facet, RadarLod::new(1), RadarChunkCoord::new(0, 0));
+        let grandparent = cache.key(facet, RadarLod::new(2), RadarChunkCoord::new(0, 0));
 
         // Three of the four: nothing above them can be built from a family with
         // a hole in it, and a reduction over one is not a coarser picture of
@@ -3094,13 +3080,13 @@ mod tests {
         let mut cache = RadarCache::default();
         for (x, y) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
             let chunk = RadarChunk::new(
-                cache.key(facet, 0, RadarChunkCoord::new(x, y)),
+                cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(x, y)),
                 vec![RED; chunk_pixel_count()],
             )
             .expect("a complete child");
             assert!(cache.publish(chunk));
         }
-        let last = cache.key(facet, 0, RadarChunkCoord::new(1, 1));
+        let last = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(1, 1));
         assert_eq!(
             build_ready_ancestors(&mut cache, last, a_fields_extent()),
             0,
@@ -3109,7 +3095,7 @@ mod tests {
         );
         assert!(
             cache
-                .get(cache.key(facet, 1, RadarChunkCoord::new(0, 0)))
+                .get(cache.key(facet, RadarLod::new(1), RadarChunkCoord::new(0, 0)))
                 .is_none()
         );
     }
@@ -3121,14 +3107,14 @@ mod tests {
         // One slot, so a lost one is the difference between a queue that works
         // and a queue that never accepts another request.
         let mut queue = RadarWorkQueue::new(1, 1).expect("non-zero limits");
-        let key = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        let key = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(0, 0));
         assert!(queue.request(key));
         assert_eq!(queue.take_for_producer(), vec![key]);
-        assert!(!queue.request(cache.key(facet, 0, RadarChunkCoord::new(1, 0))));
+        assert!(!queue.request(cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(1, 0))));
 
         assert!(queue.abandon(key));
         assert!(!queue.abandon(key), "a job is released once");
-        assert!(queue.request(cache.key(facet, 0, RadarChunkCoord::new(1, 0))));
+        assert!(queue.request(cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(1, 0))));
     }
 
     #[test]
@@ -3150,7 +3136,7 @@ mod tests {
         let facet = Facet(0);
         let coord = RadarChunkCoord::new(3, 4);
         let mut cache = RadarCache::default();
-        let first_key = cache.key(facet, 0, coord);
+        let first_key = cache.key(facet, RadarLod::new(0), coord);
         let first = RadarChunk::new(first_key, vec![GREEN; chunk_pixel_count()]).expect("a complete chunk");
 
         assert!(cache.publish(first));
@@ -3158,7 +3144,7 @@ mod tests {
         assert_eq!(cache.retained_len(), 1);
 
         assert!(cache.set_revision(facet, RadarRevision(1)));
-        let current_key = cache.key(facet, 0, coord);
+        let current_key = cache.key(facet, RadarLod::new(0), coord);
         assert_ne!(current_key, first_key);
         assert!(cache.get(first_key).is_none(), "old source is not ready");
         assert!(cache.get(current_key).is_none(), "no new product was built yet");
@@ -3189,12 +3175,12 @@ mod tests {
         // at the base and one a level up, because the carry is a claim about
         // every level of the ladder and not only the one the map is walked at.
         let over_touched = [
-            cache.key(facet, 0, touched),
-            cache.key(facet, 1, touched.ancestor_at(1)),
+            cache.key(facet, RadarLod::new(0), touched),
+            cache.key(facet, RadarLod::new(1), touched.ancestor_at(1)),
         ];
         let over_untouched = [
-            cache.key(facet, 0, untouched),
-            cache.key(facet, 1, untouched.ancestor_at(1)),
+            cache.key(facet, RadarLod::new(0), untouched),
+            cache.key(facet, RadarLod::new(1), untouched.ancestor_at(1)),
         ];
         for key in over_touched.into_iter().chain(over_untouched) {
             assert!(cache.publish(
@@ -3235,13 +3221,13 @@ mod tests {
         let counters = cache.counters();
         assert_eq!((counters.ready, counters.stale), (2, 2));
 
-        assert!(cache.is_dirty(cache.key(facet, 0, touched)));
+        assert!(cache.is_dirty(cache.key(facet, RadarLod::new(0), touched)));
         assert!(
             cache.is_dirty(cache.key(facet, SWEEP_LOD, touched.ancestor_at(SWEEP_LOD.value()))),
             "the touched chunk's column is dirty up to the ceiling, and no further",
         );
         assert!(
-            !cache.is_dirty(cache.key(facet, 0, untouched)),
+            !cache.is_dirty(cache.key(facet, RadarLod::new(0), untouched)),
             "a chunk nothing touched is not rebuild work",
         );
     }
@@ -3266,12 +3252,15 @@ mod tests {
         ] {
             assert!(
                 cache.publish(
-                    RadarChunk::new(cache.key(facet, 0, coord), vec![color; chunk_pixel_count()])
-                        .expect("a complete child")
+                    RadarChunk::new(
+                        cache.key(facet, RadarLod::new(0), coord),
+                        vec![color; chunk_pixel_count()]
+                    )
+                    .expect("a complete child")
                 )
             );
         }
-        let last = cache.key(facet, 0, edited);
+        let last = cache.key(facet, RadarLod::new(0), edited);
         assert_eq!(
             build_ready_ancestors(&mut cache, last, extent),
             1,
@@ -3279,7 +3268,7 @@ mod tests {
         );
 
         assert!(cache.moved(facet, RadarRevision(1), [edited]));
-        let rebuilt = cache.key(facet, 0, edited);
+        let rebuilt = cache.key(facet, RadarLod::new(0), edited);
         assert!(
             cache.publish(
                 RadarChunk::new(rebuilt, vec![WHITE; chunk_pixel_count()]).expect("the rebuilt child")
@@ -3292,7 +3281,7 @@ mod tests {
         );
 
         let parent = cache
-            .get(cache.key(facet, 1, RadarChunkCoord::new(0, 0)))
+            .get(cache.key(facet, RadarLod::new(1), RadarChunkCoord::new(0, 0)))
             .expect("the parent is current again");
         assert_eq!(
             parent.pixels()[0],
@@ -3343,8 +3332,8 @@ mod tests {
     fn ready_selection_prefers_exact_then_nearest_current_ancestor() {
         let facet = Facet(0);
         let mut cache = RadarCache::default();
-        let requested = cache.key(facet, 0, RadarChunkCoord::new(7, 5));
-        let ancestor = cache.key(facet, 2, RadarChunkCoord::new(1, 1));
+        let requested = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(7, 5));
+        let ancestor = cache.key(facet, RadarLod::new(2), RadarChunkCoord::new(1, 1));
         let ancestor_chunk =
             RadarChunk::new(ancestor, vec![WHITE; chunk_pixel_count()]).expect("a complete ancestor");
         assert!(cache.publish(ancestor_chunk));
@@ -3368,14 +3357,14 @@ mod tests {
         let facet = Facet(0);
         let coord = RadarChunkCoord::new(2, 3);
         let mut cache = RadarCache::default();
-        let old = cache.key(facet, 1, coord);
+        let old = cache.key(facet, RadarLod::new(1), coord);
         assert!(
             cache.publish(
                 RadarChunk::new(old, vec![RED; chunk_pixel_count()]).expect("a complete old product")
             )
         );
         assert!(cache.set_revision(facet, RadarRevision(1)));
-        let current = cache.key(facet, 1, coord);
+        let current = cache.key(facet, RadarLod::new(1), coord);
 
         let fallback = cache
             .select_ready(current)
@@ -3406,14 +3395,14 @@ mod tests {
         // its chunk afterwards. The bump is per facet, so everything else in
         // this test is published *after* it.
         let stale_coord = RadarChunkCoord::new(40, 40);
-        let old = cache.key(facet, 0, stale_coord);
+        let old = cache.key(facet, RadarLod::new(0), stale_coord);
         assert!(
             cache.publish(RadarChunk::new(old, vec![RED; chunk_pixel_count()]).expect("a complete product"))
         );
         assert!(cache.set_revision(facet, RadarRevision(1)));
-        let stale = cache.key(facet, 0, stale_coord);
+        let stale = cache.key(facet, RadarLod::new(0), stale_coord);
         // Exact: the requested key itself, at the current revision.
-        let exact = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        let exact = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(0, 0));
         assert!(
             cache.publish(
                 RadarChunk::new(exact, vec![GREEN; chunk_pixel_count()]).expect("a complete product")
@@ -3422,13 +3411,13 @@ mod tests {
         // Coarser: only a level-2 parent of (7, 5) is ready. The stale ladder
         // is exact-key only, which is why this arm needs a *current* ancestor
         // and a stale one would count as missing instead.
-        let ancestor = cache.key(facet, 2, RadarChunkCoord::new(1, 1));
+        let ancestor = cache.key(facet, RadarLod::new(2), RadarChunkCoord::new(1, 1));
         assert!(cache.publish(
             RadarChunk::new(ancestor, vec![WHITE; chunk_pixel_count()]).expect("a complete ancestor")
         ));
-        let coarser = cache.key(facet, 0, RadarChunkCoord::new(7, 5));
+        let coarser = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(7, 5));
         // Missing: never asked for, never built.
-        let missing = cache.key(facet, 0, RadarChunkCoord::new(99, 99));
+        let missing = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(99, 99));
 
         let resolved = resolve_demand(&cache, [exact, coarser, stale, missing]);
         assert_eq!(
@@ -3456,18 +3445,18 @@ mod tests {
     fn resolved_demand_reports_the_ladder_on_an_undisturbed_cache() {
         let facet = Facet(0);
         let mut cache = RadarCache::default();
-        let exact = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        let exact = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(0, 0));
         assert!(
             cache.publish(
                 RadarChunk::new(exact, vec![GREEN; chunk_pixel_count()]).expect("a complete product")
             )
         );
-        let ancestor = cache.key(facet, 2, RadarChunkCoord::new(1, 1));
+        let ancestor = cache.key(facet, RadarLod::new(2), RadarChunkCoord::new(1, 1));
         assert!(cache.publish(
             RadarChunk::new(ancestor, vec![WHITE; chunk_pixel_count()]).expect("a complete ancestor")
         ));
-        let coarser = cache.key(facet, 0, RadarChunkCoord::new(7, 5));
-        let missing = cache.key(facet, 0, RadarChunkCoord::new(99, 99));
+        let coarser = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(7, 5));
+        let missing = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(99, 99));
 
         let resolved = resolve_demand(&cache, [exact, coarser, missing]);
         assert_eq!(
@@ -3499,7 +3488,7 @@ mod tests {
         assert_eq!(cache.counters().retained_bytes, 0);
         assert_eq!(cache.counters().tail_budget, RADAR_CHUNK_CPU_BYTES * 2);
         for x in 0..3 {
-            let key = cache.key(facet, 0, RadarChunkCoord::new(x, 0));
+            let key = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(x, 0));
             assert!(cache.publish(
                 RadarChunk::new(key, vec![GREEN; chunk_pixel_count()]).expect("a complete product")
             ));
@@ -3577,35 +3566,35 @@ mod tests {
     fn a_tile_mutation_marks_only_its_base_chunk_and_lod_ancestors_dirty() {
         let facet = Facet(0);
         let mut cache = RadarCache::default();
-        let tile = (
+        let tile = RadarTile::new(
             u32::from(BASE_CHUNK_TILES) * 6 + 9,
             u32::from(BASE_CHUNK_TILES) * 5 + 12,
         );
 
         let revision = cache
-            .invalidate_tile(facet, tile, 3)
+            .invalidate_tile(facet, tile, RadarLod::new(3))
             .expect("the first revision is representable");
         assert_eq!(revision, RadarRevision(1));
         assert_eq!(
             cache.dirty_keys(),
             vec![
-                cache.key(facet, 0, RadarChunkCoord::new(6, 5)),
-                cache.key(facet, 1, RadarChunkCoord::new(3, 2)),
-                cache.key(facet, 2, RadarChunkCoord::new(1, 1)),
+                cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(6, 5)),
+                cache.key(facet, RadarLod::new(1), RadarChunkCoord::new(3, 2)),
+                cache.key(facet, RadarLod::new(2), RadarChunkCoord::new(1, 1)),
             ],
             "one tile has one base product and one ancestor at each LOD the map \
              is walked for — the caller asked for three, and the ceiling is two"
         );
 
-        let base = cache.key(facet, 0, RadarChunkCoord::new(6, 5));
-        let other = cache.key(facet, 0, RadarChunkCoord::new(7, 5));
+        let base = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(6, 5));
+        let other = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(7, 5));
         assert!(cache.is_dirty(base));
         assert!(!cache.is_dirty(other), "an adjacent base chunk is unaffected");
 
         let complete = RadarChunk::new(base, vec![GREEN; chunk_pixel_count()]).expect("a complete chunk");
         assert!(cache.publish(complete));
         assert!(!cache.is_dirty(base), "publication settles only that product");
-        assert!(cache.is_dirty(cache.key(facet, 1, RadarChunkCoord::new(3, 2))));
+        assert!(cache.is_dirty(cache.key(facet, RadarLod::new(1), RadarChunkCoord::new(3, 2))));
     }
 
     #[test]
@@ -3642,9 +3631,15 @@ mod tests {
     fn a_new_mutation_supersedes_unfinished_dirty_work_for_its_facet() {
         let facet = Facet(0);
         let mut cache = RadarCache::default();
-        let first = cache.invalidate_tile(facet, (0, 0), 1).expect("a first revision");
+        let first = cache
+            .invalidate_tile(facet, RadarTile::new(0, 0), RadarLod::new(1))
+            .expect("a first revision");
         let second = cache
-            .invalidate_tile(facet, (u32::from(BASE_CHUNK_TILES), 0), 1)
+            .invalidate_tile(
+                facet,
+                RadarTile::new(u32::from(BASE_CHUNK_TILES), 0),
+                RadarLod::new(1),
+            )
             .expect("a second revision");
 
         assert_eq!(first, RadarRevision(1));
@@ -3652,8 +3647,8 @@ mod tests {
         assert_eq!(
             cache.dirty_keys(),
             vec![
-                cache.key(facet, 0, RadarChunkCoord::new(1, 0)),
-                cache.key(facet, 1, RadarChunkCoord::new(0, 0)),
+                cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(1, 0)),
+                cache.key(facet, RadarLod::new(1), RadarChunkCoord::new(0, 0)),
             ],
             "a worker can never be asked to build an obsolete source revision"
         );
@@ -3819,13 +3814,15 @@ mod tests {
         let facet = Facet(0);
         let mut cache = RadarCache::default();
         let mut queue = RadarWorkQueue::new(2, 1).expect("non-zero limits");
-        cache.invalidate_tile(facet, (0, 0), 0).expect("a revision");
+        cache
+            .invalidate_tile(facet, RadarTile::new(0, 0), RadarLod::new(0))
+            .expect("a revision");
 
         // Add three keys from the current source snapshot to exercise the
         // queue's capacity independently of cache mutation scheduling.
-        let first = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
-        let second = cache.key(facet, 0, RadarChunkCoord::new(1, 0));
-        let third = cache.key(facet, 0, RadarChunkCoord::new(2, 0));
+        let first = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(0, 0));
+        let second = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(1, 0));
+        let third = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(2, 0));
         assert!(queue.request(first));
         assert!(queue.request(first), "an equal request is coalesced");
         assert!(queue.request(second));
@@ -3857,9 +3854,11 @@ mod tests {
         let facet = Facet(0);
         let mut cache = RadarCache::default();
         let mut queue = RadarWorkQueue::new(4, 1).expect("non-zero limits");
-        cache.invalidate_tile(facet, (0, 0), 0).expect("a revision");
+        cache
+            .invalidate_tile(facet, RadarTile::new(0, 0), RadarLod::new(0))
+            .expect("a revision");
         queue.reconcile(&cache);
-        let key = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        let key = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(0, 0));
         assert_eq!(queue.take_for_producer(), vec![key]);
 
         let complete = RadarChunk::new(key, vec![GREEN; chunk_pixel_count()]).expect("complete product");
@@ -3877,11 +3876,15 @@ mod tests {
         let undispatched = RadarChunk::new(key, vec![RED; chunk_pixel_count()]).expect("complete product");
         assert!(!queue.finish(&mut cache, undispatched));
 
-        cache.invalidate_tile(facet, (0, 0), 0).expect("new revision");
+        cache
+            .invalidate_tile(facet, RadarTile::new(0, 0), RadarLod::new(0))
+            .expect("new revision");
         queue.reconcile(&cache);
-        let stale_key = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        let stale_key = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(0, 0));
         assert_eq!(queue.take_for_producer(), vec![stale_key]);
-        cache.invalidate_tile(facet, (0, 0), 0).expect("newer revision");
+        cache
+            .invalidate_tile(facet, RadarTile::new(0, 0), RadarLod::new(0))
+            .expect("newer revision");
         let stale = RadarChunk::new(stale_key, vec![RED; chunk_pixel_count()]).expect("complete product");
         assert!(
             !queue.finish(&mut cache, stale),
@@ -3898,7 +3901,7 @@ mod tests {
         );
 
         queue.reconcile(&cache);
-        let current_key = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        let current_key = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(0, 0));
         assert_eq!(queue.take_for_producer(), vec![current_key]);
         let current =
             RadarChunk::new(current_key, vec![WHITE; chunk_pixel_count()]).expect("complete product");
@@ -3922,7 +3925,7 @@ mod tests {
         let facet = Facet(0);
         let mut cache = RadarCache::default();
         let mut queue = RadarWorkQueue::new(4, 1).expect("non-zero limits");
-        let key = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        let key = cache.key(facet, RadarLod::new(0), RadarChunkCoord::new(0, 0));
 
         assert!(queue.request(key));
         queue.reconcile(&cache);

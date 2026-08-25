@@ -31,7 +31,7 @@ include!(concat!(env!("OUT_DIR"), "/systems.rs"));
 /// One system by id.
 #[must_use]
 pub fn system(id: SystemId) -> Option<&'static CraftSystemDef> {
-    SYSTEMS.get(usize::from(id))
+    SYSTEMS.get(id.index())
 }
 
 #[cfg(test)]

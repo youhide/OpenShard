@@ -12,7 +12,7 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::{ClilocId, Hue, SoundId};
+use openshard_protocol::wire::{ClilocId, CursorId, Hue, SoundId};
 use openshard_protocol::world::PoisonLevel;
 use openshard_state::components::{
     Amount, Drawn, EMPTY_BOTTLE_GRAPHIC, POISON_POTION_GRAPHIC, PoisonCharges,
@@ -92,7 +92,7 @@ pub(super) fn chose_potion(state: &mut WorldState, actor: EntityId, potion: Enti
         },
     );
     state.localized_message(actor, APPLY_TO_WHAT, "");
-    super::send_object_cursor(state, connection, serial.raw());
+    super::send_object_cursor(state, connection, CursorId(serial.raw()));
 }
 
 /// The second cursor's answer: what to smear it on.

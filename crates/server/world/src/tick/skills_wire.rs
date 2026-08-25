@@ -238,7 +238,7 @@ impl World {
             &mut self.state,
             player,
             openshard_state::CraftGumpContext {
-                system: system.into(),
+                system: system.raw(),
                 tool,
                 group: 0,
                 sub_res: 0,

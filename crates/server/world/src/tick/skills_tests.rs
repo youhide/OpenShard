@@ -1560,7 +1560,7 @@ fn a_stat_change_tells_the_window_about_every_skill_it_moved() {
     let mut world = world();
     // Pre-AoS, which is the era the stat influence exists in at all: ServUO
     // zeroes the three scale columns from AoS on, and this asserts the influence.
-    world.state.gameplay.combat_era = openshard_config::CombatEra::from(1);
+    world.state.gameplay.combat_era = openshard_config::CombatEra::new(1);
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];
     let serial = world.state.registry.serial_of(player).unwrap();

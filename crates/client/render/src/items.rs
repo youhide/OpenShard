@@ -24,9 +24,9 @@ use openshard_protocol::wire::{Graphic, Hue};
 use openshard_tiles::TileData;
 
 use crate::animate::StaticAnimations;
-use crate::atlas::StaticArt;
 #[cfg(test)]
 use crate::atlas::StaticAtlas;
+use crate::atlas::{AtlasPixel, StaticArt};
 use crate::camera::{Camera, RealPixel, ViewPixel};
 use crate::cutaway::Cutaway;
 use crate::depth;
@@ -210,7 +210,7 @@ pub fn collect_with_fades_with_interior<'a>(
                 let overlaps_body = player_mask.is_some_and(|body| {
                     placed.order > body.order()
                         && body.overlaps_opaque(placed_rect(&placed), |x, y| {
-                            atlas.opaque_at(placed.showing, x, y)
+                            atlas.opaque_at(placed.showing, AtlasPixel::new(x, y))
                         })
                 });
                 (
@@ -506,7 +506,7 @@ pub fn pick_with_interior<'a>(
         ) else {
             continue;
         };
-        if !atlas.opaque_at(placed.showing, x, y) {
+        if !atlas.opaque_at(placed.showing, AtlasPixel::new(x, y)) {
             continue;
         }
         // `>=`, so a later item at the same order takes it: the tie-break is the

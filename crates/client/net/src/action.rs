@@ -138,7 +138,7 @@ impl Outgoing {
             Self::PickUp { item, amount } => crate::drag::pick_up(item, amount),
             Self::DropInto { item, container, at } => crate::drag::drop_into(item, container, at, version),
             Self::DropOnGround { item, at } => crate::drag::drop_on_ground(item, at, version),
-            Self::Equip { item, layer, mobile } => crate::drag::equip(item, layer.0, mobile),
+            Self::Equip { item, layer, mobile } => crate::drag::equip(item, layer, mobile),
             Self::Buy { vendor, purchases } => crate::vendor::buy(vendor, &purchases),
             Self::Sell { vendor, sales } => crate::vendor::sell(vendor, &sales),
             Self::WarMode(war) => crate::doll::war_mode(war),

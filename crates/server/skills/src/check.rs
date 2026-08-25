@@ -90,7 +90,7 @@ pub fn skill_value(state: &WorldState, entity: EntityId, skill: Skill) -> u16 {
     // From AoS the stat influence is gone: ServUO calls `AOS.DisableStatInfluences()`
     // at startup, which zeroes the three scale columns in place. An `if` says the
     // same thing without a mutable table.
-    if state.gameplay.combat_era >= CombatEra::from(2) {
+    if state.gameplay.combat_era >= CombatEra::new(2) {
         return base;
     }
     let info = skill.info();
@@ -223,7 +223,7 @@ pub fn gain_chance(state: &WorldState, entity: EntityId, skill: Skill, chance: u
     // before it, a failure at something hard still does.
     let weight = if success {
         500
-    } else if state.gameplay.combat_era >= CombatEra::from(2) {
+    } else if state.gameplay.combat_era >= CombatEra::new(2) {
         0
     } else {
         200

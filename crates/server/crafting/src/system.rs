@@ -166,30 +166,30 @@ pub struct CraftSystemDef {
 /// An index rather than a reference so it fits in a component and a save record.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct SystemId(pub u8);
+pub struct SystemId(u8);
 
-impl From<u8> for SystemId {
-    fn from(value: u8) -> Self {
-        Self(value)
+impl SystemId {
+    /// Name a system by its stored byte.
+    #[must_use]
+    pub const fn new(raw: u8) -> Self {
+        Self(raw)
     }
-}
 
-impl From<SystemId> for u8 {
-    fn from(value: SystemId) -> Self {
-        value.0
+    /// The byte kept in the in-flight crafting component and save record.
+    #[must_use]
+    pub const fn raw(self) -> u8 {
+        self.0
     }
-}
 
-impl From<SystemId> for usize {
-    fn from(value: SystemId) -> Self {
-        usize::from(value.0)
+    /// The position in [`crate::defs`] this id names.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.0 as usize
     }
-}
 
-impl TryFrom<usize> for SystemId {
-    type Error = std::num::TryFromIntError;
-
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        u8::try_from(value).map(Self)
+    /// Name a system by a collection index, if it fits the stored byte.
+    #[must_use]
+    pub fn from_index(index: usize) -> Option<Self> {
+        u8::try_from(index).ok().map(Self)
     }
 }

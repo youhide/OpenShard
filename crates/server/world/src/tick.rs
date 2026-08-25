@@ -1019,7 +1019,7 @@ impl World {
                             // the reward all come from one. Without this it would
                             // follow whoever double-clicked it, with nothing to
                             // accept or refuse.
-                            offers.push(openshard_state::QuestKey::from("escort"));
+                            offers.push(openshard_state::QuestKey::new("escort"));
                         }
                         if !offers.is_empty() {
                             quests::bind_giver(&mut self.state, serial, offers);

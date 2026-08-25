@@ -15,7 +15,7 @@
 //! without combat, magic or the AI knowing what a lute is.
 
 use openshard_entities::EntityId;
-use openshard_protocol::wire::ClilocId;
+use openshard_protocol::wire::{ClilocId, CursorId};
 use openshard_state::components::{
     Contained, Discorded, Drawn, Equipped, Hitpoints, Instrument, Mana, Pacified, Skills, Stamina,
 };
@@ -277,7 +277,7 @@ pub(super) fn provoke_first(state: &mut WorldState, bard: EntityId, target: Enti
         },
     );
     if let Some((connection, serial)) = super::client_of(state, bard) {
-        super::send_object_cursor(state, connection, serial);
+        super::send_object_cursor(state, connection, CursorId(serial.raw()));
     }
 }
 

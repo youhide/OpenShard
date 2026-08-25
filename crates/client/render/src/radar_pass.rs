@@ -91,12 +91,17 @@ pub struct Placement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::radar::{RadarChunkCoord, RadarExtent, RadarRevision, RadarTile};
+    use crate::radar::{RadarChunkCoord, RadarExtent, RadarLod, RadarRevision, RadarTile};
     use openshard_protocol::world::Facet;
 
     fn chunk(x: u32, y: u32) -> RadarChunk {
         RadarChunk::new(
-            RadarChunkKey::new(Facet(0), 0, RadarChunkCoord::new(x, y), RadarRevision(0)),
+            RadarChunkKey::new(
+                Facet(0),
+                RadarLod::new(0),
+                RadarChunkCoord::new(x, y),
+                RadarRevision(0),
+            ),
             vec![Color16(0x03e0); usize::from(BASE_CHUNK_TILES).pow(2)],
         )
         .expect("a complete chunk")
@@ -105,7 +110,7 @@ mod tests {
     fn region(origin: (u32, u32), extent: (u16, u16)) -> RadarRegion {
         RadarRegion::new(
             Facet(0),
-            RadarTile::from(origin),
+            RadarTile::new(origin.0, origin.1),
             RadarExtent::new(extent.0, extent.1).expect("a non-empty test region"),
         )
     }
@@ -153,7 +158,12 @@ mod tests {
     fn selecting_a_region_does_not_mix_facets() {
         let matching = chunk(0, 0);
         let other_facet = RadarChunk::new(
-            RadarChunkKey::new(Facet(1), 0, RadarChunkCoord::new(0, 0), RadarRevision(0)),
+            RadarChunkKey::new(
+                Facet(1),
+                RadarLod::new(0),
+                RadarChunkCoord::new(0, 0),
+                RadarRevision(0),
+            ),
             vec![Color16(0x03e0); usize::from(BASE_CHUNK_TILES).pow(2)],
         )
         .unwrap();
@@ -176,7 +186,12 @@ mod tests {
         // The level-one product covering the four base chunks at the origin: the
         // same pixel count over twice the ground in each direction.
         let parent = RadarChunk::new(
-            RadarChunkKey::new(Facet(0), 1, RadarChunkCoord::new(0, 0), RadarRevision(0)),
+            RadarChunkKey::new(
+                Facet(0),
+                RadarLod::new(1),
+                RadarChunkCoord::new(0, 0),
+                RadarRevision(0),
+            ),
             vec![Color16(0x03e0); usize::from(BASE_CHUNK_TILES).pow(2)],
         )
         .unwrap();
@@ -213,7 +228,12 @@ mod tests {
     #[test]
     fn one_product_is_one_draw_however_many_requests_fell_back_to_it() {
         let parent = RadarChunk::new(
-            RadarChunkKey::new(Facet(0), 1, RadarChunkCoord::new(0, 0), RadarRevision(0)),
+            RadarChunkKey::new(
+                Facet(0),
+                RadarLod::new(1),
+                RadarChunkCoord::new(0, 0),
+                RadarRevision(0),
+            ),
             vec![Color16(0x03e0); usize::from(BASE_CHUNK_TILES).pow(2)],
         )
         .unwrap();
@@ -286,7 +306,12 @@ mod tests {
         let far = chunk(9, 9);
         let fine = chunk(0, 0);
         let ancestor = RadarChunk::new(
-            RadarChunkKey::new(Facet(0), 1, RadarChunkCoord::new(0, 0), RadarRevision(0)),
+            RadarChunkKey::new(
+                Facet(0),
+                RadarLod::new(1),
+                RadarChunkCoord::new(0, 0),
+                RadarRevision(0),
+            ),
             vec![Color16(0x03e0); usize::from(BASE_CHUNK_TILES).pow(2)],
         )
         .unwrap();

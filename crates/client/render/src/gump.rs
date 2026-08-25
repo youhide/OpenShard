@@ -65,7 +65,7 @@ use openshard_uofiles::color::Color16;
 use openshard_uofiles::gumpart::{GumpError, Gumps};
 use openshard_uofiles::image::Image;
 
-use crate::atlas::{AtlasError, Sprite, StaticAtlas};
+use crate::atlas::{AtlasError, AtlasPixel, Sprite, StaticAtlas};
 use crate::geometry::Rect;
 use crate::hue::HueRamp;
 use crate::renderer::{QUAD, new_static_instance_buffer, upload, write_rows};
@@ -517,7 +517,7 @@ impl GumpAtlas {
     pub fn opaque_at(&self, art: GumpArt, pixel: GumpArtPixel) -> bool {
         self.slots
             .get(&art)
-            .is_some_and(|slot| self.packed.opaque_at(*slot, pixel.x, pixel.y))
+            .is_some_and(|slot| self.packed.opaque_at(*slot, AtlasPixel::new(pixel.x, pixel.y)))
     }
 
     /// How many pictures landed in it.

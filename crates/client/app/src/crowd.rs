@@ -770,6 +770,7 @@ impl Crowd {
             facing: facing.direction,
             frame: AnimationFrameIndex(0),
             from: stepped_off,
+            corpse: false,
             hue,
             drawn: tracked.drawn,
             // `Crowd` ages a position and a clock; equipment has neither —
@@ -863,6 +864,7 @@ impl Crowd {
             // step's `from` was just dropped above, so there is no crossing left
             // for the order to be between.
             from: None,
+            corpse: false,
             hue,
             drawn: tracked.drawn,
             equipment: Vec::new().into(),
@@ -1023,6 +1025,7 @@ impl Crowd {
                 facing: tracked.facing,
                 frame: AnimationFrameIndex(0),
                 from: None,
+                corpse: true,
                 hue,
                 drawn: tracked.drawn,
                 equipment: equipment.clone(),
@@ -1047,6 +1050,7 @@ impl Crowd {
             facing: facing.direction,
             frame: AnimationFrameIndex(0),
             from: None,
+            corpse: true,
             hue,
             drawn: tracked.drawn,
             equipment,

@@ -587,7 +587,8 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction
     // Keep after a target that is still alive and in sight — close in if out of
     // reach, and leave the hitting to `swings`.
     if let Some(target_serial) = state.registry.get::<Combat>(creature).and_then(|c| c.target) {
-        if let Some(target_pos) = foe_in_sight(state, target_serial, pos, facet, chase_limit(sight)) {
+        if let Some(target_pos) = foe_in_sight(state, creature, target_serial, pos, facet, chase_limit(sight))
+        {
             if should_flee(state, creature, brain) {
                 state.registry.remove::<Route>(creature);
                 return flee_step(state, creature, facet, pos, target_pos);
@@ -668,18 +669,31 @@ fn chase_limit(sight: Sight) -> u32 {
     (u32::from(sight.0) * CHASE_RANGE_FACTOR).max(CHASE_RANGE_MIN)
 }
 
-/// The position of `target` if it is still a live foe within `range` of `from`
-/// on `facet`, or `None` if it has died, fled or vanished. Range only, no sight
-/// line: both references acquire with line of sight and *pursue* on the cheaper
-/// check, so a quarry that ducks behind a wall is chased around it, not lost.
-fn foe_in_sight(state: &WorldState, target: Serial, from: Point, facet: Facet, range: u32) -> Option<Point> {
+/// The position of `target` if it is still a visible, live foe within `range`
+/// of `from` on `facet`, or `None` if it has died, fled or vanished. Range
+/// only, no terrain sight line: both references acquire with line of sight and
+/// *pursue* on the cheaper check, so a quarry that ducks behind a wall is chased
+/// around it, not lost.  Mobile visibility still applies: a living creature
+/// cannot see or pursue a ghost.
+fn foe_in_sight(
+    state: &WorldState,
+    watcher: EntityId,
+    target: Serial,
+    from: Point,
+    facet: Facet,
+    range: u32,
+) -> Option<Point> {
     let entity = state.registry.entity_of(target)?;
     let &Position(pos) = state.registry.get::<Position>(entity)?;
     let alive = state
         .registry
         .get::<Hitpoints>(entity)
         .is_some_and(|h| h.current > 0);
-    (alive && state.facet_of(entity) == facet && in_range(from, pos, range)).then_some(pos)
+    (alive
+        && state.can_see_mobile(watcher, entity)
+        && state.facet_of(entity) == facet
+        && in_range(from, pos, range))
+    .then_some(pos)
 }
 
 /// Whether a step in `dir` from `from` will *move* — a mobile not yet facing
@@ -887,7 +901,7 @@ fn nearest_player_in_sight(
     let sectors = facet_state.sectors();
     let mut best: Option<(u32, Serial)> = None;
     for (id, pos) in sectors.mobiles_near(from, u32::from(sight.0)) {
-        if id == creature || !state.registry.has::<Client>(id) {
+        if id == creature || !state.registry.has::<Client>(id) || !state.can_see_mobile(creature, id) {
             continue;
         }
         // Noticing needs a sight line — both reference emulators gate the

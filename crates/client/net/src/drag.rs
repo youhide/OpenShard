@@ -6,6 +6,7 @@ use openshard_protocol::items::{DROP_TO_GROUND, DropItem, EquipItemRequest, Item
 use openshard_protocol::packet::{DecodePacket, PacketLength, frame_body};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::version::ClientVersion;
+use openshard_protocol::wire::RawLayer;
 use openshard_protocol::world::Point;
 
 /// Ask the shard to put `item` on the cursor.
@@ -59,10 +60,10 @@ pub fn drop_on_ground(item: Serial, at: Point, version: ClientVersion) -> Vec<u8
 
 /// Put the cursor item onto a mobile's paperdoll slot.
 #[must_use]
-pub fn equip(item: Serial, layer: u8, mobile: Serial) -> Vec<u8> {
+pub fn equip(item: Serial, layer: RawLayer, mobile: Serial) -> Vec<u8> {
     frame_body(EquipItemRequest::ID, PacketLength::Fixed(10), |out| {
         out.u32(item.raw());
-        out.u8(layer);
+        out.u8(layer.0);
         out.u32(mobile.raw());
     })
 }
@@ -118,12 +119,14 @@ mod tests {
         let item = Serial::new(0x4000_002A).unwrap();
         let wearer = Serial::new(0x0000_0007).unwrap();
 
-        let ClientPacket::Equip(request) = ClientPacket::decode(&equip(item, 1, wearer), version).unwrap()
+        let layer = RawLayer(1);
+        let ClientPacket::Equip(request) =
+            ClientPacket::decode(&equip(item, layer, wearer), version).unwrap()
         else {
             panic!("paperdoll drop was not an equip request");
         };
         assert_eq!(request.item.validate(), Some(item));
-        assert_eq!(request.layer.interpret().0, 1);
+        assert_eq!(request.layer, layer);
         assert_eq!(request.mobile.validate(), Some(wearer));
     }
 }

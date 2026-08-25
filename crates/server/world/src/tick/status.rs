@@ -136,7 +136,7 @@ impl World {
             // Pre-AoS this field *is* the armour rating; from AoS the client
             // labels it physical resistance, which is the resistance component's
             // to answer (the AoS per-piece resist data is a separate port).
-            armor: if self.state.gameplay.combat_era >= CombatEra::from(2) {
+            armor: if self.state.gameplay.combat_era >= CombatEra::new(2) {
                 self.state
                     .registry
                     .get::<Resistance>(entity)

@@ -207,15 +207,15 @@ riding along with this one.
   `NotSent::Backlogged` diagnostic together. The internal `draining` count
   remains a separate implementation detail: it counts stale responses after a
   rollback, not the live pending queue.
-- **`app::gump::text_color(hues: &Hues, hue: u32)` narrows with `as`.** Its
-  body is `hues.get(Hue(hue as u16))` — a wire hue that arrived as a `u32`
-  because `GumpLayout`'s builder methods (`label`, `croppedtext`, …) declare
-  their hue parameter as `u32`, matching the layout language's decimal
-  arguments. The `as` silently keeps the low sixteen bits of anything larger.
-  Class A on this end (`Hue` exists); on the `protocol` end it is the same
-  shape as the four `u32` cliloc parameters on `GumpLayout` that
-  `protocol_newtypes.md`'s N-gump backlog already names, and probably wants
-  fixing there rather than here.
+- **`render::gump` narrows layout art and hues with `as`.** The current text
+  path is `text_hue(hue: u32) -> Hue`, whose body narrows to `u16` and then
+  adds the layout-to-wire one-based offset; image and item elements make the
+  same narrowing before constructing `Graphic`/`Hue`. `GumpLayout`'s builder
+  and parser still carry those decimal layout arguments as `u32`, so a value
+  larger than `u16::MAX` silently keeps its low sixteen bits. Class A on the
+  render end (`Graphic`/`Hue` exist), but the fix belongs at the shared
+  protocol/layout seam and needs a decision about whether an oversized decimal
+  argument is refused, retained as unknown, or has a reference-client meaning.
 - ~~**`pathtrace::Image::visibility(x: u32, y: u32, light: usize)`.**~~ Fixed:
   `ImagePixel` now names an image-grid coordinate and `LightIdx` names the
   light-list index, so the image owns the only bounds check over both. The

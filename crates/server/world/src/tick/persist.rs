@@ -1017,7 +1017,7 @@ impl World {
             active: quests
                 .iter()
                 .map(|record| QuestState {
-                    key: QuestKey::from(record.key.clone()),
+                    key: QuestKey::new(record.key.clone()),
                     progress: record.progress.clone(),
                     seconds_left: record.seconds.clone(),
                     failed: record.failed,
@@ -1027,7 +1027,7 @@ impl World {
             done: done
                 .iter()
                 .map(|record| DoneQuest {
-                    key: QuestKey::from(record.key.clone()),
+                    key: QuestKey::new(record.key.clone()),
                     restart_at: if record.restart_in_secs == u32::MAX {
                         WorldTick::MAX
                     } else {
@@ -1568,7 +1568,7 @@ impl World {
                 self.state.registry.insert(
                     entity,
                     QuestGiver {
-                        keys: record.quest_giver.iter().cloned().map(QuestKey::from).collect(),
+                        keys: record.quest_giver.iter().cloned().map(QuestKey::new).collect(),
                     },
                 );
             }

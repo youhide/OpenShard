@@ -40,7 +40,7 @@
 //! same late primitive with a canopy-tile key, while profile-controlled
 //! transparency radii remain separate work.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
@@ -50,6 +50,7 @@ use openshard_tiles::{StaticTile, TileData, TileFlags};
 use crate::depth;
 use crate::geometry::Rect;
 use crate::ground::corner_heights;
+use crate::items::GroundItem;
 
 /// How tall the client assumes a body is, for the ceiling test.
 ///
@@ -220,6 +221,22 @@ impl Cutaway {
         player: openshard_protocol::world::Point,
         draw_roofs: bool,
     ) -> Self {
+        Self::at_with_items(map, tiledata, player, draw_roofs, &[])
+    }
+
+    /// What is cut away when server items stand over the player too.
+    ///
+    /// A placed multi reaches the renderer as one [`GroundItem`] per component,
+    /// not as map statics. Leaving those pieces out makes a player house an
+    /// impossible building: its floor affects movement, but its roof never
+    /// reaches the very cutaway that is meant to reveal the body beneath it.
+    pub fn at_with_items(
+        map: &WorldMap,
+        tiledata: &TileData,
+        player: openshard_protocol::world::Point,
+        draw_roofs: bool,
+        items: &[GroundItem],
+    ) -> Self {
         let (px, py) = (player.x, player.y);
         if map.land(px, py).is_none() {
             return Self {
@@ -244,8 +261,9 @@ impl Cutaway {
         let mut kept_ground_z = 127;
         let mut max_z = 127;
         let mut no_draw_roofs = !draw_roofs;
+        let items = ItemStacks::of(items);
 
-        for piece in stack(map, tiledata, px, py) {
+        for piece in stack_with_items(map, tiledata, &items, px, py) {
             let Some(tile) = piece.tile else {
                 // The land. Its height is the average of the corners it is
                 // stretched over, which is what `Land.AverageZ` is.
@@ -269,7 +287,7 @@ impl Cutaway {
         let mut settled_z = max_z;
         let (nx, ny) = (px.saturating_add(1), py.saturating_add(1));
         if map.land(nx, ny).is_some() {
-            for piece in stack(map, tiledata, nx, ny) {
+            for piece in stack_with_items(map, tiledata, &items, nx, ny) {
                 let Some(tile) = piece.tile else { continue };
                 let tile_z = i32::from(piece.z);
                 // A roof, and *only* a roof: a wall standing on the tile in
@@ -287,7 +305,7 @@ impl Cutaway {
                     && tile.flags.is_roof()
                 {
                     max_z = tile_z;
-                    max_ground_z = i32::from(near_roof_z(map, tiledata, piece.z, nx, ny, piece.z));
+                    max_ground_z = i32::from(near_roof_z(map, tiledata, &items, piece.z, nx, ny, piece.z));
                     no_draw_roofs = true;
                 }
             }
@@ -378,14 +396,22 @@ fn cuts_from_above(tile: &StaticTile) -> bool {
 /// six bits of each coordinate. That is not a bug being carried over so much as
 /// the fill's only bound — a roof wider than 64 tiles folds onto itself and the
 /// walk stops — and it is what makes an unbounded recursion terminate.
-fn near_roof_z(map: &WorldMap, tiledata: &TileData, default_z: i8, x: u16, y: u16, z: i8) -> i8 {
+fn near_roof_z(
+    map: &WorldMap,
+    tiledata: &TileData,
+    items: &ItemStacks<'_>,
+    default_z: i8,
+    x: u16,
+    y: u16,
+    z: i8,
+) -> i8 {
     let mut visited = vec![false; 64 * 64];
     fill(
         map,
         tiledata,
+        items,
         default_z,
-        i32::from(x),
-        i32::from(y),
+        (i32::from(x), i32::from(y)),
         z,
         &mut visited,
     )
@@ -395,12 +421,13 @@ fn near_roof_z(map: &WorldMap, tiledata: &TileData, default_z: i8, x: u16, y: u1
 fn fill(
     map: &WorldMap,
     tiledata: &TileData,
+    items: &ItemStacks<'_>,
     default_z: i8,
-    x: i32,
-    y: i32,
+    at: (i32, i32),
     z: i8,
     visited: &mut [bool],
 ) -> i8 {
+    let (x, y) = at;
     let slot = ((x & 0x3F) + ((y & 0x3F) << 6)) as usize;
     if visited[slot] {
         return default_z;
@@ -415,19 +442,49 @@ fn fill(
     // The first roof within six of the height that led here. Not the lowest on
     // the tile: the client breaks out of its walk on the first, and the walk is
     // in `PriorityZ` order.
-    let found = stack(map, tiledata, tx, ty).into_iter().find(|piece| {
-        piece
-            .tile
-            .is_some_and(|tile| tile.flags.is_roof() && i32::from(z).abs_diff(i32::from(piece.z)) <= 6)
-    });
+    let found = stack_with_items(map, tiledata, items, tx, ty)
+        .into_iter()
+        .find(|piece| {
+            piece
+                .tile
+                .is_some_and(|tile| tile.flags.is_roof() && i32::from(z).abs_diff(i32::from(piece.z)) <= 6)
+        });
     let Some(found) = found else {
         return default_z;
     };
     let mut default_z = default_z.min(found.z);
     for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-        default_z = fill(map, tiledata, default_z, x + dx, y + dy, found.z, visited);
+        default_z = fill(
+            map,
+            tiledata,
+            items,
+            default_z,
+            (x + dx, y + dy),
+            found.z,
+            visited,
+        );
     }
     default_z
+}
+
+/// Server statics grouped by tile for the handful of columns one cutaway reads.
+///
+/// A roof flood revisits neighbouring columns, so indexing once keeps a placed
+/// castle from turning that walk into one full item-list scan per roof tile.
+struct ItemStacks<'a>(HashMap<(u16, u16), Vec<&'a GroundItem>>);
+
+impl<'a> ItemStacks<'a> {
+    fn of(items: &'a [GroundItem]) -> Self {
+        let mut stacks: HashMap<(u16, u16), Vec<&GroundItem>> = HashMap::new();
+        for item in items {
+            stacks.entry((item.at.x, item.at.y)).or_default().push(item);
+        }
+        Self(stacks)
+    }
+
+    fn at(&self, x: u16, y: u16) -> impl Iterator<Item = &'a GroundItem> + '_ {
+        self.0.get(&(x, y)).into_iter().flatten().copied()
+    }
 }
 
 /// One thing standing on a tile, in the terms the two rules above need.
@@ -454,10 +511,22 @@ pub struct Piece<'a> {
 /// whatever is already there — so among statics the order is the order they
 /// came out of the file. A stable sort over the same key is the same list.
 ///
-/// Mobiles and dynamic items are not here: this walks the *map*, and both rules
-/// that use it skip mobiles anyway (`UpdateMaxDrawZ` by `continue`, the fill by
-/// asking for statics).
+/// Mobiles and dynamic items are not in this bare-map spelling: both rules skip
+/// mobiles, while [`Cutaway::at_with_items`] adds the dynamic statics the shard
+/// placed. That distinction is what lets diagnostics ask only about a map while
+/// a live frame still sees a player house's roof.
 pub fn stack<'a>(map: &WorldMap, tiledata: &'a TileData, x: u16, y: u16) -> Vec<Piece<'a>> {
+    stack_with_items(map, tiledata, &ItemStacks::of(&[]), x, y)
+}
+
+/// [`stack`] with the dynamic statics the shard placed on the same tile.
+fn stack_with_items<'a>(
+    map: &WorldMap,
+    tiledata: &'a TileData,
+    items: &ItemStacks<'_>,
+    x: u16,
+    y: u16,
+) -> Vec<Piece<'a>> {
     let mut pieces = Vec::new();
     if let Some(cell) = map.land(x, y) {
         let corners = corner_heights(map, x, y, cell.z).map(|z| z as i32);
@@ -476,6 +545,14 @@ pub fn stack<'a>(map: &WorldMap, tiledata: &'a TileData, x: u16, y: u16) -> Vec<
             z: item.z,
             tile: Some(tile),
             priority_z: depth::static_priority_z(item.z, tile),
+        });
+    }
+    for item in items.at(x, y) {
+        let tile = tiledata.static_tile(item.displayed().0);
+        pieces.push(Piece {
+            z: item.at.z,
+            tile: Some(tile),
+            priority_z: depth::static_priority_z(item.at.z, tile),
         });
     }
     // Stable, and the land wins a tie: `AddGameObject`'s `state == 0` arm. The
@@ -564,6 +641,10 @@ pub fn hides_foliage_over(player_rect: Rect, screen_rect: Rect) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use openshard_map::grid::BlockExtent;
+    use openshard_map::map::LandCell;
+    use openshard_protocol::items::ItemAmount;
+    use openshard_protocol::wire::Hue;
     use openshard_tiles::TileFlags;
 
     use super::*;
@@ -650,6 +731,37 @@ mod tests {
         assert!(inside.shows_static(0, &tile(TileFlags::WALL, 20)));
         // And so does the floor: `max_ground_z` was left alone.
         assert!(inside.shows_land(0));
+    }
+
+    /// A player house is a server item expanded into dynamic statics, so its
+    /// roof has to enter the same two-tile question as a roof from the map.
+    #[test]
+    fn a_placed_house_roof_is_cut_away() {
+        const ROOF: Graphic = Graphic(0x1234);
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell::default());
+        let mut tiledata = TileData::empty();
+        tiledata.set_static_tile(ROOF.0, tile(TileFlags::ROOF, 3));
+        let roof = GroundItem {
+            // The second tile `UpdateMaxDrawZ` asks: where the roof over the
+            // body is painted in the isometric projection.
+            at: Point::new(3, 3, 20),
+            graphic: ROOF,
+            hue: Hue::NONE,
+            amount: ItemAmount::ONE,
+        };
+
+        assert_eq!(
+            Cutaway::at(&map, &tiledata, Point::new(2, 2, 0), true),
+            Cutaway::OPEN
+        );
+        let cutaway = Cutaway::at_with_items(&map, &tiledata, Point::new(2, 2, 0), true, &[roof]);
+
+        assert!(cutaway.no_draw_roofs, "the dynamic roof did not open the cutaway");
+        assert!(!cutaway.shows_static(roof.at.z, tiledata.static_tile(ROOF.0)));
+        assert!(
+            cutaway.shows_mobile(0),
+            "the cutaway hid the body it exists to reveal"
+        );
     }
 
     /// The ground is only ever cut when the player is under it, which is the

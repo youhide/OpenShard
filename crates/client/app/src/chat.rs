@@ -181,6 +181,44 @@ pub(crate) fn canvas_height(surface_height: u32, scale: f32) -> i32 {
     (surface_height as f32 / scale) as i32
 }
 
+/// The part of the surface left for world-attached HUD furniture.
+///
+/// A docked egui panel removes space from the world before the world is drawn.
+/// The chat belongs to that same context: anchoring it to the full surface
+/// would put it underneath a left-docked tool panel even though the terrain has
+/// already been pushed aside.  Keep its origin and usable size together so the
+/// rendering and hit-test paths cannot make different choices about that edge.
+fn chat_canvas(shell: Option<&shell::Shell>, window: &Screen, scale: f32) -> (GumpPixel, GumpPixel) {
+    let Some(shell) = shell else {
+        return (
+            GumpPixel::new(0, 0),
+            GumpPixel::new(
+                (window.config.width as f32 / scale) as i32,
+                canvas_height(window.config.height, scale),
+            ),
+        );
+    };
+    let viewport = shell.viewport();
+    (
+        GumpPixel::new(
+            (viewport.x as f32 / scale) as i32,
+            (viewport.y as f32 / scale) as i32,
+        ),
+        GumpPixel::new(
+            (viewport.width as f32 / scale) as i32,
+            (viewport.height as f32 / scale) as i32,
+        ),
+    )
+}
+
+/// Move a local chat control into its viewport-relative position.
+fn at_chat_origin(box_: Scissor, origin: GumpPixel) -> Scissor {
+    Scissor {
+        at: GumpPixel::new(box_.at.x + origin.x, box_.at.y + origin.y),
+        ..box_
+    }
+}
+
 /// How wide the widest channel's name is drawn, in gump pixels.
 ///
 /// **The one measurement the channel button's box is built from**, and it is a
@@ -705,15 +743,19 @@ impl crate::app::App {
             .as_ref()
             .filter(|_| truetype)
             .map(|atlas| (atlas, fonts.speech.scaled(scale)));
-        let button = channel_button(
-            canvas_height(window.config.height, scale),
-            line_height(truetype, chat_style, fonts),
-            channel_width(
-                &self.resources.font_atlas,
-                ttf,
-                chat_style.scale.glyph_scale_factor() as i32,
-                scale,
+        let (origin, canvas) = chat_canvas(self.shell.as_ref(), window, scale);
+        let button = at_chat_origin(
+            channel_button(
+                canvas.y,
+                line_height(truetype, chat_style, fonts),
+                channel_width(
+                    &self.resources.font_atlas,
+                    ttf,
+                    chat_style.scale.glyph_scale_factor() as i32,
+                    scale,
+                ),
             ),
+            origin,
         );
         if !button.contains(self.input.pointer_gump) {
             return false;
@@ -757,13 +799,13 @@ pub(crate) fn draw_chat_and_speech(
     // `Frame::scale`'s doc is what the one below multiplies out, and
     // this is that arithmetic done once for where the corner is
     // rather than for every quad in it.
-    let canvas = GumpPixel::new(
-        (window.config.width as f32 / scale) as i32,
-        canvas_height(window.config.height, scale),
-    );
+    let (origin, canvas) = chat_canvas(shell, window, scale);
     let font = Font::DEFAULT;
     let line_height = line_height(resources.ttf_font.is_some(), chat_style, fonts);
-    let input_at = GumpPixel::new(CHAT_MARGIN, canvas.y - CHAT_MARGIN - line_height);
+    let input_at = GumpPixel::new(
+        origin.x + CHAT_MARGIN,
+        origin.y + canvas.y - CHAT_MARGIN - line_height,
+    );
 
     // Owned before it is borrowed into `GumpLabel`s: the journal's own
     // strings are formatted here (name and text joined the way
@@ -794,7 +836,7 @@ pub(crate) fn draw_chat_and_speech(
     let mut highlighted: Option<usize> = None;
     for row in popup.iter().rev() {
         above += 1;
-        let at = GumpPixel::new(CHAT_MARGIN, input_at.y - line_height * above);
+        let at = GumpPixel::new(origin.x + CHAT_MARGIN, input_at.y - line_height * above);
         // Every row in the shard's grey, including the highlighted one: the
         // highlight is the plate behind it now (see [`PLATE_SHADE`]), and a
         // row that changed ink *as well* would be saying the same thing twice —
@@ -819,7 +861,10 @@ pub(crate) fn draw_chat_and_speech(
         // defect this reads the window's height to avoid.
         let journal_rows = room.saturating_sub(popup.len()).min(CHAT_LINES);
         for (row, line) in view.journal.iter().rev().take(journal_rows).enumerate() {
-            let at = GumpPixel::new(CHAT_MARGIN, input_at.y - line_height * (above + row as i32 + 1));
+            let at = GumpPixel::new(
+                origin.x + CHAT_MARGIN,
+                input_at.y - line_height * (above + row as i32 + 1),
+            );
             let text = match line.name.is_empty() {
                 true => line.text.clone(),
                 false => format!("{}: {}", line.name, line.text),
@@ -911,10 +956,13 @@ pub(crate) fn draw_chat_and_speech(
         // The button's box, in gump pixels like every other layout answer here,
         // and converted once — the pointer reads the same box out of the same
         // two functions, which is the whole of why they are functions.
-        let button = channel_button(
-            canvas.y,
-            line_height,
-            channel_width(&resources.font_atlas, Some((&*atlas, speech_size)), 1, scale),
+        let button = at_chat_origin(
+            channel_button(
+                canvas.y,
+                line_height,
+                channel_width(&resources.font_atlas, Some((&*atlas, speech_size)), 1, scale),
+            ),
+            origin,
         );
         let line_at = to_real(line_starts_at(button));
         real_labels.push(GumpLabel {
@@ -997,10 +1045,13 @@ pub(crate) fn draw_chat_and_speech(
         // The same two functions the TrueType branch above calls and the pointer
         // calls — measured through `fonts.mul` here, which is the whole of the
         // difference between the two branches.
-        let button = channel_button(
-            canvas.y,
-            line_height,
-            channel_width(&resources.font_atlas, None, magnify, scale),
+        let button = at_chat_origin(
+            channel_button(
+                canvas.y,
+                line_height,
+                channel_width(&resources.font_atlas, None, magnify, scale),
+            ),
+            origin,
         );
         let line_at = line_starts_at(button);
         labels.push(GumpLabel {

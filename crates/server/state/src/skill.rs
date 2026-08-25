@@ -368,12 +368,16 @@ mod tests {
     #[test]
     fn the_table_covers_every_id() {
         assert_eq!(SKILLS.len(), SKILL_COUNT);
-        for id in 0..SKILL_COUNT as u8 {
-            let skill = Skill::from_id(id).expect("every id in range names a skill");
-            assert_eq!(skill.id(), id, "the enum discriminant is the id");
-            assert!(!skill.info().name.is_empty());
+        for id in u8::MIN..=u8::MAX {
+            match Skill::from_id(id) {
+                Some(skill) => {
+                    assert!(usize::from(id) < SKILL_COUNT, "id {id} is outside the table");
+                    assert_eq!(skill.id(), id, "the enum discriminant is the id");
+                    assert!(!skill.info().name.is_empty());
+                }
+                None => assert!(usize::from(id) >= SKILL_COUNT, "id {id} is inside the table"),
+            }
         }
-        assert_eq!(Skill::from_id(SKILL_COUNT as u8), None);
     }
 
     #[test]

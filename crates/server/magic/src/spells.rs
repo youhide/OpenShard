@@ -59,12 +59,6 @@ impl SpellCircle {
     }
 }
 
-impl From<SpellCircle> for u8 {
-    fn from(circle: SpellCircle) -> Self {
-        circle.get()
-    }
-}
-
 /// What a spell asks the caster to aim at.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum SpellTarget {

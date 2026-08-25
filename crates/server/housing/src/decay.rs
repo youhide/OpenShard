@@ -181,6 +181,7 @@ pub fn demolish(state: &mut WorldState, house: EntityId) -> Option<EntityId> {
     let serial = state.registry.serial_of(house)?;
     let &Position(at) = state.registry.get::<Position>(house)?;
     let facet = state.facet_of(house);
+    let multi = state.registry.get::<House>(house)?.multi;
 
     // Everything the house was keeping, and everything inside the secures. Read
     // before anything is unpinned, because the pin is what identifies it.
@@ -213,9 +214,10 @@ pub fn demolish(state: &mut WorldState, house: EntityId) -> Option<EntityId> {
         pack_into_a_crate(state, at, facet, &pinned, &stored)
     };
 
-    // The doors stop being the house's. `may_pass` already opens a door whose
-    // house is gone, so this changes nothing a player sees — it is the serial
-    // that stops dangling, which matters the day the pool reissues it.
+    // Doors installed as part of a classic house come down with it. A content
+    // door the house merely adopted stays where the pack put it and only loses
+    // the relationship, which preserves the old rule for buildings laid over
+    // existing decoration.
     let doors: Vec<EntityId> = state
         .registry
         .query::<HouseDoor>()
@@ -223,7 +225,14 @@ pub fn demolish(state: &mut WorldState, house: EntityId) -> Option<EntityId> {
         .map(|(entity, _)| entity)
         .collect();
     for door in doors {
-        state.registry.remove::<HouseDoor>(door);
+        if crate::classic_doors::is_fixture(state, door, at, multi) {
+            if let Some(&Position(door_at)) = state.registry.get::<Position>(door) {
+                state.facet_state_mut(facet).unblock(door_at.x, door_at.y, door);
+            }
+            take_off_the_ground(state, door);
+        } else {
+            state.registry.remove::<HouseDoor>(door);
+        }
     }
 
     // The sign comes down with the house; it is derived from it and means
@@ -241,10 +250,6 @@ pub fn demolish(state: &mut WorldState, house: EntityId) -> Option<EntityId> {
     // The walls come out before the entity does: the footprint is derived from
     // where it stood. A house restored with no client files has none to remove,
     // and `unblock` over an empty list is the right no-op for it.
-    let multi = state
-        .registry
-        .get::<House>(house)
-        .map_or(openshard_protocol::wire::MultiId(0), |entry| entry.multi);
     // The shape it actually has: a designed house's walls are on the entity, and
     // unblocking the foundation's instead would leave every tile the two do not
     // share blocked by something that is no longer there.

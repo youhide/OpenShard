@@ -34,10 +34,21 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
 ];
 
-/// How many times `skill: u8` appears in `text` — a plain substring count,
-/// since the field name is one word.
+/// How many times a bare `skill: u8` appears in `text`, independent of how
+/// rustfmt-able whitespace is placed around its punctuation.
 fn count_bare_skill(text: &str) -> usize {
-    text.match_indices("skill: u8").count()
+    let compact: String = text
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect();
+    compact.match_indices("skill:u8").count()
+}
+
+#[test]
+fn the_skill_counter_does_not_have_a_whitespace_escape_hatch() {
+    assert_eq!(count_bare_skill("skill: u8"), 1);
+    assert_eq!(count_bare_skill("skill : u8"), 1);
+    assert_eq!(count_bare_skill("skill:\n    u8"), 1);
 }
 
 /// Every `.rs` file under `dir`, walked recursively. No `target/` ever

@@ -68,19 +68,19 @@ pub struct LeafCount(u8);
 
 impl LeafCount {
     fn new(value: usize) -> Self {
+        assert!(
+            value > 0 && value <= LEAF_PRIMITIVES,
+            "a BVH leaf holds between one and {LEAF_PRIMITIVES} primitives"
+        );
         Self(u8::try_from(value).expect("a leaf count fits in u8"))
     }
-}
 
-impl From<LeafCount> for usize {
-    fn from(value: LeafCount) -> Self {
-        usize::from(value.0)
+    const fn as_usize(self) -> usize {
+        self.0 as usize
     }
-}
 
-impl From<LeafCount> for u32 {
-    fn from(value: LeafCount) -> Self {
-        u32::from(value.0)
+    pub(super) const fn as_u32(self) -> u32 {
+        self.0 as u32
     }
 }
 
@@ -270,7 +270,7 @@ impl Bvh {
     /// The primitives a leaf names, in the build's own permuted order.
     pub fn primitives(&self, leaf: Leaf) -> &[SolidId] {
         let from = leaf.first.position() as usize;
-        &self.order[from..from + usize::from(leaf.count)]
+        &self.order[from..from + leaf.count.as_usize()]
     }
 
     /// Where a traversal is finished: one past the last node, which is what
@@ -478,7 +478,7 @@ mod tests {
         let bvh = Bvh::of(&solids);
         for leaf in bvh.nodes().iter().filter_map(|node| node.leaf) {
             assert!(
-                usize::from(leaf.count) >= 1 && usize::from(leaf.count) <= LEAF_PRIMITIVES,
+                leaf.count.as_usize() >= 1 && leaf.count.as_usize() <= LEAF_PRIMITIVES,
                 "a leaf of {} primitives",
                 leaf.count
             );
@@ -624,7 +624,7 @@ mod tests {
             let bvh = Bvh::of(&row(count as i32));
             for leaf in bvh.nodes().iter().filter_map(|node| node.leaf) {
                 assert!(
-                    usize::from(leaf.count) >= 2,
+                    leaf.count.as_usize() >= 2,
                     "a leaf of {} over {count} primitives",
                     leaf.count
                 );

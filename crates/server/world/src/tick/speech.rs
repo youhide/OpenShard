@@ -31,14 +31,15 @@ impl World {
                 // turned their mode off with `.gm` still commands, which is what
                 // lets them turn it back on.
                 if self.state.staff_authority(actor) {
-                    // `.res` resurrects the actor. Handled here, not in `gm`:
+                    // `.res` and `.ressurect` resurrect the actor. Handled here,
+                    // not in `gm`:
                     // resurrection redraws the ghost across every screen, a
                     // World-level operation, while `gm::run` works on `WorldState`.
                     // The one-account way to test the ghost round-trip solo.
                     if rest
                         .split_whitespace()
                         .next()
-                        .is_some_and(|c| c.eq_ignore_ascii_case("res"))
+                        .is_some_and(|c| c.eq_ignore_ascii_case("res") || c.eq_ignore_ascii_case("ressurect"))
                     {
                         if self.state.registry.has::<Ghost>(actor) {
                             self.resurrect(actor, true);

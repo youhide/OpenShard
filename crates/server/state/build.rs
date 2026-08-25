@@ -1012,7 +1012,7 @@ fn quests(text: &str) -> String {
         );
 
         writeln!(out, "        QuestDef {{").unwrap();
-        writeln!(out, "            key: QuestKey::from({}),", owned(&quest.key)).unwrap();
+        writeln!(out, "            key: QuestKey::new({}),", owned(&quest.key)).unwrap();
         for (field, text) in [
             ("title", &quest.title),
             ("description", &quest.description),

@@ -125,7 +125,7 @@ pub fn open(state: &mut WorldState, player: EntityId, context: CraftGumpContext)
     let Some(serial) = state.registry.serial_of(player) else {
         return;
     };
-    let Some(def) = system(SystemId::from(context.system)) else {
+    let Some(def) = system(SystemId::new(context.system)) else {
         return;
     };
     let layout = match context.page {
@@ -535,7 +535,7 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
     let Some(context) = state.row_of_mut(player).and_then(|row| row.craft_gump.take()) else {
         return true;
     };
-    let Some(def) = system(SystemId::from(context.system)) else {
+    let Some(def) = system(SystemId::new(context.system)) else {
         return true;
     };
 
@@ -636,7 +636,7 @@ fn make(state: &mut WorldState, player: EntityId, context: CraftGumpContext, rec
         state,
         player,
         context.tool,
-        SystemId::from(context.system),
+        SystemId::new(context.system),
         recipe,
         context.sub_res,
     );
