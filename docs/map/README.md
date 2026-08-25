@@ -5,6 +5,13 @@ itself and the systems whose whole job is to answer a question about it.
 
 ## Start here
 
+[`layers.md`](layers.md) — 🚩 **Which layer does this go in?** One page, one
+question — *must a bake see it?* — and the table of every answer taken so far:
+ground, statics, item, ship, house, customised house. Also the two rules in this
+folder that read as a contradiction (*"never an overlay"* against *"a house is a
+layer"*) and what actually separates them, and the four different things one art
+id can be. Read it before quoting either rule at a question about the other.
+
 [`map_rebuild.md`](map_rebuild.md) — 🚩 **The map, in three layers.** The single
 entry point for everything below: the matryoshka a runtime map actually is —
 ground, statics, and the live layer over them — and the three eras the nine
@@ -47,9 +54,10 @@ an imported base, committed patches, and one revisioned snapshot every reader
 takes a handle to. **A0, A, B and C are built** — the shard runs on a base set it
 owns, a patch survives a restart, and a **running** shard edits its own ground
 from four staff verbs, with the log written in the one order that cannot leave a
-revision nobody can reach. What is left — chunks to the client, which is the last
-clause of C's own "done", then revisioned bakes and the editor — resumes after
-eras R and P. Start at its
+revision nobody can reach. Chunks now reach connected clients, and the first
+Game Master editor cut is described in [`editor.md`](editor.md): catalogue,
+terrain/static brushes, local history and revision-checked commit. Revisioned
+bakes and editor polish remain. Start at its
 [`README.md`](new_map_representation/README.md), and read
 [`client_today.md`](new_map_representation/client_today.md) for the measured
 backlog era R spends.
