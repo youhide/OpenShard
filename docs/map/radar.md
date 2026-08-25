@@ -1088,3 +1088,28 @@ for. It is left open because it changes what a person sees, and this document
 has spent nine sections learning not to decide those by arithmetic — see
 `lighting_pitfalls.md` on the same discipline. First attribute it with both
 levels drawn side by side, then decide.
+
+### 10.7 A carry is O(everything ready), and a brush is a stream of publishes
+
+`RadarCache::moved` walks every ready key to find the ones to rename, and then
+rebuilds `highest_ready_lod` from scratch. That is right for the caller it was
+written for — a publish is an operator typing `.setland`, and the walk is a few
+thousand keys against the 115 ms the same publish spends on the span index — and
+it stops being right at the caller S3 is written for. A brush drag is one publish
+a tile, and at that rate the cache is walked once per tile for a rename that
+touched one chunk.
+
+Neither half is hard to make proportionate when something measures it: the ready
+map is ordered, so a facet's products at one revision are a range rather than a
+scan, and `highest_ready_lod` moves one bucket to another rather than being
+recomputed. Not done here because nothing has measured it, and a second index
+maintained by hand is exactly what `evict_to_budget` decided against when it
+chose to rebuild the same map.
+
+**One thing found in passing, and it is not the radar's alone.**
+`RadarCache::with_tail_budget` builds itself with `..Self::default()`, which is
+the idiom `docs/style.md` refuses by name: a field added to the struct later is
+silently given a value nobody chose, at a call site that does not mention it.
+The cache is one of the ~35 `impl Default`s the tree carries, so this is a note
+rather than a plan — but it is the one place in this file where the construction
+of a cache and the meaning of its budget meet, so it is the one worth naming.
