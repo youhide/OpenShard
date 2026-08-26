@@ -18,15 +18,28 @@ use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::gump::{
     ButtonId, CloseGump, GumpAnswer, GumpButton, GumpDisplay, GumpId, GumpKey, GumpLayout, GumpPoint,
-    GumpResponse,
+    GumpResponse, SwitchId,
 };
 use openshard_protocol::server_packet::ServerPacket;
+use openshard_protocol::wire::{Graphic, Hue};
 use openshard_state::WorldState;
 use openshard_state::components::Client;
 
 /// The id the admin gump answers under. High byte `0xAD` for "admin", so a stray
 /// `0xB1` for some other dialog never lands in the admin handler by accident.
 pub const ADMIN_GUMP: GumpId = openshard_protocol::gump::id::ADMIN;
+
+/// The form reached through the item row of [`ADMIN_GUMP`].
+pub const ADMIN_ITEM_GUMP: GumpId = openshard_protocol::gump::id::ADMIN_ITEM;
+
+/// The reply which opens the item form from the main staff menu.
+const OPEN_ITEM_CREATOR: ButtonId = ButtonId(40);
+/// The form's one action button.
+const CREATE_ITEM: ButtonId = ButtonId(1);
+const FIELD_GRAPHIC: u32 = 1;
+const FIELD_HUE: u32 = 2;
+const FIELD_AMOUNT: u32 = 3;
+const STACKABLE: SwitchId = SwitchId(1);
 
 /// One row of the menu: a reply button and the verb its id means.
 ///
@@ -47,22 +60,27 @@ struct Row {
     /// down, another for the ones that take it away again.
     hue: u32,
     label: &'static str,
-    /// What a listener switches on — `server::content` for the datasets in the
-    /// tree. This string is the whole of what a
-    /// click means.
-    verb: &'static str,
+    action: RowAction,
+}
+
+/// What a button in the main menu means.  World-building rows still publish a
+/// verb for content packs; the item row is an engine-owned form instead.
+#[derive(Clone, Copy)]
+enum RowAction {
+    Verb(&'static str),
+    OpenItemCreator,
 }
 
 /// The menu, top to bottom: three verbs that lay the world down, then three that
 /// clear them.
-const ROWS: [Row; 6] = [
+const ROWS: [Row; 7] = [
     Row {
         id: ButtonId(13),
         y: 54,
         art: (4005, 4007),
         hue: 1153,
         label: "Populate Felucca",
-        verb: "populate:felucca",
+        action: RowAction::Verb("populate:felucca"),
     },
     Row {
         id: ButtonId(22),
@@ -70,7 +88,7 @@ const ROWS: [Row; 6] = [
         art: (4005, 4007),
         hue: 1153,
         label: "Decorate Felucca",
-        verb: "decorate:felucca",
+        action: RowAction::Verb("decorate:felucca"),
     },
     Row {
         id: ButtonId(31),
@@ -78,7 +96,7 @@ const ROWS: [Row; 6] = [
         art: (4005, 4007),
         hue: 1153,
         label: "Regions: Felucca",
-        verb: "regions:felucca",
+        action: RowAction::Verb("regions:felucca"),
     },
     Row {
         id: ButtonId(12),
@@ -86,7 +104,7 @@ const ROWS: [Row; 6] = [
         art: (4017, 4019),
         hue: 33,
         label: "Clear spawns",
-        verb: "clear",
+        action: RowAction::Verb("clear"),
     },
     Row {
         id: ButtonId(21),
@@ -94,7 +112,7 @@ const ROWS: [Row; 6] = [
         art: (4017, 4019),
         hue: 33,
         label: "Clear deco",
-        verb: "clear:deco",
+        action: RowAction::Verb("clear:deco"),
     },
     Row {
         id: ButtonId(30),
@@ -102,7 +120,15 @@ const ROWS: [Row; 6] = [
         art: (4017, 4019),
         hue: 33,
         label: "Clear regions",
-        verb: "clear:regions",
+        action: RowAction::Verb("clear:regions"),
+    },
+    Row {
+        id: OPEN_ITEM_CREATOR,
+        y: 266,
+        art: (4005, 4007),
+        hue: 89,
+        label: "Create item in backpack",
+        action: RowAction::OpenItemCreator,
     },
 ];
 
@@ -112,12 +138,33 @@ const ROWS: [Row; 6] = [
 /// them. Nothing to switch between, so there are no tabs to fall out of sync.
 fn menu() -> GumpLayout {
     let mut layout = GumpLayout::new();
-    layout.background(0, 0, 300, 270, 5054);
+    layout.background(0, 0, 300, 304, 5054);
     layout.label(105, 14, 2100, "Admin");
     for row in &ROWS {
         layout.button(30, row.y, row.art.0, row.art.1, GumpButton::Reply, 0, row.id);
         layout.label(66, row.y + 2, row.hue, row.label);
     }
+    layout
+}
+
+/// The item form deliberately asks for graphics rather than maintaining a
+/// second, inevitably incomplete, catalogue of every item in the installed
+/// client files.  It accepts the same decimal or `0x` hexadecimal identifiers
+/// as staff commands do.
+fn item_creator() -> GumpLayout {
+    let mut layout = GumpLayout::new();
+    layout.background(0, 0, 360, 232, 5054);
+    layout.label(120, 14, 2100, "Create item");
+    layout.label(24, 54, 1153, "Graphic (hex or decimal)");
+    layout.text_entry(190, 50, 135, 20, 1153, FIELD_GRAPHIC, "0x");
+    layout.label(24, 88, 1153, "Hue");
+    layout.text_entry(190, 84, 135, 20, 1153, FIELD_HUE, "0");
+    layout.label(24, 122, 1153, "Amount");
+    layout.text_entry(190, 118, 135, 20, 1153, FIELD_AMOUNT, "1");
+    layout.check(24, 153, 210, 211, true, STACKABLE);
+    layout.label(54, 155, 1153, "Stack identical items");
+    layout.button(116, 188, 4005, 4007, GumpButton::Reply, 0, CREATE_ITEM);
+    layout.label(152, 190, 89, "Create in backpack");
     layout
 }
 
@@ -158,6 +205,36 @@ pub fn open_menu(state: &mut WorldState, actor: EntityId) {
     state.send_packet(connection, &packet);
 }
 
+/// Open the administrator's generic item form.
+pub fn open_item_creator(state: &mut WorldState, actor: EntityId) {
+    let Some(&Client { connection, .. }) = state.registry.get::<Client>(actor) else {
+        return;
+    };
+    let gump = item_creator();
+    let (layout, lines) = gump.finish();
+    let serial = state
+        .registry
+        .serial_of(actor)
+        .map_or(GumpKey::STANDALONE, GumpKey::on);
+    state.send_packet(
+        connection,
+        &ServerPacket::CloseGump(CloseGump {
+            gump_id: ADMIN_ITEM_GUMP,
+            button: ButtonId::CLOSE_BOX,
+        }),
+    );
+    state.send_packet(
+        connection,
+        &ServerPacket::GumpDisplay(GumpDisplay {
+            serial,
+            gump_id: ADMIN_ITEM_GUMP,
+            at: GumpPoint::new(100, 100),
+            layout: layout.to_owned(),
+            lines: lines.to_vec(),
+        }),
+    );
+}
+
 /// Send a verb the way a button would, with nobody having pressed it.
 ///
 /// This is what `--seed` is: an operator naming on the command line the same
@@ -186,12 +263,32 @@ pub fn seed(state: &mut WorldState, action: &str) {
 /// Re-checks the authority here, not only on the `.admin` that opened the gump:
 /// the gump id is not a secret, so a non-staff client could send this packet. This
 /// only reads, so the gate is safe here.
+/// A validated button the admin UI can produce.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ButtonAction {
+    /// Send an existing content-pack verb.
+    Verb(&'static str),
+    /// Show the generic item form.
+    OpenItemCreator,
+    /// Submit the generic item form.
+    CreateItem,
+}
+
+/// The data the item form makes into an item.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ItemRequest {
+    pub graphic: Graphic,
+    pub hue: Hue,
+    pub amount: u16,
+    pub stackable: bool,
+}
+
 pub fn button_action(
     state: &WorldState,
     connection: ConnectionId,
     response: &GumpResponse,
-) -> Option<(EntityId, &'static str)> {
-    response.gump_id.validate(&[ADMIN_GUMP])?;
+) -> Option<(EntityId, ButtonAction)> {
+    let gump = response.gump_id.validate(&[ADMIN_GUMP, ADMIN_ITEM_GUMP])?;
     let &actor = state.players.get(&connection)?;
     // Re-checked on the button, not only on open — and on the account's
     // authority, the same gate the `.` commands use, so a game master testing
@@ -203,14 +300,60 @@ pub fn button_action(
     let GumpAnswer::Pressed(button) = response.button.interpret() else {
         return None; // the close box
     };
-    // `None` for a button this layout never drew.
-    let row = ROWS.iter().find(|row| row.id == button)?;
-    Some((actor, row.verb))
+    let action = if gump == ADMIN_GUMP {
+        match ROWS.iter().find(|row| row.id == button)?.action {
+            RowAction::Verb(verb) => ButtonAction::Verb(verb),
+            RowAction::OpenItemCreator => ButtonAction::OpenItemCreator,
+        }
+    } else if button == CREATE_ITEM {
+        ButtonAction::CreateItem
+    } else {
+        return None;
+    };
+    Some((actor, action))
+}
+
+/// Validate an item form submission.  Field ids are checked by looking each up
+/// explicitly; a forged or duplicate unknown field carries no meaning.
+pub fn item_request(response: &GumpResponse) -> Result<ItemRequest, &'static str> {
+    let graphic = field(response, FIELD_GRAPHIC)
+        .and_then(|value| parse_u16(value.trim()))
+        .map(Graphic)
+        .ok_or("Graphic must be a decimal or 0x hexadecimal number.")?;
+    let hue = field(response, FIELD_HUE)
+        .and_then(|value| parse_u16(value.trim()))
+        .map(Hue)
+        .ok_or("Hue must be a decimal or 0x hexadecimal number.")?;
+    let amount = field(response, FIELD_AMOUNT)
+        .and_then(|value| parse_u16(value.trim()))
+        .filter(|amount| *amount > 0)
+        .ok_or("Amount must be a whole number from 1 to 65535.")?;
+    let stackable = response.switches.iter().any(|switch| switch.0 == STACKABLE.0);
+    Ok(ItemRequest {
+        graphic,
+        hue,
+        amount,
+        stackable,
+    })
+}
+
+fn field(response: &GumpResponse, wanted: u32) -> Option<&str> {
+    response
+        .text_entries
+        .iter()
+        .find(|(id, _)| u32::from(*id) == wanted)
+        .map(|(_, text)| text.as_str())
+}
+
+fn parse_u16(text: &str) -> Option<u16> {
+    text.strip_prefix("0x")
+        .or_else(|| text.strip_prefix("0X"))
+        .map_or_else(|| text.parse().ok(), |hex| u16::from_str_radix(hex, 16).ok())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ROWS, menu};
+    use super::*;
     use openshard_protocol::gump::{ButtonId, GumpAnswer, RawButtonId};
 
     /// The layout as it was written by hand, before [`menu`] built it from
@@ -219,14 +362,15 @@ mod tests {
     /// thing there is to assert, and this is what they were when the menu was
     /// last seen working in a client.
     const HAND_WRITTEN: &str = "\
-{ resizepic 0 0 5054 300 270 }\
+{ resizepic 0 0 5054 300 304 }\
 { text 105 14 2100 0 }\
 { button 30 54 4005 4007 1 0 13 }{ text 66 56 1153 1 }\
 { button 30 88 4005 4007 1 0 22 }{ text 66 90 1153 2 }\
 { button 30 122 4005 4007 1 0 31 }{ text 66 124 1153 3 }\
 { button 30 164 4017 4019 1 0 12 }{ text 66 166 33 4 }\
 { button 30 198 4017 4019 1 0 21 }{ text 66 200 33 5 }\
-{ button 30 232 4017 4019 1 0 30 }{ text 66 234 33 6 }";
+{ button 30 232 4017 4019 1 0 30 }{ text 66 234 33 6 }\
+{ button 30 266 4005 4007 1 0 40 }{ text 66 268 89 7 }";
 
     #[test]
     fn builder_draws_the_menu_the_hand_written_string_drew() {
@@ -245,6 +389,7 @@ mod tests {
                 "Clear spawns",
                 "Clear deco",
                 "Clear regions",
+                "Create item in backpack",
             ]
         );
     }
@@ -259,15 +404,15 @@ mod tests {
                 row.id,
                 ButtonId::CLOSE_BOX,
                 "{} answers under the client's close box",
-                row.verb
+                row.label
             );
             let clash = ROWS[..i].iter().find(|other| other.id == row.id);
             assert!(
                 clash.is_none(),
                 "{} shares id {:?} with {}",
-                row.verb,
+                row.label,
                 row.id,
-                clash.map_or("", |other| other.verb)
+                clash.map_or("", |other| other.label)
             );
         }
     }
@@ -281,5 +426,50 @@ mod tests {
             panic!("999 is not the close box");
         };
         assert!(ROWS.iter().all(|row| row.id != button));
+    }
+
+    #[test]
+    fn item_form_accepts_hex_fields_and_the_stack_switch() {
+        let response = openshard_protocol::gump::GumpResponse {
+            serial: openshard_protocol::gump::RawGumpKey(0),
+            gump_id: openshard_protocol::gump::RawGumpId(ADMIN_ITEM_GUMP.0),
+            button: openshard_protocol::gump::RawButtonId(CREATE_ITEM.0),
+            switches: vec![openshard_protocol::gump::RawSwitchId(STACKABLE.0)],
+            text_entries: vec![
+                (FIELD_GRAPHIC as u16, "0x0eed".to_owned()),
+                (FIELD_HUE as u16, "0x0481".to_owned()),
+                (FIELD_AMOUNT as u16, "25".to_owned()),
+            ],
+        };
+
+        assert_eq!(
+            item_request(&response),
+            Ok(ItemRequest {
+                graphic: openshard_protocol::wire::Graphic(0x0eed),
+                hue: openshard_protocol::wire::Hue(0x0481),
+                amount: 25,
+                stackable: true,
+            })
+        );
+    }
+
+    #[test]
+    fn item_form_rejects_a_zero_amount() {
+        let response = openshard_protocol::gump::GumpResponse {
+            serial: openshard_protocol::gump::RawGumpKey(0),
+            gump_id: openshard_protocol::gump::RawGumpId(ADMIN_ITEM_GUMP.0),
+            button: openshard_protocol::gump::RawButtonId(CREATE_ITEM.0),
+            switches: Vec::new(),
+            text_entries: vec![
+                (FIELD_GRAPHIC as u16, "0x0eed".to_owned()),
+                (FIELD_HUE as u16, "0".to_owned()),
+                (FIELD_AMOUNT as u16, "0".to_owned()),
+            ],
+        };
+
+        assert_eq!(
+            item_request(&response),
+            Err("Amount must be a whole number from 1 to 65535.")
+        );
     }
 }

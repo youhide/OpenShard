@@ -221,7 +221,11 @@ impl World {
         // that opened it (a notice board, a shard's custom menu). Forward it as a
         // `GumpAnswered` rather than dropping it, then stop — only the admin gump
         // runs the staff path below.
-        if response.gump_id.validate(&[crate::admin::ADMIN_GUMP]).is_none() {
+        if response
+            .gump_id
+            .validate(&[crate::admin::ADMIN_GUMP, crate::admin::ADMIN_ITEM_GUMP])
+            .is_none()
+        {
             if let Some(&actor) = self.state.players.get(&connection) {
                 if let Some(serial) = self.state.registry.serial_of(actor) {
                     self.state.bus.send(crate::events::GumpAnswered {
@@ -235,28 +239,57 @@ impl World {
             }
             return;
         }
-        let Some((actor, verb)) = crate::admin::button_action(&self.state, connection, &response) else {
+        let Some((actor, action)) = crate::admin::button_action(&self.state, connection, &response) else {
             return;
         };
-        // The world publishes the verb and does not know who answers it; a
-        // listener turns it into commands that lay a facet's content or clear it.
-        if let Some(serial) = self.state.registry.serial_of(actor) {
-            self.state.bus.send(AdminMenuAction {
-                serial: Some(serial),
-                action: verb.to_owned(),
-            });
+        match action {
+            crate::admin::ButtonAction::Verb(verb) => {
+                // The world publishes the verb and does not know who answers it; a
+                // listener turns it into commands that lay a facet's content or clear it.
+                if let Some(serial) = self.state.registry.serial_of(actor) {
+                    self.state.bus.send(AdminMenuAction {
+                        serial: Some(serial),
+                        action: verb.to_owned(),
+                    });
+                }
+                gm::notify(&mut self.state, actor, &format!("Admin: {verb}."));
+                // A reply button takes the gump off the screen at the client's end —
+                // that is what `GumpButton::Reply` *is* on the wire, not a client
+                // misbehaving — so a menu meant to survive its own button has to be
+                // drawn again from this side.
+                crate::admin::open_menu(&mut self.state, actor);
+            }
+            crate::admin::ButtonAction::OpenItemCreator => {
+                crate::admin::open_item_creator(&mut self.state, actor);
+            }
+            crate::admin::ButtonAction::CreateItem => match crate::admin::item_request(&response) {
+                Ok(item) => {
+                    let Some(serial) = self.state.registry.serial_of(actor) else {
+                        return;
+                    };
+                    if items::give_to_backpack(
+                        &mut self.state,
+                        serial,
+                        item.graphic,
+                        item.hue,
+                        item.amount,
+                        item.stackable,
+                    ) {
+                        gm::notify(
+                            &mut self.state,
+                            actor,
+                            &format!(
+                                "Created {} of {:#06x} in your backpack.",
+                                item.amount, item.graphic.0
+                            ),
+                        );
+                    } else {
+                        gm::notify(&mut self.state, actor, "Your backpack cannot hold that item.");
+                    }
+                }
+                Err(message) => gm::notify(&mut self.state, actor, message),
+            },
         }
-        gm::notify(&mut self.state, actor, &format!("Admin: {verb}."));
-        // A reply button takes the gump off the screen at the client's end —
-        // that is what `GumpButton::Reply` *is* on the wire, not a client
-        // misbehaving — so a menu meant to survive its own button has to be
-        // drawn again from this side. The operator clicks these verbs in runs
-        // (populate, then decorate, then regions), and a menu that closes after
-        // each one costs a `.admin` between every pair.
-        //
-        // `open_menu` closes before it draws, so the re-draw replaces the window
-        // rather than stacking a second copy on a client that kept the first.
-        crate::admin::open_menu(&mut self.state, actor);
     }
 }
 

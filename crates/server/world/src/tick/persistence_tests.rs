@@ -1115,6 +1115,107 @@ fn a_designed_house_restores_its_own_walls_with_no_client_files() {
     assert_eq!(design.components[0].dx, 1);
 }
 
+/// Imported designs own their fixtures as well as their walls.  The component
+/// picture deliberately omits the closed leaf and plaque once their live
+/// entities have been created, so a restart must recreate both rather than
+/// leave an attractive but inert door and no way to open the house menu.
+#[test]
+fn a_restored_imported_design_recreates_its_door_and_sign() {
+    use openshard_persistence::record::{HouseDesignRecord, HouseRecord};
+    use openshard_state::components::{Door, HouseDoor, HouseSign, Position};
+
+    let mut world = World::new(START);
+    let serial = Serial::new(0x4000_00CE).expect("an item serial");
+    let owner = Serial::new(0x0000_0001).expect("a mobile serial");
+    let at = Point::new(START.0 + 5, START.1 + 5, 0);
+    let components = vec![
+        HouseDesignRecord {
+            house: serial,
+            revision: 3,
+            graphic: 0x0006,
+            dx: 0,
+            dy: 0,
+            dz: 0,
+            flags: 1,
+        },
+        HouseDesignRecord {
+            house: serial,
+            revision: 3,
+            graphic: 0x06E5,
+            dx: 1,
+            dy: 2,
+            dz: 3,
+            flags: 1,
+        },
+        HouseDesignRecord {
+            house: serial,
+            revision: 3,
+            graphic: 0x0B9E,
+            dx: 1,
+            dy: 3,
+            dz: 3,
+            flags: 1,
+        },
+    ];
+    world.state.house_templates.insert(
+        "restored-fixtures".into(),
+        components
+            .iter()
+            .map(|row| openshard_uofiles::multi::Component {
+                graphic: Graphic(row.graphic),
+                dx: row.dx,
+                dy: row.dy,
+                dz: row.dz,
+                flags: row.flags,
+            })
+            .collect(),
+    );
+
+    world.restore_houses(
+        vec![HouseRecord {
+            serial,
+            multi: 0x13EC,
+            x: at.x,
+            y: at.y,
+            z: at.z,
+            facet: 0,
+            owner,
+            co_owners: Vec::new(),
+            friends: Vec::new(),
+            bans: Vec::new(),
+            lockdowns: 0,
+            age: 0,
+        }],
+        components,
+    );
+
+    assert!(
+        world
+            .state
+            .registry
+            .query2::<Door, HouseDoor>()
+            .any(|(entity, _, door)| {
+                door.house == serial
+                    && world
+                        .state
+                        .registry
+                        .get::<Position>(entity)
+                        .map(|position| position.0)
+                        == Some(Point::new(at.x + 1, at.y + 2, 3))
+            })
+    );
+    assert!(world.state.registry.query::<HouseSign>().any(|(entity, sign)| {
+        sign.house == serial
+            && world
+                .state
+                .registry
+                .get::<Position>(entity)
+                .map(|position| position.0)
+                == Some(Point::new(at.x + 1, at.y + 3, 3))
+            && world.state.registry.get::<Drawn>(entity).map(|drawn| drawn.id) == Some(Graphic(0x0B9E))
+    }));
+}
+
 /// A classic house carries no design, and writes no design rows.
 ///
 /// The other half, and the one that keeps the common case free: every house on

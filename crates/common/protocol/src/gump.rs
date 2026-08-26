@@ -55,6 +55,10 @@ pub mod id {
 
     /// The staff menu behind `.admin`. High byte `0xAD` for "admin".
     pub const ADMIN: GumpId = GumpId(0x00AD_0001);
+    /// The item creator opened from the staff menu.  It shares the admin
+    /// namespace but is a distinct reply target, so a form submission cannot
+    /// be mistaken for a world-management button.
+    pub const ADMIN_ITEM: GumpId = GumpId(0x00AD_0002);
     /// The quest log, offer and turn-in — one window, many pages.
     pub const QUEST: GumpId = GumpId(0x0051_0001);
     /// "Give this quest up?"
@@ -76,8 +80,9 @@ pub mod id {
 
     /// The table, for the distinctness check and for anything that wants to ask
     /// whether an id belongs to the engine at all.
-    pub const ALL: [GumpId; 10] = [
+    pub const ALL: [GumpId; 11] = [
         ADMIN,
+        ADMIN_ITEM,
         QUEST,
         QUEST_RESIGN,
         CRAFT,

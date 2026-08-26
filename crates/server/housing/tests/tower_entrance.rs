@@ -19,11 +19,12 @@ use openshard_uofiles::multi::{
 };
 
 /// The new tower placed for the report.  Its selected `0x073C` component is at
-/// `(1339, 1900, 3)`, so the approach is directly south of it.
+/// `(1339, 1900, 2)`, one legal normal step above the grass directly south.
 const TOWER_ORIGIN: Point = Point::new(1333, 1882, 0);
-const STREET: Point = Point::new(1339, 1902, 0);
-const BOTTOM_TREAD: Point = Point::new(1339, 1901, 0);
-const REPORTED_TREAD: Point = Point::new(1339, 1900, 3);
+const STREET: Point = Point::new(1339, 1901, 0);
+const ENTRY_TREAD: Point = Point::new(1339, 1900, 2);
+const NEXT_TREAD: Point = Point::new(1340, 1900, 2);
+const ENTRANCE_SIGN: Point = Point::new(1341, 1900, 8);
 
 fn client_dir() -> Option<PathBuf> {
     let dir = PathBuf::from(std::env::var_os("OPENSHARD_CLIENT")?);
@@ -56,8 +57,9 @@ fn tower_overlay(tiles: &openshard_tiles::TileData, components: &[Component]) ->
     overlay
 }
 
-/// A player can take the two real steps from Felucca ground onto the selected
-/// `wooden stairs` (`0x073C`) in `legacy-five-story-tower`.
+/// A player can enter the original exterior stairs directly from Felucca
+/// ground.  This intentionally asserts that no duplicate ground-level stair
+/// strip is added in front of the house.
 #[test]
 #[ignore = "reads an installed facet and its local custom-house template"]
 fn legacy_five_story_tower_entrance_is_walkable_on_the_reported_map_tile() {
@@ -72,13 +74,19 @@ fn legacy_five_story_tower_entrance_is_walkable_on_the_reported_map_tile() {
         .expect("the reported tower template should be installed");
     assert!(
         tower.iter().any(|component| component.graphic == Graphic(0x073C)
-            && component.placed_at(TOWER_ORIGIN) == Some(REPORTED_TREAD)),
+            && component.placed_at(TOWER_ORIGIN) == Some(ENTRY_TREAD)),
         "the reported wooden stair must stay at its declared world tile"
     );
     assert!(
-        tower.iter().any(|component| component.graphic == Graphic(0x073C)
-            && component.placed_at(TOWER_ORIGIN) == Some(BOTTOM_TREAD)),
-        "a ground-level approach tread is required before the z=3 wooden stair"
+        !tower
+            .iter()
+            .any(|component| component.placed_at(TOWER_ORIGIN) == Some(Point::new(1339, 1901, 0))),
+        "the approach must use the original stair, not a duplicated lower row"
+    );
+    assert!(
+        tower.iter().any(|component| component.graphic == Graphic(0x0B9E)
+            && component.placed_at(TOWER_ORIGIN) == Some(ENTRANCE_SIGN)),
+        "the entrance needs its metal signpost so the shard can hang the live house-menu sign"
     );
 
     let snapshot = openshard_uofiles::map::load_facet(&dir, Facet(0)).expect("facet 0 should load");
@@ -89,12 +97,12 @@ fn legacy_five_story_tower_entrance_is_walkable_on_the_reported_map_tile() {
     let overlay = tower_overlay(&tiles, tower);
     let footing = Footing::new(Some(terrain), &overlay, Doors::AsTheyStand);
 
-    let on_bottom = can_step(&footing, STREET, BOTTOM_TREAD)
-        .expect("a player must be able to step from the street onto the tower's first stair tread");
-    assert_eq!(on_bottom, Point::new(BOTTOM_TREAD.x, BOTTOM_TREAD.y, 2));
+    let on_entry = can_step(&footing, STREET, ENTRY_TREAD)
+        .expect("a player must be able to step from grass onto the original first stair tread");
+    assert_eq!(on_entry, Point::new(ENTRY_TREAD.x, ENTRY_TREAD.y, 4));
     assert_eq!(
-        can_step(&footing, on_bottom, REPORTED_TREAD),
-        Some(Point::new(REPORTED_TREAD.x, REPORTED_TREAD.y, 5)),
-        "the selected z=3 stair must be reachable from the approach tread"
+        can_step(&footing, on_entry, NEXT_TREAD),
+        Some(Point::new(NEXT_TREAD.x, NEXT_TREAD.y, 7)),
+        "the second original stair must be reachable after the entry tread"
     );
 }
