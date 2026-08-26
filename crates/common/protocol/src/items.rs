@@ -26,7 +26,8 @@ use crate::world::Point;
 pub const fn is_classic_weapon(graphic: Graphic) -> bool {
     matches!(
         graphic.0,
-        0x0E81
+        0x0DF0
+            | 0x0E81
             | 0x0E86
             | 0x0E87
             | 0x0E89
@@ -64,6 +65,116 @@ pub const fn is_classic_weapon(graphic: Graphic) -> bool {
             | 0x143E
             | 0x1441
             | 0x1443
+    )
+}
+
+/// The paperdoll layer for a classic weapon, after its class-level override.
+///
+/// Most weapons use the layer from `tiledata.mul`. Six classic weapon classes
+/// deliberately disagree with that file, however: bows, crossbows, the battle
+/// axe, the war hammer, and the hammer pick. The shard applies the same rule
+/// when accepting an equip request, so the client must do it before sending
+/// that request (and while drawing its paperdoll preview).
+#[must_use]
+pub const fn classic_weapon_layer(graphic: Graphic, tiledata_layer: Layer) -> Layer {
+    match graphic.0 {
+        // The client files incorrectly call these one-handed.
+        0x13B2 | 0x0F50 | 0x13FD | 0x0F47 | 0x1439 => Layer::TWO_HANDED,
+        // The client file incorrectly calls this two-handed.
+        0x143D => Layer::ONE_HANDED,
+        _ => tiledata_layer,
+    }
+}
+
+/// Whether `graphic` is one of the classic armour pieces implemented by the
+/// shard.  This is an item-family classification rather than a tiledata fact:
+/// tiledata can say that a robe is worn, but only this table says that it
+/// contributes armour in gameplay.
+#[must_use]
+pub const fn is_classic_armor(graphic: Graphic) -> bool {
+    matches!(
+        graphic.0,
+        0x13BB
+            | 0x13BE
+            | 0x13BF
+            | 0x13C0
+            | 0x13C3
+            | 0x13C4
+            | 0x13C5
+            | 0x13C6
+            | 0x13C7
+            | 0x13CB
+            | 0x13CC
+            | 0x13CD
+            | 0x13D2
+            | 0x13D3
+            | 0x13D4
+            | 0x13D5
+            | 0x13D6
+            | 0x13DA
+            | 0x13DB
+            | 0x13DC
+            | 0x13DD
+            | 0x13E1
+            | 0x13E2
+            | 0x13EB
+            | 0x13EC
+            | 0x13ED
+            | 0x13EE
+            | 0x13EF
+            | 0x13F0
+            | 0x13F1
+            | 0x13F2
+            | 0x1408
+            | 0x140A
+            | 0x140C
+            | 0x140E
+            | 0x1410
+            | 0x1411
+            | 0x1412
+            | 0x1413
+            | 0x1414
+            | 0x1415
+            | 0x1416
+            | 0x1417
+            | 0x1418
+            | 0x141A
+            | 0x144E
+            | 0x144F
+            | 0x1450
+            | 0x1451
+            | 0x1452
+            | 0x1453
+            | 0x1454
+            | 0x1455
+            | 0x1456
+            | 0x1457
+            | 0x1B72
+            | 0x1B73
+            | 0x1B74
+            | 0x1B76
+            | 0x1B78
+            | 0x1B7A
+            | 0x1B7B
+            | 0x1BC3
+            | 0x1BC4
+            | 0x1C00
+            | 0x1C01
+            | 0x1C02
+            | 0x1C03
+            | 0x1C04
+            | 0x1C05
+            | 0x1C06
+            | 0x1C07
+            | 0x1C08
+            | 0x1C09
+            | 0x1C0A
+            | 0x1C0B
+            | 0x1C0C
+            | 0x1C0D
+            | 0x1DB9
+            | 0x1DBA
+            | 0x1F0B
     )
 }
 
@@ -782,6 +893,36 @@ impl DecodePacket for EquipUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classic_equipment_classifiers_keep_weapon_and_armor_families_separate() {
+        assert!(is_classic_weapon(Graphic(0x0F52)), "dagger");
+        assert!(is_classic_weapon(Graphic(0x0DF0)), "black staff");
+        assert!(is_classic_armor(Graphic(0x13EC)), "ringmail tunic");
+        assert!(!is_classic_weapon(Graphic(0x13EC)));
+        assert!(!is_classic_armor(Graphic(0x0F52)));
+    }
+
+    #[test]
+    fn classic_weapon_hand_overrides_correct_tiledata() {
+        for graphic in [0x13B2, 0x0F50, 0x13FD, 0x0F47, 0x1439] {
+            assert_eq!(
+                classic_weapon_layer(Graphic(graphic), Layer::ONE_HANDED),
+                Layer::TWO_HANDED,
+                "0x{graphic:04X} is two-handed despite tiledata"
+            );
+        }
+        assert_eq!(
+            classic_weapon_layer(Graphic(0x143D), Layer::TWO_HANDED),
+            Layer::ONE_HANDED,
+            "the hammer pick is one-handed despite tiledata"
+        );
+        assert_eq!(
+            classic_weapon_layer(Graphic(0x13FF), Layer::ONE_HANDED),
+            Layer::ONE_HANDED,
+            "ordinary weapons retain tiledata's layer"
+        );
+    }
     use crate::packet::{decode_packet, encode_packet};
     use crate::serial::{ITEM_MAX, ITEM_MIN, MOBILE_MAX, MOBILE_MIN};
 

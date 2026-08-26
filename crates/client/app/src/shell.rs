@@ -41,6 +41,7 @@
 //!    `pixels_per_point` before it becomes the camera's viewport. Getting this
 //!    wrong is invisible at scale factor 1 and wrong on every HiDPI screen.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use openshard_client_render::bench::Reading;
@@ -173,6 +174,10 @@ pub struct Request {
     /// Publish the current editor draft after the event-loop owner rechecks
     /// authority, facet and revision.
     pub commit_map_edit: bool,
+    /// Create this item in the staff member's backpack.
+    pub create_item: Option<AdminItemRequest>,
+    /// Raise a server-side target cursor for this animal catalogue entry.
+    pub place_creature: Option<u16>,
 }
 
 /// What the script picker asked for.
@@ -182,6 +187,15 @@ pub enum ScriptRequest {
     Run(&'static str),
     /// Stop wherever it got to.
     Stop,
+}
+
+/// One validated submission from the F1 administrator item panel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AdminItemRequest {
+    pub graphic: u16,
+    pub hue: u16,
+    pub amount: u16,
+    pub stackable: bool,
 }
 
 /// The two egui compositions recorded into one GPU command buffer.
@@ -236,6 +250,10 @@ pub struct Shell {
     /// the app has a file to write. The `window` field is the one part of it this
     /// never touches: the operating system's window is the app's, not the HUD's.
     desk: Desk,
+    /// Decoded static-art thumbnails for the small page currently visible in
+    /// the F1 administrator browser. Keeping this in the shell lets egui own
+    /// the GPU textures while the source art stays in [`Resources`].
+    item_catalogue: ItemArtCatalogue,
 }
 
 impl Shell {
@@ -299,6 +317,7 @@ impl Shell {
             // animation clock is what wakes the loop.
             repaint_after: std::time::Duration::MAX,
             desk,
+            item_catalogue: ItemArtCatalogue::default(),
         }
     }
 
@@ -364,7 +383,12 @@ impl Shell {
     /// was loaded at startup and what will be written at exit, and between those
     /// two moments nothing draws from it, so a key that flipped it would change a
     /// value nobody reads and take effect on the next launch.
-    pub fn toggle_dev(&mut self) {
+    pub fn toggle_dev(&mut self, authority: openshard_protocol::access::AccessLevel) {
+        if !self.desk.open && authority.allows(openshard_commands::StaffCommand::AUTHORITY) {
+            // The staff tab is first in the bar as well, but selecting it here
+            // makes F1 a direct way into its one frequent testing workflow.
+            self.desk.tab = Tab::Admin;
+        }
         self.desk.open = !self.desk.open;
     }
 
@@ -417,11 +441,10 @@ impl Shell {
     /// answers `true` to that, and `Tab` is what hands out the focus. See
     /// [`crate::keyboard`]'s module docs for the whole of that defect.
     ///
-    /// Today this is always `false`: there is not one `egui::TextEdit` in this
-    /// client, because every box a player types into is drawn by `chat.rs` or by
-    /// `panes.rs`. It is asked rather than assumed because the day a text field
-    /// appears in a panel is the day it has to work, and a hard-coded `false`
-    /// would be a keyboard that never reached it.
+    /// The staff item creator in F1 uses `egui::TextEdit`; its focused field is
+    /// therefore the one case that correctly holds the keyboard here. The
+    /// question remains live rather than a panel-specific flag, so future text
+    /// fields get the same ownership rule automatically.
     pub fn holds_keyboard(&self) -> bool {
         self.context.text_edit_focused()
     }
@@ -468,6 +491,8 @@ impl Shell {
         hud: &Hud,
         camera: Camera,
         world: &WorldState,
+        art: &openshard_uofiles::art::Art,
+        tiledata: &openshard_tiles::TileData,
         map_editor: &mut crate::editor_mode::MapEditor,
         authority: openshard_protocol::access::AccessLevel,
     ) -> (Request, egui::FullOutput) {
@@ -479,7 +504,18 @@ impl Shell {
         let mut free = egui::Rect::from_min_size(egui::Pos2::ZERO, self.context.content_rect().size());
         let desk = &mut self.desk;
         let output = self.context.run_ui(input, |ui| {
-            request = layout(ui, hud, camera, world, map_editor, authority, desk);
+            request = layout(
+                ui,
+                hud,
+                camera,
+                world,
+                art,
+                tiledata,
+                &mut self.item_catalogue,
+                map_editor,
+                authority,
+                desk,
+            );
             // **No party invitation here any more.** It was an `egui::Window`
             // with a Join and a Decline on it, drawn over the gump layer with
             // its own font and its own frame — and, because egui is painted on
@@ -692,11 +728,15 @@ fn layout(
     hud: &Hud,
     camera: Camera,
     world: &WorldState,
+    art: &openshard_uofiles::art::Art,
+    tiledata: &openshard_tiles::TileData,
+    item_catalogue: &mut ItemArtCatalogue,
     map_editor: &mut crate::editor_mode::MapEditor,
     authority: openshard_protocol::access::AccessLevel,
     desk: &mut Desk,
 ) -> Request {
     let mut request = Request::default();
+    let staff = authority.allows(openshard_commands::StaffCommand::AUTHORITY);
     // egui 0.35 hands the frame a root `Ui`: panels are shown inside it and
     // what is left of it is the world's viewport, while windows float over the
     // context. The two are laid out here in that order for exactly that reason.
@@ -857,11 +897,20 @@ fn layout(
     let placed = window.show(&context, |ui| {
         ui.horizontal(|ui| {
             for tab in Tab::ALL {
+                if tab == Tab::Admin && !staff {
+                    continue;
+                }
                 if ui.selectable_label(desk.tab == tab, tab.title()).clicked() {
                     desk.tab = tab;
                 }
             }
         });
+        // A saved preference may name the staff tab after the shard has taken
+        // authority away. Do not leave an ordinary player looking at controls
+        // the current connection must not use.
+        if desk.tab == Tab::Admin && !staff {
+            desk.tab = Tab::Camera;
+        }
         ui.separator();
         // Scrolled, because the tabs are of very different heights — the rig's
         // sliders and the tile's overlays do not fit what the camera's six rows
@@ -891,6 +940,15 @@ fn layout(
                 ),
                 Tab::Audio => audio_panel(ui, &mut desk.audio, &mut request),
                 Tab::Windows => windows_panel(ui, &mut desk.window_scale),
+                Tab::Admin => admin_items_panel(
+                    ui,
+                    &mut desk.admin_item,
+                    &mut desk.admin_catalogue,
+                    art,
+                    tiledata,
+                    item_catalogue,
+                    &mut request,
+                ),
             });
     });
     desk.open = open;
@@ -908,6 +966,396 @@ fn layout(
     }
 
     request
+}
+
+/// The compact F1 workflow for making arbitrary test items.  The shard remains
+/// the authority: this only avoids manually opening and filling a classic gump.
+fn admin_items_panel(
+    ui: &mut egui::Ui,
+    item: &mut crate::desk::AdminItem,
+    catalogue: &mut crate::desk::AdminCatalogue,
+    art: &openshard_uofiles::art::Art,
+    tiledata: &openshard_tiles::TileData,
+    item_catalogue: &mut ItemArtCatalogue,
+    request: &mut Request,
+) {
+    ui.heading("Administrator catalogue");
+    ui.label("Quick access: click an item to put it in your backpack.");
+    catalogue_grid(ui, ITEMS, |entry| {
+        request.create_item = Some(AdminItemRequest {
+            graphic: entry.graphic,
+            hue: 0,
+            amount: entry.amount,
+            stackable: entry.stackable,
+        });
+    });
+    ui.add_space(10.0);
+    ui.heading("All item art");
+    ui.label(
+        "Actual sprites from the installed client. Click a sprite to create that graphic in your backpack.",
+    );
+    item_art_catalogue(ui, catalogue, art, tiledata, item_catalogue, request);
+    ui.add_space(10.0);
+    ui.heading("Animals");
+    ui.label("Click an animal, then choose its place on the map.");
+    catalogue_grid(ui, ANIMALS, |entry| request.place_creature = Some(entry.id));
+    ui.add_space(10.0);
+    ui.collapsing("Custom item", |ui| {
+        ui.label("Graphic and hue accept decimal or 0x hexadecimal values.");
+        egui::Grid::new("admin item fields")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.label("Graphic");
+                ui.add(egui::TextEdit::singleline(&mut item.graphic).hint_text("0x0eed"));
+                ui.end_row();
+                ui.label("Hue");
+                ui.add(egui::TextEdit::singleline(&mut item.hue).hint_text("0"));
+                ui.end_row();
+                ui.label("Amount");
+                ui.add(egui::TextEdit::singleline(&mut item.amount).hint_text("1"));
+                ui.end_row();
+                ui.label("");
+                ui.checkbox(&mut item.stackable, "Stack identical items");
+                ui.end_row();
+            });
+
+        let parsed = parse_admin_item(item);
+        ui.add_space(8.0);
+        match parsed {
+            Ok(created) => {
+                if ui.button("Create in backpack").clicked() {
+                    request.create_item = Some(created);
+                }
+            }
+            Err(problem) => {
+                ui.add_enabled(false, egui::Button::new("Create in backpack"));
+                ui.colored_label(ui.visuals().warn_fg_color, problem);
+            }
+        }
+    });
+    ui.add_space(8.0);
+    ui.label(
+        egui::RichText::new(
+            "The server checks staff authority and backpack capacity before creating anything.",
+        )
+        .small()
+        .weak(),
+    );
+}
+
+struct ItemCatalogueEntry {
+    icon: &'static str,
+    name: &'static str,
+    graphic: u16,
+    amount: u16,
+    stackable: bool,
+}
+
+struct AnimalCatalogueEntry {
+    icon: &'static str,
+    name: &'static str,
+    id: u16,
+}
+
+trait CatalogueEntry {
+    fn icon(&self) -> &'static str;
+    fn name(&self) -> &'static str;
+}
+
+impl CatalogueEntry for ItemCatalogueEntry {
+    fn icon(&self) -> &'static str {
+        self.icon
+    }
+    fn name(&self) -> &'static str {
+        self.name
+    }
+}
+
+impl CatalogueEntry for AnimalCatalogueEntry {
+    fn icon(&self) -> &'static str {
+        self.icon
+    }
+    fn name(&self) -> &'static str {
+        self.name
+    }
+}
+
+const ITEMS: &[ItemCatalogueEntry] = &[
+    ItemCatalogueEntry {
+        icon: "💰",
+        name: "Gold",
+        graphic: 0x0eed,
+        amount: 100,
+        stackable: true,
+    },
+    ItemCatalogueEntry {
+        icon: "🩹",
+        name: "Bandages",
+        graphic: 0x0e21,
+        amount: 10,
+        stackable: true,
+    },
+    ItemCatalogueEntry {
+        icon: "🍎",
+        name: "Apples",
+        graphic: 0x09d0,
+        amount: 5,
+        stackable: true,
+    },
+    ItemCatalogueEntry {
+        icon: "🔥",
+        name: "Torch",
+        graphic: 0x0f6b,
+        amount: 1,
+        stackable: false,
+    },
+    ItemCatalogueEntry {
+        icon: "🎒",
+        name: "Backpack",
+        graphic: 0x0e75,
+        amount: 1,
+        stackable: false,
+    },
+    ItemCatalogueEntry {
+        icon: "🗝",
+        name: "Lockpick",
+        graphic: 0x14fb,
+        amount: 5,
+        stackable: true,
+    },
+    ItemCatalogueEntry {
+        icon: "🔪",
+        name: "Dagger",
+        graphic: 0x0f52,
+        amount: 1,
+        stackable: false,
+    },
+];
+
+const ANIMALS: &[AnimalCatalogueEntry] = &[
+    AnimalCatalogueEntry {
+        icon: "🐎",
+        name: "Horse",
+        id: 1,
+    },
+    AnimalCatalogueEntry {
+        icon: "🐕",
+        name: "Dog",
+        id: 2,
+    },
+    AnimalCatalogueEntry {
+        icon: "🐈",
+        name: "Cat",
+        id: 3,
+    },
+    AnimalCatalogueEntry {
+        icon: "🐄",
+        name: "Cow",
+        id: 4,
+    },
+    AnimalCatalogueEntry {
+        icon: "🐑",
+        name: "Sheep",
+        id: 5,
+    },
+    AnimalCatalogueEntry {
+        icon: "🐔",
+        name: "Chicken",
+        id: 6,
+    },
+    AnimalCatalogueEntry {
+        icon: "🐇",
+        name: "Rabbit",
+        id: 7,
+    },
+    AnimalCatalogueEntry {
+        icon: "🦙",
+        name: "Llama",
+        id: 8,
+    },
+    AnimalCatalogueEntry {
+        icon: "🐺",
+        name: "Grey wolf",
+        id: 9,
+    },
+    AnimalCatalogueEntry {
+        icon: "🐻",
+        name: "Brown bear",
+        id: 10,
+    },
+];
+
+fn catalogue_grid<T: CatalogueEntry>(ui: &mut egui::Ui, entries: &[T], mut select: impl FnMut(&T)) {
+    ui.horizontal_wrapped(|ui| {
+        for entry in entries {
+            let label = format!("{}\n{}", entry.icon(), entry.name());
+            if ui.add_sized([82.0, 56.0], egui::Button::new(label)).clicked() {
+                select(entry);
+            }
+        }
+    });
+}
+
+/// Lazily decoded thumbnails and the filtered list behind the F1 item browser.
+/// The list contains only ids; art is still decoded only for rows egui makes
+/// visible in the scroll area.
+#[derive(Default)]
+struct ItemArtCatalogue {
+    textures: BTreeMap<u16, Option<egui::TextureHandle>>,
+    matching: Vec<u16>,
+    key: Option<(String, crate::desk::AdminItemCategory)>,
+}
+
+fn item_art_catalogue(
+    ui: &mut egui::Ui,
+    catalogue: &mut crate::desk::AdminCatalogue,
+    art: &openshard_uofiles::art::Art,
+    tiledata: &openshard_tiles::TileData,
+    browser: &mut ItemArtCatalogue,
+    request: &mut Request,
+) {
+    ui.horizontal(|ui| {
+        ui.label("Category");
+        ui.selectable_value(
+            &mut catalogue.category,
+            crate::desk::AdminItemCategory::All,
+            "All",
+        );
+        ui.selectable_value(
+            &mut catalogue.category,
+            crate::desk::AdminItemCategory::Weapons,
+            "Weapons",
+        );
+        ui.selectable_value(
+            &mut catalogue.category,
+            crate::desk::AdminItemCategory::Armor,
+            "Armor",
+        );
+    });
+    ui.add(
+        egui::TextEdit::singleline(&mut catalogue.query)
+            .hint_text("Name or graphic ID, e.g. dagger or 0x0f52"),
+    );
+
+    let key = (catalogue.query.trim().to_ascii_lowercase(), catalogue.category);
+    if browser.key.as_ref() != Some(&key) {
+        browser.matching = matching_item_ids(tiledata, &key.0, key.1);
+        browser.key = Some(key);
+        browser.textures.clear();
+    }
+    ui.small(format!("{} matching graphics", browser.matching.len()));
+
+    if browser.textures.len() > 192 {
+        browser.textures.clear();
+    }
+    egui::ScrollArea::vertical()
+        .id_salt("admin-item-art-catalogue")
+        .max_height(280.0)
+        .show_rows(ui, 38.0, browser.matching.len(), |ui, rows| {
+            // `show_rows` only asks for visible ranges. Copy those ids out so
+            // thumbnail caching can mutate independently of the full match set.
+            let visible = browser.matching[rows].to_vec();
+            for id in visible {
+                ui.horizontal(|ui| {
+                    let texture = item_art_texture(ui.ctx(), art, &mut browser.textures, id);
+                    let clicked = match texture {
+                        Some(texture) => ui
+                            .add(
+                                egui::Image::from_texture(texture)
+                                    .max_size(egui::vec2(36.0, 28.0))
+                                    .sense(egui::Sense::click()),
+                            )
+                            .clicked(),
+                        None => ui.add_sized([36.0, 28.0], egui::Button::new("—")).clicked(),
+                    };
+                    let name = tiledata.item_name(id).unwrap_or("Unnamed static");
+                    if ui.selectable_label(false, format!("{id:#06x}  {name}")).clicked() || clicked {
+                        request.create_item = Some(AdminItemRequest {
+                            graphic: id,
+                            hue: 0,
+                            amount: 1,
+                            stackable: false,
+                        });
+                    }
+                });
+            }
+        });
+}
+
+fn matching_item_ids(
+    tiledata: &openshard_tiles::TileData,
+    query: &str,
+    category: crate::desk::AdminItemCategory,
+) -> Vec<u16> {
+    let id_query = parse_u16(query);
+    (u16::MIN..=u16::MAX)
+        .filter(|&id| match category {
+            crate::desk::AdminItemCategory::All => true,
+            crate::desk::AdminItemCategory::Weapons => {
+                openshard_protocol::items::is_classic_weapon(Graphic(id))
+            }
+            crate::desk::AdminItemCategory::Armor => openshard_protocol::items::is_classic_armor(Graphic(id)),
+        })
+        .filter(|&id| {
+            query.is_empty()
+                || id_query == Some(id)
+                || tiledata
+                    .item_name(id)
+                    .is_some_and(|name| name.to_ascii_lowercase().contains(query))
+        })
+        .collect()
+}
+
+fn item_art_texture<'a>(
+    context: &egui::Context,
+    art: &openshard_uofiles::art::Art,
+    textures: &'a mut BTreeMap<u16, Option<egui::TextureHandle>>,
+    id: u16,
+) -> Option<&'a egui::TextureHandle> {
+    textures.entry(id).or_insert_with(|| {
+        let image = art.static_art(Graphic(id)).ok().flatten()?;
+        let size = [usize::from(image.width()), usize::from(image.height())];
+        let pixels = image
+            .pixels()
+            .iter()
+            .map(|pixel| {
+                if pixel.is_transparent() {
+                    egui::Color32::TRANSPARENT
+                } else {
+                    let color = pixel.rgb8();
+                    egui::Color32::from_rgb(color.red, color.green, color.blue)
+                }
+            })
+            .collect();
+        Some(context.load_texture(
+            format!("admin-item-art-{id:#06x}"),
+            egui::ColorImage::new(size, pixels),
+            egui::TextureOptions::NEAREST,
+        ))
+    });
+    textures.get(&id).and_then(Option::as_ref)
+}
+
+fn parse_admin_item(item: &crate::desk::AdminItem) -> Result<AdminItemRequest, &'static str> {
+    let graphic = parse_u16(&item.graphic).ok_or("Graphic must be a decimal or 0x hexadecimal number.")?;
+    let hue = parse_u16(&item.hue).ok_or("Hue must be a decimal or 0x hexadecimal number.")?;
+    let amount = parse_u16(&item.amount)
+        .filter(|amount| *amount > 0)
+        .ok_or("Amount must be a whole number from 1 to 65535.")?;
+    Ok(AdminItemRequest {
+        graphic,
+        hue,
+        amount,
+        stackable: item.stackable,
+    })
+}
+
+fn parse_u16(text: &str) -> Option<u16> {
+    let text = text.trim();
+    text.strip_prefix("0x")
+        .or_else(|| text.strip_prefix("0X"))
+        .map_or_else(|| text.parse().ok(), |hex| u16::from_str_radix(hex, 16).ok())
 }
 
 /// Every number the lighting is turned by, live.
@@ -3827,5 +4275,33 @@ mod tests {
     #[test]
     fn a_level_route_remains_walkable_green() {
         assert_eq!(route_height_colour(20, 20, 20), STANDABLE);
+    }
+
+    #[test]
+    fn the_admin_item_form_accepts_hex_and_rejects_zero_amount() {
+        let valid = crate::desk::AdminItem {
+            graphic: "0x0eed".to_owned(),
+            hue: "0x0481".to_owned(),
+            amount: "25".to_owned(),
+            stackable: true,
+        };
+        assert_eq!(
+            parse_admin_item(&valid),
+            Ok(AdminItemRequest {
+                graphic: 0x0eed,
+                hue: 0x0481,
+                amount: 25,
+                stackable: true,
+            })
+        );
+
+        let empty = crate::desk::AdminItem {
+            amount: "0".to_owned(),
+            ..valid
+        };
+        assert_eq!(
+            parse_admin_item(&empty),
+            Err("Amount must be a whole number from 1 to 65535.")
+        );
     }
 }

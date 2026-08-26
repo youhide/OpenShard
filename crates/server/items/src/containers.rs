@@ -4,16 +4,24 @@ use openshard_protocol::wire::{Graphic, Hue};
 /// Handle a double-click. See `Command::DoubleClick`.
 ///
 /// A door toggles open or shut; a container opens its gump; a mobile shows its
-/// paperdoll. Any other item is handed to the pack as an [`ItemUsed`] trigger,
-/// keyed by graphic — the engine has no default "use" for a bare item, so a
-/// shard gives it one; without a pack the double-click is simply silent.
-pub fn double_click(state: &mut WorldState, connection: ConnectionId, target_serial: Serial) {
+/// paperdoll. A weapon in the user's backpack is equipped. Any other item is
+/// handed to the pack as an [`ItemUsed`] trigger, keyed by graphic — the engine
+/// has no default "use" for a bare item, so a shard gives it one; without a
+/// pack the double-click is simply silent.
+///
+/// Returns whether the engine performed an item action that must keep later
+/// double-click dispatch (skill tools and shipped-item rules) from reusing it.
+pub fn double_click(state: &mut WorldState, connection: ConnectionId, target_serial: Serial) -> bool {
     let Some(&player) = state.players.get(&connection) else {
-        return;
+        return false;
     };
     let Some(target) = state.registry.entity_of(target_serial) else {
-        return;
+        return false;
     };
+
+    if equip_weapon_from_backpack(state, connection, target) {
+        return true;
+    }
 
     // A door toggles; a container opens its gump; a mobile shows its paperdoll;
     // anything else is a "use" rule not written yet, and a wrong guess is worse
@@ -50,6 +58,7 @@ pub fn double_click(state: &mut WorldState, connection: ConnectionId, target_ser
         // until a shard's script gives the graphic a meaning.
         item_used(state, player, target, target_serial);
     }
+    false
 }
 
 /// Answer a `0x06` with bit 31 set — the client's *paperdoll request*, sent by

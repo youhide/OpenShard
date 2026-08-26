@@ -21,6 +21,9 @@ impl World {
             return;
         }
         match purpose {
+            openshard_state::TargetPurpose::AdminCreature { kind } => {
+                crate::admin::place_creature(&mut self.state, actor, kind, response.location);
+            }
             openshard_state::TargetPurpose::Teleport => {
                 crate::gm::teleport_to(&mut self.state, actor, response.location);
             }
@@ -223,7 +226,11 @@ impl World {
         // runs the staff path below.
         if response
             .gump_id
-            .validate(&[crate::admin::ADMIN_GUMP, crate::admin::ADMIN_ITEM_GUMP])
+            .validate(&[
+                crate::admin::ADMIN_GUMP,
+                crate::admin::ADMIN_ITEM_GUMP,
+                crate::admin::ADMIN_CREATURE_GUMP,
+            ])
             .is_none()
         {
             if let Some(&actor) = self.state.players.get(&connection) {
@@ -287,6 +294,10 @@ impl World {
                         gm::notify(&mut self.state, actor, "Your backpack cannot hold that item.");
                     }
                 }
+                Err(message) => gm::notify(&mut self.state, actor, message),
+            },
+            crate::admin::ButtonAction::PlaceCreature => match crate::admin::creature_kind(&response) {
+                Ok(kind) => crate::admin::begin_creature_placement(&mut self.state, actor, kind),
                 Err(message) => gm::notify(&mut self.state, actor, message),
             },
         }

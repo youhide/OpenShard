@@ -113,6 +113,134 @@ pub fn equip_item(
     debug!(item = item.0, layer = layer.0, "equipped");
 }
 
+/// Equip a weapon a player double-clicked in their own backpack.
+///
+/// A weapon is an exception to the ordinary item-use rule: a double-click in
+/// the pack puts it into the appropriate hand.  The client does not send an
+/// equip packet for this path, so it cannot reuse [`equip_item`], whose input is
+/// specifically a held cursor item.  Replaced hand gear goes back into the
+/// backpack; a two-handed weapon clears both hand layers, while a one-handed
+/// weapon keeps a shield in the other hand.
+///
+/// Returns whether this click equipped the item.  Items on the ground, in a
+/// bank box, or in somebody else's container deliberately return `false` and
+/// continue through the normal double-click dispatch.
+pub fn equip_weapon_from_backpack(
+    state: &mut WorldState,
+    connection: ConnectionId,
+    target: EntityId,
+) -> bool {
+    let Some(&player) = state.players.get(&connection) else {
+        return false;
+    };
+    let (Some(player_serial), Some(target_serial), Some(&Drawn { id: graphic, .. })) = (
+        state.registry.serial_of(player),
+        state.registry.serial_of(target),
+        state.registry.get::<Drawn>(target),
+    ) else {
+        return false;
+    };
+    let Some(weapon) = weapon_data(graphic) else {
+        return false;
+    };
+    // Axes, picks and fishing poles can also have weapon rows, but their
+    // double-click is already the harvest interaction: it must still raise a
+    // target cursor rather than merely changing the paperdoll.
+    if openshard_state::harvest::tool_data(graphic).is_some() {
+        return false;
+    }
+    let Some(ItemLocation::Settled(SettledItemLocation::Contained(contained))) = item_location(state, target)
+    else {
+        return false;
+    };
+    let Some(backpack) = backpack_of(state, player_serial) else {
+        return false;
+    };
+    if !in_backpack_tree(state, contained.container, backpack) {
+        return false;
+    }
+
+    // The tiledata byte normally names one of the two hand layers.  A shard
+    // without client files has zero there; the useful and established fallback
+    // for a weapon whose class does not override it is one-handed.
+    let tile_layer = Layer(state.tiles().static_tile(graphic.0).layer);
+    let layer = match weapon_layer(weapon, tile_layer) {
+        LAYER_ONE_HANDED | LAYER_TWO_HANDED => weapon_layer(weapon, tile_layer),
+        _ => LAYER_ONE_HANDED,
+    };
+
+    // Take a snapshot before relocating: each move changes the equipment query
+    // that is its own source.  A one-handed weapon replaces its own hand and a
+    // two-handed weapon, but leaves a shield on the two-handed layer alone.
+    let displaced: Vec<EntityId> = equipped_items(state, player_serial)
+        .filter_map(|(item, worn)| {
+            let replaces = if layer == LAYER_TWO_HANDED {
+                worn.layer == LAYER_ONE_HANDED || worn.layer == LAYER_TWO_HANDED
+            } else {
+                worn.layer == LAYER_ONE_HANDED
+                    || (worn.layer == LAYER_TWO_HANDED
+                        && state
+                            .registry
+                            .get::<Drawn>(item)
+                            .is_some_and(|drawn| weapon_data(drawn.id).is_some()))
+            };
+            replaces.then_some(item)
+        })
+        .collect();
+
+    for item in displaced {
+        let Some(serial) = state.registry.serial_of(item) else {
+            continue;
+        };
+        let contained = Contained {
+            container: backpack,
+            position: GumpPoint::new(0, 0),
+            grid: GridSlot(item_count(state, backpack)),
+        };
+        relocate_item(state, item, ItemLocation::contained(contained))
+            .expect("replaced hand gear has one valid backpack parent");
+        broadcast_unequip(state, serial, player);
+        tell_watchers_updated(state, backpack, item);
+    }
+
+    // This is a direct item move, not a drag: the open pack must explicitly be
+    // told to remove the weapon before the paperdoll receives its equip update.
+    tell_watchers_removed(state, contained.container, target_serial);
+    relocate_item(
+        state,
+        target,
+        ItemLocation::equipped(Equipped {
+            mobile: player_serial,
+            layer,
+        }),
+    )
+    .expect("cleared hand layer accepts the double-clicked weapon");
+    broadcast_equip(state, target, player);
+    debug!(%target_serial, layer = layer.0, "weapon equipped by double-click");
+    true
+}
+
+/// Whether `container` is the player's backpack itself or a container inside
+/// it.  Following the chain rather than merely asking for an owner keeps a bank
+/// box out: it is worn by the same player but is not an equip source.
+fn in_backpack_tree(state: &WorldState, mut container: Serial, backpack: Serial) -> bool {
+    for _ in 0..16 {
+        if container == backpack {
+            return true;
+        }
+        let Some(entity) = state.registry.entity_of(container) else {
+            return false;
+        };
+        let Some(ItemLocation::Settled(SettledItemLocation::Contained(contained))) =
+            item_location(state, entity)
+        else {
+            return false;
+        };
+        container = contained.container;
+    }
+    false
+}
+
 /// The two protocol hand layers are not two independent weapon slots. A
 /// one-handed weapon may share `TwoHanded` with a shield, but a weapon in that
 /// layer is two-handed and therefore excludes anything in `OneHanded`.

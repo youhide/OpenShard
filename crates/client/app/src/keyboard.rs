@@ -35,10 +35,10 @@
 //!   With no `Tab` there is no focus to hand out, and its focus navigation is
 //!   dead by construction.
 //! * `Shell::holds_keyboard` — egui may claim the keyboard only while a *text
-//!   field* inside it is focused, which this client has none of (there is not
-//!   one `egui::TextEdit` in the tree — every box a player types into is drawn
-//!   by `chat.rs` or by `panes.rs`). It is written as a live question rather
-//!   than as `false` because the day one appears is the day it must work.
+//!   field* inside it is focused. The F1 staff item creator is such a field;
+//!   chat and ordinary game windows remain outside egui. It is written as a
+//!   live question rather than a panel-specific rule so a future field follows
+//!   the same ownership contract.
 
 use winit::keyboard::KeyCode;
 

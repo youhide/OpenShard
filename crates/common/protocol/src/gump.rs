@@ -59,6 +59,10 @@ pub mod id {
     /// namespace but is a distinct reply target, so a form submission cannot
     /// be mistaken for a world-management button.
     pub const ADMIN_ITEM: GumpId = GumpId(0x00AD_0002);
+    /// The creature-placement request from the F1 administrator catalogue.
+    /// It is deliberately separate from item creation: its answer raises a
+    /// target cursor instead of putting an object into a backpack.
+    pub const ADMIN_CREATURE: GumpId = GumpId(0x00AD_0003);
     /// The quest log, offer and turn-in — one window, many pages.
     pub const QUEST: GumpId = GumpId(0x0051_0001);
     /// "Give this quest up?"
@@ -80,9 +84,10 @@ pub mod id {
 
     /// The table, for the distinctness check and for anything that wants to ask
     /// whether an id belongs to the engine at all.
-    pub const ALL: [GumpId; 11] = [
+    pub const ALL: [GumpId; 12] = [
         ADMIN,
         ADMIN_ITEM,
+        ADMIN_CREATURE,
         QUEST,
         QUEST_RESIGN,
         CRAFT,
@@ -93,6 +98,26 @@ pub mod id {
         ANIMAL_LORE,
         HOUSE,
     ];
+}
+
+/// Wire contracts for engine-owned administrator requests.
+///
+/// The classic gump and the F1 developer panel share these ids, so their
+/// meaning is not duplicated across client and server UI implementations.
+pub mod admin {
+    use super::{ButtonId, SwitchId};
+
+    pub const ITEM_CREATE: ButtonId = ButtonId(1);
+    pub const ITEM_GRAPHIC_FIELD: u16 = 1;
+    pub const ITEM_HUE_FIELD: u16 = 2;
+    pub const ITEM_AMOUNT_FIELD: u16 = 3;
+    pub const ITEM_STACKABLE: SwitchId = SwitchId(1);
+
+    /// Submit one of the server-owned animal presets for placement.
+    pub const CREATURE_CREATE: ButtonId = ButtonId(1);
+    /// The animal preset selected in the F1 catalogue. This is an id, not a
+    /// body graphic: the shard chooses all of a creature's gameplay stats.
+    pub const CREATURE_KIND_FIELD: u16 = 1;
 }
 
 /// A dialog id exactly as a client's `0xB1` echoed it.

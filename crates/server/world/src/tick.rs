@@ -1312,8 +1312,8 @@ impl World {
                                 .map(|door| (serial, door.link)),
                             None => None,
                         };
-                        if !already_opened {
-                            items::double_click(&mut self.state, connection, serial);
+                        let equipped_weapon = if !already_opened {
+                            let equipped_weapon = items::double_click(&mut self.state, connection, serial);
                             if let Some((leaf, Some(link))) = opened.filter(|_| {
                                 self.state
                                     .registry
@@ -1324,21 +1324,26 @@ impl World {
                                 self.opened_door_leaves.insert((connection, leaf));
                                 self.opened_door_leaves.insert((connection, link));
                             }
-                        }
+                            equipped_weapon
+                        } else {
+                            false
+                        };
                         // And the core's own answer for an item a skill knows what
                         // to do with — an instrument struck up, and the bandage and
                         // lockpick to come. Run *after* `double_click`, so the pack
                         // has already had the `ItemUsed` event: default in core,
                         // customise in the pack, in that order.
-                        if let (Some(&player), Some(item)) = (
-                            self.state.players.get(&connection),
-                            self.state.registry.entity_of(serial),
-                        ) {
-                            self.use_item_skill(player, item);
-                            // And the shard's own two item behaviours, last of
-                            // all: the engine has answered, and a configured pack
-                            // has had its `ItemUsed`.
-                            self.use_shipped_item(player, item);
+                        if !equipped_weapon {
+                            if let (Some(&player), Some(item)) = (
+                                self.state.players.get(&connection),
+                                self.state.registry.entity_of(serial),
+                            ) {
+                                self.use_item_skill(player, item);
+                                // And the shard's own two item behaviours, last of
+                                // all: the engine has answered, and a configured pack
+                                // has had its `ItemUsed`.
+                                self.use_shipped_item(player, item);
+                            }
                         }
                     }
                 }

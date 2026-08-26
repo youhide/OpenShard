@@ -115,7 +115,7 @@ impl World {
                 items::paperdoll_request(&mut self.state, connection, object);
             }
             ContextAction::Open => {
-                items::double_click(&mut self.state, connection, object);
+                let _ = items::double_click(&mut self.state, connection, object);
             }
             ContextAction::Buy => {
                 npc::open_shop(&mut self.state, connection, object);

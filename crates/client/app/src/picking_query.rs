@@ -10,7 +10,7 @@
 //! shell draws from — the frame's answer to "what are the panels allowed to
 //! know".
 
-use openshard_client_net::action::Outgoing;
+use openshard_client_net::action::{GumpReply, Outgoing};
 use openshard_client_render::bench::{self, Metrics};
 use openshard_client_render::camera::{self, Camera, TileBounds};
 use openshard_client_render::control::Follow;
@@ -834,6 +834,66 @@ impl App {
             };
             if let (Some(link), Some(edit)) = (self.world.shard.link(), edit) {
                 link.act(Outgoing::CommitMapEdit(edit));
+            }
+        }
+        // The F1 panel is only an alternative presentation of the
+        // administrator item form. Its reply uses the same checked field ids
+        // as the classic gump, and the shard independently re-checks staff
+        // authority before it creates an item.
+        if let Some(item) = request.create_item {
+            if authority.allows(openshard_commands::StaffCommand::AUTHORITY) {
+                if let Some(link) = self.world.shard.link() {
+                    link.act(Outgoing::AnswerGump(GumpReply {
+                        key: openshard_protocol::gump::RawGumpKey(0),
+                        gump_id: openshard_protocol::gump::RawGumpId(
+                            openshard_protocol::gump::id::ADMIN_ITEM.0,
+                        ),
+                        button: openshard_protocol::gump::RawButtonId(
+                            openshard_protocol::gump::admin::ITEM_CREATE.0,
+                        ),
+                        switches: item
+                            .stackable
+                            .then_some(openshard_protocol::gump::RawSwitchId(
+                                openshard_protocol::gump::admin::ITEM_STACKABLE.0,
+                            ))
+                            .into_iter()
+                            .collect(),
+                        text_entries: vec![
+                            (
+                                openshard_protocol::gump::admin::ITEM_GRAPHIC_FIELD,
+                                format!("{:#06x}", item.graphic),
+                            ),
+                            (
+                                openshard_protocol::gump::admin::ITEM_HUE_FIELD,
+                                item.hue.to_string(),
+                            ),
+                            (
+                                openshard_protocol::gump::admin::ITEM_AMOUNT_FIELD,
+                                item.amount.to_string(),
+                            ),
+                        ],
+                    }));
+                }
+            }
+        }
+        if let Some(kind) = request.place_creature {
+            if authority.allows(openshard_commands::StaffCommand::AUTHORITY) {
+                if let Some(link) = self.world.shard.link() {
+                    link.act(Outgoing::AnswerGump(GumpReply {
+                        key: openshard_protocol::gump::RawGumpKey(0),
+                        gump_id: openshard_protocol::gump::RawGumpId(
+                            openshard_protocol::gump::id::ADMIN_CREATURE.0,
+                        ),
+                        button: openshard_protocol::gump::RawButtonId(
+                            openshard_protocol::gump::admin::CREATURE_CREATE.0,
+                        ),
+                        switches: Vec::new(),
+                        text_entries: vec![(
+                            openshard_protocol::gump::admin::CREATURE_KIND_FIELD,
+                            kind.to_string(),
+                        )],
+                    }));
+                }
             }
         }
         // The rebake button. A client with no facet open has nothing to bake a

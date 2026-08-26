@@ -25,7 +25,7 @@ use openshard_state::components::{
 };
 use openshard_state::components::{Banker, SwingSpeed, WrestlingCombo, WrestlingOpener, WrestlingStride};
 use openshard_state::sectors::distance;
-use openshard_state::{Skill, StatLock};
+use openshard_state::{SettledItemLocation, Skill, StatLock};
 
 pub(super) const START: (u16, u16) = (1363, 1600);
 
@@ -2244,6 +2244,93 @@ fn equipping_a_held_item_dresses_the_mobile() {
     assert!(
         packets_for(&mut world, player).iter().any(|p| p[0] == 0x2E),
         "the wearer is told they put it on"
+    );
+}
+
+#[test]
+fn double_clicking_a_backpack_weapon_equips_it_and_stows_the_previous_one() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let wearer_serial = serial_of(&world, player);
+    let backpack = items::backpack_of(&world.state, wearer_serial).expect("a fresh player has a backpack");
+    let sword = items::place_one(&mut world.state, backpack, Graphic(0x0F61), Hue(0), 1)
+        .expect("a sword fits in the backpack");
+    let sword_serial = world.registry().serial_of(sword).unwrap();
+    let katana = items::place_one(&mut world.state, backpack, Graphic(0x13FF), Hue(0), 1)
+        .expect("a katana fits in the backpack");
+    let katana_serial = world.registry().serial_of(katana).unwrap();
+    let bow = items::place_one(&mut world.state, backpack, Graphic(0x13B2), Hue(0), 1)
+        .expect("a bow fits in the backpack");
+    let bow_serial = world.registry().serial_of(bow).unwrap();
+    let _ = packets_for(&mut world, player);
+
+    world.queue(Command::DoubleClick {
+        connection: player,
+        request: UseRequest::Use(RawSerial(sword_serial.raw())),
+    });
+    world.tick(now);
+    assert_eq!(
+        world.state.registry.get::<Equipped>(sword),
+        Some(&Equipped {
+            mobile: wearer_serial,
+            layer: Layer(1),
+        }),
+        "a backpack weapon goes into the one-handed slot without a drag"
+    );
+
+    world.queue(Command::DoubleClick {
+        connection: player,
+        request: UseRequest::Use(RawSerial(katana_serial.raw())),
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world.state.registry.get::<Equipped>(katana),
+        Some(&Equipped {
+            mobile: wearer_serial,
+            layer: Layer(1),
+        }),
+        "the replacement is equipped"
+    );
+    assert!(
+        matches!(
+            openshard_state::item_location(&world.state, sword),
+            Some(openshard_state::ItemLocation::Settled(
+                SettledItemLocation::Contained(Contained { container, .. })
+            ))
+                if container == backpack
+        ),
+        "the replaced weapon returns to the backpack"
+    );
+    assert!(
+        packets_for(&mut world, player)
+            .iter()
+            .any(|packet| packet[0] == 0x2E),
+        "the client is told about the new paperdoll equipment"
+    );
+
+    world.queue(Command::DoubleClick {
+        connection: player,
+        request: UseRequest::Use(RawSerial(bow_serial.raw())),
+    });
+    world.tick(now);
+    assert_eq!(
+        world.state.registry.get::<Equipped>(bow),
+        Some(&Equipped {
+            mobile: wearer_serial,
+            layer: Layer(2),
+        }),
+        "a two-handed weapon selects its own hand layer"
+    );
+    assert!(
+        matches!(
+            openshard_state::item_location(&world.state, katana),
+            Some(openshard_state::ItemLocation::Settled(
+                SettledItemLocation::Contained(Contained { container, .. })
+            )) if container == backpack
+        ),
+        "equipping two-handed gear clears the occupied one-handed slot"
     );
 }
 
@@ -9812,6 +9899,48 @@ fn admin_response(connection: ConnectionId, button: u32) -> Command {
     }
 }
 
+fn admin_item_response(
+    connection: ConnectionId,
+    graphic: &str,
+    hue: &str,
+    amount: &str,
+    stackable: bool,
+) -> Command {
+    Command::GumpResponse {
+        connection,
+        response: openshard_protocol::gump::GumpResponse {
+            serial: openshard_protocol::gump::RawGumpKey(0),
+            gump_id: openshard_protocol::gump::RawGumpId(crate::admin::ADMIN_ITEM_GUMP.0),
+            button: openshard_protocol::gump::RawButtonId(1),
+            switches: stackable
+                .then_some(openshard_protocol::gump::RawSwitchId(1))
+                .into_iter()
+                .collect(),
+            text_entries: vec![
+                (1, graphic.to_owned()),
+                (2, hue.to_owned()),
+                (3, amount.to_owned()),
+            ],
+        },
+    }
+}
+
+fn admin_creature_response(connection: ConnectionId, kind: u16) -> Command {
+    Command::GumpResponse {
+        connection,
+        response: openshard_protocol::gump::GumpResponse {
+            serial: openshard_protocol::gump::RawGumpKey(0),
+            gump_id: openshard_protocol::gump::RawGumpId(crate::admin::ADMIN_CREATURE_GUMP.0),
+            button: openshard_protocol::gump::RawButtonId(openshard_protocol::gump::admin::CREATURE_CREATE.0),
+            switches: Vec::new(),
+            text_entries: vec![(
+                openshard_protocol::gump::admin::CREATURE_KIND_FIELD,
+                kind.to_string(),
+            )],
+        },
+    }
+}
+
 #[test]
 fn tele_raises_a_cursor_and_the_click_teleports() {
     let now = Instant::now();
@@ -9898,6 +10027,84 @@ fn an_admin_button_from_a_game_master_is_answered() {
     assert!(
         packets_for(&mut world, gm).iter().any(|p| p[0] == 0x1C),
         "the button is acted on"
+    );
+}
+
+#[test]
+fn an_admin_can_create_a_stacked_item_in_their_backpack() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let actor = world.state.players[&gm];
+    let actor_serial = world.registry().serial_of(actor).unwrap();
+    let backpack = items::backpack_of(&world.state, actor_serial).expect("the entering GM wears a backpack");
+    let _ = packets_for(&mut world, gm);
+
+    world.queue(admin_response(gm, 40)); // Create item in backpack
+    world.tick(now);
+    assert!(
+        packets_for(&mut world, gm).iter().any(|packet| packet[0] == 0xB0),
+        "the item creator form is sent"
+    );
+
+    world.queue(admin_item_response(gm, "0x0eed", "0x0481", "25", true));
+    world.tick(now);
+
+    let created = world
+        .registry()
+        .query::<Contained>()
+        .find(|(item, held)| {
+            held.container == backpack
+                && world
+                    .registry()
+                    .get::<Drawn>(*item)
+                    .is_some_and(|drawn| drawn.id == Graphic(0x0eed) && drawn.hue == Hue(0x0481))
+        })
+        .map(|(item, _)| item)
+        .expect("the chosen item is in the backpack");
+    assert!(
+        world.registry().has::<Stackable>(created),
+        "the checked box makes a stack"
+    );
+    assert_eq!(items::amount_of(&world.state, created), 25);
+}
+
+#[test]
+fn an_admin_can_place_a_catalogue_animal_on_a_targeted_tile() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let at = Point::new(START.0 + 3, START.1 + 2, 0);
+    let _ = packets_for(&mut world, gm);
+
+    world.queue(admin_creature_response(gm, 1)); // horse
+    world.tick(now);
+    assert!(
+        packets_for(&mut world, gm).iter().any(|packet| packet[0] == 0x6C),
+        "the location cursor is sent"
+    );
+
+    world.queue(Command::TargetResponse {
+        connection: gm,
+        response: openshard_protocol::target::TargetResponse {
+            cursor_id: openshard_protocol::wire::CursorId(0),
+            object: None,
+            location: at,
+            graphic: None,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    assert!(
+        world.registry().query::<Body>().any(|(entity, body)| {
+            body.id == Graphic(200)
+                && world
+                    .registry()
+                    .get::<Position>(entity)
+                    .is_some_and(|position| position.0 == at)
+        }),
+        "the chosen horse is a real mobile at the targeted tile"
     );
 }
 

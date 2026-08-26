@@ -458,6 +458,18 @@ mod tests {
     }
 
     #[test]
+    fn the_shared_catalogue_filter_matches_the_gameplay_table() {
+        for raw in u16::MIN..=u16::MAX {
+            let graphic = Graphic(raw);
+            assert_eq!(
+                openshard_protocol::items::is_classic_weapon(graphic),
+                weapon_data(graphic).is_some(),
+                "0x{raw:04X}"
+            );
+        }
+    }
+
+    #[test]
     fn a_weapons_kind_is_its_servuo_class_and_not_its_skill() {
         let kind = |graphic: u16| weapon_data(Graphic(graphic)).expect("in the table").kind;
         assert_eq!(kind(0x0F61), WeaponKind::Slashing); // longsword, BaseSword

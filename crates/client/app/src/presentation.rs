@@ -1933,8 +1933,16 @@ impl App {
         let ui_layout_started = Instant::now();
         let ui = match (self.shell.as_mut(), painting.as_ref()) {
             (Some(shell), Some(window)) => {
-                let (request, output) =
-                    shell.run(window, &hud, camera, &self.world, &mut self.map_editor, authority);
+                let (request, output) = shell.run(
+                    window,
+                    &hud,
+                    camera,
+                    &self.world,
+                    &self.resources.art,
+                    &self.resources.tiledata,
+                    &mut self.map_editor,
+                    authority,
+                );
                 let viewport = shell.viewport();
                 Some((request, output, viewport))
             }

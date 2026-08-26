@@ -64,6 +64,8 @@ pub enum Tab {
     Audio,
     /// How big the client's own windows draw — [`WindowScale`].
     Windows,
+    /// Staff-only tools for creating test items in the character's backpack.
+    Admin,
 }
 
 impl Tab {
@@ -71,7 +73,8 @@ impl Tab {
     ///
     /// One list, so the bar and anything that iterates the pages cannot come to
     /// disagree about which tabs exist.
-    pub const ALL: [Tab; 9] = [
+    pub const ALL: [Tab; 10] = [
+        Tab::Admin,
         Tab::Camera,
         Tab::Rig,
         Tab::Frames,
@@ -95,6 +98,7 @@ impl Tab {
             Tab::Chat => "Chat/Font",
             Tab::Audio => "Audio",
             Tab::Windows => "Windows",
+            Tab::Admin => "Admin",
         }
     }
 }
@@ -695,6 +699,10 @@ pub struct Desk {
     pub audio: Audio,
     /// Movement preferences, saved beside the rest of the client UI state.
     pub movement: Movement,
+    /// Values retained by F1's staff item creator.
+    pub admin_item: AdminItem,
+    /// Where the full item-art browser was left in F1.
+    pub admin_catalogue: AdminCatalogue,
 }
 
 /// The two everyday movement conveniences.
@@ -712,6 +720,63 @@ impl Default for Movement {
         Self {
             always_run: true,
             auto_open_doors: true,
+        }
+    }
+}
+
+/// The values last entered into F1's staff item creator.
+///
+/// They stay as strings while edited so a useful intermediate value such as
+/// `0x` is not erased beneath the typist. The panel validates them only when
+/// it decides whether creation may be submitted.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AdminItem {
+    pub graphic: String,
+    pub hue: String,
+    pub amount: String,
+    pub stackable: bool,
+}
+
+/// The query and page of F1's installed-client item-art browser.
+///
+/// It is deliberately just navigation state: art stays in the client resource
+/// archive and is decoded only for the page currently on screen.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AdminCatalogue {
+    pub query: String,
+    pub category: AdminItemCategory,
+}
+
+/// Gameplay family used to narrow the administrator's complete item browser.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub enum AdminItemCategory {
+    /// Every static graphic in the installed client.
+    #[default]
+    All,
+    /// Items in the shard's classic weapon table.
+    Weapons,
+    /// Items in the shard's classic armour table.
+    Armor,
+}
+
+impl Default for AdminCatalogue {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            category: AdminItemCategory::All,
+        }
+    }
+}
+
+impl Default for AdminItem {
+    fn default() -> Self {
+        Self {
+            graphic: "0x0eed".to_owned(),
+            hue: "0".to_owned(),
+            amount: "100".to_owned(),
+            stackable: true,
         }
     }
 }
@@ -735,6 +800,8 @@ impl Default for Desk {
             chat: Chat::default(),
             audio: Audio::default(),
             movement: Movement::default(),
+            admin_item: AdminItem::default(),
+            admin_catalogue: AdminCatalogue::default(),
         }
     }
 }
@@ -879,6 +946,16 @@ mod tests {
                 always_run: false,
                 auto_open_doors: true,
             },
+            admin_item: AdminItem {
+                graphic: "0x0f0e".to_owned(),
+                hue: "0x0481".to_owned(),
+                amount: "25".to_owned(),
+                stackable: false,
+            },
+            admin_catalogue: AdminCatalogue {
+                query: "0x0f52".to_owned(),
+                category: AdminItemCategory::Weapons,
+            },
         };
         desk.save(&path).unwrap();
         let back = Desk::load(&path).unwrap();
@@ -895,7 +972,9 @@ mod tests {
         assert_eq!(back.bitmap_font, desk.bitmap_font);
         assert_eq!(back.audio, desk.audio);
         assert_eq!(back.movement.always_run, desk.movement.always_run);
+        assert_eq!(back.admin_catalogue, desk.admin_catalogue);
         assert_eq!(back.movement.auto_open_doors, desk.movement.auto_open_doors);
+        assert_eq!(back.admin_item, desk.admin_item);
         std::fs::remove_file(&path).unwrap();
     }
 

@@ -408,8 +408,9 @@ impl ApplicationHandler<()> for App {
                         // The shell's `Desk` and not this one: see
                         // `Shell::toggle_dev`. Before there is a shell there is no
                         // window either, so this arm cannot be reached without one.
+                        let authority = self.authority();
                         if let Some(shell) = self.shell.as_mut() {
-                            shell.toggle_dev();
+                            shell.toggle_dev(authority);
                         }
                         true
                     }

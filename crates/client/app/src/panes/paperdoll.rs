@@ -33,7 +33,7 @@ use openshard_client_render::mobiles::EquipmentLayer;
 use openshard_client_render::paperdoll;
 use openshard_protocol::containers::{ContainedItem, GridSlot};
 use openshard_protocol::gump::GumpPoint;
-use openshard_protocol::items::{ItemAmount, is_classic_weapon};
+use openshard_protocol::items::{ItemAmount, classic_weapon_layer, is_classic_weapon};
 use openshard_protocol::mobile::Equipment;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::Font;
@@ -419,12 +419,15 @@ impl PaperdollPane {
                     }));
                 }
             }
-            let layer = openshard_protocol::wire::Layer(
-                ctx.frame
-                    .files
-                    .tiledata
-                    .static_tile(hand.drag().item.graphic.0)
-                    .layer,
+            let layer = classic_weapon_layer(
+                hand.drag().item.graphic,
+                Layer(
+                    ctx.frame
+                        .files
+                        .tiledata
+                        .static_tile(hand.drag().item.graphic.0)
+                        .layer,
+                ),
             );
             if self.hands_conflict(&ctx.frame, hand.drag().item.graphic, layer) {
                 return Response::consumed();
@@ -652,7 +655,7 @@ impl PaperdollPane {
             true => frame.hand.and_then(|hand| {
                 let drag = hand.drag();
                 let tile = frame.files.tiledata.static_tile(drag.item.graphic.0);
-                let layer = Layer(tile.layer);
+                let layer = classic_weapon_layer(drag.item.graphic, Layer(tile.layer));
                 (own && layer.0 > 0
                     && layer.0 <= 25
                     && !equipment.iter().any(|worn| worn.layer == layer)
@@ -1036,6 +1039,44 @@ mod tests {
             answer.out.as_slice(),
             [Effect::Drop(PendingDrop::Container { container, at })]
                 if *container == pack && *at == GumpPoint::new(0, 0)
+        ));
+    }
+
+    /// A bow's tiledata layer is one-handed, but the shard's weapon class
+    /// rule makes it two-handed. The outgoing request must already use that
+    /// corrected layer or the shard rejects the equip.
+    #[test]
+    fn a_bow_drop_requests_the_two_handed_layer() {
+        use openshard_protocol::wire::Graphic;
+
+        use crate::hand::{Hand, ItemDrag};
+        use crate::panes::fixture;
+
+        const BOW: Graphic = Graphic(0x13B2);
+
+        let me = serial(0x0000_002A);
+        let files = fixture::Install::shipping([]);
+        let view = fixture::world(me);
+        let mut ctx = files.ctx(&view, None, GumpPixel::new(50, 50), true);
+        ctx.frame.hand = Some(Hand::Held(ItemDrag {
+            item: ContainedItem {
+                serial: serial(0x4000_0001),
+                graphic: BOW,
+                amount: ItemAmount::ONE,
+                at: GumpPoint::new(0, 0),
+                grid: GridSlot(0),
+                hue: Hue::NONE,
+            },
+            origin: DragOrigin::Ground,
+            grab: GumpPixel::new(0, 0),
+        }));
+
+        let mut pane = PaperdollPane::new(me);
+        let answer = pane.handle(Input::Release(Button::Left), &ctx);
+        assert!(matches!(
+            answer.out.as_slice(),
+            [Effect::Drop(PendingDrop::Equipment { mobile, layer })]
+                if *mobile == me && *layer == Layer::TWO_HANDED
         ));
     }
 }

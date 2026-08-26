@@ -320,6 +320,18 @@ mod tests {
     }
 
     #[test]
+    fn the_shared_catalogue_filter_matches_the_gameplay_table() {
+        for raw in u16::MIN..=u16::MAX {
+            let graphic = Graphic(raw);
+            assert_eq!(
+                openshard_protocol::items::is_classic_armor(graphic),
+                armor_data(graphic).is_some(),
+                "0x{raw:04X}"
+            );
+        }
+    }
+
+    #[test]
     fn the_hit_bands_match_their_coverage() {
         // The ladder and the scalars are the same fact told twice; a chest is hit
         // 35% of the time because it covers 35% of a body.

@@ -1458,6 +1458,13 @@ pub enum TargetPurpose {
         /// dropped or consumed while the cursor was up opens nothing.
         key: EntityId,
     },
+    /// An administrator selected an animal from the F1 catalogue and now
+    /// needs to choose the tile where it should be placed. The preset id is
+    /// checked again by the world when that click lands.
+    AdminCreature {
+        /// Server-owned animal preset id.
+        kind: u16,
+    },
 }
 
 impl WorldState {
@@ -3005,9 +3012,17 @@ impl WorldState {
         neighbours.extend(self.designed_houses_near(centre, facet));
         neighbours.remove(&entity);
 
-        for other in &neighbours {
-            self.show(entity, *other);
-            self.show(*other, entity);
+        // A client rebuilds a custom multi when it receives its D8 design
+        // packet.  Its separately-addressed fixtures (doors and the live house
+        // sign) must therefore follow their parent on the wire: sending a
+        // fixture first lets the later rebuild erase it from the client's
+        // screen.  `HashSet` iteration made that order accidental on login and
+        // after every return to a house.
+        let mut draw_order: Vec<EntityId> = neighbours.iter().copied().collect();
+        draw_order.sort_unstable_by_key(|other| !self.registry.has::<HouseDesign>(*other));
+        for other in draw_order {
+            self.show(entity, other);
+            self.show(other, entity);
         }
 
         // Anything this one used to see and no longer can. `nearby` says who is
@@ -4412,10 +4427,11 @@ mod tests {
 
     use openshard_movement::scene::Scene;
     use openshard_protocol::direction::Direction;
+    use openshard_protocol::identity::AccountName;
     use openshard_protocol::serial::SerialKind;
-    use openshard_protocol::wire::Graphic;
+    use openshard_protocol::wire::{Graphic, MultiId};
     use openshard_tiles::TileData;
-    use openshard_uofiles::multi::Component;
+    use openshard_uofiles::multi::{Component, Multi};
 
     #[test]
     fn a_custom_house_stays_visible_when_its_design_reaches_the_view() {
@@ -4441,6 +4457,103 @@ mod tests {
         assert!(
             !design_reaches_view(Point::new(99, 100, 0), origin, &design),
             "one tile beyond the wall's sight boundary must still be forgotten"
+        );
+    }
+
+    #[test]
+    fn a_custom_house_design_precedes_its_live_sign_on_a_returning_screen() {
+        // D8 rebuilds the client-side multi.  This used to be a HashSet walk,
+        // so a live sign could be sent first and then be erased by that rebuild.
+        let mut state = a_shard();
+        let connection = ConnectionId::from_raw(1);
+        state.connections.insert(
+            connection,
+            Connection::new(
+                ClientVersion::TOL,
+                AccountName::new("tester"),
+                AccessLevel::Player,
+            ),
+        );
+        let (viewer, owner) = state.registry.spawn_with_serial(SerialKind::Mobile).unwrap();
+        state.registry.insert(
+            viewer,
+            Body {
+                id: Graphic(0x0190),
+                hue: Hue::NONE,
+            },
+        );
+        state.registry.insert(viewer, Client { connection });
+        state.registry.insert(viewer, Position(Point::new(4, 4, 0)));
+        state.place_mobile(Facet(0), viewer, Point::new(4, 4, 0));
+
+        let foundation = MultiId(0x13EC);
+        let component = Component {
+            graphic: Graphic(0x0001),
+            dx: 0,
+            dy: 0,
+            dz: 0,
+            flags: 1,
+        };
+        state.multis = openshard_uofiles::multi::Multis::of([Multi::new(foundation.0, vec![component])]);
+        let (house, _) = state.registry.spawn_with_serial(SerialKind::Item).unwrap();
+        state.registry.insert(
+            house,
+            Drawn {
+                id: Graphic(0x13EC),
+                hue: Hue::NONE,
+            },
+        );
+        state.registry.insert(
+            house,
+            crate::components::House {
+                multi: foundation,
+                owner,
+                co_owners: Default::default(),
+                friends: Default::default(),
+                bans: Default::default(),
+                age: 0,
+                lockdowns: 0,
+            },
+        );
+        state.registry.insert(
+            house,
+            HouseDesign {
+                components: vec![component],
+                revision: 1,
+            },
+        );
+        state.registry.insert(house, Position(Point::new(5, 4, 0)));
+        state.place_item(Facet(0), house, Point::new(5, 4, 0));
+
+        let (sign, _) = state.registry.spawn_with_serial(SerialKind::Item).unwrap();
+        state.registry.insert(
+            sign,
+            Drawn {
+                id: Graphic(0x0B9E),
+                hue: Hue::NONE,
+            },
+        );
+        state.registry.insert(sign, Position(Point::new(7, 4, 0)));
+        state.place_item(Facet(0), sign, Point::new(7, 4, 0));
+
+        state.refresh_around(viewer);
+        let packets: Vec<_> = state
+            .outbox
+            .iter()
+            .filter(|outbound| outbound.connection == connection)
+            .map(|outbound| &outbound.packet)
+            .collect();
+        let design = packets
+            .iter()
+            .rposition(|packet| packet[0] == 0xD8)
+            .expect("the returning client received the house design");
+        let sign = packets
+            .iter()
+            .rposition(|packet| packet[0] == 0x1A)
+            .expect("the returning client received the live sign item");
+        assert!(
+            design < sign,
+            "the live sign must be drawn after D8, not erased by the multi rebuild"
         );
     }
 
