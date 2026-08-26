@@ -44,6 +44,8 @@
 
 use std::path::{Path, PathBuf};
 
+use rusqlite::OptionalExtension;
+
 /// Which table a placed thing was read out of.
 ///
 /// Kept because the two are different questions to a person looking at a
@@ -81,6 +83,22 @@ pub struct Placed {
     pub graphic: u16,
     /// Its hue, `0` for none.
     pub hue: u16,
+}
+
+/// One classic house placed by the shard.
+///
+/// A house is not an `items` row: its `multi` has to be expanded through the
+/// client's `multi.mul` before a frame can draw its floors and walls. Keeping
+/// this narrow record separate makes that omission explicit at the diagnostic
+/// boundary instead of silently producing a picture without the building.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct House {
+    /// The house's persistent serial, used only to select the one to inspect.
+    pub serial: u32,
+    /// The client's multi id (not the `0x4000`-offset graphic).
+    pub multi: u16,
+    /// The multi origin in world coordinates.
+    pub at: openshard_protocol::world::Point,
 }
 
 /// The window to read: one facet, and the rectangle a scene's radius covers.
@@ -191,6 +209,47 @@ pub fn read(database: &Path, window: Window) -> Vec<Placed> {
         &mut placed,
     );
     placed
+}
+
+/// One classic house, selected by its serial.
+///
+/// This is deliberately not a window query: a diagnostic caller names the
+/// building it wants, which also avoids guessing whether a large multi whose
+/// origin is just outside a scene reaches into it. Designed houses have no
+/// classic multi and are therefore rejected loudly rather than drawn as an
+/// empty lot.
+pub fn house(database: &Path, serial: u32) -> Option<House> {
+    assert!(
+        database.exists(),
+        "{} does not exist: point OPENSHARD_SCENE_SHARD_DB at a saved shard",
+        database.display(),
+    );
+    let connection =
+        rusqlite::Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap_or_else(|error| panic!("opening {}: {error}", database.display()));
+    connection
+        .query_row(
+            "SELECT multi, x, y, z FROM houses WHERE serial = ?1",
+            [i64::from(serial)],
+            |row| {
+                let multi: i64 = row.get(0)?;
+                let x: i64 = row.get(1)?;
+                let y: i64 = row.get(2)?;
+                let z: i64 = row.get(3)?;
+                Ok((multi, x, y, z))
+            },
+        )
+        .optional()
+        .unwrap_or_else(|error| panic!("reading house {serial}: {error}"))
+        .map(|(multi, x, y, z)| House {
+            serial,
+            multi: u16::try_from(multi).unwrap_or_else(|_| panic!("house {serial} multi: {multi}")),
+            at: openshard_protocol::world::Point::new(
+                u16::try_from(x).unwrap_or_else(|_| panic!("house {serial} x: {x}")),
+                u16::try_from(y).unwrap_or_else(|_| panic!("house {serial} y: {y}")),
+                i8::try_from(z).unwrap_or_else(|_| panic!("house {serial} z: {z}")),
+            ),
+        })
 }
 
 /// One query of the five columns every row here comes back as, appended to

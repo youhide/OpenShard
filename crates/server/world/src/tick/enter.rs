@@ -157,9 +157,26 @@ impl World {
             },
         };
 
-        // A loaded character spawns exactly where it was saved, its own z
-        // included; a fresh one takes the world's configured start on its facet.
-        let position = saved_position.unwrap_or_else(|| self.state.start_position(facet));
+        // A loaded character returns to its saved tile and the valid surface
+        // nearest its saved z. Normally that is the exact saved point. The
+        // resolution matters after the world changed underneath an offline
+        // character — or after an old movement bug saved one below a house:
+        // preserving an invalid z exactly would restore the body inside a floor
+        // and leave it trapped there forever. A fresh character takes the
+        // world's configured start on its facet.
+        let position = saved_position
+            .map(|saved| {
+                let tile = Tile::new(saved.x, saved.y);
+                openshard_movement::arrival_z(
+                    &self.state.footing(facet, Doors::AsTheyStand),
+                    tile,
+                    i32::from(saved.z),
+                    openshard_movement::PLAYER_HEIGHT,
+                )
+                .and_then(|z| i8::try_from(z).ok())
+                .map_or(saved, |z| Point::new(saved.x, saved.y, z))
+            })
+            .unwrap_or_else(|| self.state.start_position(facet));
         // A stored character faces the way it logged out; a fresh one has never
         // faced anywhere, so it takes the same south the client's own creation
         // screen shows it standing.
@@ -314,19 +331,20 @@ impl World {
                     },
                 );
             }
-            if !sheet.skills.is_empty() {
-                let mut skills = openshard_state::components::Skills::default();
-                let shard_cap = self.state.gameplay.skill_cap;
-                for (id, value, lock, cap) in sheet.skills {
-                    let Some(skill) = openshard_state::skill::Skill::from_id(id) else {
-                        continue;
-                    };
-                    skills.set(skill, value);
-                    skills.set_lock(skill, lock);
-                    skills.set_cap(skill, if cap == 0 { shard_cap } else { cap });
-                }
-                self.state.registry.insert(entity, skills);
+            // A player always needs a skill sheet, even when every skill starts
+            // at 0.0. The UI can truthfully draw an absent entry as zero, but a
+            // gain needs a component to write its very first tenth into.
+            let mut skills = openshard_state::components::Skills::default();
+            let shard_cap = self.state.gameplay.skill_cap;
+            for (id, value, lock, cap) in sheet.skills {
+                let Some(skill) = openshard_state::skill::Skill::from_id(id) else {
+                    continue;
+                };
+                skills.set(skill, value);
+                skills.set_lock(skill, lock);
+                skills.set_cap(skill, if cap == 0 { shard_cap } else { cap });
             }
+            self.state.registry.insert(entity, skills);
             // A poison (and, later, the buffs and debuffs beside it) comes back
             // on relog — logging out and in is not a cure. Its pulses resume from
             // this tick.
@@ -507,6 +525,12 @@ impl World {
                 play_sound: false,
             }),
         );
+        // A weather change is state, not an effect: send the whole current
+        // answer before the player starts drawing, so a reconnect does not
+        // retain rain from a previous world while waiting for the next six-hour
+        // boundary.
+        self.state
+            .send_packet(connection, &ServerPacket::WeatherChange(self.weather()));
         // The flag byte this body would be described to anybody else with —
         // `WorldState::stance_of`, which says why the `0x20` carries it too.
         // A game master logging in learns from this packet, and from nothing

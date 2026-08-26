@@ -1453,32 +1453,28 @@ impl App {
         // filled by `client/net`, which knows nothing about screens, so a
         // window appearing is this end noticing.
         self.sync_own_windows();
-        // # The frame is three steps, and this is the first of them
-        //
-        // Everything that writes runs in `Self::advance`, before anything
-        // reads — see that method's own doc for why the clock and the eye
-        // move there and not here. After it returns, nothing in the frame
-        // moves the world or the camera again; the snapshot below is what
-        // every reader from here on is handed.
-        self.advance(now);
+        // The world and viewport have separate clocks. A hidden window keeps
+        // the former alive, while a visible one catches the latter up before a
+        // snapshot is assembled for drawing.
+        self.advance_world(now);
+        if self.watched() {
+            self.advance_view(now);
+        }
+        // A route belongs to the state clock, not to a presented frame.  In
+        // particular, a compositor is free to stop delivering redraw events
+        // for an unfocused window while the server still expects the next step
+        // of an already-issued destination order.  Keeping this after the
+        // state update also means a packet folded on this wake decides the
+        // next step before it is sent.
+        self.advance_walk(now);
     }
 
-    /// **Step one of three**: everything that writes. What the shell asked
-    /// for last frame, then every clock, then the eye.
+    /// Advance the authoritative world and its presentation clocks.
     ///
-    /// The animation clock moves here, at the top of the frame that is about
-    /// to show its answer — not when the timer that asked for this frame
-    /// fired.
-    ///
-    /// A glide is a position read off a clock, so the moment that clock is
-    /// read has to be the moment the picture is built or the walk judders:
-    /// the timer fires, the loop then lays out the UI, grows an atlas and
-    /// waits on the swapchain, and however long that took is error in the
-    /// body's position — error that varies frame to frame, which is exactly
-    /// what an eye reads as a stutter. It also puts the sampling back in step
-    /// with the display: `WaitUntil` is a floor, the timer's 16ms beats
-    /// against a 60Hz refresh, and a frame drawn from the previous tick's
-    /// clock lands on the wrong side of that beat every second or so.
+    /// The animation clock moves here, on every state wake — not only when a
+    /// picture is built. This is what lets socket traffic, combat and route
+    /// progression keep their real-time order while the compositor has no
+    /// frame to display.
     ///
     /// Whatever really passed — see `App::last_advance`. A stall longer than
     /// a frame, the window minimised or the machine asleep, moves the clock
@@ -1497,17 +1493,14 @@ impl App {
     /// Reordering two calls would have fixed today's version of it and left
     /// the shape that produced it, which is a second reader picking the
     /// camera up at a different moment. So the frame is staged instead.
-    pub(crate) fn advance(&mut self, started: Instant) {
+    ///
+    /// This is deliberately free of viewport, camera, LOD, and GPU work so it
+    /// can run while the window is not being shown. [`advance_view`](Self::advance_view)
+    /// catches the visible side up separately when a frame is needed.
+    pub(crate) fn advance_world(&mut self, started: Instant) {
         let elapsed = started.saturating_duration_since(self.last_advance);
         let asked = std::mem::take(&mut self.pending);
         self.apply(asked);
-        // The viewport the last frame's layout left free — `Shell` holds it
-        // between frames for exactly this. It has to be settled before the eye
-        // is, because it is what decides how much world a camera can see.
-        if let Some(shell) = self.shell.as_ref() {
-            let viewport = shell.viewport();
-            self.control.resize(viewport.width, viewport.height);
-        }
         advance_presentation_to(
             &mut self.world.presentation,
             &mut self.world.motion,
@@ -1518,14 +1511,12 @@ impl App {
         // here. The mixer runs on its own thread but owns no clock of its own,
         // and this is the frame's step for everything that moves without being
         // asked to.
-        self.audio.advance();
-        self.project_player_motion();
+        self.audio.advance(self.world.motion.planning_state().position);
         // Whatever scenario is being walked delivers its knots for the span that
         // just passed, before the eye is asked where the body is: a step that
         // arrived this frame is one the camera has to answer this frame.
         let prediction_before_replay = self.world.motion.planning_state();
         self.advance_replay(elapsed);
-        self.advance_lod_sweep(elapsed);
         if self.world.motion.planning_state() != prediction_before_replay {
             if let Some(trace) = self.movement_trace.as_mut() {
                 trace.record(
@@ -1535,6 +1526,28 @@ impl App {
                 );
             }
         }
+    }
+
+    /// Advance the viewport-facing side of the client to the current world.
+    ///
+    /// Called only for a window that can show a frame. The world may have been
+    /// ticking in the background for some time, so its own clock is distinct
+    /// from [`last_advance`](Self::last_advance): this first visible update
+    /// takes the camera directly to the current world rather than replaying
+    /// every hidden intermediate frame.
+    pub(crate) fn advance_view(&mut self, started: Instant) {
+        let elapsed = started.saturating_duration_since(self.last_view_advance);
+        self.last_view_advance = started;
+        // The viewport the last frame's layout left free — `Shell` holds it
+        // between frames for exactly this. It has to be settled before the eye
+        // is, because it is what decides how much world a camera can see.
+        if let Some(shell) = self.shell.as_ref() {
+            let viewport = shell.viewport();
+            self.control.resize(viewport.width, viewport.height);
+        }
+        self.refresh_harvest_tool_visuals();
+        self.project_player_motion();
+        self.advance_lod_sweep(elapsed);
         // A viewport that grew may have taken the world texture past what the
         // device allows, which no zoom step asked for.
         self.fit_zoom_to_device();
@@ -1602,6 +1615,11 @@ impl App {
         // the HUD is built — see the next paragraph.
         let cutaway = self.cutaway();
         let interior = self.interior_frame();
+        // A map-edit removal click addresses the immutable map layer rather
+        // than the frontmost world object. A placed house expands into live
+        // item components, so without this a floor inside it intercepts every
+        // attempt to remove a map static below it.
+        let removing_map_static = self.map_editor.removes_static();
         // The ground tile under the cursor, and its ring — asked here beside
         // the picks below rather than a second time when the HUD is built:
         // this used to be `App::hud`'s own call to `Self::pick_tile`, a second
@@ -1714,7 +1732,7 @@ impl App {
         // per frame with the pointer over the world, and the placement it does
         // per static is the collector's own — see the Frames tab if it ever
         // shows.
-        let on_static = match owns_pointer && on_mobile.is_none() {
+        let map_static = match owns_pointer && (on_mobile.is_none() || removing_map_static) {
             true => self.window.as_ref().and_then(|window| {
                 statics::pick_with_interior(
                     self.resources.map(),
@@ -1729,8 +1747,13 @@ impl App {
             }),
             false => None,
         };
-        // Which of the two the frame drew in front, and the other one put out.
-        let (on_item, on_static) = crate::picking::in_front(on_item, on_static);
+        // An ordinary click takes the picture's frontmost answer. The editor's
+        // Remove static tool deliberately asks a different question: which map
+        // record lies at this cursor pixel? Its decision is centralised with
+        // the ordinary ordering so the published hover state still has exactly
+        // one answer.
+        let (on_mobile, on_item, on_static) =
+            crate::picking::map_static_for_removal(removing_map_static, on_mobile, on_item, map_static);
         // What the mode allows to light up. `Tiles` lights neither, which is the
         // whole of that setting; the facts above are unchanged by it.
         let lit_mobile = on_mobile.filter(|_| self.graphics.highlight != HighlightTarget::Tiles);
@@ -1783,13 +1806,14 @@ impl App {
         let selected_item = self
             .picking
             .selected
-            .and_then(SelectedIdentity::as_item)
-            .and_then(|serial| {
+            .and_then(SelectedIdentity::as_hovered_item)
+            .and_then(|selected| {
                 self.world
                     .presentation
                     .item_serials
                     .iter()
-                    .position(|candidate| *candidate == serial)
+                    .zip(self.world.presentation.items.iter())
+                    .position(|(serial, item)| selected.matches(*serial, item.graphic, item.at))
                     .map(openshard_client_render::items::ItemIndex::new)
             });
         FrameFacts {
@@ -1835,12 +1859,15 @@ impl App {
                 .and_then(|drawn| drawn.get(index.position()))
                 .map(|(who, _)| *who)
         });
-        // The serial *and* the place, read out of the one entry the hit test
+        // The serial, art and place, read out of the one entry the hit test
         // hit: `item_serials` runs parallel to `items` and a house repeats its
         // serial down both, so the serial alone could not be looked back up to
-        // the storey that was clicked. See [`crate::picking::HoveredItem`].
+        // the storey that was clicked. The art distinguishes a floor from a
+        // wall or roof when Ctrl-click chooses a route through a house. See
+        // [`crate::picking::HoveredItem`].
         self.picking.hover.item = facts.on_item.map(|index| crate::picking::HoveredItem {
             serial: self.world.presentation.item_serials[index.position()],
+            graphic: self.world.presentation.items[index.position()].graphic,
             at: self.world.presentation.items[index.position()].at,
         });
     }
@@ -2523,26 +2550,39 @@ impl App {
                 }
             }
             false => {
-                let labels: Vec<Label<'_>> = overhead
-                    .iter()
-                    .chain(counts.iter())
-                    .map(|(anchor, line, font, hue)| Label {
-                        anchor: *anchor,
-                        text: line.as_str(),
-                        font: bitmap_font_override.unwrap_or(*font),
-                        hue: *hue,
-                        // Nearer than anything the world draws, rather than
-                        // an `Order` of its own: speech reads as an overlay
-                        // above whoever said it in every reference client,
-                        // and there is no real case here of a wall in front
-                        // of the speaker hiding it that a viewer would want
-                        // honoured. Worth revisiting with a
-                        // `depth::text_priority_z` alongside the mobile's
-                        // own if that ever stops being true.
-                        depth: 0.0,
-                    })
-                    .collect();
-                WorldText::Bitmap(text::collect(&labels, &self.resources.font_atlas))
+                fn bitmap_labels<'a>(
+                    list: &'a [(ViewPixel, String, Font, Hue)],
+                    bitmap_font_override: Option<Font>,
+                ) -> Vec<Label<'a>> {
+                    list.iter()
+                        .map(|(anchor, line, font, hue)| Label {
+                            anchor: *anchor,
+                            text: line.as_str(),
+                            font: bitmap_font_override.unwrap_or(*font),
+                            hue: *hue,
+                            // Nearer than anything the world draws, rather than
+                            // an `Order` of its own: speech reads as an overlay
+                            // above whoever said it in every reference client,
+                            // and there is no real case here of a wall in front
+                            // of the speaker hiding it that a viewer would want
+                            // honoured. Worth revisiting with a
+                            // `depth::text_priority_z` alongside the mobile's
+                            // own if that ever stops being true.
+                            depth: 0.0,
+                        })
+                        .collect()
+                }
+                let mut quads = text::collect_scaled(
+                    &bitmap_labels(&overhead, bitmap_font_override),
+                    &self.resources.font_atlas,
+                    fonts.bitmap_speech_scale(),
+                );
+                quads.extend(text::collect_scaled(
+                    &bitmap_labels(&counts, bitmap_font_override),
+                    &self.resources.font_atlas,
+                    fonts.bitmap_stack_count_scale(),
+                ));
+                WorldText::Bitmap(quads)
             }
         };
         let depth_view = window.depth.create_view(&wgpu::TextureViewDescriptor::default());
@@ -2636,8 +2676,6 @@ impl App {
         // neighbours above: `resources.gump_atlas` and `windows.drawn_windows`
         // are the two things on `self` it really writes, and both are named
         // in its signature rather than reached through `&mut self`.
-        let mut window_text_quads: Vec<SpriteQuad> = Vec::new();
-        let mut window_ttf_quads: Vec<SpriteQuad> = Vec::new();
         draw_gump_windows(
             &mut self.resources,
             &self.world,
@@ -2654,35 +2692,17 @@ impl App {
             window,
             &mut encoder,
             &view,
-            &mut window_text_quads,
-            &mut window_ttf_quads,
         );
         // Gump-space text belongs either to the client windows above or to
         // the HUD below. World-attached text was already drawn in its own
         // layer, so no later addition can put it above a paperdoll.
         //
-        // **One list because there is one pass.** `GumpRenderer` holds a single
-        // instance buffer, and `queue.write_buffer` lands before the encoder is
-        // submitted — so two `render` calls in a frame do not draw twice, they
-        // draw the *second* call's instances twice and lose the first's. That
-        // is what happened to every window's text for as long as there was a
-        // line in the journal to overwrite it with: a paperdoll's name plate
-        // was written, cut, submitted, and then quietly replaced by the chat.
-        // A second walk over `drawn_windows` used to stand here, matching the
-        // same `(WindowSubject, Drawn)` pairs `draw_gump_windows` matches, to
-        // turn each window's text into labels. **It has iterated
-        // `std::iter::empty` since window text moved next to its own art** —
-        // which it had to, because one text pass for every window drew a lower
-        // catalogue's lines over a later paperdoll — so every arm in it was
-        // unreachable, and the vendor arm's comment said as much about a walk
-        // that was not running at all.
-        //
-        // It is deleted rather than kept in step. `docs/window_components.md`
-        // filed it as `docs/parity.md`'s defect class — one frame assembled in
-        // two places, so agreement is a coincidence — and the honest version of
-        // that entry is that the second place was already dead. There is one
-        // walk now, in `render_passes.rs`, and step 4 was the step that would
-        // otherwise have had to update a dialog's arm in both.
+        // Window labels are recorded directly after their own art in
+        // `draw_gump_windows`, using independent text-layer buffers.  The HUD
+        // remains a single later pass, because its journal and input line are
+        // one component above every client window.
+        let mut window_text_quads: Vec<SpriteQuad> = Vec::new();
+        let mut window_ttf_quads: Vec<SpriteQuad> = Vec::new();
         // `draw_chat_and_speech` is a free function like its neighbours
         // above, though a plainer one: nothing it is handed is written back
         // to `self` at all, only appended to the caller's window/HUD lists.
@@ -2910,60 +2930,64 @@ impl App {
             gpu,
             repacked,
         );
-        if let Some(frame) = self.frames.frames().last().copied() {
-            let gpu_passes = self
-                .window
-                .as_ref()
-                .and_then(|window| window.gpu.as_ref())
-                .map_or(&[][..], crate::profile::Gpu::passes);
-            crate::jank::record(
-                frame,
-                crate::jank::CpuPasses {
-                    ui_hud: ui_hud_cost,
-                    ui_terrain: hud_timings.terrain,
-                    ui_route: hud_timings.route,
-                    ui_occluders: hud_timings.occluders,
-                    ui_picking: hud_timings.picking,
-                    ui_perf: hud_timings.perf,
-                    ui_layout: ui_layout_cost,
-                    ui_paint: ui_paint_cost,
-                    facts: facts_cost,
-                    atlases: atlases_cost,
-                    targets: targets_cost,
-                    geometry: geometry_cost,
-                    lighting: assembly_costs.lighting,
-                    ground: assembly_costs.ground,
-                    statics: assembly_costs.statics,
-                    static_walk: assembly_costs.static_walk,
-                    static_sort: assembly_costs.static_sort,
-                    items: assembly_costs.items,
-                    static_cache_copy: geometry_costs.static_cache_copy,
-                    split_corners: geometry_costs.split,
-                    overlays: geometry_costs.overlays,
-                    ground_quads: geometry_costs.ground_quads,
-                    static_rows: geometry_costs.static_rows,
-                    item_rows: geometry_costs.item_rows,
-                    encode: encode_cost,
-                    encode_ground: world_pass_audit.cpu_ground,
-                    encode_composites: world_pass_audit.cpu_composites,
-                    encode_ground_detail: world_pass_audit.cpu_ground_detail,
-                    ground_detail_cpu_uniforms: world_pass_audit.ground_detail_cpu_uniforms,
-                    ground_detail_cpu_serialize: world_pass_audit.ground_detail_cpu_serialize,
-                    ground_detail_cpu_upload: world_pass_audit.ground_detail_cpu_upload,
-                    ground_detail_cpu_pass: world_pass_audit.ground_detail_cpu_pass,
-                    encode_statics: world_pass_audit.cpu_statics,
-                    encode_items: world_pass_audit.cpu_items,
-                    composite_blocks: world_pass_audit.ready_blocks,
-                    composite_bindings_created: world_pass_audit.composite_bindings_created,
-                    composite_bindings_reused: world_pass_audit.composite_bindings_reused,
-                    composite_cpu_upload: world_pass_audit.composite_cpu_upload,
-                    composite_cpu_bindings: world_pass_audit.composite_cpu_bindings,
-                    composite_cpu_pass: world_pass_audit.composite_cpu_pass,
-                    static_animated: assembly_costs.static_animated,
-                },
-                atlas_work,
-                gpu_passes,
-            );
+        if crate::jank::enabled() {
+            if let Some(frame) = self.frames.frames().last().copied() {
+                let gpu_passes = self
+                    .window
+                    .as_ref()
+                    .and_then(|window| window.gpu.as_ref())
+                    .map_or(&[][..], crate::profile::Gpu::passes);
+                crate::jank::record(
+                    frame,
+                    crate::jank::CpuPasses {
+                        ui_hud: ui_hud_cost,
+                        ui_terrain: hud_timings.terrain,
+                        ui_route: hud_timings.route,
+                        ui_occluders: hud_timings.occluders,
+                        ui_picking: hud_timings.picking,
+                        ui_perf: hud_timings.perf,
+                        ui_layout: ui_layout_cost,
+                        ui_paint: ui_paint_cost,
+                        facts: facts_cost,
+                        atlases: atlases_cost,
+                        targets: targets_cost,
+                        geometry: geometry_cost,
+                        lighting: assembly_costs.lighting,
+                        ground: assembly_costs.ground,
+                        statics: assembly_costs.statics,
+                        static_walk: assembly_costs.static_walk,
+                        static_sort: assembly_costs.static_sort,
+                        items: assembly_costs.items,
+                        static_cache_copy: geometry_costs.static_cache_copy,
+                        split_corners: geometry_costs.split,
+                        overlays: geometry_costs.overlays,
+                        ground_quads: geometry_costs.ground_quads,
+                        static_rows: geometry_costs.static_rows,
+                        item_rows: geometry_costs.item_rows,
+                        light_sources: geometry.lighting.lights.len(),
+                        sun_active: geometry.lighting.sun.is_some_and(|sun| sun.intensity > 0.0),
+                        encode: encode_cost,
+                        encode_ground: world_pass_audit.cpu_ground,
+                        encode_composites: world_pass_audit.cpu_composites,
+                        encode_ground_detail: world_pass_audit.cpu_ground_detail,
+                        ground_detail_cpu_uniforms: world_pass_audit.ground_detail_cpu_uniforms,
+                        ground_detail_cpu_serialize: world_pass_audit.ground_detail_cpu_serialize,
+                        ground_detail_cpu_upload: world_pass_audit.ground_detail_cpu_upload,
+                        ground_detail_cpu_pass: world_pass_audit.ground_detail_cpu_pass,
+                        encode_statics: world_pass_audit.cpu_statics,
+                        encode_items: world_pass_audit.cpu_items,
+                        composite_blocks: world_pass_audit.ready_blocks,
+                        composite_bindings_created: world_pass_audit.composite_bindings_created,
+                        composite_bindings_reused: world_pass_audit.composite_bindings_reused,
+                        composite_cpu_upload: world_pass_audit.composite_cpu_upload,
+                        composite_cpu_bindings: world_pass_audit.composite_cpu_bindings,
+                        composite_cpu_pass: world_pass_audit.composite_cpu_pass,
+                        static_animated: assembly_costs.static_animated,
+                    },
+                    atlas_work,
+                    gpu_passes,
+                );
+            }
         }
         self.last_frame = started;
     }

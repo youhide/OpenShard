@@ -1022,6 +1022,105 @@ impl EncodePacket for LightLevel {
     }
 }
 
+impl DecodePacket for LightLevel {
+    const ID: u8 = 0x4F;
+
+    fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
+        Ok(Self {
+            level: Light(reader.u8()?),
+        })
+    }
+}
+
+/// The precipitation a shard asks the client to draw.
+///
+/// The client protocol reserves two values outside the four visible kinds:
+/// `Temperature` changes only the thermometer, and `Clear` stops any existing
+/// precipitation.  Keep both in the same domain rather than treating clear as
+/// the absence of a packet: the latter is a state change a reconnecting client
+/// must receive as explicitly as rain is.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Weather {
+    Rain,
+    StormBrewing,
+    Snow,
+    Storm,
+    Temperature,
+    Clear,
+}
+
+impl Weather {
+    /// The byte the classic weather packet uses for this condition.
+    #[must_use]
+    pub const fn to_bits(self) -> u8 {
+        match self {
+            Self::Rain => 0,
+            Self::StormBrewing => 1,
+            Self::Snow => 2,
+            Self::Storm => 3,
+            Self::Temperature => 0xFE,
+            Self::Clear => 0xFF,
+        }
+    }
+
+    /// The conditions the classic client can name. Unknown values are refused:
+    /// guessing that an unfamiliar effect is clear would leave a prior storm
+    /// drawn forever, while guessing rain invents weather the shard never sent.
+    #[must_use]
+    pub const fn from_bits(bits: u8) -> Option<Self> {
+        match bits {
+            0 => Some(Self::Rain),
+            1 => Some(Self::StormBrewing),
+            2 => Some(Self::Snow),
+            3 => Some(Self::Storm),
+            0xFE => Some(Self::Temperature),
+            0xFF => Some(Self::Clear),
+            _ => None,
+        }
+    }
+}
+
+/// `0x65` — change the weather. 4 bytes.
+///
+/// `intensity` is the classic client's particle-count byte. `temperature` is
+/// kept even for precipitation packets because the wire carries it on every
+/// change, and it makes a `Temperature` update a normal value rather than a
+/// separate packet shape.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WeatherChange {
+    pub weather: Weather,
+    pub intensity: u8,
+    pub temperature: u8,
+}
+
+impl EncodePacket for WeatherChange {
+    const ID: u8 = 0x65;
+    const LENGTH: PacketLength = PacketLength::Fixed(4);
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u8(self.weather.to_bits());
+        out.u8(self.intensity);
+        out.u8(self.temperature);
+    }
+}
+
+impl DecodePacket for WeatherChange {
+    const ID: u8 = 0x65;
+
+    fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
+        let kind = reader.u8()?;
+        let weather = Weather::from_bits(kind).ok_or(DecodeError::UnknownValue {
+            field: "0x65 weather kind",
+            value: u32::from(kind),
+        })?;
+        Ok(Self {
+            weather,
+            intensity: reader.u8()?,
+            temperature: reader.u8()?,
+        })
+    }
+}
+
 /// `0x6D` — play a music track. 3 bytes.
 ///
 /// The id indexes the client's own music list (ServUO's `MusicName` enum order,
@@ -2175,5 +2274,21 @@ mod tests {
         // `from_bits` it refuses rather than silently drawing spring.
         assert_eq!(Season::try_from_bits(5), None);
         assert_eq!(Season::try_from_bits(u8::MAX), None);
+    }
+
+    #[test]
+    fn weather_keeps_the_classic_control_values_distinct() {
+        for (weather, bits) in [
+            (Weather::Rain, 0),
+            (Weather::StormBrewing, 1),
+            (Weather::Snow, 2),
+            (Weather::Storm, 3),
+            (Weather::Temperature, 0xFE),
+            (Weather::Clear, 0xFF),
+        ] {
+            assert_eq!(weather.to_bits(), bits);
+            assert_eq!(Weather::from_bits(bits), Some(weather));
+        }
+        assert_eq!(Weather::from_bits(4), None);
     }
 }

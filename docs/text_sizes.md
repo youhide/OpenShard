@@ -14,9 +14,10 @@ Three different things called themselves a "scale" and only one of them had to:
   pixel height and shades the outline analytically), so this was a real size
   wearing a multiplier's clothes: a player who wants 13-pixel text has to work
   out that this is ×0.8125.
-- **`desk::ChatScale`** — an integer upscale of *finished quads*, because
-  `fonts.mul` is a bitmap face with no continuous size to ask for. This one is
-  a scale because it has to be, and it stays.
+- **`desk::ChatScale`** — an integer upscale of *finished quads*. `fonts.mul`
+  is a bitmap face, but high-density displays make fractional finished-quad
+  scaling useful, so this separate chat-only setting was retired in favour of
+  the role sizes below.
 - **`desk::WindowScale`** — how much bigger than its own art a window draws.
   A window's caption is drawn through it too, so at 2× the glyphs are stretched
   to twice their rasterized size instead of being *rasterized twice as large*.
@@ -77,9 +78,11 @@ window is rasterized at twice the pixels, not stretched to twice the size. The
 glyph quads themselves are then placed 1:1 — positions still move with the
 window's magnification, sizes do not.
 
-**D5 — `ChatScale` stays an integer, and stays `fonts.mul`-only.** A bitmap
-face has no other honest answer. It disappears from the picture entirely when a
-TrueType face is loaded, which is already true today.
+**D5 — One set of role settings reaches both faces.** A TrueType face receives
+the exact fractional pixel size at rasterization. `fonts.mul` cannot be
+rasterized again, so it scales its finished quads by the matching fractional
+role factor. `speech`, `window`, `tooltip`, and `stack_count` therefore remain
+useful after switching to the classic face as well as after switching to TTF.
 
 **D6 — With a face loaded, windows and tooltips draw through it too.** They are
 `fonts.mul` today whatever `--ttf-font` says, which is the last place a size
@@ -102,10 +105,10 @@ different F1 face cannot make the chat control's box drift from its glyphs.
   `collect_gump_ttf`/`gump_width_ttf` take one. Existing callers pass the one
   size they use today, so nothing changes on screen. `sync_ttf_scale` and the
   re-bake go; `TtfAtlas::reset` arrives with the `Full` policy above.
-- **P2 — the knobs.** `desk::FontSizes` with D3's four fields; `TtfScale`
-  retires. The Chat tab's slider becomes pixels. An old `ttf_scale` in a
-  `client_ui.toml` is ignored rather than migrated — it is a multiplier of a
-  base this file no longer has.
+- **P2 — the knobs.** `desk::FontSizes` with D3's four fields; `TtfScale` and
+  the old bitmap-only `ChatScale` retire. The Chat tab's sliders are pixels for
+  TTF and fractional scale controls for `fonts.mul`. Old per-face scales in a
+  `client_ui.toml` are ignored rather than migrated.
 - **P3 — windows and tooltips through the face.** D6, and D4's `WindowScale`
   half with it, since a window's caption is where the two meet.
 - **P4 — the pile's count in its own size.** `stack_count`, which is the

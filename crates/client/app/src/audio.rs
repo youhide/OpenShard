@@ -8,11 +8,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::wire::{Graphic, SoundId};
-use openshard_protocol::world::{MusicId, Point};
+use openshard_protocol::world::{MusicId, Point, Weather, WeatherChange};
 use openshard_uofiles::anim::{BodyKind, is_ghost};
 
 /// A locally inferred human footfall.
@@ -63,6 +64,7 @@ impl Audio {
             match packet {
                 ServerPacket::PlaySound(sound) => audio.play_sound(sound.sound, sound.at, listener),
                 ServerPacket::PlayMusic(music) => audio.play_music(music.track),
+                ServerPacket::WeatherChange(change) => audio.set_weather(*change, listener),
                 _ => {}
             }
         }
@@ -112,10 +114,15 @@ impl Audio {
     /// no clock to notice that for itself. The check is an atomic load against a
     /// source that is minutes long, so a frame is a generous place for it — and
     /// it is the frame that already owns everything else that advances.
-    pub(crate) fn advance(&mut self) {
+    pub(crate) fn advance(&mut self, listener: Point) {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(audio) = self.native.as_mut() {
             audio.repeat_finished_track();
+            audio.advance_weather(listener);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = listener;
         }
     }
 
@@ -150,6 +157,41 @@ fn container_sounds(gump: Graphic) -> Option<(SoundId, SoundId)> {
     Some((SoundId(sounds.0), SoundId(sounds.1)))
 }
 
+/// ClassicUO alternates the three wind clips and the two thunder clips while
+/// its weather simulation changes wind direction.
+#[cfg(not(target_arch = "wasm32"))]
+fn weather_sound(weather: Weather, index: usize) -> Option<SoundId> {
+    let sounds: &[u16] = match weather {
+        Weather::Snow => &[0x0014, 0x0015, 0x0016],
+        Weather::StormBrewing | Weather::Storm => &[0x0028, 0x0206],
+        Weather::Rain | Weather::Temperature | Weather::Clear => return None,
+    };
+    Some(SoundId(sounds[index % sounds.len()]))
+}
+
+/// ClassicUO picks a new wind direction every random 13–19 seconds. Cycling
+/// that same interval range is repeatable for recordings while retaining the
+/// cadence and avoiding a timer that fires in a silent clear sky.
+#[cfg(not(target_arch = "wasm32"))]
+fn weather_delay(index: usize) -> Duration {
+    const SECONDS: [u64; 3] = [13, 19, 16];
+    Duration::from_secs(SECONDS[index % SECONDS.len()])
+}
+
+/// Weather is heard from a random-looking place 10–18 tiles around the player
+/// in ClassicUO. These fixed rotations preserve the audible distance while
+/// keeping replay audio deterministic.
+#[cfg(not(target_arch = "wasm32"))]
+fn weather_point(listener: Point, index: usize) -> Point {
+    const OFFSETS: [(i16, i16); 4] = [(10, 14), (-18, 11), (15, -13), (-12, -17)];
+    let (x, y) = OFFSETS[index % OFFSETS.len()];
+    Point::new(
+        listener.x.saturating_add_signed(x),
+        listener.y.saturating_add_signed(y),
+        listener.z,
+    )
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 struct NativeAudio {
     output: rodio::MixerDeviceSink,
@@ -165,6 +207,17 @@ struct NativeAudio {
     footsteps: HashMap<Option<Serial>, FootstepState>,
     unheard: HashSet<SoundId>,
     missing_tracks: HashSet<MusicId>,
+    weather: Option<WeatherAudio>,
+}
+
+/// A client-owned weather ambience. ClassicUO places these effects around the
+/// player rather than waiting for a server `0x54` sound packet.
+#[cfg(not(target_arch = "wasm32"))]
+struct WeatherAudio {
+    weather: Weather,
+    next: Instant,
+    sound_index: usize,
+    offset_index: usize,
 }
 
 /// The alternating sole of one walker.  It belongs to a mobile, not to the
@@ -220,6 +273,7 @@ impl NativeAudio {
             footsteps: HashMap::new(),
             unheard: HashSet::new(),
             missing_tracks: HashSet::new(),
+            weather: None,
         })
     }
 
@@ -269,6 +323,42 @@ impl NativeAudio {
         let (sound, delay) = footstep_sound(state, step);
         state.next = Some(now + delay);
         self.play_sound(sound, step.at, listener);
+    }
+
+    fn set_weather(&mut self, change: WeatherChange, listener: Point) {
+        let Some(sound) = weather_sound(change.weather, 0) else {
+            self.weather = None;
+            return;
+        };
+        if self
+            .weather
+            .as_ref()
+            .is_some_and(|state| state.weather == change.weather)
+        {
+            return;
+        }
+        let now = Instant::now();
+        self.weather = Some(WeatherAudio {
+            weather: change.weather,
+            next: now + weather_delay(0),
+            sound_index: 1,
+            offset_index: 1,
+        });
+        self.play_sound(sound, weather_point(listener, 0), listener);
+    }
+
+    fn advance_weather(&mut self, listener: Point) {
+        let now = Instant::now();
+        let Some(state) = self.weather.as_mut().filter(|state| state.next <= now) else {
+            return;
+        };
+        let sound = weather_sound(state.weather, state.sound_index)
+            .expect("only sounding weather is stored in WeatherAudio");
+        let at = weather_point(listener, state.offset_index);
+        state.next = now + weather_delay(state.sound_index);
+        state.sound_index += 1;
+        state.offset_index += 1;
+        self.play_sound(sound, at, listener);
     }
 
     fn play_music(&mut self, track: MusicId) {
@@ -751,6 +841,25 @@ mod tests {
             "a chest keeps its own latch sounds"
         );
         assert_eq!(super::container_sounds(Graphic(0x9999)), None);
+    }
+
+    #[test]
+    fn classic_weather_uses_wind_for_snow_and_thunder_for_storms() {
+        use openshard_protocol::world::Weather;
+
+        assert_eq!(super::weather_sound(Weather::Snow, 0), Some(SoundId(0x0014)));
+        assert_eq!(super::weather_sound(Weather::Snow, 2), Some(SoundId(0x0016)));
+        assert_eq!(
+            super::weather_sound(Weather::StormBrewing, 1),
+            Some(SoundId(0x0206))
+        );
+        assert_eq!(super::weather_sound(Weather::Storm, 0), Some(SoundId(0x0028)));
+        assert_eq!(super::weather_sound(Weather::Rain, 0), None);
+        assert_eq!(super::weather_delay(0), std::time::Duration::from_secs(13));
+        assert_eq!(super::weather_delay(1), std::time::Duration::from_secs(19));
+        let here = Point::new(100, 100, 0);
+        let at = super::weather_point(here, 1);
+        assert_eq!((at.x.abs_diff(here.x), at.y.abs_diff(here.y)), (18, 11));
     }
 
     #[test]

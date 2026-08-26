@@ -134,6 +134,17 @@ pub(crate) struct Restored {
 /// partially restored world is no world at all.
 pub(crate) async fn restore(store: &Store, config: &Config, world: World) -> Restored {
     let accounts = load_accounts(store, config).await;
+    let world = restore_saved_world(store, config, world).await;
+    Restored { accounts, world }
+}
+
+/// Lay the persisted world over a freshly loaded map without starting the shard.
+///
+/// This is the world half of [`restore`], exposed separately for read-only
+/// diagnostic binaries. It deliberately does not load or seed accounts: a probe
+/// that only asks the movement authority a question must not create an account
+/// row as a side effect.
+pub async fn restore_saved_world(store: &Store, config: &Config, world: World) -> World {
     let mut world = world;
     // Before the characters, whose records name a guild by id. Nothing at boot
     // resolves one — the id is copied onto a component — but the order is the one
@@ -146,8 +157,7 @@ pub(crate) async fn restore(store: &Store, config: &Config, world: World) -> Res
     restore_decorations(store, &mut world).await;
     restore_spawners(store, &mut world).await;
     restore_regions(store, &mut world).await;
-    let world = restore_world(store, world, config.world.seed).await;
-    Restored { accounts, world }
+    restore_world(store, world, config.world.seed).await
 }
 
 /// Accounts come from the store first — their credentials are the argon2

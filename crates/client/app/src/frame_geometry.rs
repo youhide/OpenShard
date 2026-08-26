@@ -16,12 +16,43 @@ use openshard_client_render::mobiles::Mobile;
 use openshard_client_render::sprite::{SpriteQuad, split_corners};
 use openshard_client_render::{ground, items, light, mobiles, statics};
 use openshard_map::grid::BlockCoord;
+use openshard_protocol::world::Weather;
 
 use crate::crowd::Who;
 use crate::diagnostics::Pick;
 use crate::picking::{self, SelectedIdentity};
 use crate::window::Screen;
 use crate::{graphics, resources, world};
+
+/// The ambient colour for the shard's current light level and weather.
+///
+/// `0x4F` is deliberately a coarse, backwards darkness scale. Interpolating
+/// its endpoints on the client makes the twelve steps of the classic cycle a
+/// continuous visual day, while `GraphicsSettings::daylight` removes the last
+/// visible step at the instant a packet arrives.
+fn ambient_for(daylight: f32, weather: openshard_client_net::view::WeatherState) -> light::Ambient {
+    let day = (1.0 - daylight / 12.0).clamp(0.0, 1.0);
+    let blend = |night: [f32; 3], day_colour: [f32; 3]| {
+        std::array::from_fn(|channel| night[channel] + (day_colour[channel] - night[channel]) * day)
+    };
+    let mut ambient = light::Ambient {
+        sky: blend(light::NIGHT.sky, light::Ambient::DAY.sky),
+        ground: blend(light::NIGHT.ground, light::Ambient::DAY.ground),
+    };
+    let strength = f32::from(weather.intensity) / f32::from(u8::MAX);
+    let filter = match weather.weather {
+        Weather::Rain | Weather::StormBrewing => [0.72, 0.77, 0.86],
+        Weather::Storm => [0.48, 0.56, 0.70],
+        // Snow leaves more of the sky's bounced light than rain, but cools it.
+        Weather::Snow => [0.83, 0.88, 1.0],
+        Weather::Temperature | Weather::Clear => [1.0; 3],
+    };
+    for (channel, factor) in filter.into_iter().enumerate() {
+        ambient.sky[channel] *= 1.0 + (factor - 1.0) * strength;
+        ambient.ground[channel] *= 1.0 + (factor - 1.0) * strength;
+    }
+    ambient
+}
 
 fn items_fingerprint(items: &[openshard_client_render::items::GroundItem]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
@@ -42,6 +73,25 @@ fn items_fingerprint(items: &[openshard_client_render::items::GroundItem]) -> u6
         add(u64::from(item.hue.0));
     }
     hash
+}
+
+/// Split the opaque part of a server-item collection from its private cutaway
+/// part.
+///
+/// The two sprite passes have independent instance and volume buffers.  In
+/// particular, a multi-house arrives as opaque server items: its quads' volume
+/// ranges are relative to `items.boxes`, and passing the map's boxes (or none)
+/// to the dynamic pass makes its colour render over an unrelated G-buffer.
+fn separate_opaque_items(
+    mut items: statics::StaticGeometry,
+) -> (
+    openshard_client_render::sprite::InstanceRows,
+    Vec<openshard_client_render::impostor::Volume>,
+    statics::StaticGeometry,
+) {
+    let instances = split_corners(std::mem::take(&mut items.quads));
+    let boxes = std::mem::take(&mut items.boxes);
+    (instances, boxes, items)
 }
 
 /// What [`assemble_geometry`] spends *outside* `frame::assemble`, and how much
@@ -95,6 +145,11 @@ pub(crate) struct FrameGeometry {
     /// Server-owned items, kept out of map composites and drawn with a fresh
     /// current-frame instance buffer after cached map blocks.
     pub(crate) item_instances: openshard_client_render::sprite::InstanceRows,
+    /// The dynamic items' own impostor geometry.  Its ranges are relative to
+    /// this list, not to [`Self::mesh::boxes`]: a multi-house is expanded into
+    /// server items, and its wall must write its own position, normal and solid
+    /// into the G-buffer rather than inherit the terrain underneath.
+    pub(crate) item_boxes: Vec<openshard_client_render::impostor::Volume>,
     /// Architecture that overlaps the player's picture, held aside from the
     /// opaque rows so its private deferred layer can be composited after the
     /// opaque world is lit.
@@ -204,21 +259,29 @@ pub(crate) fn assemble_geometry(
     held_mobile: Option<openshard_client_render::mobiles::MobileIndex>,
     drawn: &[Mobile],
 ) -> FrameGeometry {
-    // Three skies and not two: night, a daylight with a sun in it, and the
-    // plain daylight that is the identity — the frame the blit has always
-    // copied through untouched. The middle one is a key today; see
-    // `App::sunlit`.
-    let sky = match (graphics.night, graphics.sunlit) {
-        (true, _) => Some(light::NIGHT),
-        (false, true) => Some(light::SKYLIGHT),
+    // The shard's clock is the ordinary path. It reaches us as a stepped
+    // `0x4F`; `Daylight` turns that into a continuous ambient over the few
+    // seconds after a change. F1 can hold the ordinary daylight picture still
+    // while the shard keeps advancing; F10 remains the separate local night
+    // picture for judging the map lights.
+    let shard_sky = graphics
+        .time_of_day
+        .then(|| {
+            world.authoritative.view.as_ref().and_then(|view| {
+                view.light.map(|level| {
+                    let level = graphics.daylight.sample(level, world.presentation.flame_clock);
+                    ambient_for(level, view.weather)
+                })
+            })
+        })
+        .flatten();
+    let sky = match (graphics.night, shard_sky, graphics.sunlit) {
+        (true, _, _) => Some(light::NIGHT),
+        (false, Some(ambient), _) => Some(ambient),
+        (false, None, true) => Some(light::SKYLIGHT),
         // Daylight, where the pass is a copy and no grid is built at all —
         // unless the solids view is on, and then the grid *is* the subject.
-        // `Ambient::DAY` flattened is the identity, so the picture under the
-        // boxes is the same daylight frame it was; what it buys is that the
-        // list drawn is the one the shader would walk, out of the same bake,
-        // rather than a second walk of the map made for the view. See
-        // `docs/lighting.md` step 23.0.
-        (false, false) => graphics.show_solids.then_some(light::Ambient::DAY),
+        (false, None, false) => graphics.show_solids.then_some(light::Ambient::DAY),
     };
     // And whether a tile's share of it depends on what stands over the tile.
     // Off by default: see `App::sky_field`, and `light::Ambient::flattened`
@@ -431,8 +494,8 @@ pub(crate) fn assemble_geometry(
     // The opaque lists stay split, but the private cutaway target has one
     // depth/G-buffer and therefore needs both producers in the same call.
     let split_started = std::time::Instant::now();
-    let item_instances = split_corners(std::mem::take(&mut item_geometry.quads));
-    map_statics.absorb_cutaway(item_geometry);
+    let (item_instances, item_boxes, item_cutaway) = separate_opaque_items(item_geometry);
+    map_statics.absorb_cutaway(item_cutaway);
     let statics::StaticGeometry {
         quads: map_static_quads,
         cutaway_quads,
@@ -557,6 +620,7 @@ pub(crate) fn assemble_geometry(
         quads,
         map_static_instances,
         item_instances,
+        item_boxes,
         cutaway_instances,
         cutaway_boxes,
         mesh,
@@ -606,12 +670,16 @@ pub(crate) struct FrameFacts {
 
 #[cfg(test)]
 mod tests {
+    use openshard_client_render::impostor::Volume;
     use openshard_client_render::items::GroundItem;
+    use openshard_client_render::light::WorldVec;
+    use openshard_client_render::occlusion;
+    use openshard_client_render::statics::StaticGeometry;
     use openshard_protocol::items::ItemAmount;
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_protocol::world::Point;
 
-    use super::items_fingerprint;
+    use super::{items_fingerprint, separate_opaque_items};
 
     fn at(x: u16, y: u16) -> GroundItem {
         GroundItem {
@@ -650,6 +718,31 @@ mod tests {
             items_fingerprint(&here),
             items_fingerprint(&here.clone()),
             "the same frame hashed two ways"
+        );
+    }
+
+    /// A multi-house is expanded into server items. Its volumes are addressed
+    /// by the dynamic item rows, so dropping this list makes its art cover the
+    /// old ground G-buffer and leaves the house unlit.
+    #[test]
+    fn an_opaque_item_keeps_its_own_impostor_volumes() {
+        let volume = Volume {
+            lo: WorldVec::new(10.0, 20.0, 0.0),
+            hi: WorldVec::new(11.0, 21.0, 11.0),
+            solid: None,
+            edges: occlusion::Edges::SOUTH,
+        };
+        let items = StaticGeometry {
+            boxes: vec![volume],
+            ..StaticGeometry::default()
+        };
+
+        let (_, boxes, cutaway) = separate_opaque_items(items);
+
+        assert_eq!(boxes, [volume], "the dynamic pass needs this exact volume");
+        assert!(
+            cutaway.boxes.is_empty(),
+            "the cutaway merge must not receive an opaque item's volume"
         );
     }
 }

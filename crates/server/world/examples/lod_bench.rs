@@ -14,7 +14,7 @@
 //! ```
 //!
 //! It prints, for each creature count and each of LOD off / LOD on: nanoseconds
-//! per tick, milliseconds per tick, and what fraction of the 50ms tick budget
+//! per tick, milliseconds per tick, and what fraction of the current tick budget
 //! that is — then the speedup LOD bought. "Awake" is how many creatures sit
 //! within `lod_radius` of the player cluster, the set LOD keeps thinking at full
 //! rate; the rest doze.
@@ -33,8 +33,8 @@ use openshard_world::{Brain, Character, Command, Entering, FreshCharacter, Gamep
 /// not needed here (dev mode allows every step), only a plausible coordinate.
 const START: (u16, u16) = (1363, 1600);
 
-/// The 50ms / 20Hz tick budget, to report each measurement as a fraction of.
-const TICK_BUDGET: Duration = Duration::from_millis(50);
+/// The world's current tick budget, to report each measurement as a fraction of.
+const TICK_BUDGET: Duration = TICK_INTERVAL;
 
 /// Rules with LOD off — every creature simulates at full rate.
 fn lod_off() -> Gameplay {
@@ -154,7 +154,10 @@ fn report(label: &str, per_tick: f64) {
     let ns = per_tick * 1e9;
     let ms = per_tick * 1e3;
     let budget = per_tick / TICK_BUDGET.as_secs_f64() * 100.0;
-    println!("    {label:<8}  {ns:>10.0} ns/tick  {ms:>8.3} ms/tick  {budget:>6.1}% of 50ms");
+    println!(
+        "    {label:<8}  {ns:>10.0} ns/tick  {ms:>8.3} ms/tick  {budget:>6.1}% of {}ms",
+        TICK_BUDGET.as_millis()
+    );
 }
 
 fn main() {

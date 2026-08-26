@@ -20,7 +20,7 @@ use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::RawSerial;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_state::Skill;
-use openshard_state::components::{Contained, Harvesting, Tool};
+use openshard_state::components::{Contained, Harvesting, Skills, Tool};
 use openshard_state::harvest::{HarvestKind, LOG_GRAPHIC, ORE_GRAPHIC, SAND_GRAPHIC, TileSource, definition};
 
 /// A pickaxe, ServUO's `Pickaxe`.
@@ -279,6 +279,49 @@ fn the_pick_rings_inside_the_beat_and_not_at_the_head_of_it() {
     assert!(rang, "the pick never rang inside its beat");
 }
 
+/// `HarvestTimer` in the reference starts an effect immediately, then each
+/// effect owns its own delayed sound timer.  A long chop therefore makes one
+/// sound per complete swing — not one sound for the whole action.
+#[test]
+fn a_long_chop_repeats_its_sound_once_per_beat() {
+    let mut now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    ground(&mut world, GRASS, Some((TREE, 0)));
+    let axe = give_tool(&mut world, player, HATCHET);
+    world.tick(now);
+    let _ = packets_for(&mut world, player);
+
+    swing_at(&mut world, player, axe, 1, TREE, now);
+    let _ = packets_for(&mut world, player);
+    let def = definition(HarvestKind::Lumber, true);
+    let mut heard_at = Vec::new();
+    for _ in 0..=def.beat_ticks.saturating_mul(u64::from(def.beats)) {
+        now += TICK_INTERVAL;
+        world.tick(now);
+        if packets_for(&mut world, player)
+            .iter()
+            .any(|packet| packet[0] == 0x54)
+        {
+            heard_at.push(world.state.ticks.raw());
+        }
+    }
+
+    assert_eq!(
+        heard_at.len(),
+        usize::from(def.beats),
+        "every one of the three visible chops needs its own impact sound"
+    );
+    assert_eq!(
+        heard_at
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .collect::<Vec<_>>(),
+        vec![def.beat_ticks; usize::from(def.beats.saturating_sub(1))],
+        "the sound repeats at the same 1.6-second beat as the animation"
+    );
+}
+
 #[test]
 fn a_vein_runs_dry_and_says_so() {
     // The bank is the whole point of a harvest system: without depletion one tile
@@ -429,7 +472,23 @@ fn a_hatchet_asks_what_to_use_it_on_instead_of_where_to_dig() {
     });
     world.tick(now);
 
-    let messages = clilocs(&mut world, player);
+    let packets = packets_for(&mut world, player);
+    assert!(
+        packets.iter().any(|packet| {
+            packet.len() == 23
+                && packet[0] == 0xBF
+                && packet[3..5] == (openshard_protocol::access::OPENSHARD_SUBCOMMANDS + 13).to_be_bytes()
+                && packet[13..15] == 13_u16.to_be_bytes()
+                && packet[17..21] == 4_800_u32.to_be_bytes()
+                && packet[21..23] == 3_u16.to_be_bytes()
+        }),
+        "the hatchet cursor should carry an immediate, 4.8-second chop preview"
+    );
+    let messages: Vec<_> = packets
+        .iter()
+        .filter(|packet| packet[0] == 0xC1)
+        .map(|packet| u32::from_be_bytes([packet[14], packet[15], packet[16], packet[17]]))
+        .collect();
     assert!(
         messages.contains(&1_010_018),
         "the axe did not ask for an axe target"
@@ -443,7 +502,7 @@ fn a_hatchet_chops_a_tree_static() {
     // table's `is_axe` rather than listed again, and a tree is a static — so the
     // tile is matched with the 0x4000 bit set, which is the one arithmetic in
     // `tile_key`.
-    let now = Instant::now();
+    let mut now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
     ground(&mut world, GRASS, Some((TREE, 0)));
@@ -457,8 +516,132 @@ fn a_hatchet_chops_a_tree_static() {
         world.state.registry.has::<Harvesting>(entity),
         "the axe should be chopping"
     );
+    assert_eq!(
+        world
+            .state
+            .registry
+            .get::<Harvesting>(entity)
+            .expect("chopping")
+            .beats_left,
+        3,
+        "lumberjacking lasts three full beats rather than ending after one swing"
+    );
+    for _ in 0..definition(HarvestKind::Lumber, true).beat_ticks * 2 {
+        now += TICK_INTERVAL;
+        world.tick(now);
+    }
+    assert!(
+        world.state.registry.has::<Harvesting>(entity),
+        "the third complete chop is still owed"
+    );
+    assert_eq!(
+        carried(&world, player, LOG_GRAPHIC),
+        0,
+        "logs arrive after the final whole stroke, not while chopping is looping"
+    );
     finish_swing(&mut world, player, now);
     assert!(carried(&world, player, LOG_GRAPHIC) > 0, "no logs in the pack");
+    assert!(
+        world
+            .state
+            .registry
+            .get::<Skills>(entity)
+            .expect("a player always has a skill sheet")
+            .get(Skill::Lumberjacking)
+            > 0,
+        "a zero-skill lumberjack should learn from the first completed tree"
+    );
+    assert!(
+        packets_for(&mut world, player).iter().any(|packet| {
+            packet.len() == 9
+                && packet[0] == 0xBF
+                && packet[3..5] == (openshard_protocol::access::OPENSHARD_SUBCOMMANDS + 15).to_be_bytes()
+        }),
+        "the logs must be accompanied by the signal that ends the local chop"
+    );
+}
+
+#[test]
+fn a_second_tree_swing_does_not_claim_the_lumberjack_is_fishing() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    ground(&mut world, GRASS, Some((TREE, 0)));
+    let axe = give_tool(&mut world, player, HATCHET);
+    world.tick(now);
+    let _ = packets_for(&mut world, player);
+
+    swing_at(&mut world, player, axe, 1, TREE, now);
+    assert!(
+        world
+            .state
+            .registry
+            .has::<Harvesting>(world.state.players[&player]),
+        "the first axe swing should still be in progress"
+    );
+    let _ = packets_for(&mut world, player);
+
+    swing_at(&mut world, player, axe, 1, TREE, now);
+    let text: Vec<_> = packets_for(&mut world, player)
+        .into_iter()
+        .filter(|packet| packet[0] == 0x1C)
+        .map(|packet| String::from_utf8_lossy(&packet).into_owned())
+        .collect();
+    assert!(
+        text.iter()
+            .any(|message| message.contains("You are already harvesting.")),
+        "the repeated axe swing should describe harvesting: {text:?}"
+    );
+    assert!(
+        text.iter().all(|message| !message.contains("fishing")),
+        "a lumberjack must never be told they are fishing: {text:?}"
+    );
+}
+
+#[test]
+fn a_backpack_hatchet_is_drawn_for_its_chop() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    ground(&mut world, GRASS, Some((TREE, 0)));
+    let axe = give_tool(&mut world, player, HATCHET);
+    world.tick(now);
+    let _ = packets_for(&mut world, player);
+
+    swing_at(&mut world, player, axe, 1, TREE, now);
+
+    assert!(
+        packets_for(&mut world, player).iter().any(|packet| {
+            packet.len() == 14
+                && packet[0] == 0xBF
+                && packet[3..5] == (openshard_protocol::access::OPENSHARD_SUBCOMMANDS + 12).to_be_bytes()
+                && packet[9..11] == HATCHET.0.to_be_bytes()
+        }),
+        "the chop should lend the backpack hatchet to its animation picture"
+    );
+}
+
+#[test]
+fn a_bad_tree_target_refuses_the_clients_optimistic_chop() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    // Grass with no static: the client may optimistically swing at its click,
+    // but only the map can decide this is not a tree.
+    ground(&mut world, GRASS, None);
+    let axe = give_tool(&mut world, player, HATCHET);
+    world.tick(now);
+    let _ = packets_for(&mut world, player);
+
+    swing_at(&mut world, player, axe, 1, 0, now);
+    assert!(
+        packets_for(&mut world, player).iter().any(|packet| {
+            packet.len() == 9
+                && packet[0] == 0xBF
+                && packet[3..5] == (openshard_protocol::access::OPENSHARD_SUBCOMMANDS + 14).to_be_bytes()
+        }),
+        "the shard must explicitly stop a locally predicted chop it rejected"
+    );
 }
 
 #[test]

@@ -29,7 +29,10 @@ use crate::containers::{
 use crate::context::ContextMenu;
 use crate::error::{DecodeError, expect_id};
 use crate::feature::Feature;
-use crate::feedback::{Animation, GraphicalEffect, HuedEffect, NewAnimation, PlaySound, SwingTiming};
+use crate::feedback::{
+    Animation, GraphicalEffect, HarvestCompleted, HarvestPreview, HarvestRefused, HarvestToolVisual,
+    HuedEffect, NewAnimation, PlaySound, SwingTiming,
+};
 use crate::gump::{CloseGump, GumpDisplay};
 use crate::items::{CorpseEquipment, DragCancel, EquipUpdate, WorldItem};
 use crate::login::{
@@ -48,7 +51,7 @@ use crate::vendor::{BuyList, SellList};
 use crate::version::ClientVersion;
 use crate::world::{
     DeathAnimation, DeathStatus, LightLevel, LoginComplete, LogoutAck, MapChange, PlayMusic, PlayerStart,
-    PlayerUpdate, SERVER_CHANGE_LENGTH, SeasonChange, WalkAck, WalkReject,
+    PlayerUpdate, SERVER_CHANGE_LENGTH, SeasonChange, WalkAck, WalkReject, WeatherChange,
 };
 
 /// A packet the server sends to a client.
@@ -76,6 +79,14 @@ pub enum ServerPacket {
     NewAnimation(NewAnimation),
     /// `0xBF 0xE00B` — how long the immediately following swing occupies.
     SwingTiming(SwingTiming),
+    /// `0xBF 0xE00C` — the carried tool to show for the next harvest action.
+    HarvestToolVisual(HarvestToolVisual),
+    /// `0xBF 0xE00D` — start this harvest locally when its cursor is answered.
+    HarvestPreview(HarvestPreview),
+    /// `0xBF 0xE00E` — this optimistic harvest did not start on the shard.
+    HarvestRefused(HarvestRefused),
+    /// `0xBF 0xE00F` — the shard finished this harvest.
+    HarvestCompleted(HarvestCompleted),
     /// `0x70` — an uncoloured graphical effect.
     Effect(GraphicalEffect),
     /// `0xC0` — a graphical effect with a hue and a render mode.
@@ -108,6 +119,8 @@ pub enum ServerPacket {
     LoginComplete(LoginComplete),
     /// `0x4F` — overall light level.
     LightLevel(LightLevel),
+    /// `0x65` — precipitation, intensity and temperature.
+    WeatherChange(WeatherChange),
     /// `0x6D` — play a music track.
     PlayMusic(PlayMusic),
     /// `0xBC` — which season the client draws.
@@ -232,6 +245,10 @@ impl ServerPacket {
             Self::Animation(_) => <Animation as EncodePacket>::ID,
             Self::NewAnimation(_) => <NewAnimation as EncodePacket>::ID,
             Self::SwingTiming(_) => <SwingTiming as EncodePacket>::ID,
+            Self::HarvestToolVisual(_) => <HarvestToolVisual as EncodePacket>::ID,
+            Self::HarvestPreview(_) => <HarvestPreview as EncodePacket>::ID,
+            Self::HarvestRefused(_) => <HarvestRefused as EncodePacket>::ID,
+            Self::HarvestCompleted(_) => <HarvestCompleted as EncodePacket>::ID,
             Self::Effect(_) => GraphicalEffect::ID,
             Self::HuedEffect(_) => HuedEffect::ID,
             Self::LoginDenied(_) => <LoginDenied as EncodePacket>::ID,
@@ -247,7 +264,8 @@ impl ServerPacket {
             Self::WalkAck(_) => <WalkAck as EncodePacket>::ID,
             Self::WalkReject(_) => <WalkReject as EncodePacket>::ID,
             Self::LoginComplete(_) => <LoginComplete as EncodePacket>::ID,
-            Self::LightLevel(_) => LightLevel::ID,
+            Self::LightLevel(_) => <LightLevel as EncodePacket>::ID,
+            Self::WeatherChange(_) => <WeatherChange as EncodePacket>::ID,
             Self::PlayMusic(_) => <PlayMusic as EncodePacket>::ID,
             Self::SeasonChange(_) => SeasonChange::ID,
             Self::LogoutAck(_) => <LogoutAck as EncodePacket>::ID,
@@ -314,6 +332,10 @@ impl ServerPacket {
             Self::Animation(_) => Animation::LENGTH,
             Self::NewAnimation(_) => NewAnimation::LENGTH,
             Self::SwingTiming(_) => SwingTiming::LENGTH,
+            Self::HarvestToolVisual(_) => HarvestToolVisual::LENGTH,
+            Self::HarvestPreview(_) => HarvestPreview::LENGTH,
+            Self::HarvestRefused(_) => HarvestRefused::LENGTH,
+            Self::HarvestCompleted(_) => HarvestCompleted::LENGTH,
             Self::Effect(_) => GraphicalEffect::LENGTH,
             Self::HuedEffect(_) => HuedEffect::LENGTH,
             Self::LoginDenied(_) => <LoginDenied as EncodePacket>::LENGTH,
@@ -330,6 +352,7 @@ impl ServerPacket {
             Self::WalkReject(_) => WalkReject::LENGTH,
             Self::LoginComplete(_) => <LoginComplete as EncodePacket>::LENGTH,
             Self::LightLevel(_) => LightLevel::LENGTH,
+            Self::WeatherChange(_) => WeatherChange::LENGTH,
             Self::PlayMusic(_) => <PlayMusic as EncodePacket>::LENGTH,
             Self::SeasonChange(_) => SeasonChange::LENGTH,
             Self::LogoutAck(_) => LogoutAck::LENGTH,
@@ -398,6 +421,10 @@ impl ServerPacket {
             Self::Animation(packet) => packet.encode_body(out, version),
             Self::NewAnimation(packet) => packet.encode_body(out, version),
             Self::SwingTiming(packet) => packet.encode_body(out, version),
+            Self::HarvestToolVisual(packet) => packet.encode_body(out, version),
+            Self::HarvestPreview(packet) => packet.encode_body(out, version),
+            Self::HarvestRefused(packet) => packet.encode_body(out, version),
+            Self::HarvestCompleted(packet) => packet.encode_body(out, version),
             Self::Effect(packet) => packet.encode_body(out, version),
             Self::HuedEffect(packet) => packet.encode_body(out, version),
             Self::LoginDenied(packet) => packet.encode_body(out, version),
@@ -414,6 +441,7 @@ impl ServerPacket {
             Self::WalkReject(packet) => packet.encode_body(out, version),
             Self::LoginComplete(packet) => packet.encode_body(out, version),
             Self::LightLevel(packet) => packet.encode_body(out, version),
+            Self::WeatherChange(packet) => packet.encode_body(out, version),
             Self::PlayMusic(packet) => packet.encode_body(out, version),
             Self::SeasonChange(packet) => packet.encode_body(out, version),
             Self::LogoutAck(packet) => packet.encode_body(out, version),
@@ -530,6 +558,18 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
         SwingTiming::SUBCOMMAND => decode_server(packet, version)
             .map(ServerPacket::SwingTiming)
             .map_err(ServerDecodeError::SwingTiming)?,
+        HarvestToolVisual::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::HarvestToolVisual)
+            .map_err(ServerDecodeError::HarvestToolVisual)?,
+        HarvestPreview::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::HarvestPreview)
+            .map_err(ServerDecodeError::HarvestPreview)?,
+        HarvestRefused::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::HarvestRefused)
+            .map_err(ServerDecodeError::HarvestRefused)?,
+        HarvestCompleted::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::HarvestCompleted)
+            .map_err(ServerDecodeError::HarvestCompleted)?,
         crate::party::SUBCOMMAND => return decode_party(packet, version),
         _ => return Ok(None),
     }))
@@ -613,6 +653,12 @@ impl ServerPacket {
             <LoginComplete as DecodePacket>::ID => decode_server(packet, version)
                 .map(Self::LoginComplete)
                 .map_err(ServerDecodeError::LoginComplete)?,
+            <LightLevel as DecodePacket>::ID => decode_server(packet, version)
+                .map(Self::LightLevel)
+                .map_err(ServerDecodeError::LightLevel)?,
+            <WeatherChange as DecodePacket>::ID => decode_server(packet, version)
+                .map(Self::WeatherChange)
+                .map_err(ServerDecodeError::WeatherChange)?,
             <Remove as DecodePacket>::ID => decode_server(packet, version)
                 .map(Self::Remove)
                 .map_err(ServerDecodeError::Remove)?,
@@ -788,6 +834,10 @@ pub enum ServerDecodeError {
     PlayerStart(DecodeError),
     /// `0x55` did not decode.
     LoginComplete(DecodeError),
+    /// `0x4F` did not decode.
+    LightLevel(DecodeError),
+    /// `0x65` did not decode.
+    WeatherChange(DecodeError),
     /// `0x1D` did not decode.
     Remove(DecodeError),
     /// `0x20` did not decode.
@@ -877,6 +927,14 @@ pub enum ServerDecodeError {
     MapEditReply(DecodeError),
     /// `0xBF 0xE00B` did not decode.
     SwingTiming(DecodeError),
+    /// `0xBF 0xE00C` did not decode.
+    HarvestToolVisual(DecodeError),
+    /// `0xBF 0xE00D` did not decode.
+    HarvestPreview(DecodeError),
+    /// `0xBF 0xE00E` did not decode.
+    HarvestRefused(DecodeError),
+    /// `0xBF 0xE00F` did not decode.
+    HarvestCompleted(DecodeError),
     /// `0xD6` did not decode.
     PropertyListReply(DecodeError),
     /// A `0xBF` subcommand `0x06` did not decode. One variant for all four,
@@ -898,6 +956,8 @@ impl fmt::Display for ServerDecodeError {
             Self::CharacterList(error) => ("0xA9 character list", error),
             Self::PlayerStart(error) => ("0x1B player start", error),
             Self::LoginComplete(error) => ("0x55 login complete", error),
+            Self::LightLevel(error) => ("0x4F light level", error),
+            Self::WeatherChange(error) => ("0x65 weather change", error),
             Self::Remove(error) => ("0x1D remove", error),
             Self::PlayerUpdate(error) => ("0x20 player update", error),
             Self::MobileStatus(error) => ("0x11 mobile status", error),
@@ -919,6 +979,10 @@ impl fmt::Display for ServerDecodeError {
             Self::ChangesReply(error) => ("0xBF 0xE008 changes reply", error),
             Self::MapEditReply(error) => ("0xBF 0xE00A map-edit reply", error),
             Self::SwingTiming(error) => ("0xBF 0xE00B swing timing", error),
+            Self::HarvestToolVisual(error) => ("0xBF 0xE00C harvest tool visual", error),
+            Self::HarvestPreview(error) => ("0xBF 0xE00D harvest preview", error),
+            Self::HarvestRefused(error) => ("0xBF 0xE00E harvest refusal", error),
+            Self::HarvestCompleted(error) => ("0xBF 0xE00F harvest completion", error),
             Self::PropertyListReply(error) => ("0xD6 property list", error),
             Self::Party(error) => ("0xBF 0x06 party", error),
             Self::CloseGump(error) => ("0xBF 0x04 close gump", error),
@@ -1024,6 +1088,7 @@ pub fn server_packet_length(id: u8, version: ClientVersion) -> Option<PacketLeng
         0x3A => SkillsFull::LENGTH,          // and SkillUpdate: same id, both Variable
         0x3C => <ContainerContents as EncodePacket>::LENGTH,
         0x4F => LightLevel::LENGTH,
+        0x65 => WeatherChange::LENGTH,
         0x54 => <PlaySound as EncodePacket>::LENGTH,
         0x55 => <LoginComplete as EncodePacket>::LENGTH,
         0x6C => TargetCursor::LENGTH,
@@ -1166,6 +1231,10 @@ mod tests {
         Animation,
         NewAnimation,
         SwingTiming,
+        HarvestToolVisual,
+        HarvestPreview,
+        HarvestRefused,
+        HarvestCompleted,
         Effect,
         HuedEffect,
         LoginDenied,
@@ -1182,6 +1251,7 @@ mod tests {
         WalkReject,
         LoginComplete,
         LightLevel,
+        WeatherChange,
         PlayMusic,
         SeasonChange,
         LogoutAck,
@@ -1283,6 +1353,22 @@ mod tests {
                 serial,
                 duration: crate::feedback::SwingDuration(5_000),
             }),
+            ServerPacket::HarvestToolVisual(HarvestToolVisual {
+                serial,
+                graphic: crate::wire::Graphic(0x0F43),
+                hue: crate::wire::Hue(0x0481),
+                layer: crate::wire::Layer(1),
+            }),
+            ServerPacket::HarvestPreview(HarvestPreview {
+                cursor_id: CursorId(0x2A),
+                serial,
+                action: 13,
+                frame_count: crate::feedback::AnimationFrameCount(6),
+                duration: crate::feedback::SwingDuration(4_800),
+                cycles: 3,
+            }),
+            ServerPacket::HarvestRefused(HarvestRefused { serial }),
+            ServerPacket::HarvestCompleted(HarvestCompleted { serial }),
             ServerPacket::Effect(effect),
             ServerPacket::HuedEffect(HuedEffect {
                 effect,
@@ -1352,6 +1438,11 @@ mod tests {
             ServerPacket::LoginComplete(LoginComplete),
             ServerPacket::LightLevel(LightLevel {
                 level: crate::world::Light(0),
+            }),
+            ServerPacket::WeatherChange(crate::world::WeatherChange {
+                weather: crate::world::Weather::Rain,
+                intensity: 64,
+                temperature: 12,
             }),
             ServerPacket::PlayMusic(PlayMusic {
                 track: crate::world::MusicId(11),
@@ -2292,14 +2383,29 @@ mod tests {
     }
 
     #[test]
-    fn a_packet_with_no_decoder_yet_is_not_a_failure() {
-        // The framer knew the length, so the stream is intact and the client can
-        // read on. This is the answer that shrinks as decoders are written.
+    fn the_environment_packets_round_trip_through_the_client_reader() {
+        // These are state rather than commands: a second copy simply replaces
+        // the first, so decoding them at the protocol boundary is enough for a
+        // view to keep one current answer.
         let bytes = ServerPacket::LightLevel(crate::world::LightLevel {
             level: crate::world::Light(0),
         })
         .encode(version());
-        assert_eq!(ServerPacket::decode(&bytes, version()), Ok(None));
+        assert_eq!(
+            ServerPacket::decode(&bytes, version()),
+            Ok(Some(ServerPacket::LightLevel(crate::world::LightLevel {
+                level: crate::world::Light(0),
+            })))
+        );
+        let weather = ServerPacket::WeatherChange(crate::world::WeatherChange {
+            weather: crate::world::Weather::Snow,
+            intensity: 80,
+            temperature: 3,
+        });
+        assert_eq!(
+            ServerPacket::decode(&weather.encode(version()), version()),
+            Ok(Some(weather))
+        );
     }
 
     /// The two packets the paperdoll's buttons wait for, round-tripped through

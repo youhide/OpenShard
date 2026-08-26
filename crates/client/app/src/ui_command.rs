@@ -17,11 +17,13 @@ use std::time::Instant;
 
 use openshard_client_render::camera::{self, Camera};
 use openshard_client_render::{doors, items, mobiles};
-use openshard_movement::{Bodies, Heading, Lean};
+use openshard_movement::{Bodies, Footing, Heading, Lean, PLAYER_HEIGHT, arrival_z};
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::target::{TargetKind, TargetResponse};
+use openshard_protocol::wire::Graphic;
 use openshard_protocol::wire::Layer;
 use openshard_protocol::world::Point;
+use openshard_tiles::TileData;
 use winit::window::CursorIcon;
 
 use crate::app::App;
@@ -29,6 +31,37 @@ use crate::diagnostics::PickedTile;
 use crate::net_command::project_motion;
 use crate::world::{advance_presentation_to, footing, guide};
 use crate::{DEAD_ZONE, TURN_ZONE, steer};
+
+/// Whether an art pick names a surface whose own height is meaningful for a
+/// route destination.
+///
+/// A sprite can be drawn at any z, but only a platform or stair is a place the
+/// movement rules let a body stand. Walls and roofs deliberately return false:
+/// their frame pick is visual cover, not the point a Ctrl-click should route
+/// toward.
+fn is_walk_surface(tiledata: &TileData, graphic: Graphic) -> bool {
+    let flags = tiledata.static_tile(graphic.0).flags;
+    flags.is_platform() || flags.is_climbable()
+}
+
+/// Resolve a cursor tile behind visual cover to the actual floor the live
+/// movement reading supplies there.
+///
+/// `near_z` is the cover's placed height. It keeps a click through a roof over
+/// a multi-storey house aimed at the storey immediately beneath that roof, not
+/// an arbitrary lower floor. A missing surface retains the terrain pick, which
+/// is the old behaviour for a wall with nothing routeable behind it.
+fn destination_under_cover(
+    footing: &Footing<'_>,
+    at: openshard_map::grid::Tile,
+    fallback_z: i8,
+    near_z: i8,
+) -> Point {
+    let z = arrival_z(footing, at, i32::from(near_z), PLAYER_HEIGHT)
+        .and_then(|z| i8::try_from(z).ok())
+        .unwrap_or(fallback_z);
+    Point::new(at.x, at.y, z)
+}
 
 impl App {
     /// Ask for this character's paperdoll without relying on a world pick.
@@ -53,7 +86,7 @@ impl App {
 
     /// Open this character's backpack without relying on the paperdoll being
     /// visible or open.
-    pub(crate) fn open_own_inventory(&self) {
+    pub(crate) fn open_own_inventory(&mut self) {
         let Some(backpack) = self.world.authoritative.view.as_ref().and_then(|view| {
             view.player
                 .equipment
@@ -63,9 +96,24 @@ impl App {
         }) else {
             return;
         };
-        if let Some(link) = self.world.shard.link() {
-            link.use_object(backpack);
-        }
+        self.use_item(backpack);
+    }
+
+    /// Use an object and retain it for the `U` "use last item" hotkey.
+    pub(crate) fn use_item(&mut self, serial: openshard_protocol::serial::Serial) {
+        let Some(link) = self.world.shard.link() else {
+            return;
+        };
+        self.last_used_item = Some(serial);
+        link.use_object(serial);
+    }
+
+    /// Repeat the last player-initiated item use, if there is one.
+    pub(crate) fn use_last_item(&self) {
+        let (Some(serial), Some(link)) = (self.last_used_item, self.world.shard.link()) else {
+            return;
+        };
+        link.use_object(serial);
     }
 
     /// Toggle war mode on Tab's first press.
@@ -162,6 +210,12 @@ impl App {
             (Point::new(tile.at.x, tile.at.y, tile.stand_z.0), None)
         };
         if let Some(link) = self.world.shard.link() {
+            if let Some(preview) = cursor.harvest {
+                // The cursor-specific preview is the client-side half of the
+                // harvest: start at the click, before this target reply waits
+                // for a trip to the shard and back.
+                self.world.presentation.crowd.preview_harvest(preview);
+            }
             link.target(TargetResponse {
                 cursor_id: cursor.cursor.cursor_id,
                 object,
@@ -197,6 +251,12 @@ impl App {
             return false;
         };
         if let Some(link) = self.world.shard.link() {
+            if let Some(preview) = cursor.harvest {
+                self.world
+                    .presentation
+                    .crowd
+                    .cancel_harvest_preview(preview.serial);
+            }
             link.target(TargetResponse {
                 cursor_id: cursor.cursor.cursor_id,
                 object: None,
@@ -285,6 +345,7 @@ impl App {
         let sequence = walk
             .newest_pending_sequence()
             .expect("an accepted step is pending");
+        self.ping.sent(sequence, Instant::now());
         self.world
             .shard
             .link()
@@ -481,29 +542,22 @@ impl App {
     /// height, so a roof under the cursor answers with the ground tile behind
     /// it.
     ///
-    /// **A house somebody built is the same case, and it is not a static.** A
-    /// multi is expanded into ground items where the view becomes a draw list
-    /// (`App::apply_items`), so the second storey of a player's house is a
-    /// [`Hover::item`](crate::picking::Hover::item) and never a
-    /// [`Hover::static_`](crate::picking::Hover::static_) — which is why the
-    /// item arm is here and why it can be read plainly. The two are settled
-    /// against each other before they get here, by the depth the *frame* sorted
-    /// them at rather than by the order this match happens to be written in
-    /// (see [`crate::picking::in_front`]), so at most one of them is `Some` and
-    /// the arms below cannot be a silent precedence.
-    ///
-    /// **The art's own z, not a surface.** What a body may stand on at that
-    /// height is the search's to resolve and `steer.rs`'s to compare arrival
-    /// against — both through [`openshard_movement::destination_place`], which
-    /// is why nothing here rounds the height itself: a table's top is six above
-    /// the graphic the cursor hit, and a click on something nothing stands on (a
-    /// wall, a tree) is the refusal it always was — the walk goes as close as the
-    /// ground allows and stops there.
+    /// A floor or staircase carries its own height: that is how a click can
+    /// name a house's upper storey instead of the street beneath it. A wall or
+    /// roof is not a destination, though. It is cover in front of the point the
+    /// cursor unprojected to, so Ctrl-click passes through it and asks the live
+    /// footing for the walkable surface there. User houses are dynamic items,
+    /// not map statics, and their expanded multi pieces are in that same live
+    /// footing; treating their wall and roof art this way makes their interior
+    /// routeable without changing ordinary selection, use or target clicks.
     pub(crate) fn walk_destination(&self, tile: &PickedTile) -> Point {
+        let footing = footing(&self.resources, self.walking_doors());
         match (self.picking.hover.static_, self.picking.hover.item) {
-            (Some(picked), _) => picked.at,
-            (None, Some(item)) => item.at,
-            (None, None) => Point::new(tile.at.x, tile.at.y, tile.stand_z.0),
+            (Some(picked), _) if is_walk_surface(&self.resources.tiledata, picked.graphic) => picked.at,
+            (None, Some(item)) if is_walk_surface(&self.resources.tiledata, item.graphic) => item.at,
+            (Some(picked), _) => destination_under_cover(&footing, tile.at, tile.stand_z.0, picked.at.z),
+            (None, Some(item)) => destination_under_cover(&footing, tile.at, tile.stand_z.0, item.at.z),
+            (None, None) => destination_under_cover(&footing, tile.at, tile.stand_z.0, tile.stand_z.0),
         }
     }
 
@@ -653,7 +707,7 @@ impl App {
     /// Nothing is done locally on the way out. The door swings when the `0x1A`
     /// that redraws it arrives; a client that also opened it itself would show
     /// a door the shard may have refused (a lock, or reach) standing open.
-    pub(crate) fn use_under_cursor(&self, camera: Camera) {
+    pub(crate) fn use_under_cursor(&mut self, camera: Camera) {
         // The same question the highlight is drawn from, so the two cannot
         // disagree about whether the world owns the mouse: a click that arrives
         // while a panel holds the pointer is the panel's.
@@ -692,7 +746,7 @@ impl App {
             // A body with no serial is one this client is drawing without the
             // shard having named it — the offline viewer's placeholder — and
             // there is nothing to ask about.
-            if let (Some(serial), Some(link)) = (drawn[index.position()].0, self.world.shard.link()) {
+            if let Some(serial) = drawn[index.position()].0 {
                 let own = self
                     .world
                     .authoritative
@@ -700,9 +754,11 @@ impl App {
                     .as_ref()
                     .is_some_and(|view| view.player.serial == serial);
                 if own || self.input.ctrl_held {
-                    link.paperdoll(serial);
+                    if let Some(link) = self.world.shard.link() {
+                        link.paperdoll(serial);
+                    }
                 } else {
-                    link.use_object(serial);
+                    self.use_item(serial);
                 }
             }
             return;
@@ -720,7 +776,7 @@ impl App {
         };
         let serial = self.world.presentation.item_serials[index.what.position()];
         match self.world.shard.link() {
-            Some(link) => link.use_object(serial),
+            Some(_) => self.use_item(serial),
             None => tracing::info!(serial = serial.raw(), "nothing used: no shard is connected"),
         }
     }
@@ -859,4 +915,43 @@ pub(crate) fn on_screen(direction: Direction) -> (i32, i32) {
     );
     let (a, b) = (camera::project(origin), camera::project(stepped));
     (b.x - a.x, b.y - a.y)
+}
+
+#[cfg(test)]
+mod tests {
+    use openshard_map::grid::Tile;
+    use openshard_map::overlay::{Cover, Doors, Overlay};
+    use openshard_movement::scene::Scene;
+    use openshard_tiles::TileFlags;
+
+    use super::*;
+
+    /// A house is projected as dynamic cover, so a roof click must take the
+    /// floor from the overlay rather than route to the roof's own art z.
+    #[test]
+    fn a_roof_click_routes_to_the_live_house_floor_beneath_it() {
+        const FLOOR: Graphic = Graphic(0x04AC);
+        const ROOF: Graphic = Graphic(0x05E3);
+        let tile = Tile::new(5, 5);
+        let mut scene = Scene::flat(0);
+        scene.art(FLOOR.0, TileFlags::PLATFORM, 0);
+        scene.art(ROOF.0, TileFlags::ROOF, 0);
+        let mut live = Overlay::default();
+        live.set(
+            tile,
+            Cover::of_static(scene.tiles().static_tile(FLOOR.0))
+                .based_at(7)
+                .into_iter()
+                .collect(),
+        );
+        let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
+
+        assert!(is_walk_surface(scene.tiles(), FLOOR));
+        assert!(!is_walk_surface(scene.tiles(), ROOF));
+        assert_eq!(
+            destination_under_cover(&footing, tile, 0, 37),
+            Point::new(5, 5, 7),
+            "the roof was kept as cover instead of becoming the path target"
+        );
+    }
 }

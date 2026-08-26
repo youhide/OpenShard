@@ -19,6 +19,7 @@
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::Instant;
 
 use openshard_client_net::action::Outgoing;
 use openshard_client_net::chunks::{Drain, Fetch, FetchError, Fetched, Restart};
@@ -30,7 +31,9 @@ use openshard_client_net::walk::{Moved, Walk};
 use openshard_protocol::chunks::{
     Changes, ChangesReply, ChangesRequest, PublishNotice, WorldNotice, WorldRevision,
 };
-use openshard_protocol::feedback::{Animation, NewAnimation, SwingTiming};
+use openshard_protocol::feedback::{
+    Animation, HarvestCompleted, HarvestRefused, HarvestToolVisual, NewAnimation, SwingTiming,
+};
 use openshard_protocol::gump::GumpId;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::items::ItemAmount;
@@ -179,6 +182,8 @@ pub enum Update {
     /// module's own docs for why the split moved.
     Mutation {
         packet: openshard_protocol::server_packet::ServerPacket,
+        /// Stamped after decoding, before this packet waits for the window.
+        received: Instant,
     },
     /// The server asked one mobile to play a one-shot body animation.
     Animation(Animation),
@@ -186,6 +191,12 @@ pub enum Update {
     NewAnimation(NewAnimation),
     /// The exact duration of the immediately following swing animation.
     SwingTiming(SwingTiming),
+    /// A backpack harvesting tool to draw for the immediately following action.
+    HarvestToolVisual(HarvestToolVisual),
+    /// The shard declined a harvest the client began optimistically.
+    HarvestRefused(HarvestRefused),
+    /// The shard finished a harvest and has queued its result, if any.
+    HarvestCompleted(HarvestCompleted),
     /// A designed house's picture, still as bytes.
     ///
     /// The one packet that crosses this seam undecoded, and it has a reason:
@@ -1442,11 +1453,23 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                 if let openshard_protocol::server_packet::ServerPacket::SwingTiming(timing) = packet {
                     report(Update::SwingTiming(timing));
                 }
+                if let openshard_protocol::server_packet::ServerPacket::HarvestToolVisual(visual) = packet {
+                    report(Update::HarvestToolVisual(visual));
+                }
+                if let openshard_protocol::server_packet::ServerPacket::HarvestRefused(refusal) = packet {
+                    report(Update::HarvestRefused(refusal));
+                }
+                if let openshard_protocol::server_packet::ServerPacket::HarvestCompleted(completion) = packet {
+                    report(Update::HarvestCompleted(completion));
+                }
                 // Undivided: which packets move the player is [`Walk`]'s answer
                 // and `Walk` belongs to the owner. The desync a fold can find,
                 // and the resync it owes the shard, are the owner's too — see
                 // [`Link::resync`].
-                report(Update::Mutation { packet });
+                report(Update::Mutation {
+                    packet,
+                    received: Instant::now(),
+                });
             }
             command = commands.recv() => {
                 // `None` is the window closing: the `Link` was dropped.
@@ -1583,6 +1606,7 @@ mod tests {
                 sequence: StepSequence(sequence),
                 notoriety: Notoriety::Innocent,
             }),
+            received: Instant::now(),
         }
     }
 
@@ -1603,13 +1627,15 @@ mod tests {
                     packet: ServerPacket::WalkAck(WalkAck {
                         sequence: StepSequence(101),
                         ..
-                    })
+                    }),
+                    ..
                 },
                 Update::Mutation {
                     packet: ServerPacket::WalkAck(WalkAck {
                         sequence: StepSequence(102),
                         ..
-                    })
+                    }),
+                    ..
                 },
             ]
         ));
@@ -1634,7 +1660,8 @@ mod tests {
                 packet: ServerPacket::WalkAck(WalkAck {
                     sequence: StepSequence(101),
                     ..
-                })
+                }),
+                ..
             }
         ));
         assert!(matches!(&staged[2], Update::Lost(reason) if reason == "after"));
@@ -1759,6 +1786,7 @@ mod tests {
         }
         let Some(Update::Mutation {
             packet: ServerPacket::WalkAck(ack),
+            ..
         }) = staged.last()
         else {
             panic!("the numbered walk remains ordered with packets");

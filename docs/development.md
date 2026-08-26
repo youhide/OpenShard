@@ -96,10 +96,12 @@ The ordinary player-follow camera then crosses fresh Felucca map tiles without
 mouse input, which is the repeatable path for the static-atlas repack hitch:
 
 ```sh
-cargo run -p openshard-playground -- --atlas-scroll
+cargo run -p openshard-playground -- --atlas-scroll --jank-log
 ```
 
-`OPENSHARD_ATLAS_SCROLL=1` is the equivalent environment setting. The route
+`OPENSHARD_ATLAS_SCROLL=1 OPENSHARD_JANK_LOG=1` is the equivalent environment
+setting. The jank trace is opt-in because its detailed diagnostics can affect
+the responsiveness they measure. The route
 uses the in-process shard's normal movement commands (not teleports), turns
 when a local obstacle refuses a step, and takes roughly six minutes to cross
 more than 7,000 tiles. Leave the window open until

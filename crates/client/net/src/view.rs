@@ -32,6 +32,7 @@ use openshard_protocol::access::AccessLevel;
 use openshard_protocol::chunks::WorldNotice;
 use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::direction::Facing;
+use openshard_protocol::feedback::HarvestPreview;
 use openshard_protocol::gump::layout::{Element, parse};
 use openshard_protocol::gump::{GumpId, GumpKey, GumpPoint};
 use openshard_protocol::items::CorpseEquipmentItem;
@@ -45,7 +46,7 @@ use openshard_protocol::spellbook::SpellbookContent;
 use openshard_protocol::target::TargetCursor;
 use openshard_protocol::vendor::{BuyLine, SellLine};
 use openshard_protocol::wire::{Graphic, Hue};
-use openshard_protocol::world::{MapSize, PlayerStart, Point};
+use openshard_protocol::world::{Light, MapSize, PlayerStart, Point, Weather, WeatherChange};
 
 pub use openshard_client_model::{Skill, Status};
 
@@ -57,6 +58,37 @@ pub use openshard_client_model::{Skill, Status};
 /// forget. The number is what a scrollback is worth reading, not a memory
 /// budget — the oldest line is dropped, silently, which is what a journal does.
 pub const JOURNAL_LINES: usize = 256;
+
+/// The weather currently affecting this client.
+///
+/// A `0x65` with [`Weather::Temperature`] does not replace rain or snow; it
+/// changes just the last byte the server reported. Folding that protocol quirk
+/// here gives every consumer one ordinary state value instead of asking each
+/// renderer to remember the previous precipitation packet for itself.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WeatherState {
+    pub weather: Weather,
+    pub intensity: u8,
+    pub temperature: u8,
+}
+
+impl WeatherState {
+    pub const CLEAR: Self = Self {
+        weather: Weather::Clear,
+        intensity: 0,
+        temperature: 0,
+    };
+
+    fn apply(&mut self, change: WeatherChange) -> bool {
+        let before = *self;
+        self.temperature = change.temperature;
+        if change.weather != Weather::Temperature {
+            self.weather = change.weather;
+            self.intensity = change.intensity;
+        }
+        *self != before
+    }
+}
 
 /// A vendor catalogue, keyed by the merchant's mobile serial.
 ///
@@ -338,6 +370,8 @@ pub struct OpenTarget {
     /// The multi the client draws under the pointer, for a `0x99`. `None` for
     /// an ordinary `0x6C`.
     pub multi: Option<openshard_protocol::wire::MultiId>,
+    /// A local-animation hint for this exact cursor. `None` for ordinary targets.
+    pub harvest: Option<HarvestPreview>,
 }
 
 /// Everything this client has been told about the world.
@@ -352,6 +386,11 @@ pub struct OpenTarget {
 pub struct WorldView {
     /// This client's character.
     pub player: Player,
+    /// How dark the shard says this character's world is right now. The value
+    /// is the authoritative target of the client's eased day/night curve.
+    pub light: Option<Light>,
+    /// The precipitation and temperature the shard last reported.
+    pub weather: WeatherState,
     /// How big the facet is. The client needs it to bound the map it draws.
     pub map: MapSize,
     /// Every other mobile this client has been shown, by serial.
@@ -411,6 +450,9 @@ pub struct WorldView {
     pub corpse_equipment: FxHashMap<Serial, Vec<CorpseEquipmentItem>>,
     /// The one target cursor the shard currently has open for this player.
     pub target: Option<OpenTarget>,
+    /// A harvest hint can arrive immediately before its ordinary target cursor.
+    /// It is retained only until that cursor folds it into [`OpenTarget`].
+    pending_harvest_preview: Option<HarvestPreview>,
     /// Buy catalogues currently opened by NPC vendors, keyed by vendor serial.
     pub vendor_buys: FxHashMap<Serial, VendorBuy>,
     /// Sell catalogues currently opened by NPC vendors, keyed by vendor serial.
@@ -725,6 +767,11 @@ impl WorldView {
                 // `Player::skills` for why an empty table is the honest start.
                 skills: BTreeMap::new(),
             },
+            // A shard normally puts `0x4F` right behind entry. Its absence is
+            // distinct from daylight: it keeps the legacy local lighting path
+            // for a third-party shard that never publishes a clock.
+            light: None,
+            weather: WeatherState::CLEAR,
             map: start.map,
             mobiles: FxHashMap::default(),
             items: FxHashMap::default(),
@@ -734,6 +781,7 @@ impl WorldView {
             contents: FxHashMap::default(),
             corpse_equipment: FxHashMap::default(),
             target: None,
+            pending_harvest_preview: None,
             vendor_buys: FxHashMap::default(),
             vendor_sells: FxHashMap::default(),
             pending_vendor_buys: FxHashMap::default(),
@@ -952,6 +1000,12 @@ impl WorldView {
     /// decoder at a time and this is where each one lands.
     pub fn apply(&mut self, packet: &ServerPacket) -> bool {
         match packet {
+            ServerPacket::LightLevel(level) => {
+                let changed = self.light != Some(level.level);
+                self.light = Some(level.level);
+                changed
+            }
+            ServerPacket::WeatherChange(change) => self.weather.apply(*change),
             // A second `0x1B` restarts the session on a real client — it is not
             // a move — so taking it wholesale is right: whatever the server
             // says now replaces what we thought, everyone else included.
@@ -1224,6 +1278,10 @@ impl WorldView {
                 let opened = OpenTarget {
                     cursor: *cursor,
                     multi: None,
+                    harvest: self
+                        .pending_harvest_preview
+                        .take()
+                        .filter(|preview| preview.cursor_id == cursor.cursor_id),
                 };
                 let changed = self.target != Some(opened);
                 self.target = Some(opened);
@@ -1236,10 +1294,27 @@ impl WorldView {
                         kind: request.kind,
                     },
                     multi: Some(request.multi),
+                    harvest: None,
                 };
+                self.pending_harvest_preview = None;
                 let changed = self.target != Some(opened);
                 self.target = Some(opened);
                 changed
+            }
+            ServerPacket::HarvestPreview(preview) => {
+                if let Some(target) = self
+                    .target
+                    .as_mut()
+                    .filter(|target| target.cursor.cursor_id == preview.cursor_id)
+                {
+                    let changed = target.harvest != Some(*preview);
+                    target.harvest = Some(*preview);
+                    changed
+                } else {
+                    let changed = self.pending_harvest_preview != Some(*preview);
+                    self.pending_harvest_preview = Some(*preview);
+                    changed
+                }
             }
             // A window over a container. The contents are a separate packet and
             // arrive in the same breath, so this only records the art: see
@@ -3125,6 +3200,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_harvest_preview_is_attached_before_its_cursor_is_drawn() {
+        use openshard_protocol::feedback::{AnimationFrameCount, HarvestPreview, SwingDuration};
+        use openshard_protocol::target::{TargetCursor, TargetKind};
+        use openshard_protocol::wire::CursorId;
+
+        let mut view = WorldView::entered(start());
+        let preview = HarvestPreview {
+            cursor_id: CursorId(7),
+            serial: view.player.serial,
+            action: 13,
+            frame_count: AnimationFrameCount(6),
+            duration: SwingDuration(4_800),
+            cycles: 3,
+        };
+        assert!(view.apply(&ServerPacket::HarvestPreview(preview)));
+        assert!(view.apply(&ServerPacket::TargetCursor(TargetCursor {
+            cursor_id: CursorId(7),
+            kind: TargetKind::Location,
+        })));
+        assert_eq!(view.target.expect("target cursor").harvest, Some(preview));
+    }
+
     /// A designed house announces a revision, and the view remembers which one.
     ///
     /// The shape itself never reaches this layer — see [`WorldView::designs`] —
@@ -3177,5 +3275,36 @@ mod tests {
             view.designs.is_empty(),
             "a demolished house left its revision behind"
         );
+    }
+
+    #[test]
+    fn environment_packets_keep_one_current_world_state() {
+        use openshard_protocol::world::{LightLevel, WeatherChange};
+
+        let mut view = WorldView::entered(start());
+        assert_eq!(view.light, None);
+        assert_eq!(view.weather, WeatherState::CLEAR);
+
+        assert!(view.apply(&ServerPacket::LightLevel(LightLevel { level: Light(12) })));
+        assert_eq!(view.light, Some(Light(12)));
+        assert!(!view.apply(&ServerPacket::LightLevel(LightLevel { level: Light(12) })));
+
+        assert!(view.apply(&ServerPacket::WeatherChange(WeatherChange {
+            weather: Weather::Rain,
+            intensity: 96,
+            temperature: 9,
+        })));
+        assert_eq!(view.weather.weather, Weather::Rain);
+        assert_eq!(view.weather.intensity, 96);
+        assert_eq!(view.weather.temperature, 9);
+
+        assert!(view.apply(&ServerPacket::WeatherChange(WeatherChange {
+            weather: Weather::Temperature,
+            intensity: 0,
+            temperature: 2,
+        })));
+        assert_eq!(view.weather.weather, Weather::Rain);
+        assert_eq!(view.weather.intensity, 96);
+        assert_eq!(view.weather.temperature, 2);
     }
 }

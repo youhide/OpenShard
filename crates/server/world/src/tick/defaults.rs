@@ -3,10 +3,11 @@ use openshard_protocol::wire::Graphic;
 
 /// How often the world ticks.
 ///
-/// 20Hz. Fast enough that a 200ms walk step lands within a tick of when the
+/// 40Hz. Fast enough that an interactive command waits no more than 25ms for
+/// the next authoritative tick, while a 200ms walk step still lands on a tick.
 /// client expects it, and slow enough to leave room for everything a tick will
 /// eventually do. Not a protocol constant — the client does not know or care.
-pub const TICK_INTERVAL: Duration = Duration::from_millis(50);
+pub const TICK_INTERVAL: Duration = Duration::from_millis(25);
 
 /// A human male body.
 pub(super) const BODY_HUMAN_MALE: Graphic = Graphic(0x0190);

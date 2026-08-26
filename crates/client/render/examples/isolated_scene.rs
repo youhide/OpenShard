@@ -58,6 +58,13 @@
 //!   semicolon-separated. No longer how a live decoration gets in — the reader
 //!   above is — and still how a *hypothetical* one does: a torch put where no
 //!   torch is, to find out what it would light.
+//! - `OPENSHARD_SCENE_HOUSE=serial` — expand this classic house from the
+//!   shard's `houses` table through the client's `multi.mul`. A house is a
+//!   multi, rather than an ordinary item, so the regular shard reader cannot
+//!   otherwise put its floors and walls in the diagnostic frame.
+//! - `OPENSHARD_SCENE_CARRIED=x,y,z,direction` — give the pictured player a
+//!   lantern at this real map position. `direction` is `N`, `NE`, `E`, `SE`,
+//!   `S`, `SW`, `W`, `NW`, or wire value `0..7`; no walking offset is applied.
 //! - `OPENSHARD_SCENE_NO_ROOFS=1`, `OPENSHARD_SCENE_MAX_Z=n` — the frame's own
 //!   [`Cutaway`], which the client has and this tool did not: no roof drawn
 //!   anywhere, and nothing at or above a height. What a player standing indoors
@@ -195,10 +202,12 @@ use openshard_client_render::renderer::{GroundRenderer, MeshFaceRenderer, Sprite
 use openshard_client_render::{light, renderer};
 use openshard_map::grid::BlockExtent;
 use openshard_map::map::{LandCell, WorldMap};
+use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
+use openshard_uofiles::multi::Multis;
 use openshard_uofiles::texmaps::TexMaps;
 
 // The shard's own `items` and `decorations`, without which this tool draws the
@@ -301,6 +310,33 @@ fn parse_point(spec: &str) -> Point {
         x.trim().parse().unwrap_or_else(|_| panic!("x: {x:?}")),
         y.trim().parse().unwrap_or_else(|_| panic!("y: {y:?}")),
         z.trim().parse().unwrap_or_else(|_| panic!("z: {z:?}")),
+    )
+}
+
+/// `x,y,z,direction`, a stationary carried lantern in real map coordinates.
+fn parse_carried(spec: &str) -> (Point, Direction) {
+    let parts: Vec<&str> = spec.split(',').collect();
+    let [x, y, z, direction] = parts[..] else {
+        panic!("OPENSHARD_SCENE_CARRIED wants `x,y,z,direction`, got {spec:?}");
+    };
+    let direction = match direction.trim().to_ascii_uppercase().as_str() {
+        "N" | "0" => Direction::North,
+        "NE" | "1" => Direction::NorthEast,
+        "E" | "2" => Direction::East,
+        "SE" | "3" => Direction::SouthEast,
+        "S" | "4" => Direction::South,
+        "SW" | "5" => Direction::SouthWest,
+        "W" | "6" => Direction::West,
+        "NW" | "7" => Direction::NorthWest,
+        other => panic!("carried-light direction: {other:?}"),
+    };
+    (
+        Point::new(
+            x.trim().parse().unwrap_or_else(|_| panic!("x: {x:?}")),
+            y.trim().parse().unwrap_or_else(|_| panic!("y: {y:?}")),
+            z.trim().parse().unwrap_or_else(|_| panic!("z: {z:?}")),
+        ),
+        direction,
     )
 }
 
@@ -764,6 +800,53 @@ fn main() {
     } else {
         "off (OPENSHARD_SCENE_SHARD=0): nothing the server placed is in this frame".to_owned()
     };
+    let from_the_house = if let Some(serial) = env_opt("OPENSHARD_SCENE_HOUSE") {
+        let serial: u32 = serial
+            .parse()
+            .unwrap_or_else(|_| panic!("OPENSHARD_SCENE_HOUSE: {serial:?}"));
+        let database = match env_opt("OPENSHARD_SCENE_SHARD_DB") {
+            Some(path) => PathBuf::from(path),
+            None => shard::database_in(&PathBuf::from(
+                env_opt("OPENSHARD_SCENE_CONFIG").unwrap_or_else(|| "openshard.toml".to_owned()),
+            )),
+        };
+        let house = shard::house(&database, serial)
+            .unwrap_or_else(|| panic!("house {serial} is not in {}", database.display()));
+        let multis = Multis::load(&dir).expect("the client's multi files");
+        let components = multis.components(house.multi);
+        assert!(
+            !components.is_empty(),
+            "house {serial} names multi {:#06x}, which this client does not know",
+            house.multi
+        );
+        let before = items.len();
+        for component in components.iter().copied().filter(|component| component.drawn()) {
+            if tile_filter
+                .as_ref()
+                .is_some_and(|allowed| !allowed.contains(&component.graphic.0))
+            {
+                continue;
+            }
+            let Some(at) = component.placed_at(house.at) else {
+                continue;
+            };
+            let (sx, sy) = shift(anchor, (at.x, at.y));
+            items.push(GroundItem {
+                amount: ItemAmount::ONE,
+                at: Point::new(sx, sy, at.z),
+                graphic: component.graphic,
+                hue: Hue::NONE,
+            });
+        }
+        format!(
+            "{} components of house {serial} (multi {:#06x}) from {}",
+            items.len() - before,
+            house.multi,
+            database.display(),
+        )
+    } else {
+        "off (OPENSHARD_SCENE_HOUSE unset)".to_owned()
+    };
     let before_the_extras = items.len();
 
     // Hand-named extras — anything not on the map and not in the shard's own
@@ -780,6 +863,11 @@ fn main() {
         }
     }
     let hand_named = items.len() - before_the_extras;
+    let carried = env_opt("OPENSHARD_SCENE_CARRIED").map(|spec| {
+        let (at, facing) = parse_carried(&spec);
+        let (sx, sy) = shift(anchor, (at.x, at.y));
+        (Point::new(sx, sy, at.z), Vec2::new(0.0, 0.0), facing)
+    });
     assert!(
         !items.is_empty(),
         "the scene is empty: turn on OPENSHARD_SCENE_STATICS, widen OPENSHARD_SCENE_RADIUS, \
@@ -881,10 +969,11 @@ fn main() {
             true => light::NIGHT,
             false => light::NIGHT.flattened(),
         }),
-        // Night, and nobody standing in the scene to carry a lamp: this tool
-        // builds a place rather than following a player.
+        // A caller may place a stationary player-lantern in the frame. The
+        // real client supplies a walk interpolation here; this diagnostic has
+        // no motion, so its deliberately explicit offset is zero.
         sun: None,
-        carried: None,
+        carried,
         tuning: &tuning,
         // The flicker, held at the instant every scene here is read at, so a
         // dump taken twice is the same dump.
@@ -941,6 +1030,7 @@ fn main() {
     let asked_for = format!(
         "{}scene.map = {from_the_map} statics pulled from the map\n\
          scene.shard = {from_the_shard}\n\
+         scene.house = {from_the_house}\n\
          scene.extra = {hand_named} hand-named\n",
         inputs.summary(),
     );
@@ -1001,7 +1091,21 @@ fn main() {
     // would leave the items pass drawing over whatever the textures happened
     // to hold.
     ground_pass.render(&device, &queue, &mut encoder, target, &ground_quads);
-    items_pass.render(&device, &queue, &mut encoder, target, &item_quads, &boxes, None);
+    // Use the live client's dynamic-item route, rather than merely sharing the
+    // static renderer: the deferred pass resolves an item's tile from its own
+    // instance buffer when this bit is present.  A house is expanded into this
+    // list, so a diagnostic that leaves the bit clear can prove only the map
+    // static path and miss the exact join under investigation.
+    items_pass.render_with_id_bits(
+        &device,
+        &queue,
+        &mut encoder,
+        target,
+        &item_quads,
+        &boxes,
+        None,
+        openshard_client_render::gbuffer::IDS_DYNAMIC_ITEM,
+    );
     // Right after, into the same pixels its own billboard just drew — the same
     // order `lib.rs`'s real frame loop uses and for the same reason
     // (`docs/gbuffer.md` step 4c): without this, a climbable, prism-fit item
@@ -1202,7 +1306,9 @@ fn main() {
     }
 
     let mut blit = Blit::new(&device, format);
-    // No mobile pass in this scene: the dummy stands in for it.
+    // No map-static or mobile pass in this scene: the dummies stand in for
+    // their distinct storage buffers.  `item_instances` is deliberately the
+    // real item buffer above, matching `App::encode_world_passes`.
     let dummy_instances = openshard_client_render::blit::dummy_instances(&device);
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     blit.render(
@@ -1213,7 +1319,7 @@ fn main() {
             target: &surface_view,
             world: &world_view,
             gbuffer: &gbuffer_views,
-            face_instances: items_pass.instances_buffer(),
+            face_instances: &dummy_instances,
             item_instances: items_pass.instances_buffer(),
             mobile_instances: &dummy_instances,
             mesh_instances: mesh_pass.rows_buffer(),

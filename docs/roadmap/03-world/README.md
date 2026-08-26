@@ -21,7 +21,7 @@
   run. Sent on world entry and answered on `0x34`. Versioned 3–6 by
   `status_packet_version` (type 6 is the 121-byte High Seas shape).
 - [x] `WalkPace` — a token bucket; a client can no longer walk as fast as it sends
-- [x] `World::tick` — a fixed 20Hz timestep; commands in, events and packets out
+- [x] `World::tick` — a fixed 40Hz timestep; commands in, events and packets out
 - [x] Core components: `Position`, `Heading`, `Body`, `Name`, `Client`, `Movement`
 - [x] Domain events: `PlayerEntered`, `MobileMoved`, `StepRefused`, `PlayerLeft`
 - [x] Spatial index — a 64-tile sector grid, Chebyshev range

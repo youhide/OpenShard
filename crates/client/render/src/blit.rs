@@ -831,15 +831,20 @@ fn lighting_bytes(lighting: &Lighting, opacity: f32) -> Vec<u8> {
 
     // `view`: which of the pass's own values to draw instead of the frame, and
     // beside it how many rays a fragment casts at each flame, and beside that
-    // whether this is a ghost's frame — three of the three words of padding
-    // this field carried, claimed the way this file claims one: when a reader
-    // exists, which is `blit.wesl`'s `shadow_rays` and `dead`. The last word is
-    // still padding, because a uniform block's members are aligned to sixteen
-    // bytes and the array that follows has to start on one.
+    // whether this is a ghost's frame, and finally which short lighting path is
+    // valid: zero for the full path, one for an identity, two for ambient only.
+    // Both short paths retain the ID test that leaves the clear background
+    // alone, then skip the instance lookup the full path needs. The array that
+    // follows still starts on this field's sixteen-byte boundary.
     bytes.extend_from_slice(&(lighting.view as u32).to_le_bytes());
     bytes.extend_from_slice(&lighting.shadow_rays.raw().to_le_bytes());
     bytes.extend_from_slice(&(lighting.dead as u32).to_le_bytes());
-    bytes.extend_from_slice(&[0; 4]);
+    let fast_path = match (lighting.is_identity(), lighting.is_ambient_only()) {
+        (true, _) => 1u32,
+        (_, true) => 2u32,
+        _ => 0u32,
+    };
+    bytes.extend_from_slice(&fast_path.to_le_bytes());
 
     // The sun: its direction, then the height above which nothing in this
     // frame's grid can stop it. That height is where a sunbeam's segment *ends* —

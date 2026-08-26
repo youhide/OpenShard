@@ -257,18 +257,20 @@ of its answer. Only its own unit test (`light.rs:2873-2879`) reads it today.
 
 ## The day curve
 
-**Not built.** The server sends `0x4F` as a level from 0 to 31 in discrete
-steps, and F10 is a switch between two fixed constants (`NIGHT`/nothing).
-Neither is a sunset. The intended design is a `Daylight` type holding the
-client's own time-of-day scalar, driven by the server's level but **eased
-towards it over a few seconds** rather than snapping, mapped through a ramp
-that is a colour and not a brightness — amber at dawn, white at noon, amber
-and lower at dusk, `NIGHT` at night — with F10 becoming an override of the
-scalar rather than a swap between two constants, so the debug key and the
-real path would be one code path. The same scalar would drive
-[`lighting.md`](lighting.md)'s sun direction (elevation and azimuth), so
-shadows would turn and lengthen as the day passed without a second thing to
-build.
+**Built, with the server's existing clock as its source.** The server sends
+`0x4F` as its light level from 0 to 31. `client/net::WorldView` keeps that
+authoritative target and the app's `graphics::Daylight` eases to it over three
+seconds, so the protocol's discrete dawn and dusk steps no longer read as a
+row of switches. The client interpolates the existing `NIGHT` and `DAY`
+ambients from that eased value; F10 remains an immediate diagnostic override.
+
+`0x65` weather now travels beside the level. The shard derives a deterministic
+six-UO-hour condition from its clock and current season, sends it on entry and
+at each boundary, and the client applies rain, storm and snow as an
+intensity-weighted ambient filter. This is deliberately atmospheric lighting,
+not a second particle system: the classic packet's intensity is retained in
+the client state so a precipitation pass can consume exactly the same answer
+later.
 
 **This is what the rest of the split actually waits on.** An ordinary
 daylit frame today picks no sky at all and is built as `Lighting::NONE`

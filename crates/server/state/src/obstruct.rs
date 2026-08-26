@@ -19,7 +19,7 @@
 //! An obstacle carries a z-span, so a wall on an upper floor blocks that floor
 //! and not the ground beneath it — and one entity may hold several, because a
 //! house is a single entity whose walls stand on top of each other. See
-//! [`Obstructions::block`], where the identity is the entity *and* the z.
+//! [`Obstructions::block`], where the identity also includes the cover's shape.
 
 use std::collections::HashMap;
 
@@ -79,8 +79,8 @@ impl Obstructions {
     ///
     /// # One entity may cover one tile several times over
     ///
-    /// The identity is the entity, **the z, and which arm of the cover it is** —
-    /// not the entity alone.
+    /// The identity is the entity and the cover's **z, height, and kind** — not
+    /// the entity alone.
     ///
     /// - A door is one thing at one height and re-registering it refines it,
     ///   which is what the entity half is for.
@@ -93,10 +93,23 @@ impl Obstructions {
     ///   something a body beside it walks into and somewhere a body on top of it
     ///   stands, and the two are not refinements of each other. That is the
     ///   third part of the key.
+    /// - A classic house may put a stair and a flat floor at the same tile and
+    ///   the same z. Both are surfaces, but the stair rises and the floor does
+    ///   not. Keeping height and kind in the key preserves both; otherwise the
+    ///   later floor erases the stair's landing while its blocking half remains,
+    ///   turning a visible tread into a server-side wall.
+    ///
+    /// The one deliberate refinement is a blocker becoming a door. Decoration
+    /// first lays the art's ordinary blocking cover and then identifies a door;
+    /// equal entity/z/height blocker entries are therefore the same entry even
+    /// when their door bit differs.
     pub fn block(&mut self, x: u16, y: u16, entity: EntityId, cover: Cover) {
         let tile = self.tiles.entry((x, y)).or_default();
         let same = |o: &&mut Obstacle| {
-            o.entity == entity && o.cover.z == cover.z && o.cover.is_surface() == cover.is_surface()
+            o.entity == entity
+                && o.cover.z == cover.z
+                && o.cover.height == cover.height
+                && ((o.cover.is_blocker() && cover.is_blocker()) || o.cover.kind == cover.kind)
         };
         if let Some(existing) = tile.iter_mut().find(same) {
             // Re-registering refines what the cover is — a doorway placed as
@@ -243,6 +256,23 @@ mod tests {
             obstructions.blocker_at_z(10, 10, 0).is_some_and(|o| o.door()),
             "the refinement did not land"
         );
+    }
+
+    /// Multi 0x0076 does this at its first indoor stair: the flat floor and the
+    /// climbable art share a tile and a base z. The two surfaces are not
+    /// refinements — one is the room's floor and one is the tread above it.
+    #[test]
+    fn one_house_keeps_a_floor_and_stair_surface_at_the_same_z() {
+        let house = an_entity();
+        let mut obstructions = Obstructions::default();
+        obstructions.block(10, 10, house, Cover::blocking(7, 2));
+        obstructions.block(10, 10, house, Cover::climbable(7, 5));
+        obstructions.block(10, 10, house, Cover::standing(7, 0));
+
+        let covers = covers_at(&obstructions, &Boats::default(), 10, 10);
+        assert!(covers.contains(&Cover::blocking(7, 2)));
+        assert!(covers.contains(&Cover::climbable(7, 5)));
+        assert!(covers.contains(&Cover::standing(7, 0)));
     }
 
     use super::*;

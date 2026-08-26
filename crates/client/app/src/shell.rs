@@ -112,6 +112,10 @@ pub struct Request {
     pub cutaway_disabled: Option<bool>,
     /// Switch body-overlap transparency on or off.
     pub body_overlap_transparency_disabled: Option<bool>,
+    /// Whether ambient light follows the shard's time-of-day updates.
+    pub time_of_day: Option<bool>,
+    /// Whether the local night-lighting comparison is enabled.
+    pub night: Option<bool>,
     /// Switch the occluder wireframe on or off, on the frame the box was ticked.
     ///
     /// Sent on the change and not every frame, like the terrain overlay, and for
@@ -717,6 +721,21 @@ fn layout(
             let at = world.motion.hud_state().predicted.position;
             ui.label(format!("{}, {}, {}", at.x, at.y, at.z));
             ui.separator();
+            ui.label(match hud.ping {
+                Some(ping) => match hud.ping_app_delivery {
+                    Some(delivery) => format!(
+                        "step RTT {} ms + app {} ms",
+                        ping.as_millis(),
+                        delivery.as_millis()
+                    ),
+                    None => format!("step RTT {} ms", ping.as_millis()),
+                },
+                None => "step RTT —".to_owned(),
+            })
+            .on_hover_text(
+                "The first value is client → shard → client-net. The second is how long the decoded acknowledgement waited for the window event loop.",
+            );
+            ui.separator();
             // What the frame cost to *build*, and not how long it took: paced by
             // the display, every frame takes a refresh interval whatever it was
             // doing, and the strip would read 16.7ms on an idle client for ever.
@@ -904,11 +923,28 @@ fn layout(
 /// The ranges are [`light::Tuning::MOST`] where the number is a factor, so a
 /// slider cannot ask for what [`light::Tuning::clamped`] would take back — a
 /// control that can be dragged to a value the frame refuses is a control that
-/// lies. What is *not* here is a switch for night, the sun, the lantern or the
-/// sky field: those are F10, F8, F7 and F6 and have been since before this tab,
-/// and two ways to spell one state is how the two come to disagree.
+/// lies. Time of day and the local night-lighting comparison are included here
+/// because the first controls whether a changing shard clock reaches the frame,
+/// while the second controls whether the frame is compared under map lights.
 fn light_panel(ui: &mut egui::Ui, hud: &Hud, light: &mut crate::desk::Light, request: &mut Request) {
     let most = light::Tuning::MOST;
+    ui.label("Time and light");
+    let mut time_of_day = hud.time_of_day;
+    if ui.checkbox(&mut time_of_day, "use time of day").changed() {
+        request.time_of_day = Some(time_of_day);
+    }
+    let mut night = hud.night;
+    if ui.checkbox(&mut night, "night lighting (F10)").changed() {
+        request.night = Some(night);
+    }
+    ui.label(
+        egui::RichText::new(
+            "Untick time of day to keep the ordinary picture at daylight; F10 or the second box compares it under map lights.",
+        )
+        .small()
+        .weak(),
+    );
+    ui.separator();
     // What the numbers mean where they mean something in the world's own units,
     // rather than as a bare factor: a person turning "reach" up is asking how
     // far a torch throws, and the answer is a distance in tiles.
@@ -1104,13 +1140,9 @@ fn audio_panel(ui: &mut egui::Ui, audio: &mut crate::desk::Audio, request: &mut 
 /// How big the HUD chat box's glyphs draw, and what colour the player's own
 /// line takes.
 ///
-/// `ttf_active` picks which kind of size control
-/// is shown, because the two faces are sized by two different kinds of number
-/// and only one face draws in a given run. A TrueType face has a **real size
-/// in pixels** per kind of text ([`crate::desk::FontSizes`]); `fonts.mul` has
-/// a fixed height per face and an integer upscale on top of it
-/// ([`crate::desk::ChatScale`]). Showing both would leave one of them a
-/// control for nothing on screen. See `docs/text_sizes.md`.
+/// The same four role controls apply whichever face is active. A TrueType face
+/// rasterizes at the selected pixel size; `fonts.mul` uses the corresponding
+/// fractional scale of its baked glyphs. See `docs/text_sizes.md`.
 fn chat_panel(
     ui: &mut egui::Ui,
     chat: &mut crate::desk::Chat,
@@ -1121,7 +1153,7 @@ fn chat_panel(
     ttf_active: bool,
     ttf_available: bool,
 ) {
-    use crate::desk::{BitmapFont, ChatScale, FontFace};
+    use crate::desk::{BitmapFont, FontFace};
     use openshard_client_render::atlas::TextSize;
 
     ui.label("Face");
@@ -1166,59 +1198,37 @@ fn chat_panel(
     }
     ui.separator();
     ui.label("Size");
-    if ttf_active {
-        // One row per role, each a real pixel size — see `FontSizes`. A tenth
-        // of a pixel a step, because the whole point of a rasterized size is
-        // that 13.5 is a size a person can actually have.
-        let row = |ui: &mut egui::Ui, label: &str, size: &mut TextSize| {
-            let mut pixels = size.pixels();
-            if ui
-                .add(
-                    egui::Slider::new(&mut pixels, TextSize::MIN..=TextSize::MAX)
-                        .step_by(0.1)
-                        .suffix(" px")
-                        .text(label),
-                )
-                .changed()
-            {
-                *size = TextSize::new(pixels);
-            }
-        };
-        row(ui, "speech", &mut fonts.speech);
-        row(ui, "window", &mut fonts.window);
-        row(ui, "tooltip", &mut fonts.tooltip);
-        row(ui, "count", &mut fonts.stack_count);
-        ui.label(
-            egui::RichText::new(
-                "Real sizes, in pixels, rasterized at that size rather than \
-                 scaled up from one — so a fraction is a size and not a \
-                 stretch. `speech` is a line over a head and the box below; \
-                 `window` is this client's own window captions; `count` is the \
-                 number written on a pile. A dense display multiplies these \
-                 before the glyph is drawn, never after.",
-            )
-            .small()
-            .weak(),
-        );
-    } else {
-        let mut scale = chat.scale.glyph_scale_factor();
+    // One row per role, each a real pixel size — see `FontSizes`. A tenth of a
+    // pixel remains useful for the bitmap path too: its finished quads are
+    // allowed to scale fractionally on a dense display.
+    let row = |ui: &mut egui::Ui, label: &str, size: &mut TextSize| {
+        let mut pixels = size.pixels();
         if ui
-            .add(egui::Slider::new(&mut scale, ChatScale::MIN..=ChatScale::MAX).text("scale"))
+            .add(
+                egui::Slider::new(&mut pixels, TextSize::MIN..=TextSize::MAX)
+                    .step_by(0.1)
+                    .suffix(" px")
+                    .text(label),
+            )
             .changed()
         {
-            chat.scale = ChatScale::new(scale);
+            *size = TextSize::new(pixels);
         }
-        ui.label(
-            egui::RichText::new(
-                "An integer upscale on `fonts.mul`'s own pixels — a bitmap face has \
-                 no continuous size to ask for instead. Only the journal and the \
-                 compose line below it; a shard's own dialogs draw at the size it \
-                 sent them.",
-            )
-            .small()
-            .weak(),
-        );
-    }
+    };
+    row(ui, "speech", &mut fonts.speech);
+    row(ui, "window", &mut fonts.window);
+    row(ui, "tooltip", &mut fonts.tooltip);
+    row(ui, "count", &mut fonts.stack_count);
+    ui.label(
+        egui::RichText::new(
+            "`speech` is a line over a head and the box below; `window` is this \
+             client's own window captions; `tooltip` is hover text; `count` is \
+             the number written on a pile. TrueType is rasterized at these real \
+             pixel sizes; bitmap glyphs use the same per-role fractional scale.",
+        )
+        .small()
+        .weak(),
+    );
 
     ui.separator();
     ui.label("Colour");

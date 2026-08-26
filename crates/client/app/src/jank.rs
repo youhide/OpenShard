@@ -17,6 +17,14 @@ use std::time::Duration;
 
 static LOG: OnceLock<Mutex<BufWriter<File>>> = OnceLock::new();
 
+/// Whether either destination for jank diagnostics is active.
+///
+/// Keeping this check at the caller avoids building the detailed timing record
+/// in normal gameplay runs.
+pub(crate) fn enabled() -> bool {
+    LOG.get().is_some() || tracing::enabled!(target: "jank", tracing::Level::WARN)
+}
+
 /// CPU phases within [`crate::presentation::App::draw_from`] that are useful
 /// when the single [`Frame::scene`] total says the world is slow.
 ///
@@ -56,6 +64,12 @@ pub(crate) struct CpuPasses {
     pub ground_quads: usize,
     pub static_rows: usize,
     pub item_rows: usize,
+    /// Sources handed to the deferred lighting pass, including the carried
+    /// lantern when F7 is on. This distinguishes a shader that is expensive
+    /// because it walks a real source from one that is expensive while empty.
+    pub light_sources: usize,
+    /// The sun is a separate source, not one of `light_sources`.
+    pub sun_active: bool,
     pub encode: Duration,
     pub encode_ground: Duration,
     pub encode_composites: Duration,
@@ -102,6 +116,9 @@ pub fn start_log(path: &Path) -> io::Result<()> {
 /// is what identifies a saturated device.
 pub fn record(frame: Frame, cpu: CpuPasses, atlas: AtlasWork, gpu_passes: &[Pass]) {
     if !frame.janks() {
+        return;
+    }
+    if !enabled() {
         return;
     }
     let ms = |duration: Duration| duration.as_secs_f64() * 1_000.0;
@@ -154,7 +171,7 @@ pub fn record(frame: Frame, cpu: CpuPasses, atlas: AtlasWork, gpu_passes: &[Pass
             let _ = writeln!(
                 log,
                 "jank frame budget_ms={:.3} interval_ms={:.3} build_ms={:.3} ui_ms={:.3} \
-                 scene_ms={:.3} wait_ms={:.3} gpu_ms={gpu_ms:?} repacked={} atlas_uploaded_bytes={} ground_quads={} static_rows={} item_rows={} composite_blocks={} composite_bindings_created={} composite_bindings_reused={} static_animated={} atlas_overflowed={atlas_overflowed:?} atlas_packed_graphics={atlas_packed_graphics:?} atlas_newly_requested_graphics={atlas_newly_requested_graphics:?} cpu_passes={cpu_passes:?} gpu_passes={passes:?}",
+                 scene_ms={:.3} wait_ms={:.3} gpu_ms={gpu_ms:?} repacked={} atlas_uploaded_bytes={} ground_quads={} static_rows={} item_rows={} light_sources={} sun_active={} composite_blocks={} composite_bindings_created={} composite_bindings_reused={} static_animated={} atlas_overflowed={atlas_overflowed:?} atlas_packed_graphics={atlas_packed_graphics:?} atlas_newly_requested_graphics={atlas_newly_requested_graphics:?} cpu_passes={cpu_passes:?} gpu_passes={passes:?}",
                 ms(JANK_BUDGET),
                 ms(frame.interval),
                 ms(frame.build()),
@@ -166,6 +183,8 @@ pub fn record(frame: Frame, cpu: CpuPasses, atlas: AtlasWork, gpu_passes: &[Pass
                 cpu.ground_quads,
                 cpu.static_rows,
                 cpu.item_rows,
+                cpu.light_sources,
+                cpu.sun_active,
                 cpu.composite_blocks,
                 cpu.composite_bindings_created,
                 cpu.composite_bindings_reused,

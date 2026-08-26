@@ -87,7 +87,7 @@ Numbered so a later session can argue with one without reopening all of them.
 
 **D1. Login does not move into the world.** Accounts, argon2, auth keys, the
 `0x8C` relay and the shard list are not simulation. `Argon2::default()` is 19 MiB
-and two passes against a 50 ms `TICK_INTERVAL`; a password check inside a tick
+and two passes against a 25 ms `TICK_INTERVAL`; a password check inside a tick
 stalls the whole shard for one client's benefit. What moves is everything *after*
 the `0x91`.
 
@@ -599,7 +599,7 @@ belong in the backlog above, however they were discovered.
 
 - **The character screen answers a tick late, and nobody has watched a real
   client do it.** `0xA9` used to go back inside the same call that read the
-  `0x91`; since S5 it waits for the next tick, up to one `TICK_INTERVAL` (50 ms).
+  `0x91`; since S5 it waits for the next tick, up to one `TICK_INTERVAL` (25 ms).
   The client is already waiting at that point and this should be invisible — but
   it is exactly the kind of thing that is fine in theory and a hang in practice.
 - **Compression must not follow the phase.** A game socket is Huffman-compressed

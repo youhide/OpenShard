@@ -58,6 +58,14 @@ pub fn pick_up(state: &mut WorldState, connection: ConnectionId, serial: RawSeri
         reject_drag(state, connection, DragCancelReason::CannotLift);
         return;
     }
+    // A house and its sign are both world items for protocol purposes, but are
+    // fixed housing infrastructure.  In particular the sign is derived from
+    // its house and rebuilt on restore, so letting it into a pack detaches the
+    // management UI from the building it represents.
+    if state.registry.has::<House>(item) || state.registry.has::<HouseSign>(item) {
+        reject_drag(state, connection, DragCancelReason::CannotLift);
+        return;
+    }
     // Nor is the trade window itself, which is a worn container and would
     // otherwise lift like any other — ServUO's `CheckLift` refusing outright.
     // What is *inside* it lifts normally; that is how an offer is taken back.

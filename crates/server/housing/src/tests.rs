@@ -18,6 +18,7 @@ use openshard_map::grid::Tile;
 use openshard_map::overlay::{Body, Doors};
 use openshard_movement::scene::Scene;
 use openshard_protocol::access::AccessLevel;
+use openshard_protocol::direction::Direction;
 use openshard_protocol::identity::AccountName;
 use openshard_protocol::serial::{Serial, SerialKind};
 use openshard_protocol::version::ClientVersion;
@@ -365,13 +366,14 @@ fn a_house_floor_is_a_surface_and_the_wall_over_it_is_not() {
             .is_none(),
         "a body standing on the floor is blocked by the floor"
     );
-    // And the ground under it is still open: an upper storey is not a ceiling
-    // that seals the room below.
+    // Seven z-units leave less than a body's height below this floor, so the
+    // map ground underneath is not another walkable layer. A real second floor
+    // sits twenty units above the first and leaves enough headroom naturally.
     assert!(
         ground
             .live()
             .blocker_at(Tile::new(12, 12), Body::new(0, 16), Doors::AsTheyStand)
-            .is_none()
+            .is_some()
     );
     // The wall beside it, at the same height, is in the way and is no surface.
     assert!(
@@ -415,6 +417,81 @@ fn a_ground_floor_laid_on_the_ground_seals_nothing() {
     assert_eq!(
         openshard_movement::can_step(&footing, Point::new(12, 11, 0), Point::new(12, 12, 0)),
         Some(Point::new(12, 12, 0))
+    );
+}
+
+/// A house stair is both a solid tread and a surface: a body may take it from
+/// its base and then reach the floor above.  This goes through `place` and the
+/// facet's live footing, rather than a hand-built overlay, so the components a
+/// house actually contributes cannot quietly turn into a picture-only stair.
+#[test]
+fn a_placed_house_stair_reaches_its_first_floor() {
+    let mut components = cottage();
+    // Ground at the house origin, then north onto the tread and north again
+    // onto the first floor.  A five-high climbable is met at z=2 and stood on
+    // at z=4, which puts the z=7 floor within the next step's reach.
+    components.push(component(STAIR, 0, -1, 2, true));
+    components.push(component(FLOOR, 0, -2, 7, true));
+    let mut state = world_with(components);
+    let (actor, owner) = an_actor(&mut state);
+    place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner).expect("a legal house");
+
+    let footing = state.footing(Facet(0), Doors::AsTheyStand);
+    let tread = openshard_movement::can_step(&footing, Point::new(10, 10, 0), Point::new(10, 9, 0))
+        .expect("the house stair is walkable from its base");
+    assert_eq!(tread, Point::new(10, 9, 4));
+    assert_eq!(
+        openshard_movement::can_step(&footing, tread, Point::new(10, 8, 0)),
+        Some(Point::new(10, 8, 7)),
+        "the stair does not throw the walker back before the first floor"
+    );
+}
+
+/// The exact shape of classic multi 0x0076's rejected indoor step: a flat floor
+/// and a stair occupy the target tile at the same base z. The floor must not
+/// replace the stair's surface in the live obstruction index.
+#[test]
+fn a_floor_does_not_erase_an_overlapping_house_stair() {
+    let mut components = cottage();
+    components.push(component(FLOOR, 0, 0, 7, true));
+    // Keep this order: the shipped multi lists the stair before the floor, so
+    // the old identity rule let this later flat surface overwrite the tread.
+    components.push(component(STAIR, 1, 0, 7, true));
+    components.push(component(FLOOR, 1, 0, 7, true));
+    let mut state = world_with(components);
+    let (actor, owner) = an_actor(&mut state);
+    place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner).expect("a legal house");
+
+    let footing = state.footing(Facet(0), Doors::AsTheyStand);
+    assert_eq!(
+        openshard_movement::step_allowed(&footing, Point::new(10, 10, 7), Direction::East),
+        Some(Point::new(11, 10, 9)),
+        "the flat floor erased the tread above it"
+    );
+}
+
+/// An elevated house floor replaces the usable map layer in its column. From
+/// outside at ground z it is too high to climb and too low to walk beneath;
+/// once on the house level it behaves as an ordinary floor.
+#[test]
+fn an_elevated_house_floor_cannot_be_walked_under() {
+    let mut components = cottage();
+    components.push(component(FLOOR, 1, 0, 7, true));
+    components.push(component(FLOOR, 2, 0, 7, true));
+    let mut state = world_with(components);
+    let (actor, owner) = an_actor(&mut state);
+    place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner).expect("a legal house");
+
+    let footing = state.footing(Facet(0), Doors::AsTheyStand);
+    assert_eq!(
+        openshard_movement::step_allowed(&footing, Point::new(11, 10, 0), Direction::East),
+        None,
+        "the body walked along the map underneath the house floor"
+    );
+    assert_eq!(
+        openshard_movement::step_allowed(&footing, Point::new(11, 10, 7), Direction::East),
+        Some(Point::new(12, 10, 7)),
+        "the same floor stopped a body already standing on it"
     );
 }
 

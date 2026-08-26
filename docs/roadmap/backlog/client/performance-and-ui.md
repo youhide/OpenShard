@@ -47,6 +47,62 @@ pass in `App::draw`, a `gpu` row and curve beside `ui`/`world`/`waited`, and a
   `REPEATS` times back to back, which is a different cache state from one pass
   among a dozen others.
 
+## Lighting architecture after the point-source regression
+
+The close-zoom house case exposed the present cost model rather than a cost of
+the house: the full-screen blit shades every output pixel, then for every light
+and every soft-shadow sample walks the occluder BVH. With the carried light at
+`reach = 4`, `flame_radius = 0` and `shadow_rays = 32`, all 32 samples were the
+same ray; collapsing that exact point source to one walk took `blit: lighting`
+from 27–30 ms to 0.86–0.91 ms in the live `--jank-log` reproduction. That fix is
+an algebraic specialisation, not a new lighting architecture. Finite-radius
+lights and scenes with several lights still have the old scaling. In order of
+likely leverage, what is left:
+
+- [ ] **Prototype a per-light shadow/visibility representation.** Build
+      visibility once for a light, then let the full-screen resolve sample that
+      result instead of walking the world BVH from every covered fragment. The
+      prototype must preserve the current 2.5D occluder, translucency,
+      finite-radius penumbra and CPU/GPU parity cases; compare image output and
+      GPU time against the direct walker at near and far zoom before choosing
+      its resolution or representation. This is the structural change most
+      likely to help one large soft light, including the house reproduction.
+- [ ] **Cache visibility for static light/occluder pairs.** Key invalidation on
+      the light transform and the occlusion generation; moving carried lights
+      remain dynamic. Do this only after visibility is an explicit product of
+      the previous item — caching the current per-fragment walk would add state
+      without removing its dominant work.
+- [ ] **Bound each point light's screen work.** Derive a conservative screen
+      rectangle or light volume and shade only pixels its reach can affect,
+      retaining a full-frame ambient/tonemap resolve. Prove the bounds at every
+      supported camera rotation, zoom, elevation and frame edge so a pool never
+      clips. This helps small and off-screen lights; it will not rescue the
+      carried light while that light covers most of a close-zoom frame.
+- [ ] **Bin visible lights into screen tiles (tiled/clustered lighting).** Give
+      each screen tile only the lights whose conservative bounds overlap it,
+      rather than making every fragment consider the whole frame's light array.
+      Measure list construction, storage and divergence as well as shader time.
+      This targets scenes with several local lights and is deliberately behind
+      per-light visibility for the one-large-light case.
+- [ ] **Split the monolithic resolve into specialised pipelines.** Keep the
+      already-cheap identity and flat-ambient routes out of the full lighting
+      shader, and separate point-light, sunlight and diagnostic variants where
+      measurements show branch or register pressure. Pipeline selection must
+      be made from frame-level facts and retain a single shared definition of
+      the lighting equations; otherwise this exchanges GPU cost for shader
+      drift. Record compiled-shader statistics where the backend exposes them.
+- [ ] **Investigate adaptive or temporal soft shadows last.** Vary samples by
+      penumbra/error and reuse stable visibility between frames only with a
+      deterministic quality ceiling, explicit history invalidation and tests
+      for moving lights, camera motion and changing occluders. This may reduce
+      finite-radius cost, but unlike the point-source collapse it is an
+      approximation and must not silently become the default quality knob.
+
+Every item is gated by the live close-zoom house capture plus a multi-light,
+finite-radius capture in `--jank-log`. Report lighting-pass GPU time and image
+parity separately: a lower whole-frame number under FIFO is not sufficient
+evidence, and neither is the point-source case by itself.
+
 ## The party left egui: a yes/no plate and a manifest — backlog
 
 The two party windows were the last of this client's own interface drawn as

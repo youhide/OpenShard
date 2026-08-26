@@ -28,13 +28,15 @@
 
 use std::time::Instant;
 
+use openshard_client_net::view::WorldView;
 use openshard_client_render::gump as gump_art;
 use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::gump::GumpId;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::TalkMode;
-use openshard_protocol::wire::Graphic;
+use openshard_protocol::wire::{Graphic, MultiId};
+use openshard_protocol::world::Point;
 
 use crate::app::App;
 use crate::hand;
@@ -45,6 +47,67 @@ mod sync;
 
 const MAX_STACK: u16 = 60_000;
 const GOLD_GRAPHIC: Graphic = Graphic(0x0EED);
+/// The permanent plaque created beside a house.  It is an ordinary world item
+/// on the wire, but it is house infrastructure rather than something a player
+/// can put in a pack.
+const HOUSE_SIGN_GRAPHIC: Graphic = Graphic(0x0BD2);
+/// ClassicUO's `Constants.DRAG_ITEMS_DISTANCE`.
+const DRAG_ITEMS_DISTANCE: u16 = 3;
+
+/// The tile a visible drop target ultimately belongs to. A nested pouch has no
+/// tile of its own, so walk its open-container parent chain until reaching the
+/// ground item or the body wearing its outermost pack.
+pub(crate) fn drop_target_position(view: &WorldView, destination: hand::PendingDrop) -> Option<Point> {
+    fn target_position(view: &WorldView, serial: Serial, remaining: u8) -> Option<Point> {
+        if remaining == 0 {
+            return None;
+        }
+        if serial == view.player.serial || view.player.equipment.iter().any(|item| item.serial == serial) {
+            return Some(view.player.position);
+        }
+        if let Some(mobile) = view.mobiles.get(&serial) {
+            return Some(mobile.position);
+        }
+        if let Some(item) = view.items.get(&serial) {
+            return Some(item.position);
+        }
+        if let Some(mobile) = view
+            .mobiles
+            .values()
+            .find(|mobile| mobile.equipment.iter().any(|item| item.serial == serial))
+        {
+            return Some(mobile.position);
+        }
+        let (&parent, _) = view
+            .contents
+            .iter()
+            .find(|(_, contents)| contents.iter().any(|item| item.serial == serial))?;
+        target_position(view, parent, remaining - 1)
+    }
+
+    match destination {
+        hand::PendingDrop::Ground(at) => Some(at),
+        hand::PendingDrop::Container { container, .. } => target_position(view, container, 16),
+        hand::PendingDrop::Equipment { mobile, .. } => target_position(view, mobile, 1),
+    }
+}
+
+pub(crate) fn in_drag_range(from: Point, to: Point) -> bool {
+    from.x.abs_diff(to.x) <= DRAG_ITEMS_DISTANCE && from.y.abs_diff(to.y) <= DRAG_ITEMS_DISTANCE
+}
+
+/// Whether this world graphic can start the client's item-drag gesture.
+///
+/// A multi is one item on the wire but many pieces on screen.  Starting a lift
+/// for it subtracts that one item from the local projection, making a whole
+/// house or ship flash out of existence until the shard rejects the drag.
+/// House signs are likewise derived, fixed world objects.  The shard makes the
+/// authoritative component-based decision too; this guard prevents the
+/// misleading local cursor and flicker for the two representations the client
+/// can identify from the wire alone.
+fn movable_world_graphic(graphic: Graphic) -> bool {
+    graphic.0 & MultiId::FLAG == 0 && graphic != HOUSE_SIGN_GRAPHIC
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct StackStep {
@@ -187,6 +250,9 @@ impl App {
         let openshard_protocol::items::WorldItemPayload::Stack(amount) = item.payload else {
             return false;
         };
+        if !movable_world_graphic(item.graphic) {
+            return false;
+        }
         self.windows.world_press = Some(hand::ItemPress {
             item: ContainedItem {
                 serial,
@@ -385,15 +451,30 @@ impl App {
         // Outside a gump the protocol's x/y/z are world coordinates, not gump
         // pixels. `pick_tile` already answers against the frame the player
         // released over.
-        if let (Some(link), Some(tile)) = (self.world.shard.link(), self.pick_tile(*self.control.camera())) {
-            let at = openshard_protocol::world::Point::new(tile.at.x, tile.at.y, tile.stand_z.0);
-            link.drop_on_ground(drag.item.serial, at);
-            self.windows.hand = Some(hand::Hand::Dropped {
-                drag,
-                destination: hand::PendingDrop::Ground(at),
-            });
-            self.reproject_item_drag();
+        let Some(tile) = self.pick_tile(*self.control.camera()) else {
+            self.audio.play_ui_sound(
+                openshard_protocol::wire::SoundId(0x0051),
+                self.world.motion.planning_state().position,
+            );
+            return true;
+        };
+        let at = Point::new(tile.at.x, tile.at.y, tile.stand_z.0);
+        if !in_drag_range(self.world.motion.planning_state().position, at) {
+            self.audio.play_ui_sound(
+                openshard_protocol::wire::SoundId(0x0051),
+                self.world.motion.planning_state().position,
+            );
+            return true;
         }
+        let Some(link) = self.world.shard.link() else {
+            return true;
+        };
+        link.drop_on_ground(drag.item.serial, at);
+        self.windows.hand = Some(hand::Hand::Dropped {
+            drag,
+            destination: hand::PendingDrop::Ground(at),
+        });
+        self.reproject_item_drag();
         true
     }
 
@@ -833,6 +914,18 @@ impl App {
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn houses_and_their_signs_never_start_an_item_drag() {
+        assert!(!movable_world_graphic(Graphic(MultiId::FLAG | 0x0064)));
+        assert!(!movable_world_graphic(HOUSE_SIGN_GRAPHIC));
+        assert!(movable_world_graphic(Graphic(0x0EED)));
+    }
+}
+
+#[cfg(test)]
 mod stack_tests {
     use super::*;
     use openshard_protocol::containers::GridSlot;
@@ -887,4 +980,16 @@ mod stack_tests {
 
     // The split's own bounds moved with the rule: `ItemPress::split` is what
     // divides a pile now, and it is exercised beside it in `hand.rs`.
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::*;
+
+    #[test]
+    fn classic_drag_range_is_three_tiles_in_chebyshev_distance() {
+        let here = Point::new(100, 100, 0);
+        assert!(in_drag_range(here, Point::new(103, 103, 0)));
+        assert!(!in_drag_range(here, Point::new(104, 100, 0)));
+    }
 }

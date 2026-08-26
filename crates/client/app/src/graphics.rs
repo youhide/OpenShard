@@ -8,6 +8,7 @@
 //! `night` rather than inside the renderer".
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use openshard_client_render::camera::TileBounds;
 use openshard_client_render::debug::View;
@@ -15,6 +16,45 @@ use openshard_client_render::frame;
 use openshard_client_render::impostor::Fringe;
 use openshard_client_render::interiors::{FloorView, ZSliceView};
 use openshard_client_render::occlusion;
+use openshard_protocol::world::Light;
+
+/// A smooth visual reading of the shard's stepped `0x4F` light level.
+///
+/// The server deliberately sends a byte only when its discrete value changes;
+/// applying that byte straight to a frame would make every dawn look like a
+/// sequence of dimmer switches. This is presentation state, not a second world
+/// clock: it only eases toward the last authoritative value and never advances
+/// one by itself.
+pub(crate) struct Daylight {
+    level: f32,
+    last_frame: Option<Duration>,
+}
+
+impl Daylight {
+    const SETTLE: Duration = Duration::from_secs(3);
+
+    pub(crate) const fn new() -> Self {
+        Self {
+            level: 0.0,
+            last_frame: None,
+        }
+    }
+
+    /// Return darkness on the protocol's `0..=31` scale, eased to `target`.
+    pub(crate) fn sample(&mut self, target: Light, clock: Duration) -> f32 {
+        let elapsed = self
+            .last_frame
+            .replace(clock)
+            .map(|last| clock.saturating_sub(last))
+            .unwrap_or_default();
+        let target = f32::from(target.0.min(0x1F));
+        // Exponential easing is independent of frame rate: a one-second stall
+        // covers the same fraction of the gap as sixty ordinary frames.
+        let alpha = 1.0 - (-elapsed.as_secs_f32() / Self::SETTLE.as_secs_f32()).exp();
+        self.level += (target - self.level) * alpha;
+        self.level
+    }
+}
 
 /// Make the next frame offer the whole visible map to the resident atlases.
 ///
@@ -68,11 +108,16 @@ pub struct GraphicsSettings {
     /// Whether the world is drawn as if it were night: dark ambient, and the
     /// fires on the map lighting what is around them. Toggled with F10.
     ///
-    /// A local switch and not the shard's clock, because there is no time of day
-    /// on the wire yet. When there is, this is the field it writes to and
-    /// nothing below it changes — the ambient is already a colour per frame
-    /// rather than a constant read by the shader.
+    /// A local lighting switch. The shard's time of day is separately enabled
+    /// by [`Self::time_of_day`], so either can be judged in the F1 Light tab.
     pub night: bool,
+    /// Whether ambient light follows the shard's `0x4F` time-of-day updates.
+    ///
+    /// Off, the ordinary non-night picture is fixed daylight, which gives a
+    /// stable comparison while the shard's clock keeps advancing.
+    pub time_of_day: bool,
+    /// The eased presentation reading of the shard's time-of-day level.
+    pub daylight: Daylight,
     /// What a fragment whose ray met no box is answered with — the **fringe**,
     /// [`Fringe`]. Cycled with F2, and handed to the statics pass every frame.
     ///

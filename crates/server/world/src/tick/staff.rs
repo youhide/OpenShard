@@ -96,13 +96,15 @@ impl World {
                 // `skills::resolve_harvest_target`, which is where a client naming
                 // a static that is not there is refused.
                 let facet = self.state.facet_of(actor);
-                if let Some(target) = skills::resolve_harvest_target(
+                let accepted = skills::resolve_harvest_target(
                     &self.state,
                     facet,
                     response.location,
                     response.graphic.unwrap_or(Graphic(0)),
-                ) {
-                    skills::begin_harvest(&mut self.state, actor, tool, target);
+                )
+                .is_some_and(|target| skills::begin_harvest(&mut self.state, actor, tool, target));
+                if !accepted {
+                    self.state.refuse_harvest(actor);
                 }
             }
             openshard_state::TargetPurpose::GuildInvite => {

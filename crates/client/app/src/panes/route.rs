@@ -308,6 +308,9 @@ impl App {
             // this client sends: the shard thread has already said why it went.
             Effect::Net(action) => {
                 if let Some(link) = self.world.shard.link() {
+                    if let openshard_client_net::action::Outgoing::Use(serial) = &action {
+                        self.last_used_item = Some(*serial);
+                    }
                     link.act(action);
                 }
             }
@@ -350,6 +353,23 @@ impl App {
                 let Some(Hand::Held(drag)) = self.windows.hand else {
                     return;
                 };
+                let listener = self.world.motion.planning_state().position;
+                if self
+                    .world
+                    .authoritative
+                    .view
+                    .as_ref()
+                    .and_then(|view| crate::own_windows::drop_target_position(view, destination))
+                    .is_some_and(|at| !crate::own_windows::in_drag_range(listener, at))
+                {
+                    // ClassicUO catches a known target beyond three tiles
+                    // before it goes on the wire, keeping the item on the hand
+                    // and giving the same short error beep as an invalid map
+                    // drop.
+                    self.audio
+                        .play_ui_sound(openshard_protocol::wire::SoundId(0x0051), listener);
+                    return;
+                }
                 if let Some(link) = self.world.shard.link() {
                     link.act(destination.packet(drag.item.serial));
                     self.windows.hand = Some(Hand::Dropped { drag, destination });

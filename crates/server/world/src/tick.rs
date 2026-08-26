@@ -197,6 +197,14 @@ pub struct World {
     crossed: Cursor<RegionChanged>,
     /// Commands waiting for the next tick.
     inbox: Vec<Command>,
+    /// The leaves a connection has just opened this tick.
+    ///
+    /// A diagonal past a double doorway asks both of its shut leaves to open,
+    /// before its walk request. Linked leaves open as one doorway, so the
+    /// second `0x06` is the same automatic action, not an instruction to shut
+    /// the pair again. This is tick-local on purpose: a later deliberate
+    /// double-click still closes an open door normally.
+    opened_door_leaves: HashSet<(ConnectionId, Serial)>,
     /// The spawn regions the tick keeps populated. Laid by the `populate:` verb,
     /// maintained here, and persisted — a populated area stays populated across a
     /// restart, and a rare spawn keeps its remaining respawn wait.
@@ -293,6 +301,7 @@ impl World {
             slain: Cursor::default(),
             crossed: Cursor::default(),
             inbox: Vec::new(),
+            opened_door_leaves: HashSet::new(),
             spawners: Vec::new(),
             pending_inventories: HashMap::new(),
             clock_base: 0,
@@ -626,6 +635,7 @@ impl World {
     /// cannot be debugged from a log.
     pub fn tick(&mut self, now: Instant) {
         self.state.ticks += 1;
+        self.opened_door_leaves.clear();
 
         // Take the whole inbox. A command queued *during* a tick belongs to the
         // next one — otherwise a system that queues work could starve the loop,
@@ -796,6 +806,10 @@ impl World {
         // The sun moved, or somebody walked into a cave. One pass, both reasons,
         // and only the players whose level actually changed are told.
         self.refresh_light();
+        // The clock reached a new six-hour weather quarter. This is separate
+        // from the light diff because weather is a whole visual state rather
+        // than a brightness level, and it changes even at noon.
+        self.refresh_weather();
         // And follow what a player is carrying: gold spent, loot lifted, armour
         // worn. Diffed against what was last sent, so a still player costs nothing.
         self.refresh_statuses();
@@ -1265,7 +1279,38 @@ impl World {
                         && !snoop_refused
                         && !npc::open_shop(&mut self.state, connection, serial)
                     {
-                        items::double_click(&mut self.state, connection, serial);
+                        // `App::open_door_ahead` sends a use for every shut
+                        // leaf a diagonal has to pass. A generated double
+                        // doorway links its two leaves, and the first use has
+                        // already swung both; accepting the second as an
+                        // ordinary toggle would shut them again immediately,
+                        // before the following walk is read. Remember the
+                        // leaves opened earlier in this tick, which is exactly
+                        // the lifetime of that automatic batch. A later click
+                        // is deliberate and remains the normal close action.
+                        let already_opened = self.opened_door_leaves.contains(&(connection, serial));
+                        let opened = match self.state.registry.entity_of(serial) {
+                            Some(door) => self
+                                .state
+                                .registry
+                                .get::<Door>(door)
+                                .filter(|door| !door.is_open)
+                                .map(|door| (serial, door.link)),
+                            None => None,
+                        };
+                        if !already_opened {
+                            items::double_click(&mut self.state, connection, serial);
+                            if let Some((leaf, Some(link))) = opened.filter(|_| {
+                                self.state
+                                    .registry
+                                    .entity_of(serial)
+                                    .and_then(|door| self.state.registry.get::<Door>(door))
+                                    .is_some_and(|door| door.is_open)
+                            }) {
+                                self.opened_door_leaves.insert((connection, leaf));
+                                self.opened_door_leaves.insert((connection, link));
+                            }
+                        }
                         // And the core's own answer for an item a skill knows what
                         // to do with — an instrument struck up, and the bandage and
                         // lockpick to come. Run *after* `double_click`, so the pack

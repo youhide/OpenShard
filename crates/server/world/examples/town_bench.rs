@@ -38,8 +38,8 @@ use openshard_world::{Character, Command, Entering, FreshCharacter, Gameplay, TI
 /// Britain, the same spot the tests use.
 const START: (u16, u16) = (1363, 1600);
 
-/// The 50ms / 20Hz tick budget, to report each measurement as a fraction of.
-const TICK_BUDGET: Duration = Duration::from_millis(50);
+/// The world's current tick budget, to report each measurement as a fraction of.
+const TICK_BUDGET: Duration = TICK_INTERVAL;
 
 /// A town of `folk` dressed townsfolk over a block, `decor` statics scattered
 /// through it, and `players` standing in the middle.
@@ -171,7 +171,10 @@ fn report(label: &str, per_tick: f64) {
     let ns = per_tick * 1e9;
     let ms = per_tick * 1e3;
     let budget = per_tick / TICK_BUDGET.as_secs_f64() * 100.0;
-    println!("    {label:<10}{ns:>11.0} ns/tick  {ms:>8.3} ms/tick  {budget:>6.1}% of 50ms");
+    println!(
+        "    {label:<10}{ns:>11.0} ns/tick  {ms:>8.3} ms/tick  {budget:>6.1}% of {}ms",
+        TICK_BUDGET.as_millis()
+    );
 }
 
 fn main() {

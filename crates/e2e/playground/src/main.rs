@@ -65,7 +65,7 @@
 //! — a test that read the machine's config would pass on what somebody happened
 //! to have configured.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -146,6 +146,13 @@ struct Cli {
     #[arg(long, env = "RUST_LOG", default_value = "info", value_name = "FILTER")]
     log: String,
 
+    /// Write a frame-jank trace to `target/openshard-playground-jank.log`.
+    ///
+    /// This is deliberately opt-in: detailed diagnostics and their I/O can
+    /// distort the responsiveness of the in-process playground they measure.
+    #[arg(long, env = "OPENSHARD_JANK_LOG")]
+    jank_log: bool,
+
     /// Pause the App event loop once immediately after it enters the world.
     ///
     /// A diagnostic only: the in-process shard keeps sending while the App is
@@ -184,14 +191,22 @@ fn main() -> ExitCode {
     openshard_client_app::load_env();
     let cli = Cli::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_new(&cli.log).unwrap_or_else(|_| EnvFilter::new("info")))
-        .init();
-    if let Err(error) = openshard_client_app::start_jank_log(Path::new(JANK_LOG)) {
-        eprintln!("opening {JANK_LOG}: {error}");
-        return ExitCode::FAILURE;
+    let mut filter = EnvFilter::try_new(&cli.log).unwrap_or_else(|_| EnvFilter::new("info"));
+    if !cli.jank_log {
+        filter = filter.add_directive(
+            "jank=off"
+                .parse()
+                .expect("the built-in jank logging directive is valid"),
+        );
     }
-    eprintln!("jank frames over 16 ms will be written to {JANK_LOG}");
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+    if cli.jank_log {
+        if let Err(error) = openshard_client_app::start_jank_log(JANK_LOG.as_ref()) {
+            eprintln!("opening {JANK_LOG}: {error}");
+            return ExitCode::FAILURE;
+        }
+        eprintln!("jank frames over 16 ms will be written to {JANK_LOG}");
+    }
 
     let dir = cli.client;
 

@@ -535,6 +535,16 @@ impl Ambient {
         }
         lit
     }
+
+    /// Whether an open tile already has the full daytime multiplier.
+    ///
+    /// [`Self::flattened`] spells that same day as a zero sky term and a full
+    /// ground term, so comparing this ambient with [`Self::DAY`] would miss the
+    /// ordinary client picture. The carried lantern is invisible in either
+    /// spelling, and need not make the deferred pass walk its rays.
+    pub fn is_full_daylight(self) -> bool {
+        self.at(crate::occlusion::SKY_OPEN) == [1.0; 3]
+    }
 }
 
 /// Everything the blit needs to light a frame.
@@ -656,6 +666,21 @@ impl Lighting {
         self.lights.is_empty()
             && self.ambient == Ambient::DAY
             && self.occlusion.is_empty()
+            && self.sun.is_none_or(|sun| sun.intensity <= 0.0)
+            && self.view.is_lit()
+            && !self.dead
+    }
+
+    /// Whether this frame has only a flat ambient term left to apply.
+    ///
+    /// A roof changes a non-zero sky term even with neither a flame nor the
+    /// sun, so this requires that term to have already been flattened. It is
+    /// therefore not an identity, but the fragment path need not inspect any
+    /// G-buffer attachment or object instance row.
+    pub fn is_ambient_only(&self) -> bool {
+        self.lights.is_empty()
+            && self.sun.is_none_or(|sun| sun.intensity <= 0.0)
+            && self.ambient.sky == [0.0; 3]
             && self.view.is_lit()
             && !self.dead
     }
@@ -1254,6 +1279,9 @@ pub const SHADOW_RAYS: usize = 8;
 pub struct ShadowRays(u32);
 
 impl ShadowRays {
+    /// The one unique ray a point source can cast.
+    const ONE: Self = Self(1);
+
     /// What the client draws with unless told otherwise: [`SHADOW_RAYS`].
     pub const DEFAULT: Self = Self(SHADOW_RAYS as u32);
 
@@ -1282,6 +1310,25 @@ impl ShadowRays {
     /// And for the header the shader reads.
     pub fn raw(self) -> u32 {
         self.0
+    }
+
+    /// The samples that can produce distinct answers for a body of `radius`.
+    ///
+    /// At zero radius every Vogel point is the flame centre, so walking more
+    /// than one repeats the identical segment and divides the identical sum by
+    /// the repetition count. A non-zero body keeps the person's full setting.
+    ///
+    /// **Performance regression guard.** This was found with the live client at
+    /// close zoom and `flame_radius = 0`, `shadow_rays = 32`, `reach = 4`: one
+    /// carried light spent 27–30 ms in the lighting blit. Collapsing the 32
+    /// identical BVH walks to this one brought the same pass below 1 ms. Keep
+    /// Keep the `a_point_source_walks_the_bvh_once` test beside this rule if the
+    /// sampling arrangement changes.
+    fn for_radius(self, radius: f32) -> Self {
+        match radius <= 0.0 {
+            true => Self::ONE,
+            false => self,
+        }
     }
 }
 
@@ -2783,6 +2830,12 @@ const GOLDEN_ANGLE: f32 = 2.399_963_2;
 /// happened. What it shares with the thing under test is the scene, not the
 /// answer.
 pub fn flame_points(spot: Spot, flame: [f32; 3], radius: f32, rays: ShadowRays) -> FlamePoints {
+    if radius <= 0.0 {
+        return FlamePoints {
+            points: [flame; ShadowRays::MOST as usize],
+            rays,
+        };
+    }
     let toward = TileVec::between(
         WorldVec::new(spot.at.x, spot.at.y, spot.z),
         WorldVec::from_array(flame),
@@ -2950,6 +3003,7 @@ fn arrival(
     rays: ShadowRays,
     walk: impl Fn(Spot, [f32; 3], &Occlusion) -> (f32, Option<Stopper>),
 ) -> Arrival {
+    let rays = rays.for_radius(radius);
     let normal = spot.surface.normal();
     let reach = light.radius.max(0.001);
     let mut delivered = 0.0;
@@ -3623,6 +3677,39 @@ mod tests {
         assert_eq!(ShadowRays::new(9_000).raw(), ShadowRays::MOST);
         assert_eq!(ShadowRays::new(4).count(), 4);
         assert_eq!(ShadowRays::DEFAULT.count(), SHADOW_RAYS);
+        assert_eq!(ShadowRays::new(32).for_radius(0.0), ShadowRays::ONE);
+        assert_eq!(ShadowRays::new(32).for_radius(0.01).count(), 32);
+    }
+
+    /// The performance invariant behind [`ShadowRays::for_radius`], tested at
+    /// the actual expensive boundary rather than only as arithmetic on a count:
+    /// a point source asks the BVH once even when the frame requests 32 rays.
+    #[test]
+    fn a_point_source_walks_the_bvh_once() {
+        let walks = std::cell::Cell::new(0usize);
+        let spot = Spot::flat(Vec2::new(100.5, 100.5), 0.0, (100, 100));
+        let light = Light {
+            at: Vec2::new(101.5, 100.5),
+            z: 10.0,
+            radius: 40.0,
+            color: [1.0; 3],
+            intensity: 1.0,
+            beam: None,
+        };
+        let result = arrival(
+            spot,
+            &light,
+            &Occlusion::EMPTY,
+            0.0,
+            ShadowRays::new(32),
+            |_, _, _| {
+                walks.set(walks.get() + 1);
+                (0.5, None)
+            },
+        );
+
+        assert_eq!(walks.get(), 1, "a point source repeated an identical BVH walk");
+        assert_eq!(result.visible, 0.5, "the one ray was not averaged as itself");
     }
 
     /// And the points a flame is sampled at are as many as were asked for — the
@@ -4244,11 +4331,35 @@ mod tests {
     fn the_empty_lighting_is_the_identity() {
         assert!(Lighting::NONE.is_identity());
         assert!(
+            Lighting {
+                ambient: Ambient::DAY.flattened(),
+                ..Lighting::NONE
+            }
+            .is_ambient_only()
+        );
+        assert!(Ambient::DAY.is_full_daylight());
+        assert!(Ambient::DAY.flattened().is_full_daylight());
+        assert!(!NIGHT.is_full_daylight());
+        assert!(
             !Lighting {
                 ambient: NIGHT,
                 ..Lighting::NONE
             }
             .is_identity()
+        );
+        assert!(
+            !Lighting {
+                sun: Some(midday()),
+                ..Lighting::NONE
+            }
+            .is_identity()
+        );
+        assert!(
+            !Lighting {
+                sun: Some(midday()),
+                ..Lighting::NONE
+            }
+            .is_ambient_only()
         );
     }
 

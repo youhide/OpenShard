@@ -8,6 +8,7 @@ use openshard_client_render::depth::Hit;
 use openshard_client_render::items::ItemIndex;
 use openshard_client_render::statics::PickedStatic;
 use openshard_protocol::serial::Serial;
+use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 
 use crate::crowd::Who;
@@ -24,8 +25,9 @@ pub enum SelectedIdentity {
     Static(PickedStatic),
     /// A creature, by [`Who`] — `None` for the player's own body.
     Mobile(Who),
-    /// An item lying on the ground, by its serial.
-    Item(Serial),
+    /// An item lying on the ground, including the exact component a multi
+    /// expanded into.
+    Item(HoveredItem),
 }
 
 impl SelectedIdentity {
@@ -54,10 +56,11 @@ impl SelectedIdentity {
         }
     }
 
-    /// The item half alone, for the held-selection ring.
-    pub fn as_item(self) -> Option<Serial> {
+    /// The exact ground-item component held by this selection, for the
+    /// held-selection ring and inspection panel.
+    pub fn as_hovered_item(self) -> Option<HoveredItem> {
         match self {
-            SelectedIdentity::Item(serial) => Some(serial),
+            SelectedIdentity::Item(item) => Some(item),
             _ => None,
         }
     }
@@ -83,8 +86,25 @@ impl SelectedIdentity {
 pub struct HoveredItem {
     /// What the shard knows it by — a house's serial, for any of its pieces.
     pub serial: Serial,
+    /// The art of the exact piece the cursor hit.
+    ///
+    /// A multi shares one serial between its wall, roof and floor pieces, but
+    /// walking needs to distinguish a floor from the cover drawn in front of
+    /// it. Keeping the graphic alongside the placed point makes that decision
+    /// about the completed frame, just like the rest of this snapshot.
+    pub graphic: Graphic,
     /// Where the piece the cursor actually hit stands.
     pub at: Point,
+}
+
+impl HoveredItem {
+    /// Whether a current draw-list row is the exact piece this cursor hit.
+    ///
+    /// A multi repeats its serial, so that field alone identifies the house
+    /// rather than the wall, floor or roof component the player selected.
+    pub fn matches(self, serial: Serial, graphic: Graphic, at: Point) -> bool {
+        self.serial == serial && self.graphic == graphic && self.at == at
+    }
 }
 
 /// What the cursor was on in the last completed frame.
@@ -156,6 +176,31 @@ pub(crate) fn in_front(
     }
 }
 
+/// The map editor's removal tool names map data, not the frontmost world
+/// object.
+///
+/// A placed house is one live item expanded into walls, floors and roofs. Its
+/// component can cover a map static on screen, but it is not something a map
+/// patch may remove. While the removal tool is armed, retain the map-static
+/// hit and put the ordinary mobile/item answers out; every other tool keeps the
+/// picture's normal frontmost-object rule from [`in_front`].
+pub(crate) fn map_static_for_removal(
+    armed: bool,
+    mobile: Option<openshard_client_render::mobiles::MobileIndex>,
+    item: Option<Hit<ItemIndex>>,
+    map_static: Option<Hit<PickedStatic>>,
+) -> (
+    Option<openshard_client_render::mobiles::MobileIndex>,
+    Option<ItemIndex>,
+    Option<PickedStatic>,
+) {
+    if armed {
+        return (None, None, map_static.map(|hit| hit.what));
+    }
+    let (item, map_static) = in_front(item, map_static);
+    (mobile, item, map_static)
+}
+
 /// The two independent pointer states — see the module docs.
 #[derive(Default)]
 pub struct Picking {
@@ -183,6 +228,7 @@ mod tests {
     fn hovered(serial: Serial) -> HoveredItem {
         HoveredItem {
             serial,
+            graphic: Graphic(0),
             at: Point::new(1400, 1600, 0),
         }
     }
@@ -196,7 +242,7 @@ mod tests {
                 item: Some(hovered(harp)),
                 ..Hover::default()
             },
-            selected: Some(SelectedIdentity::Item(harp)),
+            selected: Some(SelectedIdentity::Item(hovered(harp))),
         };
 
         picking.hover.item = Some(hovered(drum));
@@ -208,8 +254,24 @@ mod tests {
         );
         assert_eq!(
             picking.selected,
-            Some(SelectedIdentity::Item(harp)),
+            Some(SelectedIdentity::Item(hovered(harp))),
             "the inspector still holds the clicked harp"
+        );
+    }
+
+    #[test]
+    fn a_house_selection_keeps_its_exact_component() {
+        let house = Serial::new(0x4000_0001).expect("valid item serial");
+        let wall = HoveredItem {
+            serial: house,
+            graphic: Graphic(0x0006),
+            at: Point::new(1400, 1600, 7),
+        };
+
+        assert!(wall.matches(house, Graphic(0x0006), Point::new(1400, 1600, 7)));
+        assert!(
+            !wall.matches(house, Graphic(0x0006), Point::new(1400, 1600, 0)),
+            "the house's central floor replaced the wall selection"
         );
     }
 
@@ -298,5 +360,40 @@ mod tests {
 
         assert_eq!(in_front(Some(item), None), (Some(ItemIndex::new(2)), None));
         assert_eq!(in_front(None, None), (None, None));
+    }
+
+    #[test]
+    fn static_removal_reaches_map_data_behind_a_house_component() {
+        let map_static = PickedStatic {
+            at: Point::new(1400, 1637, 0),
+            graphic: Graphic(0x0006),
+        };
+        let mobile = openshard_client_render::mobiles::MobileIndex::new(3);
+        let (mobile, item, selected) = map_static_for_removal(
+            true,
+            Some(mobile),
+            Some(Hit {
+                order: Order {
+                    tile: 3038,
+                    priority_z: 0,
+                },
+                what: ItemIndex::new(1),
+            }),
+            Some(Hit {
+                order: Order {
+                    tile: 3037,
+                    priority_z: 0,
+                },
+                what: map_static,
+            }),
+        );
+
+        assert_eq!(mobile, None, "a mobile took the editor's map click");
+        assert_eq!(item, None, "a house component took the editor's map click");
+        assert_eq!(
+            selected,
+            Some(map_static),
+            "the map static was not kept for removal"
+        );
     }
 }

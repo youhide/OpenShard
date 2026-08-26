@@ -320,12 +320,13 @@ impl App {
                         (picked, self.tile_info(Tile::new(mobile.at.x, mobile.at.y)))
                     }),
             ),
-            SelectedIdentity::Item(serial) => Selection::Item(
+            SelectedIdentity::Item(selected) => Selection::Item(
                 self.world
                     .presentation
                     .item_serials
                     .iter()
-                    .position(|held| *held == serial)
+                    .zip(self.world.presentation.items.iter())
+                    .position(|(serial, item)| selected.matches(*serial, item.graphic, item.at))
                     .map(|index| {
                         let item = self.world.presentation.items[index];
                         let priority_z = PriorityZ(depth::static_priority_z(
@@ -333,7 +334,7 @@ impl App {
                             self.resources.tiledata.static_tile(item.displayed().0),
                         ));
                         let picked = PickedItem {
-                            serial,
+                            serial: selected.serial,
                             graphic: item.displayed(),
                             hue: item.hue,
                             at: item.at,
@@ -880,6 +881,12 @@ impl App {
         if let Some(disabled) = request.body_overlap_transparency_disabled {
             self.graphics.body_overlap_transparency_disabled = disabled;
         }
+        if let Some(time_of_day) = request.time_of_day {
+            self.graphics.time_of_day = time_of_day;
+        }
+        if let Some(night) = request.night {
+            self.graphics.night = night;
+        }
         if let Some(show) = request.show_terrain {
             self.graphics.show_terrain = show;
         }
@@ -1082,6 +1089,8 @@ impl App {
         let hud = Hud {
             locked: self.control.follow() == Follow::Body,
             rig: self.control.rig(),
+            ping: self.ping.latest(),
+            ping_app_delivery: self.ping.latest_app_delivery(),
             perf: perf.0,
             scripts: self.scripts.iter().map(|script| script.name).collect(),
             replay: self.replay.as_ref().map(|replay| {
@@ -1091,6 +1100,8 @@ impl App {
             draw: self.graphics.drawing,
             cutaway_disabled: self.graphics.cutaway_disabled,
             body_overlap_transparency_disabled: self.graphics.body_overlap_transparency_disabled,
+            time_of_day: self.graphics.time_of_day,
+            night: self.graphics.night,
             show_terrain: self.graphics.show_terrain,
             // The tile is lit when nothing else took the highlight. Under
             // `Items` nothing ever does, which is the mode's whole content; the

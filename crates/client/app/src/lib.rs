@@ -80,6 +80,7 @@ mod own_windows;
 mod panes;
 mod picking;
 mod picking_query;
+mod ping;
 mod presentation;
 mod profile;
 mod render_passes;
@@ -414,7 +415,7 @@ pub(crate) const CHAT_LINE_HEIGHT: i32 = 16;
 pub(crate) const CHAT_MARGIN: i32 = 4;
 
 /// [`text::collect_gump`]'s own quads, grown around each label's own top-left
-/// corner by the Chat tab's [`desk::ChatScale`].
+/// corner by a fractional bitmap-font scale.
 ///
 /// One label at a time and not the whole slice through `collect_gump` once,
 /// because every glyph's own quad has to grow around *its* label's corner and
@@ -431,8 +432,7 @@ pub(crate) const CHAT_MARGIN: i32 = 4;
 /// reason: [`text::collect_screen_ttf`]'s own doc is why an antialiased glyph
 /// stretched by an integer factor with no filtering reads as exactly the
 /// blockiness that function exists to avoid.
-pub(crate) fn scaled_gump_quads(labels: &[GumpLabel<'_>], atlas: &FontAtlas, scale: u32) -> Vec<SpriteQuad> {
-    let scale = scale as f32;
+pub(crate) fn scaled_gump_quads(labels: &[GumpLabel<'_>], atlas: &FontAtlas, scale: f32) -> Vec<SpriteQuad> {
     let mut quads = Vec::new();
     for label in labels {
         for mut quad in text::collect_gump(std::slice::from_ref(label), atlas) {
@@ -1126,9 +1126,11 @@ pub fn run<D: Dial + Send + 'static>(
                 "OPENSHARD_DISABLE_BODY_OVERLAP_TRANSPARENCY",
             )
             .is_some(),
-            // Daylight until asked otherwise: the lighting pass is then
-            // exactly the copy the blit has always been.
+            // The ordinary local lighting switch is still F10.
             night: false,
+            // The shard's light level is used unless F1 asks for a fixed day.
+            time_of_day: true,
+            daylight: graphics::Daylight::new(),
             // The fringe as the environment asks for it, which is
             // `Fringe::Clamp` when it asks for nothing — F2 cycles from
             // wherever that leaves it.
@@ -1216,6 +1218,7 @@ pub fn run<D: Dial + Send + 'static>(
         },
         auto_open_doors: movement.auto_open_doors,
         auto_opened_doors: Vec::new(),
+        last_used_item: None,
         route_cache: None,
         terrain_cache: None,
         occluder_cache: None,
@@ -1247,6 +1250,7 @@ pub fn run<D: Dial + Send + 'static>(
         },
         next_tick: Instant::now(),
         last_advance: Instant::now(),
+        last_view_advance: Instant::now(),
         last_frame: Instant::now(),
         window: None,
         pending: shell::Request::default(),
@@ -1277,6 +1281,7 @@ pub fn run<D: Dial + Send + 'static>(
         scenario,
         lod_sweep: None,
         movement_trace: movement_trace::MovementTrace::open(),
+        ping: ping::Ping::default(),
     };
     match event_loop.run_app(&mut app) {
         Ok(()) => ExitCode::SUCCESS,

@@ -554,7 +554,10 @@ const LUMBER_ML: HarvestDef = HarvestDef {
     place_at_feet: false,
     action: HarvestAction::Chop,
     sounds: &[SoundId(0x13E)],
-    beats: 1,
+    // Three 1.6-second beats give the chop three uninterrupted full cycles
+    // before the logs arrive. Each impact sound falls 0.9 seconds into its
+    // own cycle, matching the reference's per-effect sound timer.
+    beats: 3,
     beat_ticks: BEAT_TICKS,
     sound_ticks: SOUND_TICKS,
     messages: HarvestMessages {

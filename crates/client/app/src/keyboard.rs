@@ -219,6 +219,8 @@ pub(crate) enum Hotkey {
     /// The worn backpack, exactly as the paperdoll's own button opens it — that
     /// button can be covered or closed, and this cannot.
     Inventory,
+    /// Use the last object the player explicitly used.
+    UseLastItem,
     /// The minimap. Local, like the skills and status windows and unlike
     /// [`Paperdoll`](Self::Paperdoll): no round trip.
     ///
@@ -246,8 +248,9 @@ pub(crate) enum Hotkey {
     /// Night on and off.
     ///
     /// A key and not a setting because the only honest test of firelight is the
-    /// two pictures side by side, and there is no time of day on the wire yet
-    /// for it to follow. The five below are keys for the same reason, and the
+    /// two pictures side by side. The shard now supplies time of day, but F10
+    /// remains its separate local lighting switch. The five below are keys for the
+    /// same reason, and the
     /// reason is `docs/lighting_pitfalls.md`'s: what is being read is the
     /// difference between two pictures of *one instant*, and a hand that has to
     /// find a checkbox has moved the camera by the time it is back.
@@ -289,12 +292,13 @@ impl Hotkey {
     /// The list exists so that "no two actions share a key" is a test rather
     /// than a thing somebody notices — see [`Self::key`], which is also the
     /// question a bindings window asks.
-    pub(crate) const ALL: [Self; 22] = [
+    pub(crate) const ALL: [Self; 23] = [
         Self::Speak,
         Self::DevWindow,
         Self::Relock,
         Self::Paperdoll,
         Self::Inventory,
+        Self::UseLastItem,
         Self::Minimap,
         Self::WorldMap,
         Self::PanUp,
@@ -325,6 +329,8 @@ impl Hotkey {
             Self::Relock => KeyCode::Home,
             Self::Paperdoll => KeyCode::KeyP,
             Self::Inventory => KeyCode::KeyI,
+            // F2 is already Fringe and every other function key is occupied.
+            Self::UseLastItem => KeyCode::KeyU,
             Self::Minimap | Self::WorldMap => KeyCode::KeyM,
             Self::PanUp | Self::FloorUp => KeyCode::PageUp,
             Self::PanDown | Self::FloorDown => KeyCode::PageDown,
@@ -469,6 +475,14 @@ mod tests {
         assert_eq!(
             Hotkey::of(Gesture::new(KeyCode::PageDown, true)),
             Some(Hotkey::PanDown)
+        );
+    }
+
+    #[test]
+    fn use_last_item_is_bound_to_the_free_u_key() {
+        assert_eq!(
+            Hotkey::of(Gesture::new(KeyCode::KeyU, false)),
+            Some(Hotkey::UseLastItem)
         );
     }
 

@@ -85,6 +85,16 @@ fn bitmap_font_hue(hue: Hue) -> Hue {
 /// width of a box nobody drew would misalign every character after it for a
 /// character that was never going to be there either way.
 pub fn collect(labels: &[Label<'_>], atlas: &FontAtlas) -> Vec<SpriteQuad> {
+    collect_scaled(labels, atlas, 1.0)
+}
+
+/// [`collect`] with a uniform scale around each label's centre/baseline anchor.
+///
+/// `fonts.mul` is baked, so this is how the four role sizes reach bitmap text.
+/// The factor deliberately remains fractional: modern high-density displays
+/// have enough physical pixels for 1.5x text to be useful, and the nearest
+/// sampler preserves the face's crisp texels.
+pub fn collect_scaled(labels: &[Label<'_>], atlas: &FontAtlas, scale: f32) -> Vec<SpriteQuad> {
     let mut quads = Vec::new();
     for label in labels {
         let hue = bitmap_font_hue(label.hue);
@@ -94,16 +104,16 @@ pub fn collect(labels: &[Label<'_>], atlas: &FontAtlas) -> Vec<SpriteQuad> {
             .filter_map(legacy_byte)
             .filter_map(|byte| atlas.glyph(label.font, byte))
             .collect();
-        let total_width: i32 = glyphs.iter().map(|sprite| i32::from(sprite.width)).sum();
-        let mut x = label.anchor.x - total_width / 2;
+        let total_width: f32 = glyphs.iter().map(|sprite| f32::from(sprite.width) * scale).sum();
+        let mut x = label.anchor.x as f32 - total_width / 2.0;
         for sprite in glyphs {
             if sprite.width > 0 && sprite.height > 0 {
                 quads.push(SpriteQuad {
                     rect: Rect {
-                        x: x as f32,
-                        y: (label.anchor.y - i32::from(sprite.height)) as f32,
-                        width: f32::from(sprite.width),
-                        height: f32::from(sprite.height),
+                        x,
+                        y: label.anchor.y as f32 - f32::from(sprite.height) * scale,
+                        width: f32::from(sprite.width) * scale,
+                        height: f32::from(sprite.height) * scale,
                     },
                     region: sprite.region,
                     depth: label.depth,
@@ -116,7 +126,7 @@ pub fn collect(labels: &[Label<'_>], atlas: &FontAtlas) -> Vec<SpriteQuad> {
                     volumes: crate::impostor::Range::default(),
                 });
             }
-            x += i32::from(sprite.width);
+            x += f32::from(sprite.width) * scale;
         }
     }
     quads
@@ -540,6 +550,27 @@ mod tests {
         );
         assert_eq!(quads[0].rect.x, 96.0, "100 - 8/2");
         assert_eq!(quads[1].rect.x, 102.0);
+    }
+
+    #[test]
+    fn bitmap_labels_keep_their_anchor_at_a_fractional_scale() {
+        let atlas = atlas();
+        let quads = collect_scaled(
+            &[Label {
+                anchor: ViewPixel { x: 100, y: 50 },
+                text: "Hi",
+                font: Font(0),
+                hue: Hue::NONE,
+                depth: 0.5,
+            }],
+            &atlas,
+            1.5,
+        );
+        assert_eq!(quads[0].rect.x, 94.0, "100 - (8 × 1.5) / 2");
+        assert_eq!(quads[0].rect.width, 9.0);
+        assert_eq!(quads[1].rect.x, 103.0, "the next advance is also 1.5x");
+        assert_eq!(quads[0].rect.y, 35.0, "the baseline anchor stays put");
+        assert_eq!(quads[0].rect.height, 15.0);
     }
 
     /// A bitmap font uses the full palette. Its contour and body are separate

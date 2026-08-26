@@ -270,8 +270,10 @@ impl Connection {
 
 #[cfg(test)]
 mod tests {
+    use openshard_protocol::feedback::PlaySound;
     use openshard_protocol::login::{DenyReason, LoginDenied};
-    use openshard_protocol::world::{Light, LightLevel, LoginComplete};
+    use openshard_protocol::wire::SoundId;
+    use openshard_protocol::world::{LoginComplete, Point, Season, SeasonChange};
 
     use super::*;
 
@@ -321,6 +323,24 @@ mod tests {
     }
 
     #[test]
+    fn repeated_harvest_sounds_are_not_coalesced_by_the_wire_reader() {
+        let sound = ServerPacket::PlaySound(PlaySound {
+            sound: SoundId(0x013E),
+            at: Point::new(100, 100, 0),
+        });
+        let mut bytes = sound.encode(version());
+        bytes.extend(sound.encode(version()));
+        bytes.extend(sound.encode(version()));
+
+        let mut connection = Connection::new(Stream::Plain, version());
+        connection.receive(&bytes);
+        for _ in 0..3 {
+            assert_eq!(connection.poll().unwrap(), Some(Event::Packet(sound.clone())));
+        }
+        assert_eq!(connection.poll().unwrap(), None);
+    }
+
+    #[test]
     fn a_compressed_stream_comes_apart_packet_by_packet() {
         // What the game connection actually delivers: each packet compressed on
         // its own, then whatever TCP chose to hand over.
@@ -359,8 +379,11 @@ mod tests {
     fn a_packet_with_no_decoder_still_advances_the_stream() {
         // The point of `Undecoded`: an id nobody has written a decoder for must
         // not cost the packets behind it.
-        let light = ServerPacket::LightLevel(LightLevel { level: Light(0x10) });
-        let mut bytes = light.encode(version());
+        let season = ServerPacket::SeasonChange(SeasonChange {
+            season: Season::Fall,
+            play_sound: false,
+        });
+        let mut bytes = season.encode(version());
         bytes.extend(ServerPacket::LoginComplete(LoginComplete).encode(version()));
 
         let mut connection = Connection::new(Stream::Plain, version());
@@ -369,8 +392,8 @@ mod tests {
         assert_eq!(
             connection.poll().unwrap(),
             Some(Event::Undecoded {
-                id: PacketId(0x4F),
-                body: light.encode(version()),
+                id: PacketId(0xBC),
+                body: season.encode(version()),
             })
         );
         assert_eq!(

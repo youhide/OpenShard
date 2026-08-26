@@ -10424,6 +10424,115 @@ fn linked_leaves_toggle_and_auto_close_as_one_doorway() {
     assert!(!world.registry().get::<Door>(second).unwrap().is_open);
 }
 
+/// The auto-door opens every shut tile a diagonal crosses. That is two use
+/// packets for a double doorway, but linked leaves are one toggle: after the
+/// first packet opens both, the second must not slam them shut before the walk.
+#[test]
+fn a_diagonal_auto_door_use_keeps_a_linked_double_doorway_open() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let west_at = Point::new(START.0, START.1 - 1, Z_WITHOUT_A_MAP);
+    let east_at = Point::new(START.0 + 1, START.1 - 1, Z_WITHOUT_A_MAP);
+    world.queue(Command::Decorate {
+        facet: Facet(0),
+        statics: Vec::new(),
+        doors: vec![
+            DecorDoor {
+                lock: None,
+                closed: openshard_protocol::wire::Graphic(0x06A5),
+                open: openshard_protocol::wire::Graphic(0x06A6),
+                offset_x: -1,
+                offset_y: 1,
+                position: west_at,
+            },
+            DecorDoor {
+                lock: None,
+                closed: openshard_protocol::wire::Graphic(0x06A7),
+                open: openshard_protocol::wire::Graphic(0x06A8),
+                offset_x: 1,
+                offset_y: 1,
+                position: east_at,
+            },
+        ],
+        containers: Vec::new(),
+    });
+    world.tick(now);
+
+    let leaves: Vec<_> = world
+        .registry()
+        .query::<Door>()
+        .map(|(entity, _)| (entity, world.registry().serial_of(entity).unwrap()))
+        .collect();
+    assert_eq!(leaves.len(), 2, "the fixture has the two leaves to link");
+    let (west, west_serial) = leaves
+        .iter()
+        .copied()
+        .find(|(entity, _)| {
+            world
+                .registry()
+                .get::<Position>(*entity)
+                .is_some_and(|at| at.0 == west_at)
+        })
+        .unwrap();
+    let (east, east_serial) = leaves
+        .iter()
+        .copied()
+        .find(|(entity, _)| {
+            world
+                .registry()
+                .get::<Position>(*entity)
+                .is_some_and(|at| at.0 == east_at)
+        })
+        .unwrap();
+    let mut west_door = *world.registry().get::<Door>(west).unwrap();
+    west_door.link = Some(east_serial);
+    world.state.registry.insert(west, west_door);
+    let mut east_door = *world.registry().get::<Door>(east).unwrap();
+    east_door.link = Some(west_serial);
+    world.state.registry.insert(east, east_door);
+
+    // This is the exact wire order of `App::open_door_ahead` then `App::walk`:
+    // the landing leaf, the blocked flank, then the diagonal step.
+    let entity = world.state.players[&player];
+    world.state.registry.insert(
+        entity,
+        Movement(openshard_movement::Walker::new(
+            Point::new(START.0, START.1, Z_WITHOUT_A_MAP),
+            Facing::walking(Direction::NorthEast),
+        )),
+    );
+    for serial in [east_serial, west_serial] {
+        world.queue(Command::DoubleClick {
+            connection: player,
+            request: UseRequest::Use(RawSerial(serial.raw())),
+        });
+    }
+    world.queue(Command::Walk {
+        connection: player,
+        request: walk(0, Direction::NorthEast),
+    });
+    world.tick(now);
+
+    assert!(world.registry().get::<Door>(west).unwrap().is_open);
+    assert!(world.registry().get::<Door>(east).unwrap().is_open);
+    assert_eq!(
+        world.registry().get::<Position>(entity).unwrap().0,
+        east_at,
+        "the now-open flank no longer refuses the diagonal"
+    );
+
+    // The coalescing stops at the tick boundary: a subsequent real click is
+    // still the normal command to close the doorway.
+    world.queue(Command::DoubleClick {
+        connection: player,
+        request: UseRequest::Use(RawSerial(east_serial.raw())),
+    });
+    world.tick(now);
+    assert!(!world.registry().get::<Door>(west).unwrap().is_open);
+    assert!(!world.registry().get::<Door>(east).unwrap().is_open);
+}
+
 /// One west door frame at (100, 100) and one east frame at (102, 100) — a
 /// single-door gap for the generator to fill. `walled` bricks the gap up.
 ///
@@ -10935,12 +11044,13 @@ fn entering_sends_the_sequence_the_client_needs() {
     assert_eq!(
         ids,
         vec![
-            0x1B, 0xBF, 0xB9, 0xBC, 0x20, 0x4F, 0x11, 0x3A, 0xBF, 0x78, 0xBF, 0x55
+            0x1B, 0xBF, 0xB9, 0xBC, 0x65, 0x20, 0x4F, 0x11, 0x3A, 0xBF, 0x78, 0xBF, 0x55
         ],
         "0x1B first or there is no body; 0x55 last or the client draws early; \
              0xB9 AoS features after the map change (ServUO's DoLogin order), or a \
-             modern client shows no tooltips; 0xBC season between the map change and \
-             the player update, as ServUO sends it; 0x11 status and the 0x78 of the \
+             modern client shows no tooltips; 0xBC season and 0x65 weather between \
+             the map change and the player update, before the first world frame; \
+             0x11 status and the 0x78 of the \
              player's own equipment before it, or the client has no stamina and no \
              backpack serial to open; 0x3A fills the skill window, and the second \
              0xBF after it carries the three stat arrows — nothing else sends them, \
@@ -14004,6 +14114,41 @@ fn a_loaded_character_returns_on_its_saved_serial_and_spot() {
 }
 
 #[test]
+fn a_loaded_character_saved_under_a_live_floor_returns_on_top_of_it() {
+    let mut world = world();
+    let floor = world.state.registry.spawn();
+    world.state.facet_state_mut(Facet(0)).block(
+        1500,
+        1000,
+        floor,
+        openshard_map::overlay::Cover::standing(7, 0),
+    );
+    let connection = connection();
+    on_file(
+        &mut world,
+        Serial::new(0x0000_0202).unwrap(),
+        Point::new(1500, 1000, 0),
+        Appearance::default_human(),
+    );
+    world.queue(Command::Enter(Entering {
+        connection,
+        version: ClientVersion::TOL,
+        account: AccountName("admin".to_owned()),
+        name: CharacterName("Lord British".to_owned()),
+        access: AccessLevel::Player,
+        character: Character::Saved,
+    }));
+    world.tick(Instant::now());
+
+    let entity = world.state.players[&connection];
+    assert_eq!(
+        world.registry().get::<Position>(entity).unwrap().0,
+        Point::new(1500, 1000, 7),
+        "an invalid saved z below the live floor was preserved"
+    );
+}
+
+#[test]
 fn a_deleted_character_is_no_longer_on_file_under_its_name() {
     // The other end of the roster's life, and the half S4 moved into the world:
     // `0x83` now names the character rather than the serial the shard used to
@@ -14679,10 +14824,10 @@ fn an_event_is_gone_a_tick_after_the_one_that_emitted_it() {
 
 #[test]
 fn the_tick_interval_is_not_a_protocol_constant() {
-    // 20Hz is ours to change. The client neither knows nor cares; it only
+    // 40Hz is ours to change. The client neither knows nor cares; it only
     // sees acks. Worth stating because the 200ms walk interval *is* the
     // client's, and the two are easy to confuse.
-    assert_eq!(TICK_INTERVAL.as_millis(), 50);
+    assert_eq!(TICK_INTERVAL.as_millis(), 25);
     assert!(TICK_INTERVAL < WALK_INTERVAL, "a step must not span two ticks");
 }
 

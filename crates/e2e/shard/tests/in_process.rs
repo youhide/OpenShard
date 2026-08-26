@@ -13,7 +13,7 @@
 //! deadline on every step, and a walk at the end that needs bytes to travel in
 //! both directions.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use openshard_client_net::connection::Event;
 use openshard_client_net::transport::enter_world_with;
@@ -28,6 +28,13 @@ use openshard_e2e_shard::{in_process, plan, stock_config, version};
 /// moment its answer arrives. What it bounds is a hang, which is this
 /// arrangement's characteristic way of being broken.
 const WAIT: Duration = Duration::from_secs(20);
+
+/// The playground's transport has no kernel or network beneath it: a step only
+/// waits for the shard's 25ms tick and the two in-process schedulers.  This is
+/// deliberately much looser than that nominal cost, yet tight enough to catch
+/// the hundreds-of-milliseconds regression a developer can otherwise mistake
+/// for a network ping in the window.
+const MAX_IN_PROCESS_STEP_RTT: Duration = Duration::from_millis(100);
 
 #[tokio::test]
 async fn a_client_enters_the_world_with_no_socket_anywhere() {
@@ -85,6 +92,71 @@ async fn a_client_enters_the_world_with_no_socket_anywhere() {
 
     assert_ne!(stepped, start, "an acked step moves the body");
     assert_eq!(view.player.position, stepped, "and the view follows it");
+}
+
+/// Measure the exact client-net -> in-process shard -> client-net path of a
+/// normal walk acknowledgement.
+///
+/// This excludes the window event loop on purpose.  If this stays below the
+/// bound while the HUD reports a large "ping", the delay is after the transport
+/// has received the acknowledgement: the app mailbox, event loop, or renderer.
+/// Printing the percentile and worst sample makes this test usable as a small
+/// performance probe too, rather than only a pass/fail guard.
+#[tokio::test]
+async fn an_in_process_walk_ack_arrives_well_before_a_visible_stall() {
+    let (dial, _shard) = in_process::spawn(stock_config, Vec::new());
+    let (mut socket, view) = tokio::time::timeout(WAIT, enter_world_with(dial, plan(), version()))
+        .await
+        .expect("the login conversation finished inside the deadline")
+        .expect("the client reached the world");
+
+    let mut walk = Walk::new(view.player.position, view.player.facing);
+    let heading = Facing::walking(view.player.facing.direction);
+    let mut samples = Vec::new();
+
+    // Twelve is below the initial fifteen-step anti-speedhack budget, so this
+    // is timing acknowledgements rather than the shard refusing a burst.
+    for _ in 0..12 {
+        let step = walk.step(heading, |_, _| None).expect("room for one step");
+        let sent = Instant::now();
+        socket.send(step.bytes()).await.expect("the shard is listening");
+
+        let elapsed = tokio::time::timeout(WAIT, async {
+            while let Some(event) = socket.next_event().await.expect("the pipe stayed up") {
+                let Event::Packet(packet) = event else {
+                    continue;
+                };
+                match walk.on_packet(&packet).expect("the shard kept the walk in step") {
+                    Moved::Stepped { .. } => return sent.elapsed(),
+                    Moved::Snapped { position, .. } => {
+                        panic!("a latency sample was refused and snapped to {position:?}")
+                    }
+                    Moved::Turned { .. } | Moved::Idle => {}
+                }
+            }
+            panic!("the shard closed the connection before it acknowledged a step");
+        })
+        .await
+        .expect("the shard answered the latency sample inside the deadline");
+        samples.push(elapsed);
+    }
+
+    samples.sort_unstable();
+    let percentile_95 = samples[(samples.len() * 95).div_ceil(100) - 1];
+    let worst = *samples.last().expect("the loop records samples");
+    eprintln!(
+        "in-process walk RTT: p95={}ms, max={}ms, samples={:?}",
+        percentile_95.as_millis(),
+        worst.as_millis(),
+        samples
+    );
+    assert!(
+        worst < MAX_IN_PROCESS_STEP_RTT,
+        "the in-process walk path took up to {}ms (p95 {}ms); this has no network and should stay below {}ms",
+        worst.as_millis(),
+        percentile_95.as_millis(),
+        MAX_IN_PROCESS_STEP_RTT.as_millis()
+    );
 }
 
 #[tokio::test]

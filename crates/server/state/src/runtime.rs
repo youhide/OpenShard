@@ -27,7 +27,10 @@ use openshard_movement::ground::Ground;
 use openshard_movement::{Footing, MapTerrain, NavigationGraph};
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::combat::{AttackTarget, HealthBar, WarMode};
-use openshard_protocol::feedback::{Animation, NewAnimation, PlaySound, SwingDuration, SwingTiming};
+use openshard_protocol::feedback::{
+    Animation, HarvestCompleted, HarvestPreview, HarvestToolVisual, NewAnimation, PlaySound, SwingDuration,
+    SwingTiming,
+};
 use openshard_protocol::items::WorldItem;
 use openshard_protocol::localized;
 use openshard_protocol::mobile::{Equipment, MobileIncoming, MobileMove, Notoriety, Remove, StatusFlags};
@@ -35,7 +38,7 @@ use openshard_protocol::properties::{PropertyList, TooltipRevision};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::speech::{Font, LocalizedMessage, SpokenMessage, TalkMode};
-use openshard_protocol::wire::{ClilocId, Hue, SoundId};
+use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue, Layer, SoundId};
 use openshard_protocol::world::{
     Facet, MapChange, MapSize, PlayerUpdate, Point, Season, encode_server_change,
 };
@@ -104,11 +107,11 @@ pub const SHOVE_STAMINA: u16 = 10;
 const SYSTEM_HUE: Hue = Hue::SYSTEM;
 const SYSTEM_FONT: Font = Font::DEFAULT;
 
-/// Ticks in one second — the reciprocal of the world's 50ms tick interval. The
+/// Ticks in one second — the reciprocal of the world's 25ms tick interval. The
 /// world defines the interval; this is the whole-number rate config uses to turn
 /// operator-facing seconds into the tick counts timers run on. If one moves, the
 /// other must.
-pub const TICKS_PER_SECOND: u64 = 20;
+pub const TICKS_PER_SECOND: u64 = 40;
 
 /// The gameplay rules an operator tuned, in the form the systems read them: the
 /// [`GameplayConfig`](../../openshard_config) knobs, with the second-valued ones
@@ -2450,16 +2453,104 @@ impl WorldState {
         self.animate_inner(mobile, action, None);
     }
 
-    /// Begin an action now and tell OpenShard clients how long it occupies.
+    /// Begin an action now and tell OpenShard clients its minimum duration.
     ///
     /// The timing extension is emitted immediately before the ordinary action
     /// packet for each observer. Damage and all other gameplay still use the
-    /// server tick; this only lets the picture cover that exact interval.
+    /// server tick; the client keeps whole animation cycles alive through this
+    /// interval rather than cutting the final one short.
     pub fn animate_timed(&mut self, mobile: EntityId, action: Action, duration_ticks: u64) {
         let duration_ms = duration_ticks
             .saturating_mul(1_000 / TICKS_PER_SECOND)
             .min(u64::from(u32::MAX)) as u32;
         self.animate_inner(mobile, action, Some(duration_ms));
+    }
+
+    /// Tell OpenShard clients which backpack tool to draw in a harvester's hand
+    /// for the action that follows.  The item remains where it was; this is a
+    /// picture-only companion to the ordinary animation packet.
+    pub fn show_harvest_tool(&mut self, mobile: EntityId, graphic: Graphic, hue: Hue, layer: Layer) {
+        let Some(serial) = self.registry.serial_of(mobile) else {
+            return;
+        };
+        self.broadcast_packet(
+            mobile,
+            &ServerPacket::HarvestToolVisual(HarvestToolVisual {
+                serial,
+                graphic,
+                hue,
+                layer,
+            }),
+        );
+    }
+
+    /// Tell this player's client how to animate the harvest it is about to aim.
+    ///
+    /// It is deliberately sent to the actor alone and names the cursor it is
+    /// bound to. Watchers start only after the server accepts the target; they
+    /// have no local action to predict.
+    pub fn preview_harvest(
+        &mut self,
+        mobile: EntityId,
+        cursor_id: CursorId,
+        action: Action,
+        duration_ticks: u64,
+        cycles: u16,
+    ) {
+        let Some(serial) = self.registry.serial_of(mobile) else {
+            return;
+        };
+        let Some(connection) = self.connection_of(mobile) else {
+            return;
+        };
+        let body = self.registry.get::<Body>(mobile).copied();
+        let humanoid = body.is_some_and(|body| body_opens_doors(body.id));
+        let kind = body.map_or(BodyKind::Monster, |body| BodyKind::of(body.id));
+        let (group, frames) = action.classic_action(kind, humanoid, WeaponAnimation::Wrestle);
+        let duration_ms = duration_ticks
+            .saturating_mul(1_000 / TICKS_PER_SECOND)
+            .min(u64::from(u32::MAX)) as u32;
+        self.send_packet(
+            connection,
+            &ServerPacket::HarvestPreview(HarvestPreview {
+                cursor_id,
+                serial,
+                action: group,
+                frame_count: openshard_protocol::feedback::AnimationFrameCount(frames),
+                duration: SwingDuration(duration_ms),
+                cycles,
+            }),
+        );
+    }
+
+    /// Tell the actor to end its local harvest prediction without granting it
+    /// anything. The client preserves the current complete stroke as it settles.
+    pub fn refuse_harvest(&mut self, mobile: EntityId) {
+        let Some(serial) = self.registry.serial_of(mobile) else {
+            return;
+        };
+        let Some(connection) = self.connection_of(mobile) else {
+            return;
+        };
+        self.send_packet(
+            connection,
+            &ServerPacket::HarvestRefused(openshard_protocol::feedback::HarvestRefused { serial }),
+        );
+    }
+
+    /// Tell the harvester that its server-owned work is over. This accompanies
+    /// every terminal harvest outcome, including outcomes that pay no item.
+    pub fn complete_harvest(&mut self, mobile: EntityId) {
+        let Some(serial) = self.registry.serial_of(mobile) else {
+            return;
+        };
+        let Some(connection) = self.connection_of(mobile) else {
+            return;
+        };
+        self.send_packet(
+            connection,
+            &ServerPacket::HarvestCompleted(HarvestCompleted { serial }),
+        );
     }
 
     fn animate_inner(&mut self, mobile: EntityId, action: Action, duration_ms: Option<u32>) {

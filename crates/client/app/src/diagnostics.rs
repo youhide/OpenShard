@@ -274,6 +274,10 @@ pub enum Navigation {
 pub struct Hud {
     pub locked: bool,
     pub rig: Rig,
+    /// Last `Walk` request-to-acknowledgement transport round trip.
+    pub ping: Option<std::time::Duration>,
+    /// Time that acknowledgement waited for the window event loop.
+    pub ping_app_delivery: Option<std::time::Duration>,
     pub perf: crate::frames::Perf,
     pub scripts: Vec<&'static str>,
     pub replay: Option<(&'static str, f32)>,
@@ -292,6 +296,10 @@ pub struct Hud {
     pub draw: openshard_client_render::frame::Draw,
     pub cutaway_disabled: bool,
     pub body_overlap_transparency_disabled: bool,
+    /// Whether the server's time of day controls ambient light this frame.
+    pub time_of_day: bool,
+    /// Whether the local night-lighting comparison is on this frame.
+    pub night: bool,
     pub show_terrain: bool,
     pub terrain: Option<Arc<TerrainOverlay>>,
     pub show_interiors: bool,

@@ -43,7 +43,8 @@ use openshard_client_render::mobiles::{EquipmentLayer, Mobile};
 use openshard_movement::step_hold;
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::feedback::{
-    Animation, AnimationFrameCount, DEFAULT_ANIMATION_FRAME_MS, NewAnimation, SwingTiming,
+    Animation, AnimationFrameCount, DEFAULT_ANIMATION_FRAME_MS, HarvestPreview, HarvestRefused,
+    HarvestToolVisual, NewAnimation, SwingTiming,
 };
 use openshard_protocol::mobile::Equipment;
 use openshard_protocol::serial::Serial;
@@ -368,6 +369,8 @@ struct Tracked {
     /// wherever the old one happened to be.
     clock: AnimationClock,
     action: Option<ActionAnimation>,
+    /// A backpack axe temporarily borrowed by the harvest animation's picture.
+    harvest_tool: Option<EquipmentLayer>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -377,34 +380,75 @@ struct ActionAnimation {
     forward: bool,
     repeat: bool,
     delay: Duration,
-    /// Exact server interval for a combat wind-up. Unlike `delay`, this uses a
-    /// staged anticipation/hold/release timeline rather than spacing six pieces
-    /// of sprite art several hundred milliseconds apart.
+    /// Exact duration of one complete cycle when the server supplied one.
+    /// This lets a six-frame chop take 1.6 seconds instead of six default
+    /// 80ms frames, while still using the same frame machine as locomotion.
+    cycle: Option<Duration>,
+    /// Exact server interval for a timed action. It is rounded up to a complete
+    /// animation loop before the state gives the body back to standing.
     duration: Option<Duration>,
+    /// A cursor click has started this locally, but the shard has not yet
+    /// accepted or refused it. It must keep looping while that answer is in
+    /// flight; otherwise latency would make the predicted action end early.
+    optimistic: bool,
+    /// This action was started by the harvesting protocol, not ordinary combat.
+    harvest: bool,
     elapsed: Duration,
 }
 
 impl ActionAnimation {
     fn frame(self, available: u16) -> u16 {
         let frames = self.frames.0.clamp(1, available);
-        let frame = self.duration.map_or_else(
-            || {
+        let frame = match (self.cycle, self.duration) {
+            // Harvest owns an explicit loop length. It remains a continuously
+            // cycling action even while waiting for the authoritative result.
+            (Some(cycle), _) => {
+                let cycle_ns = cycle.as_nanos().max(1);
+                let elapsed_in_cycle = self.elapsed.as_nanos() % cycle_ns;
+                (elapsed_in_cycle.saturating_mul(u128::from(frames)) / cycle_ns) as u16
+            }
+            // A combat timing names one wind-up to its impact. Showing all art
+            // at 80ms here made a slow weapon finish its visible swing in half
+            // a second, then idle invisibly for the rest of its interval.
+            (None, Some(duration)) => staged_swing_frame(self.elapsed, duration, self.delay, frames),
+            (None, None) => {
                 let ticks = self.elapsed.as_nanos() / self.delay.as_nanos().max(1);
                 (ticks % u128::from(frames)) as u16
-            },
-            |duration| staged_swing_frame(self.elapsed, duration, self.delay, frames),
-        );
+            }
+        };
         if self.forward { frame } else { frames - 1 - frame }
+    }
+
+    /// Whether this timed action has reached the next complete animation loop.
+    ///
+    /// The action may only hand the body back on this boundary.  That makes a
+    /// resource arrive after a whole axe stroke, even if a future server timing
+    /// is not an exact multiple of the client's frame cadence.
+    fn finished(self) -> bool {
+        let Some(duration) = self.duration else {
+            if self.optimistic {
+                return false;
+            }
+            let ticks = self.elapsed.as_nanos() / self.delay.as_nanos().max(1);
+            return ticks >= u128::from(self.frames.0.max(1)) * u128::from(self.repeats.max(1));
+        };
+        let cycle = self
+            .cycle
+            .unwrap_or_else(|| self.delay.saturating_mul(u32::from(self.frames.0.max(1))));
+        let cycle_ns = cycle.as_nanos().max(1);
+        let duration_ns = duration.as_nanos();
+        let complete_at = duration_ns.div_ceil(cycle_ns).saturating_mul(cycle_ns);
+        self.elapsed.as_nanos() >= complete_at
     }
 }
 
-/// Place sparse classic attack art on a readable wind-up timeline.
+/// Place sparse combat art on the server-owned wind-up timeline.
 ///
-/// Long attacks enter frame one at the ordinary cadence, hold that anticipation
-/// pose, then play every remaining strike frame at that same cadence immediately
-/// before impact. Short attacks are compressed evenly because there is no room
-/// for a hold. This keeps both ends visible without turning a six-frame sprite
-/// into six seconds of apparent freezes.
+/// One normal cadence enters the anticipation pose; it remains readable until
+/// the final few ordinary-cadence frames immediately before impact. This makes
+/// slow and fast weapons differ in their wind-up rather than in a jarring
+/// playback-rate change. Harvest previews provide their own repeating cycle
+/// and deliberately do not take this path.
 fn staged_swing_frame(elapsed: Duration, duration: Duration, cadence: Duration, frames: u16) -> u16 {
     if frames <= 2 || duration <= cadence.saturating_mul(u32::from(frames)) {
         let progress = elapsed.as_nanos().saturating_mul(u128::from(frames)) / duration.as_nanos().max(1);
@@ -493,6 +537,8 @@ pub struct Crowd {
     speech: HashMap<Who, Vec<Speech>>,
     /// Server-owned duration for the immediately following action, by mobile.
     swing_timings: HashMap<Serial, Duration>,
+    /// Tool pictures received just before their paired action packet.
+    pending_harvest_tools: HashMap<Serial, EquipmentLayer>,
     /// Real time since this crowd was built. Its own clock rather than an
     /// `Instant`, so every rule here can be tested by handing it durations.
     now: Duration,
@@ -526,6 +572,7 @@ impl Default for Crowd {
             falls: HashMap::new(),
             speech: HashMap::new(),
             swing_timings: HashMap::new(),
+            pending_harvest_tools: HashMap::new(),
             now: Duration::ZERO,
             commanded: None,
             ease: Ease::NONE,
@@ -605,17 +652,13 @@ impl Crowd {
         for tracked in self.tracked.values_mut() {
             let action_done = if let Some(action) = tracked.action.as_mut() {
                 action.elapsed += dt;
-                let ticks = action.elapsed.as_nanos() / action.delay.as_nanos().max(1);
-                !action.repeat
-                    && action.duration.map_or_else(
-                        || ticks >= u128::from(action.frames.0.max(1)) * u128::from(action.repeats.max(1)),
-                        |duration| action.elapsed >= duration,
-                    )
+                !action.repeat && action.finished()
             } else {
                 false
             };
             if action_done {
                 tracked.action = None;
+                tracked.harvest_tool = None;
                 if tracked.settles_as_corpse {
                     tracked.settles_as_corpse = false;
                     tracked.corpse = true;
@@ -704,6 +747,7 @@ impl Crowd {
             drawn: Gaze::on(at),
             clock: AnimationClock::default(),
             action: None,
+            harvest_tool: None,
         });
 
         // A serial is normally never reused while it remains on screen, but
@@ -882,6 +926,7 @@ impl Crowd {
             drawn: Gaze::on(at),
             clock: AnimationClock::default(),
             action: None,
+            harvest_tool: None,
         });
         tracked.at = at;
         tracked.facing = facing.direction;
@@ -1051,6 +1096,7 @@ impl Crowd {
                     drawn: Gaze::on(at),
                     clock: AnimationClock::default(),
                     action: None,
+                    harvest_tool: None,
                 },
                 |dying| Tracked {
                     at,
@@ -1067,6 +1113,7 @@ impl Crowd {
                     clock: dying.clock,
                     facing: dying.facing,
                     action: dying.action,
+                    harvest_tool: dying.harvest_tool,
                 },
             )
         });
@@ -1097,6 +1144,7 @@ impl Crowd {
         tracked.stepped_at = None;
         tracked.drawn = Gaze::on(at);
         tracked.action = None;
+        tracked.harvest_tool = None;
         tracked.change_to(group);
 
         Mobile {
@@ -1116,12 +1164,35 @@ impl Crowd {
     /// Play a server-selected classic body action until it finishes.
     pub fn play(&mut self, animation: Animation) {
         let duration = self.swing_timings.remove(&animation.serial);
+        let harvest_tool = self.pending_harvest_tools.remove(&animation.serial);
         let Some(tracked) = self.tracked.get_mut(&Some(animation.serial)) else {
             return;
         };
         let Ok(group) = u8::try_from(animation.action) else {
             return;
         };
+        if let (Some(duration), Some(action)) = (duration, tracked.action.as_mut()) {
+            if action.optimistic {
+                // Network time must never re-time a swing already on screen.
+                // It may add a whole stroke, but the promised 1.6-second tempo
+                // stays immutable.
+                action.frames = animation.frame_count;
+                action.forward = animation.forward;
+                action.repeat = animation.repeat;
+                action.delay = Duration::from_millis(if animation.delay == 0 {
+                    DEFAULT_ANIMATION_FRAME_MS
+                } else {
+                    u64::from(animation.delay)
+                });
+                action.duration = Some(duration.max(action.elapsed));
+                action.optimistic = false;
+                if harvest_tool.is_some() {
+                    tracked.harvest_tool = harvest_tool;
+                }
+                tracked.change_to(AnimationGroup(group));
+                return;
+            }
+        }
         tracked.action = Some(ActionAnimation {
             frames: animation.frame_count,
             repeats: animation.repeat_count,
@@ -1134,9 +1205,13 @@ impl Crowd {
             } else {
                 u64::from(animation.delay)
             }),
+            cycle: None,
             duration,
+            optimistic: false,
+            harvest: false,
             elapsed: Duration::ZERO,
         });
+        tracked.harvest_tool = harvest_tool;
         tracked.change_to(AnimationGroup(group));
     }
 
@@ -1172,6 +1247,106 @@ impl Crowd {
         } else {
             self.swing_timings.insert(timing.serial, duration);
         }
+    }
+
+    /// Start the local half of a harvest at its targeting click.
+    ///
+    /// The preview is issued only by the shard that raised this particular
+    /// cursor. Its later animation packet confirms the work without changing
+    /// the tempo already visible on screen; a refusal finishes the current full
+    /// stroke without ever granting a resource client-side.
+    pub fn preview_harvest(&mut self, preview: HarvestPreview) {
+        let Some(tracked) = self.tracked.get_mut(&Some(preview.serial)) else {
+            return;
+        };
+        let Ok(group) = u8::try_from(preview.action) else {
+            return;
+        };
+        tracked.action = Some(ActionAnimation {
+            frames: preview.frame_count,
+            repeats: preview.cycles.max(1),
+            forward: true,
+            repeat: false,
+            delay: Duration::from_millis(DEFAULT_ANIMATION_FRAME_MS),
+            cycle: Some(Duration::from_millis(
+                u64::from(preview.duration.millis()) / u64::from(preview.cycles.max(1)),
+            )),
+            duration: None,
+            optimistic: true,
+            harvest: true,
+            elapsed: Duration::ZERO,
+        });
+        tracked.harvest_tool = self.pending_harvest_tools.remove(&preview.serial);
+        tracked.change_to(AnimationGroup(group));
+    }
+
+    /// Let an optimistic harvest settle at the end of its current animation.
+    pub fn refuse_harvest(&mut self, refusal: HarvestRefused) {
+        let Some(action) = self
+            .tracked
+            .get_mut(&Some(refusal.serial))
+            .and_then(|tracked| tracked.action.as_mut())
+            .filter(|action| action.harvest && action.optimistic)
+        else {
+            return;
+        };
+        action.duration = Some(action.elapsed);
+        action.optimistic = false;
+    }
+
+    /// The shard has made its final harvest decision and, if any, queued its
+    /// resource update. Keep only the partial axe stroke currently on screen;
+    /// an item update alone cannot safely be used as this signal because it may
+    /// be a merged stack or the harvest may have yielded nothing.
+    pub fn complete_harvest(&mut self, completion: openshard_protocol::feedback::HarvestCompleted) {
+        let Some(action) = self
+            .tracked
+            .get_mut(&Some(completion.serial))
+            .and_then(|tracked| tracked.action.as_mut())
+            .filter(|action| action.harvest)
+        else {
+            return;
+        };
+        action.duration = Some(action.duration.unwrap_or(action.elapsed).min(action.elapsed));
+        action.optimistic = false;
+    }
+
+    /// Forget the visual hint that belonged to a target cursor the player
+    /// cancelled before clicking. It must not leak into a later unrelated swing.
+    pub fn cancel_harvest_preview(&mut self, serial: Serial) {
+        self.pending_harvest_tools.remove(&serial);
+    }
+
+    /// Hold a backpack axe's visual layer until its immediately following
+    /// animation completes.  It never enters the authoritative equipment list.
+    pub fn harvest_tool(&mut self, visual: HarvestToolVisual, tiledata: &TileData) {
+        self.pending_harvest_tools.insert(
+            visual.serial,
+            EquipmentLayer {
+                graphic: tiledata.static_tile(visual.graphic.0).anim_id,
+                hue: visual.hue,
+                layer: visual.layer,
+            },
+        );
+    }
+
+    /// The supplied equipment plus an in-flight harvest tool, if there is one.
+    /// The borrowed tool replaces the matching hand layer only in this rendered
+    /// frame; the next projection restores the real weapon automatically.
+    pub fn worn(
+        &self,
+        who: Who,
+        equipment: &[Equipment],
+        tiledata: &TileData,
+    ) -> std::rc::Rc<[EquipmentLayer]> {
+        let mut layers = worn(equipment, tiledata);
+        if let Some(tool) = self.tracked.get(&who).and_then(|tracked| tracked.harvest_tool) {
+            match layers.iter_mut().find(|item| item.layer == tool.layer) {
+                Some(layer) => *layer = tool,
+                None => layers.push(tool),
+            }
+        }
+        layers.into()
     }
 
     /// Where this body is drawn now, in the sub-pixel form the sprite and the
@@ -1519,6 +1694,45 @@ mod tests {
         Some(Serial::new(raw).expect("a nonzero serial"))
     }
 
+    fn chopping_crowd() -> (Crowd, Who, Serial) {
+        let who = serial(1);
+        let mobile = who.expect("a serial");
+        let mut crowd = Crowd::default();
+        crowd.see(
+            who,
+            Point::new(10, 10, 0),
+            Graphic(PLAYER),
+            Facing::walking(Direction::South),
+            Hue::NONE,
+            false,
+        );
+        crowd.preview_harvest(HarvestPreview {
+            cursor_id: openshard_protocol::wire::CursorId(mobile.raw()),
+            serial: mobile,
+            action: 13,
+            frame_count: AnimationFrameCount(6),
+            duration: openshard_protocol::feedback::SwingDuration(4_800),
+            cycles: 3,
+        });
+        (crowd, who, mobile)
+    }
+
+    fn confirm_chop(crowd: &mut Crowd, mobile: Serial) {
+        crowd.time_swing(SwingTiming {
+            serial: mobile,
+            duration: openshard_protocol::feedback::SwingDuration(4_800),
+        });
+        crowd.play(Animation {
+            serial: mobile,
+            action: 13,
+            frame_count: AnimationFrameCount(6),
+            repeat_count: 1,
+            forward: true,
+            repeat: false,
+            delay: 0,
+        });
+    }
+
     /// A body nobody has seen before is standing, in its own kind's numbering.
     #[test]
     fn a_body_first_heard_of_is_standing() {
@@ -1603,7 +1817,7 @@ mod tests {
     }
 
     #[test]
-    fn server_timing_stages_a_readable_axe_windup_and_release() {
+    fn a_timed_axe_action_holds_its_windup_until_its_last_complete_stroke() {
         let who = serial(1);
         let mobile = who.expect("a serial");
         let mut crowd = Crowd::default();
@@ -1631,23 +1845,218 @@ mod tests {
         assert_eq!(crowd.frame_for(who, AnimationFrameCount(6)), 0);
         crowd.advance(Duration::from_millis(1));
         assert_eq!(crowd.frame_for(who, AnimationFrameCount(6)), 1);
-        crowd.advance(Duration::from_millis(4_399));
+        crowd.advance(Duration::from_millis(400));
         assert_eq!(
             crowd.frame_for(who, AnimationFrameCount(6)),
             1,
-            "the raised-weapon anticipation remains readable during a long wind-up"
+            "a long timed swing keeps its anticipation readable"
         );
-        crowd.advance(Duration::from_millis(1));
-        assert_eq!(crowd.frame_for(who, AnimationFrameCount(6)), 2);
-        crowd.advance(Duration::from_millis(239));
-        assert_eq!(crowd.frame_for(who, AnimationFrameCount(6)), 4);
-        crowd.advance(Duration::from_millis(1));
-        assert_eq!(crowd.frame_for(who, AnimationFrameCount(6)), 5);
-        crowd.advance(Duration::from_millis(80));
+        crowd.advance(Duration::from_millis(4_320));
         assert_eq!(
             crowd.group_for(who),
             Some(BodyKind::Human.standing()),
-            "the action occupies the complete server-supplied 4.8 seconds"
+            "an exact whole-cycle duration ends at the end of its last stroke"
+        );
+    }
+
+    /// A combat swing's *interval* is gameplay timing, not a playback-rate
+    /// command. Different weapons and dexterity may change when damage lands,
+    /// but the classic slash must keep its normal sprite cadence.
+    #[test]
+    fn timed_combat_uses_its_server_interval_for_a_readable_windup() {
+        for duration in [1_600_u32, 3_200] {
+            let who = serial(1);
+            let mobile = who.expect("a serial");
+            let mut crowd = Crowd::default();
+            crowd.see(
+                who,
+                Point::new(10, 10, 0),
+                Graphic(PLAYER),
+                Facing::walking(Direction::South),
+                Hue::NONE,
+                false,
+            );
+            crowd.time_swing(SwingTiming {
+                serial: mobile,
+                duration: openshard_protocol::feedback::SwingDuration(duration),
+            });
+            crowd.play_new(NewAnimation {
+                serial: mobile,
+                animation_type: 0,
+                action: 4, // one-handed slash
+                delay: 0,
+            });
+
+            crowd.advance(Duration::from_millis(400));
+            assert_eq!(
+                crowd.frame_for(who, AnimationFrameCount(7)),
+                1,
+                "a {duration}ms combat interval rushed through its attack art"
+            );
+        }
+    }
+
+    #[test]
+    fn a_timed_action_waits_for_a_complete_last_stroke() {
+        let who = serial(1);
+        let mobile = who.expect("a serial");
+        let mut crowd = Crowd::default();
+        crowd.see(
+            who,
+            Point::new(10, 10, 0),
+            Graphic(PLAYER),
+            Facing::walking(Direction::South),
+            Hue::NONE,
+            false,
+        );
+        crowd.time_swing(SwingTiming {
+            serial: mobile,
+            duration: openshard_protocol::feedback::SwingDuration(500),
+        });
+        crowd.play_new(NewAnimation {
+            serial: mobile,
+            animation_type: 0,
+            action: 7,
+            delay: 0,
+        });
+
+        crowd.advance(Duration::from_millis(500));
+        assert_eq!(
+            crowd.group_for(who),
+            Some(AnimationGroup(13)),
+            "the requested interval ends mid-cycle, so do not cut off the axe"
+        );
+        crowd.advance(Duration::from_millis(460));
+        assert_eq!(
+            crowd.group_for(who),
+            Some(BodyKind::Human.standing()),
+            "the action hands the body back only after the next complete cycle"
+        );
+    }
+
+    #[test]
+    fn a_harvest_preview_starts_at_the_target_click_and_waits_for_confirmation() {
+        let who = serial(1);
+        let mobile = who.expect("a serial");
+        let mut crowd = Crowd::default();
+        crowd.see(
+            who,
+            Point::new(10, 10, 0),
+            Graphic(PLAYER),
+            Facing::walking(Direction::South),
+            Hue::NONE,
+            false,
+        );
+        crowd.preview_harvest(HarvestPreview {
+            cursor_id: openshard_protocol::wire::CursorId(mobile.raw()),
+            serial: mobile,
+            action: 13,
+            frame_count: AnimationFrameCount(6),
+            duration: openshard_protocol::feedback::SwingDuration(4_800),
+            cycles: 3,
+        });
+        assert_eq!(crowd.group_for(who), Some(AnimationGroup(13)));
+        crowd.advance(Duration::from_millis(800));
+        assert_eq!(
+            crowd.frame_for(who, AnimationFrameCount(6)),
+            3,
+            "a tree swing takes 1.6 seconds, with its impact halfway through"
+        );
+        crowd.advance(Duration::from_millis(800));
+        assert_eq!(
+            crowd.frame_for(who, AnimationFrameCount(6)),
+            0,
+            "the chop loops at the end of its full 1.6-second cycle"
+        );
+        crowd.advance(Duration::from_millis(3_200));
+        assert_eq!(
+            crowd.group_for(who),
+            Some(AnimationGroup(13)),
+            "a delayed server answer cannot make the optimistic chop stop"
+        );
+
+        confirm_chop(&mut crowd, mobile);
+        crowd.advance(Duration::ZERO);
+        assert_eq!(
+            crowd.group_for(who),
+            Some(BodyKind::Human.standing()),
+            "confirmation after the predicted endpoint does not add another stroke"
+        );
+    }
+
+    /// The preview starts at the click, while the confirmation returns anywhere
+    /// inside a round trip. That transport timing must not alter the visual
+    /// cadence: it is the regression that made chopping look randomly slow or
+    /// fast from one tree to the next.
+    #[test]
+    fn harvest_confirmation_never_retimes_a_stroke() {
+        for confirmation_at in [100_u64, 790, 1_590] {
+            let (mut crowd, who, mobile) = chopping_crowd();
+            crowd.advance(Duration::from_millis(confirmation_at));
+            confirm_chop(&mut crowd, mobile);
+
+            // At 800ms into any 1.6-second stroke, the six-frame chop must be
+            // on its third frame. The old latency-compensation code changed
+            // this answer depending on `confirmation_at`.
+            let impact_at = if confirmation_at < 800 { 800 } else { 2_400 };
+            crowd.advance(Duration::from_millis(impact_at - confirmation_at));
+            assert_eq!(
+                crowd.frame_for(who, AnimationFrameCount(6)),
+                3,
+                "a {confirmation_at}ms confirmation changed the chop tempo"
+            );
+        }
+    }
+
+    #[test]
+    fn a_refused_harvest_finishes_its_current_stroke() {
+        let who = serial(1);
+        let mobile = who.expect("a serial");
+        let mut crowd = Crowd::default();
+        crowd.see(
+            who,
+            Point::new(10, 10, 0),
+            Graphic(PLAYER),
+            Facing::walking(Direction::South),
+            Hue::NONE,
+            false,
+        );
+        crowd.preview_harvest(HarvestPreview {
+            cursor_id: openshard_protocol::wire::CursorId(mobile.raw()),
+            serial: mobile,
+            action: 13,
+            frame_count: AnimationFrameCount(6),
+            duration: openshard_protocol::feedback::SwingDuration(4_800),
+            cycles: 3,
+        });
+        crowd.advance(Duration::from_millis(100));
+        crowd.refuse_harvest(HarvestRefused { serial: mobile });
+        assert_eq!(crowd.group_for(who), Some(AnimationGroup(13)));
+        crowd.advance(Duration::from_millis(1_500));
+        assert_eq!(
+            crowd.group_for(who),
+            Some(BodyKind::Human.standing()),
+            "a refusal returns to standing at the cycle boundary, never mid-swing"
+        );
+    }
+
+    #[test]
+    fn a_completed_harvest_stops_its_prediction_at_the_current_stroke_boundary() {
+        let (mut crowd, who, mobile) = chopping_crowd();
+        crowd.advance(Duration::from_millis(3_500));
+        crowd.complete_harvest(openshard_protocol::feedback::HarvestCompleted { serial: mobile });
+
+        crowd.advance(Duration::from_millis(1_299));
+        assert_eq!(
+            crowd.group_for(who),
+            Some(AnimationGroup(13)),
+            "the final stroke is not cut off when the logs arrive"
+        );
+        crowd.advance(Duration::from_millis(1));
+        assert_eq!(
+            crowd.group_for(who),
+            Some(BodyKind::Human.standing()),
+            "the harvest completion prevents another complete loop"
         );
     }
 

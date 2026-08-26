@@ -555,11 +555,14 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
         None => Lighting::NONE,
     };
     lighting.sun = sun;
-    // Only where the frame has a sky at all: with no ambient the pass is a copy,
-    // and a beam over an already-white multiplier would cost a loop to change
-    // nothing. After the sort, and `hold` is what says this flame is never the
-    // one dropped when a tavern's candles fill the array.
-    if let Some((at, offset, facing)) = carried.filter(|_| sky.is_some()) {
+    // Only where the frame has a non-daylight sky: with no ambient the pass is
+    // a copy, and a beam over the full daytime multiplier cannot change the
+    // picture but would make every nearby screen pixel walk its rays. After the
+    // sort, `hold` says this flame is never the one dropped when a tavern's
+    // candles fill the array.
+    if let Some((at, offset, facing)) =
+        carried.filter(|_| sky.is_some_and(|ambient| !ambient.is_full_daylight()))
+    {
         lighting.hold(tuning.applied_headlight(light::carried(at, offset, facing, flame_time)));
     }
     lighting.view = view;

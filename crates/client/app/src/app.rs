@@ -42,6 +42,19 @@ use crate::{
     tooltips, windows, world,
 };
 
+/// The cadence of the non-rendering state clock.
+///
+/// An unwatched client still consumes server state, but never borrows a surface
+/// or submits a GPU frame. It therefore needs the same responsive clock as a
+/// visible glide even when nothing is currently moving.
+fn state_tick_interval(watched: bool, moving: bool) -> std::time::Duration {
+    if !watched || moving {
+        GLIDE_INTERVAL
+    } else {
+        FRAME_DELAY
+    }
+}
+
 /// State for the injected LOD field scenario.  The input stays in the client
 /// rather than being synthesized by the desktop, so each frame follows the
 /// same `Control` path as a real pan and can be reproduced in CI or locally.
@@ -191,6 +204,12 @@ pub(crate) struct App {
     /// it swings, while keeping a locked door from receiving a use packet each
     /// walking beat.
     pub(crate) auto_opened_doors: Vec<Serial>,
+    /// The most recent object explicitly used by the player.
+    ///
+    /// Automatic doors intentionally do not replace it: `UseLastItem` is for
+    /// repeating a player's action, not for reopening the leaf they walked
+    /// through.
+    pub(crate) last_used_item: Option<Serial>,
     /// The last route assembled for the development HUD.
     ///
     /// A path search is considerably more expensive than drawing its line,
@@ -238,6 +257,12 @@ pub(crate) struct App {
     /// it, so a clock fed the nominal step would run slow by however much it did
     /// — which a stepping animation hides and a glide does not.
     pub(crate) last_advance: Instant,
+    /// When the viewport and camera last caught up with the world.
+    ///
+    /// Unlike [`last_advance`](Self::last_advance), this clock deliberately
+    /// stands still while the window is hidden. The next visible view is then
+    /// advanced over the same whole span as the world it is about to show.
+    pub(crate) last_view_advance: Instant,
     /// When the last frame was *drawn*, for the frame panel's interval.
     ///
     /// Not [`App::last_advance`], which is the clock the world is advanced on
@@ -326,6 +351,8 @@ pub(crate) struct App {
     pub(crate) lod_sweep: Option<LodSweep>,
     /// Diagnostic comparison of network, prediction, crowd and render positions.
     pub(crate) movement_trace: Option<crate::movement_trace::MovementTrace>,
+    /// The latest walk request round-trip, for the always-visible status strip.
+    pub(crate) ping: crate::ping::Ping,
 }
 
 /// A route snapshot and the world positions that make it valid.
@@ -647,7 +674,7 @@ impl App {
             // packets that *could* move the player rather than ones that did:
             // a swallowed ack or a reject a rollback already voided lands in
             // `movements` here and moves nothing.
-            crate::link::Update::Mutation { packet } => {
+            crate::link::Update::Mutation { packet, .. } => {
                 let counter = match crate::link::touches_the_walk(packet) {
                     true => &mut sweep.server_updates.movements,
                     false => &mut sweep.server_updates.mutations,
@@ -667,6 +694,18 @@ impl App {
             }
             crate::link::Update::SwingTiming(_) => {
                 sweep.server_updates.swing_timings += 1;
+                true
+            }
+            crate::link::Update::HarvestToolVisual(_) => {
+                sweep.server_updates.animations += 1;
+                true
+            }
+            crate::link::Update::HarvestRefused(_) => {
+                sweep.server_updates.animations += 1;
+                true
+            }
+            crate::link::Update::HarvestCompleted(_) => {
+                sweep.server_updates.animations += 1;
                 true
             }
             // And not the ground, nor the graph baked over it: neither is the
@@ -776,16 +815,12 @@ impl App {
     /// because "the frame rate drops when I stand still" was true here and read
     /// as a stall no matter how correct the reason was.
     ///
-    /// Unwatched, there is nobody to show a frame to, and the timer below is
-    /// what the loop falls back to. Two rates there, because there are two
-    /// reasons for a frame and they are an order of magnitude apart: a body's
-    /// animation steps once every [`FRAME_DELAY`] and nothing between two of
-    /// those changes a pixel, while a *glide* moves a body a couple of pixels at
-    /// a time and drawn on the animation clock would arrive in five visible
-    /// jumps — the teleport it exists to remove, in instalments. Three reasons
-    /// for the fast one and not one, because they are three independent things
-    /// that move a pixel: a body mid-step, an eye still converging on one that
-    /// has stopped, and a scenario waiting to deliver its next knot.
+    /// Unwatched, there is nobody to show a frame to, but the timer below keeps
+    /// the *world* advancing at the glide cadence.  A slow 80ms animation
+    /// clock was sufficient for an invisible sprite, but not for the ordered
+    /// shard updates and local motion that continue arriving while a player is
+    /// in another application: delaying those turns a live fight into a burst
+    /// of animation and state on return.  This path spends no GPU frame.
     ///
     /// The eye is the one that was missing. A rig that filters is still settling
     /// on frames where nothing else moved, and a loop that only woke for gliding
@@ -801,8 +836,13 @@ impl App {
     /// The fallback timer's interval. See [`App::pacing`] for when it is the one
     /// that decides.
     pub(crate) fn redraw_interval(&self) -> std::time::Duration {
+        // The background state clock is deliberately independent of whether a
+        // body happens to be gliding right now. A server can start an attack,
+        // move a mobile, or answer a route between two such samples; keeping
+        // the normal simulation cadence prevents those updates from bunching
+        // up until the player activates the window again.
         let moving = self.world.anyone_gliding() || self.control.settling() || self.replay.is_some();
-        if moving { GLIDE_INTERVAL } else { FRAME_DELAY }
+        state_tick_interval(self.watched(), moving)
     }
 
     /// Start walking one of the bench's scenarios in the window.
@@ -970,5 +1010,17 @@ impl App {
             self.zoom_limit_reported = true;
             eprintln!("{message}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unwatched_world_keeps_the_glide_cadence_while_standing() {
+        assert_eq!(state_tick_interval(false, false), GLIDE_INTERVAL);
+        assert_eq!(state_tick_interval(false, true), GLIDE_INTERVAL);
+        assert_eq!(state_tick_interval(true, false), FRAME_DELAY);
     }
 }

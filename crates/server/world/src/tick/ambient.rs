@@ -26,7 +26,7 @@
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::world::{Light, LightLevel};
+use openshard_protocol::world::{Light, LightLevel, Season, Weather, WeatherChange};
 use openshard_state::components::Position;
 
 use super::World;
@@ -98,6 +98,52 @@ impl World {
         Light(u8::try_from(level.clamp(0, 0x1F)).unwrap_or(LIGHT_DAY.0))
     }
 
+    /// The shard-wide weather at the current part of its simulated day.
+    ///
+    /// It is a pure clock-and-season function for the same reason daylight is:
+    /// a replay must recreate the same sky, and a wall-clock or an unrecorded
+    /// random roll would make two identical replays visibly disagree. A period
+    /// is six UO hours — long enough to be weather rather than a flicker, short
+    /// enough that a normal session sees it change. Season biases the choices
+    /// without needing a second calendar before the existing season one turns.
+    #[must_use]
+    pub fn weather(&self) -> WeatherChange {
+        let quarter = (self.clock_minutes() / (6 * 60)) % 4;
+        let weather = match (self.state.gameplay.season, quarter) {
+            (Season::Spring, 0 | 2) => Weather::Clear,
+            (Season::Spring, 1) => Weather::Rain,
+            (Season::Spring, _) => Weather::StormBrewing,
+            (Season::Summer, 2) => Weather::StormBrewing,
+            (Season::Summer, _) => Weather::Clear,
+            (Season::Fall, 0 | 2) => Weather::Rain,
+            (Season::Fall, 1) => Weather::Storm,
+            (Season::Fall, _) => Weather::Clear,
+            (Season::Winter, 2) => Weather::Clear,
+            (Season::Winter, _) => Weather::Snow,
+            (Season::Desolation, 0 | 2) => Weather::Storm,
+            (Season::Desolation, _) => Weather::Clear,
+        };
+        let intensity = match weather {
+            Weather::Rain => 112,
+            Weather::StormBrewing => 144,
+            Weather::Snow => 104,
+            Weather::Storm => 208,
+            Weather::Temperature | Weather::Clear => 0,
+        };
+        let temperature = match self.state.gameplay.season {
+            Season::Spring => 12,
+            Season::Summer => 24,
+            Season::Fall => 8,
+            Season::Winter => 0,
+            Season::Desolation => 16,
+        };
+        WeatherChange {
+            weather,
+            intensity,
+            temperature,
+        }
+    }
+
     /// The light level one mobile should be seeing right now.
     ///
     /// Precedence, brightest override first:
@@ -145,6 +191,25 @@ impl World {
             self.remember_light(connection, level);
             self.state
                 .send_packet(connection, &ServerPacket::LightLevel(LightLevel { level }));
+        }
+    }
+
+    /// Broadcast the next weather quarter once, at its exact simulated
+    /// boundary. There is no remembered copy per connection: the condition is
+    /// a pure function, and every connected player receives the same whole
+    /// replacement packet. A player who logs in between boundaries gets that
+    /// same answer in [`World::try_enter`](super::World::try_enter).
+    pub(super) fn refresh_weather(&mut self) {
+        let per_minute = self.state.gameplay.uo_minute_ticks.max(1);
+        if !self.state.ticks.raw().is_multiple_of(per_minute) || !self.clock_minutes().is_multiple_of(6 * 60)
+        {
+            return;
+        }
+        let weather = self.weather();
+        let connections: Vec<ConnectionId> = self.state.players.keys().copied().collect();
+        for connection in connections {
+            self.state
+                .send_packet(connection, &ServerPacket::WeatherChange(weather));
         }
     }
 

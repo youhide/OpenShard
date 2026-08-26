@@ -152,8 +152,6 @@ pub(crate) fn draw_gump_windows(
     window: &mut Screen,
     encoder: &mut wgpu::CommandEncoder,
     view: &wgpu::TextureView,
-    bitmap_quads: &mut Vec<SpriteQuad>,
-    ttf_quads: &mut Vec<SpriteQuad>,
 ) {
     // Read once for the whole pass: every window on this frame is placed with
     // it, and a pane's own cursor was divided by it a moment ago.
@@ -165,7 +163,11 @@ pub(crate) fn draw_gump_windows(
     // leave an invisible window intercepting clicks (and its labels still
     // eligible for the text pass) after gump assets or their GPU pass were
     // unavailable.
-    if let (Some(files), Some(pass)) = (resources.gumps.as_ref(), window.gump_pass.as_mut()) {
+    if resources.gumps.is_some() && window.gump_pass.is_some() {
+        let files = resources
+            .gumps
+            .as_ref()
+            .expect("the gump-assets check above succeeded");
         let mut pictures = Vec::new();
         // A dialog's art used to be packed here, in a loop over every gump in
         // the *view* — one rung above the windows, so a dialog this client had
@@ -391,7 +393,11 @@ pub(crate) fn draw_gump_windows(
         // windows this frame drew none of are windows nothing can click.
         windows.drawn_windows = drawn_windows;
         if let Some(rows) = resources.gump_atlas.take_dirty() {
-            pass.upload_rows(&window.queue, resources.gump_atlas.pixels(), rows);
+            window
+                .gump_pass
+                .as_mut()
+                .expect("gump assets have their matching render pass")
+                .upload_rows(&window.queue, resources.gump_atlas.pixels(), rows);
         }
         let frame = gump_art::Frame {
             target: view,
@@ -401,7 +407,9 @@ pub(crate) fn draw_gump_windows(
         };
         // A window is one painter layer: its frame and icons, then the text
         // belonging to that frame, before the next window is allowed to cover
-        // it.  A global text pass cannot express this ordering.
+        // it.  `window_text` records the matching independent text pass below;
+        // collecting every caption into the HUD's single buffer would put a
+        // lower doll's name over every later gump.
         for (subject, drawn) in &windows.drawn_windows {
             // Every pane laid this window out window-local and at its art's
             // own size — see `PaneFrame::cursor`'s doc — so this is the one
@@ -421,7 +429,11 @@ pub(crate) fn draw_gump_windows(
                 .unwrap_or_default();
             let mut art = gump_art::collect(drawn.pictures(), &resources.gump_atlas);
             gump_art::place(&mut art, at, magnify);
-            pass.render_layer(&window.device, &window.queue, encoder, frame, &art);
+            window
+                .gump_pass
+                .as_mut()
+                .expect("gump assets have their matching render pass")
+                .render_layer(&window.device, &window.queue, encoder, frame, &art);
             // Each window's captions, in that window's own unmagnified gump
             // pixels, paired with the box the row is cut to when there is one.
             #[allow(clippy::type_complexity)]
@@ -524,7 +536,11 @@ pub(crate) fn draw_gump_windows(
                         }
                         let mut rim = gump_art::collect(&[bounds.frame], &resources.gump_atlas);
                         gump_art::place(&mut rim, at, magnify);
-                        pass.render_layer(&window.device, &window.queue, encoder, frame, &rim);
+                        window
+                            .gump_pass
+                            .as_mut()
+                            .expect("gump assets have their matching render pass")
+                            .render_layer(&window.device, &window.queue, encoder, frame, &rim);
                     }
                 }
                 (WindowSubject::WorldMap, Drawn::WorldMap(bounds)) => {
@@ -575,13 +591,18 @@ pub(crate) fn draw_gump_windows(
                         magnify,
                         density: frame.scale,
                         size: if count { fonts.stack_count } else { fonts.window },
+                        bitmap_scale: if count {
+                            fonts.bitmap_stack_count_scale()
+                        } else {
+                            fonts.bitmap_window_scale()
+                        },
                         bitmap_font_override,
                     },
                     ttf_active.then_some(resources.ttf_font.as_ref()).flatten(),
                     &resources.font_atlas,
-                    window.ttf_atlas.as_mut(),
-                    bitmap_quads,
-                    ttf_quads,
+                    window,
+                    encoder,
+                    view,
                 );
                 first = end;
             }
@@ -592,7 +613,11 @@ pub(crate) fn draw_gump_windows(
         // was grabbed — see where it was pushed — so this magnifies that grab
         // offset with the picture it belongs to.
         gump_art::place(&mut dragged, cursor, magnify);
-        pass.render_layer(&window.device, &window.queue, encoder, frame, &dragged);
+        window
+            .gump_pass
+            .as_mut()
+            .expect("gump assets have their matching render pass")
+            .render_layer(&window.device, &window.queue, encoder, frame, &dragged);
         // How many are on the cursor, in the corner of the icon that is on it
         // — the third and last place a pile is counted, and the same rule and
         // the same corner as the two before it: `container::amount_label`
@@ -636,13 +661,14 @@ pub(crate) fn draw_gump_windows(
                         magnify,
                         density: frame.scale,
                         size: fonts.stack_count,
+                        bitmap_scale: fonts.bitmap_stack_count_scale(),
                         bitmap_font_override,
                     },
                     ttf_active.then_some(resources.ttf_font.as_ref()).flatten(),
                     &resources.font_atlas,
-                    window.ttf_atlas.as_mut(),
-                    bitmap_quads,
-                    ttf_quads,
+                    window,
+                    encoder,
+                    view,
                 );
             }
         }
@@ -660,6 +686,7 @@ pub(crate) fn draw_gump_windows(
                 &resources.font_atlas,
                 ttf_active.then_some(fonts.tooltip),
                 bitmap_font_override.unwrap_or(TOOLTIP_FONT),
+                fonts.bitmap_tooltip_scale(),
             );
             let labels: Vec<_> = hover
                 .iter()
@@ -691,13 +718,14 @@ pub(crate) fn draw_gump_windows(
                     magnify: 1.0,
                     density: frame.scale,
                     size: fonts.tooltip,
+                    bitmap_scale: fonts.bitmap_tooltip_scale(),
                     bitmap_font_override,
                 },
                 ttf_active.then_some(resources.ttf_font.as_ref()).flatten(),
                 &resources.font_atlas,
-                window.ttf_atlas.as_mut(),
-                bitmap_quads,
-                ttf_quads,
+                window,
+                encoder,
+                view,
             );
         }
     } else {
@@ -727,6 +755,8 @@ struct WindowText<'a> {
     density: f32,
     /// The size captions are drawn at, before either of the two above.
     size: openshard_client_render::atlas::TextSize,
+    /// The matching `fonts.mul` scale for this role.
+    bitmap_scale: f32,
     /// The active F1 classic-face override, if any.  Role classification is
     /// done before this replacement, so an overridden pile count keeps the
     /// count's scale even though it uses the selected glyphs.
@@ -756,9 +786,9 @@ fn window_text(
     text: WindowText<'_>,
     font: Option<&openshard_uofiles::ttf_font::TtfFont>,
     font_atlas: &openshard_client_render::atlas::FontAtlas,
-    ttf_atlas: Option<&mut openshard_client_render::atlas::TtfAtlas>,
-    bitmap_quads: &mut Vec<SpriteQuad>,
-    ttf_quads: &mut Vec<SpriteQuad>,
+    window: &mut Screen,
+    encoder: &mut wgpu::CommandEncoder,
+    view: &wgpu::TextureView,
 ) {
     if text.labels.is_empty() {
         return;
@@ -771,15 +801,7 @@ fn window_text(
         .labels
         .iter()
         .all(|(label, _)| label.font == openshard_client_render::items::STACK_COUNT_FONT);
-    if stack_count || font.is_none() || ttf_atlas.is_none() {
-        // Face 9 is a bitmap, so its size knob is an intentional nearest-
-        // sampled scale from the 11-pixel default rather than a request to a
-        // rasterizer. Counts are never clipped today; crop before that scale
-        // nevertheless, which keeps this branch correct if one gains a clip.
-        let scale = match stack_count {
-            true => text.size.pixels() / 11.0,
-            false => 1.0,
-        };
+    if stack_count || font.is_none() || window.ttf_atlas.is_none() {
         let mut quads = Vec::new();
         for (label, scissor) in text.labels {
             let label = openshard_client_render::text::GumpLabel {
@@ -795,21 +817,32 @@ fn window_text(
             if let Some(scissor) = scissor {
                 scissor.cut(&mut line);
             }
-            if stack_count {
+            if text.bitmap_scale != 1.0 {
                 for quad in &mut line {
-                    quad.rect.x = label.at.x as f32 + (quad.rect.x - label.at.x as f32) * scale;
-                    quad.rect.y = label.at.y as f32 + (quad.rect.y - label.at.y as f32) * scale;
-                    quad.rect.width *= scale;
-                    quad.rect.height *= scale;
+                    quad.rect.x = label.at.x as f32 + (quad.rect.x - label.at.x as f32) * text.bitmap_scale;
+                    quad.rect.y = label.at.y as f32 + (quad.rect.y - label.at.y as f32) * text.bitmap_scale;
+                    quad.rect.width *= text.bitmap_scale;
+                    quad.rect.height *= text.bitmap_scale;
                 }
             }
             quads.extend(line);
         }
         gump_art::place(&mut quads, text.at, text.magnify);
-        bitmap_quads.extend(quads);
+        window.gump_text_pass.render_layer(
+            &window.device,
+            &window.queue,
+            encoder,
+            gump_art::Frame {
+                target: view,
+                width: window.config.width,
+                height: window.config.height,
+                scale: text.density,
+            },
+            &quads,
+        );
         return;
     }
-    let (Some(font), Some(atlas)) = (font, ttf_atlas) else {
+    let (Some(font), Some(atlas)) = (font, window.ttf_atlas.as_mut()) else {
         unreachable!("the bitmap branch returned unless both TrueType resources exist")
     };
     let size = text.size.scaled(text.magnify * text.density);
@@ -852,7 +885,24 @@ fn window_text(
         }
         quads.extend(line);
     }
-    ttf_quads.extend(quads);
+    window.upload_ttf_dirty();
+    window
+        .ttf_gump_pass
+        .as_mut()
+        .expect("a TrueType atlas has its matching gump pass")
+        .render_layer(
+            &window.device,
+            &window.queue,
+            encoder,
+            gump_art::Frame {
+                target: view,
+                width: window.config.width,
+                height: window.config.height,
+                // The TrueType quads were already collected in real pixels.
+                scale: 1.0,
+            },
+            &quads,
+        );
 }
 
 /// The face a tooltip is drawn in — `fonts.mul`'s face 1, the same one every
@@ -877,6 +927,7 @@ fn tooltip_line_step(
     fonts: &openshard_client_render::atlas::FontAtlas,
     truetype: Option<openshard_client_render::atlas::TextSize>,
     bitmap_font: openshard_protocol::speech::Font,
+    bitmap_scale: f32,
 ) -> i32 {
     // A TrueType face has a requested size, and the step is that size plus the
     // same two pixels of air. Bitmap faces have no continuous size, so their
@@ -884,9 +935,11 @@ fn tooltip_line_step(
     if let Some(size) = truetype {
         return size.pixels().round() as i32 + 2;
     }
-    fonts
+    (fonts
         .glyph_ink_height(bitmap_font, b'M')
-        .map_or(16, |height| i32::from(height) + 2)
+        .map_or(16, |height| i32::from(height) + 2) as f32
+        * bitmap_scale)
+        .round() as i32
 }
 
 /// Records every world-space pass into `encoder`, from the ground up to the
@@ -1097,7 +1150,7 @@ pub(crate) fn encode_world_passes(
         encoder,
         target,
         &geometry.item_instances.rows,
-        &[],
+        &geometry.item_boxes,
         Some(geometry.item_instances.drawn),
         openshard_client_render::gbuffer::IDS_DYNAMIC_ITEM,
     );

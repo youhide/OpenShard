@@ -212,11 +212,12 @@ struct Lighting {
     grid: vec4<i32>,
     // Which picture to draw: `crate::debug::View` in the first component,
     // `shadow_rays` in the second, whether this is a ghost's frame in the
-    // third — `light::Lighting::dead`, `docs/combat.md`'s D9 — the fourth
-    // still padding. Zero is the lit frame and every other value is a
-    // diagnostic drawn from the values this pass lit it with — see
-    // `docs/lighting.md`, decision 8. The numbers are pinned in a test on the
-    // Rust side.
+    // third — `light::Lighting::dead`, `docs/combat.md`'s D9 — and whether the
+    // fourth selects a short lighting path: zero is the full path, one is an
+    // identity and two is flat ambient only. The first component is zero for the lit
+    // frame and every other value is a diagnostic drawn from the values this
+    // pass lit it with — see `docs/lighting.md`, decision 8. The numbers are
+    // pinned in a test on the Rust side.
     view: vec4<u32>,
     // Which way the sun is — `x` and `y` in tiles, `z` in tiles as well — and in
     // the fourth component the height above which nothing in this frame's grid
@@ -1334,9 +1335,11 @@ fn arrival(
 ) -> Arrival {
     let toward = vec3<f32>(to.x - at.x, to.y - at.y, (to.z - at.z) / Z_PER_TILE);
     let span = length(toward);
+    let body_radius = flame_radius();
+    let point_source = body_radius <= 0.0;
     var across = vec3<f32>(1.0, 0.0, 0.0);
     var up = vec3<f32>(0.0, 1.0, 0.0);
-    if span >= 1.0e-6 {
+    if span >= 1.0e-6 && !point_source {
         let axis = toward / span;
         // Two directions across the ray, built the textbook branching way: away
         // from whichever axis the ray is most nearly along, so the cross product
@@ -1347,18 +1350,28 @@ fn arrival(
         across = normalize(cross(aside, axis));
         up = cross(axis, across);
     }
-    let phase = dither(at) * TAU;
-    let rays = shadow_rays();
+    var phase = 0.0;
+    if !point_source {
+        phase = dither(at) * TAU;
+    }
+    // PERFORMANCE REGRESSION GUARD: a zero-radius flame has no body to sample;
+    // all requested Vogel points are exactly `to`. With the live close-zoom
+    // repro (`flame_radius = 0`, `shadow_rays = 32`, `reach = 4`) walking those
+    // 32 identical BVH segments cost 27–30 ms for one carried light. One unique
+    // ray draws the same point source and measured below 1 ms. The CPU twin is
+    // `ShadowRays::for_radius`, pinned by
+    // `a_point_source_walks_the_bvh_once`.
+    let rays = select(shadow_rays(), 1u, point_source);
     var result = Arrival(0.0, 0.0);
     for (var ray = 0u; ray < rays; ray = ray + 1u) {
         var point = to;
-        if span >= 1.0e-6 {
+        if span >= 1.0e-6 && !point_source {
             // The fragment is inside the flame when this is false. Every point of
             // the sphere is then as good as any other and none of them has a
             // direction, so every ray is the ray to the centre — the one with no
             // length.
             let angle = phase + GOLDEN_ANGLE * f32(ray);
-            let radius = flame_radius() * sqrt((f32(ray) + 0.5) / f32(rays));
+            let radius = body_radius * sqrt((f32(ray) + 0.5) / f32(rays));
             let offset = (across * cos(angle) + up * sin(angle)) * radius;
             point = vec3<f32>(to.x + offset.x, to.y + offset.y, to.z + offset.z * Z_PER_TILE);
         }
@@ -1792,6 +1805,20 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
             return with_composite_opacity(vec4<f32>(0.0, 0.0, 0.0, color.a));
         }
         return with_composite_opacity(color);
+    }
+
+    // `Lighting::NONE` still has to run the colour curve, but it has no reason
+    // to find a tile, fetch an instance row, inspect the sky field, or touch an
+    // occluder. In a dense house those data-dependent reads cover most of the
+    // screen even when there is not one flame; this uniform branch keeps that
+    // case to the one world sample and one ID load it actually needs. It comes
+    // after the clear-background exception above so that text and untouched
+    // pixels retain the exact behaviour of the full path.
+    if lighting.view.w == 1u {
+        return with_composite_opacity(vec4<f32>(shade(color.rgb, vec3<f32>(1.0)), color.a));
+    }
+    if lighting.view.w == 2u {
+        return with_composite_opacity(vec4<f32>(shade(color.rgb, lighting.ground.rgb), color.a));
     }
 
     // Which *tile* this pixel's picture came from is still an id into a

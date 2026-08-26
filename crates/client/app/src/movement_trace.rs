@@ -12,7 +12,6 @@ use openshard_protocol::world::Point;
 
 use crate::world::{MotionSnapshot, WorldState};
 
-const DEFAULT_PATH: &str = "/tmp/openshard-movement.log";
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -33,9 +32,7 @@ pub(crate) struct MovementTrace {
 
 impl MovementTrace {
     pub(crate) fn open() -> Option<Self> {
-        let path = std::env::var_os("OPENSHARD_MOVEMENT_TRACE")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from(DEFAULT_PATH));
+        let path = std::path::PathBuf::from(std::env::var_os("OPENSHARD_MOVEMENT_TRACE")?);
         Self::open_at(&path)
     }
 

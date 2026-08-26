@@ -2793,6 +2793,7 @@ dependencies = [
  "openshard-state",
  "openshard-tiles",
  "openshard-uofiles",
+ "rusqlite",
 ]
 
 [[package]]

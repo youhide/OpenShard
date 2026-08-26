@@ -79,8 +79,7 @@ impl Channel {
 ///
 /// [`CHAT_LINES`] and not a number of its own: the popup and the journal are
 /// drawn in the same column at the same line height, so the two together are
-/// what has to fit above the input line, and at `desk::ChatScale`'s largest that
-/// is already a third of a small window.
+/// what has to fit above the input line.
 ///
 /// A *taste* and not a limit: what the window can actually hold is
 /// [`room_above`], and the popup is drawn to whichever of the two is smaller.
@@ -127,8 +126,8 @@ fn plate_of(box_: Scissor, to_real: f32) -> SpriteQuad {
 /// The column is laid out **upward** from the input line — the popup first and
 /// the journal above it — and until this function existed nothing asked how tall
 /// the window was: six journal lines and up to six popup rows were drawn at
-/// `desk::ChatScale`'s line height wherever that landed, which at scale 4 on a
-/// small window is off the top of the screen. What does not fit is not drawn,
+/// the selected speech size's line height wherever that landed. What does not
+/// fit is not drawn,
 /// which is the only answer that does not lie: a line above the surface is a
 /// line the player cannot read, and drawing it costs the same as drawing one
 /// they can.
@@ -136,8 +135,8 @@ fn plate_of(box_: Scissor, to_real: f32) -> SpriteQuad {
 /// Both arguments are in gump pixels, the space
 /// [`draw_chat_and_speech`] lays the column out in. `canvas_height` is the
 /// surface's own height there, and `line_height` is one row of it — which is
-/// [`CHAT_LINE_HEIGHT`] scaled by `desk::ChatScale` for `fonts.mul`, and
-/// unscaled for a TrueType face (see the call site).
+/// the bitmap speech role's fractional scale for `fonts.mul`, and unscaled for
+/// a TrueType face (see the call site).
 ///
 /// The arithmetic is the layout's own, read back: the input line's top sits at
 /// `canvas_height - CHAT_MARGIN - line_height`, row `k` above it at
@@ -159,7 +158,7 @@ pub(crate) fn room_above(canvas_height: i32, line_height: i32) -> usize {
 ///
 /// The two faces are spaced by two different things, because they are sized by
 /// two different things: `fonts.mul` uses the selected face's measured visible
-/// `M` height and an integer `desk::ChatScale`; a TrueType face uses its
+/// `M` height and the speech role's fractional bitmap scale; a TrueType face uses its
 /// measured ascent/descent/line-gap at [`desk::FontSizes::speech`].  Both are
 /// real rows, not nominal raster sizes, so changing a face cannot make the
 /// pointer and the rendered chat disagree. See `docs/text_sizes.md`.
@@ -168,7 +167,6 @@ pub(crate) fn room_above(canvas_height: i32, line_height: i32) -> usize {
 /// the pointer has to land on the same row the frame drew.
 pub(crate) fn line_height(
     truetype: bool,
-    chat_style: desk::Chat,
     fonts: desk::FontSizes,
     bitmap_font: Font,
     font_atlas: &openshard_client_render::atlas::FontAtlas,
@@ -185,12 +183,11 @@ pub(crate) fn line_height(
                 (real as f32 / density).round() as i32
             },
         ),
-        false => {
-            font_atlas
-                .glyph_ink_height(bitmap_font, b'M')
-                .map_or(CHAT_LINE_HEIGHT, |height| i32::from(height) + 2)
-                * chat_style.scale.glyph_scale_factor() as i32
-        }
+        false => (font_atlas
+            .glyph_ink_height(bitmap_font, b'M')
+            .map_or(CHAT_LINE_HEIGHT, |height| i32::from(height) + 2) as f32
+            * fonts.bitmap_speech_scale())
+        .round() as i32,
     }
 }
 
@@ -254,13 +251,13 @@ fn at_chat_origin(box_: Scissor, origin: GumpPixel) -> Scissor {
 /// `ttf` is the atlas when a TrueType face is set, which measures in **real**
 /// pixels (see [`text::gump_width_ttf`]) and is divided back here — this
 /// answers in gump pixels whichever face is in use, because that is the space
-/// the layout and the pointer both speak. `magnify` is `desk::ChatScale`'s
-/// factor, which multiplies `fonts.mul`'s own pixels and does nothing to a
+/// the layout and the pointer both speak. `magnify` is the speech role's
+/// bitmap factor, which multiplies `fonts.mul`'s own pixels and does nothing to a
 /// TrueType face.
 pub(crate) fn channel_width(
     font_atlas: &openshard_client_render::atlas::FontAtlas,
     ttf: Option<(&openshard_client_render::atlas::TtfAtlas, TextSize)>,
-    magnify: i32,
+    magnify: f32,
     scale: f32,
     bitmap_font: Font,
 ) -> i32 {
@@ -268,7 +265,9 @@ pub(crate) fn channel_width(
         .iter()
         .map(|channel| match ttf {
             Some((atlas, size)) => text::gump_width_ttf(channel.label(), atlas, size),
-            None => text::gump_width(channel.label(), bitmap_font, font_atlas) * magnify,
+            None => {
+                (text::gump_width(channel.label(), bitmap_font, font_atlas) as f32 * magnify).round() as i32
+            }
         })
         .max()
         .unwrap_or_default();
@@ -750,7 +749,6 @@ impl crate::app::App {
             return false;
         };
         let scale = self.gump_scale();
-        let chat_style = self.chat_style();
         // `ttf_atlas` is `Some` exactly when a face was supplied at startup;
         // F1 still chooses whether this frame draws through it or the classic
         // bitmap atlas.
@@ -771,7 +769,6 @@ impl crate::app::App {
                 canvas.y,
                 line_height(
                     truetype,
-                    chat_style,
                     fonts,
                     bitmap_font,
                     &self.resources.font_atlas,
@@ -781,7 +778,7 @@ impl crate::app::App {
                 channel_width(
                     &self.resources.font_atlas,
                     ttf,
-                    chat_style.scale.glyph_scale_factor() as i32,
+                    fonts.bitmap_speech_scale(),
                     scale,
                     bitmap_font,
                 ),
@@ -836,7 +833,6 @@ pub(crate) fn draw_chat_and_speech(
     let font = bitmap_font_override.unwrap_or(Font::DEFAULT);
     let line_height = line_height(
         ttf_active,
-        chat_style,
         fonts,
         font,
         &resources.font_atlas,
@@ -1005,7 +1001,7 @@ pub(crate) fn draw_chat_and_speech(
                 channel_width(
                     &resources.font_atlas,
                     Some((&*atlas, speech_size)),
-                    1,
+                    1.0,
                     scale,
                     Font::DEFAULT,
                 ),
@@ -1088,7 +1084,7 @@ pub(crate) fn draw_chat_and_speech(
             );
         profile::end(window.gpu.as_ref(), encoder, timed);
     } else {
-        let magnify = chat_style.scale.glyph_scale_factor() as i32;
+        let magnify = fonts.bitmap_speech_scale();
         let mut labels = labels;
         // The same two functions the TrueType branch above calls and the pointer
         // calls — measured through `fonts.mul` here, which is the whole of the
@@ -1117,16 +1113,18 @@ pub(crate) fn draw_chat_and_speech(
             clip: None,
         });
         if chat.focused && blink_on {
-            let caret_x = text::gump_width(&chat.typed[..chat.cursor], font, &resources.font_atlas);
+            let caret_x = (text::gump_width(&chat.typed[..chat.cursor], font, &resources.font_atlas) as f32
+                * magnify)
+                .round() as i32;
             labels.push(GumpLabel {
                 // **Magnified**, like the glyphs it is counting past.
                 // `gump_width` measures `fonts.mul`'s own pixels and
                 // `scaled_gump_quads` draws them at `magnify` times that, each
                 // label from its own anchor — so an anchor placed at the
                 // unmagnified width put the caret at a fraction of the way along
-                // the line it was measuring, which at `ChatScale`'s default of
-                // two was halfway back through what had been typed.
-                at: GumpPixel::new(line_at.x + caret_x * magnify, line_at.y),
+                // the line it was measuring, which at the default bitmap
+                // speech scale of two was halfway back through what had been typed.
+                at: GumpPixel::new(line_at.x + caret_x, line_at.y),
                 text: caret_text,
                 font,
                 hue: Hue(chat_style.hue),
@@ -1152,24 +1150,18 @@ pub(crate) fn draw_chat_and_speech(
                 Rect {
                     x: at.x as f32,
                     y: at.y as f32,
-                    width: (widest * magnify) as f32,
+                    width: widest as f32 * magnify,
                     height: line_height as f32,
                 },
                 Hue::NONE,
                 gump_art::Shade::new(PLATE_SHADE),
             ));
         }
-        window_text_quads.extend(scaled_gump_quads(
-            &labels,
-            &resources.font_atlas,
-            chat_style.scale.glyph_scale_factor(),
-        ));
+        window_text_quads.extend(scaled_gump_quads(&labels, &resources.font_atlas, magnify));
     }
-    // The one call, with the windows' lines already in front of the
-    // chat's: painter's order inside a single pass, and the only order
-    // there is — see `window_text_quads` for what a second call would cost.
-    // Draws only the windows' captions when `App::ttf_font` is set:
-    // the chat's own quads went through `ttf_gump_pass` above instead.
+    // The HUD's one bitmap-text call. Window captions were rendered directly
+    // after their own art, so they are intentionally absent here: the journal
+    // and input line are the component above every client window.
     let timed = profile::begin(window.gpu.as_ref(), "gump text", encoder);
     window.gump_text_pass.render(
         &window.device,
@@ -1247,7 +1239,6 @@ mod tests {
         assert_eq!(
             super::line_height(
                 false,
-                crate::desk::Chat::default(),
                 crate::desk::FontSizes::default(),
                 Font(0),
                 &atlas,
@@ -1500,9 +1491,7 @@ mod tests {
         assert!(!rows[0].highlighted);
     }
 
-    /// The defect this arithmetic was written for: at `ChatScale` 4 on a small
-    /// window the chat block ran off the top of the screen. Whatever the window
-    /// and whatever the scale, the topmost row drawn starts at or below the
+    /// Whatever the window and whatever the line height, the topmost row drawn starts at or below the
     /// margin — which is the same statement as "every row is on the surface".
     #[test]
     fn no_row_is_ever_laid_out_above_the_top_of_the_window() {

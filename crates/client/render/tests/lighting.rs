@@ -13,9 +13,14 @@ use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::debug;
 use openshard_client_render::facing::Face;
 use openshard_client_render::geometry::Vec2;
+use openshard_client_render::items::GroundItem;
 use openshard_client_render::light::{self, Lighting, Spot};
 use openshard_client_render::occlusion;
 use openshard_client_render::scene::{self, CENTRE, DOORWAY, Scene};
+use openshard_protocol::direction::Direction;
+use openshard_protocol::items::ItemAmount;
+use openshard_protocol::wire::Hue;
+use openshard_protocol::world::Point;
 
 /// The flicker's instant. Always zero: a flame's brightness swings by a tenth,
 /// and an assertion about a leak must not depend on which tenth of a second it
@@ -595,6 +600,43 @@ fn a_carried_light_lights_the_way_it_is_pointed() {
             "both walls are lit the same at z {z}: {face} against {back}{picture}",
         );
     }
+}
+
+/// A house floor is a static at the house's height, rather than the terrain
+/// below it. The carried flame must retain that same `z` all the way from the
+/// player's point into the lighting list, or its ray begins under the planks
+/// and the floor the character is standing on remains dark.
+#[test]
+fn a_carried_light_reaches_the_raised_floor_it_stands_on() {
+    let floor_z = scene::WALL_HEIGHT as i8;
+    let mut scene = scene::lantern_in_a_room();
+    for x in CENTRE.x - scene::ROOM_HALF + 1..=CENTRE.x + scene::ROOM_HALF - 1 {
+        for y in CENTRE.y - scene::ROOM_HALF + 1..=CENTRE.y + scene::ROOM_HALF - 1 {
+            scene.items.push(GroundItem {
+                amount: ItemAmount::ONE,
+                at: Point::new(x, y, floor_z),
+                graphic: scene::FLOOR,
+                hue: Hue::NONE,
+            });
+        }
+    }
+    scene.carried = Some((Point::new(CENTRE.x, CENTRE.y, floor_z), Direction::East));
+
+    let lighting = scene.lighting(STILL);
+    let carried = lighting.lights[0];
+    assert_eq!(
+        carried.z,
+        f32::from(floor_z) + light::FLAME_LIFT,
+        "the flame must be lifted from the house floor, not terrain z=0"
+    );
+
+    let ahead = (CENTRE.x + 2, CENTRE.y);
+    let floor = on_the_static(&lighting, ahead, f32::from(floor_z), scene::FLOOR, floor_z);
+    assert!(
+        brighter_by(floor, ambient(&lighting, ahead)) > 0.2,
+        "the floor at z={floor_z} is dark even though the carried flame is on it: {floor}{}",
+        picture(&scene, &lighting),
+    );
 }
 
 /// The beam's own edge is a gradient, and it is sixty degrees wide.

@@ -37,23 +37,23 @@ built and thrown away; the decision is in
 ## The numbers
 
 The question was whether a per-entity hook fits the tick. The budget is
-`TICK_INTERVAL`: **50ms at 20Hz**. Measured on an Apple-silicon dev machine, V8
+`TICK_INTERVAL`: **25ms at 40Hz**. Measured on an Apple-silicon dev machine, V8
 hosted in a Tokio runtime, release build, warmed up so the JIT has tiered the
 hook. `cargo run -p openshard-scripting --example benchmark --release`.
 
-| Hook | per call | 10k mobiles/tick | share of a 50ms tick |
+| Hook | per call | 10k mobiles/tick | share of a 25ms tick |
 |---|---|---|---|
-| empty (`onTick(){}`) — pure Rust↔V8 crossing | ~170 ns | ~1.7 ms | ~3% |
-| read + maybe move — `op_position`, then conditionally `op_move` | ~490 ns | ~4.9 ms | ~10% |
+| empty (`onTick(){}`) — pure Rust↔V8 crossing | ~170 ns | ~1.7 ms | ~7% |
+| read + maybe move — `op_position`, then conditionally `op_move` | ~490 ns | ~4.9 ms | ~20% |
 
 The realistic hook — the one a gameplay rule looks like: read the mobile's tile
 through an op, decide, and on a condition enqueue a step — costs about half a
 microsecond a call. Ten thousand mobiles each firing it every tick spend roughly
-a tenth of the budget. **It fits, with room.**
+a fifth of the budget. **It fits, with room.**
 
 Two honest caveats. The ceiling is *script* time only; a real tick also moves
 mobiles, runs interest management and writes packets, so the script share is a
-slice of the 50ms, not all of it — the per-call nanoseconds are the number that
+slice of the 25ms, not all of it — the per-call nanoseconds are the number that
 travels, not the "calls per tick" ceiling. And the crossing cost is per call, so
 a design that calls one hook over a batch of entities will always beat one that
 crosses per entity; that is a knob for §6, not a problem for the spike.

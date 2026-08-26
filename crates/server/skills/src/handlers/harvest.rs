@@ -7,8 +7,9 @@
 //!
 //! The tables — which tiles, which veins, what a bank holds — are
 //! [`openshard_state::harvest`]. What the swing *does* is here, and it is the
-//! usual four steps: raise a cursor, check the ground, beat a few times with a
-//! sound and a gesture, and on the last beat roll [`roll_skill_band`] and pay out.
+//! usual four steps: raise a cursor, check the ground, work for a few beats with
+//! sound, one continuous gesture, and on the last beat roll [`roll_skill_band`]
+//! and pay out.
 //!
 //! Two things it does *not* decide. Whether the ground is what the client claims
 //! it is, which the caller resolves against the map and hands over as a
@@ -19,13 +20,14 @@ use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::target::{TargetCursor, TargetKind};
-use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue};
+use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue, Layer};
 use openshard_protocol::world::{Facet, Point};
-use openshard_state::components::{Client, Harvesting, Position, Tool};
+use openshard_state::components::{Client, Drawn, Equipped, Harvesting, Position, Tool};
 use openshard_state::harvest::{
     Bank, HarvestAction, HarvestDef, HarvestKind, HarvestResource, TileSource, VeinIdx, definition_for,
     tool_data,
 };
+use openshard_state::weapon::{LAYER_ONE_HANDED, weapon_data, weapon_layer};
 use openshard_state::{Action, Skill, TargetPurpose, WorldState, in_range};
 
 use crate::check::{roll_skill_band, skill_value};
@@ -45,8 +47,13 @@ const NOT_MINABLE: ClilocId = ClilocId(501_862);
 const NOT_CHOPPABLE: ClilocId = ClilocId(500_489);
 /// "You can't fish there." — a line cast at dry land.
 const NOT_FISHABLE: ClilocId = ClilocId(500_979);
-/// "You are already harvesting." — one swing at a time per tool.
-const ALREADY_BUSY: ClilocId = ClilocId(500_972);
+/// One swing at a time per harvester.
+///
+/// `500972` looks tempting here, but its actual text is "You are already
+/// fishing."  It is only suitable for fishing, and using it for a lumberjack
+/// makes a second axe swing claim the player is fishing.  There is no shared
+/// harvest cliloc, so this deliberately remains a plain system line.
+const ALREADY_HARVESTING: &str = "You are already harvesting.";
 
 /// The facet a Felucca-rate harvest is worth double on.
 ///
@@ -135,6 +142,20 @@ pub fn use_tool(state: &mut WorldState, harvester: EntityId, tool: EntityId) -> 
         return true;
     };
     state.raise_target(harvester, TargetPurpose::Harvest { tool });
+    // A hatchet has one possible harvest definition, unlike a pick which can
+    // point at either ore or sand. Send the presentation facts *before* the
+    // crosshair: by the time the user can click, the client can start locally.
+    if data.skill == Skill::Lumberjacking {
+        let lumber = openshard_state::harvest::definition(HarvestKind::Lumber, state.gameplay.is_ml());
+        show_backpack_chop_tool(state, harvester, tool);
+        state.preview_harvest(
+            harvester,
+            CursorId(serial.raw()),
+            Action::Chop,
+            lumber.beat_ticks.saturating_mul(u64::from(lumber.beats)),
+            lumber.beats,
+        );
+    }
     let prompt = match data.skill {
         Skill::Mining => DIG_WHERE,
         Skill::Lumberjacking => CHOP_WHERE,
@@ -157,14 +178,19 @@ pub fn use_tool(state: &mut WorldState, harvester: EntityId, tool: EntityId) -> 
 /// The cursor came back with a spot on the ground: start swinging, or say why not.
 ///
 /// ServUO's `StartHarvesting`, gate for gate.
-pub fn begin_harvest(state: &mut WorldState, harvester: EntityId, tool: EntityId, target: HarvestTarget) {
+pub fn begin_harvest(
+    state: &mut WorldState,
+    harvester: EntityId,
+    tool: EntityId,
+    target: HarvestTarget,
+) -> bool {
     // The tool may have been dropped, sold or spent while the cursor was up.
     if state.registry.serial_of(tool).is_none() {
-        return;
+        return false;
     }
     let Some(def) = definition_for(target.tile, target.source, state.gameplay.is_ml()) else {
         state.localized_message(harvester, bad_target_line(state, tool), "");
-        return;
+        return false;
     };
     // Which system a swing is comes from the *tile*, never the tool — but a
     // fishing pole still cannot mine, so the two have to agree.
@@ -175,23 +201,23 @@ pub fn begin_harvest(state: &mut WorldState, harvester: EntityId, tool: EntityId
         .is_some_and(|data| data.skill == def.skill);
     if !matches_tool {
         state.localized_message(harvester, bad_target_line(state, tool), "");
-        return;
+        return false;
     }
     if !within_reach(state, harvester, target.at, def.max_range) {
         state.localized_message(harvester, def.messages.out_of_range, "");
-        return;
+        return false;
     }
     if !has_stock(state, harvester, def, target.at) {
         state.localized_message(harvester, def.messages.no_resources, "");
-        return;
+        return false;
     }
     // ServUO's `GetLock` returns the *tool*, so a player with two picks may work
     // two veins — "as OSI", its own comment says. One `Harvesting` per mobile is
     // the closest this engine gets: a component is per entity, and a second
     // concurrent swing would need a list. So the refusal is per harvester.
     if state.registry.has::<Harvesting>(harvester) {
-        state.localized_message(harvester, ALREADY_BUSY, "");
-        return;
+        state.system_message(harvester, ALREADY_HARVESTING);
+        return false;
     }
     // ServUO reveals a lumberjack (`Lumberjacking.OnHarvestStarted`, `Core.ML`)
     // and nobody else — a miner underground stays hidden, which reads oddly and
@@ -214,7 +240,15 @@ pub fn begin_harvest(state: &mut WorldState, harvester: EntityId, tool: EntityId
     // The first swing lands now rather than a beat and a half from now: without
     // this the tool is double-clicked, the cursor answered, and nothing at all
     // happens for two seconds. The noise it makes follows on its own clock.
-    swing_gesture(state, harvester, def, target.at);
+    swing_gesture(
+        state,
+        harvester,
+        tool,
+        def,
+        target.at,
+        def.beat_ticks.saturating_mul(u64::from(def.beats)),
+    );
+    true
 }
 
 /// Advance every harvest in flight, and finish those whose last beat has come.
@@ -251,10 +285,12 @@ pub fn advance_harvests(state: &mut WorldState) -> Vec<ToolWorn> {
         // can walk off, and somebody else can empty the vein.
         if state.registry.serial_of(work.tool).is_none() {
             state.registry.remove::<Harvesting>(harvester);
+            state.complete_harvest(harvester);
             continue;
         }
         if !within_reach(state, harvester, work.at, def.max_range) {
             state.registry.remove::<Harvesting>(harvester);
+            state.complete_harvest(harvester);
             // A *different* line from the one a too-distant first click gets:
             // walking away mid-swing is giving up, not a mistake.
             state.localized_message(harvester, def.messages.timed_out_of_range, "");
@@ -262,6 +298,7 @@ pub fn advance_harvests(state: &mut WorldState) -> Vec<ToolWorn> {
         }
         if !has_stock(state, harvester, def, work.at) {
             state.registry.remove::<Harvesting>(harvester);
+            state.complete_harvest(harvester);
             state.localized_message(harvester, def.messages.double_harvest, "");
             continue;
         }
@@ -276,10 +313,10 @@ pub fn advance_harvests(state: &mut WorldState) -> Vec<ToolWorn> {
                     ..work
                 },
             );
-            swing_gesture(state, harvester, def, work.at);
             continue;
         }
         state.registry.remove::<Harvesting>(harvester);
+        state.complete_harvest(harvester);
         if let Some(broke) = deliver(state, harvester, &work, def) {
             worn.push(broke);
         }
@@ -479,12 +516,20 @@ fn choose_resource(
     primary
 }
 
-/// Face the spot and swing — the standing rule that a visible action is never a
-/// state change alone. The noise follows on [`swing_sound`]'s own clock.
+/// Face the spot and begin a continuous harvest animation — the standing rule
+/// that a visible action is never a state change alone. The noise follows on
+/// [`swing_sound`]'s own clock.
 ///
 /// ServUO's `DoHarvestingEffect` does not animate a *mounted* harvester, and that
 /// is kept: a mining swing played on horseback reads as a glitch.
-fn swing_gesture(state: &mut WorldState, harvester: EntityId, def: &'static HarvestDef, at: Point) {
+fn swing_gesture(
+    state: &mut WorldState,
+    harvester: EntityId,
+    tool: EntityId,
+    def: &'static HarvestDef,
+    at: Point,
+    duration_ticks: u64,
+) {
     state.face_point(harvester, at);
     if state
         .registry
@@ -492,12 +537,44 @@ fn swing_gesture(state: &mut WorldState, harvester: EntityId, def: &'static Harv
     {
         return;
     }
-    state.animate(
+    if def.action == HarvestAction::Chop {
+        show_backpack_chop_tool(state, harvester, tool);
+    }
+    state.animate_timed(
         harvester,
         match def.action {
             HarvestAction::Mine => Action::Mine,
             HarvestAction::Chop => Action::Chop,
             HarvestAction::Fish => Action::Fish,
+        },
+        duration_ticks,
+    );
+}
+
+/// Lend a backpack axe to the renderer. It is called when the target cursor
+/// opens as well as when the shard accepts its target, so optimistic chopping
+/// has the correct hand layer from its first local frame.
+fn show_backpack_chop_tool(state: &mut WorldState, harvester: EntityId, tool: EntityId) {
+    if state.registry.has::<Equipped>(tool) {
+        return;
+    }
+    let Some(Drawn { id, hue }) = state.registry.get::<Drawn>(tool).copied() else {
+        return;
+    };
+    let Some(weapon) = weapon_data(id) else {
+        return;
+    };
+    let layer = weapon_layer(weapon, Layer(state.tiles().static_tile(id.0).layer));
+    // No client files leave this byte at zero. The tool is already known to be
+    // a `BaseAxe`, whose ordinary one-handed appearance is the useful fallback.
+    state.show_harvest_tool(
+        harvester,
+        id,
+        hue,
+        if layer == Layer(0) {
+            LAYER_ONE_HANDED
+        } else {
+            layer
         },
     );
 }

@@ -527,8 +527,8 @@ declared with `deno_core::extension!` and `#[op2]`, and every op called from a
 hook is synchronous — a tick never awaits.
 
 The benchmark is the point: a hook call costs on the order of a couple of hundred
-nanoseconds, so ten thousand mobiles each firing a hook per tick spend a low
-single-digit-millisecond slice of the 50ms budget. It fits. Numbers and method
+nanoseconds, so ten thousand mobiles each firing a hook per tick spend a
+single-digit-millisecond slice of the 25ms budget. It fits. Numbers and method
 are in `docs/roadmap.md` §5.
 
 `ScriptEngine::load` doubles as hot reload — re-evaluating rebinds the hooks in

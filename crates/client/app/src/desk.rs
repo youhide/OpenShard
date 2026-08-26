@@ -283,7 +283,7 @@ impl<'de> Deserialize<'de> for Zoom {
 /// raw art pixels, which on a modern screen makes a container the size of a
 /// postage stamp however good the monitor is.
 ///
-/// **Fractional, unlike [`ChatScale`], and that is a choice with a visible
+/// **Fractional, and that is a choice with a visible
 /// cost.** Gump art is five-bit pixel art sampled with `Nearest`, so a factor
 /// between two whole numbers repeats some rows of a picture and not others: a
 /// window's border comes out two pixels thick along part of an edge and one
@@ -353,69 +353,8 @@ impl<'de> Deserialize<'de> for WindowScale {
     }
 }
 
-/// How much bigger than `fonts.mul`'s own pixels the HUD chat box's glyphs
-/// draw.
-///
-/// Not [`Zoom`]: that scales the whole HUD, dev window included, and turning
-/// it up to read the chat more easily also grows every slider in this window.
-/// A bitmap face has no continuous size of its own to ask for either — every
-/// glyph is baked at whatever pixels the art shipped
-/// (`openshard_uofiles::font`'s own doc) — so this is an integer upscale
-/// applied to the finished glyph quads, nearest-sampled the same way a camera
-/// zoom step already grows a world sprite. See `App::draw`'s chat block for
-/// where it is applied and why it stops at the classic face rather than also
-/// reaching the TrueType path.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ChatScale(u32);
-
-impl ChatScale {
-    /// Unscaled — `fonts.mul`'s own pixels — and four times as big, past which
-    /// a six-line journal no longer fits above the input line on a small
-    /// window.
-    pub const MIN: u32 = 1;
-    pub const MAX: u32 = 4;
-
-    /// Clamp into the range. Takes anything, including what a hand-edited file
-    /// offers, the same reason [`Zoom::new`] does.
-    pub fn new(factor: u32) -> Self {
-        Self(factor.clamp(Self::MIN, Self::MAX))
-    }
-
-    /// The multiplier applied to each classic glyph quad.
-    ///
-    /// Pass this to the bitmap chat layout and rendering paths; TrueType text
-    /// remains at its independently chosen pixel size.
-    pub fn glyph_scale_factor(self) -> u32 {
-        self.0
-    }
-}
-
-impl Default for ChatScale {
-    /// Twice `fonts.mul`'s own pixels — legible without a chat box that eats
-    /// half the screen, and the reason a fresh `client_ui.toml` already reads
-    /// bigger than the classic client's own chat did.
-    fn default() -> Self {
-        Self(2)
-    }
-}
-
-// The same reason [`Zoom`]'s pair exists: written and read as a bare number,
-// and built through [`ChatScale::new`] on the way in so a hand-edited `0` or
-// `4000` cannot reach the renderer.
-impl Serialize for ChatScale {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for ChatScale {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(ChatScale::new(u32::deserialize(deserializer)?))
-    }
-}
-
 /// A real pixel size for each kind of text this client draws through a
-/// TrueType face.
+/// TrueType face, and the matching fractional scale for `fonts.mul`.
 ///
 /// **Sizes, not scales** — `docs/text_sizes.md`, whose whole subject this is.
 /// The number in `client_ui.toml` is what reaches the rasterizer: eleven means
@@ -430,9 +369,6 @@ impl<'de> Deserialize<'de> for ChatScale {
 /// scale again — the point is that a person can write `stack_count = 11.0` and
 /// get eleven pixels.
 ///
-/// [`ChatScale`] is untouched by any of this and stays an integer: it upscales
-/// finished `fonts.mul` quads, and a bitmap face has no continuous size to ask
-/// for at all.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FontSizes {
@@ -552,6 +488,32 @@ impl Default for FontSizes {
     }
 }
 
+impl FontSizes {
+    // These are calibration points for finished bitmap quads, not raster
+    // sizes. They keep the old defaults: chat was 2x its eight-pixel base,
+    // while the other roles were drawn at their native size.
+    const BITMAP_SPEECH_REFERENCE: f32 = 8.0;
+    const BITMAP_WINDOW_REFERENCE: f32 = 14.0;
+    const BITMAP_TOOLTIP_REFERENCE: f32 = 14.0;
+    const BITMAP_STACK_COUNT_REFERENCE: f32 = 11.0;
+
+    pub(crate) fn bitmap_speech_scale(self) -> f32 {
+        self.speech.pixels() / Self::BITMAP_SPEECH_REFERENCE
+    }
+
+    pub(crate) fn bitmap_window_scale(self) -> f32 {
+        self.window.pixels() / Self::BITMAP_WINDOW_REFERENCE
+    }
+
+    pub(crate) fn bitmap_tooltip_scale(self) -> f32 {
+        self.tooltip.pixels() / Self::BITMAP_TOOLTIP_REFERENCE
+    }
+
+    pub(crate) fn bitmap_stack_count_scale(self) -> f32 {
+        self.stack_count.pixels() / Self::BITMAP_STACK_COUNT_REFERENCE
+    }
+}
+
 /// A [`TextSize`] as the bare number a person writes in the file.
 ///
 /// A `with` shim rather than a second newtype beside
@@ -575,20 +537,15 @@ mod text_size {
 
 /// The HUD chat box's own look.
 ///
-/// Two knobs. [`Chat::hue`] is about the player's own line rather than the
+/// [`Chat::hue`] is about the player's own line rather than the
 /// shard's: it tints the compose line and its caret, never a journal row
 /// someone else's message already carries a hue of its own on the wire — see
-/// `App::draw`'s chat block for where that split is made. [`Chat::scale`] is
-/// about that same line's *size*, and only while `App::ttf_font` is unset: a
-/// TrueType face is sized in pixels by [`Desk::fonts`] instead, which is a
-/// size rather than a multiple of the box's own and therefore does not live
-/// here. See `docs/text_sizes.md`.
+/// `App::draw`'s chat block for where that split is made. [`Desk::fonts`]
+/// controls the size for both face types.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 #[derive(Default)]
 pub struct Chat {
-    /// How big the classic face's glyphs draw — see [`ChatScale`].
-    pub scale: ChatScale,
     /// What the player's own compose line and caret are tinted, as a wire hue
     /// (`openshard_protocol::wire::Hue`'s own representation, not the type
     /// itself: this crate's `Deserialize` is what a hand-edited file can hand
@@ -717,7 +674,7 @@ pub struct Desk {
     pub light: Light,
     /// What the HUD chat box has been turned to — [`Chat`].
     pub chat: Chat,
-    /// How big each kind of TrueType text draws — [`FontSizes`].
+    /// How big each text role draws — [`FontSizes`].
     ///
     /// On [`Desk`] rather than on [`Chat`], where the old multiplier lived,
     /// because these reach every piece of text this client draws and not one
@@ -904,10 +861,7 @@ mod tests {
                 lantern_color: [1.0, 0.5, 0.2],
                 ambient_color: [0.8, 0.9, 1.0],
             },
-            chat: Chat {
-                scale: ChatScale::new(3),
-                hue: 33,
-            },
+            chat: Chat { hue: 33 },
             fonts: FontSizes {
                 speech: TextSize::new(18.5),
                 window: TextSize::new(13.0),
@@ -1000,17 +954,6 @@ mod tests {
         assert_eq!(desk.zoom.hud_scale_factor(), 1.0);
     }
 
-    /// [`ChatScale`]'s own version of the zoom clamp above: a hand-edited `0`
-    /// or a scale past what a six-line journal fits above the input line
-    /// cannot reach `App::draw`.
-    #[test]
-    fn a_hand_edited_chat_scale_is_clamped_on_the_way_in() {
-        let desk: Desk = toml::from_str("[chat]\nscale = 400").unwrap();
-        assert_eq!(desk.chat.scale.glyph_scale_factor(), ChatScale::MAX);
-        let desk: Desk = toml::from_str("[chat]\nscale = 0").unwrap();
-        assert_eq!(desk.chat.scale.glyph_scale_factor(), ChatScale::MIN);
-    }
-
     /// [`WindowScale`]'s own version of the same clamp. A `0` here is worse
     /// than a `0` in either of its neighbours: a window drawn at nothing is a
     /// window with nothing to click, so the value that would make the client
@@ -1070,16 +1013,29 @@ mod tests {
         assert!(written.contains("stack_count = 13.5"), "{written}");
     }
 
+    #[test]
+    fn bitmap_roles_use_the_same_sizes_with_fractional_scales() {
+        let fonts = FontSizes {
+            speech: TextSize::new(12.0),
+            window: TextSize::new(17.5),
+            tooltip: TextSize::new(10.5),
+            stack_count: TextSize::new(13.75),
+        };
+        assert_eq!(fonts.bitmap_speech_scale(), 1.5);
+        assert_eq!(fonts.bitmap_window_scale(), 1.25);
+        assert_eq!(fonts.bitmap_tooltip_scale(), 0.75);
+        assert_eq!(fonts.bitmap_stack_count_scale(), 1.25);
+    }
+
     /// A file written before font sizes existed opens with the defaults, and
     /// an old `ttf_scale` in it is ignored rather than read as a size.
     ///
     /// It was a multiplier of a base this file no longer has, so there is
     /// nothing to migrate it *to* — see `docs/text_sizes.md`'s P2.
     #[test]
-    fn an_old_ttf_scale_is_ignored_and_the_rest_of_the_file_survives() {
+    fn old_per_face_scales_are_ignored_and_the_rest_of_the_file_survives() {
         let desk: Desk = toml::from_str("zoom = 1.25\n[chat]\nttf_scale = 2.0\nscale = 3").unwrap();
         assert_eq!(desk.fonts, FontSizes::default());
-        assert_eq!(desk.chat.scale.glyph_scale_factor(), 3);
         assert_eq!(desk.zoom.hud_scale_factor(), 1.25);
     }
 

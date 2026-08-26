@@ -143,8 +143,9 @@ impl Body {
 /// stands.
 ///
 /// Keeping them separate is what keeps [`Stands`](Self::Stands) the *positive*
-/// arm: a reader asking what is in the way never has to know that some of the
-/// things in the way are also floors.
+/// arm: it has no blocking volume of its own. It is still a ceiling to a body
+/// below it, just as a platform in the static map is; [`Overlay::blocker_at`]
+/// is where that headroom rule is applied.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CoverKind {
     /// In the way.
@@ -554,14 +555,20 @@ impl Overlay {
     /// The first thing in the way of `body` standing on `tile`, under this
     /// reading of the doors.
     ///
-    /// What a step asks. `None` is "nothing here stops you", which is not the
-    /// same as "you may stand here" — the map answers that.
+    /// A blocking cover obstructs by overlapping the body. A surface obstructs
+    /// only when it lies strictly between the body's feet and head: the same
+    /// floor carries a body at its own z and is a ceiling to a body underneath.
+    /// This mirrors the static map's headroom rule and prevents an elevated
+    /// house floor from leaving the map ground beneath it walkable.
+    ///
+    /// `None` is "nothing here stops you", which is not the same as "you may
+    /// stand here" — the map answers that.
     #[must_use]
     pub fn blocker_at(&self, tile: Tile, body: Body, doors: Doors) -> Option<Cover> {
         self.at(tile)
             .iter()
             .copied()
-            .find(|cover| cover.blocks_body(body, doors))
+            .find(|cover| cover.obstructs_body(body, doors))
     }
 
     /// The first thing in the way on `tile` at *any* height.
@@ -627,11 +634,14 @@ impl Cover {
     /// the reading is not "a blocker that does not block", it is nothing at
     /// all, and a caller that saw it as the former would report a doorway as
     /// obstructed.
-    const fn blocks_body(self, body: Body, doors: Doors) -> bool {
+    const fn obstructs_body(self, body: Body, doors: Doors) -> bool {
         match self.kind {
             CoverKind::Blocks { door: true } if matches!(doors, Doors::AllOpen) => false,
             CoverKind::Blocks { .. } => self.meets(body),
-            CoverKind::Stands { .. } => false,
+            CoverKind::Stands { .. } => {
+                let surface = self.surface();
+                body.feet() < surface && surface < body.head()
+            }
         }
     }
 }
@@ -893,8 +903,8 @@ mod tests {
             "a body standing on the floor is not blocked by it"
         );
         assert!(
-            overlay.blocker_at(HERE, person(0), Doors::AsTheyStand).is_none(),
-            "and neither is one on the ground beneath it"
+            overlay.blocker_at(HERE, person(0), Doors::AsTheyStand).is_some(),
+            "the same floor is not a ceiling to a body underneath it"
         );
     }
 
@@ -972,7 +982,9 @@ mod tests {
     #[test]
     fn a_door_is_found_whatever_height_it_hangs_at() {
         let mut overlay = Overlay::default();
-        overlay.set(HERE, vec![Cover::standing(-2, 5), Cover::door(80, 20)]);
+        // A surface at the body's feet exercises the surface filtering without
+        // also being a low ceiling, which is a different obstruction.
+        overlay.set(HERE, vec![Cover::standing(-2, 2), Cover::door(80, 20)]);
 
         assert!(overlay.blocker_at(HERE, person(0), Doors::AsTheyStand).is_none());
         assert!(

@@ -38,7 +38,7 @@ use crate::codec::PacketWriter;
 use crate::packet::{DecodePacket, EncodePacket, PacketLength};
 use crate::serial::{Serial, raw_or_none};
 use crate::version::ClientVersion;
-use crate::wire::{Graphic, Hue, SoundId};
+use crate::wire::{CursorId, Graphic, Hue, Layer, SoundId};
 use crate::world::Point;
 
 /// The ordinary client cadence for a mobile-animation frame.
@@ -60,19 +60,20 @@ impl SwingDuration {
     }
 }
 
-/// `0xBF` subcommand `0xE00B` — a swing animation begins now and occupies the
-/// supplied duration before its authoritative impact.
+/// `0xBF` subcommand `0xE00B` — a swing animation begins now and stays active
+/// for at least the supplied duration before its authoritative impact.
 ///
 /// The stock animation packets can only carry an eight-bit per-frame delay,
 /// which cannot represent a several-second heavy swing. This OpenShard
 /// extension carries the whole duration as `u32`; it is sent immediately before
-/// the ordinary `0x6E`/`0xE2`, so a client that understands it stretches that
-/// action and a stock client simply ignores the unknown extended command.
+/// the ordinary `0x6E`/`0xE2`, so a client that understands it loops complete
+/// action cycles through that interval and a stock client simply ignores the
+/// unknown extended command.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SwingTiming {
     /// The mobile whose next animation this timing belongs to.
     pub serial: Serial,
-    /// Total time from the first frame to the impact.
+    /// Minimum time from the first frame to the impact.
     pub duration: SwingDuration,
 }
 
@@ -119,6 +120,250 @@ impl DecodePacket for SwingTiming {
             serial,
             duration: SwingDuration(reader.u32()?),
         })
+    }
+}
+
+/// `0xBF` subcommand `0xE00C` — draw a harvesting tool in a mobile's hand for
+/// its immediately following action.
+///
+/// A hatchet may be used straight from a backpack, as it is on ServUO.  The
+/// ordinary animation packet can name the chopping motion but not the tool
+/// that caused it, so an OpenShard client would otherwise make the lumberjack
+/// swing empty hands.  This is visual-only: it neither moves the item nor
+/// makes it equipped.  Stock clients skip this unknown extended command and
+/// retain their ordinary harvest animation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct HarvestToolVisual {
+    /// The mobile about to swing.
+    pub serial: Serial,
+    /// The tool's item graphic.
+    pub graphic: Graphic,
+    /// The tool's hue.
+    pub hue: Hue,
+    /// The hand layer it is drawn on for this action.
+    pub layer: Layer,
+}
+
+impl HarvestToolVisual {
+    /// The extended-command envelope.
+    pub const ID: u8 = 0xBF;
+    /// Follows [`SwingTiming::SUBCOMMAND`].
+    pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 12;
+    /// Id, length, subcommand, mobile, graphic, hue and layer.
+    pub const LENGTH_BYTES: u16 = 14;
+}
+
+impl EncodePacket for HarvestToolVisual {
+    const ID: u8 = Self::ID;
+    const LENGTH: PacketLength = PacketLength::Fixed(Self::LENGTH_BYTES);
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u16(Self::LENGTH_BYTES);
+        out.u16(Self::SUBCOMMAND);
+        out.u32(self.serial.raw());
+        out.u16(self.graphic.0);
+        out.u16(self.hue.0);
+        out.u8(self.layer.0);
+    }
+}
+
+impl DecodePacket for HarvestToolVisual {
+    const ID: u8 = Self::ID;
+
+    fn decode_body(
+        reader: &mut crate::codec::PacketReader<'_>,
+        _version: ClientVersion,
+    ) -> Result<Self, crate::error::DecodeError> {
+        let subcommand = reader.u16()?;
+        if subcommand != Self::SUBCOMMAND {
+            return Err(crate::error::DecodeError::UnknownValue {
+                field: "0xBF subcommand for harvest tool visual",
+                value: u32::from(subcommand),
+            });
+        }
+        let serial = Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
+            field: "harvest tool visual serial",
+            value: 0,
+        })?;
+        Ok(Self {
+            serial,
+            graphic: Graphic(reader.u16()?),
+            hue: Hue(reader.u16()?),
+            layer: Layer(reader.u8()?),
+        })
+    }
+}
+
+/// `0xBF` subcommand `0xE00D` — enough animation data to start a harvest the
+/// instant its targeting click leaves the client.
+///
+/// This is a presentation hint, not permission to gather: the server still
+/// validates the tile and is the only side that delivers a resource.  Its cursor
+/// id binds the hint to exactly one open target, preventing an old hatchet click
+/// from starting a later spell or house-placement cursor.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct HarvestPreview {
+    /// The target cursor this preview belongs to.
+    pub cursor_id: CursorId,
+    /// The mobile that will perform the action.
+    pub serial: Serial,
+    /// The classic animation group to start locally.
+    pub action: u16,
+    /// The group length the server will later authoritatively send.
+    pub frame_count: AnimationFrameCount,
+    /// Server-owned work duration, before transport latency.
+    pub duration: SwingDuration,
+    /// Number of complete swings that make up the work interval.
+    pub cycles: u16,
+}
+
+impl HarvestPreview {
+    pub const ID: u8 = 0xBF;
+    pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 13;
+    /// Id, length, subcommand, cursor, mobile, group, frames, duration and cycles.
+    pub const LENGTH_BYTES: u16 = 23;
+}
+
+impl EncodePacket for HarvestPreview {
+    const ID: u8 = Self::ID;
+    const LENGTH: PacketLength = PacketLength::Fixed(Self::LENGTH_BYTES);
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u16(Self::LENGTH_BYTES);
+        out.u16(Self::SUBCOMMAND);
+        out.u32(self.cursor_id.0);
+        out.u32(self.serial.raw());
+        out.u16(self.action);
+        out.u16(self.frame_count.0);
+        out.u32(self.duration.0);
+        out.u16(self.cycles);
+    }
+}
+
+impl DecodePacket for HarvestPreview {
+    const ID: u8 = Self::ID;
+
+    fn decode_body(
+        reader: &mut crate::codec::PacketReader<'_>,
+        _version: ClientVersion,
+    ) -> Result<Self, crate::error::DecodeError> {
+        let subcommand = reader.u16()?;
+        if subcommand != Self::SUBCOMMAND {
+            return Err(crate::error::DecodeError::UnknownValue {
+                field: "0xBF subcommand for harvest preview",
+                value: u32::from(subcommand),
+            });
+        }
+        let cursor_id = CursorId(reader.u32()?);
+        let serial = Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
+            field: "harvest preview serial",
+            value: 0,
+        })?;
+        Ok(Self {
+            cursor_id,
+            serial,
+            action: reader.u16()?,
+            frame_count: AnimationFrameCount(reader.u16()?),
+            duration: SwingDuration(reader.u32()?),
+            cycles: reader.u16()?,
+        })
+    }
+}
+
+/// `0xBF` subcommand `0xE00E` — the server refused the optimistic harvest.
+///
+/// The client finishes the current cycle before standing again; no resource can
+/// be inferred from this packet.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct HarvestRefused {
+    pub serial: Serial,
+}
+
+impl HarvestRefused {
+    pub const ID: u8 = 0xBF;
+    pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 14;
+    pub const LENGTH_BYTES: u16 = 9;
+}
+
+impl EncodePacket for HarvestRefused {
+    const ID: u8 = Self::ID;
+    const LENGTH: PacketLength = PacketLength::Fixed(Self::LENGTH_BYTES);
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u16(Self::LENGTH_BYTES);
+        out.u16(Self::SUBCOMMAND);
+        out.u32(self.serial.raw());
+    }
+}
+
+impl DecodePacket for HarvestRefused {
+    const ID: u8 = Self::ID;
+
+    fn decode_body(
+        reader: &mut crate::codec::PacketReader<'_>,
+        _version: ClientVersion,
+    ) -> Result<Self, crate::error::DecodeError> {
+        let subcommand = reader.u16()?;
+        if subcommand != Self::SUBCOMMAND {
+            return Err(crate::error::DecodeError::UnknownValue {
+                field: "0xBF subcommand for harvest refusal",
+                value: u32::from(subcommand),
+            });
+        }
+        let serial = Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
+            field: "harvest refusal serial",
+            value: 0,
+        })?;
+        Ok(Self { serial })
+    }
+}
+
+/// `0xBF` subcommand `0xE00F` — the shard has finished a harvest.
+///
+/// This is deliberately distinct from receiving an item update: a full
+/// backpack, a failed skill roll, or a depleted vein also end the local
+/// prediction, and a stack update does not reliably identify its source.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct HarvestCompleted {
+    pub serial: Serial,
+}
+
+impl HarvestCompleted {
+    pub const ID: u8 = 0xBF;
+    pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 15;
+    pub const LENGTH_BYTES: u16 = 9;
+}
+
+impl EncodePacket for HarvestCompleted {
+    const ID: u8 = Self::ID;
+    const LENGTH: PacketLength = PacketLength::Fixed(Self::LENGTH_BYTES);
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u16(Self::LENGTH_BYTES);
+        out.u16(Self::SUBCOMMAND);
+        out.u32(self.serial.raw());
+    }
+}
+
+impl DecodePacket for HarvestCompleted {
+    const ID: u8 = Self::ID;
+
+    fn decode_body(
+        reader: &mut crate::codec::PacketReader<'_>,
+        _version: ClientVersion,
+    ) -> Result<Self, crate::error::DecodeError> {
+        let subcommand = reader.u16()?;
+        if subcommand != Self::SUBCOMMAND {
+            return Err(crate::error::DecodeError::UnknownValue {
+                field: "0xBF subcommand for harvest completion",
+                value: u32::from(subcommand),
+            });
+        }
+        let serial = Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
+            field: "harvest completion serial",
+            value: 0,
+        })?;
+        Ok(Self { serial })
     }
 }
 
@@ -500,6 +745,24 @@ mod tests {
         assert_eq!(&packet[5..9], &0x0000_1234_u32.to_be_bytes());
         assert_eq!(&packet[9..13], &5_000_u32.to_be_bytes());
         assert_eq!(decode_packet::<SwingTiming>(&packet, version()), Ok(timing));
+    }
+
+    #[test]
+    fn harvest_tool_visual_carries_the_backpack_axes_picture() {
+        let visual = HarvestToolVisual {
+            serial: mobile(0x0000_1234),
+            graphic: Graphic(0x0F43),
+            hue: Hue(0x0481),
+            layer: Layer(1),
+        };
+        let packet = encode_packet(&visual, version());
+        assert_eq!(packet.len(), usize::from(HarvestToolVisual::LENGTH_BYTES));
+        assert_eq!(packet[0], HarvestToolVisual::ID);
+        assert_eq!(&packet[1..3], &HarvestToolVisual::LENGTH_BYTES.to_be_bytes());
+        assert_eq!(&packet[3..5], &HarvestToolVisual::SUBCOMMAND.to_be_bytes());
+        assert_eq!(&packet[5..9], &0x0000_1234_u32.to_be_bytes());
+        assert_eq!(&packet[9..11], &0x0F43_u16.to_be_bytes());
+        assert_eq!(decode_packet::<HarvestToolVisual>(&packet, version()), Ok(visual));
     }
 
     #[test]

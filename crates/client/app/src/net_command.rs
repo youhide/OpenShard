@@ -160,6 +160,33 @@ pub(crate) fn project_motion(
 }
 
 impl App {
+    /// Refresh only the equipment projection after an animation clock changes.
+    ///
+    /// Ordinary equipment changes arrive as a world mutation and rebuild the
+    /// whole presentation.  A backpack axe borrowed by a harvest animation is
+    /// different: it expires on the client's animation clock, so this narrow
+    /// refresh puts the real hand layer back on the frame the chop ends.
+    pub(crate) fn refresh_harvest_tool_visuals(&mut self) {
+        let Some(view) = self.world.authoritative.view.as_ref() else {
+            return;
+        };
+        let crowd = &self.world.presentation.crowd;
+        self.world.presentation.player.equipment = crowd.worn(
+            Some(view.player.serial),
+            &view.player.equipment,
+            &self.resources.tiledata,
+        );
+        for (who, drawn) in &mut self.world.presentation.others {
+            let Some(serial) = *who else {
+                continue;
+            };
+            let Some(mobile) = view.mobiles.get(&serial) else {
+                continue;
+            };
+            drawn.equipment = crowd.worn(Some(serial), &mobile.equipment, &self.resources.tiledata);
+        }
+    }
+
     /// Get a coarse graph for a world that arrived on the connection: the one
     /// beside it, or one built from it.
     ///
@@ -470,7 +497,7 @@ impl App {
                 "world",
                 format!("entered={}", crate::movement_trace::point(view.player.position)),
             ),
-            link::Update::Mutation { packet } => (
+            link::Update::Mutation { packet, .. } => (
                 "mutation",
                 format!("packet={}", crate::movement_trace::packet_kind(packet)),
             ),
@@ -484,6 +511,16 @@ impl App {
                     timing.duration.millis()
                 ),
             ),
+            link::Update::HarvestToolVisual(visual) => (
+                "harvest tool visual",
+                format!("serial={} graphic=0x{:04X}", visual.serial, visual.graphic.0),
+            ),
+            link::Update::HarvestRefused(refusal) => {
+                ("harvest refused", format!("serial={}", refusal.serial))
+            }
+            link::Update::HarvestCompleted(completion) => {
+                ("harvest completed", format!("serial={}", completion.serial))
+            }
             link::Update::Design(bytes) => ("design", format!("bytes={}", bytes.len())),
             link::Update::Ground { snapshot, .. } => (
                 "ground",
@@ -529,6 +566,7 @@ impl App {
                     corrected: true,
                 });
                 self.world.authoritative.walk = Some(walk);
+                self.ping.discard_pending();
                 // A whole fresh view is a `0x1B`, and a `0x1B` restarts the
                 // session: the tooltips it carries are a new table, so the
                 // questions outstanding against the old one would never be
@@ -537,10 +575,19 @@ impl App {
                 self.tooltips.reset();
                 self.entered(*view, None);
             }
-            link::Update::Mutation { packet } => self.fold_incoming(&packet),
+            link::Update::Mutation { packet, received } => self.fold_incoming(&packet, received),
             link::Update::Animation(animation) => self.world.presentation.crowd.play(animation),
             link::Update::NewAnimation(animation) => self.world.presentation.crowd.play_new(animation),
             link::Update::SwingTiming(timing) => self.world.presentation.crowd.time_swing(timing),
+            link::Update::HarvestToolVisual(visual) => self
+                .world
+                .presentation
+                .crowd
+                .harvest_tool(visual, &self.resources.tiledata),
+            link::Update::HarvestRefused(refusal) => self.world.presentation.crowd.refuse_harvest(refusal),
+            link::Update::HarvestCompleted(completion) => {
+                self.world.presentation.crowd.complete_harvest(completion);
+            }
             // The connection ended, for any of the reasons the shard thread
             // returns: the socket closed, a packet would not frame, the player
             // logged out. Three things happen and the reason for all three is
@@ -733,7 +780,7 @@ impl App {
     /// does both.
     ///
     /// [`Walk`]: openshard_client_net::walk::Walk
-    pub(crate) fn fold_incoming(&mut self, packet: &ServerPacket) {
+    pub(crate) fn fold_incoming(&mut self, packet: &ServerPacket, received: Instant) {
         // A packet arrives only after `Update::World` has entered a world, and
         // that is what makes the walk exist. An offline viewer has no link and
         // so receives none of these.
@@ -752,7 +799,22 @@ impl App {
                 // A correction is worth applying even when the view is
                 // unchanged: the view never held the prediction, so rolling one
                 // back moves the *drawn* body and nothing else.
-                Some(movement) => self.apply_movement(packet, movement),
+                Some(movement) => {
+                    match movement {
+                        link::Movement::Ack { sequence, .. } => {
+                            self.ping.acknowledged(sequence, received, Instant::now());
+                        }
+                        link::Movement::Reject { .. } | link::Movement::Relocation { .. } => {
+                            self.ping.discard_pending();
+                        }
+                        link::Movement::Turn { .. } => {
+                            if let ServerPacket::WalkAck(ack) = packet {
+                                self.ping.acknowledged(ack.sequence, received, Instant::now());
+                            }
+                        }
+                    }
+                    self.apply_movement(packet, movement);
+                }
                 None => self.apply_mutation(packet),
             },
             // The two ends have lost track of each other over the walk, and
@@ -1018,8 +1080,10 @@ impl App {
         // it was, while a real step round a building cannot be culled by the
         // previous tile's roof threshold for the whole server round trip.
         self.advance_cutaway(false);
-        self.follow_player(std::time::Duration::ZERO);
-        self.assert_motion_projection();
+        if self.watched() {
+            self.follow_player(std::time::Duration::ZERO);
+            self.assert_motion_projection();
+        }
     }
 
     /// Move the cutaway source to the current player prediction when that move
@@ -1146,8 +1210,11 @@ impl App {
             self.world.motion.render_state(),
             view.player.war && !view.player.dead,
         );
-        self.world.presentation.player.equipment =
-            crowd::worn(&view.player.equipment, &self.resources.tiledata).into();
+        self.world.presentation.player.equipment = self.world.presentation.crowd.worn(
+            Some(view.player.serial),
+            &view.player.equipment,
+            &self.resources.tiledata,
+        );
         // Sorted by serial for the same reason, and for one more: two items on
         // one tile at one height are drawn in the order they arrive here, so an
         // order that changed every frame would flicker.
@@ -1323,7 +1390,11 @@ impl App {
                     mobile.hue,
                     mobile.war() && !is_ghost(mobile.body),
                 );
-                drawn.equipment = crowd::worn(&mobile.equipment, &self.resources.tiledata).into();
+                drawn.equipment = self.world.presentation.crowd.worn(
+                    Some(*serial),
+                    &mobile.equipment,
+                    &self.resources.tiledata,
+                );
                 (who, drawn)
             })
             .collect();
@@ -1378,8 +1449,10 @@ impl App {
         // Zero, for the reason `App::walk_offline` says: a packet is not a
         // frame. Game motion was brought up to date before this fold, so there
         // is no elapsed time left to hand a rig anyway.
-        self.follow_player(std::time::Duration::ZERO);
-        self.assert_motion_projection();
+        if self.watched() {
+            self.follow_player(std::time::Duration::ZERO);
+            self.assert_motion_projection();
+        }
     }
 
     /// Point the eye at our own body, wherever the game-motion core has it.

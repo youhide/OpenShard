@@ -31,3 +31,6 @@ openshard-uofiles.workspace = true
 # The tests stand a bare `WorldState` up with a terrain that knows one multi:
 # every part of one is in `openshard-state` except the bus.
 openshard-events.workspace = true
+# `house_stair_audit --saved-step` opens a shard save read-only and asks the
+# production footing about the character's next tile.
+rusqlite = { version = "0.32", features = ["bundled"] }

@@ -22,6 +22,34 @@ use crate::world::{footing, guide};
 use crate::{DOUBLE_CLICK, PAGE_PIXELS, desk, keyboard, keys, panes, shell, steer};
 
 impl App {
+    /// Send every movement step which is due now.
+    ///
+    /// The caller is the state clock rather than a redraw callback: a route is
+    /// an order already given to the client, so it must keep advancing while a
+    /// desktop compositor has stopped painting this window.
+    pub(crate) fn advance_walk(&mut self, now: Instant) {
+        for _ in 0..2 {
+            // Both halves of the ground, because this is where a destination
+            // replans: see `steer::Readings`. Built here rather than held, for
+            // the reason the single terrain always was — they borrow the map
+            // and the crowd, and the walk borrows `steer` mutably beside them.
+            let ground = steer::Readings {
+                live: footing(&self.resources, self.walking_doors())
+                    .among(Bodies::standing(&self.world.bodies)),
+                guide: guide(&self.resources),
+                coarse: self.resources.coarse.as_ref(),
+            };
+            let motion = self.world.motion.planning_state();
+            let Some(facing) = self
+                .steer
+                .due(now, motion.position, motion.facing.direction, ground)
+            else {
+                break;
+            };
+            self.walk(facing);
+        }
+    }
+
     /// A key the speech line owns. Answers whether the picture changed.
     ///
     /// Every arm is a call into [`crate::chat::Chat`] and nothing here decides
@@ -396,6 +424,10 @@ impl ApplicationHandler<()> for App {
                         self.open_own_inventory();
                         true
                     }
+                    keyboard::Hotkey::UseLastItem => {
+                        self.use_last_item();
+                        false
+                    }
                     keyboard::Hotkey::Minimap => {
                         if let Some(open) = self
                             .windows
@@ -737,7 +769,7 @@ impl ApplicationHandler<()> for App {
                         self.picking.hover.static_,
                     ) {
                         (Some(who), _, _) => Some(SelectedIdentity::Mobile(who)),
-                        (None, Some(item), _) => Some(SelectedIdentity::Item(item.serial)),
+                        (None, Some(item), _) => Some(SelectedIdentity::Item(item)),
                         (None, None, Some(picked)) => Some(SelectedIdentity::Static(picked)),
                         (None, None, None) => self.pick_tile(camera).map(|tile| SelectedIdentity::Tile {
                             x: tile.at.x,
@@ -857,42 +889,10 @@ impl ApplicationHandler<()> for App {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         // A held arrow — or a tile the mouse sent the body to — asks for a step
-        // every step's length. Here and not in the input event: the operating
-        // system repeats a held key at a rate that is not a walking speed, a
-        // mouse held over the ground reports a move a pixel, and the fast half
-        // of either is refused by the shard as a speedhack — which reads as the
-        // walk stuttering. See `steer.rs`.
-        //
-        // Twice at most, because a turn is a step that covers no ground and
-        // costs no time against the shard's pace budget: the step it precedes is
-        // due the same instant, and holding that back to the next wake would put
-        // a frame of standing still exactly where the player asked for movement.
-        // Two and not a loop — the second ask is the step the turn was for, and
-        // anything past it is a rate, which is what the clock is for.
-        let mut moved = false;
-        for _ in 0..2 {
-            // Both halves of the ground, because this is where a destination
-            // replans: see `steer::Readings`. Built here rather than held, for the
-            // reason the single terrain always was — they borrow the map and the
-            // crowd, and the walk borrows `steer` mutably beside them.
-            let ground = steer::Readings {
-                live: footing(&self.resources, self.walking_doors())
-                    .among(Bodies::standing(&self.world.bodies)),
-                guide: guide(&self.resources),
-                coarse: self.resources.coarse.as_ref(),
-            };
-            let motion = self.world.motion.planning_state();
-            let Some(facing) = self
-                .steer
-                .due(now, motion.position, motion.facing.direction, ground)
-            else {
-                break;
-            };
-            moved |= self.walk(facing);
-        }
-        if moved {
-            self.ask_redraw();
-        }
+        // every step's length. The step itself is dispatched by `tick`, rather
+        // than here: an inactive window may never receive a redraw callback,
+        // but it still receives the state-clock wake below.
+        let walk_due = self.steer.deadline().is_some_and(|deadline| now >= deadline);
         // The animation clock. Watched, this is a safety net rather than the
         // pacer — `draw` asks for the next frame itself and the display answers
         // — and it is kept for the paths where that ask does not happen: `draw`
@@ -902,11 +902,17 @@ impl ApplicationHandler<()> for App {
         // unwatched window runs the same state tick directly: a compositor need
         // not issue a redraw for a virtual desktop it is not showing, but the
         // client's route and network state cannot depend on one.
+        if walk_due {
+            self.tick(now);
+            if self.watched() {
+                self.ask_redraw();
+            }
+        }
         if now >= self.next_tick {
             self.next_tick = now + self.redraw_interval();
             if self.watched() {
                 self.ask_redraw();
-            } else {
+            } else if !walk_due {
                 self.tick(now);
             }
         }
