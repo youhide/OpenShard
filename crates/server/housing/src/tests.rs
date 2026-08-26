@@ -83,6 +83,10 @@ const FLOOR: u16 = 0x0007;
 /// A stair: `PLATFORM | CLIMBABLE`, five tall, like multi `0x0064`'s own stone
 /// stairs. Met at its base and stood on half way up.
 const STAIR: u16 = 0x0008;
+/// A decorative house banister. It is blocking in the client's generic
+/// tiledata, but imported house designs must not turn it into a wall through
+/// the floor below it.
+const BANISTER: u16 = 0x08C6;
 
 /// The ground these tests build on, and the table it reads.
 ///
@@ -110,6 +114,7 @@ fn ground_scene(land: u16, fits: bool) -> Scene {
     scene.art(WALL, TileFlags::WALL | TileFlags::BLOCK, 20);
     scene.art(FLOOR, TileFlags::FLOOR | TileFlags::PLATFORM, 0);
     scene.art(STAIR, TileFlags::PLATFORM | TileFlags::CLIMBABLE, 5);
+    scene.art(BANISTER, TileFlags::BLOCK, 5);
     scene
 }
 
@@ -136,21 +141,25 @@ fn component(graphic: u16, dx: i16, dy: i16, dz: i16, drawn: bool) -> Component 
 }
 
 #[test]
-fn an_imported_design_uses_a_fitting_foundation_and_is_centred_on_it() {
+fn an_imported_design_uses_a_fitting_foundation_without_moving_its_origin() {
     let small = vec![component(1, -3, -3, 0, true), component(1, 3, 3, 0, true)];
     let fitting = vec![component(1, -5, -5, 0, true), component(1, 6, 6, 0, true)];
     let multis = Multis::of([
         Multi::new(0x13EC, small),
         Multi::new(0x13ED, fitting),
     ]);
-    // Old WSC exports commonly begin in their north-west corner rather than at
-    // the foundation centre.
+    // This export begins in its north-west corner. Its coordinates are its
+    // placement contract, rather than an instruction to centre it again.
     let design = vec![component(FLOOR, 0, 0, 0, true), component(FLOOR, 11, 11, 0, true)];
 
     let (foundation, fitted) = fit_design_to_foundation(&multis, design).expect("a 12x12 foundation");
 
     assert_eq!(foundation, MultiId(0x13ED));
-    assert_eq!(bounds(&fitted), bounds(multis.components(0x13ED)));
+    assert_eq!(
+        fitted,
+        vec![component(FLOOR, 0, 0, 0, true), component(FLOOR, 11, 11, 0, true)],
+        "choosing the foundation must not move the completed template"
+    );
 }
 
 /// A cottage: four walls in a ring, a floor in the middle, and one component the
@@ -377,6 +386,25 @@ fn the_walls_block_and_the_floor_does_not() {
     assert!(
         !obstructions.holds_anything(20, 20),
         "an undrawn component was folded in"
+    );
+}
+
+#[test]
+fn a_house_banister_is_visible_but_does_not_seal_its_floor() {
+    let components = vec![
+        component(FLOOR, 0, 0, 0, true),
+        component(BANISTER, 0, 0, 10, true),
+    ];
+    let mut state = world_with(components);
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a floor with a decorative banister");
+
+    let live = state.facet_state(Facet(0)).ground().live();
+    assert!(
+        live.blocker_at(Tile::new(at.x, at.y), Body::new(0, 16), Doors::AsTheyStand)
+            .is_none(),
+        "the banister above the floor must not make the ground-floor tile impassable"
     );
 }
 
@@ -1198,6 +1226,41 @@ fn an_imported_design_keeps_its_embedded_sign_position() {
             && state.registry.get::<Position>(entity).map(|position| position.0)
                 == Some(Point::new(13, 14, 7))
             && state.registry.get::<Drawn>(entity).map(|drawn| drawn.id) == Some(Graphic(0x0BD1))
+    }));
+}
+
+/// The legacy custom-house pack marks its usable sign as a `metal signpost`,
+/// not as either of the conventional house-sign graphics.  It remains at the
+/// declared component position; the server replaces only its representation
+/// with a live `HouseSign` so use opens the house menu.
+#[test]
+fn an_imported_design_can_use_a_metal_signpost_as_its_house_sign() {
+    use openshard_state::components::HouseSign;
+
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    let imported = vec![component(WALL, 0, 0, 0, true), component(0x0B9E, 2, 6, 0, true)];
+    state
+        .house_templates
+        .insert("metal-signpost".into(), imported.clone());
+    let house = super::place_design(
+        &mut state,
+        actor,
+        at,
+        Facet(0),
+        MultiId(FOUNDATION),
+        owner,
+        imported,
+    )
+    .expect("an imported house with a metal signpost");
+    let serial = state.registry.serial_of(house).unwrap();
+
+    assert!(state.registry.query::<HouseSign>().any(|(entity, sign)| {
+        sign.house == serial
+            && state.registry.get::<Position>(entity).map(|position| position.0)
+                == Some(Point::new(12, 16, 0))
+            && state.registry.get::<Drawn>(entity).map(|drawn| drawn.id) == Some(Graphic(0x0B9E))
     }));
 }
 

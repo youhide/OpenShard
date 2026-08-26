@@ -89,15 +89,28 @@ pub fn is_closed_door_graphic(graphic: Graphic) -> bool {
         .any(|base| (base..=base + 14).contains(&graphic.0) && (graphic.0 - base).is_multiple_of(2))
 }
 
+/// Whether `graphic` is one of the wooden-banister pieces used by house packs.
+///
+/// Their client tiledata marks them blocking, which is appropriate for a loose
+/// railing but wrong for the decorative rail lines built into these house
+/// designs: it seals the floor directly underneath. Housing keeps the artwork
+/// but leaves its collision to the floor and walls around it.
+#[must_use]
+pub const fn is_house_banister_graphic(graphic: Graphic) -> bool {
+    graphic.0 >= 0x08B6 && graphic.0 <= 0x08CA
+}
+
 /// Whether `graphic` is the visible art of a functional house sign.
 ///
 /// A content multi may contain this decal, while the server also creates a
 /// live `HouseSign` entity for naming and interaction. Custom-house rendering
-/// must omit the decal in that case, or the two signs are drawn on top of each
-/// other.
+/// must omit the component in that case, or the two signs are drawn on top of
+/// each other. `0x0B9E` is the legacy pack's `metal signpost`: it is the
+/// template's actual house-menu attachment, even though the client tile name
+/// does not call it a house sign.
 #[must_use]
 pub const fn is_house_sign_graphic(graphic: Graphic) -> bool {
-    matches!(graphic.0, 0x0BD1 | 0x0BD2)
+    matches!(graphic.0, 0x0B9E | 0x0BD1 | 0x0BD2)
 }
 
 /// Bytes per `multi.idx` entry: lookup, length, extra.

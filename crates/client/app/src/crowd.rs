@@ -375,6 +375,9 @@ struct Tracked {
 
 #[derive(Clone, Copy, Debug)]
 struct ActionAnimation {
+    /// A fall is terminal: a late ordinary action must not pull a dead body
+    /// back upright before its corpse has claimed the final frame.
+    death: bool,
     frames: AnimationFrameCount,
     repeats: u16,
     forward: bool,
@@ -1023,21 +1026,38 @@ impl Crowd {
     /// nothing to hold: the corpse, when it comes, is drawn already prone. That
     /// is the same picture a client gets for a corpse that was lying there before
     /// it arrived, and it is the honest one — there is no fall to run.
+    ///
+    /// `0xAF` is also the fallback that makes the hand-off reliable.  The normal
+    /// `0x6E`/`0xE2` action precedes it, but the corpse packet must not turn a
+    /// missed or late action packet into an instant death.  This packet still
+    /// has the body we last drew, which is enough to select that body's death
+    /// group and play the ordinary fall for every animation table.
     pub fn died(&mut self, killed: Serial, corpse: Option<Serial>) {
         let Some(corpse) = corpse else {
             return;
         };
-        // Only a body in mid-action is worth keeping. `action` is the death
-        // throe the shard sent; without one there is nothing to play out, and
-        // the tracked entry belongs to whatever the mobile was doing instead.
-        let Some(body) = self
-            .tracked
-            .get(&Some(killed))
-            .filter(|tracked| tracked.action.is_some() && !tracked.corpse)
-            .copied()
-        else {
+        let Some(tracked) = self.tracked.get_mut(&Some(killed)) else {
             return;
         };
+        if tracked.corpse {
+            return;
+        }
+        // Do not make a death depend on the separate action packet having
+        // reached this presentation first.  In particular, a low-animation
+        // cow needs group 8, rather than the high-animation group's 2; derive
+        // the group from the body instead of borrowing whatever it was doing
+        // when its hit points reached zero.
+        let kind = BodyKind::of(tracked.body);
+        let death_group = kind.dying();
+        // Keep a fall that the ordinary action packet already started at its
+        // current frame.  Resetting it here would make two simultaneous deaths
+        // visibly rewind when their `0xAF`s arrive at different times.
+        if tracked.group != death_group || tracked.action.is_none() {
+            tracked.change_to(death_group);
+            tracked.action = Some(death_action(kind));
+            tracked.harvest_tool = None;
+        }
+        let body = *tracked;
         self.tracked.remove(&Some(killed));
         self.falls.insert(
             corpse,
@@ -1171,29 +1191,39 @@ impl Crowd {
         let Ok(group) = u8::try_from(animation.action) else {
             return;
         };
-        if let (Some(duration), Some(action)) = (duration, tracked.action.as_mut()) {
-            if action.optimistic {
-                // Network time must never re-time a swing already on screen.
-                // It may add a whole stroke, but the promised 1.6-second tempo
-                // stays immutable.
-                action.frames = animation.frame_count;
-                action.forward = animation.forward;
-                action.repeat = animation.repeat;
-                action.delay = Duration::from_millis(if animation.delay == 0 {
-                    DEFAULT_ANIMATION_FRAME_MS
-                } else {
-                    u64::from(animation.delay)
-                });
-                action.duration = Some(duration.max(action.elapsed));
-                action.optimistic = false;
-                if harvest_tool.is_some() {
-                    tracked.harvest_tool = harvest_tool;
+        let death = AnimationGroup(group) == BodyKind::of(tracked.body).dying();
+        // Ordinary actions are latest-wins: a new authoritative swing starts
+        // cleanly at frame zero instead of queuing stale motions.  Death is the
+        // one terminal action, so it wins over any delayed attack packet.
+        if tracked.action.is_some_and(|action| action.death) && !death {
+            return;
+        }
+        if !death {
+            if let (Some(duration), Some(action)) = (duration, tracked.action.as_mut()) {
+                if action.optimistic {
+                    // Network time must never re-time a swing already on screen.
+                    // It may add a whole stroke, but the promised 1.6-second tempo
+                    // stays immutable.
+                    action.frames = animation.frame_count;
+                    action.forward = animation.forward;
+                    action.repeat = animation.repeat;
+                    action.delay = Duration::from_millis(if animation.delay == 0 {
+                        DEFAULT_ANIMATION_FRAME_MS
+                    } else {
+                        u64::from(animation.delay)
+                    });
+                    action.duration = Some(duration.max(action.elapsed));
+                    action.optimistic = false;
+                    if harvest_tool.is_some() {
+                        tracked.harvest_tool = harvest_tool;
+                    }
+                    tracked.change_to(AnimationGroup(group));
+                    return;
                 }
-                tracked.change_to(AnimationGroup(group));
-                return;
             }
         }
         tracked.action = Some(ActionAnimation {
+            death,
             frames: animation.frame_count,
             repeats: animation.repeat_count,
             forward: animation.forward,
@@ -1262,7 +1292,11 @@ impl Crowd {
         let Ok(group) = u8::try_from(preview.action) else {
             return;
         };
+        if tracked.action.is_some_and(|action| action.death) {
+            return;
+        }
         tracked.action = Some(ActionAnimation {
+            death: false,
             frames: preview.frame_count,
             repeats: preview.cycles.max(1),
             forward: true,
@@ -1466,6 +1500,24 @@ impl Crowd {
             .flatten()
             .filter(|line| self.now.saturating_sub(line.started) < SPEECH_HOLD)
             .map(|line| (line.text.as_str(), line.font, line.hue))
+    }
+}
+
+/// The ordinary one-shot fall supplied by `0xAF` when its matching action did
+/// not make it through the presentation boundary first.
+fn death_action(kind: BodyKind) -> ActionAnimation {
+    ActionAnimation {
+        death: true,
+        frames: AnimationFrameCount(if matches!(kind, BodyKind::Human) { 6 } else { 4 }),
+        repeats: 1,
+        forward: true,
+        repeat: false,
+        delay: Duration::from_millis(DEFAULT_ANIMATION_FRAME_MS),
+        cycle: None,
+        duration: None,
+        optimistic: false,
+        harvest: false,
+        elapsed: Duration::ZERO,
     }
 }
 
@@ -3493,6 +3545,93 @@ mod tests {
             3,
             "once finished it remains at the final corpse pose"
         );
+    }
+
+    /// Server actions are latest-wins while a body lives, but a fall is
+    /// terminal. A delayed hit packet must not make a dying cow stand up and
+    /// attack for one frame before its corpse takes over.
+    #[test]
+    fn a_late_ordinary_action_cannot_interrupt_a_death() {
+        let mut crowd = Crowd::default();
+        let cow = Graphic(0x00D8);
+        let mob = serial(1);
+        crowd.see(
+            mob,
+            Point::new(10, 10, 0),
+            cow,
+            Facing::walking(Direction::SouthEast),
+            Hue::NONE,
+            false,
+        );
+        crowd.play_new(NewAnimation {
+            serial: mob.expect("a real mobile serial"),
+            animation_type: 3,
+            action: 0,
+            delay: 80,
+        });
+        crowd.advance(Duration::from_millis(80));
+        crowd.play(Animation {
+            serial: mob.expect("a real mobile serial"),
+            action: 5, // LowAnimationGroup.Attack1
+            frame_count: AnimationFrameCount(4),
+            repeat_count: 1,
+            forward: true,
+            repeat: false,
+            delay: 80,
+        });
+
+        assert_eq!(crowd.group_for(mob), Some(BodyKind::Animal.dying()));
+        assert_eq!(crowd.frame_for(mob, AnimationFrameCount(4)), 1);
+    }
+
+    /// `0xAF` has enough information to start a fall on its own.  The action
+    /// packet normally arrives first, but making the visible death depend on
+    /// that ordering made a creature that was removed in the same update turn
+    /// straight into its corpse.  In particular this pins the distinct death
+    /// groups for high, low, and people animation bodies.
+    #[test]
+    fn a_death_packet_starts_the_fall_for_every_body_animation_table() {
+        let at = Point::new(10, 10, 0);
+        for (number, body, kind, frames) in [
+            (1, Graphic(0x0038), BodyKind::Monster, 4),
+            (2, Graphic(0x00D8), BodyKind::Animal, 4), // cow
+            (3, Graphic(0x0190), BodyKind::Human, 6),
+        ] {
+            let mut crowd = Crowd::default();
+            let mob = serial(number);
+            let corpse = serial(0x4000_0000 + number);
+            crowd.see(
+                mob,
+                at,
+                body,
+                Facing::walking(Direction::SouthEast),
+                Hue::NONE,
+                false,
+            );
+            // No preceding 0x6E/0xE2: this is the packet ordering that used
+            // to skip the animation entirely.
+            crowd.died(
+                mob.expect("a real mobile serial"),
+                Some(corpse.expect("a real corpse serial")),
+            );
+            let falling = crowd.corpse(
+                corpse,
+                at,
+                body,
+                Direction::SouthEast,
+                Hue::NONE,
+                Vec::new().into(),
+            );
+            assert_eq!(falling.group, kind.dying(), "body {:#06x}", body.0);
+            assert_eq!(crowd.frame_for(corpse, AnimationFrameCount(frames)), 0);
+            crowd.advance(Duration::from_millis(80));
+            assert_eq!(
+                crowd.frame_for(corpse, AnimationFrameCount(frames)),
+                1,
+                "body {:#06x} advances its death animation",
+                body.0
+            );
+        }
     }
 
     /// Two of the same creature dying on one tile keep their own falls.

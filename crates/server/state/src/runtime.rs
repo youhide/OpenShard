@@ -49,9 +49,9 @@ use openshard_uofiles::anim::BodyKind;
 use crate::boat::Plank;
 use crate::components::{
     Access, Amount, Body, Client, Combat, Contained, CorpseBody, CraftedBy, Drawn, Equipped, Ghost, Heading,
-    HearsGhosts, Hidden, Hitpoints, InRegion, ItemAffix, ItemAffixes, ItemLocation, Meditating, Movement,
-    Name, Position, Quality, SettledItemLocation, Staff, Stamina, Stealthing, SwingWindup, TradeWindow,
-    body_opens_doors, creature_name,
+    HearsGhosts, Hidden, Hitpoints, HouseDesign, InRegion, ItemAffix, ItemAffixes, ItemLocation, Meditating,
+    Movement, Name, Position, Quality, SettledItemLocation, Staff, Stamina, Stealthing, SwingWindup,
+    TradeWindow, body_opens_doors, creature_name,
 };
 use crate::connection::Connection;
 use crate::dialogue::Dialogue;
@@ -80,6 +80,39 @@ const HOUSE_DESIGN_WIRE_EPOCH: u32 = 8;
 
 fn house_design_wire_revision(revision: u32) -> openshard_protocol::design::Revision {
     openshard_protocol::design::Revision(revision.wrapping_add(HOUSE_DESIGN_WIRE_EPOCH << 24))
+}
+
+/// Whether a custom house's drawn footprint meets the player's view square.
+///
+/// The rectangle is a conservative screen-interest shape: it intentionally
+/// includes holes and upper storeys, because missing a parent multi leaves its
+/// separately indexed doors hanging in the air.
+fn design_reaches_view(
+    viewer: Point,
+    origin: Point,
+    components: &[openshard_uofiles::multi::Component],
+) -> bool {
+    let mut bounds: Option<(u16, u16, u16, u16)> = None;
+    for component in components.iter().filter(|component| component.drawn()) {
+        let Some(at) = component.placed_at(origin) else {
+            continue;
+        };
+        bounds = Some(match bounds {
+            Some((min_x, max_x, min_y, max_y)) => {
+                (min_x.min(at.x), max_x.max(at.x), min_y.min(at.y), max_y.max(at.y))
+            }
+            None => (at.x, at.x, at.y, at.y),
+        });
+    }
+    let Some((min_x, max_x, min_y, max_y)) = bounds else {
+        return false;
+    };
+    let nearest = Point::new(
+        viewer.x.clamp(min_x, max_x),
+        viewer.y.clamp(min_y, max_y),
+        viewer.z,
+    );
+    crate::sectors::in_range(viewer, nearest, VIEW_RANGE)
 }
 
 /// "You stop meditating." — the line a broken trance says, ServUO's 500134.
@@ -2958,11 +2991,19 @@ impl WorldState {
         // Both lists, and the only lookup in this file that wants both: a screen
         // holds the people *and* the furniture, so a player who walks up to a
         // house has to be sent the house.
-        let neighbours: HashSet<EntityId> = sectors
+        let mut neighbours: HashSet<EntityId> = sectors
             .everything_near(centre, VIEW_RANGE)
             .map(|(id, _)| id)
             .filter(|id| *id != entity)
             .collect();
+        // A custom house is one anchor item on the sector grid, but its visible
+        // design can extend well away from that anchor. Its live doors are
+        // indexed at their own cells, so treating only the anchor as visible
+        // made a tower vanish while its two doors remained in the world. Keep
+        // the parent on screen whenever any part of its drawn design reaches
+        // the player's view square.
+        neighbours.extend(self.designed_houses_near(centre, facet));
+        neighbours.remove(&entity);
 
         for other in &neighbours {
             self.show(entity, *other);
@@ -2997,6 +3038,22 @@ impl WorldState {
         }
 
         self.broadcast_move(entity);
+    }
+
+    /// Designed houses whose drawn rectangle reaches the ordinary sight square.
+    ///
+    /// The sector index deliberately files one item at one point; adding every
+    /// component of a several-thousand-piece house to it would turn a sight
+    /// query into decoration-scale work. The few custom houses instead pay one
+    /// rectangle check when a player moves.
+    fn designed_houses_near(&self, centre: Point, facet: Facet) -> HashSet<EntityId> {
+        self.registry
+            .query2::<Position, HouseDesign>()
+            .filter(|(house, position, design)| {
+                self.facet_of(*house) == facet && design_reaches_view(centre, position.0, &design.components)
+            })
+            .map(|(house, _, _)| house)
+            .collect()
     }
 
     /// The half of [`refresh_around`](Self::refresh_around) that matters for a
@@ -4358,6 +4415,34 @@ mod tests {
     use openshard_protocol::serial::SerialKind;
     use openshard_protocol::wire::Graphic;
     use openshard_tiles::TileData;
+    use openshard_uofiles::multi::Component;
+
+    #[test]
+    fn a_custom_house_stays_visible_when_its_design_reaches_the_view() {
+        let origin = Point::new(120, 100, 0);
+        let design = [Component {
+            graphic: Graphic(0x0001),
+            // The foundation anchor is twenty tiles away, but the drawn house
+            // reaches two tiles back into the normal eighteen-tile view.
+            dx: -2,
+            dy: 0,
+            dz: 0,
+            flags: 1,
+        }];
+
+        assert!(
+            design_reaches_view(Point::new(100, 100, 0), origin, &design),
+            "a visible wall must keep its parent multi on screen"
+        );
+        assert!(
+            !crate::sectors::in_range(Point::new(100, 100, 0), origin, VIEW_RANGE),
+            "the sector index alone would only see the distant anchor"
+        );
+        assert!(
+            !design_reaches_view(Point::new(99, 100, 0), origin, &design),
+            "one tile beyond the wall's sight boundary must still be forgotten"
+        );
+    }
 
     #[test]
     fn classic_death_uses_the_body_animation_table_not_the_gameplay_body_type() {

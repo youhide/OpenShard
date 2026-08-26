@@ -26,7 +26,7 @@
 //! mobiles, corpses, effects and multis all adjust it, and each one belongs
 //! with whatever draws it.
 
-use openshard_protocol::world::Point;
+use openshard_protocol::{wire::Graphic, world::Point};
 use openshard_tiles::StaticTile;
 
 /// Key units one step of tile depth (`x + y`) is worth.
@@ -174,6 +174,33 @@ pub fn static_priority_z(z: i8, tile: &StaticTile) -> i32 {
     priority_z
 }
 
+/// The legacy custom-house `metal signpost` reaches into the picture of the
+/// entrance doors behind it. Its component is correctly anchored at the
+/// outside tile, but a tile-only sort lets a door's tall sprite write over that
+/// hanging face. Reserve four screen-depth tiles for the sign's visible panel:
+/// the house keeps its declared world position and collision, while the panel
+/// stays in front of either half of its doorway.
+///
+/// This is deliberately part of the complete static order rather than a draw
+/// pass after doors. Picking uses this same order, so the visible sign is also
+/// the item that receives the click.
+#[must_use]
+pub fn static_order(at: Point, graphic: Graphic, tile: &StaticTile) -> Order {
+    const METAL_SIGNPOST: u16 = 0x0B9E;
+    const PANEL_FOREGROUND_TILES: i32 = 4;
+
+    Order {
+        tile: i32::from(at.x)
+            + i32::from(at.y)
+            + if graphic.0 == METAL_SIGNPOST {
+                PANEL_FOREGROUND_TILES
+            } else {
+                0
+            },
+        priority_z: static_priority_z(at.z, tile),
+    }
+}
+
 /// Where a mobile sorts on the tile it stands on.
 ///
 /// `Chunk.AddGameObject`'s `Mobile` arm, which is one line: a mobile rises one
@@ -267,6 +294,22 @@ mod tests {
         // Both at once cancel, which is the client's behaviour and not an
         // accident of ordering here.
         assert_eq!(static_priority_z(5, &tile(TileFlags::FLOOR, 20)), 5);
+    }
+
+    #[test]
+    fn a_metal_signpost_stays_in_front_of_the_house_door_it_overlaps() {
+        let sign = static_order(Point::new(1341, 1896, 0), Graphic(0x0B9E), &tile(0, 0));
+        let door = static_order(Point::new(1339, 1895, 0), Graphic(0x0675), &tile(0, 20));
+
+        assert_eq!(
+            sign.tile,
+            1341 + 1896 + 4,
+            "the visible panel has its foreground reservation"
+        );
+        assert!(
+            sign > door,
+            "the sign must receive both the draw and click over the door"
+        );
     }
 
     /// `Order` — and the depth value it becomes — is a sort key, not a linear

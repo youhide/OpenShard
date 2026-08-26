@@ -872,10 +872,7 @@ pub(crate) fn place<'a>(
     // canopy can share a fade key. Placement itself must remain available for
     // that late row (and for picking), so it never hard-cuts foliage here.
     Some(Placed {
-        order: depth::Order {
-            tile: i32::from(at.x) + i32::from(at.y),
-            priority_z: depth::static_priority_z(at.z, tile),
-        },
+        order: depth::static_order(at, graphic, tile),
         // The cell's centre, height folded in: `to_screen` already lifts `z` by
         // four pixels a unit, which is the same lift the ground gets.
         at: screen_at,
@@ -920,10 +917,7 @@ pub(crate) fn place_cutaway<'a>(
     let sprite = packed.sprite;
     let screen_at = stand_on(camera, at, &sprite);
     Some(Placed {
-        order: depth::Order {
-            tile: i32::from(at.x) + i32::from(at.y),
-            priority_z: depth::static_priority_z(at.z, tile),
-        },
+        order: depth::static_order(at, graphic, tile),
         at: screen_at,
         sprite,
         page: packed.page,

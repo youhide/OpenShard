@@ -22,7 +22,9 @@ use openshard_protocol::speech::{Font, SpokenMessage, TalkMode};
 use openshard_protocol::target::{TargetCursor, TargetKind};
 use openshard_protocol::wire::{CursorId, Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
-use openshard_state::components::{Client, Position, SPELLBOOK_GRAPHIC, Spellbook, Staff, Stats};
+use openshard_state::components::{
+    Client, HouseDoor, HouseSign, Position, SPELLBOOK_GRAPHIC, Spellbook, Staff, Stats,
+};
 use openshard_state::{HouseChange, TargetPurpose, WorldState};
 
 use openshard_items as items;
@@ -970,11 +972,23 @@ fn demolish_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
                 notify(state, actor, "That house no longer exists.");
                 return;
             };
-            if !state.registry.has::<openshard_state::components::House>(house) {
+            if state.registry.has::<openshard_state::components::House>(house) {
+                house
+            } else if let Some(fixture_house) = state
+                .registry
+                .get::<HouseDoor>(house)
+                .map(|door| door.house)
+                .or_else(|| state.registry.get::<HouseSign>(house).map(|sign| sign.house))
+            {
+                let Some(house) = state.registry.entity_of(fixture_house) else {
+                    notify(state, actor, "That house no longer exists.");
+                    return;
+                };
+                house
+            } else {
                 // Map Editor's whole-house picker names a live item. Imported
-                // doors are live items too, rather than map statics or the
-                // house entity, so let that same removal tool clear a stuck
-                // door without turning into a general-purpose item delete.
+                // loose doors are live items too. A house fixture took the arm
+                // above, so only an unrelated door is deleted on its own.
                 if state.registry.has::<openshard_state::components::Door>(house) {
                     items::consume(state, serial, 0);
                     notify(state, actor, "The door is removed.");
@@ -983,7 +997,6 @@ fn demolish_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
                 }
                 return;
             }
-            house
         }
         _ => {
             notify(state, actor, "Usage: .hdemolish [house serial]");

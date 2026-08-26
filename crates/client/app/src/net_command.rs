@@ -1613,6 +1613,23 @@ impl App {
                     .collect(),
             },
         );
+        // `0xD8` is delivered outside `WorldView`: its shape is client-file
+        // data, rather than a field the wire view can own.  Merely caching it
+        // therefore leaves the presentation made for the preceding foundation
+        // item intact (and that presentation deliberately draws an unknown
+        // foundation as nothing).  A later walk packet happened to rebuild the
+        // view, which made a newly placed house appear only after its owner
+        // stepped close enough. Re-project now, while the foundation is still
+        // in the view and the freshly decoded design is available.
+        let Some(view) = self.world.authoritative.view.clone() else {
+            return;
+        };
+        self.steer.clear_plan_cache();
+        self.route_cache = None;
+        self.terrain_cache = None;
+        self.occluder_cache = None;
+        let previous_latest = view.journal.back().cloned();
+        self.entered(view, previous_latest);
     }
 
     /// Ask the shard for every designed house whose shape this client does not

@@ -68,9 +68,9 @@ pub const FOUNDATION_IDS: std::ops::Range<u16> = 0x13EC..0x1D00;
 /// client takes both from the placed foundation multi.  Choosing the first
 /// foundation for every imported building therefore truncates anything larger
 /// than that smallest plot, even though every component reached the server.
-/// Content exports use two equally common origins: some are already centred,
-/// while others begin at `(0, 0)`.  [`fit_design_to_foundation`] centres either
-/// form after this size choice.
+/// An imported design's offsets are its author-declared local origin.  The
+/// foundation is selected for its grid dimensions, but never gets to redefine
+/// where a finished building stands.
 #[must_use]
 pub fn foundation_for_design(multis: &Multis, components: &[Component]) -> Option<MultiId> {
     let design = bounds(components)?;
@@ -91,32 +91,17 @@ pub fn foundation_for_design(multis: &Multis, components: &[Component]) -> Optio
         .map(|(id, _)| id)
 }
 
-/// Centre an imported component list on the foundation selected for its size.
+/// Choose the foundation that can carry an imported component list.
 ///
-/// The returned list is what is persisted and sent to the client; it is not a
-/// render-only adjustment. That keeps collision, doors and the D8 detail packet
-/// at one common local origin.
+/// The returned offsets are exactly the template's offsets. Older code centred
+/// every template on the foundation and silently moved templates that had
+/// already declared their own origin — a house placed at a target then appeared
+/// one or more tiles away from it. The custom-design wire has a longhand path
+/// for offsets beyond the foundation's compact plane, so preserving the origin
+/// does not truncate the picture.
 #[must_use]
 pub fn fit_design_to_foundation(multis: &Multis, components: Vec<Component>) -> Option<(MultiId, Vec<Component>)> {
-    let design = bounds(&components)?;
     let multi = foundation_for_design(multis, &components)?;
-    let foundation = bounds(multis.components(multi.0))?;
-    let design_width = design.max_x.abs_diff(design.min_x) + 1;
-    let design_height = design.max_y.abs_diff(design.min_y) + 1;
-    let foundation_width = foundation.max_x.abs_diff(foundation.min_x) + 1;
-    let foundation_height = foundation.max_y.abs_diff(foundation.min_y) + 1;
-    let shift_x = i32::from(foundation.min_x) + i32::from((foundation_width - design_width) / 2)
-        - i32::from(design.min_x);
-    let shift_y = i32::from(foundation.min_y) + i32::from((foundation_height - design_height) / 2)
-        - i32::from(design.min_y);
-    let components = components
-        .into_iter()
-        .map(|mut component| {
-            component.dx = i16::try_from(i32::from(component.dx) + shift_x).ok()?;
-            component.dy = i16::try_from(i32::from(component.dy) + shift_y).ok()?;
-            Some(component)
-        })
-        .collect::<Option<Vec<_>>>()?;
     Some((multi, components))
 }
 
@@ -396,6 +381,11 @@ fn place_with_design(
     // built in front of a stationary client must also be drawn now, just like
     // an ordinary item spawned on the ground.
     state.reveal(entity);
+    // An editor may place a wide imported design from a cell that is inside the
+    // drawing rectangle but outside the foundation anchor's ordinary sight
+    // radius. The placer needs the parent multi now; its live doors already
+    // reveal independently and are otherwise the only visible pieces.
+    state.show(actor, entity);
     if let Some(sign) = sign {
         state.reveal(sign);
     }
@@ -814,6 +804,7 @@ pub fn footprint_of(
     for component in components.iter().filter(|component| {
         component.drawn()
             && !openshard_uofiles::multi::is_closed_door_graphic(component.graphic)
+            && !openshard_uofiles::multi::is_house_banister_graphic(component.graphic)
             && !openshard_uofiles::multi::is_house_sign_graphic(component.graphic)
     }) {
         let graphic = component.graphic;

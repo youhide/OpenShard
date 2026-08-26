@@ -127,7 +127,18 @@ impl ApplicationHandler<()> for App {
             }
         }
         if changed {
-            self.ask_redraw();
+            if self.watched() {
+                self.ask_redraw();
+            } else {
+                // Receiving a packet is itself a state-clock wake.  In
+                // particular, `fold_incoming` can start or replace weather
+                // ambience and music, whose next turns belong to
+                // `Audio::advance` in `tick`.  A minimised compositor is free
+                // to defer redraw callbacks (and, on some platforms, timer
+                // wakes), so waiting for one made those sounds appear only
+                // when the window was restored.
+                self.tick(Instant::now());
+            }
         }
     }
 
