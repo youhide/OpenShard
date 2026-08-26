@@ -226,6 +226,49 @@ impl World {
         for record in records {
             let facet = Facet(record.facet);
             let at = Point::new(record.x, record.y, record.z);
+            // A design packet borrows its grid dimensions from the foundation
+            // multi. Older imports always used 0x13EC, the smallest one, which
+            // made the client silently lose the middle of wider buildings.
+            // Repair that old choice while no client can yet see this restored
+            // item; its next ordinary save records the fitting foundation.
+            let mut design = by_house.remove(&record.serial);
+            let saved_multi = openshard_protocol::wire::MultiId(record.multi);
+            let saved_bounds = openshard_uofiles::multi::bounds(self.state.multis.components(saved_multi.0));
+            let design_bounds = design
+                .as_ref()
+                .and_then(|(_, components)| openshard_uofiles::multi::bounds(components));
+            let fits_saved_foundation = matches!(
+                (saved_bounds, design_bounds),
+                (Some(foundation), Some(design))
+                    if foundation.min_x <= design.min_x
+                        && foundation.max_x >= design.max_x
+                        && foundation.min_y <= design.min_y
+                        && foundation.max_y >= design.max_y
+            );
+            let multi = if fits_saved_foundation {
+                saved_multi
+            } else if let Some((revision, components)) = design.take() {
+                match openshard_housing::fit_design_to_foundation(&self.state.multis, components.clone()) {
+                    Some((multi, components)) => {
+                        design = Some((revision, components));
+                        multi
+                    }
+                    None => {
+                        design = Some((revision, components));
+                        saved_multi
+                    }
+                }
+            } else {
+                saved_multi
+            };
+            if multi != saved_multi {
+                info!(
+                    serial = %record.serial,
+                    from = saved_multi.0,
+                    to = multi.0,
+                    "resized a restored custom-house foundation for its design"
+                );
+            }
             let entity = self.state.registry.spawn();
             if self.state.registry.bind_serial(entity, record.serial).is_err() {
                 warn!(serial = %record.serial, "a saved house's serial was already taken");
@@ -235,14 +278,14 @@ impl World {
             self.state.registry.insert(
                 entity,
                 Drawn {
-                    id: openshard_protocol::wire::MultiId(record.multi).graphic(),
+                    id: multi.graphic(),
                     hue: Hue(0),
                 },
             );
             self.state.registry.insert(
                 entity,
                 House {
-                    multi: openshard_protocol::wire::MultiId(record.multi),
+                    multi,
                     owner: record.owner,
                     // A saved serial that will not parse is dropped rather than
                     // refused: a name this engine cannot read is a name it cannot
@@ -260,7 +303,6 @@ impl World {
             self.state.place_item(facet, entity, at);
             // The design, if this house has one. Put on before the footprint is
             // computed, because the footprint is computed *from* it.
-            let design = by_house.remove(&record.serial);
             if let Some((revision, components)) = design.clone() {
                 self.state
                     .registry
@@ -271,7 +313,7 @@ impl World {
             match openshard_housing::footprint_of(
                 &self.state,
                 at,
-                openshard_protocol::wire::MultiId(record.multi),
+                multi,
                 shape,
             ) {
                 Ok(footprint) => {
@@ -291,7 +333,7 @@ impl World {
                 entity,
                 facet,
                 at,
-                openshard_protocol::wire::MultiId(record.multi),
+                multi,
             );
             // Rebuilt rather than restored, for the module header's reason: the
             // sign's spot is a pure function of the classic house type or a
@@ -299,12 +341,12 @@ impl World {
             // design changes.
             // A shard with no client files gets no sign, the same bargain the
             // walls make.
-            openshard_housing::hang_sign(
+            openshard_housing::hang_sign_for_design(
                 &mut self.state,
                 entity,
                 facet,
                 at,
-                openshard_protocol::wire::MultiId(record.multi),
+                multi,
             );
             restored += 1;
         }

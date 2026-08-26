@@ -12,6 +12,7 @@ use openshard_protocol::wire::{Graphic, Hue, MultiId};
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{Decoration, Door, Drawn, HouseDoor, Position};
 use openshard_state::{ItemLocation, WorldState, WorldTick, establish_item_location};
+use openshard_uofiles::multi::Component;
 
 #[derive(Clone, Copy)]
 enum Material {
@@ -38,7 +39,8 @@ struct DoorSpec {
     dx: i16,
     dy: i16,
     dz: i16,
-    material: Material,
+    /// The closed art, directly retained for imported door families.
+    closed: Graphic,
     facing: Facing,
     /// The other row of a double door. Both stable serials are assigned before
     /// either component receives this relationship.
@@ -46,11 +48,15 @@ struct DoorSpec {
 }
 
 const fn door(dx: i16, dy: i16, dz: i16, material: Material, facing: Facing) -> DoorSpec {
+    let base = match material {
+        Material::Wood => 0x06A5,
+        Material::Metal => 0x0675,
+    };
     DoorSpec {
         dx,
         dy,
         dz,
-        material,
+        closed: Graphic(base + 2 * facing.0),
         facing,
         link: None,
     }
@@ -129,14 +135,14 @@ const SHOP_MARBLE: [DoorSpec; 1] = [door(-2, 0, 24, Material::Metal, Facing::EAS
 
 fn specs(multi: MultiId) -> &'static [DoorSpec] {
     match multi.0 {
-        0x0064 | 0x0066 | 0x0068 | 0x006A | 0x006C | 0x006E => &SMALL_OLD,
-        0x0074 => &GUILD,
-        0x0076 => &TWO_STOREY_WOOD,
-        0x0078 => &TWO_STOREY_STONE,
-        0x007A => &TOWER,
-        0x007C => &KEEP,
-        0x007E => &CASTLE,
-        0x008C => &LARGE_PATIO,
+        0x0064..=0x006F => &SMALL_OLD,
+        0x0074 | 0x0075 => &GUILD,
+        0x0076 | 0x0077 => &TWO_STOREY_WOOD,
+        0x0078 | 0x0079 => &TWO_STOREY_STONE,
+        0x007A | 0x007B => &TOWER,
+        0x007C | 0x007D => &KEEP,
+        0x007E | 0x007F => &CASTLE,
+        0x008C | 0x008D => &LARGE_PATIO,
         0x0096 => &LARGE_MARBLE,
         0x0098 => &SMALL_TOWER,
         0x009A => &LOG_CABIN,
@@ -149,6 +155,36 @@ fn specs(multi: MultiId) -> &'static [DoorSpec] {
 }
 
 impl DoorSpec {
+    /// A closed leaf the multi itself draws.
+    ///
+    /// Most classic houses have no door art in their component list, hence the
+    /// catalog above. A content multi can carry it, though; making that leaf a
+    /// real door is more faithful than placing an invented one nearby.
+    fn from_component(component: Component) -> Option<Self> {
+        if !component.drawn() {
+            return None;
+        }
+        // UO's door sets are eight closed/open pairs in the same facing order.
+        // Old housing packs use several material families, not just the two
+        // the classic house fixtures happen to declare.
+        let base = [0x0675, 0x06A5, 0x06BD, 0x06D5, 0x06E5, 0x0839, 0x0866]
+            .into_iter()
+            .find(|&base| (base..=base + 14).contains(&component.graphic.0))?;
+        let difference = component.graphic.0 - base;
+        if !openshard_uofiles::multi::is_closed_door_graphic(component.graphic) {
+            return None;
+        }
+        let facing = Facing(difference / 2);
+        Some(DoorSpec {
+            dx: component.dx,
+            dy: component.dy,
+            dz: component.dz,
+            closed: component.graphic,
+            facing,
+            link: None,
+        })
+    }
+
     fn at(self, origin: Point) -> Option<Point> {
         let x = u16::try_from(i32::from(origin.x) + i32::from(self.dx)).ok()?;
         let y = u16::try_from(i32::from(origin.y) + i32::from(self.dy)).ok()?;
@@ -157,15 +193,10 @@ impl DoorSpec {
     }
 
     fn component(self) -> Door {
-        let base = match self.material {
-            Material::Wood => 0x06A5,
-            Material::Metal => 0x0675,
-        };
-        let closed = base + 2 * self.facing.0;
         let (offset_x, offset_y) = OFFSETS[usize::from(self.facing.0)];
         Door {
-            closed: Graphic(closed),
-            open: Graphic(closed + 1),
+            closed: self.closed,
+            open: Graphic(self.closed.0 + 1),
             offset_x,
             offset_y,
             link: None,
@@ -173,6 +204,40 @@ impl DoorSpec {
             close_at: WorldTick::ZERO,
         }
     }
+}
+
+/// Doors already drawn by a multi rather than declared by a classic house
+/// class. This is deliberately a fallback: the standard houses' component
+/// lists omit their functional doors and continue to use the catalog above.
+fn component_specs(components: &[Component]) -> Vec<DoorSpec> {
+    let mut out: Vec<_> = components
+        .iter()
+        .copied()
+        .filter_map(DoorSpec::from_component)
+        .collect();
+
+    // A south-facing double door is adjacent west/east leaves. Give it the
+    // same linked behaviour as catalogued fixtures without guessing links
+    // between unrelated doors elsewhere in a content multi.
+    for west in 0..out.len() {
+        if out[west].facing.0 != Facing::WEST_CW.0 {
+            continue;
+        }
+        for east in 0..out.len() {
+            if west == east || out[east].facing.0 != Facing::EAST_CCW.0 {
+                continue;
+            }
+            if out[east].dx == out[west].dx + 1
+                && out[east].dy == out[west].dy
+                && out[east].dz == out[west].dz
+            {
+                out[west].link = Some(east);
+                out[east].link = Some(west);
+                break;
+            }
+        }
+    }
+    out
 }
 
 /// ServUO's hinge offsets, indexed by `DoorFacing`.
@@ -193,8 +258,18 @@ pub(crate) fn install(state: &mut WorldState, house: EntityId, facet: Facet, ori
     let Some(house_serial) = state.registry.serial_of(house) else {
         return;
     };
-    let mut installed = Vec::with_capacity(specs(multi).len());
-    for spec in specs(multi) {
+    let specs = match crate::design::shape_of_house(state, house) {
+        // Imported designs carry their closed leaves in the component list.
+        // Turn the recognized leaves into real door entities rather than
+        // leaving them as inert art in the `0xD8` picture.
+        Some(components) => component_specs(&components),
+        None => match specs(multi) {
+            [] => component_specs(state.multis.components(multi.0)),
+            specs => specs.to_vec(),
+        },
+    };
+    let mut installed = Vec::with_capacity(specs.len());
+    for spec in &specs {
         let Some(at) = spec.at(origin) else {
             installed.push(None);
             continue;
@@ -224,7 +299,7 @@ pub(crate) fn install(state: &mut WorldState, house: EntityId, facet: Facet, ori
         installed.push(Some(entity));
     }
 
-    for (row, spec) in specs(multi).iter().enumerate() {
+    for (row, spec) in specs.iter().enumerate() {
         let (Some(entity), Some(other)) = (installed[row], spec.link.and_then(|link| installed[link])) else {
             continue;
         };
@@ -285,5 +360,17 @@ pub(crate) fn is_fixture(state: &WorldState, entity: EntityId, origin: Point, mu
         at.x = (i32::from(at.x) - i32::from(component.offset_x)).clamp(0, i32::from(u16::MAX)) as u16;
         at.y = (i32::from(at.y) - i32::from(component.offset_y)).clamp(0, i32::from(u16::MAX)) as u16;
     }
-    specs(multi).iter().any(|spec| spec.at(origin) == Some(at))
+    let specs = state
+        .registry
+        .get::<HouseDoor>(entity)
+        .and_then(|door| state.registry.entity_of(door.house))
+        .and_then(|house| crate::design::shape_of_house(state, house))
+        .map_or_else(
+            || match specs(multi) {
+                [] => component_specs(state.multis.components(multi.0)),
+                specs => specs.to_vec(),
+            },
+            |components| component_specs(&components),
+        );
+    specs.iter().any(|spec| spec.at(origin) == Some(at))
 }

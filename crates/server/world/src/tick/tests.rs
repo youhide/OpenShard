@@ -17,6 +17,7 @@ use openshard_protocol::skill::SkillLock;
 use openshard_protocol::wire::{Graphic, Hue, RawSkillId, SoundId};
 use openshard_protocol::world::{Aggression, RangedRange, RawStepSequence};
 use openshard_skills::SkillUsed;
+use openshard_state::components::ItemAffix;
 use openshard_state::components::Riding;
 use openshard_state::components::{
     Amount, Contained, Container, Corpse, CorpseBody, CriminalUntil, Decays, Drawn, Equipped, MurderDecay,
@@ -2941,6 +2942,43 @@ fn gameplay_config_reaches_the_systems() {
 }
 
 #[test]
+fn zero_item_decay_keeps_ground_items_and_corpses() {
+    let now = Instant::now();
+    let mut world = World::new(START).with_gameplay(Gameplay {
+        decay_ticks: 0,
+        ..Gameplay::default()
+    });
+    let watcher = enter(&mut world, now);
+    spawn_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let item = entity(&world, loose_item_serial(&world));
+
+    // A loose item created with cleanup off has no clock at all.
+    assert!(
+        !world.state.registry.has::<Decays>(item),
+        "cleanup off does not mark a new ground item"
+    );
+
+    // Even an already-marked item (including a corpse's direct clock) remains.
+    world.state.registry.insert(
+        item,
+        Decays {
+            at_tick: world.state.ticks,
+        },
+    );
+    world.tick(now);
+    assert!(
+        world.state.registry.contains(item),
+        "cleanup off does not sweep items"
+    );
+    assert!(
+        !packets_for(&mut world, watcher)
+            .iter()
+            .any(|packet| packet[0] == 0x1D),
+        "the watcher is not told that the item vanished"
+    );
+}
+
+#[test]
 fn a_container_does_not_decay_even_after_being_moved() {
     // A backpack is a ground item too, but it must not rot — and picking it
     // up and setting it back down must not hand it a decay clock either.
@@ -5092,6 +5130,33 @@ fn a_decaying_corpse_takes_its_loot_with_it() {
 }
 
 #[test]
+fn cleanup_disabled_does_not_start_a_corpse_decay_clock() {
+    let now = Instant::now();
+    let mut world = World::new(START).with_gameplay(Gameplay {
+        decay_ticks: 0,
+        ..Gameplay::default()
+    });
+    let player = enter(&mut world, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 8, now);
+    engage(&mut world, player, mob, now);
+    for _ in 0..(2 * WRESTLING_SWING_TICKS) {
+        world.tick(now);
+    }
+    let corpse = world
+        .state
+        .registry
+        .query::<Drawn>()
+        .find(|(_, g)| g.id == openshard_protocol::wire::Graphic(0x2006))
+        .map(|(entity, _)| entity)
+        .expect("a corpse");
+
+    assert!(
+        !world.state.registry.has::<Decays>(corpse),
+        "a corpse remains when map cleanup is disabled"
+    );
+}
+
+#[test]
 fn no_swing_without_war_mode() {
     let now = Instant::now();
     let mut world = world();
@@ -5329,6 +5394,39 @@ fn a_wielded_weapon_rolls_its_damage_within_range_and_replays() {
     }
     let seq_b: Vec<u16> = (0..64).map(|_| combat::melee_blow(&mut b.state, eb)).collect();
     assert_eq!(seq_a, seq_b, "the damage roll replays for a fixed seed");
+}
+
+#[test]
+fn a_weapon_damage_affix_changes_its_instance_not_the_weapon_table() {
+    // The same longsword graphic still reads 5..=33; this one physical sword
+    // carries +10..+12. That is the distinction that lets loot be individual.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let wielder = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(wielder).unwrap();
+    let sword = items::equip_worn_item(
+        &mut world.state,
+        serial,
+        openshard_protocol::wire::Graphic(0x0F61),
+        openshard_protocol::wire::Hue(0),
+        Layer(1),
+    )
+    .unwrap();
+    let sword_serial = world.state.registry.serial_of(sword).unwrap();
+    items::set_affixes(
+        &mut world.state,
+        sword_serial,
+        vec![ItemAffix::DamageBonus {
+            minimum: 10,
+            maximum: 12,
+        }],
+    );
+
+    for _ in 0..64 {
+        let blow = combat::melee_blow(&mut world.state, wielder);
+        assert!((15..=45).contains(&blow), "affixed blow {blow} out of range");
+    }
 }
 
 #[test]
@@ -18510,21 +18608,34 @@ fn a_designed_house_announces_its_revision_and_answers_the_ask() {
     .expect("the owner may redesign");
     world.tick(now);
 
-    // The commit told whoever was looking. The draw's copy cannot reach a client
-    // already standing there, which is why this broadcast exists at all.
+    // The commit told whoever was looking, with the new picture in the same
+    // burst. Waiting for the client's query here leaves the old foundation
+    // visible for one round-trip.
+    let changed = packets_for(&mut world, connection);
     assert!(
-        extended(&packets_for(&mut world, connection)).contains(&0x1D),
+        extended(&changed).contains(&0x1D),
         "the design committed and nobody was told"
     );
+    let changed_detail = changed
+        .iter()
+        .find(|packet| packet[0] == 0xD8)
+        .expect("the changed house was left as a bare foundation");
+    assert_eq!(changed_detail[4], 0, "an offered D8 is not a query response");
 
     // And it rides with the draw for anyone arriving later.
     world.state.seen.clear();
     world.state.show(player, house);
     world.tick(now);
+    let shown = packets_for(&mut world, connection);
     assert!(
-        extended(&packets_for(&mut world, connection)).contains(&0x1D),
+        extended(&shown).contains(&0x1D),
         "the revision did not ride along with the draw"
     );
+    let shown_detail = shown
+        .iter()
+        .find(|packet| packet[0] == 0xD8)
+        .expect("a newly shown designed house was left as a bare foundation");
+    assert_eq!(shown_detail[4], 0, "the immediate D8 is volunteered");
 
     // The ask, and the answer.
     world.queue(Command::DesignDetails {
@@ -18550,7 +18661,7 @@ fn a_designed_house_announces_its_revision_and_answers_the_ask() {
     let back = openshard_protocol::design::DesignDetail::decode(detail, bounds)
         .expect("the shard sent a design its own decoder refuses");
     assert_eq!(back.serial.0, serial.raw());
-    assert_eq!(back.revision, openshard_protocol::design::Revision(1));
+    assert_eq!(back.revision, openshard_protocol::design::Revision(0x0800_0001));
     assert!(back.response, "an answer to an ask is flagged as one");
     assert_eq!(
         back.tiles,

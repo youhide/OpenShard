@@ -14,6 +14,10 @@ dependency, and — with the single exception called out below — none is copie
 they are read. Where your checkouts of them are is your own business: put the
 paths in `CLAUDE.local.md`, which is gitignored beside this file.
 
+For public shard scriptpacks, custom-house variants and content-system leads,
+use the separate [external shard and script catalogue](external_script_catalogue.md).
+It records licence status and is a discovery queue, not an approval to copy.
+
 **SphereServer**, if a checkout is available: `Source-X/` (the C++ engine) and
 `Scripts-X/` (the .scp scriptpack). Read it for **observed protocol behaviour**,
 which is two decades of finding out which client breaks on what and is genuinely

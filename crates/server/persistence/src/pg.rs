@@ -216,7 +216,9 @@ CREATE TABLE IF NOT EXISTS items (
     -- the house this is locked down in, and the access level if it is a secure.
     -- See the sqlite schema.
     lockdown_house BIGINT,
-    lockdown_secure SMALLINT
+    lockdown_secure SMALLINT,
+    -- Typed per-instance custom properties. See the SQLite schema.
+    affixes TEXT
 );
 CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
 CREATE TABLE IF NOT EXISTS mobiles (
@@ -317,6 +319,16 @@ impl PgStore {
             .map_err(database)?
             .map(|row| row.get(0));
         match found {
+            // v34 only adds a nullable column. Existing rows mean no affixes.
+            Some(33) if SCHEMA_VERSION == 34 => {
+                client
+                    .batch_execute(
+                        "ALTER TABLE items ADD COLUMN IF NOT EXISTS affixes TEXT; \
+                         UPDATE meta SET value = 34 WHERE key = 'schema';",
+                    )
+                    .await
+                    .map_err(database)?;
+            }
             Some(version) if version != i64::from(SCHEMA_VERSION) => {
                 return Err(StoreError::SchemaMismatch {
                     found: u32::try_from(version).unwrap_or(u32::MAX),
@@ -748,7 +760,7 @@ impl PgStore {
                  corpse, poison_level, poison_charges, trap_kind, trap_power, trap_level, \
                  uses, exceptional, crafter, \
                  rune_facet, rune_x, rune_y, rune_z, runebook, \
-                 lockdown_house, lockdown_secure FROM items",
+                 lockdown_house, lockdown_secure, affixes FROM items",
                 &[],
             )
             .await
@@ -1107,9 +1119,9 @@ async fn insert_item(
               loc_kind, facet, x, y, z, parent, grid, layer, price, name, spellbook, \
               corpse, poison_level, poison_charges, trap_kind, trap_power, trap_level, uses, \
               exceptional, crafter, rune_facet, rune_x, rune_y, rune_z, runebook, \
-              lockdown_house, lockdown_secure) \
+              lockdown_house, lockdown_secure, affixes) \
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21, \
-                     $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34) \
+                     $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35) \
              ON CONFLICT (serial) DO UPDATE SET \
              owner = EXCLUDED.owner, graphic = EXCLUDED.graphic, hue = EXCLUDED.hue, \
              amount = EXCLUDED.amount, stackable = EXCLUDED.stackable, gump = EXCLUDED.gump, \
@@ -1124,7 +1136,7 @@ async fn insert_item(
              crafter = EXCLUDED.crafter, rune_facet = EXCLUDED.rune_facet, \
              rune_x = EXCLUDED.rune_x, rune_y = EXCLUDED.rune_y, rune_z = EXCLUDED.rune_z, \
              runebook = EXCLUDED.runebook, lockdown_house = EXCLUDED.lockdown_house, \
-             lockdown_secure = EXCLUDED.lockdown_secure",
+             lockdown_secure = EXCLUDED.lockdown_secure, affixes = EXCLUDED.affixes",
             &[
                 &i64::from(item.serial.raw()),
                 // `owner` is `NOT NULL BIGINT` with `0` the sentinel for "no owner" —
@@ -1178,6 +1190,10 @@ async fn insert_item(
                     .map_err(|e| StoreError::Corrupt(e.to_string()))?,
                 &item.locked_down.map(|pinned| i64::from(pinned.house.raw())),
                 &item.locked_down.and_then(|pinned| pinned.secure).map(i16::from),
+                &(!item.affixes.is_empty())
+                    .then(|| serde_json::to_string(&item.affixes))
+                    .transpose()
+                    .map_err(|e| StoreError::Corrupt(e.to_string()))?,
             ],
         )
         .await
@@ -1305,6 +1321,10 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
                     house,
                     secure: row.get::<_, Option<i16>>(33).and_then(|n| u8::try_from(n).ok()),
                 }),
+            affixes: row
+                .get::<_, Option<String>>(34)
+                .and_then(|json| serde_json::from_str(&json).ok())
+                .unwrap_or_default(),
             location,
         }))
     }

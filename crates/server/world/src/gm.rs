@@ -786,20 +786,69 @@ fn set_skill(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     );
 }
 
-/// `.house <multi id> [x y z]` — put a house at your feet or at an editor tile.
+/// `.house <multi id|@template> [x y z]` — put a house at your feet or at an
+/// editor tile.
 ///
 /// The staff half of housing, and the whole of H1's front door: a deed and the
 /// cursor that draws the house under it are H2, and until they exist this is how
 /// a house gets onto the ground at all. The id is the multi's, hex or decimal,
 /// with or without the `0x4000` the wire carries — `place` masks either.
 ///
+/// An `@template` is the JSON file stem read from `openshard-houses/` at shard
+/// boot. It is placed on a customisable foundation and immediately becomes that
+/// design, so the shard persists and distributes the actual component list.
 /// With no coordinates this keeps `.add`'s at-your-feet convention. The map
-/// editor supplies all three coordinates after showing the same multi under its
-/// pointer; accepting them here keeps that UI on the ordinary housing path.
+/// editor supplies all three coordinates after showing the same shape under its
+/// pointer.
 fn place_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
-    let Some(raw_multi) = args.first().and_then(parse_u16) else {
-        notify(state, actor, "Usage: .house <multi id> [x y z], e.g. .house 0x64");
+    let Some(request) = args.first() else {
+        notify(
+            state,
+            actor,
+            "Usage: .house <multi id|@template> [x y z], e.g. .house 0x64",
+        );
         return;
+    };
+    let template = request.strip_prefix('@').map(|name| {
+        state
+            .house_templates
+            .get(name)
+            .cloned()
+            .map(|components| (name, components))
+    });
+    let template = match template {
+        Some(Some((name, components))) => {
+            let Some((foundation, components)) =
+                openshard_housing::fit_design_to_foundation(&state.multis, components)
+            else {
+                notify(
+                    state,
+                    actor,
+                    "This template does not fit any custom-house foundation in this client.",
+                );
+                return;
+            };
+            Some((name, foundation, components))
+        }
+        Some(None) => {
+            notify(state, actor, "No imported house template has that name.");
+            return;
+        }
+        None => None,
+    };
+    let multi = match template.as_ref() {
+        Some((_, foundation, _)) => *foundation,
+        None => {
+            let Some(raw_multi) = parse_u16(request) else {
+                notify(
+                    state,
+                    actor,
+                    "Usage: .house <multi id|@template> [x y z], e.g. .house 0x64",
+                );
+                return;
+            };
+            openshard_protocol::wire::MultiId::from_graphic(Graphic(raw_multi))
+        }
     };
     let Some(&Position(feet)) = state.registry.get::<Position>(actor) else {
         return;
@@ -817,7 +866,7 @@ fn place_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
             notify(
                 state,
                 actor,
-                "Usage: .house <multi id> [x y z], e.g. .house 0x64 1400 1600 0",
+                "Usage: .house <multi id|@template> [x y z], e.g. .house @legacy-inn 1400 1600 0",
             );
             return;
         }
@@ -826,16 +875,35 @@ fn place_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     let Some(owner) = state.registry.serial_of(actor) else {
         return;
     };
-    let multi = openshard_protocol::wire::MultiId::from_graphic(Graphic(raw_multi));
-    match openshard_housing::place(state, actor, at, facet, multi, owner) {
-        Ok(_) => notify(
-            state,
-            actor,
-            &format!(
-                "A house ({:#06x}) stands at ({}, {}, {}).",
-                multi.0, at.x, at.y, at.z
-            ),
-        ),
+    let template_name = template.as_ref().map(|(name, _, _)| *name);
+    let placement = match template {
+        Some((_, _, components)) => {
+            openshard_housing::place_design(state, actor, at, facet, multi, owner, components)
+        }
+        None => openshard_housing::place(state, actor, at, facet, multi, owner),
+    };
+    match placement {
+        Ok(_house) => {
+            if let Some(name) = template_name {
+                notify(
+                    state,
+                    actor,
+                    &format!(
+                        "The imported house {name:?} stands at ({}, {}, {}) (revision 1).",
+                        at.x, at.y, at.z
+                    ),
+                );
+            } else {
+                notify(
+                    state,
+                    actor,
+                    &format!(
+                        "A house ({:#06x}) stands at ({}, {}, {}).",
+                        multi.0, at.x, at.y, at.z
+                    ),
+                );
+            }
+        }
         Err(refusal) => notify(state, actor, refusal.message()),
     }
 }
@@ -903,7 +971,16 @@ fn demolish_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
                 return;
             };
             if !state.registry.has::<openshard_state::components::House>(house) {
-                notify(state, actor, "That object is not a house.");
+                // Map Editor's whole-house picker names a live item. Imported
+                // doors are live items too, rather than map statics or the
+                // house entity, so let that same removal tool clear a stuck
+                // door without turning into a general-purpose item delete.
+                if state.registry.has::<openshard_state::components::Door>(house) {
+                    items::consume(state, serial, 0);
+                    notify(state, actor, "The door is removed.");
+                } else {
+                    notify(state, actor, "That object is not a house or door.");
+                }
                 return;
             }
             house

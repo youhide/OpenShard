@@ -685,6 +685,19 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
     };
 
     let mut world = configured_world(config).with_tiles(tiles, multis);
+    match openshard_housing::template::load_directory(&dir.join("openshard-houses")) {
+        Ok(templates) => {
+            if !templates.is_empty() {
+                eprintln!(
+                    "world load +{:.3}s: {} custom house template(s) read",
+                    started.elapsed().as_secs_f64(),
+                    templates.len()
+                );
+            }
+            world = world.with_house_templates(templates);
+        }
+        Err(error) => warn!(%error, "could not read custom house templates; none can be placed"),
+    }
     for &facet in &config.world.facets {
         let facet = openshard_protocol::world::Facet(facet);
         // The map before the navigation artifact, because the artifact is now

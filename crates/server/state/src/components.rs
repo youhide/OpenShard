@@ -290,6 +290,47 @@ pub struct Decays {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Name(pub String);
 
+/// One typed, shard-defined property on an item.
+///
+/// These are instance data, not a second item-definition table: two otherwise
+/// identical swords may carry different affixes.  The variants name mechanics
+/// the engine can enforce and display, rather than accepting an untyped bag of
+/// script values that combat could neither validate nor balance.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ItemAffix {
+    /// Deal extra damage to one creature body. `bonus_percent = 100` doubles a
+    /// landed weapon blow, matching the usual major-slayer convention.
+    Slayer {
+        /// The target's body graphic.
+        body: u16,
+        /// Extra damage after the ordinary weapon calculation, in percent.
+        bonus_percent: u8,
+    },
+    /// Shift this weapon's rolled minimum and maximum damage before skills,
+    /// armour and resistances apply.
+    DamageBonus {
+        /// Added to the weapon's minimum damage.
+        minimum: i16,
+        /// Added to the weapon's maximum damage.
+        maximum: i16,
+    },
+    /// On a landed weapon blow, this independently rolls to poison the target.
+    HitPoison {
+        /// The standard poison level, 0 (lesser) through 4 (lethal).
+        level: u8,
+        /// Chance out of 1,000. Values above 1,000 mean certainty.
+        chance_per_mille: u16,
+    },
+}
+
+/// The custom properties one item instance carries.
+///
+/// A vector deliberately preserves the order the loot or crafting system gave
+/// the item.  The list is small, is saved as one typed JSON value, and avoids a
+/// column per possible future affix.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
+pub struct ItemAffixes(pub Vec<ItemAffix>);
+
 /// One quest a character has taken, and how far along it is.
 ///
 /// `progress` runs parallel to the definition's objective list — one count per

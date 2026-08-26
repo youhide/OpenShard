@@ -26,6 +26,8 @@ openshard-state.workspace = true
 # what `Multi::center` is derived from.
 openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 # The tests stand a bare `WorldState` up with a terrain that knows one multi:

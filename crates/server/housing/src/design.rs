@@ -271,5 +271,5 @@ fn rehang_sign(state: &mut WorldState, house: EntityId, facet: Facet, at: Point,
     for sign in old {
         crate::decay::take_off_the_ground(state, sign);
     }
-    crate::hang_sign(state, house, facet, at, multi);
+    crate::hang_sign_for_design(state, house, facet, at, multi);
 }

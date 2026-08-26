@@ -132,7 +132,8 @@ critical_damage_percent = 150
 # The ceiling any one skill trains to, in tenths (1000 = 100.0).
 skill_cap = 1000
 
-# How long an item lies on the ground before it rots, in seconds.
+# How long an item lies on the ground before it rots, in seconds. Set 0 to
+# disable cleanup of loose items and corpses entirely.
 decay_seconds = 1200
 
 # How long a house stands without being refreshed before it collapses, in

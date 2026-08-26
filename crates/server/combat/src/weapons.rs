@@ -58,14 +58,7 @@ pub fn combat_skill_id(state: &WorldState, mobile: EntityId) -> Skill {
 /// off reverts the bearer to wrestling with nothing to undo.
 #[must_use]
 pub fn equipped_weapon(state: &WorldState, mobile: EntityId) -> Option<WeaponData> {
-    let serial = state.registry.serial_of(mobile)?;
-    let item = [LAYER_ONE_HANDED, LAYER_TWO_HANDED]
-        .into_iter()
-        .find_map(|layer| {
-            openshard_state::equipped_items(state, serial)
-                .find(|(_, worn)| worn.layer == layer)
-                .map(|(entity, _)| entity)
-        })?;
+    let item = equipped_weapon_item(state, mobile)?;
     let base = state
         .registry
         .get::<Drawn>(item)
@@ -94,6 +87,24 @@ pub fn equipped_weapon(state: &WorldState, mobile: EntityId) -> Option<WeaponDat
         }),
         None => base,
     }
+}
+
+/// The item a mobile currently wields, if either weapon layer holds one.
+///
+/// This is the entity counterpart to [`equipped_weapon`]. Custom properties
+/// belong to the item instance, while the ordinary weapon table answers the
+/// graphic's class, so combat needs both answers without mirroring either onto
+/// the mobile.
+#[must_use]
+pub fn equipped_weapon_item(state: &WorldState, mobile: EntityId) -> Option<EntityId> {
+    let serial = state.registry.serial_of(mobile)?;
+    [LAYER_ONE_HANDED, LAYER_TWO_HANDED]
+        .into_iter()
+        .find_map(|layer| {
+            openshard_state::equipped_items(state, serial)
+                .find(|(_, worn)| worn.layer == layer)
+                .map(|(entity, _)| entity)
+        })
 }
 
 #[cfg(test)]

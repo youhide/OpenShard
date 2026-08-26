@@ -2594,6 +2594,7 @@ dependencies = [
  "puffin_http",
  "rodio",
  "serde",
+ "serde_json",
  "tokio",
  "toml",
  "tracing",
@@ -2794,6 +2795,8 @@ dependencies = [
  "openshard-tiles",
  "openshard-uofiles",
  "rusqlite",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2953,6 +2956,7 @@ dependencies = [
  "openshard-config",
  "openshard-events",
  "openshard-gateway",
+ "openshard-housing",
  "openshard-login",
  "openshard-map",
  "openshard-movement",

@@ -134,7 +134,8 @@ pub struct GameplayConfig {
     /// from the skill table instead.
     #[serde(default = "default_stat_gain_chance")]
     pub stat_gain_chance: u32,
-    /// How long an item lies on the ground before it rots, in seconds.
+    /// How long an item lies on the ground before it rots, in seconds. `0`
+    /// disables cleanup of loose ground items and corpses.
     #[serde(default = "default_decay_seconds")]
     pub decay_seconds: u64,
     /// How long a house stands without being refreshed before it collapses, in

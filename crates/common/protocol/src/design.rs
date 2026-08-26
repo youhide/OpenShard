@@ -350,18 +350,19 @@ enum Slot {
 /// the tests agree by construction. `floor` is the caller's answer about the
 /// graphic — see the module header for why this crate cannot work it out.
 fn slot_of(tile: DesignTile, bounds: DesignBounds, floor: bool) -> Slot {
+    // The classic client takes a foundation's physical platform as its ground
+    // layer and does not reliably apply D8 plane 0 over it. Imported designs
+    // use that layer for real slate floors (often more than one static at one
+    // cell), while the explicit five-byte stair entries render them exactly.
+    // Keep every z=0 component in that longhand form rather than silently
+    // losing the floor beneath the foundation.
+    if tile.dz == 0 {
+        return Slot::Stairs;
+    }
     let Some(storey) = STOREY_HEIGHTS.iter().position(|&z| z == tile.dz) else {
         return Slot::Stairs;
     };
-    // A ground-floor tile is plane 0 whether or not it is a floor: the ground
-    // is not inset the way the storeys above it are.
-    let (plane, x, y) = if storey == 0 {
-        (
-            0,
-            i32::from(tile.dx) - i32::from(bounds.x_min),
-            i32::from(tile.dy) - i32::from(bounds.y_min),
-        )
-    } else if floor {
+    let (plane, x, y) = if floor {
         (
             storey,
             i32::from(tile.dx) - i32::from(bounds.x_min) - 1,
@@ -441,7 +442,24 @@ impl DesignDetail<'_> {
     /// run.
     #[must_use]
     pub fn encode(&self, is_floor: impl Fn(Graphic) -> bool) -> Vec<u8> {
-        let planes = self.planes(is_floor);
+        let planes =
+            DesignBounds::of(self.tiles).map_or_else(Vec::new, |bounds| self.planes(bounds, is_floor));
+        self.encode_planes(planes)
+    }
+
+    /// Encode against the foundation grid the receiver will use.
+    ///
+    /// A design packet does not carry its grid's dimensions.  The classic
+    /// client takes them from the placed foundation, so a shard must use those
+    /// same bounds when it decides which tiles may use a compact grid plane.
+    /// Tiles outside the foundation go through the longhand stair buffer and
+    /// therefore remain exact rather than being decoded at a shifted x/y.
+    #[must_use]
+    pub fn encode_with_bounds(&self, bounds: DesignBounds, is_floor: impl Fn(Graphic) -> bool) -> Vec<u8> {
+        self.encode_planes(self.planes(bounds, is_floor))
+    }
+
+    fn encode_planes(&self, planes: Vec<Plane>) -> Vec<u8> {
         // The plane-count byte, then four header bytes and a blob each.
         let buffer_length: usize = 1 + planes.iter().map(|plane| 4 + plane.deflated.len()).sum::<usize>();
         frame_body(Self::ID, PacketLength::Variable, |out: &mut PacketWriter| {
@@ -460,18 +478,24 @@ impl DesignDetail<'_> {
     }
 
     /// Bucket the tiles and deflate each bucket that got anything.
-    fn planes(&self, is_floor: impl Fn(Graphic) -> bool) -> Vec<Plane> {
-        let Some(bounds) = DesignBounds::of(self.tiles) else {
-            return Vec::new();
-        };
+    fn planes(&self, bounds: DesignBounds, is_floor: impl Fn(Graphic) -> bool) -> Vec<Plane> {
         let mut grids: Vec<Vec<u8>> = (0..9).map(|index| vec![0u8; bounds.plane_bytes(index)]).collect();
+        // A compact grid cell names one graphic, but a real house design may
+        // layer a railing, wall trim or other decorative static at the very
+        // same `(x, y, z)`. Keep its first tile in the compact plane and send
+        // every overlap through the longhand buffer, whose entries have no
+        // one-per-cell limit.
+        let mut occupied: Vec<Vec<bool>> = grids.iter().map(|grid| vec![false; grid.len() / 2]).collect();
         let mut used = [false; 9];
         let mut stairs: Vec<u8> = Vec::new();
 
         for &tile in self.tiles {
             match slot_of(tile, bounds, is_floor(tile.graphic)) {
-                Slot::Grid { plane, offset } if offset + 1 < grids[plane].len() => {
+                Slot::Grid { plane, offset }
+                    if offset + 1 < grids[plane].len() && !occupied[plane][offset / 2] =>
+                {
                     used[plane] = true;
+                    occupied[plane][offset / 2] = true;
                     grids[plane][offset] = u8::try_from(tile.graphic.0 >> 8).unwrap_or(0);
                     grids[plane][offset + 1] = u8::try_from(tile.graphic.0 & 0xFF).unwrap_or(0);
                 }
@@ -805,6 +829,24 @@ mod tests {
         assert_eq!(sorted(back.tiles), sorted(tiles));
     }
 
+    /// A grid plane is a single graphic per cell, while legacy builds often
+    /// layer decorative rails and trim over a wall on that same cell. The
+    /// compact representation must not silently overwrite either one.
+    #[test]
+    fn overlapping_tiles_survive_through_the_stair_buffer() {
+        let tiles = vec![tile(0x0030, 1, 1, 0), tile(0x0031, 1, 1, 0)];
+        let detail = DesignDetail {
+            serial: RawSerial(3),
+            revision: Revision(2),
+            response: false,
+            tiles: &tiles,
+        };
+        let bytes = detail.encode(floors_below(0x1000));
+        let bounds = DesignBounds::of(&tiles).unwrap();
+        let back = DesignDetail::decode(&bytes, bounds).unwrap();
+        assert_eq!(sorted(back.tiles), sorted(tiles));
+    }
+
     /// Negative offsets are ordinary: a house's origin is its centre, not its
     /// corner, so roughly half of every design is west or north of it.
     #[test]
@@ -824,6 +866,64 @@ mod tests {
         let bytes = detail.encode(floors_below(0x1000));
         let bounds = DesignBounds::of(&tiles).unwrap();
         let back = DesignDetail::decode(&bytes, bounds).unwrap();
+        assert_eq!(sorted(back.tiles), sorted(tiles));
+    }
+
+    #[test]
+    fn a_design_larger_than_its_foundation_keeps_its_exact_offsets() {
+        let tiles = vec![
+            tile(0x0030, -1, -1, 0),
+            // This wall cannot occupy the foundation's grid, so it must travel
+            // in the longhand buffer rather than be decoded with a shifted
+            // plane stride.
+            tile(0x2032, 8, 1, 7),
+        ];
+        let foundation = DesignBounds {
+            x_min: -2,
+            y_min: -2,
+            width: 5,
+            height: 5,
+        };
+        let bytes = DesignDetail {
+            serial: RawSerial(5),
+            revision: Revision(1),
+            response: false,
+            tiles: &tiles,
+        }
+        .encode_with_bounds(foundation, floors_below(0x1000));
+        let back = DesignDetail::decode(&bytes, foundation).unwrap();
+        assert_eq!(sorted(back.tiles), sorted(tiles));
+    }
+
+    /// The grid belongs to the foundation, not to whatever bounding box a
+    /// particular design happened to occupy.  This is the 12×12 custom-house
+    /// case: floor tiles and roof tiles occupy the same x/y range, but live in
+    /// plane 0 and plane 8 respectively. A one-column stride mismatch used to
+    /// wrap their middle columns into unrelated map rows in the classic client.
+    #[test]
+    fn a_full_foundation_keeps_its_floor_and_roof_rows() {
+        let foundation = DesignBounds {
+            x_min: -5,
+            y_min: -5,
+            width: 12,
+            height: 12,
+        };
+        let mut tiles = Vec::new();
+        for y in -5..=6 {
+            tiles.push(tile(0x049C, -5, y, 0));
+            tiles.push(tile(0x049C, 6, y, 0));
+            tiles.push(tile(0x0597, -5, y, 47));
+            tiles.push(tile(0x0597, 6, y, 47));
+        }
+        let bytes = DesignDetail {
+            serial: RawSerial(6),
+            revision: Revision(1),
+            response: true,
+            tiles: &tiles,
+        }
+        .encode_with_bounds(foundation, |graphic| graphic.0 == 0x049C);
+
+        let back = DesignDetail::decode(&bytes, foundation).expect("the foundation-sized packet decodes");
         assert_eq!(sorted(back.tiles), sorted(tiles));
     }
 
@@ -861,7 +961,7 @@ mod tests {
             "the buffer length covers the plane count byte and every plane"
         );
         assert_eq!(bytes[17], 1, "one plane held the one tile");
-        assert_eq!(bytes[18], 0x20, "plane 0, flagged as a grid rather than stairs");
+        assert_eq!(bytes[18], 0x09, "ground tiles are explicit longhand entries");
     }
 
     /// Both twelve-bit lengths share the fourth header byte, one nibble each.

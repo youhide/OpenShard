@@ -523,6 +523,22 @@ fn landing(footing: &Footing<'_>, stance: Stance, to: Point) -> Option<Point> {
         None => Some(i32::from(to.z)),
     };
     let landed = climbed(footing, stance, tile, ground).or(ground)?;
+    // Do not walk through a railing or a shut door on this storey by falling
+    // back to the map ground underneath it.  A real floor at the height being
+    // left is what distinguishes that case from the normal descent onto a
+    // lower stair tread or an unguarded edge.
+    if landed < stance.z
+        && footing
+            .overlay
+            .surfaces_at(tile)
+            .any(|cover| cover.surface() >= stance.z)
+        && footing
+            .overlay
+            .blocker_at(tile, Body::new(stance.z, PLAYER_HEIGHT), footing.doors)
+            .is_some()
+    {
+        return None;
+    }
     let z = i8::try_from(landed).ok()?;
     if footing
         .overlay
@@ -1259,6 +1275,39 @@ mod tests {
             can_step(&dry, Point::new(10, 10, 0), Point::new(10, 11, 0)),
             Some(Point::new(10, 11, 0)),
             "over ground the same storey is out of reach and the body stays on the ground",
+        );
+    }
+
+    #[test]
+    fn a_blocked_upper_floor_does_not_fall_back_to_the_ground_below() {
+        let scene = crate::scene::Scene::flat_holding(20, 20, 0);
+        let from = Point::new(10, 11, 20);
+        let target = Point::new(10, 10, 20);
+        let mut house = Overlay::default();
+        house.set(Tile::new(from.x, from.y), vec![Cover::standing(20, 0)]);
+        // A railing on a second-storey floor rejects the upper landing.  The
+        // map still offers ground at z=0 under it, but that must not turn a
+        // lateral step into a fall through the railing.
+        house.set(
+            Tile::new(target.x, target.y),
+            vec![Cover::standing(20, 0), Cover::blocking(20, 5)],
+        );
+        let footing = Footing::new(Some(scene.terrain()), &house, Doors::AsTheyStand);
+
+        assert_eq!(
+            can_step(&footing, from, target),
+            None,
+            "the blocked floor was discarded and the walker fell through it",
+        );
+
+        // A stair tread below the storey remains a normal way down.
+        let stair = Point::new(11, 10, 20);
+        house.set(Tile::new(stair.x, stair.y), vec![Cover::climbable(10, 10)]);
+        let footing = Footing::new(Some(scene.terrain()), &house, Doors::AsTheyStand);
+        assert_eq!(
+            can_step(&footing, from, stair),
+            Some(Point::new(stair.x, stair.y, 15)),
+            "the guard against falling through a floor stopped a real stair",
         );
     }
 

@@ -25,10 +25,10 @@ use openshard_protocol::wire::{Graphic, SoundId};
 use openshard_protocol::world::{Point, PoisonLevel};
 use openshard_state::components::{
     BehaviourBuffs, Body, Client, Combat, CriminalUntil, DamageType, Frozen, Ghost, Guard, Hidden, Hitpoints,
-    MeleeDamage, MurderDecay, Murders, PoisonCharges, Poisoned, Position, RangedAttack, Resistance, Skills,
-    Stamina, Stats, SwingSpeed, SwingWindup, WrestlingAmbushCooldown, WrestlingCombo,
-    WrestlingInterceptCooldown, WrestlingOpener, WrestlingStride, body_is_female, body_opens_doors,
-    creature_base_sound,
+    ItemAffix, ItemAffixes, MeleeDamage, MurderDecay, Murders, PoisonCharges, Poisoned, Position,
+    RangedAttack, Resistance, Skills, Stamina, Stats, SwingSpeed, SwingWindup, WrestlingAmbushCooldown,
+    WrestlingCombo, WrestlingInterceptCooldown, WrestlingOpener, WrestlingStride, body_is_female,
+    body_opens_doors, creature_base_sound,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::weapon::{LAYER_ONE_HANDED, LAYER_TWO_HANDED};
@@ -791,6 +791,7 @@ pub fn swings(state: &mut WorldState) {
         state.play_sound(attacker, sound);
         // A coated blade spends a dose into whatever it just cut.
         deliver_weapon_poison(state, attacker, target_serial, now);
+        deliver_affix_poison(state, attacker, target_serial, now);
         set_next_swing(state, attacker, now + swing_speed(state, attacker));
         // The blow may have killed it; a dead target is no target. Dead means gone
         // *or* standing at zero hits — a creature killed this tick is not swept off
@@ -1080,6 +1081,41 @@ fn deliver_weapon_poison(state: &mut WorldState, attacker: EntityId, target: Ser
     }
 }
 
+/// Roll and deliver an equipped weapon's `HitPoison` affixes after a landed blow.
+///
+/// Unlike a temporary Poisoning-skill coating, this is a permanent property of
+/// the weapon and never spends a charge. The affix list is copied before the
+/// world's generator is advanced, so the registry is not borrowed across the
+/// mutable roll or poison application.
+fn deliver_affix_poison(state: &mut WorldState, attacker: EntityId, target: Serial, now: WorldTick) {
+    let Some(weapon) = weapons::equipped_weapon_item(state, attacker) else {
+        return;
+    };
+    let effects: Vec<(u8, u16)> = state
+        .registry
+        .get::<ItemAffixes>(weapon)
+        .map(|affixes| {
+            affixes
+                .0
+                .iter()
+                .filter_map(|affix| match *affix {
+                    ItemAffix::HitPoison {
+                        level,
+                        chance_per_mille,
+                    } => Some((level, chance_per_mille)),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    for (level, chance) in effects {
+        let lands = chance >= 1_000 || (chance > 0 && state.rng.below(1_000) < u32::from(chance));
+        if lands {
+            apply_poison(state, target, PoisonLevel::new(level), now);
+        }
+    }
+}
+
 /// stronger one already working — ServUO's rule.
 pub fn apply_poison(state: &mut WorldState, serial: Serial, level: PoisonLevel, now: WorldTick) {
     let Some(entity) = state.registry.entity_of(serial) else {
@@ -1289,12 +1325,34 @@ pub fn melee_blow(state: &mut WorldState, attacker: EntityId) -> u16 {
     }
     if let Some(weapon) = weapons::equipped_weapon(state, attacker) {
         let era = state.gameplay.combat_era;
-        let min = openshard_state::weapon::by_era(weapon.old_min, weapon.aos_min, era);
-        let max = openshard_state::weapon::by_era(weapon.old_max, weapon.aos_max, era);
+        let mut min = openshard_state::weapon::by_era(weapon.old_min, weapon.aos_min, era);
+        let mut max = openshard_state::weapon::by_era(weapon.old_max, weapon.aos_max, era);
+        if let Some(item) = weapons::equipped_weapon_item(state, attacker) {
+            if let Some(affixes) = state.registry.get::<ItemAffixes>(item) {
+                for affix in &affixes.0 {
+                    if let ItemAffix::DamageBonus { minimum, maximum } = *affix {
+                        min = offset_damage(min, minimum);
+                        max = offset_damage(max, maximum);
+                    }
+                }
+            }
+        }
+        if min > max {
+            std::mem::swap(&mut min, &mut max);
+        }
         let span = u32::from(max.saturating_sub(min)) + 1;
         return min + state.rng.below(span) as u16;
     }
     SWING_DAMAGE
+}
+
+/// Apply one signed item-property offset without widening ordinary weapon math.
+fn offset_damage(value: u16, offset: i16) -> u16 {
+    if offset >= 0 {
+        value.saturating_add(offset as u16)
+    } else {
+        value.saturating_sub(offset.unsigned_abs())
+    }
 }
 
 /// A mobile's value in a skill, in tenths (0 for untrained or no sheet).
@@ -1427,6 +1485,11 @@ fn scaled_blow(state: &mut WorldState, attacker: EntityId, defender: EntityId) -
     } else {
         scaled
     };
+    // Slayer is a property of the weapon instance, checked against the target's
+    // body before armour gets to absorb the blow. It never lives on the mobile,
+    // so removing the weapon cannot leave a stale combat bonus behind.
+    let slayer_bonus = slayer_bonus_percent(state, attacker, defender);
+    let final_damage = final_damage * (100.0 + f64::from(slayer_bonus)) / 100.0;
     // Truncate like ServUO's `(int)`, floored at 1.
     let blow = final_damage.max(1.0) as u16;
     // Then the defender's worn armour takes its bite — ServUO's
@@ -1446,4 +1509,31 @@ fn scaled_blow(state: &mut WorldState, attacker: EntityId, defender: EntityId) -
             critical,
         }
     }
+}
+
+/// The sum of an equipped weapon's slayer bonuses matching `defender`'s body.
+fn slayer_bonus_percent(state: &WorldState, attacker: EntityId, defender: EntityId) -> u16 {
+    let Some(body) = state.registry.get::<Body>(defender).map(|body| body.id.0) else {
+        return 0;
+    };
+    let Some(weapon) = weapons::equipped_weapon_item(state, attacker) else {
+        return 0;
+    };
+    state
+        .registry
+        .get::<ItemAffixes>(weapon)
+        .map(|affixes| {
+            affixes
+                .0
+                .iter()
+                .filter_map(|affix| match *affix {
+                    ItemAffix::Slayer {
+                        body: target,
+                        bonus_percent,
+                    } if target == body => Some(u16::from(bonus_percent)),
+                    _ => None,
+                })
+                .sum()
+        })
+        .unwrap_or(0)
 }

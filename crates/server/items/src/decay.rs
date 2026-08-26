@@ -5,6 +5,12 @@ use super::*;
 /// container — it and its contents stay put until someone moves them, which is
 /// also why a container picked up and set back down does not start rotting.
 pub fn mark_decay(state: &mut WorldState, item: EntityId) {
+    // Zero is the operator's explicit "keep everything" setting.  Do this
+    // before attaching a clock: an item created while cleanup is off must stay
+    // clock-free if cleanup is enabled again later.
+    if state.gameplay.decay_ticks == 0 {
+        return;
+    }
     if state.registry.has::<Container>(item) {
         return;
     }
@@ -28,6 +34,12 @@ pub fn mark_decay(state: &mut WorldState, item: EntityId) {
 /// Remove every ground item whose decay tick has arrived. Runs each tick,
 /// against `ticks`, so it reads no clock.
 pub fn decay(state: &mut WorldState) {
+    // Also leave clocks that pre-date a configuration change alone.  This
+    // makes disabling decay immediate for a running world and covers corpses,
+    // whose clock is installed directly by the death system.
+    if state.gameplay.decay_ticks == 0 {
+        return;
+    }
     let now = state.ticks;
     let expired: Vec<EntityId> = state
         .registry

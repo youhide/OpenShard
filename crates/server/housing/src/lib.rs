@@ -32,6 +32,8 @@ pub mod decay;
 pub mod design;
 pub mod sign;
 pub mod storage;
+pub mod template;
+pub mod wsc;
 
 mod access;
 mod classic_doors;
@@ -48,7 +50,7 @@ use openshard_protocol::wire::{Graphic, Hue, MultiId};
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{Drawn, House, Position};
 use openshard_state::{FacetState, ItemLocation, WorldState, establish_item_location};
-use openshard_uofiles::multi::Component;
+use openshard_uofiles::multi::{Component, Multis, bounds};
 
 /// The first customisable-house foundation id, and the last.
 ///
@@ -58,6 +60,65 @@ use openshard_uofiles::multi::Component;
 /// without them is a house nobody can get into, so the range is refused by name
 /// rather than placed and wondered about. See `docs/housing.md`'s D7.
 pub const FOUNDATION_IDS: std::ops::Range<u16> = 0x13EC..0x1D00;
+
+/// Find the smallest custom-house foundation whose client-side design grid is
+/// large enough for `components`.
+///
+/// A custom design packet deliberately has no width or height: the classic
+/// client takes both from the placed foundation multi.  Choosing the first
+/// foundation for every imported building therefore truncates anything larger
+/// than that smallest plot, even though every component reached the server.
+/// Content exports use two equally common origins: some are already centred,
+/// while others begin at `(0, 0)`.  [`fit_design_to_foundation`] centres either
+/// form after this size choice.
+#[must_use]
+pub fn foundation_for_design(multis: &Multis, components: &[Component]) -> Option<MultiId> {
+    let design = bounds(components)?;
+    let width = design.max_x.abs_diff(design.min_x) + 1;
+    let height = design.max_y.abs_diff(design.min_y) + 1;
+    FOUNDATION_IDS
+        .filter_map(|id| {
+            let foundation = bounds(multis.components(id))?;
+            let foundation_width = foundation.max_x.abs_diff(foundation.min_x) + 1;
+            let foundation_height = foundation.max_y.abs_diff(foundation.min_y) + 1;
+            (foundation_width >= width && foundation_height >= height)
+                .then_some((
+                    MultiId(id),
+                    usize::from(foundation_width) * usize::from(foundation_height),
+                ))
+        })
+        .min_by_key(|(id, area)| (*area, id.0))
+        .map(|(id, _)| id)
+}
+
+/// Centre an imported component list on the foundation selected for its size.
+///
+/// The returned list is what is persisted and sent to the client; it is not a
+/// render-only adjustment. That keeps collision, doors and the D8 detail packet
+/// at one common local origin.
+#[must_use]
+pub fn fit_design_to_foundation(multis: &Multis, components: Vec<Component>) -> Option<(MultiId, Vec<Component>)> {
+    let design = bounds(&components)?;
+    let multi = foundation_for_design(multis, &components)?;
+    let foundation = bounds(multis.components(multi.0))?;
+    let design_width = design.max_x.abs_diff(design.min_x) + 1;
+    let design_height = design.max_y.abs_diff(design.min_y) + 1;
+    let foundation_width = foundation.max_x.abs_diff(foundation.min_x) + 1;
+    let foundation_height = foundation.max_y.abs_diff(foundation.min_y) + 1;
+    let shift_x = i32::from(foundation.min_x) + i32::from((foundation_width - design_width) / 2)
+        - i32::from(design.min_x);
+    let shift_y = i32::from(foundation.min_y) + i32::from((foundation_height - design_height) / 2)
+        - i32::from(design.min_y);
+    let components = components
+        .into_iter()
+        .map(|mut component| {
+            component.dx = i16::try_from(i32::from(component.dx) + shift_x).ok()?;
+            component.dy = i16::try_from(i32::from(component.dy) + shift_y).ok()?;
+            Some(component)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some((multi, components))
+}
 
 /// Why a house could not go there.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -209,10 +270,6 @@ pub fn place(
     multi: MultiId,
     owner: Serial,
 ) -> Result<EntityId, Refusal> {
-    // Once, at the top, and threaded — this crate's own idiom, the way `trust`,
-    // `distrust`, `ban`, `unban` and `standing_of` all take it rather than each
-    // asking again.
-    let staff = state.is_staff(actor);
     // A foundation is placed **with a design**, and that is the whole of what
     // `NeedsCustomisation` was waiting for: its own component list has no
     // stairs, so one placed bare is a house nobody can get into. The refusal
@@ -226,6 +283,42 @@ pub fn place(
     } else {
         None
     };
+    place_with_design(state, actor, at, facet, multi, owner, design)
+}
+
+/// Put a supplied custom-house design on a foundation in one reveal.
+///
+/// Imported templates already have their complete component list. Starting
+/// with an empty foundation and immediately redesigning it momentarily shows
+/// that foundation to nearby clients. This path establishes the final design
+/// before the house is visible, exactly like [`place`] does for generated
+/// foundation stairs.
+pub fn place_design(
+    state: &mut WorldState,
+    actor: EntityId,
+    at: Point,
+    facet: Facet,
+    multi: MultiId,
+    owner: Serial,
+    components: Vec<Component>,
+) -> Result<EntityId, Refusal> {
+    if !FOUNDATION_IDS.contains(&multi.0) || state.multis.components(multi.0).is_empty() {
+        return Err(Refusal::NeedsCustomisation);
+    }
+    place_with_design(state, actor, at, facet, multi, owner, Some(components))
+}
+
+/// The common placement transaction after the final shape has been chosen.
+fn place_with_design(
+    state: &mut WorldState,
+    actor: EntityId,
+    at: Point,
+    facet: Facet,
+    multi: MultiId,
+    owner: Serial,
+    design: Option<Vec<Component>>,
+) -> Result<EntityId, Refusal> {
+    let staff = state.is_staff(actor);
     let footprint = footprint_of(state, at, multi, design.as_deref())?;
     if footprint.is_empty() {
         return Err(Refusal::DrawsNothing);
@@ -298,7 +391,7 @@ pub fn place(
     state.place_item(facet, entity, at);
     block_footprint(state.facet_state_mut(facet), entity, &footprint);
     install_doors(state, entity, facet, at, multi);
-    let sign = hang_sign(state, entity, facet, at, multi);
+    let sign = hang_sign_for_design(state, entity, facet, at, multi);
     // `place_item` only files an entity for later interest sweeps. A house
     // built in front of a stationary client must also be drawn now, just like
     // an ordinary item spawned on the ground.
@@ -324,13 +417,13 @@ const SIGN_Z: i16 = 7;
 /// building and at the wrong height.
 fn classic_sign_offset(multi: MultiId) -> Option<(i16, i16, i16)> {
     match multi.0 {
-        0x0064 | 0x0066 | 0x0068 | 0x006A | 0x006C | 0x006E => Some((2, 4, 5)),
-        0x0074 => Some((4, 8, 16)),
-        0x0076 | 0x0078 => Some((2, 8, 16)),
-        0x007A => Some((5, 8, 16)),
-        0x007C => Some((5, 12, 16)),
-        0x007E => Some((5, 17, 16)),
-        0x008C => Some((1, 8, 16)),
+        0x0064..=0x006F => Some((2, 4, 5)),
+        0x0074 | 0x0075 => Some((4, 8, 16)),
+        0x0076..=0x0079 => Some((2, 8, 16)),
+        0x007A | 0x007B => Some((5, 8, 16)),
+        0x007C | 0x007D => Some((5, 12, 16)),
+        0x007E | 0x007F => Some((5, 17, 16)),
+        0x008C | 0x008D => Some((1, 8, 16)),
         0x0096 => Some((1, 8, 11)),
         0x0098 => Some((1, 4, 5)),
         0x009A => Some((5, 8, 20)),
@@ -340,6 +433,21 @@ fn classic_sign_offset(multi: MultiId) -> Option<(i16, i16, i16)> {
         0x00A2 => Some((3, 4, 5)),
         _ => None,
     }
+}
+
+/// A multi may already contain the sign's visible art. Unlike a hanger, this
+/// is the sign itself and therefore names the one position a functional house
+/// sign may occupy. It covers content multis without extending the classic
+/// house catalog for each one.
+fn embedded_sign_offset(components: &[Component]) -> Option<(i16, i16, i16)> {
+    embedded_sign(components).map(|component| (component.dx, component.dy, component.dz))
+}
+
+/// The original visible sign component a legacy template declares.
+fn embedded_sign(components: &[Component]) -> Option<Component> {
+    components.iter().copied().find(|component| {
+        component.drawn() && openshard_uofiles::multi::is_house_sign_graphic(component.graphic)
+    })
 }
 
 /// Where a house's sign hangs, or `None` on a shard with no multi table.
@@ -370,7 +478,7 @@ pub fn sign_spot(
 ) -> Option<Point> {
     let box_ = openshard_uofiles::multi::bounds(shape_of(design, state, multi))?;
     let classic = match design {
-        None => classic_sign_offset(multi),
+        None => classic_sign_offset(multi).or_else(|| embedded_sign_offset(shape_of(None, state, multi))),
         Some(_) => None,
     };
     let (dx, dy, dz) = classic.unwrap_or((box_.min_x, box_.max_y, SIGN_Z));
@@ -393,11 +501,87 @@ pub fn hang_sign(
     at: Point,
     multi: MultiId,
 ) -> Option<EntityId> {
-    let serial = state.registry.serial_of(house)?;
     // The house's own design if it has one: the sign hangs off the box's corner
     // and a designed house's box is not the foundation's.
     let shape = design::shape_of_house(state, house);
     let spot = sign_spot(state, at, multi, shape.as_deref())?;
+    spawn_sign(state, house, facet, spot, Graphic(SIGN_GRAPHIC))
+}
+
+/// Hang a sign using the explicit plaque in an imported template, if any.
+///
+/// Legacy content is a finished building rather than a blank player
+/// foundation. A template without `0x0BD2` did not ask for a sign, so adding
+/// one at the foundation's generic corner is visible junk. An embedded plaque
+/// is its exact attachment point and is replaced by this live, usable entity.
+fn hang_template_sign(state: &mut WorldState, house: EntityId, facet: Facet, at: Point) -> Option<EntityId> {
+    let components = design::shape_of_house(state, house)?;
+    let sign = embedded_sign(&components)?;
+    let spot = Point::new(
+        u16::try_from(i32::from(at.x) + i32::from(sign.dx)).ok()?,
+        u16::try_from(i32::from(at.y) + i32::from(sign.dy)).ok()?,
+        i8::try_from(i32::from(at.z) + i32::from(sign.dz)).ok()?,
+    );
+    spawn_sign(state, house, facet, spot, sign.graphic)
+}
+
+/// Hang the right kind of sign for the shape this house actually carries.
+///
+/// A design equal to one of the operator's loaded templates retains the
+/// template's sign policy. A player-edited design is no longer that template
+/// and uses the regular foundation sign rule.
+pub fn hang_sign_for_design(
+    state: &mut WorldState,
+    house: EntityId,
+    facet: Facet,
+    at: Point,
+    multi: MultiId,
+) -> Option<EntityId> {
+    let imported = design::shape_of_house(state, house).is_some_and(|components| {
+        state
+            .house_templates
+            .values()
+            .any(|template| same_components(template, &components))
+    });
+    if imported {
+        hang_template_sign(state, house, facet, at)
+    } else {
+        hang_sign(state, house, facet, at, multi)
+    }
+}
+
+/// Whether two component lists contain the same design, irrespective of their
+/// save order. SQLite happens to retain row order today, but a sign policy must
+/// not turn into a database implementation detail at the next migration.
+fn same_components(left: &[Component], right: &[Component]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut left = left.to_vec();
+    let mut right = right.to_vec();
+    let key = |component: &Component| {
+        (
+            component.graphic.0,
+            component.dx,
+            component.dy,
+            component.dz,
+            component.flags,
+        )
+    };
+    left.sort_unstable_by_key(key);
+    right.sort_unstable_by_key(key);
+    left == right
+}
+
+/// Create the live entity after its position policy has been chosen.
+fn spawn_sign(
+    state: &mut WorldState,
+    house: EntityId,
+    facet: Facet,
+    spot: Point,
+    graphic: Graphic,
+) -> Option<EntityId> {
+    let serial = state.registry.serial_of(house)?;
     let (sign, _) = state
         .registry
         .spawn_with_serial(openshard_protocol::serial::SerialKind::Item)
@@ -405,7 +589,7 @@ pub fn hang_sign(
     state.registry.insert(
         sign,
         Drawn {
-            id: Graphic(SIGN_GRAPHIC),
+            id: graphic,
             hue: Hue(0),
         },
     );
@@ -422,10 +606,11 @@ pub fn hang_sign(
 ///
 /// # Why adoption still exists beside classic fixtures
 ///
-/// The obvious source is the multi itself, and it is not one: of the 326 multis
-/// a shipped `multi.mul` holds, **three** carry a door component. The reference
-/// agrees — ServUO's houses call `AddDoor` from each house class with an explicit
-/// graphic and position. [`install_doors`] carries that table for classic houses.
+/// The obvious source is the multi itself, and it is usually not one: of the 326
+/// multis a shipped `multi.mul` holds, **three** carry a closed door leaf. The
+/// reference agrees — ServUO's houses call `AddDoor` from each house class with
+/// an explicit graphic and position. [`install_doors`] carries that table for
+/// classic houses, then recognises the exceptional embedded leaves by their art.
 ///
 /// Adoption is the remaining rule a player would state: another door standing
 /// inside your house is your house's door too. It is right for a door added by a
@@ -626,7 +811,11 @@ pub fn footprint_of(
     // is asked about separately, in `ground_under`.
     let tiledata = state.tiles();
     let mut out = Vec::new();
-    for component in components.iter().filter(|c| c.drawn()) {
+    for component in components.iter().filter(|component| {
+        component.drawn()
+            && !openshard_uofiles::multi::is_closed_door_graphic(component.graphic)
+            && !openshard_uofiles::multi::is_house_sign_graphic(component.graphic)
+    }) {
         let graphic = component.graphic;
         // The one expansion. A footprint *refuses* what falls off the edge of
         // the world rather than skipping it, because a house with a wall

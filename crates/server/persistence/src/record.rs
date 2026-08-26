@@ -278,11 +278,11 @@ mod optional_serial {
 ///   fixes rather than a feature it adds: a lute bought and half played came back
 ///   full at every reboot, because nothing saved the count.
 /// - v22: **where a rune points and what a runebook holds**. Both columns land
-///   together even though the book fills a slice later than the rune: there are
-///   no migrations here — [`SqliteStore::init`](crate::SqliteStore) and its
-///   Postgres twin stamp a fresh database and refuse any other version — so two
-///   bumps inside one piece of work means an operator throwing their test shard
-///   away twice for one feature.
+///   together even though the book fills a slice later than the rune. At this
+///   point versions still refused an incompatible database, so two bumps inside
+///   one piece of work meant an operator throwing their test shard away twice
+///   for one feature. A later migration is deliberately limited to a nullable,
+///   lossless addition; incompatible semantic changes still refuse to open.
 /// - v23: **where the world's roll generator got to** ([`WorldRecord::rng_state`]),
 ///   beside the clock it already shares a row with. Unsaved, the generator was
 ///   re-seeded from a constant at every boot, so a restart dealt out the exact
@@ -361,7 +361,10 @@ mod optional_serial {
 /// - v33: a generated double door's two leaves name each other. The optional
 ///   serial lives inside `DoorState`, so both SQLite and Postgres keep the pair
 ///   together through their existing decoration JSON.
-pub const SCHEMA_VERSION: u32 = 33;
+/// - v34: typed custom item affixes. The v33-to-v34 migration only adds a
+///   nullable JSON column, so every existing item correctly starts with no
+///   affixes and remains readable.
+pub const SCHEMA_VERSION: u32 = 34;
 
 /// One component of a house whose shape nobody shipped.
 ///
@@ -970,8 +973,25 @@ pub struct ItemRecord {
     /// one at a time, by a lift that already has the item in hand.
     #[serde(default)]
     pub locked_down: Option<LockdownData>,
+    /// Shard-defined properties of this particular item. A list rather than a
+    /// column per property: a sword carries only a few, while new affix kinds
+    /// should not force a database redesign. Empty is the ordinary item.
+    #[serde(default)]
+    pub affixes: Vec<ItemAffixRecord>,
     /// Where it is.
     pub location: ItemLocation,
+}
+
+/// One saved custom property on an item.
+///
+/// Kept separate from the live [`openshard_state::ItemAffix`] component: save
+/// records are an intentionally stable boundary and must not become a direct
+/// serialization of the simulation's internals.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum ItemAffixRecord {
+    Slayer { body: u16, bonus_percent: u8 },
+    DamageBonus { minimum: i16, maximum: i16 },
+    HitPoison { level: u8, chance_per_mille: u16 },
 }
 
 /// An item pinned inside a house, as saved — a plain mirror of the world's
@@ -1642,6 +1662,10 @@ mod tests {
                     max_charges: 10,
                     default_entry: Some(0),
                 }),
+                affixes: vec![ItemAffixRecord::Slayer {
+                    body: 0x0009,
+                    bonus_percent: 100,
+                }],
                 location,
             };
             let json = serde_json::to_string(&record).expect("an item must serialise");

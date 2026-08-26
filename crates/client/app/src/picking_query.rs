@@ -1307,14 +1307,19 @@ impl crate::App {
             .as_ref()
             .and_then(|view| view.target)
             .and_then(|target| target.multi);
-        let editor_multi = self
+        let editor_preview = self
             .map_editor
             .active()
-            .then(|| self.map_editor.selected_house())
+            .then(|| self.map_editor.selected_house_preview())
             .flatten();
-        let multi = target_multi.map(|multi| multi.0).or(editor_multi);
-        let owns_preview = target_multi.is_some_and(|_| self.world_owns_pointer()) || editor_multi.is_some();
-        let (Some(multi), true) = (multi, owns_preview) else {
+        let owns_preview =
+            target_multi.is_some_and(|_| self.world_owns_pointer()) || editor_preview.is_some();
+        let (Some(preview), true) = (
+            target_multi
+                .map(|multi| crate::editor_mode::HousePreview::Multi(multi.0))
+                .or(editor_preview),
+            owns_preview,
+        ) else {
             self.world.presentation.multi_preview.clear();
             return;
         };
@@ -1330,16 +1335,23 @@ impl crate::App {
         // `Unknown` and `NotAMulti` both draw nothing here, and for once that is
         // the same answer: a preview this client has no shape for is a preview it
         // cannot show, and the cursor is still up either way.
-        self.world.presentation.multi_preview = match crate::net_command::multi_pieces(
-            self.resources.multis.as_deref(),
-            // A placement preview is never a designed house: the cursor draws a
-            // multi the player is about to put down, and a design belongs to one
-            // that already stands.
-            None,
-            openshard_protocol::wire::MultiId(multi).graphic(),
-            at,
-            openshard_protocol::wire::Hue::NONE,
-        ) {
+        let drawn = match preview {
+            crate::editor_mode::HousePreview::Multi(multi) => crate::net_command::multi_pieces(
+                self.resources.multis.as_deref(),
+                None,
+                openshard_protocol::wire::MultiId(multi).graphic(),
+                at,
+                openshard_protocol::wire::Hue::NONE,
+            ),
+            crate::editor_mode::HousePreview::Design(components) => crate::net_command::multi_pieces(
+                None,
+                Some(&components),
+                openshard_protocol::wire::MultiId(0).graphic(),
+                at,
+                openshard_protocol::wire::Hue::NONE,
+            ),
+        };
+        self.world.presentation.multi_preview = match drawn {
             crate::net_command::MultiDraw::Pieces(pieces) => pieces,
             crate::net_command::MultiDraw::Unknown | crate::net_command::MultiDraw::NotAMulti => Vec::new(),
         };

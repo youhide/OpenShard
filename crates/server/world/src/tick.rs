@@ -413,6 +413,20 @@ impl World {
         self
     }
 
+    /// Give the shard its operator-imported custom house designs.
+    ///
+    /// They are keyed by their JSON file stem, rather than synthetic multi ids:
+    /// an imported design has no entry in `multi.mul` and must remain distinct
+    /// from every classic house the client installation owns.
+    #[must_use]
+    pub fn with_house_templates(
+        mut self,
+        templates: std::collections::BTreeMap<String, Vec<openshard_uofiles::multi::Component>>,
+    ) -> Self {
+        self.state.house_templates = templates;
+        self
+    }
+
     /// Give the default facet a map, under the ruleset its number ran in retail.
     ///
     /// A map and no home: a caller handing over a snapshot it built itself — a

@@ -75,6 +75,31 @@ use openshard_protocol::world::Point;
 /// slots and 326 multis in them.
 pub const MAX_MULTI_ID: u16 = 0x3FFF;
 
+/// Whether `graphic` is the closed half of a standard UO door pair.
+///
+/// A custom house sends its ordinary structure as `HouseDesign` but places
+/// doors as live entities.  Leaving a closed door in both representations
+/// makes the entity open while the static design leaf remains shut and blocks
+/// the doorway.  The families are the ones present in the client art used by
+/// the legacy house packs; each has eight closed/open pairs in facing order.
+#[must_use]
+pub fn is_closed_door_graphic(graphic: Graphic) -> bool {
+    [0x0675, 0x06A5, 0x06BD, 0x06D5, 0x06E5, 0x0839, 0x0866]
+        .into_iter()
+        .any(|base| (base..=base + 14).contains(&graphic.0) && (graphic.0 - base).is_multiple_of(2))
+}
+
+/// Whether `graphic` is the visible art of a functional house sign.
+///
+/// A content multi may contain this decal, while the server also creates a
+/// live `HouseSign` entity for naming and interaction. Custom-house rendering
+/// must omit the decal in that case, or the two signs are drawn on top of each
+/// other.
+#[must_use]
+pub const fn is_house_sign_graphic(graphic: Graphic) -> bool {
+    matches!(graphic.0, 0x0BD1 | 0x0BD2)
+}
+
 /// Bytes per `multi.idx` entry: lookup, length, extra.
 const INDEX_ENTRY: usize = 12;
 /// A component before High Seas: id, three offsets, `u32` flags.

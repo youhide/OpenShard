@@ -307,7 +307,10 @@ CREATE TABLE IF NOT EXISTS items (
     -- Two columns rather than JSON: neither is a list, and the house half is the
     -- one a demolition would want to sweep by.
     lockdown_house INTEGER,
-    lockdown_secure INTEGER
+    lockdown_secure INTEGER,
+    -- Typed per-instance custom properties. A list is JSON because an item
+    -- carries only a few affixes and new kinds do not need new columns.
+    affixes TEXT
 );
 CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
 -- NPC mobiles and placed decoration, each a JSON record keyed by serial: a
@@ -402,6 +405,16 @@ impl SqliteStore {
             .optional()
             .map_err(database)?;
         match found {
+            // v34 only adds a nullable column. Existing items therefore have
+            // the exact safe default: no custom properties.
+            Some(33) if SCHEMA_VERSION == 34 => {
+                connection
+                    .execute_batch(
+                        "ALTER TABLE items ADD COLUMN affixes TEXT; \
+                         UPDATE meta SET value = 34 WHERE key = 'schema';",
+                    )
+                    .map_err(database)?;
+            }
             Some(version) if version != SCHEMA_VERSION => {
                 return Err(StoreError::SchemaMismatch {
                     found: version,
@@ -546,9 +559,9 @@ impl SqliteStore {
                       corpse, poison_level, poison_charges, trap_kind, trap_power, \
                       trap_level, uses, exceptional, crafter, \
                       rune_facet, rune_x, rune_y, rune_z, runebook, \
-                      lockdown_house, lockdown_secure) \
+                      lockdown_house, lockdown_secure, affixes) \
                      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,\
-                             ?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34)",
+                             ?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35)",
                         params![
                             item.serial.raw(),
                             // `owner` is `NOT NULL`, `0` the sentinel for "no owner" (a
@@ -604,6 +617,10 @@ impl SqliteStore {
                                 .unwrap_or_default(),
                             item.locked_down.map(|pinned| pinned.house.raw()),
                             item.locked_down.and_then(|pinned| pinned.secure),
+                            (!item.affixes.is_empty())
+                                .then(|| serde_json::to_string(&item.affixes))
+                                .transpose()
+                                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
                         ],
                     )?;
                     Ok(())
@@ -939,7 +956,7 @@ impl SqliteStore {
                      corpse, poison_level, poison_charges, trap_kind, trap_power, trap_level, \
                      uses, exceptional, crafter, \
                      rune_facet, rune_x, rune_y, rune_z, runebook, \
-                     lockdown_house, lockdown_secure FROM items",
+                     lockdown_house, lockdown_secure, affixes FROM items",
                 )
                 .map_err(database)?;
             let rows = statement
@@ -1008,6 +1025,10 @@ impl SqliteStore {
                                     secure: row.get::<_, Option<u8>>(33).ok().flatten(),
                                 }
                             }),
+                            affixes: row
+                                .get::<_, Option<String>>(34)?
+                                .and_then(|json| serde_json::from_str(&json).ok())
+                                .unwrap_or_default(),
                             // A placeholder overwritten below; the location cannot be
                             // built inside `query_map`'s closure return type cleanly.
                             location: ItemLocation::Ground {
@@ -1570,6 +1591,7 @@ mod tests {
             rune: None,
             runebook: None,
             locked_down: None,
+            affixes: Vec::new(),
             location: ItemLocation::Contained {
                 container: Serial::new(container).expect("a valid test serial"),
                 x: 0,
@@ -2073,6 +2095,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn custom_item_affixes_survive_a_reopen() {
+        // Properties are an item-instance concern: two otherwise identical
+        // swords can carry different effects. Keep the whole typed list rather
+        // than a single flag, because loot and crafting may combine them.
+        let path = temp_db("item-affixes");
+        let affixes = vec![
+            crate::record::ItemAffixRecord::Slayer {
+                body: 0x0002,
+                bonus_percent: 50,
+            },
+            crate::record::ItemAffixRecord::DamageBonus {
+                minimum: 3,
+                maximum: 7,
+            },
+            crate::record::ItemAffixRecord::HitPoison {
+                level: 2,
+                chance_per_mille: 250,
+            },
+        ];
+        {
+            let store = SqliteStore::open(&path).expect("open");
+            let mut item = contained(0x4000_0001, 1, 1);
+            item.affixes = affixes.clone();
+            let mut snap = snapshot(vec![character(1, 100)], vec![]);
+            snap.inventories = vec![crate::record::Inventory {
+                owner: Serial::new(1).unwrap(),
+                items: vec![item],
+            }];
+            store.save(&snap).await.expect("save");
+        }
+        {
+            let store = SqliteStore::open(&path).expect("reopen");
+            let items = store.items().await.expect("read");
+            assert_eq!(items[0].affixes, affixes);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
     async fn a_spellbook_mask_survives_a_reopen() {
         // The learned-spell bitmask round-trips through the i64 column even with
         // the top bit set (u64::MAX, the full book) — a signed widen would lose
@@ -2297,6 +2358,45 @@ mod tests {
         }
         let error = SqliteStore::open(&path).expect_err("must refuse");
         assert!(matches!(error, StoreError::SchemaMismatch { found: 999, .. }));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn version_33_adds_empty_custom_affixes_without_losing_the_database() {
+        // This is the one compatible upgrade: NULL means the old, exact
+        // semantics (no properties), so it needs no invented value or rewrite.
+        let path = temp_db("v33-affixes");
+        {
+            let connection = Connection::open(&path).expect("raw open");
+            let v33_schema = SCHEMA_SQL.replace(
+                "    lockdown_secure INTEGER,\n    -- Typed per-instance custom properties. A list is JSON because an item\n    -- carries only a few affixes and new kinds do not need new columns.\n    affixes TEXT\n",
+                "    lockdown_secure INTEGER\n",
+            );
+            connection
+                .execute_batch(&v33_schema)
+                .expect("create the v33 tables");
+            connection
+                .execute("INSERT INTO meta (key, value) VALUES ('schema', 33)", [])
+                .expect("stamp a v33 database");
+        }
+        let store = SqliteStore::open(&path).expect("migrate");
+        let connection = store.connection.lock().expect("connection");
+        let version: u32 = connection
+            .query_row("SELECT value FROM meta WHERE key = 'schema'", [], |row| {
+                row.get(0)
+            })
+            .expect("schema version");
+        let has_affixes: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('items') WHERE name = 'affixes')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("affixes column");
+        assert_eq!(version, SCHEMA_VERSION);
+        assert!(has_affixes);
+        drop(connection);
+        drop(store);
         let _ = std::fs::remove_file(&path);
     }
 }

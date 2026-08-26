@@ -66,6 +66,7 @@ tracing-subscriber.workspace = true
 # What the HUD remembers between runs — see `desk.rs`. TOML because it sits
 # beside `openshard.toml` and is meant to be read and deleted by hand.
 serde.workspace = true
+serde_json.workspace = true
 toml.workspace = true
 winit = "0.30"
 # Where a frame's time actually went. Two halves, because a frame has two and

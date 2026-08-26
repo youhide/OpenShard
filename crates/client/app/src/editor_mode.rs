@@ -6,7 +6,9 @@
 //! snapshot until the shard accepts it and the accepted revision arrives.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 use openshard_client_editor::draft::Draft;
 use openshard_client_editor::tools::{
@@ -25,7 +27,8 @@ use openshard_protocol::mapedit::{
 };
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Facet;
-use openshard_uofiles::multi::{Multi, Multis};
+use openshard_uofiles::multi::{Component, Multis};
+use serde::Deserialize;
 
 /// The authority required before this client offers map editing controls.
 pub(crate) const REQUIRED_AUTHORITY: AccessLevel = AccessLevel::GameMaster;
@@ -46,6 +49,54 @@ enum ActiveTool {
     PlaceHouse,
     RemoveHouse,
 }
+
+/// The two origins a house preview can have in the editor.
+///
+/// A classic multi is resolved by id from the client install.  A custom
+/// template is already the list of components the installed art files draw;
+/// keeping those variants distinct stops a locally loaded template from ever
+/// being sent as an invented `multi_id` to the shard.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum HousePreview {
+    Multi(u16),
+    Design(Arc<[Component]>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HouseSelection {
+    Multi(u16),
+    Template(usize),
+}
+
+struct HouseTemplate {
+    /// Stable server catalogue key: exactly the JSON file stem.
+    key: String,
+    /// Readable label made from that key for the editor list.
+    name: String,
+    components: Arc<[Component]>,
+}
+
+#[derive(Deserialize)]
+struct TemplateFile {
+    format: String,
+    components: Vec<TemplateComponent>,
+}
+
+#[derive(Deserialize)]
+struct TemplateComponent {
+    graphic: u16,
+    dx: i16,
+    dy: i16,
+    dz: i16,
+    flags: u64,
+}
+
+/// The directory an operator populates with [`wsc_to_design`]'s JSON output.
+///
+/// It belongs beside the client files because map-editor catalogues are local
+/// operator tools today; templates become shard-owned data only when the
+/// placement/catalogue protocol is added.
+const CUSTOM_HOUSE_DIRECTORY: &str = "openshard-houses";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommitState {
@@ -87,8 +138,11 @@ pub(crate) struct MapEditor {
     multis: Option<std::sync::Arc<Multis>>,
     house_search: String,
     house_matches: Vec<u16>,
-    selected_house: Option<u16>,
+    selected_house: Option<HouseSelection>,
     house_previews: BTreeMap<u16, Option<egui::TextureHandle>>,
+    templates: Vec<HouseTemplate>,
+    template_error: Option<String>,
+    template_previews: BTreeMap<usize, Option<egui::TextureHandle>>,
 }
 
 impl MapEditor {
@@ -99,6 +153,10 @@ impl MapEditor {
             Err(error) => Self::with_catalogue(None, Some(error.to_string())),
         };
         editor.multis = multis;
+        match load_house_templates(&client_dir.join(CUSTOM_HOUSE_DIRECTORY)) {
+            Ok(templates) => editor.templates = templates,
+            Err(error) => editor.template_error = Some(error),
+        }
         editor.refresh_house_matches();
         editor
     }
@@ -128,6 +186,9 @@ impl MapEditor {
             house_matches: Vec::new(),
             selected_house: None,
             house_previews: BTreeMap::new(),
+            templates: Vec::new(),
+            template_error: None,
+            template_previews: BTreeMap::new(),
         }
     }
 
@@ -163,13 +224,42 @@ impl MapEditor {
         matches!(self.tool, Some(ActiveTool::RemoveStatic))
     }
 
-    /// The multi the next editor click places as a real house entity.
+    /// The classic multi the next editor click places as a real house entity.
     #[must_use]
-    pub(crate) const fn selected_house(&self) -> Option<u16> {
-        if matches!(self.tool, Some(ActiveTool::PlaceHouse)) {
-            self.selected_house
-        } else {
-            None
+    pub(crate) const fn selected_multi(&self) -> Option<u16> {
+        match (self.tool, self.selected_house) {
+            (Some(ActiveTool::PlaceHouse), Some(HouseSelection::Multi(multi))) => Some(multi),
+            _ => None,
+        }
+    }
+
+    /// What the editor should draw under the pointer for its current house
+    /// selection.  Template geometry is reference-counted: rebuilding a ghost
+    /// every frame must not clone a thousand-piece imported building.
+    pub(crate) fn selected_house_preview(&self) -> Option<HousePreview> {
+        if self.tool != Some(ActiveTool::PlaceHouse) {
+            return None;
+        }
+        match self.selected_house? {
+            HouseSelection::Multi(multi) => Some(HousePreview::Multi(multi)),
+            HouseSelection::Template(index) => self
+                .templates
+                .get(index)
+                .map(|template| HousePreview::Design(Arc::clone(&template.components))),
+        }
+    }
+
+    /// The imported template the next editor click asks the shard to place.
+    ///
+    /// Its file stem is an operator-controlled, command-safe catalogue key; it
+    /// is never conflated with a `multi.mul` id.
+    #[must_use]
+    pub(crate) fn selected_template_name(&self) -> Option<&str> {
+        match (self.tool, self.selected_house) {
+            (Some(ActiveTool::PlaceHouse), Some(HouseSelection::Template(index))) => {
+                self.templates.get(index).map(|template| template.key.as_str())
+            }
+            _ => None,
         }
     }
 
@@ -559,17 +649,16 @@ impl MapEditor {
         {
             self.refresh_house_matches();
         }
-        ui.small("multi.mul has no house names; rows show id, footprint and piece count");
+        ui.small("Classic multis from the client install");
         let mut chosen = None;
         let multis = self.multis.as_deref().expect("checked above");
         // Leave the selected multi's picture visible below the catalogue even
         // on an ordinary-height window; the static-art palette can spend more
         // height because it has no second building-sized card under its rows.
-        egui::ScrollArea::vertical().max_height(180.0).show_rows(
-            ui,
-            24.0,
-            self.house_matches.len(),
-            |ui, rows| {
+        egui::ScrollArea::vertical()
+            .id_salt("map-editor-classic-houses")
+            .max_height(180.0)
+            .show_rows(ui, 24.0, self.house_matches.len(), |ui, rows| {
                 for id in &self.house_matches[rows] {
                     let Some(multi) = multis.get(*id) else { continue };
                     let label = format!(
@@ -580,19 +669,52 @@ impl MapEditor {
                         multi.drawn().count()
                     );
                     if ui
-                        .selectable_label(self.selected_house == Some(*id), label)
+                        .selectable_label(self.selected_house == Some(HouseSelection::Multi(*id)), label)
                         .clicked()
                     {
                         chosen = Some(*id);
                     }
                 }
-            },
-        );
+            });
         if let Some(id) = chosen {
-            self.selected_house = Some(id);
+            self.selected_house = Some(HouseSelection::Multi(id));
         }
+
+        ui.separator();
+        ui.label("Custom templates");
+        if let Some(error) = &self.template_error {
+            ui.colored_label(egui::Color32::LIGHT_RED, error);
+        } else if self.templates.is_empty() {
+            ui.small(format!(
+                "Export .wsc files to {CUSTOM_HOUSE_DIRECTORY}/ beside this client install."
+            ));
+        } else {
+            let mut chosen = None;
+            egui::ScrollArea::vertical()
+                .id_salt("map-editor-custom-houses")
+                .max_height(120.0)
+                .show_rows(ui, 24.0, self.templates.len(), |ui, rows| {
+                    for index in rows {
+                        let template = &self.templates[index];
+                        let label = format!("{}  {} pieces", template.name, template.components.len());
+                        if ui
+                            .selectable_label(
+                                self.selected_house == Some(HouseSelection::Template(index)),
+                                label,
+                            )
+                            .clicked()
+                        {
+                            chosen = Some(index);
+                        }
+                    }
+                });
+            if let Some(index) = chosen {
+                self.selected_house = Some(HouseSelection::Template(index));
+            }
+        }
+
         match self.selected_house {
-            Some(id) => {
+            Some(HouseSelection::Multi(id)) => {
                 ui.small(format!("Selected house {id:#06x}. Click the world to place it."));
                 self.house_previews.retain(|cached, _| *cached == id);
                 if !self.house_previews.contains_key(&id) {
@@ -600,7 +722,14 @@ impl MapEditor {
                         .catalogue
                         .as_ref()
                         .zip(self.multis.as_deref().and_then(|multis| multis.get(id)))
-                        .map(|(catalogue, multi)| house_preview_texture(catalogue, ui.ctx(), multi))
+                        .map(|(catalogue, multi)| {
+                            components_preview_texture(
+                                catalogue,
+                                ui.ctx(),
+                                &format!("map-editor-house-{id:#06x}"),
+                                multi.components.as_slice(),
+                            )
+                        })
                         .transpose()
                         .map(Option::flatten);
                     match preview {
@@ -625,6 +754,55 @@ impl MapEditor {
                     }
                     None => {
                         ui.small("No drawable preview for this multi.");
+                    }
+                }
+            }
+            Some(HouseSelection::Template(index)) => {
+                let Some(template) = self.templates.get(index) else {
+                    self.selected_house = None;
+                    return;
+                };
+                ui.small(format!(
+                    "Selected template {}. Click the world to place it.",
+                    template.name
+                ));
+                self.template_previews.retain(|cached, _| *cached == index);
+                if !self.template_previews.contains_key(&index) {
+                    let preview = self
+                        .catalogue
+                        .as_ref()
+                        .map(|catalogue| {
+                            components_preview_texture(
+                                catalogue,
+                                ui.ctx(),
+                                &format!("map-editor-template-{index}"),
+                                &template.components,
+                            )
+                        })
+                        .transpose()
+                        .map(Option::flatten);
+                    match preview {
+                        Ok(texture) => {
+                            self.template_previews.insert(index, texture);
+                        }
+                        Err(error) => {
+                            self.template_previews.insert(index, None);
+                            self.message = Some(error.to_string());
+                        }
+                    }
+                }
+                match self.template_previews.get(&index).and_then(Option::as_ref) {
+                    Some(texture) => {
+                        egui::Frame::canvas(ui.style()).show(ui, |ui| {
+                            ui.add(
+                                egui::Image::from_texture(texture)
+                                    .max_size(egui::vec2(220.0, 170.0))
+                                    .maintain_aspect_ratio(true),
+                            );
+                        });
+                    }
+                    None => {
+                        ui.small("No drawable preview for this template.");
                     }
                 }
             }
@@ -813,12 +991,81 @@ fn preview_texture(
     }))
 }
 
+fn load_house_templates(directory: &Path) -> Result<Vec<HouseTemplate>, String> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("could not read {}: {error}", directory.display())),
+    };
+    let mut paths = entries
+        .map(|entry| entry.map(|entry| entry.path()).map_err(|error| error.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    paths.sort();
+    paths
+        .into_iter()
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+        })
+        .map(|path| {
+            let source = fs::read_to_string(&path)
+                .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+            decode_house_template(&path, &source)
+        })
+        .collect()
+}
+
+fn decode_house_template(path: &Path, source: &str) -> Result<HouseTemplate, String> {
+    let template: TemplateFile = serde_json::from_str(source)
+        .map_err(|error| format!("could not decode {}: {error}", path.display()))?;
+    if template.format != "openshard-house-design/v1" {
+        return Err(format!("{} has an unknown house-template format", path.display()));
+    }
+    if template.components.is_empty() {
+        return Err(format!("{} has no components", path.display()));
+    }
+    let components = template
+        .components
+        .into_iter()
+        .map(|component| {
+            if i8::try_from(component.dx).is_err()
+                || i8::try_from(component.dy).is_err()
+                || i8::try_from(component.dz).is_err()
+            {
+                return Err(format!(
+                    "{} has a component the custom-house wire format cannot carry",
+                    path.display()
+                ));
+            }
+            Ok(Component {
+                graphic: Graphic(component.graphic),
+                dx: component.dx,
+                dy: component.dy,
+                dz: component.dz,
+                flags: component.flags,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let key = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| format!("{} has no UTF-8 file name", path.display()))?
+        .to_owned();
+    Ok(HouseTemplate {
+        name: key.replace(['_', '-'], " "),
+        key,
+        components: components.into(),
+    })
+}
+
 /// Flatten a multi's component art into the same south-east isometric view as
 /// the world, for the selected-house card in the editor panel.
-fn house_preview_texture(
+fn components_preview_texture(
     catalogue: &Catalog,
     context: &egui::Context,
-    multi: &Multi,
+    texture_name: &str,
+    components: &[Component],
 ) -> Result<Option<egui::TextureHandle>, openshard_uofiles::art::ArtError> {
     const HALF_TILE: i32 = 22;
     const Z_STEP: i32 = 4;
@@ -827,7 +1074,7 @@ fn house_preview_texture(
 
     let mut layers = Vec::new();
     let mut bounds: Option<(i32, i32, i32, i32)> = None;
-    for component in multi.drawn().copied() {
+    for component in components.iter().copied().filter(|component| component.drawn()) {
         let Some(image) = catalogue.preview(AssetId::Static(component.graphic))? else {
             continue;
         };
@@ -903,7 +1150,7 @@ fn house_preview_texture(
     };
     let image = egui::ColorImage::new([thumb_width, thumb_height], pixels);
     Ok(Some(context.load_texture(
-        format!("map-editor-house-{:#06x}", multi.id),
+        texture_name,
         image,
         egui::TextureOptions::NEAREST,
     )))
@@ -970,7 +1217,19 @@ impl crate::app::App {
         let Some(at) = at else {
             return;
         };
-        if let Some(multi) = self.map_editor.selected_house() {
+        if let Some(template) = self.map_editor.selected_template_name() {
+            let tile = self
+                .pick_tile(camera)
+                .map(|tile| openshard_protocol::world::Point::new(tile.at.x, tile.at.y, tile.stand_z.0));
+            if let (Some(link), Some(at)) = (self.world.shard.link(), tile) {
+                link.say(
+                    format!(".house @{template} {} {} {}", at.x, at.y, at.z),
+                    openshard_protocol::speech::TalkMode::Regular,
+                );
+            }
+            return;
+        }
+        if let Some(multi) = self.map_editor.selected_multi() {
             let tile = self
                 .pick_tile(camera)
                 .map(|tile| openshard_protocol::world::Point::new(tile.at.x, tile.at.y, tile.stand_z.0));
@@ -1008,6 +1267,7 @@ impl crate::app::App {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::sync::Arc;
 
     use openshard_protocol::access::AccessLevel;
@@ -1015,7 +1275,7 @@ mod tests {
     use openshard_tiles::LandTileId;
     use openshard_uofiles::multi::{Component, Multi, Multis};
 
-    use super::{ActiveTool, AssetId, MapEditor};
+    use super::{ActiveTool, AssetId, HousePreview, HouseSelection, MapEditor, decode_house_template};
 
     #[test]
     fn a_player_cannot_enter_editor_mode() {
@@ -1089,12 +1349,60 @@ mod tests {
             }],
         )])));
         editor.refresh_house_matches();
-        editor.selected_house = Some(0x64);
+        editor.selected_house = Some(HouseSelection::Multi(0x64));
 
-        assert_eq!(editor.selected_house(), None);
+        assert_eq!(editor.selected_multi(), None);
         editor.tool = Some(ActiveTool::PlaceHouse);
-        assert_eq!(editor.selected_house(), Some(0x64));
+        assert_eq!(editor.selected_multi(), Some(0x64));
         assert_eq!(editor.house_matches, vec![0x64]);
+    }
+
+    #[test]
+    fn an_exported_wsc_design_appears_as_a_custom_template_preview() {
+        let template = decode_house_template(
+            Path::new("Marble-Bungalow.json"),
+            r#"{
+                "format": "openshard-house-design/v1",
+                "revision": 1,
+                "components": [
+                    { "graphic": 1442, "dx": 3, "dy": 1, "dz": 20, "flags": 1 }
+                ]
+            }"#,
+        )
+        .expect("the exporter format is accepted");
+        assert_eq!(template.name, "Marble Bungalow");
+
+        let mut editor = MapEditor::with_catalogue(None, None);
+        editor.templates.push(template);
+        editor.selected_house = Some(HouseSelection::Template(0));
+        editor.tool = Some(ActiveTool::PlaceHouse);
+
+        assert_eq!(
+            editor.selected_multi(),
+            None,
+            "a template is not an invented multi id"
+        );
+        assert_eq!(editor.selected_template_name(), Some("Marble-Bungalow"));
+        assert!(matches!(
+            editor.selected_house_preview(),
+            Some(HousePreview::Design(components)) if components.as_ref() == [Component {
+                graphic: Graphic(1442), dx: 3, dy: 1, dz: 20, flags: 1
+            }]
+        ));
+    }
+
+    #[test]
+    fn a_template_that_cannot_cross_the_house_design_wire_is_rejected() {
+        let source = r#"{
+            "format": "openshard-house-design/v1",
+            "components": [
+                { "graphic": 1442, "dx": 128, "dy": 0, "dz": 0, "flags": 1 }
+            ]
+        }"#;
+        assert!(
+            decode_house_template(Path::new("too-wide.json"), source).is_err(),
+            "the preview must not bless a template the shard would drop on the wire"
+        );
     }
 
     #[test]
@@ -1104,7 +1412,7 @@ mod tests {
         assert!(!editor.removes_house());
         editor.tool = Some(ActiveTool::RemoveHouse);
         assert!(editor.removes_house());
-        assert_eq!(editor.selected_house(), None);
+        assert_eq!(editor.selected_multi(), None);
     }
 
     #[test]
@@ -1115,12 +1423,12 @@ mod tests {
         assert!(editor.cancel_tool());
         assert!(editor.active());
         assert!(!editor.removes_static());
-        assert_eq!(editor.selected_house(), None);
+        assert_eq!(editor.selected_multi(), None);
         assert!(!editor.cancel_tool());
 
         editor.tool = Some(ActiveTool::PlaceHouse);
         assert!(editor.cancel_tool());
-        assert_eq!(editor.selected_house(), None);
+        assert_eq!(editor.selected_multi(), None);
         assert!(!editor.removes_house());
     }
 }

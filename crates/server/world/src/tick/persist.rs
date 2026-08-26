@@ -1,7 +1,7 @@
 use super::*;
 use openshard_persistence::{
-    CorpseData, CorpseEquipmentData, DoneQuestRecord, EffectRecord, PetData, QuestRecord, RestockRecord,
-    RunebookData, RunebookEntryData, WorldRecord,
+    CorpseData, CorpseEquipmentData, DoneQuestRecord, EffectRecord, ItemAffixRecord, PetData, QuestRecord,
+    RestockRecord, RunebookData, RunebookEntryData, WorldRecord,
 };
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::identity::CharacterName;
@@ -9,9 +9,10 @@ use openshard_protocol::wire::{Graphic, Hue, Layer};
 use openshard_protocol::world::{Aggression, PhysicalResistance};
 use openshard_state::components::{
     Banker, BehaviourBuff, BehaviourBuffs, Corpse, CraftedBy, DoneQuest, Escortable, Field, Frozen, Healer,
-    Moongate, NightHome, Npc, Pet, PetOrder, PoisonCharges, Poisoned, Price, Quality, QuestGiver, QuestLog,
-    QuestState, RangedAttack, Restock, RuneMark, Runebook, RunebookEntry, Skills, Spellbook, StatMod,
-    StatMods, StockRecord, SwingSpeed, Title, TradeWindow, Trap, TrapKind, Vendor, body_opens_doors, effect,
+    ItemAffix, ItemAffixes, Moongate, NightHome, Npc, Pet, PetOrder, PoisonCharges, Poisoned, Price, Quality,
+    QuestGiver, QuestLog, QuestState, RangedAttack, Restock, RuneMark, Runebook, RunebookEntry, Skills,
+    Spellbook, StatMod, StatMods, StockRecord, SwingSpeed, Title, TradeWindow, Trap, TrapKind, Vendor,
+    body_opens_doors, effect,
 };
 use openshard_state::{KeyValue, LockKind, QuestKey, WorldTick};
 
@@ -518,8 +519,63 @@ impl World {
                     house: pinned.house,
                     secure: pinned.secure.map(|access| access.code()),
                 }),
+            affixes: registry
+                .get::<ItemAffixes>(item)
+                .map(|affixes| {
+                    affixes
+                        .0
+                        .iter()
+                        .map(|affix| match *affix {
+                            ItemAffix::Slayer { body, bonus_percent } => {
+                                ItemAffixRecord::Slayer { body, bonus_percent }
+                            }
+                            ItemAffix::DamageBonus { minimum, maximum } => {
+                                ItemAffixRecord::DamageBonus { minimum, maximum }
+                            }
+                            ItemAffix::HitPoison {
+                                level,
+                                chance_per_mille,
+                            } => ItemAffixRecord::HitPoison {
+                                level,
+                                chance_per_mille,
+                            },
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
             location,
         })
+    }
+
+    /// Restore one item's typed custom properties at the persistence seam.
+    fn restore_affixes(&mut self, entity: EntityId, record: &ItemRecord) {
+        if record.affixes.is_empty() {
+            return;
+        }
+        self.state.registry.insert(
+            entity,
+            ItemAffixes(
+                record
+                    .affixes
+                    .iter()
+                    .map(|affix| match *affix {
+                        ItemAffixRecord::Slayer { body, bonus_percent } => {
+                            ItemAffix::Slayer { body, bonus_percent }
+                        }
+                        ItemAffixRecord::DamageBonus { minimum, maximum } => {
+                            ItemAffix::DamageBonus { minimum, maximum }
+                        }
+                        ItemAffixRecord::HitPoison {
+                            level,
+                            chance_per_mille,
+                        } => ItemAffix::HitPoison {
+                            level,
+                            chance_per_mille,
+                        },
+                    })
+                    .collect(),
+            ),
+        );
     }
 
     /// Put a saved item's craftsmanship back: the exceptional mark, and the name
@@ -1228,12 +1284,15 @@ impl World {
         }
         self.restore_craftsmanship(entity, record);
         self.restore_travel_state(entity, record);
-        // Loose clutter resumes rotting; a container does not (mark_decay skips
-        // it) — except a corpse, which is a container that *must* rot, so it gets
-        // a fresh timer here (the decay tick is not itself saved, so a restored
-        // corpse counts down from the restore, like any restored clutter does).
+        self.restore_affixes(entity, record);
+        // Loose clutter resumes rotting unless cleanup is disabled. A container
+        // does not (mark_decay skips it); a corpse gets its own seven-minute
+        // timer when decay is enabled. The tick itself is not saved, so a
+        // restored corpse counts down from the restore.
         items::mark_decay(&mut self.state, entity);
-        if Graphic(record.graphic) == openshard_state::components::CORPSE_GRAPHIC {
+        if self.state.gameplay.decay_ticks != 0
+            && Graphic(record.graphic) == openshard_state::components::CORPSE_GRAPHIC
+        {
             self.state.registry.insert(
                 entity,
                 openshard_state::components::Decays {
@@ -1334,6 +1393,7 @@ impl World {
             }
             self.restore_craftsmanship(entity, record);
             self.restore_travel_state(entity, record);
+            self.restore_affixes(entity, record);
         }
         // Pass two: where each item goes.
         for record in &records {

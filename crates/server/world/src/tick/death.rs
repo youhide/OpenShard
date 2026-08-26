@@ -633,14 +633,16 @@ impl World {
         // save sweeps along with the rest of the item.
         self.state.registry.insert(entity, story);
         // A corpse rots like clutter, but it is a container, so `mark_decay`
-        // skips it — the timer is set here directly, and `items::decay` takes the
-        // loot down with it.
-        self.state.registry.insert(
-            entity,
-            Decays {
-                at_tick: self.state.ticks + CORPSE_DECAY_TICKS,
-            },
-        );
+        // skips it.  Its separate seven-minute timer is installed here; zero
+        // item-decay is the shard-wide "nothing on the map disappears" switch.
+        if self.state.gameplay.decay_ticks != 0 {
+            self.state.registry.insert(
+                entity,
+                Decays {
+                    at_tick: self.state.ticks + CORPSE_DECAY_TICKS,
+                },
+            );
+        }
         // A corpse is an item and always was: it is a container with a body
         // graphic, not a body, so it goes in the list the living are not read
         // out of.

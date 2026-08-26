@@ -135,6 +135,24 @@ fn component(graphic: u16, dx: i16, dy: i16, dz: i16, drawn: bool) -> Component 
     }
 }
 
+#[test]
+fn an_imported_design_uses_a_fitting_foundation_and_is_centred_on_it() {
+    let small = vec![component(1, -3, -3, 0, true), component(1, 3, 3, 0, true)];
+    let fitting = vec![component(1, -5, -5, 0, true), component(1, 6, 6, 0, true)];
+    let multis = Multis::of([
+        Multi::new(0x13EC, small),
+        Multi::new(0x13ED, fitting),
+    ]);
+    // Old WSC exports commonly begin in their north-west corner rather than at
+    // the foundation centre.
+    let design = vec![component(FLOOR, 0, 0, 0, true), component(FLOOR, 11, 11, 0, true)];
+
+    let (foundation, fitted) = fit_design_to_foundation(&multis, design).expect("a 12x12 foundation");
+
+    assert_eq!(foundation, MultiId(0x13ED));
+    assert_eq!(bounds(&fitted), bounds(multis.components(0x13ED)));
+}
+
 /// A cottage: four walls in a ring, a floor in the middle, and one component the
 /// client never draws.
 fn cottage() -> Vec<Component> {
@@ -152,6 +170,33 @@ fn cottage() -> Vec<Component> {
 
 fn world_with(components: Vec<Component>) -> WorldState {
     ground_of(components, 0, true)
+}
+
+/// A fixture world that knows one extra multi, for testing content models whose
+/// own sign or closed-door art supplies fixtures.
+fn world_with_extra_multi(multi: Multi) -> WorldState {
+    let (map, tiles) = ground_scene(0, true).into_shard(Facet(0));
+    let mut facets = BTreeMap::new();
+    facets.insert(
+        Facet(0),
+        FacetState::new(
+            Some(map),
+            None,
+            SIZE,
+            SIZE,
+            openshard_state::facet_rules::FacetRules::classic(Facet(0)),
+            None,
+            &tiles,
+        ),
+    );
+    WorldState::new(
+        facets,
+        Facet(0),
+        tiles,
+        Multis::of([Multi::new(COTTAGE, cottage()), multi]),
+        (0, 0),
+        1,
+    )
 }
 
 /// A world the size of Felucca, for the one test that uses the shipped region
@@ -936,8 +981,9 @@ fn a_full_list_refuses_a_new_name_and_takes_an_old_one() {
 /// A door standing inside a house becomes the house's, and the house's rules
 /// then decide who may work it.
 ///
-/// The multi cannot be the source — three of a shipped file's 326 carry a door
-/// component at all — so the rule is the one a player would state.
+/// The multi usually cannot be the source — only three of a shipped file's 326
+/// carry a door component at all — so the general rule is the one a player
+/// would state.
 #[test]
 fn a_house_adopts_the_doors_standing_inside_it() {
     use openshard_state::components::{Door, HouseDoor};
@@ -1009,6 +1055,175 @@ fn a_classic_house_places_its_door() {
             .is_some(),
         "the shut door does not close the entrance"
     );
+}
+
+#[test]
+fn an_imported_design_turns_its_closed_leaf_into_a_functional_door() {
+    use openshard_state::components::{Door, HouseDoor};
+
+    const FOUNDATION: u16 = 0x13EC;
+    let mut state = world_with_extra_multi(Multi::new(FOUNDATION, cottage()));
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    let house = place(&mut state, actor, at, Facet(0), FOUNDATION, owner).expect("a usable foundation");
+    let mut imported = cottage();
+    imported.push(Component {
+        // A light-wood door: this family appears in the legacy cathedral and
+        // is not one of the classic house fixture families.
+        graphic: Graphic(0x06BD),
+        dx: 2,
+        dy: 1,
+        dz: 7,
+        flags: 1,
+    });
+
+    design::redesign(&mut state, actor, house, imported).expect("a non-empty imported design");
+    install_doors(&mut state, house, Facet(0), at, MultiId(FOUNDATION));
+
+    let house_serial = state.registry.serial_of(house).unwrap();
+    let door = state
+        .registry
+        .query::<HouseDoor>()
+        .find(|(_, entry)| entry.house == house_serial)
+        .map(|(entity, _)| entity)
+        .expect("the imported closed leaf became a door entity");
+    assert_eq!(
+        state.registry.get::<Position>(door).map(|position| position.0),
+        Some(Point::new(12, 11, 7))
+    );
+    assert_eq!(
+        state
+            .registry
+            .get::<Door>(door)
+            .map(|door| (door.closed, door.open)),
+        Some((Graphic(0x06BD), Graphic(0x06BE)))
+    );
+}
+
+/// The alternate small-house multis are still classic houses: a player who
+/// chooses one must not lose its declared door and sign merely because its id
+/// is the odd member of the art pair.
+#[test]
+fn a_classic_house_variant_keeps_its_shared_fixtures() {
+    use openshard_state::components::{HouseDoor, HouseSign};
+
+    let mut state = world_with_extra_multi(Multi::new(0x0065, cottage()));
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    let house = place(&mut state, actor, at, Facet(0), 0x0065, owner).expect("a legal variant house");
+    let serial = state.registry.serial_of(house).unwrap();
+
+    assert!(
+        state
+            .registry
+            .query::<HouseDoor>()
+            .any(|(_, door)| door.house == serial)
+    );
+    assert!(state.registry.query::<HouseSign>().any(|(entity, sign)| {
+        sign.house == serial
+            && state.registry.get::<Position>(entity).map(|position| position.0)
+                == Some(Point::new(12, 14, 5))
+    }));
+}
+
+/// `0x0087` supplies its own visible house sign and closed door leaves. Those
+/// art components are the authoritative frames for the functional fixtures.
+#[test]
+fn an_embedded_house_sign_and_doors_become_functional_fixtures() {
+    use openshard_state::components::{HouseDoor, HouseSign};
+
+    let mut state = world_with_extra_multi(Multi::new(
+        0x0087,
+        vec![
+            component(1, 0, 0, 0, false),
+            component(WALL, 0, 0, 0, true),
+            component(0x0BD2, 0, 7, -2, true),
+            component(0x06A7, 4, -1, 0, true),
+            component(0x06A5, -4, 6, 0, true),
+            component(0x06A7, -3, 6, 0, true),
+        ],
+    ));
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    let house = place(&mut state, actor, at, Facet(0), 0x0087, owner).expect("a legal content house");
+    let serial = state.registry.serial_of(house).unwrap();
+
+    let doors: Vec<_> = state
+        .registry
+        .query::<HouseDoor>()
+        .filter(|(_, door)| door.house == serial)
+        .map(|(entity, _)| state.registry.get::<Position>(entity).unwrap().0)
+        .collect();
+    assert_eq!(
+        doors.len(),
+        3,
+        "every closed leaf in the multi must become a door"
+    );
+    assert!(doors.contains(&Point::new(6, 16, 0)));
+    assert!(doors.contains(&Point::new(7, 16, 0)));
+    assert!(doors.contains(&Point::new(14, 9, 0)));
+    assert!(state.registry.query::<HouseSign>().any(|(entity, sign)| {
+        sign.house == serial
+            && state.registry.get::<Position>(entity).map(|position| position.0)
+                == Some(Point::new(10, 17, -2))
+    }));
+}
+
+/// An imported design's plaque is not a request to hang a second sign at the
+/// generic foundation corner: it is the exact attachment point for the live
+/// sign that replaces the decorative component in the design packet.
+#[test]
+fn an_imported_design_keeps_its_embedded_sign_position() {
+    use openshard_state::components::HouseSign;
+
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    let imported = vec![component(WALL, 0, 0, 0, true), component(0x0BD1, 3, 4, 7, true)];
+    state.house_templates.insert("with-sign".into(), imported.clone());
+    let house = super::place_design(
+        &mut state,
+        actor,
+        at,
+        Facet(0),
+        MultiId(FOUNDATION),
+        owner,
+        imported,
+    )
+    .expect("an imported house with a declared sign");
+    let serial = state.registry.serial_of(house).unwrap();
+
+    assert!(state.registry.query::<HouseSign>().any(|(entity, sign)| {
+        sign.house == serial
+            && state.registry.get::<Position>(entity).map(|position| position.0)
+                == Some(Point::new(13, 14, 7))
+            && state.registry.get::<Drawn>(entity).map(|drawn| drawn.id) == Some(Graphic(0x0BD1))
+    }));
+}
+
+#[test]
+fn an_imported_design_without_a_plaque_does_not_gain_a_corner_sign() {
+    use openshard_state::components::HouseSign;
+
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let imported = vec![component(WALL, 0, 0, 0, true)];
+    state
+        .house_templates
+        .insert("without-sign".into(), imported.clone());
+
+    super::place_design(
+        &mut state,
+        actor,
+        Point::new(10, 10, 0),
+        Facet(0),
+        MultiId(FOUNDATION),
+        owner,
+        imported,
+    )
+    .expect("a signless imported house");
+
+    assert!(state.registry.query::<HouseSign>().next().is_none());
 }
 
 #[test]
@@ -2229,4 +2444,27 @@ fn a_placed_foundation_starts_at_revision_one() {
     .expect("open ground");
 
     assert_eq!(design::revision(&state, house), 1);
+}
+
+/// Imported content is the house's first shape, not a redesign after an empty
+/// foundation has already been revealed to clients.
+#[test]
+fn a_supplied_design_is_installed_at_its_first_revision() {
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let imported = vec![component(FLOOR, 0, 0, 0, true), component(WALL, 2, 0, 0, true)];
+
+    let house = super::place_design(
+        &mut state,
+        actor,
+        Point::new(10, 10, 0),
+        Facet(0),
+        MultiId(FOUNDATION),
+        owner,
+        imported.clone(),
+    )
+    .expect("the complete imported design is placeable");
+
+    assert_eq!(design::revision(&state, house), 1);
+    assert_eq!(design::shape_of_house(&state, house), Some(imported));
 }

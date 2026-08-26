@@ -49,8 +49,9 @@ use openshard_uofiles::anim::BodyKind;
 use crate::boat::Plank;
 use crate::components::{
     Access, Amount, Body, Client, Combat, Contained, CorpseBody, CraftedBy, Drawn, Equipped, Ghost, Heading,
-    HearsGhosts, Hidden, Hitpoints, InRegion, ItemLocation, Meditating, Movement, Name, Position, Quality,
-    SettledItemLocation, Staff, Stamina, Stealthing, SwingWindup, TradeWindow, body_opens_doors,
+    HearsGhosts, Hidden, Hitpoints, InRegion, ItemAffix, ItemAffixes, ItemLocation, Meditating, Movement,
+    Name, Position, Quality, SettledItemLocation, Staff, Stamina, Stealthing, SwingWindup, TradeWindow,
+    body_opens_doors, creature_name,
 };
 use crate::connection::Connection;
 use crate::dialogue::Dialogue;
@@ -66,6 +67,20 @@ use crate::weapon::{LAYER_ONE_HANDED, LAYER_TWO_HANDED, WeaponAnimation, weapon_
 
 /// A character's height above the ground when the facet has no map to ask.
 const Z_WITHOUT_A_MAP: i8 = 0;
+
+/// Bumped when the meaning of a cached custom-house `0xD8` changes.
+///
+/// The stored design revision says when an owner edited their house.  The
+/// client cache key must also change when the server changes how that same
+/// stored list is rendered — for example, when closed door and sign decals
+/// became live entities and therefore stopped travelling in `0xD8`.  Keeping
+/// this in the high byte leaves ordinary owner revisions intact while making
+/// every old cache miss once after an engine upgrade.
+const HOUSE_DESIGN_WIRE_EPOCH: u32 = 8;
+
+fn house_design_wire_revision(revision: u32) -> openshard_protocol::design::Revision {
+    openshard_protocol::design::Revision(revision.wrapping_add(HOUSE_DESIGN_WIRE_EPOCH << 24))
+}
 
 /// "You stop meditating." — the line a broken trance says, ServUO's 500134.
 const STOP_MEDITATING: ClilocId = ClilocId(500_134);
@@ -1040,6 +1055,12 @@ pub struct WorldState {
     /// Owned outright, like [`tiles`](Self::tiles) beside it: one holder each,
     /// and nothing on the shard to share either with.
     pub multis: openshard_uofiles::multi::Multis,
+    /// Imported house designs the operator has made available to staff.
+    ///
+    /// Unlike [`multis`](Self::multis), these shapes are original content rather
+    /// than entries in `multi.mul`; the server retains them so a placement is
+    /// authoritative and can be sent to every client as a `HouseDesign`.
+    pub house_templates: BTreeMap<String, Vec<openshard_uofiles::multi::Component>>,
     /// Which entity a connection is driving.
     pub players: HashMap<ConnectionId, EntityId>,
     /// Every connection the world is holding, playing a character or not.
@@ -1441,6 +1462,7 @@ impl WorldState {
             default_facet,
             tiles,
             multis,
+            house_templates: BTreeMap::new(),
             players: HashMap::new(),
             connections: HashMap::new(),
             seen: HashMap::new(),
@@ -3069,16 +3091,24 @@ impl WorldState {
                 packet: tooltip,
             });
         }
-        // And a designed house's *picture* revision, which is the same shape one
-        // question along: the client knows its cached walls are stale and can ask
-        // for a fresh `0xD8`. The reference does exactly this and in exactly this
-        // place — `HouseFoundation.SendInfoTo` overrides the item's own "show
-        // yourself" and appends the general-info packet after it.
+        // And a designed house's picture revision. It follows the foundation
+        // item so the client knows which multi supplies the D8 grid bounds.
         if let Some(design) = self.design_revision_packet(other, version) {
             self.outbox.push(Outbound {
                 connection,
                 packet: design,
             });
+        }
+        // Do not make a newly visible foundation spend a network round-trip as
+        // an empty platform. The client may still cache this revision on later
+        // visits, but its first frame has the ordinary item before this D8 and
+        // can therefore resolve the foundation bounds immediately. `false` is
+        // the protocol's volunteered-design flag; a 0xBF/0x1E answer below is
+        // still marked as a response.
+        if version.supports(Feature::CustomMulti) {
+            if let Some(packet) = self.design_detail_packet(other, false) {
+                self.outbox.push(Outbound { connection, packet });
+            }
         }
     }
 
@@ -3103,7 +3133,7 @@ impl WorldState {
         Some(
             openshard_protocol::design::DesignRevision {
                 serial: openshard_protocol::serial::RawSerial(serial.raw()),
-                revision: openshard_protocol::design::Revision(design.revision),
+                revision: house_design_wire_revision(design.revision),
             }
             .encode(),
         )
@@ -3123,10 +3153,29 @@ impl WorldState {
     /// because a client asked, clear when the shard volunteered it.
     #[must_use]
     pub fn design_detail_packet(&self, house: EntityId, response: bool) -> Option<Vec<u8>> {
-        use openshard_protocol::design::{DesignDetail, DesignTile};
+        use openshard_protocol::design::{DesignBounds, DesignDetail, DesignTile};
 
         let design = self.registry.get::<crate::components::HouseDesign>(house)?;
         let serial = self.registry.serial_of(house)?;
+        // The client decodes grid planes using the placed foundation's box,
+        // because `0xD8` does not contain width or height.  Deriving a box from
+        // the imported design here instead made a plane stride the client did
+        // not share: tiles then appeared increasingly far along x.  Components
+        // that do not fit this foundation grid fall back to the packet's
+        // longhand stair buffer, which carries their offsets exactly.
+        let foundation = self.registry.get::<crate::components::House>(house)?.multi;
+        let foundation = openshard_uofiles::multi::bounds(self.multis.components(foundation.0))?;
+        let bounds = DesignBounds {
+            // The client obtains both the origin and the dimensions of these
+            // compact planes from its placed foundation multi. They must match
+            // exactly: adding a seemingly harmless extra x column makes the
+            // client decode every following column with the wrong stride,
+            // wrapping floors and roof rows into unrelated map tiles.
+            x_min: i8::try_from(foundation.min_x).ok()?,
+            y_min: i8::try_from(foundation.min_y).ok()?,
+            width: usize::from(foundation.max_x.abs_diff(foundation.min_x)) + 1,
+            height: usize::from(foundation.max_y.abs_diff(foundation.min_y)) + 1,
+        };
         // The table, not the facet the house stands on: how tall a graphic is has
         // nothing to do with where it was placed. A shard with no client files
         // holds an empty one, and every component in it is a floor — the picture
@@ -3138,7 +3187,14 @@ impl WorldState {
         let tiles: Vec<DesignTile> = design
             .components
             .iter()
-            .filter(|component| component.drawn())
+            .filter(|component| {
+                component.drawn()
+                    && !openshard_uofiles::multi::is_closed_door_graphic(component.graphic)
+                    // A real `HouseSign` is spawned for every placed house.
+                    // Content templates sometimes include this same decal;
+                    // sending it in D8 would leave a duplicate static sign.
+                    && !openshard_uofiles::multi::is_house_sign_graphic(component.graphic)
+            })
             .filter_map(|component| {
                 Some(DesignTile {
                     graphic: component.graphic,
@@ -3154,14 +3210,14 @@ impl WorldState {
         Some(
             DesignDetail {
                 serial: openshard_protocol::serial::RawSerial(serial.raw()),
-                revision: openshard_protocol::design::Revision(design.revision),
+                revision: house_design_wire_revision(design.revision),
                 response,
                 tiles: &tiles,
             }
             // A *floor* is a static with no height, which is `tiledata`'s answer
             // and the one thing `openshard-protocol` refused to guess — C1
             // recorded the seam and this is the caller that holds the table.
-            .encode(|graphic| tiledata.static_tile(graphic.0).height == 0),
+            .encode_with_bounds(bounds, |graphic| tiledata.static_tile(graphic.0).height == 0),
         )
     }
 
@@ -3185,9 +3241,9 @@ impl WorldState {
     /// commits — a client that is already looking at the house will never be
     /// shown it a second time, so the draw's copy cannot reach it.
     ///
-    /// Encoded per recipient rather than fanned out as one buffer, because the
-    /// gate is per client version: `Feature::CustomMulti` is 4.0.0a and a shard
-    /// may well have older clients on it.
+    /// The revision and its shape travel together. Sending only the revision
+    /// made an already visible house flash back to its plain foundation until
+    /// the client issued its next design query.
     pub fn broadcast_design_revision(&mut self, house: EntityId) {
         let Some(design) = self.registry.get::<crate::components::HouseDesign>(house) else {
             return;
@@ -3197,7 +3253,7 @@ impl WorldState {
         };
         let packet = openshard_protocol::design::DesignRevision {
             serial: openshard_protocol::serial::RawSerial(serial.raw()),
-            revision: openshard_protocol::design::Revision(design.revision),
+            revision: house_design_wire_revision(design.revision),
         }
         .encode();
         for (connection, version) in self.audience_of(house) {
@@ -3208,6 +3264,12 @@ impl WorldState {
                 connection,
                 packet: packet.clone(),
             });
+            if let Some(detail) = self.design_detail_packet(house, false) {
+                self.outbox.push(Outbound {
+                    connection,
+                    packet: detail,
+                });
+            }
         }
     }
 
@@ -3289,6 +3351,32 @@ impl WorldState {
         }
         if let Some(CraftedBy(maker)) = self.registry.get::<CraftedBy>(entity) {
             list.add_args(ClilocId(1_050_043), maker); // crafted by ~1_NAME~
+        }
+        if let Some(ItemAffixes(affixes)) = self.registry.get::<ItemAffixes>(entity) {
+            for affix in affixes {
+                let text = match *affix {
+                    ItemAffix::Slayer { body, bonus_percent } => {
+                        let target = creature_name(Graphic(body))
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| format!("body {body:#06X}"));
+                        format!("Slayer: {target} (+{bonus_percent}% damage)")
+                    }
+                    ItemAffix::DamageBonus { minimum, maximum } => {
+                        format!("Damage bonus: {minimum:+} to {maximum:+}")
+                    }
+                    ItemAffix::HitPoison {
+                        level,
+                        chance_per_mille,
+                    } => {
+                        let whole = chance_per_mille / 10;
+                        let tenths = chance_per_mille % 10;
+                        format!("Hit poison: level {level}, {whole}.{tenths}%")
+                    }
+                };
+                // `~1_NOTHING~` is the client's own empty-line cliloc, the
+                // standard way for a shard to append a custom property string.
+                list.add_args(ClilocId(1_042_971), &text);
+            }
         }
         Some(list.finish())
     }

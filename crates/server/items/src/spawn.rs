@@ -27,6 +27,21 @@ pub fn set_weapon(state: &mut WorldState, serial: Serial, speed: u16, min: u16, 
     state.registry.insert(entity, Weapon { speed, min, max });
 }
 
+/// Replace one item's typed custom properties.
+///
+/// This is the one mutation door for loot, crafting and staff tooling. An empty
+/// list removes the component so ordinary items stay component-free.
+pub fn set_affixes(state: &mut WorldState, serial: Serial, affixes: Vec<ItemAffix>) {
+    let Some(entity) = state.registry.entity_of(serial) else {
+        return;
+    };
+    if affixes.is_empty() {
+        state.registry.remove::<ItemAffixes>(entity);
+    } else {
+        state.registry.insert(entity, ItemAffixes(affixes));
+    }
+}
+
 /// Put poison on an item, or take it off. See `Command::SetPoison`.
 ///
 /// The pack's door to the poison economy: all four poison potions are the same
