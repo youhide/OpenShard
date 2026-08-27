@@ -6706,6 +6706,15 @@ enum Doing {
     /// drawn over this fighter's head on this tick. The other half of the same
     /// report, and the half a server-state assertion cannot see.
     Blank(&'static str),
+    /// A bar is drawn and it is measuring the wrong thing: the interval the
+    /// watcher is filling against and the ticks the shard will actually wait
+    /// have come apart by more than a tick. Held (ticks on screen, ticks owed).
+    ///
+    /// The picture lies rather than vanishes, which is the harder half to see by
+    /// looking: a bar that finishes early sits full while the fighter goes on
+    /// preparing, and a bar that finishes late is still filling when the blow
+    /// lands. Both read as *"the bar has nothing to do with the swing"*.
+    Adrift(u32, u32),
 }
 
 /// Walk `ticks` ticks and write down what `fighter` was doing on each one.
@@ -6738,7 +6747,8 @@ fn fight_timeline<S: FnMut(&mut World, u32)>(
             if !warmode {
                 return Doing::Peace;
             }
-            let doing = match world.registry().get::<CombatAction>(fighter) {
+            let action = world.registry().get::<CombatAction>(fighter).copied();
+            let doing = match action {
                 Some(action) => {
                     let kind = match action.kind {
                         ActionKind::Swing { .. } => "swing",
@@ -6755,11 +6765,23 @@ fn fight_timeline<S: FnMut(&mut World, u32)>(
                     None => Doing::Silent,
                 },
             };
-            match (screen.blank_now(), &doing) {
-                (true, Doing::Acting(kind, _)) => Doing::Blank(kind),
-                (true, _) => Doing::Blank("held up"),
-                (false, _) => doing,
+            if screen.blank_now() {
+                return match &doing {
+                    Doing::Acting(kind, _) => Doing::Blank(kind),
+                    _ => Doing::Blank("held up"),
+                };
             }
+            // The bar is there — is it measuring the right thing? The watcher is
+            // filling against the interval it was last announced; the shard is
+            // counting down to an impact it owns. One tick of slack, because the
+            // packet is read on the tick after the one that produced it.
+            if let Some(impact) = action.and_then(|action| action.impact()) {
+                let owed = u32::try_from(impact.saturating_sub(world.state.ticks)).unwrap_or(u32::MAX);
+                if screen.running.abs_diff(owed) > 1 {
+                    return Doing::Adrift(screen.running, owed);
+                }
+            }
+            doing
         })
         .collect()
 }
@@ -6810,11 +6832,14 @@ fn a_whole_fight_has_no_tick_the_shard_cannot_account_for() {
         let unaccounted: Vec<usize> = timeline
             .iter()
             .enumerate()
-            .filter_map(|(tick, doing)| matches!(doing, Doing::Silent | Doing::Blank(_)).then_some(tick))
+            .filter_map(|(tick, doing)| {
+                matches!(doing, Doing::Silent | Doing::Blank(_) | Doing::Adrift(..)).then_some(tick)
+            })
             .collect();
         assert!(
             unaccounted.is_empty(),
-            "{} ticks with nothing to show with a {}: {:?}\nthe fight, in runs: {:#?}",
+            "{} ticks with nothing to show, or a bar measuring the wrong thing, with a {}: {:?}\n\
+             the fight, in runs: {:#?}",
             unaccounted.len(),
             if bow { "bow" } else { "fist" },
             unaccounted,
@@ -6880,11 +6905,14 @@ fn a_fight_with_everything_that_happens_to_one_still_has_no_blank_tick() {
     let unaccounted: Vec<usize> = timeline
         .iter()
         .enumerate()
-        .filter_map(|(tick, doing)| matches!(doing, Doing::Silent | Doing::Blank(_)).then_some(tick))
+        .filter_map(|(tick, doing)| {
+            matches!(doing, Doing::Silent | Doing::Blank(_) | Doing::Adrift(..)).then_some(tick)
+        })
         .collect();
     assert!(
         unaccounted.is_empty(),
-        "{} ticks with nothing to show: {:?}\nthe fight, in runs: {:#?}",
+        "{} ticks with nothing to show, or a bar measuring the wrong thing: {:?}\n\
+         the fight, in runs: {:#?}",
         unaccounted.len(),
         unaccounted,
         runs(&timeline)
