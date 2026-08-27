@@ -480,7 +480,10 @@ pub fn attack(state: &mut WorldState, connection: ConnectionId, target: Option<S
                 && state.notoriety_of(entity) != Notoriety::Invulnerable
         });
     let Some((serial, target_entity)) = valid else {
-        clear_target(state, player);
+        // The client aimed at something that cannot be fought. Whatever was
+        // being swung at the *previous* target ends because this fighter let go
+        // of it, not because that opponent went anywhere.
+        clear_target(state, player, InterruptReason::Abandoned);
         state.send_packet(
             connection,
             &ServerPacket::AttackTarget(AttackTarget { target: None }),
@@ -762,11 +765,7 @@ pub fn resolve_actions(state: &mut WorldState) {
             .entity_of(target_serial)
             .filter(|&target| attackable(state, target))
         else {
-            state.end_combat_action(
-                attacker,
-                CombatActionOutcome::Interrupted(InterruptReason::TargetGone),
-            );
-            clear_target(state, attacker);
+            clear_target(state, attacker, InterruptReason::TargetGone);
             continue;
         };
         let Some(&Position(target_pos)) = state.registry.get::<Position>(target) else {
@@ -879,7 +878,7 @@ pub fn resolve_actions(state: &mut WorldState) {
         // *or* standing at zero hits — a creature killed this tick is not swept off
         // the map until the tick's `reap`, so the entity still resolves for a beat.
         if target_is_dead(state, target_serial) {
-            clear_target(state, attacker);
+            clear_target(state, attacker, InterruptReason::TargetGone);
         }
     }
 }
@@ -900,16 +899,25 @@ pub fn resolve_actions(state: &mut WorldState) {
 /// `docs/combat_actions.md` and nothing commits into a watch yet.
 pub fn commit_actions(state: &mut WorldState) {
     let now = state.ticks;
-    let pending: Vec<(EntityId, Serial, WorldTick)> = state
+    // Every fighter this pass could begin an action for, and what each one is
+    // aimed at — `None` for a weapon drawn at nobody. That case used to be
+    // filtered out *here*, which made it the one refusal the pass could not
+    // report: the fighter never entered the loop, so nothing was recorded, and
+    // the sweep at the end then cleared whatever it had been standing in. A
+    // fighter that had just killed its opponent therefore went from a reason to
+    // no word at all, which is the same empty screen the balk state exists to
+    // end. Aim is carried as an `Option` so the refusal is taken inside the loop
+    // with all the others.
+    let pending: Vec<(EntityId, Option<(Serial, WorldTick)>)> = state
         .registry
         .query::<Combat>()
-        .filter_map(|(attacker, combat)| {
+        .filter(|&(attacker, combat)| {
             // One action at a time. A fighter already swinging is sustained, not
             // committed again — that is what makes the wind-up a process rather
             // than a marker to be re-stamped every tick.
-            (combat.warmode() && attackable(state, attacker) && !state.registry.has::<CombatAction>(attacker))
-                .then(|| Some((attacker, combat.target()?, combat.next_swing()?)))?
+            combat.warmode() && attackable(state, attacker) && !state.registry.has::<CombatAction>(attacker)
         })
+        .map(|(attacker, combat)| (attacker, combat.target().zip(combat.next_swing())))
         .collect();
 
     // Whoever this pass refused, and why. Everything else that holds a `Balked`
@@ -919,8 +927,10 @@ pub fn commit_actions(state: &mut WorldState) {
     // refusal this pass was built to stop having.
     let mut balked: HashSet<EntityId> = HashSet::new();
 
-    for (attacker, target_serial, due) in pending {
+    for (attacker, aim) in pending {
         // A mobile a bard has calmed does not start one — ServUO's `BardPacified`.
+        // Read before the aim, because a calmed fighter is held by the song
+        // whether or not it still has somebody in mind.
         if state
             .registry
             .has::<openshard_state::components::Pacified>(attacker)
@@ -928,6 +938,14 @@ pub fn commit_actions(state: &mut WorldState) {
             balk(state, &mut balked, attacker, InterruptReason::Pacified);
             continue;
         }
+        // War drawn and nothing in front of it. A standing state like any other
+        // here: it lasts until the fighter aims at somebody or puts the weapon
+        // away, and it is what a player sees for the beat after the thing they
+        // were fighting falls over.
+        let Some((target_serial, due)) = aim else {
+            balk(state, &mut balked, attacker, InterruptReason::NoTarget);
+            continue;
+        };
         let Some(target) = state
             .registry
             .entity_of(target_serial)
@@ -940,7 +958,7 @@ pub fn commit_actions(state: &mut WorldState) {
             // struck it: without the guard, monsters keep aiming at a ghost until
             // their next AI beat notices.
             if now >= due {
-                clear_target(state, attacker);
+                clear_target(state, attacker, InterruptReason::TargetGone);
             }
             balk(state, &mut balked, attacker, InterruptReason::TargetGone);
             continue;
@@ -1399,15 +1417,19 @@ pub fn set_next_swing(state: &mut WorldState, attacker: EntityId, tick: WorldTic
     }
 }
 
-/// Stop a combatant attacking whatever it was.
+/// Stop a combatant attacking whatever it was, for the named reason.
 ///
 /// Whatever it was swinging goes with the target it was swinging at: an action
 /// is bound to the opponent it committed to and does not follow a change of aim.
-pub fn clear_target(state: &mut WorldState, attacker: EntityId) {
-    state.end_combat_action(
-        attacker,
-        CombatActionOutcome::Interrupted(InterruptReason::TargetGone),
-    );
+///
+/// The reason is the caller's because *dropping an aim* and *the quarry being
+/// gone* are two different facts, and this used to report the second for both:
+/// a creature that lost its way to a player standing in plain sight told every
+/// screen "target gone" about somebody who was visibly still there. Death and a
+/// serial that no longer resolves pass [`InterruptReason::TargetGone`]; a
+/// fighter that gave up passes [`InterruptReason::Abandoned`].
+pub fn clear_target(state: &mut WorldState, attacker: EntityId, reason: InterruptReason) {
+    state.end_combat_action(attacker, CombatActionOutcome::Interrupted(reason));
     if let Some(combat) = state.registry.get_mut::<Combat>(attacker) {
         combat.clear_target();
     }

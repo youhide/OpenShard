@@ -481,6 +481,12 @@ pub enum InterruptReason {
     /// A wound spoiled it. The condition rule, not the damage itself — a shard
     /// whose table lets a fighter swing through a blow never sends this.
     Struck,
+    /// The weapon is drawn and nothing is aimed at. A [`BalkState`] alone: it
+    /// can never end an action, because an action carries the target it
+    /// committed to and cannot outlive it. It is here rather than in a list of
+    /// its own because a watcher asks one question — *why is that fighter
+    /// standing there* — and must not need two vocabularies to hear the answer.
+    NoTarget,
 }
 
 impl InterruptReason {
@@ -497,6 +503,7 @@ impl InterruptReason {
             Self::NoAmmo => 6,
             Self::Moved => 7,
             Self::Struck => 8,
+            Self::NoTarget => 9,
         }
     }
 
@@ -512,6 +519,7 @@ impl InterruptReason {
             6 => Some(Self::NoAmmo),
             7 => Some(Self::Moved),
             8 => Some(Self::Struck),
+            9 => Some(Self::NoTarget),
             _ => None,
         }
     }

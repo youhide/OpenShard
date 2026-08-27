@@ -3148,6 +3148,7 @@ fn interrupt_label(reason: InterruptReason) -> &'static str {
         InterruptReason::NoAmmo => "no ammo",
         InterruptReason::Moved => "moved",
         InterruptReason::Struck => "struck",
+        InterruptReason::NoTarget => "no target",
     }
 }
 

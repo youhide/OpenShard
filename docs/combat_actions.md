@@ -647,6 +647,36 @@ What landed, and the four things worth knowing before reading the code:
   The outcome word keeps the right-hand slot, so a miss and the refusal that
   follows it are both legible in the one moment both are true.
 
+**Ф4.2 — the two lies a refusal could still tell. ✅ Built.** Ф4.1's own backlog
+opened with a prediction — *"a fighter in war mode with no target says nothing,
+and that may be the next complaint"* — and it was, in the same breath as a
+second one nobody had predicted. Both are about the *vocabulary* rather than the
+seam: the pass now speaks everywhere, and this is about it speaking truthfully.
+*Done when:* nothing a fighter can be standing in is unnamed, and no name is
+claimed for a fact that is not so.
+
+- **`InterruptReason::NoTarget`, and the commit pass's last silent exit.** The
+  refusal was taken *before* the loop: a fighter with no aim was filtered out of
+  `pending` and so could not be recorded, and the sweep at the end then lifted
+  whatever it had been standing in. Winning a fight therefore took the bar, the
+  glyph and the word off the screen and put nothing in their place. The aim is
+  now carried into the loop as an `Option` and the refusal is taken beside all
+  the others. The backlog entry asked whether *"standing, no quarry"* is worth a
+  picture; the answer came from the person playing it, and it is yes.
+- **`clear_target` no longer says "target gone" about everybody.** It wrote that
+  one reason whoever called it, and two of its callers are the creature brain
+  giving up — on a chase it cannot finish, or on a foe it can no longer see.
+  What a player saw was the monster in front of them announcing that *they* were
+  gone. The reason is the caller's now: death and a serial that no longer
+  resolves pass `TargetGone`, a fighter that let go passes `Abandoned`.
+- **A creature that gives up leaves war, rather than clearing an aim.** Both AI
+  paths call `WorldState::disengage`, which is the verb that already knew the
+  rule — a player keeps a drawn stance, an NPC's combat state exists only while
+  it is fighting. This was invisible until `NoTarget` existed: without it, a
+  creature left standing in a targetless war state was merely wrong; with it,
+  every creature that had ever fought would have worn *"no target"* for the rest
+  of its life.
+
 **Ф5 — the fight costs something.** D9: an opening stamina cost at the commit, a
 per-tick `Drain` while sustaining, the owed fatigue spent at the impact, `Winded`
 as a condition the table can read, and the regeneration pulse excluding anyone
@@ -678,17 +708,32 @@ index of armed squares, and that index is a design rather than a variant.
 
 ## Backlog
 
-Found while building Ф1, Ф2, Ф3, Ф4 and Ф4.1, and none of it belonged to any of
-them.
+Found while building Ф1, Ф2, Ф3, Ф4, Ф4.1 and Ф4.2, and none of it belonged to
+any of them.
+
+**From Ф4.2:**
+
+- **`NoTarget` is a balk that can never be an interrupt, and the type does not
+  say so.** It shares `InterruptReason` with the eight that can end an action,
+  because a watcher asks one question and must not need two vocabularies to hear
+  the answer — but nothing stops a future caller passing it to
+  `end_combat_action`, where it would be a sentence with no meaning. A separate
+  `BalkReason` that `InterruptReason` widens into is the honest shape and costs a
+  conversion at one seam.
+- **Every fighter standing at the ready now holds a component.** `Balked` was
+  sized for the held-up minority; `NoTarget` makes it the common case, so a town
+  square of guards in war mode is a `Balked` each. It is one insert and one edge
+  packet per fighter and only when the answer changes, so this is a note rather
+  than a worry — but the component is no longer rare and anything that assumed it
+  was should be re-read.
+- **A creature disengaging now broadcasts a move it did not used to.**
+  `disengage` ends with `broadcast_move` when the mobile was in war, which
+  `clear_target` never did. It is correct — the stance changed and every screen
+  should see it — but it is a packet per give-up that the chase profile has not
+  been measured with.
 
 **From Ф4.1:**
 
-- **A fighter in war mode with no target says nothing, and that may be the next
-  complaint.** It is not a refusal — nothing was asked for — so there is no
-  `Balked` to send, and the screen is as blank as it was for the case this phase
-  fixed. Whether *"standing, no quarry"* is worth a picture is a question about
-  what war mode means on screen, not about the commit pass, and it wants asking
-  before it is answered.
 - **The stage shares are three numbers per kind and nobody has looked at them
   in motion.** They were chosen to read as sentences — a blow is mostly its
   wind-up, a bow is mostly its draw and hold — and they are an operator setting

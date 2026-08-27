@@ -276,7 +276,11 @@ impl World {
             .filter_map(|(attacker, combat)| (combat.target() == Some(target)).then_some(attacker))
             .collect();
         for attacker in attackers {
-            combat::clear_target(&mut self.state, attacker);
+            combat::clear_target(
+                &mut self.state,
+                attacker,
+                openshard_protocol::feedback::InterruptReason::TargetGone,
+            );
             self.state
                 .registry
                 .remove::<openshard_state::components::Route>(attacker);

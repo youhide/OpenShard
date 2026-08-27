@@ -6544,6 +6544,115 @@ fn an_archer_held_out_of_reach_says_so_once_and_says_so_until_it_is_not() {
     );
 }
 
+/// The other silent exit from the commit pass, and the one a fighter meets every
+/// time it wins: a drawn weapon with nothing in front of it.
+///
+/// This refusal used to be taken *before* the loop — a fighter with no aim was
+/// filtered out of the pass entirely — so it could not be recorded, and the
+/// sweep at the end then lifted whatever the fighter had been standing in.
+/// Killing what you were fighting therefore took the bar, the glyph and the word
+/// off the screen and put nothing at all in their place: the same blank the balk
+/// state exists to end, reached by the commonest route there is.
+#[test]
+fn a_drawn_weapon_with_nothing_aimed_at_says_so() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    let fighter = world.state.registry.serial_of(player_entity).unwrap();
+    let _ = packets_for(&mut world, connection);
+
+    // War drawn, nobody aimed at.
+    world.queue(Command::WarMode {
+        connection,
+        war: true,
+    });
+    world.tick(now);
+    assert_eq!(
+        action_balks(&packets_for(&mut world, connection), fighter),
+        vec![InterruptReason::NoTarget.to_bits()],
+        "a fighter at the ready with no quarry is told which of the two it is"
+    );
+
+    // A standing state like every other one here: the edges cross the wire, and
+    // the ticks in between do not.
+    for _ in 0..5 {
+        world.tick(now);
+    }
+    assert!(
+        action_balks(&packets_for(&mut world, connection), fighter).is_empty(),
+        "a refusal that has not changed is not re-sent every tick"
+    );
+
+    // Aim at something and it lifts, in the tick the swing commits.
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let _ = packets_for(&mut world, connection);
+    engage(&mut world, connection, mob, now);
+    let packets = packets_for(&mut world, connection);
+    assert_eq!(
+        action_balks(&packets, fighter),
+        vec![0],
+        "clear is a zero, and it is sent exactly once"
+    );
+    assert!(
+        action_phase(&packets).is_some(),
+        "and the blow the fighter had nobody to aim is committed in the same tick"
+    );
+}
+
+/// A creature that loses its quarry must not report the quarry as *gone*.
+///
+/// Every way a fight could end used to arrive at one word. `clear_target` wrote
+/// [`InterruptReason::TargetGone`] whoever called it, and two of its callers are
+/// the brain giving up — on a chase it cannot finish, or on a foe it can no
+/// longer see. The player is standing right there watching the monster in front
+/// of them announce that they are gone, which is a lie about the one fact the
+/// packet exists to carry. What ended the swing is the creature abandoning it.
+///
+/// Hiding is the cheapest way to make the brain lose sight of somebody who has
+/// not moved an inch — which is exactly the shape of the defect.
+#[test]
+fn a_creature_that_loses_its_quarry_does_not_call_the_quarry_gone() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.0 + 1, START.1, 0), 8, now);
+
+    // Let it notice and start swinging.
+    for _ in 0..(AI_THINK_TICKS + 1) {
+        world.tick(now);
+    }
+    assert!(
+        world.registry().has::<CombatAction>(creature),
+        "the creature is mid-swing before anything is taken away from it"
+    );
+
+    // Out of sight without going anywhere.
+    world
+        .state
+        .registry
+        .insert(player_entity, openshard_state::Hidden);
+    let _ = packets_for(&mut world, connection);
+    for _ in 0..(AI_THINK_TICKS + 1) {
+        world.tick(now);
+    }
+
+    assert_eq!(
+        action_end(&packets_for(&mut world, connection)),
+        Some((
+            CombatActionOutcome::Interrupted(InterruptReason::Abandoned).to_bits(),
+            InterruptReason::Abandoned.to_bits()
+        )),
+        "the creature gave the fight up; it did not watch its foe die"
+    );
+    assert!(
+        !world.registry().has::<Combat>(creature),
+        "and a creature's war state lives only as long as the fight, so it is gone \
+         rather than left standing as a fighter with nobody to fight"
+    );
+}
+
 /// The other half of what a player is owed while a bow is bending: **which part
 /// of the draw this is.** A bar answers *how far along* and cannot answer *how
 /// far along what* — a bow coming up and a bow held at full draw fill the same

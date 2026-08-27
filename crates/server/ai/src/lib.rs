@@ -629,7 +629,15 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction
             }
             return chase_step(state, creature, facet, pos, target_pos, brain);
         }
-        combat::clear_target(state, creature);
+        // Out of sight, or too far to keep after: the creature drops the fight
+        // rather than aiming at a memory. `disengage` and not `clear_target`,
+        // for two reasons that are one. The quarry is *not* gone — it is very
+        // often standing in plain view behind a fence — so what ends the swing
+        // is the creature abandoning it, and that is the word every watcher
+        // gets. And a creature's combat state exists only while it is fighting:
+        // left behind as a targetless war stance, it would stand there flagged
+        // as a fighter with nothing to fight for the rest of its life.
+        state.disengage(creature);
         state.registry.remove::<Route>(creature);
     }
 
@@ -885,7 +893,10 @@ fn chase_step(
 /// The alternative — shuffling into the fence forever — is the bug this exists
 /// to end.
 fn give_up(state: &mut WorldState, creature: EntityId) -> Option<Direction> {
-    combat::clear_target(state, creature);
+    // The quarry is still there and still alive — the *way* to it is what failed.
+    // See `think_one`'s lost-sight path for why this ends the fight outright
+    // instead of clearing an aim.
+    state.disengage(creature);
     state.registry.remove::<Route>(creature);
     let until = state.ticks + GUARD_TICKS;
     if let Some(brain) = state.registry.get_mut::<Brain>(creature) {
