@@ -20,6 +20,7 @@ use openshard_gateway::ConnectionId;
 use openshard_movement::Walker;
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::containers::GridSlot;
+use openshard_protocol::feedback::{ActionPhase, CombatActionKind, SwingDuration};
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::identity::AccountName;
 use openshard_protocol::items::CorpseEquipmentItem;
@@ -2343,17 +2344,143 @@ pub struct SwingSpeed {
     pub ticks: u64,
 }
 
-/// A melee swing whose gesture has begun and is stretched to its scheduled impact.
+/// What a combatant is doing right now, and what will make it land.
 ///
-/// Combat consumes this at the scheduled impact instead of playing the same
-/// full-body action twice. It is target-bound and tick-bound so a rescheduled
-/// blow cannot mistake an older gesture for its own.
+/// Present only while something is happening, and it is the whole of what the
+/// fighter promised: the reach, the target and (later) the round are frozen into
+/// it at the commit and are never re-derived at the impact. That is the
+/// difference between this and the scalar deadline it replaced — a deadline can
+/// only arrive, while an action can be sustained, spoiled, and *ended with a
+/// reason the player is told*. `docs/combat_actions.md` is the plan.
+///
+/// The three axes it separates are `kind` (what the impact does), the `watch`
+/// inside [`Phase::Armed`] (what releases it) and the condition rules applied to
+/// it while it runs (what the world does to it in between). Nothing arms yet —
+/// see the phase.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct SwingWindup {
-    /// The opponent the visible preparation belongs to.
+pub struct CombatAction {
+    /// The opponent this action was committed to. It does not follow a change
+    /// of aim: a fighter who picks another target abandons this action.
     pub target: Serial,
-    /// When that prepared swing was scheduled to land.
-    pub completes_at: WorldTick,
+    /// What the impact will do.
+    pub kind: ActionKind,
+    /// Which half of its life it is in.
+    pub phase: Phase,
+    /// When it was committed — the tick the promise was made on.
+    pub started_at: WorldTick,
+    /// A percentage adjustment to the hit roll, accumulated while the action
+    /// runs and spent once when it resolves. An ambush from cover is what puts
+    /// anything in it today; a run's sway is what will subtract from it.
+    pub accuracy: i16,
+    /// Whether the gesture was shown when the action was committed.
+    ///
+    /// A concealed fighter has no wind-up: drawing one would break cover before
+    /// the blow, which is the whole of an ambush. Its stroke is animated at the
+    /// impact instead, and this is what tells the resolve which of the two
+    /// happened rather than making it guess from a marker.
+    pub telegraphed: bool,
+}
+
+/// What a combat action's impact does.
+///
+/// A closed list, and the difference between the three is at the *impact* — a
+/// projectile, a round spent — never in the schedule. `Breath` carries no
+/// ammunition and that is a difference in kind, not a missing field.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ActionKind {
+    /// A blow, committed to the reach read from the weapon at the commit.
+    Swing { reach: RangedRange },
+}
+
+/// Which half of an action's life it is in.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Phase {
+    /// Ready and waiting on the world. `expires_at` is the arm's endurance, not
+    /// its timing: an action that is never released ends when it runs out.
+    ///
+    /// Nothing constructs this yet — arming is the last phase of the plan — but
+    /// the variant and the packet that carries it exist from the first commit,
+    /// so the wire is never revised for it.
+    Armed { watch: Watch, expires_at: WorldTick },
+    /// Released. The impact lands at this tick, and a rule may still push it.
+    Releasing { impact: WorldTick },
+}
+
+/// What the world has to do for an armed action to be released.
+///
+/// Deliberately a closed enum and not a predicate language: a watch that cannot
+/// be named here is a watch nobody can cost, and the tick has to be able to
+/// answer all of them in bounded time. Each is a fact the server already
+/// computes at a seam it already runs.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Watch {
+    /// The committed target becomes visible again — steps out from behind the
+    /// wall, the tree, the door that just opened.
+    TargetInSight,
+    /// The committed target comes within the action's reach.
+    TargetInReach,
+    /// Movement carries the attacker through the target's reach, at whatever
+    /// speed it was travelling: the joust, the passing blow.
+    Contact,
+}
+
+impl CombatAction {
+    /// The tick this action lands on, or `None` while it is still armed.
+    #[must_use]
+    pub const fn impact(self) -> Option<WorldTick> {
+        match self.phase {
+            Phase::Releasing { impact } => Some(impact),
+            Phase::Armed { .. } => None,
+        }
+    }
+
+    /// The reach it committed to. Read at the impact in place of asking the
+    /// weapon again: what the fighter promised is what the fighter is held to.
+    #[must_use]
+    pub const fn reach(self) -> RangedRange {
+        match self.kind {
+            ActionKind::Swing { reach } => reach,
+        }
+    }
+
+    /// How this action reads on the wire.
+    #[must_use]
+    pub const fn wire_kind(self) -> CombatActionKind {
+        match self.kind {
+            ActionKind::Swing { .. } => CombatActionKind::Swing,
+        }
+    }
+
+    /// The phase as the wire says it, given the tick it is being announced on.
+    ///
+    /// Both halves are an interval in ticks from `now`, and both are saturating:
+    /// an impact already in the past is an action about to resolve, not a
+    /// negative duration.
+    #[must_use]
+    pub const fn wire_phase(self, now: WorldTick) -> ActionPhase {
+        match self.phase {
+            Phase::Armed { expires_at, .. } => ActionPhase::Armed {
+                endurance: SwingDuration(ticks_to_millis(expires_at.saturating_sub(now))),
+            },
+            Phase::Releasing { impact } => ActionPhase::Releasing {
+                impact_in: SwingDuration(ticks_to_millis(impact.saturating_sub(now))),
+            },
+        }
+    }
+}
+
+/// A tick count as the milliseconds the wire carries.
+///
+/// The same conversion `WorldState::animate_timed` makes, and it is here rather
+/// than duplicated at the caller so one action's animation and its phase packet
+/// can never disagree about how long it lasts.
+const fn ticks_to_millis(ticks: u64) -> u32 {
+    let millis = ticks.saturating_mul(1_000 / crate::TICKS_PER_SECOND);
+    if millis > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        millis as u32
+    }
 }
 
 /// A mobile's armour: how much of each kind of blow it shrugs off, as a

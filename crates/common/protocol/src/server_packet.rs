@@ -30,8 +30,8 @@ use crate::context::ContextMenu;
 use crate::error::{DecodeError, expect_id};
 use crate::feature::Feature;
 use crate::feedback::{
-    Animation, GraphicalEffect, HarvestCompleted, HarvestPreview, HarvestRefused, HarvestToolVisual,
-    HuedEffect, NewAnimation, PlaySound, SwingTiming,
+    Animation, CombatActionEnded, CombatActionPhase, GraphicalEffect, HarvestCompleted, HarvestPreview,
+    HarvestRefused, HarvestToolVisual, HuedEffect, NewAnimation, PlaySound, SwingTiming,
 };
 use crate::gump::{CloseGump, GumpDisplay};
 use crate::items::{CorpseEquipment, DragCancel, EquipUpdate, WorldItem};
@@ -87,6 +87,10 @@ pub enum ServerPacket {
     HarvestRefused(HarvestRefused),
     /// `0xBF 0xE00F` — the shard finished this harvest.
     HarvestCompleted(HarvestCompleted),
+    /// `0xBF 0xE010` — a mobile entered a phase of a combat action.
+    CombatActionPhase(CombatActionPhase),
+    /// `0xBF 0xE011` — a mobile's combat action ended, and how.
+    CombatActionEnded(CombatActionEnded),
     /// `0x70` — an uncoloured graphical effect.
     Effect(GraphicalEffect),
     /// `0xC0` — a graphical effect with a hue and a render mode.
@@ -249,6 +253,8 @@ impl ServerPacket {
             Self::HarvestPreview(_) => <HarvestPreview as EncodePacket>::ID,
             Self::HarvestRefused(_) => <HarvestRefused as EncodePacket>::ID,
             Self::HarvestCompleted(_) => <HarvestCompleted as EncodePacket>::ID,
+            Self::CombatActionPhase(_) => <CombatActionPhase as EncodePacket>::ID,
+            Self::CombatActionEnded(_) => <CombatActionEnded as EncodePacket>::ID,
             Self::Effect(_) => <GraphicalEffect as EncodePacket>::ID,
             Self::HuedEffect(_) => HuedEffect::ID,
             Self::LoginDenied(_) => <LoginDenied as EncodePacket>::ID,
@@ -336,6 +342,8 @@ impl ServerPacket {
             Self::HarvestPreview(_) => HarvestPreview::LENGTH,
             Self::HarvestRefused(_) => HarvestRefused::LENGTH,
             Self::HarvestCompleted(_) => HarvestCompleted::LENGTH,
+            Self::CombatActionPhase(_) => CombatActionPhase::LENGTH,
+            Self::CombatActionEnded(_) => CombatActionEnded::LENGTH,
             Self::Effect(_) => GraphicalEffect::LENGTH,
             Self::HuedEffect(_) => HuedEffect::LENGTH,
             Self::LoginDenied(_) => <LoginDenied as EncodePacket>::LENGTH,
@@ -425,6 +433,8 @@ impl ServerPacket {
             Self::HarvestPreview(packet) => packet.encode_body(out, version),
             Self::HarvestRefused(packet) => packet.encode_body(out, version),
             Self::HarvestCompleted(packet) => packet.encode_body(out, version),
+            Self::CombatActionPhase(packet) => packet.encode_body(out, version),
+            Self::CombatActionEnded(packet) => packet.encode_body(out, version),
             Self::Effect(packet) => packet.encode_body(out, version),
             Self::HuedEffect(packet) => packet.encode_body(out, version),
             Self::LoginDenied(packet) => packet.encode_body(out, version),
@@ -570,6 +580,12 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
         HarvestCompleted::SUBCOMMAND => decode_server(packet, version)
             .map(ServerPacket::HarvestCompleted)
             .map_err(ServerDecodeError::HarvestCompleted)?,
+        CombatActionPhase::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::CombatActionPhase)
+            .map_err(ServerDecodeError::CombatActionPhase)?,
+        CombatActionEnded::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::CombatActionEnded)
+            .map_err(ServerDecodeError::CombatActionEnded)?,
         crate::party::SUBCOMMAND => return decode_party(packet, version),
         _ => return Ok(None),
     }))
@@ -942,6 +958,8 @@ pub enum ServerDecodeError {
     HarvestRefused(DecodeError),
     /// `0xBF 0xE00F` did not decode.
     HarvestCompleted(DecodeError),
+    CombatActionPhase(DecodeError),
+    CombatActionEnded(DecodeError),
     /// `0xD6` did not decode.
     PropertyListReply(DecodeError),
     /// A `0xBF` subcommand `0x06` did not decode. One variant for all four,
@@ -990,6 +1008,8 @@ impl fmt::Display for ServerDecodeError {
             Self::HarvestPreview(error) => ("0xBF 0xE00D harvest preview", error),
             Self::HarvestRefused(error) => ("0xBF 0xE00E harvest refusal", error),
             Self::HarvestCompleted(error) => ("0xBF 0xE00F harvest completion", error),
+            Self::CombatActionPhase(error) => ("0xBF 0xE010 combat action phase", error),
+            Self::CombatActionEnded(error) => ("0xBF 0xE011 combat action end", error),
             Self::PropertyListReply(error) => ("0xD6 property list", error),
             Self::Party(error) => ("0xBF 0x06 party", error),
             Self::CloseGump(error) => ("0xBF 0x04 close gump", error),
@@ -1243,6 +1263,8 @@ mod tests {
         HarvestPreview,
         HarvestRefused,
         HarvestCompleted,
+        CombatActionPhase,
+        CombatActionEnded,
         Effect,
         HuedEffect,
         LoginDenied,
@@ -1377,6 +1399,20 @@ mod tests {
             }),
             ServerPacket::HarvestRefused(HarvestRefused { serial }),
             ServerPacket::HarvestCompleted(HarvestCompleted { serial }),
+            ServerPacket::CombatActionPhase(CombatActionPhase {
+                actor: serial,
+                target: serial,
+                kind: crate::feedback::CombatActionKind::Swing,
+                phase: crate::feedback::ActionPhase::Releasing {
+                    impact_in: crate::feedback::SwingDuration(1_500),
+                },
+            }),
+            ServerPacket::CombatActionEnded(CombatActionEnded {
+                actor: serial,
+                outcome: crate::feedback::CombatActionOutcome::Interrupted(
+                    crate::feedback::InterruptReason::TargetGone,
+                ),
+            }),
             ServerPacket::Effect(effect),
             ServerPacket::HuedEffect(HuedEffect {
                 effect,

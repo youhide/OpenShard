@@ -146,9 +146,16 @@ pub enum Watch {
 `TileReach` is today's `RangedRange` (`crates/server/combat/src/weapons.rs`) with
 the word *ranged* taken out of it: once a blow has a reach too, the newtype is
 about tiles between two fighters and not about which half of the weapon table it
-came from. Ф5 is where it is renamed; until then `Swing` commits the constant.
+came from. Ф6 is where it is renamed; until then `Swing` commits the constant —
+which as built is `MELEE_REACH`, the one-tile `RangedRange` beside `MELEE_RANGE`.
 
-Four verbs run over it, once per tick, in this order:
+Four verbs run over it, once per tick each. **Built order: sustain, resolve,
+commit** — release is folded into sustain until something arms. Commit runs
+*last* on purpose, and the reason is a measured one rather than a preference: a
+blow that resolves this tick has to open its next gesture in the same tick, or
+every single swing starts a tick late and the animation covers one tick less
+than the interval it is stretched to. The old code said the same thing by
+running its wind-up pass twice, before and after the blow.
 
 **Commit.** No action, engaged, recovery elapsed. Every precondition is tested
 *here*: attackable, same facet, within the weapon's reach, sight clear, not
@@ -175,6 +182,14 @@ the outcome goes to every watcher, and recovery is scheduled.
 
 `Combat::next_swing` keeps a job, and it is now a narrow one: **when the next
 commit may happen.** It is recovery, not a swing. Nothing else reads it.
+
+> **As built, it is still the impact tick.** Ф1 changed nothing about the
+> schedule, and today there is no recovery to speak of: the next gesture opens
+> the instant the previous blow lands and occupies the whole interval, so
+> "when the next commit may happen" and "when the next blow is due" are the same
+> number, and `commit_actions` re-pins it to the impact exactly as the wind-up
+> pass used to. Splitting the interval into recovery *then* action is a real
+> change to how a fight feels and is nobody's phase yet — see the backlog.
 
 ## Decisions
 
@@ -357,15 +372,42 @@ needs, and a bar that could only fill was never going to draw it.
 spend one axis of the model, and every one of them is a phase rather than a
 feature only because Ф1 separated the axes.
 
-**Ф1 — the object.** `CombatAction`, the four verbs, and both new packets. Only
-`Phase::Releasing` is reachable — nothing arms yet — but the phase enum and the
-packet that carries it exist from the first commit, so the wire is never revised
-for Ф7. Melee only; behaviour deliberately unchanged except that the
+**Ф1 — the object. ✅ Built.** `CombatAction`, the four verbs, and both new
+packets. Only `Phase::Releasing` is reachable — nothing arms yet — but the phase
+enum and the packet that carries it exist from the first commit, so the wire is
+never revised for Ф7. Melee only; behaviour deliberately unchanged except that the
 silent `continue` becomes a named interruption and the client stops an animation it
 would have run out. `prepare_swings` and `SwingWindup` are retired into it — the
 marker becomes a phase of a real object. *Done when:* a target that dies mid-swing
 stops its attacker's animation on the spot; a swing that loses reach says so;
 nothing else about a fight looks different.
+
+What landed, and the four things worth knowing before reading the code:
+
+- **The three passes are `commit_actions`, `sustain_actions`, `resolve_actions`**
+  in `crates/server/combat/src/lib.rs`, called from the tick in the order argued
+  above. `swings` and `prepare_swings` are gone; `volleys` is untouched, so a bow
+  is still Ф2's problem.
+- **`obstruction` is one function now.** Facet, reach and live sight were three
+  lines copied into the wind-up pass and into the impact; they are one call
+  returning an `InterruptReason`, read at the commit and again every tick the
+  action runs. That is where "the second test has no way to say so" was fixed.
+- **A concealed opener is an *untelegraphed* action**, not an exception to the
+  model: `CombatAction::telegraphed` is false, no wind-up is drawn and no phase
+  packet goes out (a wind-up would break cover before the blow), and the stroke
+  is animated at the impact. The one behavioural change it brings is that such a
+  blow lands on the tick *after* the attack command rather than on it, because
+  commit runs last.
+- **The end has one door**, `WorldState::end_combat_action`, on the state crate
+  rather than in combat — death, Peacemaking, logout and a pet being called off
+  all end a fight and none of them can depend on the crate that owns swinging.
+  `disengage` goes through it, which is what makes "every action ends" true
+  rather than aspirational.
+
+And two known gaps left standing on purpose: `owed_stamina` is not on the
+component (nothing owes any until Ф5), and the release verb exists only as the
+`Armed` expiry inside sustain, because a watch nobody can satisfy is a stub
+rather than a verb. Ф7 is where it becomes one.
 
 **Ф2 — the bow draws.** `Shot` commits at the start of the interval: reach, sight
 and the nocked round tested there, animation and timing sent there, the arrow loosed
@@ -411,6 +453,46 @@ target chosen yet, which is *"anyone hostile enters this square"* rather than a
 question about one committed opponent. It is deliberately not in Ф7: it is the
 first watch that cannot be answered from the armed action alone, so it needs an
 index of armed squares, and that index is a design rather than a variant.
+
+## Backlog
+
+Found while building Ф1, and none of it belongs to Ф1.
+
+- **`Combat::next_swing` is still the impact, not a recovery.** The model calls
+  it "when the next commit may happen"; as built it is re-pinned to the impact at
+  every commit, because that is what keeps the gesture covering the whole
+  interval. Making recovery a real, separate span is a change to how a fight
+  feels — a fighter would stand still between blows — and it wants a number in
+  operator settings before anyone writes it. Ф5 is the natural home: it is the
+  phase where the interval already gains a second meaning.
+- **A concealed opener now lands one tick later.** Commit runs last, so an
+  untelegraphed action committed on the tick of the attack command resolves on
+  the next one. It is 25 ms and no test could see it, but it is a real
+  divergence and this is the note that says so rather than letting it be found
+  again from the code.
+- **Leaving reach mid-swing now cancels the swing.** Under the deadline only the
+  impact tick was tested, so a target that stepped out and back landed the blow
+  anyway. Sustain ends it instead, and the next commit opens a *full* fresh
+  interval — which makes stepping in and out of reach a real defensive move
+  nobody balanced. Whether the answer is a grace window or a partial credit is
+  Ф3's question, since it is exactly a condition/effect row.
+- **`volleys` still clears a target and schedules its own beat**, so the two
+  halves of "who is fighting whom" now live in two shapes: an action for melee,
+  a deadline for shots. That is Ф2's whole job and it is named here only so the
+  duplication is not mistaken for a design.
+- **The tick's swing timing has three call sites and one arithmetic.**
+  `animate_timed`, `preview_harvest` and now `CombatAction::wire_phase` each turn
+  ticks into milliseconds; the third one is deliberately the only copy in the
+  component, but the first two are still two. One `TickMillis` conversion would
+  make it impossible for an animation and its phase packet to disagree.
+- **`InterruptReason::Abandoned` covers four different things** — disengaged,
+  retargeted, died, logged out. It is one byte and splitting it costs nothing on
+  the wire; it was left whole because no reader distinguishes them yet, and Ф4's
+  bar is the first thing that might.
+- **No test drives a stock (non-OpenShard) client past the two new packets.**
+  Unknown `0xBF` subcommands are skipped by contract, and the contract is
+  believed rather than exercised. A capture-driven test is already on the
+  protocol backlog for a different reason and would cover this too.
 
 ## What this does not cover
 

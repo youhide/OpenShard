@@ -43,8 +43,8 @@ use openshard_client_render::mobiles::{EquipmentLayer, Mobile};
 use openshard_movement::step_hold;
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::feedback::{
-    Animation, AnimationFrameCount, DEFAULT_ANIMATION_FRAME_MS, HarvestPreview, HarvestRefused,
-    HarvestToolVisual, NewAnimation, SwingTiming,
+    Animation, AnimationFrameCount, CombatActionEnded, CombatActionOutcome, DEFAULT_ANIMATION_FRAME_MS,
+    HarvestPreview, HarvestRefused, HarvestToolVisual, NewAnimation, SwingTiming,
 };
 use openshard_protocol::mobile::Equipment;
 use openshard_protocol::serial::Serial;
@@ -1343,6 +1343,39 @@ impl Crowd {
         }
     }
 
+    /// The shard's word that a combat action is over, and how it ended.
+    ///
+    /// Only an end that did *not* land stops the picture. A hit and a miss **are**
+    /// the impact: the stroke's last frames are the blow, and the whole point of
+    /// stretching it was to make them meet this moment — cutting it here would
+    /// truncate the one frame it was aimed at. An interruption is the opposite
+    /// and is why the packet exists: a telegraph nobody is making any more used
+    /// to run out its promised duration over an empty tile.
+    ///
+    /// A fall is terminal and outlives a cancelled swing, and a harvest is not
+    /// this packet's to cancel — the stroke on screen may be an axe on a tree.
+    pub fn end_action(&mut self, ended: CombatActionEnded) {
+        if matches!(
+            ended.outcome,
+            CombatActionOutcome::Hit | CombatActionOutcome::Miss
+        ) {
+            return;
+        }
+        let Some(tracked) = self.tracked.get_mut(&Some(ended.actor)) else {
+            return;
+        };
+        let Some(action) = tracked.action else {
+            return;
+        };
+        if action.death || action.harvest {
+            return;
+        }
+        tracked.action = None;
+        tracked.harvest_tool = None;
+        let standing = tracked.standing_group();
+        tracked.change_to(standing);
+    }
+
     /// Start the local half of a harvest at its targeting click.
     ///
     /// The preview is issued only by the shard that raised this particular
@@ -1825,6 +1858,7 @@ mod tests {
     use openshard_protocol::direction::Direction;
 
     use super::*;
+    use openshard_protocol::feedback::InterruptReason;
 
     const PLAYER: u16 = 400;
     const HORSE: u16 = 204;
@@ -1999,6 +2033,82 @@ mod tests {
         ] {
             assert_eq!(modern_action(BodyKind::Human, 0, sub_action), Some(expected));
         }
+    }
+
+    /// A cancelled telegraph used to run out its promised duration over an empty
+    /// tile, because the wire never said it had stopped. A landed one is the
+    /// opposite case and must not be cut: its last frames *are* the impact, and
+    /// they are what the stretched timing was aimed at.
+    #[test]
+    fn an_interrupted_swing_stops_being_drawn_and_a_landed_one_finishes() {
+        for (outcome, still_swinging) in [
+            (
+                CombatActionOutcome::Interrupted(InterruptReason::TargetGone),
+                false,
+            ),
+            (CombatActionOutcome::Expired, false),
+            (CombatActionOutcome::Hit, true),
+            (CombatActionOutcome::Miss, true),
+        ] {
+            let who = serial(1);
+            let mobile = who.expect("a serial");
+            let mut crowd = Crowd::default();
+            crowd.see(
+                who,
+                Point::new(10, 10, 0),
+                Graphic(PLAYER),
+                Facing::walking(Direction::South),
+                Hue::NONE,
+                false,
+                false,
+            );
+            crowd.time_swing(SwingTiming {
+                serial: mobile,
+                duration: openshard_protocol::feedback::SwingDuration(1_600),
+            });
+            crowd.play_new(NewAnimation {
+                serial: mobile,
+                animation_type: 0,
+                action: 0,
+                delay: 0,
+            });
+            let swinging = crowd.group_for(who);
+            assert_ne!(swinging, Some(BodyKind::Human.standing()));
+
+            crowd.advance(Duration::from_millis(400));
+            crowd.end_action(CombatActionEnded {
+                actor: mobile,
+                outcome,
+            });
+
+            let expected = if still_swinging {
+                swinging
+            } else {
+                Some(BodyKind::Human.standing())
+            };
+            assert_eq!(
+                crowd.group_for(who),
+                expected,
+                "a {outcome:?} left the wrong body on screen"
+            );
+        }
+    }
+
+    /// The stroke on screen may be an axe on a tree: a combat action's end is
+    /// not this client's licence to stop whatever happens to be playing.
+    #[test]
+    fn a_combat_interruption_does_not_cancel_a_harvest() {
+        let (mut crowd, who, mobile) = chopping_crowd();
+        crowd.advance(Duration::from_millis(400));
+        crowd.end_action(CombatActionEnded {
+            actor: mobile,
+            outcome: CombatActionOutcome::Interrupted(InterruptReason::Abandoned),
+        });
+        assert_eq!(
+            crowd.group_for(who),
+            Some(AnimationGroup(13)),
+            "the chop keeps swinging through somebody else's combat packet"
+        );
     }
 
     #[test]

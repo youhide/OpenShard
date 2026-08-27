@@ -681,12 +681,19 @@ impl World {
         for (serial, direction) in npc::live(&mut self.state) {
             self.step(serial, direction);
         }
-        // Begin reachable swings immediately and tell the client the exact
-        // server-owned interval to their impact. A second pass starts the next
-        // gesture in the same tick after a blow resets its timer.
-        combat::prepare_swings(&mut self.state);
-        combat::swings(&mut self.state);
-        combat::prepare_swings(&mut self.state);
+        // The three verbs of a combat action. Apply the world to what is already
+        // running — ending, with a reason on the wire, whatever the world has
+        // spoiled — then land what has reached its impact, then start what a
+        // ready fighter promises, telling the client the exact server-owned
+        // interval to that impact.
+        //
+        // Committing *last* is what makes a fight continuous: a blow that lands
+        // this tick opens its next gesture in the same tick, so the animation
+        // covers the whole interval instead of starting a tick late and leaving
+        // a beat of dead air in every single swing.
+        combat::sustain_actions(&mut self.state);
+        combat::resolve_actions(&mut self.state);
+        combat::commit_actions(&mut self.state);
         combat::volleys(&mut self.state);
         // A poisoner who fumbled a dose onto themselves. `skills` decides it and
         // says so; applying poison is combat's one door, and this is the tick

@@ -8,6 +8,9 @@ use openshard_movement::WALK_INTERVAL;
 use openshard_movement::scene::Scene;
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::containers::GridSlot;
+use openshard_protocol::feedback::{
+    CombatActionEnded, CombatActionOutcome, CombatActionPhase, InterruptReason,
+};
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::items::DropDestination;
 use openshard_protocol::mobile::Remove;
@@ -20,10 +23,13 @@ use openshard_skills::SkillUsed;
 use openshard_state::components::ItemAffix;
 use openshard_state::components::Riding;
 use openshard_state::components::{
+    ActionKind, Banker, CombatAction, Phase, SwingSpeed, Watch, WrestlingCombo, WrestlingOpener,
+    WrestlingStride,
+};
+use openshard_state::components::{
     Amount, Contained, Container, Corpse, CorpseBody, CriminalUntil, Decays, Drawn, Equipped, MurderDecay,
     Murders, Route, RouteRefused, Skills, Stackable,
 };
-use openshard_state::components::{Banker, SwingSpeed, WrestlingCombo, WrestlingOpener, WrestlingStride};
 use openshard_state::sectors::distance;
 use openshard_state::{SettledItemLocation, Skill, StatLock};
 
@@ -4709,6 +4715,31 @@ fn a_ghost_is_hidden_from_the_living() {
 }
 
 /// Put a player in war mode, aimed at `target`, in one tick.
+/// Bring an already-committed action's impact forward to this tick and let the
+/// remaining two passes run over it.
+///
+/// The passes are the ordinary ones; only the impact moves. Waiting out a whole
+/// swing interval in ticks would make a test about the interval rather than
+/// about the blow, and would let stamina and hit regeneration drift the numbers
+/// such a test asserts on.
+fn land_the_committed_swing(world: &mut World, attacker: EntityId) {
+    let impact = world.state.ticks;
+    let action = *world
+        .state
+        .registry
+        .get::<CombatAction>(attacker)
+        .expect("a fighter with a target in reach commits a swing");
+    world.state.registry.insert(
+        attacker,
+        CombatAction {
+            phase: Phase::Releasing { impact },
+            ..action
+        },
+    );
+    combat::sustain_actions(&mut world.state);
+    combat::resolve_actions(&mut world.state);
+}
+
 fn engage(world: &mut World, player: ConnectionId, target: Serial, now: Instant) {
     world.queue(Command::WarMode {
         connection: player,
@@ -5472,6 +5503,147 @@ fn no_swing_out_of_reach() {
         world.state.registry.get::<Hitpoints>(mob_entity).unwrap().current,
         50,
         "a swing out of reach lands nothing"
+    );
+}
+
+/// The outcome and reason bytes of the first "this action ended" the shard
+/// broadcast, if it said one ended at all.
+fn action_end(packets: &[Vec<u8>]) -> Option<(u8, u8)> {
+    packets.iter().find_map(|packet| {
+        (packet.first() == Some(&0xBF)
+            && packet.get(3..5) == Some(&CombatActionEnded::SUBCOMMAND.to_be_bytes()[..]))
+        .then(|| (packet[9], packet[10]))
+    })
+}
+
+/// The kind, phase and interval of the first "this action began" it broadcast.
+fn action_phase(packets: &[Vec<u8>]) -> Option<(u8, u8, u32)> {
+    packets.iter().find_map(|packet| {
+        (packet.first() == Some(&0xBF)
+            && packet.get(3..5) == Some(&CombatActionPhase::SUBCOMMAND.to_be_bytes()[..]))
+        .then(|| {
+            (
+                packet[13],
+                packet[14],
+                u32::from_be_bytes([packet[15], packet[16], packet[17], packet[18]]),
+            )
+        })
+    })
+}
+
+/// The commit says what is being done, to whom, and how long it has left — the
+/// half of the wire that used to be a bare duration with no subject.
+#[test]
+fn a_committed_swing_announces_its_phase_and_the_time_to_the_impact() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let _ = packets_for(&mut world, player);
+    engage(&mut world, player, mob, now);
+
+    assert_eq!(
+        action_phase(&packets_for(&mut world, player)),
+        Some((0, 1, 1_000)),
+        "a swing, released, landing one wrestling interval from now"
+    );
+}
+
+/// The defect the whole model was built for. A telegraph that was cancelled had
+/// no way to say so, so the watcher ran it out over an empty tile.
+#[test]
+fn a_target_that_dies_mid_swing_ends_its_attackers_action_with_a_reason() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let mob_entity = entity(&world, mob);
+    engage(&mut world, player, mob, now);
+    let _ = packets_for(&mut world, player);
+
+    // Killed by something that is not this swing, a full interval before it
+    // would have landed.
+    world
+        .state
+        .registry
+        .insert(mob_entity, Hitpoints { current: 0, max: 50 });
+    world.tick(now);
+
+    assert_eq!(
+        action_end(&packets_for(&mut world, player)),
+        Some((
+            CombatActionOutcome::Interrupted(InterruptReason::TargetGone).to_bits(),
+            InterruptReason::TargetGone.to_bits()
+        )),
+        "the stroke stops on the spot, and the watcher is told why"
+    );
+}
+
+/// The other half of the same rule: what the fighter committed to is the reach
+/// it is held to, and losing it is an outcome with a name rather than a silent
+/// `continue` at the impact.
+#[test]
+fn a_swing_whose_target_leaves_the_committed_reach_says_so() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let mob_entity = entity(&world, mob);
+    engage(&mut world, player, mob, now);
+    let _ = packets_for(&mut world, player);
+
+    world
+        .state
+        .teleport(mob_entity, Point::new(START.0 + 5, START.1, 0));
+    world.tick(now);
+
+    assert_eq!(
+        action_end(&packets_for(&mut world, player)),
+        Some((
+            CombatActionOutcome::Interrupted(InterruptReason::OutOfReach).to_bits(),
+            InterruptReason::OutOfReach.to_bits()
+        )),
+        "a swing that loses its reach ends, and names the reason"
+    );
+}
+
+/// Nothing arms yet — that is the last phase of `docs/combat_actions.md` — but
+/// the endurance is not decoration: an arm that is never released has to give
+/// out, or a couched lance becomes a permanent property of a rider. Constructed
+/// by hand here for exactly that reason.
+#[test]
+fn an_armed_action_that_is_never_released_expires() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let player_entity = world.state.players[&player];
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    engage(&mut world, player, mob, now);
+    let _ = packets_for(&mut world, player);
+
+    let armed_at = world.state.ticks;
+    world.state.registry.insert(
+        player_entity,
+        CombatAction {
+            target: mob,
+            kind: ActionKind::Swing {
+                reach: openshard_combat::MELEE_REACH,
+            },
+            phase: Phase::Armed {
+                watch: Watch::TargetInSight,
+                expires_at: armed_at,
+            },
+            started_at: armed_at,
+            accuracy: 0,
+            telegraphed: true,
+        },
+    );
+    world.tick(now);
+
+    assert_eq!(
+        action_end(&packets_for(&mut world, player)),
+        Some((CombatActionOutcome::Expired.to_bits(), 0)),
+        "an arm nothing released gives out, and says that rather than a reason"
     );
 }
 
@@ -9619,16 +9791,8 @@ fn a_melee_swing_turns_the_attacker_toward_its_target() {
     combat::war_mode(&mut world.state, attacker, true);
     combat::attack(&mut world.state, attacker, Some(defender_serial));
     let turn = packets_for(&mut world, attacker);
-    let due = world.state.ticks;
-    assert!(
-        world
-            .state
-            .registry
-            .get_mut::<Combat>(attacker_entity)
-            .expect("player combat state")
-            .schedule_swing(due)
-    );
-    combat::swings(&mut world.state);
+    combat::commit_actions(&mut world.state);
+    land_the_committed_swing(&mut world, attacker_entity);
 
     assert_eq!(
         world.state.registry.get::<Heading>(attacker_entity),
@@ -9771,7 +9935,8 @@ fn a_wrestlers_third_consecutive_hit_is_a_combo_and_restores_stamina() {
             .expect("player combat state");
         assert!(combat.enter_war());
         assert!(combat.aim(defender_serial, due));
-        combat::swings(&mut world.state);
+        combat::commit_actions(&mut world.state);
+        land_the_committed_swing(&mut world, attacker_entity);
     }
 
     assert_eq!(

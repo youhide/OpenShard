@@ -709,6 +709,10 @@ impl App {
                 sweep.server_updates.animations += 1;
                 true
             }
+            crate::link::Update::CombatActionEnded(_) => {
+                sweep.server_updates.animations += 1;
+                true
+            }
             crate::link::Update::Effect(_) => {
                 sweep.server_updates.animations += 1;
                 true

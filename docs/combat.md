@@ -134,6 +134,14 @@ delay)` and a `Tracked::one_shot: Option<OneShot>`, and **a step cancels it** �
 the reference's own rule, and the one that keeps a body from moonwalking through
 its own swing.
 
+> **Amended by `combat_actions.md`'s D6, and half of this was never built.** The
+> one-shot machinery is right and stands. The cancellation rule was in the wrong
+> process: a client that cancels on its own is guessing at a fact only the server
+> has, and it never actually did — `Crowd` clamps an overlapping action to the
+> displayed group's frames rather than dropping it. What cancels a stroke now is
+> the shard saying so, `CombatActionEnded` (`0xBF 0xE011`), and *when* a step
+> spoils a blow becomes the operator's condition table in that plan's Ф3.
+
 **D8. `0x6E` now, `0xE2` when a client asks for it.** The server picks between
 them by the connection's features (`Feature::NewMobileAnimation`); `0x6E`'s
 action number is body-specific and `0xE2`'s is a body-agnostic category, which

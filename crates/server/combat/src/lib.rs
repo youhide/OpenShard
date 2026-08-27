@@ -7,28 +7,38 @@
 //! *does* (loot, notoriety, a corpse) is a reader's to decide off that event;
 //! combat says what happened and moves on.
 //!
-//! [`swings`] is the interactive half, run each tick against the tick counter so
-//! it reads no clock: a combatant in war mode with a target in reach strikes on
-//! its timer. A due timer held out of reach becomes a fresh complete swing when
-//! the target enters reach. AI drives the same machinery — a brain that hands a
-//! creature a `Combat` is fought by `swings` exactly as a player is.
+//! The interactive half is a small state machine over one component,
+//! [`CombatAction`], run each tick against the tick counter so it reads no
+//! clock. Three passes, in this order and once each:
+//! [`commit_actions`] starts what a ready fighter promises, [`sustain_actions`]
+//! applies the world to what is running and ends what the world has spoiled, and
+//! [`resolve_actions`] lands what has reached its impact. A due swing held out
+//! of reach becomes a fresh complete swing when the target enters reach. AI
+//! drives the same machinery — a brain that hands a creature a `Combat` is
+//! fought by these three exactly as a player is.
+//!
+//! What the machine buys over the deadline it replaced is that an action can
+//! *end*: every one of them finishes as a hit, a miss or a named interruption,
+//! and the end crosses the wire, so a telegraph that was cancelled stops being
+//! drawn instead of running out its promised duration over an empty tile. See
+//! `docs/combat_actions.md`.
 
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_map::overlay::Doors;
 use openshard_protocol::combat::{AttackTarget, WarMode};
-use openshard_protocol::feedback::{EffectKind, GraphicalEffect};
+use openshard_protocol::feedback::{CombatActionOutcome, EffectKind, GraphicalEffect, InterruptReason};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::wire::{Graphic, SoundId};
-use openshard_protocol::world::{Point, PoisonLevel};
+use openshard_protocol::world::{Point, PoisonLevel, RangedRange};
 use openshard_state::components::{
-    BehaviourBuffs, Body, Client, Combat, CriminalUntil, DamageType, Frozen, Ghost, Guard, Hidden, Hitpoints,
-    ItemAffix, ItemAffixes, MeleeDamage, MurderDecay, Murders, PoisonCharges, Poisoned, Position,
-    RangedAttack, Resistance, Skills, Stamina, Stats, SwingSpeed, SwingWindup, WrestlingAmbushCooldown,
-    WrestlingCombo, WrestlingInterceptCooldown, WrestlingOpener, WrestlingStride, body_is_female,
-    body_opens_doors, creature_base_sound,
+    ActionKind, BehaviourBuffs, Body, Client, Combat, CombatAction, CriminalUntil, DamageType, Frozen, Ghost,
+    Guard, Hidden, Hitpoints, ItemAffix, ItemAffixes, MeleeDamage, MurderDecay, Murders, Phase,
+    PoisonCharges, Poisoned, Position, RangedAttack, Resistance, Skills, Stamina, Stats, SwingSpeed,
+    WrestlingAmbushCooldown, WrestlingCombo, WrestlingInterceptCooldown, WrestlingOpener, WrestlingStride,
+    body_is_female, body_opens_doors, creature_base_sound,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::weapon::{ARROW, LAYER_ONE_HANDED, LAYER_TWO_HANDED, WeaponKind};
@@ -46,6 +56,19 @@ pub use vitals::{
 /// How near, in tiles (Chebyshev), a mobile must be to land a melee blow: the
 /// next tile over, diagonals included.
 pub const MELEE_RANGE: u32 = 1;
+/// The same tile count as [`MELEE_RANGE`], as the reach newtype every action
+/// commits to.
+///
+/// A constant rather than a weapon row, and that is the seam a polearm at two
+/// tiles falls on: reach is a number in the ranged half of the weapon table and
+/// a constant in the melee half, and making it one column is a phase of its own.
+pub const MELEE_REACH: RangedRange = match RangedRange::new(MELEE_RANGE as u8) {
+    Some(reach) => reach,
+    None => panic!("melee reach is one tile, which is not zero"),
+};
+/// What an ambush from cover adds to the hit roll, in percent — captured at the
+/// commit and spent once when the action resolves.
+const AMBUSH_ACCURACY_PERCENT: i16 = 25;
 /// The swing base of bare hands — Sphere's wrestling value. A wielded weapon
 /// supplies its own base from [`weapons`]; a mobile holding nothing (or holding
 /// something not in the weapon table) falls back to this, modulated by dexterity.
@@ -490,9 +513,14 @@ pub fn attack(state: &mut WorldState, connection: ConnectionId, target: Option<S
         );
         return;
     }
-    // Face a reachable target immediately. `prepare_swings` starts the gesture
-    // this tick and tells the client how long it lasts before impact.
-    state.registry.remove::<SwingWindup>(player);
+    // A new aim abandons whatever was being swung at the old one: an action is
+    // committed to a target, and does not follow a change of mind. Face a
+    // reachable target immediately; `commit_actions` starts the gesture this
+    // tick and tells the client how long it lasts before impact.
+    state.end_combat_action(
+        player,
+        CombatActionOutcome::Interrupted(InterruptReason::Abandoned),
+    );
     if melee_reachable(state, player, target_entity) {
         state.face_toward(player, target_entity);
     }
@@ -754,97 +782,71 @@ pub fn volleys(state: &mut WorldState) {
     }
 }
 
-pub fn swings(state: &mut WorldState) {
+/// Land every action whose impact has arrived — the third of the four verbs.
+///
+/// What is *not* here is the point. Reach, sight, pacification and the target's
+/// life were asked by [`sustain_actions`] a moment ago, in this same tick, and
+/// what fails there ends the action with a name instead of vanishing. Two things
+/// can still have changed since: another blow in this very pass may have killed
+/// the target, and only that is re-asked.
+pub fn resolve_actions(state: &mut WorldState) {
     let now = state.ticks;
     // Collected first: `damage` mutates the registry, so the query cannot be held
     // across it.
-    let ready: Vec<(EntityId, Serial)> = state
+    let due: Vec<(EntityId, CombatAction)> = state
         .registry
-        .query::<Combat>()
-        .filter_map(|(attacker, combat)| {
-            (combat.warmode()
-                && combat.next_swing().is_some_and(|next| now >= next)
-                && attackable(state, attacker))
-            .then(|| combat.target().map(|target| (attacker, target)))
-            .flatten()
-        })
+        .query::<CombatAction>()
+        .filter(|(_, action)| action.impact().is_some_and(|impact| now >= impact))
+        .map(|(attacker, action)| (attacker, *action))
         .collect();
 
-    for (attacker, target_serial) in ready {
-        let Some(target) = state.registry.entity_of(target_serial) else {
-            // The target is gone — a creature killed, a player logged out.
+    for (attacker, action) in due {
+        let target_serial = action.target;
+        // A blow struck earlier in this same pass may have killed it. A player
+        // also remains a mobile after death as a ghost, so resolving the serial
+        // is not enough on its own.
+        let Some(target) = state
+            .registry
+            .entity_of(target_serial)
+            .filter(|&target| attackable(state, target))
+        else {
+            state.end_combat_action(
+                attacker,
+                CombatActionOutcome::Interrupted(InterruptReason::TargetGone),
+            );
             clear_target(state, attacker);
             continue;
         };
-        // A target may have died since combat selected it.  In particular, a
-        // player remains a mobile after death as a ghost, so just resolving its
-        // serial is not enough: without this guard monsters keep animating
-        // attacks at the ghost until their next AI beat clears the target.
-        if !attackable(state, target) {
-            clear_target(state, attacker);
-            continue;
-        }
-        let (Some(&Position(attacker_pos)), Some(&Position(target_pos))) = (
-            state.registry.get::<Position>(attacker),
-            state.registry.get::<Position>(target),
-        ) else {
+        let Some(&Position(target_pos)) = state.registry.get::<Position>(target) else {
+            state.end_combat_action(
+                attacker,
+                CombatActionOutcome::Interrupted(InterruptReason::TargetGone),
+            );
             continue;
         };
-        let facet = state.facet_of(attacker);
-        if state.facet_of(target) != facet
-            || !in_range(attacker_pos, target_pos, MELEE_RANGE)
-            // Adjacent tiles can still be separated by a closed door or wall.
-            // Melee follows the same live-terrain sight rule as a volley and an
-            // interaction: range alone must not allow a blow through an obstacle.
-            || !openshard_movement::sight_clear(
-                &state.footing(facet, Doors::AsTheyStand),
-                attacker_pos,
-                target_pos,
-            )
-        {
-            continue;
-        }
         // The attacker's serial rides along so a lethal blow can be blamed —
         // `damage` is the one place murder is tallied, melee or spell alike.
         let by = state.registry.serial_of(attacker);
-        // A mobile a bard has calmed does not swing — ServUO's `BardPacified`,
-        // checked where the blow would land rather than folded into the target.
-        if state
-            .registry
-            .has::<openshard_state::components::Pacified>(attacker)
-        {
-            continue;
-        }
-        let already_animated = state
-            .registry
-            .remove::<SwingWindup>(attacker)
-            .is_some_and(|windup| windup.target == target_serial && now == windup.completes_at);
-        if !already_animated {
-            // Direct callers and instant concealed openers did not pass through
-            // the wind-up turn. Use the common path: the owner ignores `0x77`
-            // and needs the accompanying `0x20` player update.
-            state.face_point(attacker, target_pos);
-        }
-        // The opener is captured before revealing the attacker and spent on this
-        // attempt even on a miss.  Cover is a way into a fight, never a permanent
-        // accuracy aura.
-        let ambush = take_wrestling_opener(state, attacker, target_serial);
         // Swinging at somebody is the loudest thing you can do — ServUO calls
         // `RevealingAction` in the combat timer, before the blow is even rolled.
         state.break_cover(attacker);
-        // The swing animates whether it lands or not — a miss still gestures.
-        // In the normal tick path `prepare_swings` already played it so its last frame
-        // meets this impact. Direct callers and concealed instant openers have
-        // no prepared window and retain the safe animate-at-impact fallback.
-        if !already_animated {
+        // A telegraphed action played its stroke at the commit and stretched it
+        // to exactly this moment. An untelegraphed one — a concealed fighter's
+        // opener, which had no wind-up to give away — is drawn here instead, and
+        // turns here too: the owner ignores `0x77` and needs the accompanying
+        // `0x20` player update, which is what `face_point` sends.
+        if !action.telegraphed {
+            state.face_point(attacker, target_pos);
             state.animate(attacker, Action::Attack);
         }
-        // Roll to hit (and train the weapon skill by trying). A miss whistles past
-        // and does no damage; the timer resets either way.
-        if !check_hit(state, attacker, target, if ambush { 25 } else { 0 }) {
+        // Roll to hit (and train the weapon skill by trying), spending whatever
+        // the action accumulated on its way here. A miss whistles past and does
+        // no damage; the timer resets either way.
+        if !check_hit(state, attacker, target, action.accuracy) {
             state.registry.remove::<WrestlingCombo>(attacker);
             state.play_sound(attacker, SoundId(miss_sound(state, attacker)));
             set_next_swing(state, attacker, now + swing_speed(state, attacker));
+            state.end_combat_action(attacker, CombatActionOutcome::Miss);
             continue;
         }
         let mut blow = scaled_blow(state, attacker, target);
@@ -873,6 +875,7 @@ pub fn swings(state: &mut WorldState) {
         deliver_weapon_poison(state, attacker, target_serial, now);
         deliver_affix_poison(state, attacker, target_serial, now);
         set_next_swing(state, attacker, now + swing_speed(state, attacker));
+        state.end_combat_action(attacker, CombatActionOutcome::Hit);
         // The blow may have killed it; a dead target is no target. Dead means gone
         // *or* standing at zero hits — a creature killed this tick is not swept off
         // the map until the tick's `reap`, so the entity still resolves for a beat.
@@ -882,69 +885,179 @@ pub fn swings(state: &mut WorldState) {
     }
 }
 
-/// Begin each reachable melee animation now and stretch it to its impact.
+/// Start an action for every fighter who is ready for one — the first verb.
 ///
-/// The server owns the timer, including operator combat settings, dexterity,
-/// scripted [`SwingSpeed`], range and live sight. Sending the ordinary action at
-/// the start of that authoritative interval keeps the client synchronized
-/// without asking it to duplicate rules it cannot fully know. If a due swing
-/// was held out of reach, its impact is moved one full swing interval ahead
-/// when the fighters meet instead of landing before a frame can be shown.
-pub fn prepare_swings(state: &mut WorldState) {
+/// Every precondition is tested *here*, and what the fighter promises is frozen
+/// into the component: the target, and the reach the blow is committed to. The
+/// server owns the timer, including operator combat settings, dexterity,
+/// scripted [`SwingSpeed`], range and live sight, and sending the ordinary
+/// action at the start of that authoritative interval keeps the client
+/// synchronized without asking it to duplicate rules it cannot fully know. A due
+/// swing that was held out of reach opens a full interval when the fighters
+/// meet, rather than landing before a frame can be shown.
+///
+/// Only [`Phase::Releasing`] is reachable: arming is the last phase of
+/// `docs/combat_actions.md` and nothing commits into a watch yet.
+pub fn commit_actions(state: &mut WorldState) {
     let now = state.ticks;
     let pending: Vec<(EntityId, Serial, WorldTick)> = state
         .registry
         .query::<Combat>()
         .filter_map(|(attacker, combat)| {
-            (combat.warmode() && attackable(state, attacker))
+            // One action at a time. A fighter already swinging is sustained, not
+            // committed again — that is what makes the wind-up a process rather
+            // than a marker to be re-stamped every tick.
+            (combat.warmode() && attackable(state, attacker) && !state.registry.has::<CombatAction>(attacker))
                 .then(|| Some((attacker, combat.target()?, combat.next_swing()?)))?
         })
         .collect();
 
     for (attacker, target_serial, due) in pending {
         // A ranged attacker — innate or a wielded bow/crossbow — has no melee
-        // wind-up: it stands and looses on `volleys`'s own beat instead.
+        // wind-up: it stands and looses on `volleys`'s own beat instead. That is
+        // the ten seconds of standing still, and closing it is the next phase.
         let is_ranged = state.registry.has::<RangedAttack>(attacker)
             || weapons::equipped_weapon(state, attacker)
                 .is_some_and(|weapon| weapon.kind == WeaponKind::Ranged);
+        // A mobile a bard has calmed does not start one — ServUO's `BardPacified`.
         if is_ranged
-            || state.registry.has::<Hidden>(attacker)
             || state
                 .registry
                 .has::<openshard_state::components::Pacified>(attacker)
         {
             continue;
         }
-        let Some(target) = state.registry.entity_of(target_serial) else {
+        let Some(target) = state
+            .registry
+            .entity_of(target_serial)
+            .filter(|&target| attackable(state, target))
+        else {
+            // The target is gone — a creature killed, a player logged out, or a
+            // player still standing as a ghost, which keeps its mobile serial and
+            // is not a combat target. Dropping a stale aim is the swing beat's
+            // job, so it survives exactly as long as the timer that would have
+            // struck it: without the guard, monsters keep aiming at a ghost until
+            // their next AI beat notices.
+            if now >= due {
+                clear_target(state, attacker);
+            }
             continue;
         };
-        if !attackable(state, target) || !melee_reachable(state, attacker, target) {
+        // The reach a swing commits to. One tile today, and a constant rather
+        // than a weapon row until reach becomes data — the polearm falls exactly
+        // on that seam.
+        let reach = MELEE_REACH;
+        if obstruction(state, attacker, target, reach).is_some() {
+            continue;
+        }
+        // A concealed fighter is not telegraphed: drawing a wind-up would break
+        // cover before the blow, which is the whole of an ambush.
+        let telegraphed = !state.registry.has::<Hidden>(attacker);
+        let impact = if telegraphed {
+            if due > now {
+                due
+            } else {
+                now.saturating_add(swing_speed(state, attacker).max(1))
+            }
+        } else {
+            // No gesture to stretch, so nothing to stretch it over: the blow
+            // lands when it was already due.
+            due.max(now)
+        };
+        // The opener is captured at the commit — what the fighter promised is
+        // frozen here — and spent by the hit roll at the impact even on a miss.
+        // Cover is a way into a fight, never a permanent accuracy aura.
+        let accuracy = if take_wrestling_opener(state, attacker, target_serial) {
+            AMBUSH_ACCURACY_PERCENT
+        } else {
+            0
+        };
+        set_next_swing(state, attacker, impact);
+        let action = CombatAction {
+            target: target_serial,
+            kind: ActionKind::Swing { reach },
+            phase: Phase::Releasing { impact },
+            started_at: now,
+            accuracy,
+            telegraphed,
+        };
+        state.registry.insert(attacker, action);
+        if telegraphed {
+            state.face_toward(attacker, target);
+            state.break_cover(attacker);
+            state.animate_timed(attacker, Action::Attack, impact.saturating_sub(now));
+            state.announce_action(attacker, action);
+        }
+    }
+}
+
+/// Apply the world to every running action — the second verb, and the one the
+/// old model had no room for at all.
+///
+/// Both phases are sustained the same way: an armed fighter is interruptible and
+/// can be spoiled, which is what stops "wait for the perfect moment" from being
+/// a free option. What ends an action here ends it *with a reason*, and the
+/// reason crosses the wire — the silent `continue` at the impact is what made a
+/// player watch a full swing and get neither a blow nor a word.
+///
+/// The condition rules of `docs/combat_actions.md`'s D4 — a run that sways a
+/// shot, a wound that spoils it — are a later phase. What is applied today is
+/// only what the world does: the fighter's own life, a bard's calm, and the
+/// three ways a committed target stops being strikeable.
+pub fn sustain_actions(state: &mut WorldState) {
+    let now = state.ticks;
+    let running: Vec<(EntityId, CombatAction)> = state
+        .registry
+        .query::<CombatAction>()
+        .map(|(attacker, action)| (attacker, *action))
+        .collect();
+
+    for (attacker, action) in running {
+        // The fighter itself first: a dead or ghosted attacker has no action,
+        // whatever its target is doing.
+        if !attackable(state, attacker) {
+            state.end_combat_action(
+                attacker,
+                CombatActionOutcome::Interrupted(InterruptReason::Abandoned),
+            );
             continue;
         }
         if state
             .registry
-            .get::<SwingWindup>(attacker)
-            .is_some_and(|windup| windup.target == target_serial && windup.completes_at == due && now <= due)
+            .has::<openshard_state::components::Pacified>(attacker)
         {
+            state.end_combat_action(
+                attacker,
+                CombatActionOutcome::Interrupted(InterruptReason::Pacified),
+            );
             continue;
         }
-
-        let impact = if due > now {
-            due
-        } else {
-            now.saturating_add(swing_speed(state, attacker).max(1))
+        let Some(target) = state
+            .registry
+            .entity_of(action.target)
+            .filter(|&target| attackable(state, target))
+        else {
+            state.end_combat_action(
+                attacker,
+                CombatActionOutcome::Interrupted(InterruptReason::TargetGone),
+            );
+            continue;
         };
-        set_next_swing(state, attacker, impact);
-        state.face_toward(attacker, target);
-        state.break_cover(attacker);
-        state.animate_timed(attacker, Action::Attack, impact.saturating_sub(now));
-        state.registry.insert(
-            attacker,
-            SwingWindup {
-                target: target_serial,
-                completes_at: impact,
-            },
-        );
+        // Against the *committed* reach, not the weapon's reach now: a fighter
+        // is held to what it promised, and a weapon swapped mid-swing does not
+        // lengthen the blow already in flight.
+        if let Some(reason) = obstruction(state, attacker, target, action.reach()) {
+            state.end_combat_action(attacker, CombatActionOutcome::Interrupted(reason));
+            continue;
+        }
+        // An arm that was never released gives out. Nothing arms yet, so nothing
+        // reaches this today; it is the endurance that stops a couched lance
+        // from becoming a permanent property of a rider.
+        if let Phase::Armed { expires_at, .. } = action.phase {
+            if now >= expires_at {
+                state.end_combat_action(attacker, CombatActionOutcome::Expired);
+            }
+        }
     }
 }
 
@@ -1059,29 +1172,58 @@ pub fn set_next_swing(state: &mut WorldState, attacker: EntityId, tick: WorldTic
 }
 
 /// Stop a combatant attacking whatever it was.
+///
+/// Whatever it was swinging goes with the target it was swinging at: an action
+/// is bound to the opponent it committed to and does not follow a change of aim.
 pub fn clear_target(state: &mut WorldState, attacker: EntityId) {
-    state.registry.remove::<SwingWindup>(attacker);
+    state.end_combat_action(
+        attacker,
+        CombatActionOutcome::Interrupted(InterruptReason::TargetGone),
+    );
     if let Some(combat) = state.registry.get_mut::<Combat>(attacker) {
         combat.clear_target();
     }
 }
 
-/// Whether a melee gesture can actually belong to this target.
+/// Why `attacker` cannot presently strike `target` within `reach` — `None` when
+/// it can.
 ///
-/// Kept identical to the range/facet/sight half of [`swings`]. A distant target
-/// is an aim, not a reason to slash empty air; [`prepare_swings`] opens its animation
-/// window when the attacker reaches it.
-fn melee_reachable(state: &WorldState, attacker: EntityId, target: EntityId) -> bool {
+/// One test, read at the commit and again every tick the action runs. It used to
+/// be two copies of the same three lines at two different moments, and the
+/// second copy is what turned a spoiled swing into a bare `continue`: adjacent
+/// tiles can still be separated by a closed door or a wall, so melee follows the
+/// same live-terrain sight rule as a volley and an interaction.
+fn obstruction(
+    state: &WorldState,
+    attacker: EntityId,
+    target: EntityId,
+    reach: RangedRange,
+) -> Option<InterruptReason> {
     let (Some(&Position(from)), Some(&Position(to))) = (
         state.registry.get::<Position>(attacker),
         state.registry.get::<Position>(target),
     ) else {
-        return false;
+        return Some(InterruptReason::TargetGone);
     };
     let facet = state.facet_of(attacker);
-    state.facet_of(target) == facet
-        && in_range(from, to, MELEE_RANGE)
-        && openshard_movement::sight_clear(&state.footing(facet, Doors::AsTheyStand), from, to)
+    if state.facet_of(target) != facet {
+        return Some(InterruptReason::TargetGone);
+    }
+    if !in_range(from, to, u32::from(reach.get())) {
+        return Some(InterruptReason::OutOfReach);
+    }
+    if !openshard_movement::sight_clear(&state.footing(facet, Doors::AsTheyStand), from, to) {
+        return Some(InterruptReason::NoLineOfSight);
+    }
+    None
+}
+
+/// Whether a melee gesture can actually belong to this target.
+///
+/// A distant target is an aim, not a reason to slash empty air;
+/// [`commit_actions`] opens its animation window when the attacker reaches it.
+fn melee_reachable(state: &WorldState, attacker: EntityId, target: EntityId) -> bool {
+    obstruction(state, attacker, target, MELEE_REACH).is_none()
 }
 
 /// Turn a mobile grey for `gameplay.criminal_ticks`, or push the timer out if it is
@@ -1458,12 +1600,12 @@ fn skill_value(state: &WorldState, mobile: EntityId, skill: Skill) -> u16 {
 /// mobile has none and keeps the pre-feature certainty — its natural blow always
 /// lands and trains nothing. The moment a mobile has skills (a trained player, a
 /// creature the pack equips with them) its swings roll and gain.
-fn check_hit(
-    state: &mut WorldState,
-    attacker: EntityId,
-    defender: EntityId,
-    accuracy_bonus_percent: u16,
-) -> bool {
+///
+/// `accuracy` is what the action accumulated on its way to the impact, as a
+/// signed percentage of the base chance: an ambush from cover adds to it, and a
+/// condition rule that sways a shot will subtract. A penalty that would take the
+/// chance below zero takes it to zero rather than wrapping.
+fn check_hit(state: &mut WorldState, attacker: EntityId, defender: EntityId, accuracy: i16) -> bool {
     if !state.registry.has::<Skills>(attacker) {
         return true;
     }
@@ -1475,7 +1617,8 @@ fn check_hit(
     // cancel, leaving `chance = (atk + 500) / (2·(def + 500))`, per-mille below and
     // clamped to certainty (pre-AoS lets a wide skill gap always land).
     let base_chance = 1000 * (u32::from(attack) + 500) / (2 * (u32::from(defend) + 500));
-    let chance = (base_chance * (100 + u32::from(accuracy_bonus_percent)) / 100).min(1000);
+    let scale = (100 + i32::from(accuracy)).max(0) as u32;
+    let chance = (base_chance * scale / 100).min(1000);
     openshard_skills::roll_skill_chance(state, attacker, attack_skill, chance)
 }
 

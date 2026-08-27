@@ -121,6 +121,8 @@ pub(crate) fn packet_kind(packet: &ServerPacket) -> &'static str {
         ServerPacket::Animation(_) => "Animation",
         ServerPacket::NewAnimation(_) => "NewAnimation",
         ServerPacket::SwingTiming(_) => "SwingTiming",
+        ServerPacket::CombatActionPhase(_) => "CombatActionPhase",
+        ServerPacket::CombatActionEnded(_) => "CombatActionEnded",
         ServerPacket::OpenContainer(_) => "OpenContainer",
         ServerPacket::AddToContainer(_) => "AddToContainer",
         ServerPacket::ContainerContents(_) => "ContainerContents",

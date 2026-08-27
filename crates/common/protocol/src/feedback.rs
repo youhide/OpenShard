@@ -367,6 +367,347 @@ impl DecodePacket for HarvestCompleted {
     }
 }
 
+/// What a combat action's impact does — the axis `docs/combat_actions.md` calls
+/// *kind*.
+///
+/// It is on the wire because a watcher draws a drawn bow differently from a
+/// raised axe, and because the two end differently: a shot spends a round. The
+/// three are the whole list; a fourth is a protocol change, deliberately.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CombatActionKind {
+    /// A blow committed to a reach.
+    Swing,
+    /// A shot from a wielded ranged weapon, its round already out of the pack.
+    Shot,
+    /// An innate ranged attack — a breath weapon. It carries no ammunition.
+    Breath,
+}
+
+impl CombatActionKind {
+    /// The byte this kind is written as.
+    #[must_use]
+    pub const fn to_bits(self) -> u8 {
+        match self {
+            Self::Swing => 0,
+            Self::Shot => 1,
+            Self::Breath => 2,
+        }
+    }
+
+    /// Read a kind byte, or `None` for one this build does not know.
+    #[must_use]
+    pub const fn from_bits(bits: u8) -> Option<Self> {
+        match bits {
+            0 => Some(Self::Swing),
+            1 => Some(Self::Shot),
+            2 => Some(Self::Breath),
+            _ => None,
+        }
+    }
+}
+
+/// Which half of an action's life the actor just entered.
+///
+/// The duration means a different thing in each, which is why they are one enum
+/// and not a flag beside a number: an armed action is *waiting* and its number
+/// is how long it can wait, a releasing one is *landing* and its number is how
+/// long that takes. A zero-length timed action would be the lie
+/// `docs/combat_actions.md`'s wire section refuses.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ActionPhase {
+    /// Ready and waiting on the world, for at most this long.
+    Armed { endurance: SwingDuration },
+    /// Released: the impact lands after this long.
+    Releasing { impact_in: SwingDuration },
+}
+
+impl ActionPhase {
+    /// The byte this phase is written as.
+    #[must_use]
+    pub const fn to_bits(self) -> u8 {
+        match self {
+            Self::Armed { .. } => 0,
+            Self::Releasing { .. } => 1,
+        }
+    }
+
+    /// The interval it carries, whichever of the two it is.
+    #[must_use]
+    pub const fn duration(self) -> SwingDuration {
+        match self {
+            Self::Armed { endurance } => endurance,
+            Self::Releasing { impact_in } => impact_in,
+        }
+    }
+
+    /// Rebuild a phase from its byte and its interval.
+    #[must_use]
+    pub const fn from_bits(bits: u8, duration: SwingDuration) -> Option<Self> {
+        match bits {
+            0 => Some(Self::Armed { endurance: duration }),
+            1 => Some(Self::Releasing { impact_in: duration }),
+            _ => None,
+        }
+    }
+}
+
+/// Why an action stopped without landing.
+///
+/// A closed list, and each entry is a fact the server tests at a seam it already
+/// runs. The player is owed the reason: a swing that vanished with no word is
+/// the defect `docs/combat_actions.md` opens with.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum InterruptReason {
+    /// The committed target died, logged out, or left the facet.
+    TargetGone,
+    /// The committed target is no longer within the action's committed reach.
+    OutOfReach,
+    /// The line to the committed target was cut — a door, a wall.
+    NoLineOfSight,
+    /// A bard calmed the actor mid-action.
+    Pacified,
+    /// The actor stopped: it disengaged, aimed at somebody else, died, or left.
+    Abandoned,
+}
+
+impl InterruptReason {
+    /// The byte this reason is written as. Never `0`, which is the "no reason"
+    /// filler an outcome that is not an interruption writes.
+    #[must_use]
+    pub const fn to_bits(self) -> u8 {
+        match self {
+            Self::TargetGone => 1,
+            Self::OutOfReach => 2,
+            Self::NoLineOfSight => 3,
+            Self::Pacified => 4,
+            Self::Abandoned => 5,
+        }
+    }
+
+    /// Read a reason byte, or `None` for `0` and for one this build does not know.
+    #[must_use]
+    pub const fn from_bits(bits: u8) -> Option<Self> {
+        match bits {
+            1 => Some(Self::TargetGone),
+            2 => Some(Self::OutOfReach),
+            3 => Some(Self::NoLineOfSight),
+            4 => Some(Self::Pacified),
+            5 => Some(Self::Abandoned),
+            _ => None,
+        }
+    }
+}
+
+/// How a combat action ended.
+///
+/// Every action ends, and every end crosses the wire — without this a cancelled
+/// telegraph keeps playing on the watcher's screen for its promised duration.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CombatActionOutcome {
+    /// The impact landed and did damage.
+    Hit,
+    /// The impact landed and found only air.
+    Miss,
+    /// It never reached its impact.
+    Interrupted(InterruptReason),
+    /// An armed action ran out of endurance without its watch ever firing.
+    Expired,
+}
+
+impl CombatActionOutcome {
+    /// The byte this outcome is written as.
+    #[must_use]
+    pub const fn to_bits(self) -> u8 {
+        match self {
+            Self::Hit => 0,
+            Self::Miss => 1,
+            Self::Interrupted(_) => 2,
+            Self::Expired => 3,
+        }
+    }
+
+    /// The reason byte, `0` for every outcome that is not an interruption.
+    #[must_use]
+    pub const fn reason_bits(self) -> u8 {
+        match self {
+            Self::Interrupted(reason) => reason.to_bits(),
+            Self::Hit | Self::Miss | Self::Expired => 0,
+        }
+    }
+
+    /// Rebuild an outcome from its two bytes. The reason byte is read only for
+    /// an interruption, and an interruption with no reason is malformed.
+    #[must_use]
+    pub const fn from_bits(outcome: u8, reason: u8) -> Option<Self> {
+        match outcome {
+            0 => Some(Self::Hit),
+            1 => Some(Self::Miss),
+            2 => match InterruptReason::from_bits(reason) {
+                Some(reason) => Some(Self::Interrupted(reason)),
+                None => None,
+            },
+            3 => Some(Self::Expired),
+            _ => None,
+        }
+    }
+}
+
+/// `0xBF` subcommand `0xE010` — a mobile has entered a phase of a combat action.
+///
+/// Sent at the commit and again at the release, because those are two different
+/// pictures and the second is not implied by the first: an archer who looses is
+/// not an archer holding a draw, and a watcher should be told rather than left
+/// to guess from the arrival of an animation.
+///
+/// [`SwingTiming`] is not this packet and is not repurposed into it: it carries a
+/// duration and nothing else, harvesting uses it too, and an armed action has no
+/// duration to carry — a zero there already means "forget the timing you were
+/// given".
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CombatActionPhase {
+    /// Whose action it is.
+    pub actor: Serial,
+    /// What it is committed to.
+    pub target: Serial,
+    /// What its impact will do.
+    pub kind: CombatActionKind,
+    /// The phase just entered, and the interval that phase measures.
+    pub phase: ActionPhase,
+}
+
+impl CombatActionPhase {
+    /// The extended-command envelope.
+    pub const ID: u8 = 0xBF;
+    /// Follows [`HarvestCompleted::SUBCOMMAND`].
+    pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 16;
+    /// Id, length, subcommand, actor, target, kind, phase and interval.
+    pub const LENGTH_BYTES: u16 = 19;
+}
+
+impl EncodePacket for CombatActionPhase {
+    const ID: u8 = Self::ID;
+    const LENGTH: PacketLength = PacketLength::Fixed(Self::LENGTH_BYTES);
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u16(Self::LENGTH_BYTES);
+        out.u16(Self::SUBCOMMAND);
+        out.u32(self.actor.raw());
+        out.u32(self.target.raw());
+        out.u8(self.kind.to_bits());
+        out.u8(self.phase.to_bits());
+        out.u32(self.phase.duration().0);
+    }
+}
+
+impl DecodePacket for CombatActionPhase {
+    const ID: u8 = Self::ID;
+
+    fn decode_body(
+        reader: &mut crate::codec::PacketReader<'_>,
+        _version: ClientVersion,
+    ) -> Result<Self, crate::error::DecodeError> {
+        let subcommand = reader.u16()?;
+        if subcommand != Self::SUBCOMMAND {
+            return Err(crate::error::DecodeError::UnknownValue {
+                field: "0xBF subcommand for combat action phase",
+                value: u32::from(subcommand),
+            });
+        }
+        let actor = Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
+            field: "combat action actor",
+            value: 0,
+        })?;
+        let target = Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
+            field: "combat action target",
+            value: 0,
+        })?;
+        let kind_bits = reader.u8()?;
+        let kind = CombatActionKind::from_bits(kind_bits).ok_or(crate::error::DecodeError::UnknownValue {
+            field: "combat action kind",
+            value: u32::from(kind_bits),
+        })?;
+        let phase_bits = reader.u8()?;
+        let duration = SwingDuration(reader.u32()?);
+        let phase =
+            ActionPhase::from_bits(phase_bits, duration).ok_or(crate::error::DecodeError::UnknownValue {
+                field: "combat action phase",
+                value: u32::from(phase_bits),
+            })?;
+        Ok(Self {
+            actor,
+            target,
+            kind,
+            phase,
+        })
+    }
+}
+
+/// `0xBF` subcommand `0xE011` — a mobile's combat action is over, and this is
+/// how it ended.
+///
+/// The half the wire was missing: the beginning already crossed as an animation
+/// with a duration, so a telegraph that was cancelled had no way to stop, and
+/// ran out its promised interval over an empty tile.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CombatActionEnded {
+    /// Whose action ended.
+    pub actor: Serial,
+    /// How it ended.
+    pub outcome: CombatActionOutcome,
+}
+
+impl CombatActionEnded {
+    /// The extended-command envelope.
+    pub const ID: u8 = 0xBF;
+    /// Follows [`CombatActionPhase::SUBCOMMAND`].
+    pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 17;
+    /// Id, length, subcommand, actor, outcome and reason.
+    pub const LENGTH_BYTES: u16 = 11;
+}
+
+impl EncodePacket for CombatActionEnded {
+    const ID: u8 = Self::ID;
+    const LENGTH: PacketLength = PacketLength::Fixed(Self::LENGTH_BYTES);
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u16(Self::LENGTH_BYTES);
+        out.u16(Self::SUBCOMMAND);
+        out.u32(self.actor.raw());
+        out.u8(self.outcome.to_bits());
+        out.u8(self.outcome.reason_bits());
+    }
+}
+
+impl DecodePacket for CombatActionEnded {
+    const ID: u8 = Self::ID;
+
+    fn decode_body(
+        reader: &mut crate::codec::PacketReader<'_>,
+        _version: ClientVersion,
+    ) -> Result<Self, crate::error::DecodeError> {
+        let subcommand = reader.u16()?;
+        if subcommand != Self::SUBCOMMAND {
+            return Err(crate::error::DecodeError::UnknownValue {
+                field: "0xBF subcommand for combat action end",
+                value: u32::from(subcommand),
+            });
+        }
+        let actor = Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
+            field: "combat action actor",
+            value: 0,
+        })?;
+        let outcome_bits = reader.u8()?;
+        let reason_bits = reader.u8()?;
+        let outcome = CombatActionOutcome::from_bits(outcome_bits, reason_bits).ok_or(
+            crate::error::DecodeError::UnknownValue {
+                field: "combat action outcome",
+                value: u32::from(outcome_bits) << 8 | u32::from(reason_bits),
+            },
+        )?;
+        Ok(Self { actor, outcome })
+    }
+}
+
 /// `0x54` — play a sound at a world location. 12 bytes.
 ///
 /// The point places the sound in 3D so the client attenuates it by distance; a
@@ -806,6 +1147,90 @@ mod tests {
         assert_eq!(&packet[5..9], &0x0000_1234_u32.to_be_bytes());
         assert_eq!(&packet[9..13], &5_000_u32.to_be_bytes());
         assert_eq!(decode_packet::<SwingTiming>(&packet, version()), Ok(timing));
+    }
+
+    #[test]
+    fn a_released_action_carries_its_target_and_the_time_to_impact() {
+        let phase = CombatActionPhase {
+            actor: mobile(0x0000_1234),
+            target: mobile(0x0000_5678),
+            kind: CombatActionKind::Swing,
+            phase: ActionPhase::Releasing {
+                impact_in: SwingDuration(1_500),
+            },
+        };
+        let packet = encode_packet(&phase, version());
+        assert_eq!(packet.len(), usize::from(CombatActionPhase::LENGTH_BYTES));
+        assert_eq!(packet[0], CombatActionPhase::ID);
+        assert_eq!(&packet[1..3], &CombatActionPhase::LENGTH_BYTES.to_be_bytes());
+        assert_eq!(&packet[3..5], &CombatActionPhase::SUBCOMMAND.to_be_bytes());
+        assert_eq!(&packet[5..9], &0x0000_1234_u32.to_be_bytes());
+        assert_eq!(&packet[9..13], &0x0000_5678_u32.to_be_bytes());
+        assert_eq!(packet[13], 0, "a swing");
+        assert_eq!(packet[14], 1, "releasing");
+        assert_eq!(&packet[15..19], &1_500_u32.to_be_bytes());
+        assert_eq!(decode_packet::<CombatActionPhase>(&packet, version()), Ok(phase));
+    }
+
+    /// An armed action has no duration to the impact, and saying so as a
+    /// zero-length timed one is the lie the second packet exists to avoid.
+    #[test]
+    fn an_armed_action_carries_its_endurance_rather_than_an_impact() {
+        let phase = CombatActionPhase {
+            actor: mobile(0x0000_1234),
+            target: mobile(0x0000_5678),
+            kind: CombatActionKind::Shot,
+            phase: ActionPhase::Armed {
+                endurance: SwingDuration(8_000),
+            },
+        };
+        let packet = encode_packet(&phase, version());
+        assert_eq!(packet[13], 1, "a shot");
+        assert_eq!(packet[14], 0, "armed");
+        assert_eq!(&packet[15..19], &8_000_u32.to_be_bytes());
+        assert_eq!(decode_packet::<CombatActionPhase>(&packet, version()), Ok(phase));
+    }
+
+    #[test]
+    fn an_interruption_names_its_reason_and_a_hit_does_not() {
+        let interrupted = CombatActionEnded {
+            actor: mobile(0x0000_1234),
+            outcome: CombatActionOutcome::Interrupted(InterruptReason::OutOfReach),
+        };
+        let packet = encode_packet(&interrupted, version());
+        assert_eq!(packet.len(), usize::from(CombatActionEnded::LENGTH_BYTES));
+        assert_eq!(&packet[3..5], &CombatActionEnded::SUBCOMMAND.to_be_bytes());
+        assert_eq!(&packet[5..9], &0x0000_1234_u32.to_be_bytes());
+        assert_eq!(packet[9], 2, "interrupted");
+        assert_eq!(packet[10], 2, "out of reach");
+        assert_eq!(
+            decode_packet::<CombatActionEnded>(&packet, version()),
+            Ok(interrupted)
+        );
+
+        let hit = CombatActionEnded {
+            actor: mobile(0x0000_1234),
+            outcome: CombatActionOutcome::Hit,
+        };
+        let packet = encode_packet(&hit, version());
+        assert_eq!(packet[9], 0, "hit");
+        assert_eq!(
+            packet[10], 0,
+            "an outcome that is not an interruption has no reason"
+        );
+        assert_eq!(decode_packet::<CombatActionEnded>(&packet, version()), Ok(hit));
+    }
+
+    /// A reason of `0` is the filler every other outcome writes, so it cannot
+    /// also stand for an interruption — reading one back is malformed, not a
+    /// nameless interruption.
+    #[test]
+    fn an_interruption_without_a_reason_does_not_decode() {
+        assert_eq!(CombatActionOutcome::from_bits(2, 0), None);
+        assert_eq!(
+            CombatActionOutcome::from_bits(2, InterruptReason::Pacified.to_bits()),
+            Some(CombatActionOutcome::Interrupted(InterruptReason::Pacified))
+        );
     }
 
     #[test]

@@ -28,8 +28,8 @@ use openshard_movement::{Footing, MapTerrain, NavigationGraph};
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::combat::{AttackTarget, HealthBar, WarMode};
 use openshard_protocol::feedback::{
-    Animation, HarvestCompleted, HarvestPreview, HarvestToolVisual, NewAnimation, PlaySound, SwingDuration,
-    SwingTiming,
+    Animation, CombatActionEnded, CombatActionOutcome, CombatActionPhase, HarvestCompleted, HarvestPreview,
+    HarvestToolVisual, InterruptReason, NewAnimation, PlaySound, SwingDuration, SwingTiming,
 };
 use openshard_protocol::items::WorldItem;
 use openshard_protocol::localized;
@@ -48,10 +48,10 @@ use openshard_uofiles::anim::BodyKind;
 
 use crate::boat::Plank;
 use crate::components::{
-    Access, Amount, Body, Client, Combat, Contained, CorpseBody, CraftedBy, Drawn, Equipped, Ghost, Heading,
-    HearsGhosts, Hidden, Hitpoints, HouseDesign, InRegion, ItemAffix, ItemAffixes, ItemLocation, Meditating,
-    Movement, Name, Position, Quality, SettledItemLocation, Staff, Stamina, Stealthing, SwingWindup,
-    TradeWindow, body_opens_doors, creature_name,
+    Access, Amount, Body, Client, Combat, CombatAction, Contained, CorpseBody, CraftedBy, Drawn, Equipped,
+    Ghost, Heading, HearsGhosts, Hidden, Hitpoints, HouseDesign, InRegion, ItemAffix, ItemAffixes,
+    ItemLocation, Meditating, Movement, Name, Position, Quality, SettledItemLocation, Staff, Stamina,
+    Stealthing, TradeWindow, body_opens_doors, creature_name,
 };
 use crate::connection::Connection;
 use crate::dialogue::Dialogue;
@@ -2535,6 +2535,54 @@ impl WorldState {
         self.animate_inner(mobile, action, Some(duration_ms));
     }
 
+    /// Tell everyone who can see `mobile` which phase of its action it just
+    /// entered.
+    ///
+    /// Sent at the commit and again at the release — two different pictures, and
+    /// the second is not implied by the first. Substrate rather than a rule: the
+    /// crate that owns fighting decides *when* an action changes phase, and this
+    /// is only how that fact reaches a screen. Silent for a mobile with no wire
+    /// identity, like every other broadcast here.
+    pub fn announce_action(&mut self, mobile: EntityId, action: CombatAction) {
+        let Some(actor) = self.registry.serial_of(mobile) else {
+            return;
+        };
+        let now = self.ticks;
+        self.broadcast_packet(
+            mobile,
+            &ServerPacket::CombatActionPhase(CombatActionPhase {
+                actor,
+                target: action.target,
+                kind: action.wire_kind(),
+                phase: action.wire_phase(now),
+            }),
+        );
+    }
+
+    /// End `mobile`'s combat action, if it has one, and tell every watcher how.
+    ///
+    /// The one door out of [`CombatAction`], and it is on `WorldState` rather
+    /// than in the combat crate for the same reason [`disengage`](Self::disengage)
+    /// is: death, Peacemaking, logout and a pet being called off all end a fight,
+    /// and none of them can depend on the crate that owns swinging. An action
+    /// that ends without this is exactly the defect the packet was added for —
+    /// the watcher's telegraph runs out its promised duration over an empty tile.
+    ///
+    /// Returns whether there was an action to end.
+    pub fn end_combat_action(&mut self, mobile: EntityId, outcome: CombatActionOutcome) -> bool {
+        if self.registry.remove::<CombatAction>(mobile).is_none() {
+            return false;
+        }
+        let Some(actor) = self.registry.serial_of(mobile) else {
+            return true;
+        };
+        self.broadcast_packet(
+            mobile,
+            &ServerPacket::CombatActionEnded(CombatActionEnded { actor, outcome }),
+        );
+        true
+    }
+
     /// Tell OpenShard clients which backpack tool to draw in a harvester's hand
     /// for the action that follows.  The item remains where it was; this is a
     /// picture-only companion to the ordinary animation packet.
@@ -3762,7 +3810,12 @@ impl WorldState {
     /// player cannot retain a drawn war stance or target after the server has
     /// ended their fight.
     pub fn disengage(&mut self, mobile: EntityId) {
-        self.registry.remove::<SwingWindup>(mobile);
+        // The fight ends, so whatever was being swung ends with it — and says
+        // so, or the watcher keeps playing a stroke nobody is making any more.
+        self.end_combat_action(
+            mobile,
+            CombatActionOutcome::Interrupted(InterruptReason::Abandoned),
+        );
         let was_war = self
             .registry
             .get::<Combat>(mobile)
