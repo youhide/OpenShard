@@ -177,6 +177,23 @@ pub struct Route {
     pub refusal: Option<crate::steer::Refusal>,
 }
 
+/// A look the shard's own rule was asked for, ready to draw.
+///
+/// **The shard's rule, not a picture of it.** The trace comes out of
+/// `openshard_movement::sight::trace` — the same call `sight_clear` is, and the
+/// same call a shot flies along — over this client's own map and its own
+/// live overlay. See `docs/sight.md`'s D1 and D3, and the limit D3 names: the
+/// live half is what the shard has told this client about.
+pub struct SightLine {
+    /// The walk itself: every tile crossed, the ray's height over each, and
+    /// where it stopped.
+    pub trace: openshard_movement::sight::SightTrace,
+    /// Whether this is the look at the mobile the shard says we are attacking,
+    /// rather than at the tile under the cursor. The first is the question the
+    /// shard is really asking; the second is a person surveying a piece of map.
+    pub at_quarry: bool,
+}
+
 /// One overhead health line, anchored in world-viewport pixels.
 ///
 /// Its colour remains a presentation decision: the query returns the wire's
@@ -309,6 +326,10 @@ pub struct Hud {
     pub z_slice_view: openshard_client_render::interiors::ZSliceView,
     pub floor_view: openshard_client_render::interiors::FloorView,
     pub route: Option<Arc<Route>>,
+    /// Whether the sight overlay is on this frame.
+    pub show_sight: bool,
+    /// The look it draws, when it is on and there is something to look at.
+    pub sight: Option<Arc<SightLine>>,
     pub show_occluders: bool,
     pub show_solids: bool,
     pub solids_only: bool,

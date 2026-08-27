@@ -18,6 +18,7 @@ use openshard_protocol::world::Point;
 use openshard_tiles::LandTileId;
 use openshard_tiles::{StaticTile, TileData, TileFlags};
 
+use crate::sight::Stop;
 use crate::spans::{SpanIndex, Spans};
 
 /// How far a walking human can step up.
@@ -686,60 +687,62 @@ impl MapTerrain<'_> {
             .min_by_key(|&z| (z - near_z).abs())
     }
 
-    pub fn sight_clear(&self, from: Point, to: Point) -> bool {
-        // Eye height: the ray runs at head level, interpolated between the two
-        // ends so a look up a hill follows the slope.
-        const EYE: i32 = 9;
-        let tiles = crate::line_tiles(Tile::new(from.x, from.y), Tile::new(to.x, to.y));
-        let count = tiles.len() as i32;
-        for (i, tile) in tiles.into_iter().enumerate() {
-            let t = i as i32 + 1;
-            let ray_z = i32::from(from.z) + (i32::from(to.z) - i32::from(from.z)) * t / (count + 1) + EYE;
-            // A hill in the way: ground above the eye line occludes.
-            if self
-                .ground_z(tile)
-                .is_some_and(|ground| i32::from(ground) > ray_z)
-            {
-                return false;
+    /// What on `tile` stops a look passing over it at `ray_z`, if anything on
+    /// the map does.
+    ///
+    /// **One tile at one height**, because the line and the eye belong to
+    /// [`sight::trace`](crate::sight::trace), which walks both this layer and
+    /// the live one over the same ray rather than each over its own copy of it.
+    pub fn sight_stop(&self, tile: Tile, ray_z: i32) -> Option<Stop> {
+        // A hill in the way: ground above the eye line occludes.
+        if let Some(ground) = self
+            .ground_z(tile)
+            .map(i32::from)
+            .filter(|&ground| ground > ray_z)
+        {
+            return Some(Stop::Ground { z: ground });
+        }
+        for item in self.map().statics_at(tile.x, tile.y) {
+            let static_tile = self.tiles().static_tile(item.tile.0);
+            let flags = static_tile.flags;
+            // Windows are the deliberate hole in a wall — Sphere's
+            // `LOS_NB_WINDOWS`, and the one place `UFLAG2_WINDOW` is read at
+            // all. A look passes; a step does not (see `is_obstructed`).
+            if flags.has(TileFlags::WINDOW) {
+                continue;
             }
-            for item in self.map().statics_at(tile.x, tile.y) {
-                let static_tile = self.tiles().static_tile(item.tile.0);
-                let flags = static_tile.flags;
-                // Windows are the deliberate hole in a wall — Sphere's
-                // `LOS_NB_WINDOWS`, and the one place `UFLAG2_WINDOW` is read at
-                // all. A look passes; a step does not (see `is_obstructed`).
-                if flags.has(TileFlags::WINDOW) {
-                    continue;
-                }
-                // Sphere's `CCharLOS.cpp:400`: a static blocks sight if it is
-                // `UFLAG1_WALL | UFLAG1_BLOCK | UFLAG2_PLATFORM`. The platform bit
-                // is not an oversight there — an upper floor is exactly what stops
-                // you seeing the storey above you. `NO_SHOOT` is ServUO's name for
-                // `UFLAG2_WALL2` and covers the grilles and bars a look does not
-                // cross either, which is why a monster does not aggro through a
-                // portcullis it can never reach through.
-                const WALLISH: u64 = TileFlags::WALL | TileFlags::BLOCK | TileFlags::NO_SHOOT;
-                let wallish = flags.has(WALLISH);
-                if !wallish && !flags.is_platform() {
-                    continue;
-                }
-                let base = i32::from(item.z);
-                // Walls often carry zero height in tiledata; treat them as a full
-                // storey, the way the client draws them. A *platform* keeps its
-                // real height, and the difference is not academic: a floor tile is
-                // height 0, and lending it a storey walls off every doorway it is
-                // laid in — which is how "an open doorway is a sight line" broke.
-                let top = if wallish {
-                    base + i32::from(static_tile.height.max(15))
-                } else {
-                    base + i32::from(static_tile.height)
-                };
-                if base <= ray_z && ray_z < top {
-                    return false;
-                }
+            // Sphere's `CCharLOS.cpp:400`: a static blocks sight if it is
+            // `UFLAG1_WALL | UFLAG1_BLOCK | UFLAG2_PLATFORM`. The platform bit
+            // is not an oversight there — an upper floor is exactly what stops
+            // you seeing the storey above you. `NO_SHOOT` is ServUO's name for
+            // `UFLAG2_WALL2` and covers the grilles and bars a look does not
+            // cross either, which is why a monster does not aggro through a
+            // portcullis it can never reach through.
+            const WALLISH: u64 = TileFlags::WALL | TileFlags::BLOCK | TileFlags::NO_SHOOT;
+            let wallish = flags.has(WALLISH);
+            if !wallish && !flags.is_platform() {
+                continue;
+            }
+            let base = i32::from(item.z);
+            // Walls often carry zero height in tiledata; treat them as a full
+            // storey, the way the client draws them. A *platform* keeps its
+            // real height, and the difference is not academic: a floor tile is
+            // height 0, and lending it a storey walls off every doorway it is
+            // laid in — which is how "an open doorway is a sight line" broke.
+            let top = match wallish {
+                true => base + i32::from(static_tile.height.max(15)),
+                false => base + i32::from(static_tile.height),
+            };
+            if base <= ray_z && ray_z < top {
+                return Some(Stop::Static {
+                    graphic: item.tile,
+                    base,
+                    top,
+                    wallish,
+                });
             }
         }
-        true
+        None
     }
 }
 

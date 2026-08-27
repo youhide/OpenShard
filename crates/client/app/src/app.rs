@@ -218,6 +218,8 @@ pub(crate) struct App {
     /// change as the body walks, and is cleared whenever a fresh world view
     /// changes the terrain it was planned over.
     pub(crate) route_cache: Option<RouteCache>,
+    /// The last sight line drawn, while its two ends stand — see [`SightCache`].
+    pub(crate) sight_cache: Option<SightCache>,
     /// The terrain wash for an unchanged world and camera.
     pub(crate) terrain_cache: Option<TerrainCache>,
     /// The HUD's separate occlusion grid for an unchanged world/camera view.
@@ -364,6 +366,18 @@ pub(crate) struct RouteCache {
     /// route to the street back for an order to the storey over it.
     pub(crate) goal: Point,
     pub(crate) route: Option<Arc<Route>>,
+}
+
+/// A sight line, and the two points that make it valid.
+///
+/// The trace is cheap — a Bresenham walk of at most a screen's width — and it
+/// is asked every frame the overlay is on, while the cursor moves every frame
+/// and the endpoints do not. Keyed on the pair and cleared wherever the route
+/// cache is, since both are readings of the same ground.
+pub(crate) struct SightCache {
+    pub(crate) from: Point,
+    pub(crate) to: Point,
+    pub(crate) sight: Option<Arc<crate::diagnostics::SightLine>>,
 }
 
 /// A terrain wash is independent of time; rebuilding it while the camera is

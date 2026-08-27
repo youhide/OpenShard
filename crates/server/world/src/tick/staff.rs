@@ -27,6 +27,9 @@ impl World {
             openshard_state::TargetPurpose::Teleport => {
                 crate::gm::teleport_to(&mut self.state, actor, response.location);
             }
+            openshard_state::TargetPurpose::Sight => {
+                crate::gm::report_sight(&mut self.state, actor, response.location);
+            }
             openshard_state::TargetPurpose::PlaceHouse { deed } => {
                 self.place_house_from_deed(actor, deed, response.location);
             }

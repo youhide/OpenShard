@@ -409,6 +409,7 @@ impl App {
         self.terrain_cache = None;
         self.occluder_cache = None;
         self.route_cache = None;
+        self.sight_cache = None;
         self.steer.clear_plan_cache();
         self.steer.clear_route();
         // The coarse graph **follows** the ground over the chunks that moved,
@@ -1162,6 +1163,9 @@ impl App {
         if items_changed || mobile_obstacles_changed {
             self.steer.clear_plan_cache();
             self.route_cache = None;
+            // A door that has just opened or shut is the live half of a look,
+            // and the only half of it this client keeps.
+            self.sight_cache = None;
         }
         if items_changed {
             self.terrain_cache = None;
@@ -1673,6 +1677,7 @@ impl App {
         };
         self.steer.clear_plan_cache();
         self.route_cache = None;
+        self.sight_cache = None;
         self.terrain_cache = None;
         self.occluder_cache = None;
         let previous_latest = view.journal.back().cloned();

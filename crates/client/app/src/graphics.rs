@@ -210,6 +210,14 @@ pub struct GraphicsSettings {
     /// which is a bill worth a debugging picture and not worth a frame nobody is
     /// looking at.
     pub show_terrain: bool,
+    /// Whether the HUD draws the sight line the shard decides a shot by — the
+    /// ray, the tiles it crosses, and what stopped it. See `docs/sight.md`.
+    ///
+    /// Off by default and paid for only while it is on, exactly as
+    /// [`show_terrain`](Self::show_terrain) is: the trace is one Bresenham walk
+    /// a frame, which is cheap, and a picture nobody is looking at is still a
+    /// picture nobody asked for.
+    pub show_sight: bool,
     /// Whether the development overlay draws the R1 interior index. It does
     /// not gate ordinary geometry until R2 explicitly makes it an input.
     pub show_interiors: bool,

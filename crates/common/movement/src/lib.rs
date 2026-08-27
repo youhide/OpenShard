@@ -65,6 +65,7 @@ mod path;
 pub mod reach;
 pub mod scene;
 mod sequence;
+pub mod sight;
 pub mod spans;
 pub mod surfaces;
 mod terrain;

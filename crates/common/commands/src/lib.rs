@@ -97,6 +97,8 @@ pub enum StaffCommand {
     Set,
     /// `.setland <tile id> [z]`
     SetLand,
+    /// `.sight`
+    Sight,
     /// `.skill <name> <value>`
     Skill,
     /// `.spellbook`
@@ -116,7 +118,7 @@ impl StaffCommand {
     ///
     /// An array and not a `Vec`: it is a constant, and the client walks it on
     /// every keystroke while a command is being typed.
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 31] = [
         Self::Add,
         Self::AddGold,
         Self::AddStatic,
@@ -141,6 +143,7 @@ impl StaffCommand {
         Self::Save,
         Self::Set,
         Self::SetLand,
+        Self::Sight,
         Self::Skill,
         Self::Spellbook,
         Self::Tele,
@@ -178,6 +181,7 @@ impl StaffCommand {
             Self::Save => "save",
             Self::Set => "set",
             Self::SetLand => "setland",
+            Self::Sight => "sight",
             Self::Skill => "skill",
             Self::Spellbook => "spellbook",
             Self::Tele => "tele",
@@ -221,6 +225,7 @@ impl StaffCommand {
             | Self::HUnban
             | Self::Quests
             | Self::Save
+            | Self::Sight
             | Self::Spellbook
             | Self::Tele
             | Self::Tile
@@ -260,6 +265,7 @@ impl StaffCommand {
             Self::Save => "save the world now",
             Self::Set => "change one of your stats",
             Self::SetLand => "change the ground under you, for good",
+            Self::Sight => "click a spot, and say what the ray to it meets",
             Self::Skill => "set one of your skills, in whole points",
             Self::Spellbook => "drop a full spellbook into your pack",
             Self::Tele => "click a spot, and jump to it",

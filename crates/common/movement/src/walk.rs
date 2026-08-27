@@ -795,19 +795,14 @@ pub fn arrival_z(footing: &Footing<'_>, tile: Tile, near_z: i32, height: i32) ->
 /// crate is furniture, not a wall — which is why this asks
 /// [`Overlay::blocker_anywhere`](crate::Overlay::blocker_anywhere) and reads
 /// only the door flag off what it finds.
+///
+/// **A reading of [`sight::trace`](crate::sight::trace), not a second walk.**
+/// The rule — the line, the eye height, which layer is asked in what order —
+/// lives there, once, so the picture a person debugs a refusal with is drawn
+/// from the same ray this fires along. See `docs/sight.md`.
 #[must_use]
 pub fn sight_clear(footing: &Footing<'_>, from: Point, to: Point) -> bool {
-    if !footing.map.is_none_or(|map| map.sight_clear(from, to)) {
-        return false;
-    }
-    line_tiles(Tile::new(from.x, from.y), Tile::new(to.x, to.y))
-        .into_iter()
-        .all(|tile| {
-            footing
-                .overlay
-                .blocker_anywhere(tile)
-                .is_none_or(|cover| !cover.is_door())
-        })
+    crate::sight::trace(footing, from, to, crate::sight::Extent::ToFirstBlock).clear()
 }
 
 /// Where one *legal* step from `from` lands, or `None` when that step is not a

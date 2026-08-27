@@ -1394,6 +1394,13 @@ pub enum TargetPurpose {
     },
     /// Teleport the targeter to the clicked spot — the cursor `.tele`.
     Teleport,
+    /// Say what a look from the targeter to the clicked spot meets — the cursor
+    /// `.sight` raises.
+    ///
+    /// A diagnostic and nothing else: it changes no state, and exists so the
+    /// shard's own verdict can be laid beside the client's overlay of it. See
+    /// `docs/sight.md`'s Ф4.
+    Sight,
     /// A targeted spell waiting for its aim — the cursor a spell puts up once
     /// the cast resolves. `success` is the skill roll already made, carried here
     /// so a fumbled cast that still raises a cursor simply lands no effect.

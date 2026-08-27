@@ -25,8 +25,9 @@
 use std::path::PathBuf;
 
 use openshard_map::grid::Tile;
-use openshard_movement::MapTerrain;
+use openshard_map::overlay::Doors;
 use openshard_movement::spans::SpanIndex;
+use openshard_movement::{Footing, MapTerrain};
 use openshard_protocol::world::{Facet, Point};
 
 /// The client directory, or `None` to skip.
@@ -95,6 +96,14 @@ fn a_base_set_walks_and_sees_exactly_as_the_install_does() {
         (width, height),
         "the base set came back a different size"
     );
+
+    // A look is asked of the whole footing rather than of the map alone — the
+    // rule lives in `sight::trace`, which walks the map and the live world over
+    // one ray. Nothing is live here, so what this compares is still the two
+    // maps and only the two maps.
+    let nothing_placed = openshard_map::overlay::Overlay::default();
+    let was_footing = Footing::new(Some(was), &nothing_placed, Doors::AsTheyStand);
+    let is_footing = Footing::new(Some(is), &nothing_placed, Doors::AsTheyStand);
 
     let mut counts = Counts::default();
     // Reused rather than allocated per tile: `statics_at` appends.
@@ -205,7 +214,10 @@ fn a_base_set_walks_and_sees_exactly_as_the_install_does() {
                 y: ty,
                 z: ground,
             };
-            let (a, b) = (was.sight_clear(from, to), is.sight_clear(from, to));
+            let (a, b) = (
+                openshard_movement::sight_clear(&was_footing, from, to),
+                openshard_movement::sight_clear(&is_footing, from, to),
+            );
             assert_eq!(a, b, "the look from ({x}, {y}) to ({tx}, {ty})");
             if !a {
                 counts.sight_blocked += 1;

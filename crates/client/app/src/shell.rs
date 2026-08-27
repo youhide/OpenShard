@@ -56,8 +56,10 @@ use openshard_protocol::wire::{Graphic, Hue};
 use winit::window::Window;
 
 use crate::desk::{Desk, Tab};
+use openshard_movement::sight::{EYE, Stop};
+
 use crate::diagnostics::{
-    HealthBar, Height, Hud, Navigation, PickedTile, PriorityZ, Route, Selection, TerrainOverlay,
+    HealthBar, Height, Hud, Navigation, PickedTile, PriorityZ, Route, Selection, SightLine, TerrainOverlay,
 };
 use crate::graphics::{HighlightStyle, HighlightTarget};
 use crate::world::{Shard, WorldState};
@@ -90,6 +92,12 @@ pub struct Request {
     /// walkability lookup per visible tile and a fresh plan per frame, and that
     /// is a bill the client should only pay while somebody is looking at it.
     pub show_terrain: Option<bool>,
+    /// Switch the sight overlay on or off, on the frame the box was ticked.
+    ///
+    /// Sent on the change like the others, though this one is the cheapest of
+    /// them: one Bresenham walk of the line a shot would fly along. See
+    /// `docs/sight.md`.
+    pub show_sight: Option<bool>,
     /// Switch the R1 interior-index overlay on or off. It is deliberately a
     /// diagnostic request: no normal world geometry consults this setting.
     pub show_interiors: Option<bool>,
@@ -2141,6 +2149,65 @@ fn tile_tab(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut Requ
         }
     }
     ui.separator();
+    let mut sight = hud.show_sight;
+    if ui
+        .checkbox(&mut sight, "sight — the ray a shot is allowed by")
+        .on_hover_text(
+            "the shard's own line of sight, run here: at whoever you are attacking, \
+             or at the tile under the cursor",
+        )
+        .changed()
+    {
+        request.show_sight = Some(sight);
+    }
+    // The verdict in words, because the picture says *where* the ray stopped
+    // and only this says what stopped it. A refusal names the tile, the art,
+    // the span it occupies and the height the ray was at — which is the whole
+    // of what "why can I not shoot that" needs answering with.
+    match &hud.sight {
+        Some(sight) => {
+            let aimed = match sight.at_quarry {
+                true => "at your quarry",
+                false => "at the cursor",
+            };
+            match sight.trace.stopped {
+                None => {
+                    ui.label(format!("sight {aimed}: clear, {} tiles", sight.trace.steps.len()));
+                }
+                Some(step) => {
+                    let ray = step.ray_z;
+                    let what = match step.stop {
+                        Some(Stop::Ground { z }) => format!("ground z {z} over ray {ray}"),
+                        Some(Stop::Static {
+                            graphic,
+                            base,
+                            top,
+                            wallish,
+                        }) => {
+                            let reading = match wallish {
+                                true => "wall",
+                                false => "platform",
+                            };
+                            format!("{reading} 0x{:04X} z {base}..{top} over ray {ray}", graphic.0)
+                        }
+                        Some(Stop::Door) => format!("a shut door, ray {ray}"),
+                        // The verdict is the first stop, so it always has one;
+                        // this arm exists because the type says it may not, not
+                        // because the picture can reach it.
+                        None => "nothing".to_owned(),
+                    };
+                    ui.label(format!(
+                        "sight {aimed}: blocked at ({}, {}), {what}",
+                        step.tile.x, step.tile.y
+                    ));
+                }
+            }
+        }
+        None => {
+            ui.label("sight off");
+        }
+    }
+    ui.separator();
     let mut boxes = hud.show_occluders;
     if ui
         .checkbox(
@@ -2489,6 +2556,12 @@ fn draw_world_overlays(
     // cover the marker that says what the *next* click would do.
     if let Some(route) = &hud.route {
         draw_route(&world, &camera, route, viewport.min);
+    }
+    // The ray over the route, and drawn after it: where a walk and a look
+    // disagree — a wall a body goes round and an arrow does not — the answer
+    // being read is the look's.
+    if let Some(sight) = hud.sight.as_ref().filter(|_| hud.show_sight) {
+        draw_sight(&world, &camera, sight, viewport.min);
     }
     for tile in &hud.editor_preview {
         let corners = facet_corners(
@@ -4126,6 +4199,124 @@ fn draw_occluders(
             ),
         }
     }
+}
+
+/// The sight line the shard decides a shot by: the ray, and what stopped it.
+///
+/// **Drawn at the ray's own height, not on the ground.** A look from a hill to a
+/// hollow crosses tiles it is metres above, and a line laid on the land would
+/// draw a ray bending over every rise it passes — which is the picture of a rule
+/// this engine does not have. The height each segment is drawn at is the one
+/// `sight::trace` decided the tile by, so a person can see the ray pass over the
+/// low wall it passes over.
+///
+/// Green to the stop and red past it, in [`draw_route`]'s own vocabulary: this
+/// is a second answer about the same ground and a second palette would make the
+/// two read as unrelated pictures. The blocking body is drawn as a box from its
+/// `base` to its `top`, which is the half of the answer no line can carry — a
+/// wall the table gives no height is lent a whole storey, and this is where that
+/// becomes a thing to look at rather than a thing to deduce.
+fn draw_sight(painter: &egui::Painter, camera: &Camera, sight: &SightLine, viewport_origin: egui::Pos2) {
+    // A `z` outside `i8` is not a height this world has: the ray can be lent one
+    // by an interpolation over two extreme ends, and the picture stops at the
+    // top of the world rather than wrapping round it.
+    let height = |z: i32| z.clamp(i32::from(i8::MIN), i32::from(i8::MAX)) as i8;
+    let at = |x: u16, y: u16, z: i32| {
+        tile_centre(
+            painter,
+            camera,
+            openshard_protocol::world::Point { x, y, z: height(z) },
+            viewport_origin,
+        )
+    };
+    let trace = &sight.trace;
+    // The two ends are not steps of the line — an archer and their quarry do not
+    // stand in their own way — so the polyline is built with them put back.
+    let mut points = vec![at(trace.from.x, trace.from.y, i32::from(trace.from.z) + EYE)];
+    points.extend(
+        trace
+            .steps
+            .iter()
+            .map(|step| at(step.tile.x, step.tile.y, step.ray_z)),
+    );
+    points.push(at(trace.to.x, trace.to.y, i32::from(trace.to.z) + EYE));
+    // Where the ray gave up, as an index into that polyline: one past the
+    // leading end, which the steps are offset by.
+    let stopped = trace.stopped.and_then(|stop| {
+        trace
+            .steps
+            .iter()
+            .position(|step| step.tile == stop.tile)
+            .map(|index| index + 1)
+    });
+    let reached = stopped.map_or(points.len(), |index| index + 1);
+    for segment in points[..reached].windows(2) {
+        painter.line_segment([segment[0], segment[1]], egui::Stroke::new(2.0, STANDABLE));
+    }
+    // Past the blocker the ray does not go, and the dashes say so — the same
+    // thing a route's dashed half says about a walk that does not arrive.
+    if reached < points.len() {
+        for segment in points[reached - 1..].windows(2) {
+            painter.add(egui::Shape::dashed_line(
+                &[segment[0], segment[1]],
+                egui::Stroke::new(2.0, BLOCKED),
+                5.0,
+                4.0,
+            ));
+        }
+    }
+    let Some(step) = trace.stopped else {
+        return;
+    };
+    let stop_at = points[reached - 1];
+    let arm = 5.0;
+    let stroke = egui::Stroke::new(2.0, BLOCKED);
+    painter.line_segment(
+        [stop_at + egui::vec2(-arm, -arm), stop_at + egui::vec2(arm, arm)],
+        stroke,
+    );
+    painter.line_segment(
+        [stop_at + egui::vec2(-arm, arm), stop_at + egui::vec2(arm, -arm)],
+        stroke,
+    );
+    // And the body itself, where it has one. A door has no span to draw — the
+    // live layer is asked without a height at all — so the cross above is the
+    // whole of what can be said about it.
+    let span = match step.stop {
+        Some(Stop::Static { base, top, .. }) => Some((base, top)),
+        // Ground is not a box: it is the tile's own surface, drawn as the
+        // diamond it is, from the ray's height up to it.
+        Some(Stop::Ground { z }) => Some((step.ray_z, z)),
+        Some(Stop::Door) | None => None,
+    };
+    let Some((base, top)) = span else {
+        return;
+    };
+    let corners = |z: i32| {
+        tile_corners(
+            painter,
+            camera,
+            openshard_protocol::world::Point {
+                x: step.tile.x,
+                y: step.tile.y,
+                z: height(z),
+            },
+            viewport_origin,
+        )
+    };
+    let (low, high) = (corners(base), corners(top));
+    let fill = egui::Color32::from_rgba_unmultiplied(255, 40, 40, 70);
+    let edge = egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(10, 8, 16, 220));
+    // The three faces a camera looking from the north-west can see, in the order
+    // the occluder wireframe draws them, so the two diagnostics read alike.
+    for ends in [[3usize, 2], [1, 2]] {
+        painter.add(egui::Shape::convex_polygon(
+            vec![low[ends[0]], low[ends[1]], high[ends[1]], high[ends[0]]],
+            fill,
+            edge,
+        ));
+    }
+    painter.add(egui::Shape::convex_polygon(high.to_vec(), fill, edge));
 }
 
 /// Which two corners of a tile's diamond a panel on `named` stands between.

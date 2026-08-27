@@ -70,6 +70,7 @@ pub fn run(state: &mut WorldState, actor: EntityId, rest: &str) {
         StaffCommand::Gm => toggle_gm_mode(state, actor, &args),
         StaffCommand::Where => where_am_i(state, actor),
         StaffCommand::Tele => teleport_cursor(state, actor),
+        StaffCommand::Sight => sight_cursor(state, actor),
         StaffCommand::Go => go_to(state, actor, &args),
         StaffCommand::Add => add_item(state, actor, &args),
         StaffCommand::AddGold => add_gold(state, actor, &args),
@@ -610,6 +611,104 @@ fn teleport_cursor(state: &mut WorldState, actor: EntityId) {
             kind: TargetKind::Location,
         }),
     );
+}
+
+/// `.sight` — raise a cursor, and answer what the ray to the clicked spot meets.
+///
+/// The same shape as [`teleport_cursor`], and the same packet: the interesting
+/// half is what the click does, in [`report_sight`].
+fn sight_cursor(state: &mut WorldState, actor: EntityId) {
+    let Some(&Client { connection, .. }) = state.registry.get::<Client>(actor) else {
+        return;
+    };
+    let serial = state.registry.serial_of(actor).map_or(0, |s| s.raw());
+    state.raise_target(actor, TargetPurpose::Sight);
+    state.send_packet(
+        connection,
+        &ServerPacket::TargetCursor(TargetCursor {
+            cursor_id: CursorId(serial),
+            kind: TargetKind::Location,
+        }),
+    );
+}
+
+/// Finish a `.sight`: say what a look from the actor to `to` meets.
+///
+/// **The shard's own verdict, in the words the client's overlay uses.** Same
+/// call — `sight::trace` — same footing, same `Doors::AsTheyStand` every real
+/// caller passes. The point is that the two answers can be *read against each
+/// other*: the client computes its picture from its own copy of the map and its
+/// own live overlay (`docs/sight.md`'s D3), and the one thing it can be wrong
+/// about is a door the shard has not told it about. This is how that stops being
+/// an assumption. It changes nothing in the world.
+pub(crate) fn report_sight(state: &mut WorldState, actor: EntityId, to: Point) {
+    let Some(&Position(from)) = state.registry.get::<Position>(actor) else {
+        return;
+    };
+    let facet = state.facet_of(actor);
+    let trace = openshard_movement::sight::trace(
+        &state.footing(facet, openshard_map::overlay::Doors::AsTheyStand),
+        from,
+        to,
+        // The whole line: a game master asking this wants the tiles behind the
+        // wall as much as the wall — "it is the second door, not the first" is
+        // the answer that is hard to get any other way.
+        openshard_movement::sight::Extent::WholeLine,
+    );
+    let mut lines = vec![format!(
+        "sight ({}, {}, {}) → ({}, {}, {}): {}",
+        from.x,
+        from.y,
+        from.z,
+        to.x,
+        to.y,
+        to.z,
+        match trace.clear() {
+            true => "clear",
+            false => "blocked",
+        }
+    )];
+    // Every stop, not only the first: the first is the verdict and the rest are
+    // what a person moving one tile sideways is about to meet instead.
+    lines.extend(trace.steps.iter().filter_map(|step| {
+        let stop = step.stop?;
+        let ray = step.ray_z;
+        Some(match stop {
+            openshard_movement::sight::Stop::Ground { z } => {
+                format!(
+                    "  ({}, {}): ground z {z} over ray {ray}",
+                    step.tile.x, step.tile.y
+                )
+            }
+            openshard_movement::sight::Stop::Static {
+                graphic,
+                base,
+                top,
+                wallish,
+            } => format!(
+                "  ({}, {}): {} {:#06x} z {base}..{top} over ray {ray}",
+                step.tile.x,
+                step.tile.y,
+                match wallish {
+                    true => "wall",
+                    false => "platform",
+                },
+                graphic.0
+            ),
+            openshard_movement::sight::Stop::Door => {
+                format!("  ({}, {}): a shut door, ray {ray}", step.tile.x, step.tile.y)
+            }
+        })
+    }));
+    if lines.len() == 1 {
+        lines.push(format!(
+            "  {} tiles crossed, nothing in the way",
+            trace.steps.len()
+        ));
+    }
+    for line in lines {
+        notify(state, actor, &line);
+    }
 }
 
 /// Finish a `.tele`: the game master clicked a spot; jump there. Called from the

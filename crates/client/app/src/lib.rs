@@ -1151,6 +1151,9 @@ pub fn run<D: Dial + Send + 'static>(
             frame_dump: None,
             frame_dumps: 0,
             show_terrain: false,
+            // The sight overlay is a debugging picture, and off until somebody
+            // asks for it: see `GraphicsSettings::show_sight`.
+            show_sight: false,
             show_interiors: false,
             buildings: false,
             z_slice: false,
@@ -1222,6 +1225,7 @@ pub fn run<D: Dial + Send + 'static>(
         auto_opened_doors: Vec::new(),
         last_used_item: None,
         route_cache: None,
+        sight_cache: None,
         terrain_cache: None,
         occluder_cache: None,
         radar_cache: openshard_client_render::radar::RadarCache::default(),

@@ -34,7 +34,7 @@ use crate::crowd::Who;
 use crate::diagnostics::{
     CompositeTelemetry, HealthBar, HealthPoints, Height, Hud, InteriorCell, InteriorDoor, InteriorOverlay,
     OccluderSurface, Pick, PickedItem, PickedMobile, PickedTile, PriorityZ, RadarTelemetry, Route, Selection,
-    TerrainOverlay, TileDepth,
+    SightLine, TerrainOverlay, TileDepth,
 };
 use crate::graphics::HighlightTarget;
 use crate::picking::SelectedIdentity;
@@ -760,6 +760,95 @@ impl App {
         route
     }
 
+    /// The look the shard would decide a shot by, from this body to whatever it
+    /// is aimed at — or `None` while nobody has asked for the picture.
+    ///
+    /// **The shard's own rule, run here.** `openshard_movement::sight::trace` is
+    /// what `sight_clear` *is* (`docs/sight.md`'s D1), and this client already
+    /// holds both halves it reads: the same map files and the live overlay it
+    /// builds out of ground items. So the overlay costs no packet and follows
+    /// the cursor, which a wire round trip could not — D3, which also names the
+    /// limit: a door this client has not been told about is a door it cannot
+    /// see.
+    ///
+    /// **What it is aimed at**, in the order D5 gives: the mobile the shard says
+    /// we are attacking, because that is the pair of points the shard is really
+    /// asking about; and the hovered tile otherwise, which is what makes this
+    /// usable for surveying a piece of map rather than only for explaining one
+    /// refusal.
+    pub(crate) fn sight_shown(&mut self, hover: Option<&PickedTile>) -> Option<Arc<SightLine>> {
+        if !self.graphics.show_sight {
+            return None;
+        }
+        // The same origin the route is planned from, for the same reason: the
+        // body's own predicted place, not the rendered one, which is a step
+        // behind it while it walks.
+        let from = self.world.motion.route_origin();
+        let (to, at_quarry) = Self::aim(self.quarry(), hover)?;
+        if let Some(cached) = self
+            .sight_cache
+            .as_ref()
+            .filter(|cached| cached.from == from && cached.to == to)
+        {
+            return cached.sight.clone();
+        }
+        // `Doors::AsTheyStand`, and not the reading a *walk* takes: a shut door
+        // is opaque whether or not the walker intends to open it, and the shard
+        // asks the same way — every `sight_clear` caller passes this one.
+        let footing = footing(&self.resources, openshard_map::overlay::Doors::AsTheyStand);
+        let trace = openshard_movement::sight::trace(
+            &footing,
+            from,
+            to,
+            // The whole line: a picture that stopped at the blocker would end in
+            // mid-air with nothing to say which end the archer stands at.
+            openshard_movement::sight::Extent::WholeLine,
+        );
+        let sight = Some(Arc::new(SightLine { trace, at_quarry }));
+        self.sight_cache = Some(crate::app::SightCache {
+            from,
+            to,
+            sight: sight.clone(),
+        });
+        sight
+    }
+
+    /// What the sight overlay is aimed at, and whether that is the fight.
+    ///
+    /// Takes no `self` because it is the whole of `docs/sight.md`'s D5 and none
+    /// of the frame around it — the quarry wins, the hovered tile stands in, and
+    /// with neither there is nothing to draw — which is also what makes it the
+    /// one part of the overlay a test can hold in its hand.
+    fn aim(quarry: Option<Point>, hover: Option<&PickedTile>) -> Option<(Point, bool)> {
+        match quarry {
+            Some(at) => Some((at, true)),
+            // The tile's *standing* height, not its land height: a look is aimed
+            // at where a body would be, which on a bridge or a shop floor is not
+            // the ground under it.
+            None => hover.map(|tile| {
+                (
+                    Point {
+                        x: tile.at.x,
+                        y: tile.at.y,
+                        z: tile.stand_z.0,
+                    },
+                    false,
+                )
+            }),
+        }
+    }
+
+    /// Where the mobile the shard says we are attacking is standing.
+    ///
+    /// The shard's word, not this client's guess: `player.attacking` is written
+    /// from `AttackTarget`, so a look drawn from it is a look at the fight the
+    /// shard believes is happening.
+    fn quarry(&self) -> Option<Point> {
+        let view = self.world.authoritative.view.as_ref()?;
+        let attacking = view.player.attacking?;
+        view.mobiles.get(&attacking).map(|mobile| mobile.position)
+    }
+
     /// The occluder wireframe is a second consumer of the frame's grid, but
     /// egui needs its shapes before the renderer has assembled that frame. Its
     /// source can still be retained while the grid's exact inputs are stable.
@@ -977,6 +1066,9 @@ impl App {
         if let Some(show) = request.show_terrain {
             self.graphics.show_terrain = show;
         }
+        if let Some(show) = request.show_sight {
+            self.graphics.show_sight = show;
+        }
         if let Some(show) = request.show_interiors {
             self.graphics.show_interiors = show;
         }
@@ -1161,6 +1253,7 @@ impl App {
 
         let route_started = Instant::now();
         let route = self.route_shown(pick.tile.as_ref());
+        let sight = self.sight_shown(pick.tile.as_ref());
         let route_cost = route_started.elapsed();
 
         let occluders_started = Instant::now();
@@ -1217,6 +1310,8 @@ impl App {
             z_slice_view: self.graphics.z_slice_view,
             floor_view: self.graphics.floor_view,
             route,
+            show_sight: self.graphics.show_sight,
+            sight,
             show_occluders: self.graphics.show_occluders,
             show_solids: self.graphics.show_solids,
             solids_only: self.graphics.solids_only,
@@ -1461,5 +1556,51 @@ impl crate::App {
             crate::net_command::MultiDraw::Pieces(pieces) => pieces,
             crate::net_command::MultiDraw::Unknown | crate::net_command::MultiDraw::NotAMulti => Vec::new(),
         };
+    }
+}
+
+#[cfg(test)]
+mod sight_tests {
+    use super::*;
+
+    /// A hovered tile whose ground is at `land_z` and whose standing height —
+    /// what a look is aimed at — is `stand_z`.
+    fn hovered(at: Tile, land_z: i8, stand_z: i8) -> PickedTile {
+        PickedTile {
+            at,
+            land: None,
+            land_z: Height(land_z),
+            stand_z: Height(stand_z),
+            corners: [Height(land_z); 4],
+            levels: Vec::new(),
+            ceiling: None,
+            statics: Vec::new(),
+            items: Vec::new(),
+            tile_depth: TileDepth(0),
+            mobile_order: None,
+        }
+    }
+
+    /// `docs/sight.md`'s D5, in the three cases it has.
+    #[test]
+    fn the_look_is_aimed_at_the_quarry_first_and_the_cursor_after() {
+        let quarry = Point::new(20, 30, 5);
+        let tile = hovered(Tile::new(11, 12), 0, 7);
+
+        assert_eq!(
+            App::aim(Some(quarry), Some(&tile)),
+            Some((quarry, true)),
+            "a fight is the question the shard is really asking"
+        );
+        assert_eq!(
+            App::aim(None, Some(&tile)),
+            Some((Point::new(11, 12, 7), false)),
+            "the cursor stands in, at the height a body would stand at"
+        );
+        assert_eq!(
+            App::aim(None, None),
+            None,
+            "with nothing aimed at there is nothing to draw"
+        );
     }
 }
