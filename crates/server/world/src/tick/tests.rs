@@ -6600,6 +6600,369 @@ fn a_drawn_weapon_with_nothing_aimed_at_says_so() {
     );
 }
 
+/// The interval, in milliseconds, of every phase this actor announced in the
+/// batch — the number a watcher measures its bar against.
+fn action_phase_intervals(packets: &[Vec<u8>], actor: Serial) -> Vec<u32> {
+    packets
+        .iter()
+        .filter(|packet| {
+            packet.first() == Some(&0xBF)
+                && packet.get(3..5) == Some(&CombatActionPhase::SUBCOMMAND.to_be_bytes()[..])
+                && packet.get(5..9) == Some(&actor.raw().to_be_bytes()[..])
+        })
+        .filter_map(|packet| {
+            let bytes: [u8; 4] = packet.get(15..19)?.try_into().ok()?;
+            Some(u32::from_be_bytes(bytes))
+        })
+        .collect()
+}
+
+/// What a watcher's screen holds, rebuilt from the packets alone.
+///
+/// The three marks of `crowd::ActionRecord`, in ticks rather than in wall time:
+/// a bar that runs for the interval its phase announced, a verdict that fades on
+/// its own hold, and a refusal that stands until it is lifted. This is the whole
+/// of what `Crowd::preparing` answers with, so a tick where all three are empty
+/// is a tick with nothing over that fighter's head.
+///
+/// Modelled here rather than asserted through the client because the direction
+/// rule forbids a server crate from naming one. What it costs is that the two
+/// copies can drift; what it buys is the only oracle that answers the question
+/// actually asked — *is anything written* — inside a test that can run a fight.
+struct Screen {
+    /// Ticks of bar left to fill, `0` for none.
+    running: u32,
+    /// Ticks of verdict left before it fades.
+    ended: u32,
+    /// The standing refusal, which times out never.
+    balked: Option<InterruptReason>,
+}
+
+impl Screen {
+    /// `OUTCOME_HOLD` in the client, in ticks: 1200ms at 40 a second.
+    const OUTCOME_HOLD_TICKS: u32 = 48;
+
+    const fn blank() -> Self {
+        Self {
+            running: 0,
+            ended: 0,
+            balked: None,
+        }
+    }
+
+    /// Age by one tick, then apply everything the shard said on it.
+    ///
+    /// **In the order it was said.** One tick carries the end of one action and
+    /// the commit of the next — `resolve_actions` runs before `commit_actions`,
+    /// so the ending arrives first — and a reader that sorted by kind instead of
+    /// by arrival would let the ending wipe the bar that was opened after it.
+    /// The client walks its inbox in order, and so does this.
+    fn advance(&mut self, packets: &[Vec<u8>], actor: Serial) {
+        self.running = self.running.saturating_sub(1);
+        self.ended = self.ended.saturating_sub(1);
+        for packet in packets {
+            if packet.first() != Some(&0xBF) || packet.get(5..9) != Some(&actor.raw().to_be_bytes()[..]) {
+                continue;
+            }
+            let Some(subcommand) = packet.get(3..5) else {
+                continue;
+            };
+            if subcommand == CombatActionPhase::SUBCOMMAND.to_be_bytes() {
+                // A tick is 25ms, and a bar with any interval at all is drawn
+                // for at least the tick it was announced on.
+                if let Some(interval) = action_phase_intervals(std::slice::from_ref(packet), actor).first() {
+                    self.running = (interval / 25).max(1);
+                }
+            } else if subcommand == CombatActionEnded::SUBCOMMAND.to_be_bytes() {
+                self.running = 0;
+                self.ended = Self::OUTCOME_HOLD_TICKS;
+            } else if subcommand == CombatActionBalked::SUBCOMMAND.to_be_bytes() {
+                self.balked = packet.get(9).copied().and_then(InterruptReason::from_bits);
+            }
+        }
+    }
+
+    /// Whether there is anything over this fighter's head at all.
+    const fn blank_now(&self) -> bool {
+        self.running == 0 && self.ended == 0 && self.balked.is_none()
+    }
+}
+
+/// What one fighter was doing on one tick, in the words the shard itself would
+/// use — the row of the timeline [`fight_timeline`] builds.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum Doing {
+    /// Not fighting: at peace, or dead. Nothing is owed and nothing is said.
+    Peace,
+    /// Mid-action, and which stretch of it.
+    Acting(&'static str, ActionStage),
+    /// Standing in a refusal, and what is in the way.
+    Balked(InterruptReason),
+    /// **In war, acting on nothing, and refusing nothing.** The tick that has no
+    /// answer to *"why is my character just standing there"*, and the one this
+    /// timeline exists to find.
+    Silent,
+    /// The shard knows what it is doing and the *screen* does not: nothing is
+    /// drawn over this fighter's head on this tick. The other half of the same
+    /// report, and the half a server-state assertion cannot see.
+    Blank(&'static str),
+}
+
+/// Walk `ticks` ticks and write down what `fighter` was doing on each one.
+///
+/// Read off the shard's own state rather than off the wire on purpose: the wire
+/// carries *edges*, so a watcher's screen is a fold of the whole history and a
+/// silent tick there could be a packet that was never sent or a packet that was
+/// sent and superseded. The state is the ground truth about which of the two a
+/// stall is, and the wire is asked separately once the state is known to be
+/// sound.
+fn fight_timeline<S: FnMut(&mut World, u32)>(
+    world: &mut World,
+    connection: ConnectionId,
+    fighter: EntityId,
+    ticks: u32,
+    now: Instant,
+    mut script: S,
+) -> Vec<Doing> {
+    let actor = world.state.registry.serial_of(fighter).unwrap();
+    let mut screen = Screen::blank();
+    (0..ticks)
+        .map(|tick| {
+            script(world, tick);
+            world.tick(now);
+            screen.advance(&packets_for(world, connection), actor);
+            let warmode = world
+                .registry()
+                .get::<Combat>(fighter)
+                .is_some_and(|combat| combat.warmode());
+            if !warmode {
+                return Doing::Peace;
+            }
+            let doing = match world.registry().get::<CombatAction>(fighter) {
+                Some(action) => {
+                    let kind = match action.kind {
+                        ActionKind::Swing { .. } => "swing",
+                        ActionKind::Shot { .. } => "shot",
+                        ActionKind::Breath { .. } => "breath",
+                    };
+                    Doing::Acting(kind, action.stage)
+                }
+                None => match world
+                    .registry()
+                    .get::<openshard_state::components::Balked>(fighter)
+                {
+                    Some(balked) => Doing::Balked(balked.reason),
+                    None => Doing::Silent,
+                },
+            };
+            match (screen.blank_now(), &doing) {
+                (true, Doing::Acting(kind, _)) => Doing::Blank(kind),
+                (true, _) => Doing::Blank("held up"),
+                (false, _) => doing,
+            }
+        })
+        .collect()
+}
+
+/// The timeline as runs of equal rows, which is the only readable form of it:
+/// four hundred ticks of a fight are a dozen stretches.
+fn runs(timeline: &[Doing]) -> Vec<(usize, usize, &Doing)> {
+    let mut out: Vec<(usize, usize, &Doing)> = Vec::new();
+    for (tick, doing) in timeline.iter().enumerate() {
+        match out.last_mut() {
+            Some((_, end, last)) if *last == doing => *end = tick,
+            _ => out.push((tick, tick, doing)),
+        }
+    }
+    out
+}
+
+/// Every tick of a whole fight, and not one of them with nothing to say.
+///
+/// The user's report was *"there is a moment when nothing is written and he just
+/// stands there"*, and a report shaped like that cannot be chased by reading the
+/// commit pass: the stall is wherever the three verbs hand off to each other, and
+/// which handoff it is depends on the weapon. So the fight is run instead — a
+/// character and a mob, standing — and every tick is written down. A tick that is
+/// [`Doing::Silent`] is the defect, by name and by tick number.
+///
+/// Both weapons, because they fail differently: a blow reaches one tile and a bow
+/// reaches ten, so the melee half spends its life at the impact seam and the
+/// ranged half spends its life in the draw.
+#[test]
+fn a_whole_fight_has_no_tick_the_shard_cannot_account_for() {
+    for bow in [false, true] {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        let fighter = world.state.players[&connection];
+        if bow {
+            arm_with_bow(&mut world, connection);
+        }
+        // Far enough that a bow is at range and near enough that a fist lands,
+        // and tough enough to outlive the run: what is under test is the loop,
+        // not the kill.
+        let at = if bow { 3 } else { 1 };
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0 + at, START.1, 0), 20_000, now);
+        engage(&mut world, connection, mob, now);
+
+        let timeline = fight_timeline(&mut world, connection, fighter, 600, now, |_, _| {});
+        let unaccounted: Vec<usize> = timeline
+            .iter()
+            .enumerate()
+            .filter_map(|(tick, doing)| matches!(doing, Doing::Silent | Doing::Blank(_)).then_some(tick))
+            .collect();
+        assert!(
+            unaccounted.is_empty(),
+            "{} ticks with nothing to show with a {}: {:?}\nthe fight, in runs: {:#?}",
+            unaccounted.len(),
+            if bow { "bow" } else { "fist" },
+            unaccounted,
+            runs(&timeline)
+        );
+    }
+}
+
+/// The same fight, with everything a player actually does to it.
+///
+/// The standing fight above is the loop with nothing happening to it, and it is
+/// the *unhappy* ticks that a report of "he just stands there" is about. So this
+/// one scripts them, in the order an archer meets them: stepping while the bow
+/// is bent, the quarry walking out past the reach and back, the quiver running
+/// dry and being refilled, and the quarry dying with the weapon still drawn.
+/// Every one of those is a seam between two of the four verbs, and the claim is
+/// the same at all of them — the shard knows what this fighter is doing, and
+/// says enough for a watcher to know it too.
+#[test]
+fn a_fight_with_everything_that_happens_to_one_still_has_no_blank_tick() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let fighter = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(fighter).unwrap();
+    arm_with_bow(&mut world, connection);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 20_000, now);
+    let mob_entity = entity(&world, mob);
+    engage(&mut world, connection, mob, now);
+
+    let timeline = fight_timeline(&mut world, connection, fighter, 900, now, |world, tick| {
+        match tick {
+            // Two steps mid-draw, which is what the condition table is for.
+            60 | 61 => world.queue(Command::Walk {
+                connection,
+                request: walk((tick - 60) as u8, Direction::South),
+            }),
+            // Out past the bow's reach, and back inside it.
+            200 => world
+                .state
+                .teleport(mob_entity, Point::new(START.0 + 25, START.1, 0)),
+            300 => world
+                .state
+                .teleport(mob_entity, Point::new(START.0 + 3, START.1, 0)),
+            // The quiver runs dry, and is refilled.
+            // One at a time: the take is all-or-nothing against the amount asked
+            // for, so a round number bigger than the quiver takes nothing at all.
+            450 => while items::take_from_backpack(&mut world.state, serial, Graphic(0x0F3F), 1) > 0 {},
+            600 => {
+                items::give_to_backpack(&mut world.state, serial, Graphic(0x0F3F), Hue(0), 20, true);
+            }
+            // And the quarry dies with the weapon still drawn.
+            750 => {
+                world.state.registry.insert(
+                    mob_entity,
+                    openshard_state::components::Hitpoints { current: 0, max: 100 },
+                );
+            }
+            _ => {}
+        }
+    });
+
+    let unaccounted: Vec<usize> = timeline
+        .iter()
+        .enumerate()
+        .filter_map(|(tick, doing)| matches!(doing, Doing::Silent | Doing::Blank(_)).then_some(tick))
+        .collect();
+    assert!(
+        unaccounted.is_empty(),
+        "{} ticks with nothing to show: {:?}\nthe fight, in runs: {:#?}",
+        unaccounted.len(),
+        unaccounted,
+        runs(&timeline)
+    );
+    // And the scenario actually happened. A script that quietly stopped biting —
+    // a teleport inside the reach, a quiver the take did not empty — would leave
+    // the assertion above passing over an ordinary fight, which is the way a
+    // test like this dies without anyone noticing.
+    for expected in [
+        InterruptReason::OutOfReach,
+        InterruptReason::NoAmmo,
+        InterruptReason::NoTarget,
+    ] {
+        assert!(
+            timeline.contains(&Doing::Balked(expected)),
+            "the script never drove the fighter into {expected:?}: {:#?}",
+            runs(&timeline)
+        );
+    }
+}
+
+/// A concealed fighter's own screen, which is the one hole the scripted chain
+/// above cannot reach: it needs the *commit* to happen from cover, and a running
+/// action reveals its owner at the impact.
+///
+/// An untelegraphed action is deliberately invisible — no wind-up packet, no
+/// stroke, because drawing one would break the cover an ambush *is*. That rule
+/// is about **watchers**, and the commit pass applies it to everybody, the
+/// archer included. So an ambusher with a bow stands stock still with nothing
+/// over their head for a whole draw, which is precisely the picture a player
+/// reports as *"he just stands there and nothing is written"*.
+#[test]
+fn an_ambusher_is_hidden_from_watchers_and_not_from_itself() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let fighter = world.state.players[&connection];
+    arm_with_bow(&mut world, connection);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 20_000, now);
+    // Somebody else standing there, whose screen is the other half of the claim.
+    let bystander = enter(&mut world, now);
+    let archer = world.state.registry.serial_of(fighter).unwrap();
+    // Into cover *before* aiming, so the commit itself happens from concealment.
+    world.state.registry.insert(fighter, openshard_state::Hidden);
+    engage(&mut world, connection, mob, now);
+    let _ = packets_for(&mut world, bystander);
+
+    // Short of the impact on purpose: the shot itself breaks cover, and every
+    // draw after that one is an ordinary telegraphed draw that watchers are
+    // *supposed* to hear. What is under test is the concealed one.
+    let timeline = fight_timeline(&mut world, connection, fighter, 90, now, |_, _| {});
+    let blank: Vec<usize> = timeline
+        .iter()
+        .enumerate()
+        .filter_map(|(tick, doing)| matches!(doing, Doing::Blank(_)).then_some(tick))
+        .collect();
+    assert!(
+        blank.is_empty(),
+        "{} ticks of a draw the archer cannot see: {:?}\nthe draw, in runs: {:#?}",
+        blank.len(),
+        blank,
+        runs(&timeline)
+    );
+    // And the ambush is still an ambush. The rule that was over-applied is not
+    // repealed: nothing about the concealed draw reached anybody else. Read
+    // after the run rather than per tick, because `packets_for` leaves the other
+    // connection's queue alone and this is the whole of it.
+    let overheard = packets_for(&mut world, bystander);
+    assert!(
+        action_phase_intervals(&overheard, archer).is_empty(),
+        "a concealed draw was narrated to a watcher"
+    );
+    assert!(
+        action_stages(&overheard, archer).is_empty(),
+        "and its stages were narrated too"
+    );
+}
+
 /// A creature that loses its quarry must not report the quarry as *gone*.
 ///
 /// Every way a fight could end used to arrive at one word. `clear_target` wrote

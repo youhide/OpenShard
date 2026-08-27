@@ -677,6 +677,40 @@ claimed for a fact that is not so.
   every creature that had ever fought would have worn *"no target"* for the rest
   of its life.
 
+**Ф4.3 — the fight, run tick by tick. ✅ Built.** Ф4.2 closed two refusals and the
+report came back a third time — *"there is a moment when nothing is written and he
+just stands there"* — which is not a claim any amount of reading the commit pass
+can settle: a stall lives at a seam between two of the four verbs, and which seam
+depends on the weapon. So the fight is **run** instead. *Done when:* a whole
+fight, with everything a player does to one, has no tick the shard cannot account
+for — and the oracle says so by tick number rather than by inspection.
+
+- **`fight_timeline`, and the two questions it asks per tick.** A character and a
+  mob, standing, six hundred ticks, and every one of them written down twice:
+  what the *shard* had the fighter doing (acting, balked, or `Silent` — in war,
+  acting on nothing, refusing nothing) and what a *watcher's screen* would hold,
+  rebuilt from that tick's packets alone. The second is the question actually
+  being asked, and no assertion about server state can reach it.
+- **The screen model is a second copy of `crowd::ActionRecord`, deliberately.**
+  The dependency rule forbids a server crate from naming a client one, so the
+  three marks — a bar that runs for the interval its phase announced, a verdict
+  that fades on its hold, a refusal that stands until lifted — are modelled in
+  the test. What that costs is drift between the two copies; what it buys is an
+  oracle that can run a fight. It has to walk the tick's packets **in arrival
+  order**: one tick carries the end of one action and the commit of the next, and
+  a reader that sorted by kind let the ending wipe the bar opened after it — a
+  false positive that looked exactly like the defect, for a whole afternoon.
+- **The defect it found is the ambush, and it is a rule applied to one person too
+  many.** An untelegraphed action shows no wind-up, which is the whole of what
+  concealment buys — and the commit pass was skipping the *announcement* along
+  with the stroke. A concealed archer therefore stood through a hundred-tick draw
+  with no bar, no stage, no animation and no refusal: from their own seat,
+  indistinguishable from a shard that has stopped. The turn, the broken cover and
+  the stroke stay inside the telegraph; the announcement moved out, and
+  `WorldState::announce_action` reads the audience off `telegraphed` itself.
+  `announce_stage` takes the whole action now for the same reason — so the stages
+  of an action cannot reach a wider room than the commit they belong to.
+
 **Ф5 — the fight costs something.** D9: an opening stamina cost at the commit, a
 per-tick `Drain` while sustaining, the owed fatigue spent at the impact, `Winded`
 as a condition the table can read, and the regeneration pulse excluding anyone
@@ -708,8 +742,28 @@ index of armed squares, and that index is a design rather than a variant.
 
 ## Backlog
 
-Found while building Ф1, Ф2, Ф3, Ф4, Ф4.1 and Ф4.2, and none of it belonged to
-any of them.
+Found while building Ф1, Ф2, Ф3, Ф4, Ф4.1, Ф4.2 and Ф4.3, and none of it belonged
+to any of them.
+
+**From Ф4.3:**
+
+- **The screen model and `crowd::ActionRecord` are two copies of one rule.** The
+  holds, the timeout and the arrival-order handling are written twice, in two
+  crates that may not name each other, and nothing makes them agree. A change to
+  `OUTCOME_HOLD` breaks the oracle silently — it would still pass, about a client
+  nobody ships. The honest fix is a shared crate for the record itself, which is
+  a `common/` question rather than a combat one.
+- **A concealed action still broadcasts its *end*.** `end_combat_action` has no
+  audience rule, so a watcher is told an action they never heard begin has ended.
+  It costs nothing today — a hidden body is not drawn, so the client's record
+  hangs on a serial with nothing under it — but it is the same over-broad
+  audience the commit had, from the other side.
+- **Nothing plays the ambusher's own stroke.** The animation stays inside the
+  telegraph, which is right for watchers and now inconsistent for the fighter:
+  their bar fills over a body that is standing still. Whether a concealed fighter
+  should see their own stroke — the reference draws nothing at all — is a
+  question for whoever builds Hiding properly, and it wants asking rather than
+  assuming.
 
 **From Ф4.2:**
 

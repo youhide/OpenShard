@@ -1047,8 +1047,16 @@ pub fn commit_actions(state: &mut WorldState) {
             }
             state.break_cover(attacker);
             state.animate_timed(attacker, Action::Attack, impact.saturating_sub(now));
-            state.announce_action(attacker, action);
         }
+        // Outside the telegraph, and this is the correction rather than an
+        // oversight tidied up. What concealment buys is that *watchers* see no
+        // wind-up — the turn, the broken cover and the stroke above are the
+        // wind-up, and they stay bought. The announcement is not: it is how a
+        // fighter's own screen knows what its body is doing, and an ambusher
+        // whose commit said nothing to anybody stood through a whole draw with a
+        // blank bar, no stage and no stroke, which reads as a shard that has
+        // stopped. `announce_action` reads the audience off the action itself.
+        state.announce_action(attacker, action);
     }
 
     // Everyone still standing in a refusal this pass did not renew is free of
@@ -1181,9 +1189,9 @@ pub fn sustain_actions(state: &mut WorldState) {
 /// slows an archer means. Only a forward move is recorded and only a forward
 /// move is announced.
 ///
-/// An untelegraphed action says nothing, for the reason it has no wind-up
-/// either: a concealed fighter narrating their own draw would give away the
-/// ambush the concealment is for.
+/// An untelegraphed action's stages reach its own client and nobody else, which
+/// is the same audience its commit had — `WorldState::announce_stage` reads that
+/// off the action rather than being told, so the two cannot come apart.
 fn advance_stage(state: &mut WorldState, attacker: EntityId, now: WorldTick) {
     let Some(&action) = state.registry.get::<CombatAction>(attacker) else {
         return;
@@ -1209,9 +1217,7 @@ fn advance_stage(state: &mut WorldState, attacker: EntityId, now: WorldTick) {
     let mut moved = action;
     moved.stage = stage;
     state.registry.insert(attacker, moved);
-    if action.telegraphed {
-        state.announce_stage(attacker, stage);
-    }
+    state.announce_stage(attacker, moved);
 }
 
 /// Push a condition at whatever `mobile` is doing — D5's one door.

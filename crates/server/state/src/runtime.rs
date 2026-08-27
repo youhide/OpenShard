@@ -28,9 +28,9 @@ use openshard_movement::{Footing, MapTerrain, NavigationGraph};
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::combat::{AttackTarget, HealthBar, WarMode};
 use openshard_protocol::feedback::{
-    ActionStage, Animation, BalkState, CombatActionBalked, CombatActionEnded, CombatActionOutcome,
-    CombatActionPhase, CombatActionStage, HarvestCompleted, HarvestPreview, HarvestToolVisual,
-    InterruptReason, NewAnimation, PlaySound, SwingDuration, SwingTiming,
+    Animation, BalkState, CombatActionBalked, CombatActionEnded, CombatActionOutcome, CombatActionPhase,
+    CombatActionStage, HarvestCompleted, HarvestPreview, HarvestToolVisual, InterruptReason, NewAnimation,
+    PlaySound, SwingDuration, SwingTiming,
 };
 use openshard_protocol::items::WorldItem;
 use openshard_protocol::localized;
@@ -2558,7 +2558,7 @@ impl WorldState {
         self.animate_inner(mobile, action, Some(duration_ms));
     }
 
-    /// Tell everyone who can see `mobile` which phase of its action it just
+    /// Tell everyone who may hear it which phase of its action `mobile` just
     /// entered.
     ///
     /// Sent at the commit and again at the release — two different pictures, and
@@ -2566,37 +2566,67 @@ impl WorldState {
     /// crate that owns fighting decides *when* an action changes phase, and this
     /// is only how that fact reaches a screen. Silent for a mobile with no wire
     /// identity, like every other broadcast here.
+    ///
+    /// **Who "everyone" is depends on the action, and that is the whole of
+    /// [`tell_watchers`](Self::tell_watchers).** A concealed fighter's action is
+    /// untelegraphed and reaches its own client alone: an ambush is hidden from
+    /// the people it is sprung on, never from the person springing it.
     pub fn announce_action(&mut self, mobile: EntityId, action: CombatAction) {
         let Some(actor) = self.registry.serial_of(mobile) else {
             return;
         };
         let now = self.ticks;
-        self.broadcast_packet(
-            mobile,
-            &ServerPacket::CombatActionPhase(CombatActionPhase {
-                actor,
-                target: action.target,
-                kind: action.wire_kind(),
-                phase: action.wire_phase(now),
-            }),
-        );
+        let packet = ServerPacket::CombatActionPhase(CombatActionPhase {
+            actor,
+            target: action.target,
+            kind: action.wire_kind(),
+            phase: action.wire_phase(now),
+        });
+        self.tell_watchers(mobile, action.telegraphed, &packet);
     }
 
-    /// Tell everyone who can see `mobile` that its action has entered a new
+    /// Tell everyone who may hear it that `mobile`'s action has entered a new
     /// stretch — the bow is drawn, the arm is set, the arrow is away.
     ///
     /// A companion to [`announce_action`](Self::announce_action) and not part of
     /// it: a phase carries the interval a watcher measures its bar against, and
     /// re-sending one to say the stage moved would restart that measurement.
-    /// This says only which stretch, and leaves the clock alone.
-    pub fn announce_stage(&mut self, mobile: EntityId, stage: ActionStage) {
+    /// This says only which stretch, and leaves the clock alone. It takes the
+    /// whole action rather than the stage alone so that it reads the audience
+    /// off the same field the phase did — a stage sent to a wider room than the
+    /// commit it belongs to would narrate an ambush nobody was told had begun.
+    pub fn announce_stage(&mut self, mobile: EntityId, action: CombatAction) {
         let Some(actor) = self.registry.serial_of(mobile) else {
             return;
         };
-        self.broadcast_packet(
-            mobile,
-            &ServerPacket::CombatActionStage(CombatActionStage { actor, stage }),
-        );
+        let packet = ServerPacket::CombatActionStage(CombatActionStage {
+            actor,
+            stage: action.stage,
+        });
+        self.tell_watchers(mobile, action.telegraphed, &packet);
+    }
+
+    /// Send `packet` to everyone who can see `mobile` — or, when it is not
+    /// `public`, to `mobile`'s own client and nobody else.
+    ///
+    /// The one place concealment decides an audience. It exists because the two
+    /// answers used to be *broadcast* and *say nothing at all*, and the second
+    /// was applied to the concealed fighter's own screen as well: an ambusher
+    /// with a bow stood through a two-and-a-half-second draw with no bar, no
+    /// stage and no stroke, which is indistinguishable from a shard that has
+    /// stopped. Hiding the wind-up from watchers is the rule; hiding it from the
+    /// fighter is what the rule cost before anybody separated the two.
+    fn tell_watchers(&mut self, mobile: EntityId, public: bool, packet: &ServerPacket) {
+        if public {
+            self.broadcast_packet(mobile, packet);
+            return;
+        }
+        let Some(&Client { connection, .. }) = self.registry.get::<Client>(mobile) else {
+            // A creature has no screen of its own to keep informed, and a
+            // concealed one owes its watchers nothing.
+            return;
+        };
+        self.send_packet(connection, packet);
     }
 
     /// Record that `mobile` cannot begin an action, and tell every watcher what
