@@ -39,6 +39,7 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::wire::{Graphic, SoundId};
 use openshard_protocol::world::{Point, PoisonLevel, RangedRange};
+use openshard_state::action_rules::{ActionEffect, ActorCondition, ConditionSet};
 use openshard_state::components::{
     ActionKind, BehaviourBuffs, Body, Client, Combat, CombatAction, CriminalUntil, DamageType, Frozen, Ghost,
     Guard, Hidden, Hitpoints, ItemAffix, ItemAffixes, MeleeDamage, MurderDecay, Murders, Phase,
@@ -329,6 +330,13 @@ pub fn damage(
         state.registry.remove::<Frozen>(entity);
         // And it gives away anyone hiding: you cannot be struck and stay unseen.
         state.break_cover(entity);
+        // D5's second seam. This is the one door every wound passes — a blow, an
+        // arrow, a spell, a reflected hit — so a rule about being struck is
+        // pushed from here and never gone looking for by a pass. What it does is
+        // the shard's table's business: the shipped one lets a fighter swing
+        // through a wound, and `struck = "break"` is how an operator says
+        // otherwise.
+        apply_condition(state, entity, ActorCondition::Struck);
     }
     // Reactive Armor bounces a share of a melee physical blow back at the
     // attacker. The reflected hit is unattributed (attacker `None`), which both
@@ -709,14 +717,25 @@ pub fn resolve_actions(state: &mut WorldState) {
     let now = state.ticks;
     // Collected first: `damage` mutates the registry, so the query cannot be held
     // across it.
-    let due: Vec<(EntityId, CombatAction)> = state
+    let due: Vec<EntityId> = state
         .registry
         .query::<CombatAction>()
         .filter(|(_, action)| action.impact().is_some_and(|impact| now >= impact))
-        .map(|(attacker, action)| (attacker, *action))
+        .map(|(attacker, _)| attacker)
         .collect();
 
-    for (attacker, action) in due {
+    for attacker in due {
+        // Re-read rather than carry a copy from the collection above: a blow
+        // struck earlier in *this* pass reaches its victim through `damage`,
+        // which pushes `Struck` at whatever the victim was doing — and the
+        // shard's table may have ended it or pushed its impact away. Resolving
+        // the snapshot would land a blow the rules had already taken back.
+        let Some(&action) = state.registry.get::<CombatAction>(attacker) else {
+            continue;
+        };
+        if !action.impact().is_some_and(|impact| now >= impact) {
+            continue;
+        }
         let target_serial = action.target;
         // A blow struck earlier in this same pass may have killed it. A player
         // also remains a mobile after death as a ghost, so resolving the serial
@@ -957,6 +976,7 @@ pub fn commit_actions(state: &mut WorldState) {
             phase: Phase::Releasing { impact },
             started_at: now,
             accuracy,
+            applied: ConditionSet::EMPTY,
             telegraphed,
         };
         state.registry.insert(attacker, action);
@@ -1033,9 +1053,26 @@ pub fn sustain_actions(state: &mut WorldState) {
         // Against the *committed* reach, not the weapon's reach now: a fighter
         // is held to what it promised, and a weapon swapped mid-swing does not
         // lengthen the blow already in flight.
-        if let Some(reason) = obstruction(state, attacker, target, action.reach()) {
-            state.end_combat_action(attacker, CombatActionOutcome::Interrupted(reason));
-            continue;
+        //
+        // A cut line is the one refusal here that is a *rule* rather than a
+        // verdict: `Blinded` is a row in the table, and the shipped row breaks
+        // the action, which is what this did with a bare reason before there was
+        // a table to route it through. A shard that lets a fighter keep swinging
+        // into the dark now says so in its config. The other two are not
+        // negotiable — a target on another facet or outside the committed reach
+        // is not somewhere a rule can put it back.
+        match obstruction(state, attacker, target, action.reach()) {
+            Some(InterruptReason::NoLineOfSight) => {
+                apply_condition(state, attacker, ActorCondition::Blinded);
+                if !state.registry.has::<CombatAction>(attacker) {
+                    continue;
+                }
+            }
+            Some(reason) => {
+                state.end_combat_action(attacker, CombatActionOutcome::Interrupted(reason));
+                continue;
+            }
+            None => {}
         }
         // An arm that was never released gives out. Nothing arms yet, so nothing
         // reaches this today; it is the endurance that stops a couched lance
@@ -1045,6 +1082,99 @@ pub fn sustain_actions(state: &mut WorldState) {
                 state.end_combat_action(attacker, CombatActionOutcome::Expired);
             }
         }
+    }
+}
+
+/// Push a condition at whatever `mobile` is doing — D5's one door.
+///
+/// Called from the seam that already knows the fact, never from a pass that goes
+/// looking for it: the step has `running` and the mount in hand, and [`damage`]
+/// is the door every wound passes. A mobile with no action is the ordinary case
+/// and costs one component lookup.
+///
+/// **A condition is charged at most once per action.** A ten-second draw takes
+/// twenty steps, and a sway charged per step would put an archer's chance at
+/// zero for crossing a room, while a `Slow` charged per step would push the
+/// impact away faster than the wait brings it closer and the shot would never be
+/// taken at all. So the rule is a fact about the action — *it ran*, *it was
+/// struck* — and [`ConditionSet`] on the action remembers. The per-tick spender
+/// in the model is `Drain`, levied against a held condition by the sustain pass,
+/// and it is Ф5's.
+pub fn apply_condition(state: &mut WorldState, mobile: EntityId, condition: ActorCondition) {
+    let Some(&action) = state.registry.get::<CombatAction>(mobile) else {
+        return;
+    };
+    if action.applied.contains(condition) {
+        return;
+    }
+    let Some(effect) = state.gameplay.action_rules.effect(action.kind, condition) else {
+        // No rule for this pair, which is a real answer and not a gap: walking
+        // is *free* for an archer on the shipped shard. Nothing is charged, so
+        // nothing is remembered either.
+        return;
+    };
+    let now = state.ticks;
+    let mut action = action;
+    action.applied = action.applied.with(condition);
+    match effect {
+        ActionEffect::Break => {
+            state.end_combat_action(
+                mobile,
+                CombatActionOutcome::Interrupted(condition.interrupt_reason()),
+            );
+        }
+        ActionEffect::Sway { penalty } => {
+            // Spent once by the hit roll at the impact, beside whatever the
+            // commit put there. A penalty deep enough to take the chance below
+            // zero takes it to zero — `check_hit` clamps.
+            action.accuracy = action.accuracy.saturating_sub(penalty);
+            state.registry.insert(mobile, action);
+        }
+        ActionEffect::Slow { percent } => {
+            // An armed action has no clock to push yet — its release is what
+            // starts one, and Ф7 is where a watch can fire. Nothing to do but
+            // remember that the condition has been charged.
+            let Some(impact) = action.impact() else {
+                state.registry.insert(mobile, action);
+                return;
+            };
+            let pushed = impact.saturating_add(impact.saturating_sub(now) * u64::from(percent) / 100);
+            action.phase = Phase::Releasing { impact: pushed };
+            state.registry.insert(mobile, action);
+            // The deadline goes with the impact it was pinned to at the commit,
+            // and so does the picture: a watcher was given an interval to
+            // stretch a stroke over, and an impact that moved without saying so
+            // is exactly the desync this model was built to stop.
+            set_next_swing(state, mobile, pushed);
+            if action.telegraphed && pushed != impact {
+                state.animate_timed(mobile, Action::Attack, pushed.saturating_sub(now));
+                state.announce_action(mobile, action);
+            }
+        }
+    }
+}
+
+/// The movement half of D5: a step, with what kind of step it was.
+///
+/// Both step seams call it — the client's own walk and a decreed one — because a
+/// fighter that was moved is a fighter that moved. The pace is pushed first and
+/// the mount second: the step is the event, and being mounted is a thing that
+/// was true of it.
+pub fn stepped(state: &mut WorldState, mobile: EntityId, running: bool, mounted: bool) {
+    if !state.registry.has::<CombatAction>(mobile) {
+        return;
+    }
+    apply_condition(
+        state,
+        mobile,
+        if running {
+            ActorCondition::Running
+        } else {
+            ActorCondition::Walking
+        },
+    );
+    if mounted {
+        apply_condition(state, mobile, ActorCondition::Mounted);
     }
 }
 

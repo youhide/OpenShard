@@ -473,6 +473,14 @@ pub enum InterruptReason {
     /// for an empty quiver comes at the nock instead, before there is an action
     /// to interrupt at all.
     NoAmmo,
+    /// The actor moved, and the shard's rules table says this action does not
+    /// survive that. Walking, running and riding all end under this one name:
+    /// what a watcher is being told is that the fighter moved, not which of the
+    /// three it was doing.
+    Moved,
+    /// A wound spoiled it. The condition rule, not the damage itself — a shard
+    /// whose table lets a fighter swing through a blow never sends this.
+    Struck,
 }
 
 impl InterruptReason {
@@ -487,6 +495,8 @@ impl InterruptReason {
             Self::Pacified => 4,
             Self::Abandoned => 5,
             Self::NoAmmo => 6,
+            Self::Moved => 7,
+            Self::Struck => 8,
         }
     }
 
@@ -500,6 +510,8 @@ impl InterruptReason {
             4 => Some(Self::Pacified),
             5 => Some(Self::Abandoned),
             6 => Some(Self::NoAmmo),
+            7 => Some(Self::Moved),
+            8 => Some(Self::Struck),
             _ => None,
         }
     }

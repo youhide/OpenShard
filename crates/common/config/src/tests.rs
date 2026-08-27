@@ -712,3 +712,73 @@ fn free_movement_defaults_to_saying_nothing() {
         "an unset table is empty, not a table of answers"
     );
 }
+
+/// The condition rules as an operator writes them — the exact shape documented
+/// in `openshard.toml` and in `docs/combat_actions.md`'s D4, parsed rather than
+/// described.
+#[test]
+fn the_action_rules_table_reads_as_its_effects_own_names() {
+    let config = config(
+        r#"
+            [server]
+            name = "OpenShard"
+            listen = "0.0.0.0:2593"
+            advertise = "127.0.0.1:2593"
+
+            [gameplay.action_rules.shot]
+            running = { sway = { penalty = 40 } }
+            walking = { slow = { percent = 50 } }
+            struck = "break"
+            "#,
+    );
+    config.validate().unwrap();
+    let shot = config.gameplay.action_rules.shot;
+    assert_eq!(shot.running, Some(ActionEffectConfig::Sway { penalty: 40 }));
+    assert_eq!(shot.walking, Some(ActionEffectConfig::Slow { percent: 50 }));
+    assert_eq!(shot.struck, Some(ActionEffectConfig::Break));
+    assert_eq!(
+        shot.blinded, None,
+        "a row an operator writes is the whole row: what it leaves out is no rule, \
+         not the shipped default quietly merged back in"
+    );
+    assert_eq!(
+        config.gameplay.action_rules.swing,
+        ActionRulesConfig::shipped().swing,
+        "and a kind it says nothing about keeps the shipped row entire"
+    );
+}
+
+/// A shard with no `[gameplay.action_rules]` at all runs the shipped table,
+/// which is the one thing every other file in the repo describes.
+#[test]
+fn an_unwritten_action_rules_table_is_the_shipped_one() {
+    assert_eq!(
+        config(MINIMAL).gameplay.action_rules,
+        ActionRulesConfig::shipped()
+    );
+}
+
+/// A slow big enough to be a cancellation is refused at load rather than run: an
+/// impact pushed a hundred times further out reads as a shard swallowing the
+/// blow, not as a setting doing its job.
+#[test]
+fn an_absurd_slow_is_refused_at_load() {
+    let config = config(
+        r#"
+            [server]
+            name = "OpenShard"
+            listen = "0.0.0.0:2593"
+            advertise = "127.0.0.1:2593"
+
+            [gameplay.action_rules.swing]
+            struck = { slow = { percent = 10000 } }
+            "#,
+    );
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::SlowPercentTooHigh {
+            kind: "swing",
+            percent: 10000
+        })
+    ));
+}

@@ -276,6 +276,23 @@ The table is keyed by `ActionKind` and lives in operator settings beside
 configuration and not a branch. A shard that wants the classic rule writes
 `Break` on the same row. **No code decides this**, which is the point.
 
+> **Amended at Ф3, in one place the decision left open: how often a rule fires.**
+> A condition is charged **at most once per action**. Written as it stands, a
+> pushed condition would fire at every step — and a ten-second draw takes twenty
+> of them, so a 25% sway would put a running archer's chance at zero for crossing
+> a room, and a `Slow` would push the impact out faster than the wait brings it
+> closer, leaving a shot that is never taken. So a rule is a fact *about the
+> action* — *it ran*, *it was struck*, which is how `Struck` is worded here
+> already — and a `ConditionSet` on the component is what remembers. The
+> per-tick spender the enum promises is `Drain`, and it is levied by the sustain
+> pass against a condition that *holds* rather than pushed at an event, which is
+> the difference that makes Ф5 the phase that can build it.
+>
+> Two of the enums above are also Ф5's rather than Ф3's, and for the same
+> reason: `Winded` is a reading of the stamina pool, and `Drain` needs the
+> `owed_stamina` field the component does not carry yet. Ф3 shipped the other
+> five conditions and the other three effects.
+
 **D5 — Conditions are pushed in from where they are already known, never polled.**
 Movement is the exemplar: `motion.rs` already has `request.facing.running` and the
 `Riding` lookup in hand at the step (`tick/motion.rs:113-121,194`) and already
@@ -471,10 +488,44 @@ And one behaviour that changed on the way past: a pacified archer stops shooting
 `volleys` never read `Pacified` — only the melee pass did — so a bard's calm
 silenced swordsmen and left bowmen firing.
 
-**Ф3 — the rules table.** D4 and D5: conditions pushed in from movement and damage,
-the effect table in operator settings, defaults chosen so that walking is free,
-running sways, and a mount is neutral. *Done when:* shooting on the move works and
-its penalty is a config line an operator can change without a rebuild.
+**Ф3 — the rules table. ✅ Built.** D4 and D5: conditions pushed in from movement
+and damage, the effect table in operator settings, defaults chosen so that walking
+is free, running sways, and a mount is neutral. *Done when:* shooting on the move
+works and its penalty is a config line an operator can change without a rebuild.
+
+What landed, and the four things worth knowing before reading the code:
+
+- **The table is `crates/server/state/src/action_rules.rs`**, reached through
+  `Gameplay::action_rules` like every other operator knob, and written by an
+  operator as `[gameplay.action_rules.<kind>]` with the effect's own name:
+  `running = { sway = { penalty = 25 } }`, `struck = "break"`. **A row an
+  operator writes is the whole row** — a condition left out of it is *no rule*,
+  not the shipped default quietly merged back in, because a table that reads one
+  way in the file and runs another is the `..Default::default()` hazard wearing
+  a different hat.
+- **A condition is charged once per action, and this is a decision D4 did not
+  make.** A ten-second draw takes twenty steps; a sway charged per step would
+  put a running archer's chance at zero for crossing a room, and a `Slow`
+  charged per step would push the impact away faster than the wait brings it
+  closer, so the shot would never be taken at all. A rule is therefore a *fact
+  about the action* — it ran, it was struck, which is how `Struck` was worded to
+  begin with — remembered in a `ConditionSet` on the component. The per-tick
+  spender in the model is `Drain`, which the sustain pass levies against a held
+  condition rather than an event, and it is Ф5's.
+- **A cut line is now a row rather than a verdict.** `Blinded` is the one
+  condition the sustain pass computes for itself, because losing sight is not an
+  event anything pushes; the shipped row breaks the action, which is exactly
+  what the pass did with a bare `NoLineOfSight` before there was a table to
+  route it through. The other two refusals — another facet, outside the
+  committed reach — stay verdicts, because no rule can put a target back.
+- **A `Slow` re-announces.** The impact moves, so `next_swing`, the stretched
+  animation and the phase packet move with it: a watcher was given an interval
+  to stretch a stroke over, and an impact that changed without saying so is the
+  same desync the whole model was built to stop.
+
+Two new interrupt reasons cross the wire with it, `Moved` and `Struck`. Walking,
+running and riding all end under `Moved`: what a watcher is told is that the
+fighter moved, not which of the three it was doing.
 
 **Ф4 — the preparation bar.** The client draws its own pending action, off the
 pair from Ф1: filling between `Began` and `Ended` when the action is timed, held
@@ -511,7 +562,45 @@ index of armed squares, and that index is a design rather than a variant.
 
 ## Backlog
 
-Found while building Ф1 and Ф2, and none of it belonged to either.
+Found while building Ф1, Ф2 and Ф3, and none of it belonged to any of them.
+
+**From Ф3:**
+
+- **Nothing cuts a line of sight mid-swing in a test.** `Blinded` is the one
+  condition the sustain pass computes rather than receives, and its shipped row
+  keeps exactly the behaviour that was there before — but the scene that would
+  prove it wants a door or a wall between two fighters, and the tick tests have
+  no cheap fixture for one (the wall fixtures they do have belong to housing
+  scenes). The table's own unit tests cover the routing; the world does not.
+- **`Mounted` is charged at the step, so a rider who stands still is neutral by
+  omission rather than by decision.** It is the honest reading of D5 — the step
+  is the seam that has the mount in hand — but *"a mount steadies an archer"*
+  written as a `Sway { penalty: -10 }` would then only apply to an archer who
+  moved, which is not what an operator writing that row would expect. Either the
+  condition wants a second seam (a held condition the sustain pass reads, which
+  is exactly the shape `Winded` needs in Ф5) or the row wants a name that says
+  *riding*, not *mounted*.
+- **A condition charged once per action is charged once per action, and a
+  fighter can wait it out.** An archer who runs one stride at the start of a
+  draw is swayed for the whole draw; an archer who runs the *last* stride is
+  swayed exactly as much. Neither is wrong, and the alternative — decaying or
+  re-charging — is a number nobody has asked for yet. It is written down because
+  the first person to want "sway more the longer you ran" will find this line
+  before they find the `ConditionSet`.
+- **`resolve_actions` re-reads its actions, and nothing tests why.** Until Ф3
+  nothing could end an action *during* the resolve pass, so the pass could walk a
+  snapshot; now a blow reaches its victim through `damage`, which pushes `Struck`
+  at whatever the victim was doing — under a `struck = "break"` table the victim's
+  own blow, due in the same pass, would land from a copy the rules had already
+  taken back. The pass re-reads the component and re-asks whether the impact is
+  due, which closes it. The scene that would prove it wants two fighters whose
+  impacts fall on one tick and a table that says so, and the assertion has to be
+  order-independent because which of the two resolves first is a registry
+  detail.
+- **`InterruptReason::Moved` covers three conditions**, the same shape the
+  `Abandoned` note below complains about. It is deliberate here — a watcher is
+  being told the fighter moved — but if Ф4's bar ever wants to say *"you cannot
+  shoot at a gallop"* it will want the three apart.
 
 **From Ф2:**
 

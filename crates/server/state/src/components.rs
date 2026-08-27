@@ -29,6 +29,7 @@ use openshard_protocol::skill::SkillLock;
 use openshard_protocol::wire::{Graphic, Hue, Layer, SoundId};
 
 use crate::WorldTick;
+use crate::action_rules::ConditionSet;
 use crate::quest::QuestKey;
 use crate::skill::Skill;
 pub use openshard_protocol::items::CORPSE_GRAPHIC;
@@ -2369,9 +2370,17 @@ pub struct CombatAction {
     /// When it was committed — the tick the promise was made on.
     pub started_at: WorldTick,
     /// A percentage adjustment to the hit roll, accumulated while the action
-    /// runs and spent once when it resolves. An ambush from cover is what puts
-    /// anything in it today; a run's sway is what will subtract from it.
+    /// runs and spent once when it resolves. An ambush from cover puts a bonus
+    /// in it at the commit; a condition rule's `Sway` — a shot loosed at a run —
+    /// subtracts from it while it runs.
     pub accuracy: i16,
+    /// Which conditions have already been charged against this action.
+    ///
+    /// A rule is a fact about the action ("it ran"), not a tax on every step:
+    /// twenty steps during a long draw must not sway an archer twenty times over
+    /// nor push the impact out faster than it arrives. See
+    /// [`action_rules`](crate::action_rules).
+    pub applied: ConditionSet,
     /// Whether the gesture was shown when the action was committed.
     ///
     /// A concealed fighter has no wind-up: drawing one would break cover before

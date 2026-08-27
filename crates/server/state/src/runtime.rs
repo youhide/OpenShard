@@ -46,6 +46,7 @@ use openshard_protocol::{access::AccessLevel, feature::Feature, version::ClientV
 use openshard_tiles::TileData;
 use openshard_uofiles::anim::BodyKind;
 
+use crate::action_rules::ActionRules;
 use crate::boat::Plank;
 use crate::components::{
     Access, Amount, Body, Client, Combat, CombatAction, Contained, CorpseBody, CraftedBy, Drawn, Equipped,
@@ -172,6 +173,12 @@ pub struct Gameplay {
     pub combat_era: CombatEra,
     /// The swing formula's numerator (Sphere's `SpeedScaleFactor`).
     pub speed_scale_factor: u64,
+    /// What the world does to an action that is already running — a run that
+    /// sways a shot, a wound that spoils it. `docs/combat_actions.md`'s D4, and
+    /// the reason it is a table rather than a branch: *"an archer may fire at a
+    /// walk, sways at a run, and steadies on horseback"* is a shard's choice,
+    /// and a boolean on the weapon cannot say it.
+    pub action_rules: ActionRules,
     /// Chance, in per-mille, for a landed weapon or ranged blow to be critical.
     /// A shard extension: zero keeps strictly classic damage rolls.
     pub critical_chance: u16,
@@ -401,6 +408,7 @@ impl Default for Gameplay {
         Self {
             combat_era: CombatEra::new(1),
             speed_scale_factor: 10000,
+            action_rules: ActionRules::shipped(),
             critical_chance: 50,
             critical_damage_percent: 150,
             skill_cap: 1000,

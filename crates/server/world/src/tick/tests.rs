@@ -20,6 +20,7 @@ use openshard_protocol::skill::SkillLock;
 use openshard_protocol::wire::{Graphic, Hue, RawSkillId, SoundId};
 use openshard_protocol::world::{Aggression, RangedRange, RawStepSequence};
 use openshard_skills::SkillUsed;
+use openshard_state::action_rules::{ActionEffect, ActionRules, ConditionEffects, ConditionSet};
 use openshard_state::components::ItemAffix;
 use openshard_state::components::Riding;
 use openshard_state::components::{
@@ -400,6 +401,18 @@ pub(super) fn walk(sequence: u8, direction: Direction) -> WalkRequest {
 
     WalkRequest {
         facing: Facing::walking(direction),
+        sequence: RawStepSequence(sequence),
+        fastwalk_key: RawFastwalkKey(0),
+    }
+}
+
+/// The same step, taken at a run — the bit the condition rules of
+/// `docs/combat_actions.md`'s D4 key on.
+pub(super) fn run(sequence: u8, direction: Direction) -> WalkRequest {
+    use openshard_protocol::world::RawFastwalkKey;
+
+    WalkRequest {
+        facing: Facing::running(direction),
         sequence: RawStepSequence(sequence),
         fastwalk_key: RawFastwalkKey(0),
     }
@@ -5635,6 +5648,7 @@ fn an_armed_action_that_is_never_released_expires() {
             },
             started_at: armed_at,
             accuracy: 0,
+            applied: ConditionSet::EMPTY,
             telegraphed: true,
         },
     );
@@ -6291,16 +6305,13 @@ fn an_archer_with_no_arrows_cannot_fire() {
     );
 }
 
-/// The visible half of Ф2. A shot is a committed action like any other, so it
-/// announces itself at the start of the interval it will take — the archer is a
-/// body drawing a bow for the whole of it, not a statue that spits an arrow.
-#[test]
-fn a_drawn_bow_announces_a_shot_for_the_whole_interval() {
-    let now = Instant::now();
-    let mut world = world();
-    let connection = enter(&mut world, now);
-    let player_entity = world.state.players[&connection];
-    let serial = world.state.registry.serial_of(player_entity).unwrap();
+/// A bow on the back and a quiver in the pack — what every archery scene below
+/// starts from, and the fixture that has to agree with itself: the graphic worn
+/// is the one the weapon table calls a bow, and the round given is the one that
+/// bow nocks.
+fn arm_with_bow(world: &mut World, connection: ConnectionId) {
+    let entity = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(entity).unwrap();
     items::equip_worn_item(
         &mut world.state,
         serial,
@@ -6317,6 +6328,18 @@ fn a_drawn_bow_announces_a_shot_for_the_whole_interval() {
         20,
         true
     ));
+}
+
+/// The visible half of Ф2. A shot is a committed action like any other, so it
+/// announces itself at the start of the interval it will take — the archer is a
+/// body drawing a bow for the whole of it, not a statue that spits an arrow.
+#[test]
+fn a_drawn_bow_announces_a_shot_for_the_whole_interval() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    arm_with_bow(&mut world, connection);
     let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 50, now);
     let _ = packets_for(&mut world, connection);
     // The bow's own pace, not wrestling's: the interval announced has to be the
@@ -6347,22 +6370,7 @@ fn an_interrupted_draw_costs_the_archer_no_arrow() {
     let connection = enter(&mut world, now);
     let player_entity = world.state.players[&connection];
     let serial = world.state.registry.serial_of(player_entity).unwrap();
-    items::equip_worn_item(
-        &mut world.state,
-        serial,
-        openshard_protocol::wire::Graphic(0x13B2),
-        openshard_protocol::wire::Hue(0),
-        Layer(2),
-    )
-    .unwrap(); // bow
-    assert!(items::give_to_backpack(
-        &mut world.state,
-        serial,
-        Graphic(0x0F3F),
-        Hue(0),
-        20,
-        true
-    ));
+    arm_with_bow(&mut world, connection);
     let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 50, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, connection, mob, now);
@@ -6392,6 +6400,209 @@ fn an_interrupted_draw_costs_the_archer_no_arrow() {
         items::count_in_container(&world.state, quiver, Graphic(0x0F3F)),
         20,
         "and the archer is not robbed of the arrow it never loosed"
+    );
+}
+
+/// Ф3, and the sentence the shipped table is meant to read as: **an archer may
+/// fire at a walk and sways at a run.** Both halves in one scene, because the
+/// interesting claim is the *difference* — a rule that fired on every step would
+/// pass a test that only ran.
+///
+/// The third assertion is the one the model turns on: a condition is a fact
+/// about the action, charged once. A ten-second draw takes twenty steps, and a
+/// sway per step would put a running archer's chance at zero for crossing a
+/// room.
+#[test]
+fn a_shot_sways_at_a_run_is_free_at_a_walk_and_is_swayed_only_once() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    arm_with_bow(&mut world, connection);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 50, now);
+    engage(&mut world, connection, mob, now);
+
+    let accuracy = |world: &World| {
+        world
+            .state
+            .registry
+            .get::<CombatAction>(player_entity)
+            .expect("the bow is drawn")
+            .accuracy
+    };
+    assert_eq!(accuracy(&world), 0, "nothing has happened to the draw yet");
+    let start = world.state.registry.get::<Position>(player_entity).unwrap().0;
+
+    // The first request only turns: a mobile facing elsewhere spends one on
+    // coming about, and a turn is not a step. The second is the walk. Sequences
+    // start at zero — a fresh walker refuses anything else.
+    world.queue(Command::Walk {
+        connection,
+        request: walk(0, Direction::North),
+    });
+    world.tick(now);
+    world.queue(Command::Walk {
+        connection,
+        request: walk(1, Direction::North),
+    });
+    world.tick(now);
+    assert_ne!(
+        world.state.registry.get::<Position>(player_entity).unwrap().0,
+        start,
+        "the archer really walked, or 'walking is free' is free of a walk"
+    );
+    assert_eq!(accuracy(&world), 0, "walking is free");
+
+    let later = now + Duration::from_secs(1);
+    let walked = world.state.registry.get::<Position>(player_entity).unwrap().0;
+    world.queue(Command::Walk {
+        connection,
+        request: run(2, Direction::North),
+    });
+    world.tick(later);
+    assert_ne!(
+        world.state.registry.get::<Position>(player_entity).unwrap().0,
+        walked,
+        "and really ran — it was already facing north, so this one is a step"
+    );
+    assert_eq!(
+        accuracy(&world),
+        -ActionRules::RUNNING_SHOT_SWAY,
+        "and running sways the shot that is already on the string"
+    );
+
+    let later_still = later + Duration::from_secs(1);
+    world.queue(Command::Walk {
+        connection,
+        request: run(3, Direction::North),
+    });
+    world.tick(later_still);
+    assert_eq!(
+        accuracy(&world),
+        -ActionRules::RUNNING_SHOT_SWAY,
+        "a second stride is the same run: the rule is a fact about the draw, not a toll per step"
+    );
+}
+
+/// D4 from the operator's end: *"a wound spoils it"* is a line in the config and
+/// not a branch in the tick. The shipped shard lets a fighter swing through a
+/// blow, so this scene has to say otherwise before it can watch one break.
+#[test]
+fn a_shard_whose_table_says_a_wound_spoils_a_blow_gets_one() {
+    let now = Instant::now();
+    let spoiled_by_wounds = ActionRules {
+        swing: ConditionEffects {
+            running: None,
+            walking: None,
+            mounted: None,
+            struck: Some(ActionEffect::Break),
+            blinded: Some(ActionEffect::Break),
+        },
+        ..ActionRules::shipped()
+    };
+    let mut world = World::new(START).with_gameplay(Gameplay {
+        action_rules: spoiled_by_wounds,
+        ..Gameplay::default()
+    });
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    let player = world.state.registry.serial_of(player_entity).unwrap();
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    engage(&mut world, connection, mob, now);
+    let _ = packets_for(&mut world, connection);
+    assert!(
+        world.state.registry.has::<CombatAction>(player_entity),
+        "the swing is under way"
+    );
+
+    // Through the one door every wound passes, which is where the condition is
+    // pushed from — not from a pass that went looking for it.
+    combat::damage(&mut world.state, player, 5, DamageType::Physical, None);
+
+    assert!(
+        !world.state.registry.has::<CombatAction>(player_entity),
+        "the blow the fighter was winding up is gone"
+    );
+    assert_eq!(
+        action_end(&packets_for(&mut world, connection)),
+        Some((
+            CombatActionOutcome::Interrupted(InterruptReason::Struck).to_bits(),
+            InterruptReason::Struck.to_bits()
+        )),
+        "and the watcher is told which condition took it"
+    );
+}
+
+/// The third effect, and the one with a picture attached: an impact that moves
+/// has to say so, or the stroke a watcher was given an interval to stretch runs
+/// out over a blow that has not landed yet.
+#[test]
+fn a_slowed_blow_pushes_its_impact_and_re_announces_the_interval() {
+    let now = Instant::now();
+    let slowed_by_walking = ActionRules {
+        swing: ConditionEffects {
+            running: None,
+            walking: Some(ActionEffect::Slow { percent: 100 }),
+            mounted: None,
+            struck: None,
+            blinded: Some(ActionEffect::Break),
+        },
+        ..ActionRules::shipped()
+    };
+    let mut world = World::new(START).with_gameplay(Gameplay {
+        action_rules: slowed_by_walking,
+        ..Gameplay::default()
+    });
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    engage(&mut world, connection, mob, now);
+    let impact = |world: &World| {
+        world
+            .state
+            .registry
+            .get::<CombatAction>(player_entity)
+            .expect("the swing is under way")
+            .impact()
+            .expect("released, so it has a clock")
+    };
+    // The fighter is facing its target, so the first request turns it away and
+    // only the second is a step. A turn spoils nothing, which is why the impact
+    // is read after both.
+    world.queue(Command::Walk {
+        connection,
+        request: walk(0, Direction::North),
+    });
+    world.tick(now);
+    let promised = impact(&world);
+    let _ = packets_for(&mut world, connection);
+    let before = world.state.registry.get::<Position>(player_entity).unwrap().0;
+
+    world.queue(Command::Walk {
+        connection,
+        request: walk(1, Direction::North),
+    });
+    world.tick(now);
+    assert_ne!(
+        world.state.registry.get::<Position>(player_entity).unwrap().0,
+        before,
+        "the fighter really stepped, or there is no condition to have pushed anything"
+    );
+
+    let pushed = impact(&world);
+    let remaining = promised - world.state.ticks;
+    assert_eq!(
+        pushed,
+        promised + remaining,
+        "a hundred percent doubles what the blow had left"
+    );
+    let phases = packets_for(&mut world, connection);
+    let (_, phase, interval) = action_phase(&phases).expect("a fresh phase packet");
+    assert_eq!(phase, 1, "still releasing, just later");
+    assert_eq!(
+        u64::from(interval) * openshard_state::TICKS_PER_SECOND / 1_000,
+        pushed - world.state.ticks,
+        "and the interval the watcher is given is the one the shard will actually wait"
     );
 }
 

@@ -242,6 +242,41 @@ guards = true
 # npc_work_hour = 7
 # npc_home_hour = 21
 
+# What the world does to a blow or a draw that is already under way —
+# docs/combat_actions.md's D4. A rule is a pair: a condition the shard already
+# knows, and an effect on the action running when it becomes true.
+#
+# The conditions are `running`, `walking` and `mounted` (all three charged at a
+# step), `struck` (a wound taken while the action runs) and `blinded` (the line
+# to the committed target is cut). The effects are:
+#
+#   "break"                       the action ends, and the actor is told why
+#   { slow = { percent = 50 } }   push the impact out by half of what was left
+#   { sway = { penalty = 25 } }   take 25% off the hit roll (negative steadies)
+#
+# A condition is charged ONCE per action, so a long draw taken at a run is
+# swayed once rather than once per stride.
+#
+# Below is the table the shard already runs, left commented because uncommenting
+# it changes nothing: walking is free, running sways a shot, a mount is neutral,
+# and a cut line ends any of the three. A row you write is the WHOLE row for
+# that kind — a condition you leave out of it is no rule, not the shipped
+# default merged back in — so edit these rows rather than adding a bare one.
+#
+# They are the last thing in [gameplay] on purpose: a table header ends the
+# section above it, so a key written after one of them would belong to the row
+# rather than to [gameplay].
+#
+# [gameplay.action_rules.swing]
+# blinded = "break"
+#
+# [gameplay.action_rules.shot]
+# running = { sway = { penalty = 25 } }
+# blinded = "break"
+#
+# [gameplay.action_rules.breath]
+# blinded = "break"
+
 # Development accounts, in plaintext, until there is a database.
 #
 # `access` is what a staff command is gated on, and it ships absent — so this

@@ -198,6 +198,12 @@ impl World {
                 if !mounted {
                     combat::record_wrestling_step(&mut self.state, entity);
                 }
+                // And what the step does to a blow or a draw already under way —
+                // `docs/combat_actions.md`'s D5. Pushed from here, with the pace
+                // and the mount in hand, because they are facts of *this* step:
+                // reading `Heading` in a later pass would find the run bit still
+                // set and sway a fighter who ran once for ever.
+                combat::stepped(&mut self.state, entity, request.facing.running, mounted);
                 // The index is a second copy of the position; this is the line
                 // that keeps it honest.
                 self.state.place_mobile(facet, entity, position);
@@ -384,6 +390,10 @@ impl World {
         self.state.registry.insert(entity, Movement(walker));
         self.state.registry.insert(entity, Heading(facing));
         combat::record_wrestling_step(&mut self.state, entity);
+        // A fighter that was moved is a fighter that moved, so a decreed step
+        // spoils an action exactly as a walked one does. Never a run and never
+        // mounted, for the reason above it.
+        combat::stepped(&mut self.state, entity, false, false);
         // A script may control a player as well as an NPC. `move_to` sends that
         // player's own client the 0x20 position update a client-side prediction
         // would otherwise supply, then refreshes both sides' interest sets. A

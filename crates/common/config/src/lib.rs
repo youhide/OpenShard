@@ -292,6 +292,86 @@ pub struct GameplayConfig {
     /// rejected at load, so nothing downstream has to reason about one.
     #[serde(default = "default_npc_home_hour")]
     pub npc_home_hour: u8,
+    /// What the world does to a combat action that is already running — the
+    /// condition/effect table of `docs/combat_actions.md`'s D4.
+    #[serde(default = "default_action_rules")]
+    pub action_rules: ActionRulesConfig,
+}
+
+/// What happens to a running combat action when a condition catches it.
+///
+/// Written as the effect's own name, with its number where it needs one:
+///
+/// ```toml
+/// [gameplay.action_rules.shot]
+/// running = { sway = { penalty = 25 } }
+/// struck  = "break"
+/// ```
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ActionEffectConfig {
+    /// The action ends, interrupted, and the actor is told which condition
+    /// spoiled it.
+    Break,
+    /// The impact is pushed out by this percentage of the time it still had to
+    /// run. `100` doubles what is left.
+    Slow {
+        /// How much of the remaining time to add.
+        percent: u16,
+    },
+    /// Taken off the hit roll, as a signed percentage of the base chance.
+    /// Negative steadies rather than sways — that is how "an archer steadies on
+    /// horseback" is written.
+    Sway {
+        /// What to take off the chance.
+        penalty: i16,
+    },
+}
+
+/// One kind of action's rules: a condition that is absent has **no rule**, which
+/// is a real answer — walking is free for an archer on the shipped shard.
+///
+/// A row an operator writes is the *whole* row for that kind: conditions left
+/// out of it are no rule, not the shipped default. Half a row silently merged
+/// with a default is the `..Default::default()` hazard in another costume — the
+/// operator would be reading a table that is not the one the shard runs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConditionRulesConfig {
+    /// What a step taken at a run does.
+    #[serde(default)]
+    pub running: Option<ActionEffectConfig>,
+    /// What a step that was not a run does.
+    #[serde(default)]
+    pub walking: Option<ActionEffectConfig>,
+    /// What being on a mount does, charged at the step.
+    #[serde(default)]
+    pub mounted: Option<ActionEffectConfig>,
+    /// What a wound taken while the action runs does.
+    #[serde(default)]
+    pub struck: Option<ActionEffectConfig>,
+    /// What losing the line to the committed target does.
+    #[serde(default)]
+    pub blinded: Option<ActionEffectConfig>,
+}
+
+/// The whole table, keyed by what the action is.
+///
+/// Keyed by kind rather than by weapon: what a run does to *a shot* is one line
+/// an operator can read, where a column on every ranged weapon row would be
+/// fifty places for two of them to disagree.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionRulesConfig {
+    /// A blow's rules.
+    #[serde(default = "default_swing_rules")]
+    pub swing: ConditionRulesConfig,
+    /// A shot's rules.
+    #[serde(default = "default_shot_rules")]
+    pub shot: ConditionRulesConfig,
+    /// An innate ranged attack's rules — a dragon's breath.
+    #[serde(default = "default_breath_rules")]
+    pub breath: ConditionRulesConfig,
 }
 
 /// The expansions a shard may advertise, in order.
@@ -442,6 +522,85 @@ fn default_npc_home_hour() -> u8 {
     21
 }
 
+/// No rule for any condition — the base every shipped row is written from.
+const fn no_rules() -> ConditionRulesConfig {
+    ConditionRulesConfig {
+        running: None,
+        walking: None,
+        mounted: None,
+        struck: None,
+        blinded: None,
+    }
+}
+
+/// A cut line ends the action. Today's behaviour written down: the sustain pass
+/// used to end a swing on a bare loss of sight, with no table to route it
+/// through and so no way for a shard to want anything else.
+const fn default_swing_rules() -> ConditionRulesConfig {
+    ConditionRulesConfig {
+        blinded: Some(ActionEffectConfig::Break),
+        ..no_rules()
+    }
+}
+
+/// **Walking is free, running sways, a mount is neutral** — the three sentences
+/// the shipped table is meant to read as, plus the cut line every kind breaks
+/// on. Twenty-five is the same scale, and near enough the same size, as the
+/// bonus an ambush from cover already carries.
+const fn default_shot_rules() -> ConditionRulesConfig {
+    ConditionRulesConfig {
+        running: Some(ActionEffectConfig::Sway { penalty: 25 }),
+        blinded: Some(ActionEffectConfig::Break),
+        ..no_rules()
+    }
+}
+
+/// A creature's own breath: nothing but the cut line stops it.
+const fn default_breath_rules() -> ConditionRulesConfig {
+    ConditionRulesConfig {
+        blinded: Some(ActionEffectConfig::Break),
+        ..no_rules()
+    }
+}
+
+/// The most an `action_rules` row may push an impact out, as a percentage of
+/// the time the action still had to run. Ten times over is already a swing that
+/// takes half a minute; past it the setting stops being a slow and becomes a
+/// silent cancellation.
+pub const MAX_SLOW_PERCENT: u16 = 1000;
+
+impl ConditionRulesConfig {
+    /// Every effect in the row, for validation to walk.
+    fn effects(&self) -> [Option<ActionEffectConfig>; 5] {
+        [
+            self.running,
+            self.walking,
+            self.mounted,
+            self.struck,
+            self.blinded,
+        ]
+    }
+}
+
+impl ActionRulesConfig {
+    /// The table this build ships with, for a shard whose file says nothing
+    /// about one. Named rather than a bare `default` because the systems crate
+    /// holds the same three rows in its own vocabulary and a test compares them:
+    /// two tables claiming to be the shipped one must be the shipped one.
+    #[must_use]
+    pub const fn shipped() -> Self {
+        Self {
+            swing: default_swing_rules(),
+            shot: default_shot_rules(),
+            breath: default_breath_rules(),
+        }
+    }
+}
+
+fn default_action_rules() -> ActionRulesConfig {
+    ActionRulesConfig::shipped()
+}
+
 impl Default for GameplayConfig {
     fn default() -> Self {
         Self {
@@ -481,6 +640,7 @@ impl Default for GameplayConfig {
             npc_schedule: false,
             npc_work_hour: default_npc_work_hour(),
             npc_home_hour: default_npc_home_hour(),
+            action_rules: default_action_rules(),
             expansion: default_expansion(),
         }
     }
@@ -954,6 +1114,14 @@ pub enum ConfigError {
         /// The chance given, in per-mille.
         chance: u16,
     },
+    /// A `gameplay.action_rules` row slows an action by so much that it would
+    /// never land.
+    SlowPercentTooHigh {
+        /// Which kind of action the row is for.
+        kind: &'static str,
+        /// The percentage given.
+        percent: u16,
+    },
     /// `gameplay.critical_damage_percent` would make a critical weaker than a
     /// normal landed hit.
     CriticalDamageBelowNormal {
@@ -1062,6 +1230,13 @@ impl fmt::Display for ConfigError {
             Self::CriticalChanceTooHigh { chance } => write!(
                 f,
                 "gameplay.critical_chance is {chance}; it must be at most 1000 per-mille"
+            ),
+            Self::SlowPercentTooHigh { kind, percent } => write!(
+                f,
+                "gameplay.action_rules.{kind} slows by {percent}%; it must be at most \
+                 {MAX_SLOW_PERCENT}% — beyond that the impact is pushed so far out that \
+                 nobody watching will see the action land, which reads as a shard that \
+                 swallowed the blow rather than as the setting doing its job"
             ),
             Self::CriticalDamageBelowNormal { percent } => write!(
                 f,
@@ -1188,6 +1363,21 @@ impl Config {
             return Err(ConfigError::CriticalChanceTooHigh {
                 chance: self.gameplay.critical_chance,
             });
+        }
+        // A slow is the one effect in the table with a number big enough to turn
+        // the rule into a cancellation nobody asked for.
+        for (kind, row) in [
+            ("swing", &self.gameplay.action_rules.swing),
+            ("shot", &self.gameplay.action_rules.shot),
+            ("breath", &self.gameplay.action_rules.breath),
+        ] {
+            for effect in row.effects().into_iter().flatten() {
+                if let ActionEffectConfig::Slow { percent } = effect {
+                    if percent > MAX_SLOW_PERCENT {
+                        return Err(ConfigError::SlowPercentTooHigh { kind, percent });
+                    }
+                }
+            }
         }
         if self.gameplay.critical_damage_percent < 100 {
             return Err(ConfigError::CriticalDamageBelowNormal {
