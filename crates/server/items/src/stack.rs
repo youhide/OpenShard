@@ -1,4 +1,5 @@
 use super::*;
+use openshard_state::weapon::{ARROW, BOLT};
 
 /// ServUO's three coin clinks, chosen by the pile that was set down.
 const GOLD_DROP_SOUNDS: [SoundId; 3] = [SoundId(0x02E4), SoundId(0x02E5), SoundId(0x02E6)];
@@ -21,6 +22,15 @@ pub fn drop_sound(graphic: Graphic, amount: u16, fallback: SoundId) -> SoundId {
     }
 }
 
+/// Whether an item's art is inherently stackable even when an older save or a
+/// generic spawn path omitted its [`Stackable`] component.  Gold established
+/// this rule first; arrows and bolts need the same treatment because a single
+/// piece has no amount on the wire, so neither the client nor a restored item
+/// can infer the fact from its count alone.
+pub const fn intrinsically_stackable(graphic: Graphic) -> bool {
+    matches!(graphic, GOLD_GRAPHIC | ARROW | BOLT)
+}
+
 /// Whether two items are one pile waiting to happen: both stackable, same
 /// graphic and hue, and not the same entity.
 pub fn can_stack(state: &WorldState, a: EntityId, b: EntityId) -> bool {
@@ -28,9 +38,13 @@ pub fn can_stack(state: &WorldState, a: EntityId, b: EntityId) -> bool {
     a != b
         && same_drawn
         && (state.registry.has::<Stackable>(a) && state.registry.has::<Stackable>(b)
-            // Older saves can contain one-coin gold items made before gold was
-            // marked stackable at creation.  Keep those coins usable too.
-            || state.registry.get::<Drawn>(a).is_some_and(|drawn| drawn.id == GOLD_GRAPHIC))
+            // Older saves can contain a bare coin, arrow or bolt.  Keep those
+            // single items usable too; `same_drawn` above already proves both
+            // items have the same intrinsically-stackable art.
+            || state
+                .registry
+                .get::<Drawn>(a)
+                .is_some_and(|drawn| intrinsically_stackable(drawn.id)))
 }
 
 /// Merge a held stack onto another stack, on the ground or inside a container.
@@ -130,14 +144,16 @@ pub const MAX_STACK: u16 = 60_000;
 /// and despawning the source, which quietly destroyed the difference. Dropping
 /// 50,000 gold onto 50,000 left one pile of 65,535 and 34,465 gone.
 fn merge_amounts(state: &mut WorldState, held: EntityId, target: EntityId) -> u16 {
-    // Normalise an old one-coin gold item as soon as it participates in a
-    // merge, so its corrected state is retained by the next save.
+    // Normalise an old singleton as soon as it participates in a merge, so its
+    // corrected state is retained by the next save (and a partial merge leaves
+    // a usable remainder on the cursor).
     if state
         .registry
         .get::<Drawn>(target)
-        .is_some_and(|drawn| drawn.id == GOLD_GRAPHIC)
+        .is_some_and(|drawn| intrinsically_stackable(drawn.id))
     {
         state.registry.insert(target, Stackable);
+        state.registry.insert(held, Stackable);
     }
     let held_amount = amount_of(state, held);
     let room = MAX_STACK.saturating_sub(amount_of(state, target));

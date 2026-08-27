@@ -101,6 +101,11 @@ pub struct Draw {
     /// What the server put on the ground: dropped items and a pack's
     /// decorations, which reach the same pass through [`crate::items::collect`].
     pub items: bool,
+    /// Houses and other multis the server put in the world. A multi is
+    /// expanded into ordinary item pieces before it reaches this renderer, but
+    /// the client keeps this separate switch so a dropped item under a house
+    /// can still be inspected.
+    pub houses: bool,
     /// Mobiles — **honoured by the caller and not here.** This module does not
     /// collect them (see the module's own note), so nothing in [`assemble`] reads
     /// this field; the client's own mobile pass does.
@@ -119,6 +124,7 @@ impl Draw {
         land: true,
         statics: true,
         items: true,
+        houses: true,
         mobiles: true,
     };
 }
@@ -137,8 +143,13 @@ pub struct Inputs<'a> {
     pub map: &'a WorldMap,
     /// What the server has put in it: dropped items, decorations, and — for a
     /// tool that builds a place rather than loading one — the map's own statics
-    /// translated onto a synthetic anchor.
+    /// translated onto a synthetic anchor. This complete list remains the
+    /// lighting and occlusion source even when a diagnostic hides part of it.
     pub items: &'a [GroundItem],
+    /// The server-owned item sprites this frame may show. Usually this is
+    /// [`Self::items`]; the client uses a filtered view to independently hide
+    /// houses (multis) and ordinary ground items without changing lighting.
+    pub drawn_items: &'a [GroundItem],
     /// Where the eye is and how much it can see. Its zoom is in here too, so
     /// two callers at different zooms differ by this one field.
     pub camera: &'a Camera,
@@ -354,14 +365,15 @@ impl Inputs<'_> {
         line("highlight", format!("{:?}", self.highlight));
         line("impostor", format!("{:?}", self.impostor));
         // **Named producers and not `{:?}` of the struct**, because this is the
-        // line a person scans for "why is there no floor in this dump": four
-        // booleans in field order read as four booleans, and `land statics` reads
+        // line a person scans for "why is there no floor in this dump": five
+        // booleans in field order read as five booleans, and `land statics` reads
         // as what was drawn. `everything` is the ordinary frame, said in a word
         // so that a filtered dump stands out beside an unfiltered one.
         let drawn: Vec<&str> = [
             (self.draw.land, "land"),
             (self.draw.statics, "statics"),
             (self.draw.items, "items"),
+            (self.draw.houses, "houses"),
             (self.draw.mobiles, "mobiles"),
         ]
         .into_iter()
@@ -507,6 +519,7 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
     let Inputs {
         map,
         items,
+        drawn_items,
         camera,
         tiledata,
         animations,
@@ -618,9 +631,9 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
     // atlas: one draw call binds one texture, and what covers what is the depth
     // these carry rather than the order they are appended in.
     let items_started = Instant::now();
-    let items = if draw.items {
+    let items = if draw.items || draw.houses {
         crate::items::collect_with_fades_with_interior(
-            items,
+            drawn_items,
             camera,
             tiledata,
             animations,

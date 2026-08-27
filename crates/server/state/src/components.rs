@@ -1613,6 +1613,13 @@ pub const CORPSE_GUMP: Graphic = Graphic(0x0009);
 pub struct Corpse {
     /// Who this was.
     pub owner: String,
+    /// The player whose death made this corpse, when it was a player death.
+    ///
+    /// Names are the right historical record for Forensics, but resurrection
+    /// needs an unambiguous live link. The player's serial remains stable while
+    /// they are a ghost (and across a restart), so it lets the shard return only
+    /// that player's own worn items and consume only their own body.
+    pub player: Option<Serial>,
     /// Who struck the killing blow, if anybody did. An unattributed death (a fall
     /// into a fire field with no caster, say) leaves `None`, which Forensics reads
     /// out as ServUO's "no one".
@@ -1622,6 +1629,12 @@ pub struct Corpse {
     pub examined_by: Option<String>,
     /// Everyone who has taken something off it, in the order they did.
     pub looters: Vec<String>,
+    /// Whether the animal resources from this body have already been taken.
+    ///
+    /// This belongs to the corpse story instead of its contents: an empty
+    /// animal carcass is still a valid corpse, and players may take or put back
+    /// its contents without making it harvestable again.
+    pub carved: bool,
     /// Which items were worn by the body, and on which layers, before they
     /// moved into this corpse container.  A container listing carries the item
     /// pictures but not these layers; retaining this pairing is what lets the
@@ -1639,11 +1652,22 @@ impl Corpse {
     pub fn from_death(owner: String, killer: Option<String>) -> Self {
         Self {
             owner,
+            player: None,
             killer,
             examined_by: None,
             looters: Vec::new(),
+            carved: false,
             equipment: Vec::new(),
         }
+    }
+
+    /// Start the story for a player corpse, retaining the live resurrection
+    /// link in addition to the forensic name.
+    #[must_use]
+    pub fn from_player_death(owner: String, player: Serial, killer: Option<String>) -> Self {
+        let mut corpse = Self::from_death(owner, killer);
+        corpse.player = Some(player);
+        corpse
     }
 }
 
@@ -1703,12 +1727,15 @@ pub enum BodyType {
     Human,
 }
 
-// The body-type and mount tables are `data/body_types.json` and
-// `data/mounts.json`; `build.rs` sorts them by id and emits the `const`s, with
-// their documentation, before this crate compiles. Both are searched on the
-// tick path, so both stay `const` slices rather than a map built at startup.
+// The body-type table is `data/body_types.json`; `build.rs` sorts it by id and
+// emits the `const`, with its documentation, before this crate compiles. It is
+// searched on the tick path, so it stays a `const` slice rather than a map built
+// at startup.
+//
+// The mount table used to sit beside it and does not any more: the client needs
+// the same pairs to draw a horse under its rider, so the one table lives in
+// `openshard_protocol::mounts` where both ends of the wire can read it.
 include!(concat!(env!("OUT_DIR"), "/body_types.rs"));
-include!(concat!(env!("OUT_DIR"), "/mounts.rs"));
 
 /// The type ServUO gives this body, or [`BodyType::Empty`] for one it does not list.
 ///
@@ -1735,37 +1762,6 @@ pub fn body_type(body: Graphic) -> BodyType {
 #[must_use]
 pub fn body_opens_doors(body: Graphic) -> bool {
     !matches!(body_type(body), BodyType::Animal | BodyType::Sea)
-}
-
-/// The item graphic that draws a body as a mount on a rider, for the bodies that can be
-/// ridden at all. `None` is "not rideable", which is what double-click checks first.
-///
-/// Ported from ServUO's `BaseMount` subclasses — the `base(name, bodyID, itemID, …)`
-/// each one passes, plus the alternating body/item arrays a class that rolls between
-/// several looks keeps (`Horse` is one of four). Thirty bodies, against the eight the
-/// hand-kept list had.
-#[must_use]
-pub fn mount_item_for(body: Graphic) -> Option<Graphic> {
-    MOUNTS
-        .binary_search_by_key(&body.0, |&(id, _)| id)
-        .ok()
-        .map(|index| Graphic(MOUNTS[index].1))
-}
-
-/// The creature body a mount-item graphic stands for — the inverse of
-/// [`mount_item_for`]. Persistence saves the worn mount item, not the ridden
-/// creature (which lives only while ridden), so restoring a saved ride rebuilds
-/// the creature from the item it was drawn as. `None` is "not a mount item".
-///
-/// Derived from the one [`MOUNTS`] table rather than written out again: two
-/// hand-kept halves of one mapping is how a saved ride comes back as the wrong
-/// animal.
-#[must_use]
-pub fn mount_body_for(item_graphic: Graphic) -> Option<Graphic> {
-    MOUNTS
-        .iter()
-        .find(|&&(_, item)| item == item_graphic.0)
-        .map(|&(body, _)| Graphic(body))
 }
 
 // The two creature tables are `data/creature_names.json` and
@@ -2871,10 +2867,6 @@ mod tests {
             BODY_TYPES.windows(2).all(|w| w[0].0 < w[1].0),
             "BODY_TYPES must be sorted and unique"
         );
-        assert!(
-            MOUNTS.windows(2).all(|w| w[0].0 < w[1].0),
-            "MOUNTS must be sorted and unique"
-        );
     }
 
     #[test]
@@ -2898,38 +2890,6 @@ mod tests {
         assert_eq!(body_type(Graphic(0x0190)), BodyType::Human);
         assert_eq!(body_type(Graphic(0x00E2)), BodyType::Animal);
         assert_eq!(body_type(Graphic(0x0011)), BodyType::Monster);
-    }
-
-    #[test]
-    fn every_horse_colour_is_rideable_and_round_trips() {
-        // The hand-kept list had eight mounts; ServUO has thirty, and four of them are
-        // the one `Horse` class rolling between colours — which the first scrape missed
-        // entirely, because the colours live in an array and not in the constructor.
-        for (body, item) in [
-            (0x00C8, 0x3E9F),
-            (0x00CC, 0x3EA2),
-            (0x00E2, 0x3EA0),
-            (0x00E4, 0x3EA1),
-            (0x00DC, 0x3EA6),
-        ] {
-            let (body, item) = (Graphic(body), Graphic(item));
-            assert_eq!(mount_item_for(body), Some(item), "body {:#06x}", body.0);
-            assert_eq!(mount_body_for(item), Some(body), "item {:#06x}", item.0);
-        }
-        assert_eq!(mount_item_for(Graphic(0x0190)), None, "a person is not a mount");
-        assert!(MOUNTS.len() >= 25, "{} mounts", MOUNTS.len());
-    }
-
-    #[test]
-    fn no_two_mounts_share_one_item_graphic() {
-        // `mount_body_for` is the inverse of one table now, and an inverse only exists
-        // if the mapping is one to one — otherwise a saved ride comes back as whichever
-        // animal the search happened to reach first.
-        let mut items: Vec<u16> = MOUNTS.iter().map(|&(_, item)| item).collect();
-        items.sort_unstable();
-        let before = items.len();
-        items.dedup();
-        assert_eq!(before, items.len(), "a mount item graphic is used twice");
     }
 
     use openshard_entities::Registry;

@@ -145,6 +145,25 @@ impl SpriteQuad {
         }
     }
 
+    /// Rotate a screen-space-only sprite around its centre.
+    ///
+    /// The ordinary sprite layout has no spare rotation field: `twin` is a
+    /// corner-static's second row and therefore cannot be repurposed for a
+    /// thing in the world. A [`Place::NOWHERE`](crate::place::Place::NOWHERE)
+    /// sprite has neither a world-facing G-buffer record nor a twin, though,
+    /// so its otherwise-unused word carries the IEEE bits of this clockwise,
+    /// screen-space angle. The static shader recognises exactly that spelling;
+    /// every world sprite continues to use `twin` solely as a row id.
+    ///
+    /// `rect` must already be the rotated picture's axis-aligned bounds. This
+    /// method only records how that bound is sampled.
+    #[must_use]
+    pub fn with_screen_rotation(mut self, radians_clockwise: f32) -> Self {
+        debug_assert_eq!(self.place, crate::place::Place::NOWHERE);
+        self.twin = radians_clockwise.to_bits();
+        self
+    }
+
     /// Encode a late-layer opacity without widening the instance layout.
     ///
     /// Wire hues use their low sixteen bits; the static shader masks those

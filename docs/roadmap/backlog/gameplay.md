@@ -52,7 +52,9 @@ The craft, body-type, mount, skill, creature-name, creature-sound, harvest-tile
 and NPC-name tables moved out of Rust source and into `data/*.json` behind a
 `build.rs` (18,155 lines of source became 5,521 of data; the rule is now in
 [`architecture.md`](../../architecture.md#a-big-table-is-data-and-lives-in-datajson)).
-Found while doing it, none started:
+The mount table has since moved again — it is thirty rows and the *client* needs
+them too, so it is `openshard_protocol::mounts` and there is no
+`state/data/mounts.json` any more. Found while doing the sweep, none started:
 
 - **Three tables share the `body` key and are three files.** `body_types.json`
   answers what *type* a body is, `creature_names.json` what it is *called*, and

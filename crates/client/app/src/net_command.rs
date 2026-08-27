@@ -146,6 +146,10 @@ pub(crate) fn project_motion(
     war: bool,
 ) {
     let equipment = std::mem::take(&mut player.equipment);
+    // Our own mount status, unlike war, needs no separate fact from the
+    // caller: it is already sitting in the equipment this function was just
+    // handed, as the layer the saddle equips onto — see `mounted` below.
+    let mounted = equipment.iter().any(|layer| layer.layer == Layer::MOUNT);
     let command = match (motion.corrected, motion.transition) {
         (true, _) => crowd::CommandedMove::Snap {
             at: motion.rendered.position,
@@ -155,7 +159,15 @@ pub(crate) fn project_motion(
             at: motion.rendered.position,
         },
     };
-    *player = crowd.command(who, command, player.body, motion.rendered.facing, player.hue, war);
+    *player = crowd.command(
+        who,
+        command,
+        player.body,
+        motion.rendered.facing,
+        player.hue,
+        war,
+        mounted,
+    );
     player.equipment = equipment;
 }
 
@@ -503,6 +515,7 @@ impl App {
             ),
             link::Update::Animation(_) => ("animation", String::new()),
             link::Update::NewAnimation(_) => ("new animation", String::new()),
+            link::Update::Effect(effect) => ("effect", format!("art=0x{:04X}", effect.art.0)),
             link::Update::SwingTiming(timing) => (
                 "swing timing",
                 format!(
@@ -578,6 +591,7 @@ impl App {
             link::Update::Mutation { packet, received } => self.fold_incoming(&packet, received),
             link::Update::Animation(animation) => self.world.presentation.crowd.play(animation),
             link::Update::NewAnimation(animation) => self.world.presentation.crowd.play_new(animation),
+            link::Update::Effect(effect) => self.world.presentation.fire(effect),
             link::Update::SwingTiming(timing) => self.world.presentation.crowd.time_swing(timing),
             link::Update::HarvestToolVisual(visual) => self
                 .world
@@ -1050,22 +1064,30 @@ impl App {
         sequence: openshard_protocol::world::StepSequence,
     ) {
         let from = self.world.motion.planning_state();
-        self.world.motion.accept_local(body, sequence);
+        // Read once and reused below: the movement core needs it for its own
+        // glide hold, and the footstep sound needs it for the same reason it
+        // already did.
+        let is_mounted = self
+            .world
+            .authoritative
+            .view
+            .as_ref()
+            .is_some_and(|view| mounted(&view.player.equipment));
+        self.world.motion.accept_local(body, sequence, is_mounted);
         if is_step(from.position, body.predicted.position) {
-            let (mounted, dead) = self
+            let dead = self
                 .world
                 .authoritative
                 .view
                 .as_ref()
-                .map(|view| (mounted(&view.player.equipment), view.player.dead))
-                .unwrap_or((false, false));
+                .is_some_and(|view| view.player.dead);
             self.audio.play_footstep(
                 Footstep {
                     who: self.world.me(),
                     body: self.world.presentation.player.body,
                     at: body.predicted.position,
                     running: body.predicted.facing.running,
-                    mounted,
+                    mounted: is_mounted,
                     hidden: false,
                     dead,
                 },
@@ -1200,6 +1222,26 @@ impl App {
             self.steer
                 .corrected(self.world.motion.planning_state().facing.direction);
         }
+        // And the saddle, which is a fact about the *cadence* and not only about
+        // the picture: a mounted step takes half as long, so a walk that did not
+        // know would ask for the next one a whole hold after the body had
+        // already arrived — the gallop that crossed a tile and then stood still
+        // for as long again. Restated on every fold, like `commanding` above:
+        // mounting and dismounting arrive as ordinary equipment changes and
+        // nothing here is told about them separately.
+        self.steer.set_mounted(mounted(&view.player.equipment));
+        // The equipment first, and the projection after it. `project_motion`
+        // reads the saddle out of the list it is handed — that is where "am I
+        // riding" comes from, and therefore which animation group the body is
+        // drawn in — so a list refreshed *afterwards* meant the group was always
+        // one fold of the wire behind the item. Mounting, that is a rider drawn
+        // standing on the ground beside a horse nobody draws, until whatever
+        // packet happens to arrive next puts it right.
+        self.world.presentation.player.equipment = self.world.presentation.crowd.worn(
+            Some(view.player.serial),
+            &view.player.equipment,
+            &self.resources.tiledata,
+        );
         // A ghost stands with no sword drawn even if `war` is still set —
         // D9's `!InWarMode || IsDead`.  The facing and all movement endpoints
         // come only from `PlayerMotion` above.
@@ -1209,11 +1251,6 @@ impl App {
             &mut self.world.presentation.player,
             self.world.motion.render_state(),
             view.player.war && !view.player.dead,
-        );
-        self.world.presentation.player.equipment = self.world.presentation.crowd.worn(
-            Some(view.player.serial),
-            &view.player.equipment,
-            &self.resources.tiledata,
         );
         // Sorted by serial for the same reason, and for one more: two items on
         // one tile at one height are drawn in the order they arrive here, so an
@@ -1237,6 +1274,7 @@ impl App {
         let designs = &self.world.authoritative.designs;
         self.world.presentation.items.clear();
         self.world.presentation.item_serials.clear();
+        self.world.presentation.item_houses.clear();
         self.world.presentation.corpses.clear();
         let transaction_drag = self.windows.hand.map(crate::hand::Hand::drag);
         let lifted_ground = transaction_drag
@@ -1301,6 +1339,7 @@ impl App {
                             for piece in pieces {
                                 self.world.presentation.items.push(piece);
                                 self.world.presentation.item_serials.push(*serial);
+                                self.world.presentation.item_houses.push(true);
                             }
                         }
                         // Drawn as nothing, and picked as nothing with it: the
@@ -1322,6 +1361,7 @@ impl App {
                                 amount,
                             });
                             self.world.presentation.item_serials.push(*serial);
+                            self.world.presentation.item_houses.push(false);
                         }
                     }
                 }
@@ -1343,6 +1383,7 @@ impl App {
                 amount: drag.item.amount,
             });
             self.world.presentation.item_serials.push(drag.item.serial);
+            self.world.presentation.item_houses.push(false);
         }
         // The same view read for a second question — not what to draw, but what
         // a step cannot go through. Rebuilt here rather than per decision: one
@@ -1389,6 +1430,7 @@ impl App {
                     mobile.facing,
                     mobile.hue,
                     mobile.war() && !is_ghost(mobile.body),
+                    mounted(&mobile.equipment),
                 );
                 drawn.equipment = self.world.presentation.crowd.worn(
                     Some(*serial),
@@ -1944,7 +1986,7 @@ mod tests {
         let facing = Facing::walking(Direction::East);
         let mut crowd = crowd::Crowd::default();
         crowd.commanding(None);
-        let mut player = crowd.see(None, start, Graphic(400), facing, Hue::NONE, false);
+        let mut player = crowd.see(None, start, Graphic(400), facing, Hue::NONE, false, false);
         player.equipment = vec![EquipmentLayer {
             graphic: AnimId(7005),
             hue: Hue::NONE,
@@ -2008,6 +2050,53 @@ mod tests {
             crowd.drawn_for(None),
             Some(Gaze::on(start)),
             "the body moves before the server's acknowledgement"
+        );
+    }
+
+    /// The saddle a projection is handed is the saddle it draws by, on the
+    /// frame it is handed it.
+    ///
+    /// This is the contract `App::entered` has to keep, and the order it keeps
+    /// it in: the equipment list is refreshed from the view *before* the
+    /// projection reads it. Refreshed after, the group was a fold of the wire
+    /// behind the item — mounting drew a rider standing on the ground with no
+    /// horse under them (`mobiles::mount_of` refuses to draw one under a body
+    /// that is not in a mounted group) until some later packet happened to put
+    /// it right.
+    #[test]
+    fn a_body_handed_a_saddle_is_drawn_in_the_saddle_at_once() {
+        let at = Point::new(100, 100, 0);
+        let facing = Facing::walking(Direction::East);
+        let mut crowd = crowd::Crowd::default();
+        crowd.commanding(None);
+        let mut player = crowd.see(None, at, Graphic(400), facing, Hue::NONE, false, false);
+        let on_foot = player.group;
+
+        // The saddle arrives, as `entered` now puts it: into the list first.
+        player.equipment = vec![EquipmentLayer {
+            graphic: AnimId(0x00C8),
+            hue: Hue::NONE,
+            layer: Layer::MOUNT,
+        }]
+        .into();
+        project_motion(
+            &mut crowd,
+            None,
+            &mut player,
+            MotionRenderState {
+                rendered: openshard_client_net::walk::Predicted { position: at, facing },
+                predicted: openshard_client_net::walk::Predicted { position: at, facing },
+                transition: None,
+                corrected: false,
+            },
+            false,
+        );
+
+        assert_ne!(player.group, on_foot, "the body left its on-foot stand");
+        assert_eq!(
+            Some(player.group),
+            openshard_uofiles::anim::BodyKind::Human.standing_mounted(),
+            "and is sitting the mounted stand the horse is drawn under"
         );
     }
 

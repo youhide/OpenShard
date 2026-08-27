@@ -1073,6 +1073,10 @@ pub struct PetData {
 pub struct CorpseData {
     /// Who this was.
     pub owner: String,
+    /// The player whose death made this corpse. Older saves and creature
+    /// corpses have no such link.
+    #[serde(default, with = "optional_serial")]
+    pub player: Option<Serial>,
     /// Who struck the killing blow, by name.
     #[serde(default)]
     pub killer: Option<String>,
@@ -1082,6 +1086,10 @@ pub struct CorpseData {
     /// Everyone who has taken something off it.
     #[serde(default)]
     pub looters: Vec<String>,
+    /// Whether the animal resources have already been carved from this body.
+    /// Defaulted so a corpse from before carving existed remains uncarved.
+    #[serde(default)]
+    pub carved: bool,
     /// Which way it fell, as the wire's direction byte — `0` north, running
     /// clockwise, exactly `Direction::to_bits`.
     ///
@@ -1628,9 +1636,11 @@ mod tests {
                 spellbook: Some(0x0000_0000_00FF_00FF),
                 corpse: Some(CorpseData {
                     owner: "Reginald".into(),
+                    player: Some(Serial::new(0x0000_0001).unwrap()),
                     killer: Some("an orc".into()),
                     examined_by: Some("Mordred".into()),
                     looters: vec!["Vesper".into()],
+                    carved: true,
                     facing: 6,
                     equipment: vec![CorpseEquipmentData {
                         item: Serial::new(0x4000_0003).unwrap(),

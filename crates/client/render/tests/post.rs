@@ -142,6 +142,7 @@ fn draw(
     let inputs = frame::Inputs {
         map: &map,
         items,
+        drawn_items: items,
         camera: &camera,
         tiledata,
         animations,

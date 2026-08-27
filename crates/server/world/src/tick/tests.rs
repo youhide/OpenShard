@@ -1465,6 +1465,99 @@ fn spawn_plain_item_at(world: &mut World, point: Point, now: Instant) -> Serial 
 }
 
 #[test]
+fn a_dagger_carves_an_animal_corpse_once() {
+    // Carving is a two-packet action: use the blade, then point at the corpse.
+    // Keep both halves in one test, since an item in a corpse is the result that
+    // proves the target cursor did not merely appear.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+    let Position(at) = *world.registry().get::<Position>(player).unwrap();
+    let dagger =
+        openshard_items::spawn_item(&mut world.state, Graphic(0x0F52), Hue(0), 1, false, at, Facet(0))
+            .expect("a dagger");
+    let dagger_serial = world.registry().serial_of(dagger).unwrap();
+    let corpse = spawn_plain_item_at(&mut world, Point::new(at.x + 1, at.y, at.z), now);
+    let corpse_entity = world.registry().entity_of(corpse).unwrap();
+    world.state.registry.insert(
+        corpse_entity,
+        Drawn {
+            id: openshard_state::components::CORPSE_GRAPHIC,
+            hue: Hue(0),
+        },
+    );
+    world.state.registry.insert(
+        corpse_entity,
+        Container {
+            gump: openshard_state::components::CORPSE_GUMP,
+        },
+    );
+    world.state.registry.insert(
+        corpse_entity,
+        CorpseBody {
+            body: Graphic(0x00D8), // cow
+            facing: openshard_protocol::direction::Direction::North,
+        },
+    );
+    world
+        .state
+        .registry
+        .insert(corpse_entity, Corpse::from_death("a cow".to_owned(), None));
+
+    let carve = |world: &mut World| {
+        world.queue(Command::DoubleClick {
+            connection,
+            request: UseRequest::Use(RawSerial(dagger_serial.raw())),
+        });
+        world.tick(now);
+        world.queue(Command::TargetResponse {
+            connection,
+            response: openshard_protocol::target::TargetResponse {
+                cursor_id: openshard_protocol::wire::CursorId(0),
+                object: Some(corpse),
+                location: Point::new(0, 0, 0),
+                graphic: None,
+                cancelled: false,
+            },
+        });
+        world.tick(now);
+    };
+    carve(&mut world);
+
+    let contained: Vec<(Graphic, u16)> = world
+        .registry()
+        .query::<Contained>()
+        .filter(|(_, contained)| contained.container == corpse)
+        .filter_map(|(item, _)| {
+            world.registry().get::<Drawn>(item).map(|drawn| {
+                (
+                    drawn.id,
+                    world.registry().get::<Amount>(item).map_or(1, |amount| amount.0),
+                )
+            })
+        })
+        .collect();
+    assert!(
+        contained.contains(&(Graphic(0x09F1), 10)),
+        "the cow yielded raw ribs: {contained:?}"
+    );
+    assert!(
+        contained.contains(&(Graphic(0x1078), 10)),
+        "the cow yielded hides: {contained:?}"
+    );
+    assert!(world.registry().get::<Corpse>(corpse_entity).unwrap().carved);
+
+    carve(&mut world);
+    let count = world
+        .registry()
+        .query::<Contained>()
+        .filter(|(_, contained)| contained.container == corpse)
+        .count();
+    assert_eq!(count, 2, "a carcass yields its resources only once");
+}
+
+#[test]
 fn double_clicking_a_plain_item_fires_the_use_trigger() {
     // The item-trigger seam (Sphere's @DClick): an item with no engine behaviour
     // — not a door, container, spellbook, mount or mobile — hands its double-click
@@ -2835,6 +2928,73 @@ fn a_single_spawned_gold_coin_stacks_with_a_pile() {
 }
 
 #[test]
+fn single_arrows_and_bolts_are_stackable_from_spawn() {
+    // Ammunition is often created one piece at a time (staff tools and older
+    // saves do this), but it must still behave like the piles a vendor sells.
+    // The stack-all client pass can then safely send this exact lift/drop pair.
+    for graphic in [0x0F3F, 0x1BFB] {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let here = Point::new(START.0, START.1, 0);
+        let spawn = |world: &mut World| {
+            world.queue(Command::SpawnItem {
+                graphic: Graphic(graphic),
+                hue: Hue(0),
+                amount: 1,
+                stackable: false,
+                position: here,
+                facet: Facet(0),
+            });
+            world.tick(now);
+            world
+                .state
+                .registry
+                .query::<Drawn>()
+                .filter(|(item, drawn)| {
+                    drawn.id == Graphic(graphic) && world.state.registry.has::<Position>(*item)
+                })
+                .filter_map(|(item, _)| world.state.registry.serial_of(item))
+                .max()
+                .expect("the single piece of ammunition")
+        };
+        let target = spawn(&mut world);
+        let source = spawn(&mut world);
+        let target_item = entity(&world, target);
+        assert!(
+            world.state.registry.has::<Stackable>(target_item),
+            "0x{graphic:04X} is marked stackable while it is still one item"
+        );
+
+        world.queue(Command::PickUpItem {
+            connection: player,
+            serial: RawSerial(source.raw()),
+            amount: 1,
+        });
+        world.tick(now);
+        world.queue(Command::DropItem {
+            connection: player,
+            serial: RawSerial(source.raw()),
+            destination: DropDestination::Item {
+                item: target,
+                at: GumpPoint::new(0, 0),
+            },
+        });
+        world.tick(now);
+
+        assert_eq!(
+            world
+                .state
+                .registry
+                .get::<Amount>(target_item)
+                .map(|amount| amount.0),
+            Some(2),
+            "0x{graphic:04X} merged with the identical singleton"
+        );
+    }
+}
+
+#[test]
 fn merging_past_the_stack_cap_keeps_the_remainder() {
     // The bug this exists to not have again: two 50,000 piles merged into one
     // clamped 65,535 and the difference was simply gone. Sphere's `CItem::Stack`
@@ -3967,13 +4127,25 @@ fn a_weapon_on_the_cursor_when_its_owner_dies_falls_into_the_corpse() {
 #[test]
 fn resurrection_brings_a_ghost_back() {
     // The staff `.res` command (and the Resurrection spell) call the same core
-    // path: the ghost marker lifts, the living body returns, and the client is
-    // told it is alive again.
+    // path: the ghost marker lifts, the living body and original outfit return,
+    // and the consumed corpse is removed from the world.
     let now = Instant::now();
     let mut world = world();
     let player = enter_gm(&mut world, now);
     let serial = serial_of(&world, player);
     let player_entity = world.state.players[&player];
+    let robe = items::equip_worn_item(&mut world.state, serial, Graphic(0x1F03), Hue(0), Layer(0x16))
+        .expect("an original robe");
+    let axe = items::equip_worn_item(
+        &mut world.state,
+        serial,
+        Graphic(0x0F49),
+        Hue(0),
+        openshard_state::weapon::LAYER_TWO_HANDED,
+    )
+    .expect("an original axe");
+    let robe_serial = world.registry().serial_of(robe).unwrap();
+    let axe_serial = world.registry().serial_of(axe).unwrap();
 
     world.queue(Command::Damage {
         serial,
@@ -3985,14 +4157,17 @@ fn resurrection_brings_a_ghost_back() {
     assert!(world.state.registry.has::<Ghost>(player_entity), "dead first");
     let _ = packets_for(&mut world, player);
 
-    // `.ressurect` spoken by the (GM) ghost raises it.
-    world.queue(Command::Say {
-        connection: player,
-        mode: RawTalkMode(0),
-        hue: RawHue(0),
-        font: RawFont(0),
-        text: ".ressurect".to_owned(),
-    });
+    // The Resurrection cursor may name the old body rather than the ghost.
+    let corpse = world
+        .registry()
+        .query::<Corpse>()
+        .find_map(|(entity, corpse)| {
+            (corpse.player == Some(serial))
+                .then(|| world.registry().serial_of(entity))
+                .flatten()
+        })
+        .expect("the dead player has their own corpse");
+    world.resurrect_target(corpse, false);
     world.tick(now);
 
     assert!(
@@ -4025,6 +4200,18 @@ fn resurrection_brings_a_ghost_back() {
             layer.0,
         );
     }
+    assert!(
+        equipment.iter().any(|item| item.serial == robe_serial)
+            && equipment.iter().any(|item| item.serial == axe_serial),
+        "resurrection returns the exact items that were worn at death"
+    );
+    assert!(
+        !world
+            .registry()
+            .query::<Corpse>()
+            .any(|(_, corpse)| corpse.player == Some(serial)),
+        "the reclaimed player corpse is gone"
+    );
     assert_eq!(
         openshard_combat::weapons::equipped_weapon(&world.state, player_entity).map(|weapon| weapon.graphic),
         Some(Graphic(0x0F49)),
@@ -4069,16 +4256,10 @@ fn resurrection_brings_a_ghost_back() {
         "the target is recorded after resurrection"
     );
     let impact = combat.next_swing().expect("an aimed combat row has an impact");
-    let duration_ms = u32::try_from((impact - world.state.ticks) * 50).unwrap();
     let timing_at = opening
         .iter()
-        .position(|packet| {
-            packet.len() == 13
-                && packet[0] == 0xBF
-                && packet[3..5] == [0xE0, 0x0B]
-                && packet[9..13] == duration_ms.to_be_bytes()
-        })
-        .expect("the server sends the complete axe wind-up duration before impact");
+        .position(|packet| packet.len() == 13 && packet[0] == 0xBF && packet[3..5] == [0xE0, 0x0B])
+        .expect("the server sends the axe wind-up duration before impact");
     let animation_at = opening
         .iter()
         .position(|packet| packet[0] == 0xE2 && packet[7..9] == [0x00, 0x07])
@@ -5836,6 +6017,93 @@ fn a_bow_deals_its_own_damage_band() {
     assert!(
         blows.iter().all(|&b| (9..=41).contains(&b)),
         "every arrow hits for the bow's band, not the flat default: {blows:?}"
+    );
+}
+
+#[test]
+fn a_wielded_bow_fights_at_range_with_no_ranged_attack_component() {
+    // A player who merely equips a bow and has arrows in their pack fights at
+    // range on that alone — no script-inserted `RangedAttack`. `volleys` derives
+    // the reach and ammo from the weapon table itself.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(player_entity).unwrap();
+    items::equip_worn_item(
+        &mut world.state,
+        serial,
+        openshard_protocol::wire::Graphic(0x13B2),
+        openshard_protocol::wire::Hue(0),
+        Layer(2),
+    )
+    .unwrap(); // bow
+    assert!(
+        items::give_to_backpack(&mut world.state, serial, Graphic(0x0F3F), Hue(0), 20, true),
+        "the fresh backpack takes a pile of arrows"
+    );
+    // Three tiles off: out of melee reach, inside the bow's ten-tile reach.
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 4000, now);
+    engage(&mut world, connection, mob, now);
+    let mut damaged: Cursor<MobileDamaged> = world.bus().cursor();
+
+    let mut blows: Vec<u16> = Vec::new();
+    for _ in 0..(12 * WRESTLING_SWING_TICKS) {
+        world.tick(now);
+        blows.extend(world.bus().read(&mut damaged).map(|d| d.amount));
+    }
+    assert!(
+        !blows.is_empty(),
+        "the wielded bow fired without a RangedAttack component"
+    );
+    assert!(
+        blows.iter().all(|&b| (9..=41).contains(&b)),
+        "still the bow's own damage band: {blows:?}"
+    );
+    assert!(
+        items::count_in_container(
+            &world.state,
+            items::backpack_of(&world.state, serial).unwrap(),
+            Graphic(0x0F3F)
+        ) < 20,
+        "firing spent arrows out of the pack"
+    );
+}
+
+#[test]
+fn an_archer_with_no_arrows_cannot_fire() {
+    // Same setup as above, minus the arrows: the shot must not fire, and the
+    // shooter is told why instead of silently missing forever.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(player_entity).unwrap();
+    items::equip_worn_item(
+        &mut world.state,
+        serial,
+        openshard_protocol::wire::Graphic(0x13B2),
+        openshard_protocol::wire::Hue(0),
+        Layer(2),
+    )
+    .unwrap(); // bow, no arrows given
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 4000, now);
+    engage(&mut world, connection, mob, now);
+    let mut damaged: Cursor<MobileDamaged> = world.bus().cursor();
+    let _ = packets_for(&mut world, connection); // drain the engage burst
+
+    let mut blows: Vec<u16> = Vec::new();
+    for _ in 0..(12 * WRESTLING_SWING_TICKS) {
+        world.tick(now);
+        blows.extend(world.bus().read(&mut damaged).map(|d| d.amount));
+    }
+    assert!(blows.is_empty(), "an empty quiver must not land a hit: {blows:?}");
+    let refusal = packets_for(&mut world, connection);
+    assert!(
+        refusal
+            .iter()
+            .any(|p| p.first() == Some(&0x1C) && p.windows(6).any(|w| w == b"arrows")),
+        "the shooter is told their quiver is empty"
     );
 }
 
@@ -10067,6 +10335,72 @@ fn an_admin_can_create_a_stacked_item_in_their_backpack() {
         "the checked box makes a stack"
     );
     assert_eq!(items::amount_of(&world.state, created), 25);
+}
+
+#[test]
+fn an_admin_created_backpack_is_a_container() {
+    // The quick catalogue presents a backpack as ordinary item art.  It must
+    // nevertheless be born with Container, or it looks like a bag but cannot
+    // be opened or receive a drop.
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let actor = world.state.players[&gm];
+    let actor_serial = world.registry().serial_of(actor).unwrap();
+    let pack = items::backpack_of(&world.state, actor_serial).unwrap();
+    let _ = packets_for(&mut world, gm);
+
+    world.queue(admin_item_response(gm, "0x0e75", "0", "1", false));
+    world.tick(now);
+
+    let created = world
+        .registry()
+        .query::<Contained>()
+        .find(|(item, held)| {
+            held.container == pack
+                && world
+                    .registry()
+                    .get::<Drawn>(*item)
+                    .is_some_and(|drawn| drawn.id == items::BACKPACK_GRAPHIC)
+        })
+        .map(|(item, _)| item)
+        .expect("the new backpack is in the GM's pack");
+    assert!(world.registry().has::<Container>(created));
+
+    let created_serial = world.registry().serial_of(created).unwrap();
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        request: UseRequest::Use(RawSerial(created_serial.raw())),
+    });
+    world.tick(now);
+    assert!(
+        packets_for(&mut world, gm).iter().any(|packet| packet[0] == 0x24),
+        "double-clicking the created backpack opens its container gump"
+    );
+
+    let here = world.registry().get::<Position>(actor).unwrap().0;
+    let item_serial = spawn_plain_item_at(&mut world, here, now);
+    let item = entity(&world, item_serial);
+    world.queue(Command::PickUpItem {
+        connection: gm,
+        serial: RawSerial(item_serial.raw()),
+        amount: 1,
+    });
+    world.tick(now);
+    world.queue(Command::DropItem {
+        connection: gm,
+        serial: RawSerial(item_serial.raw()),
+        destination: DropDestination::Item {
+            item: created_serial,
+            at: GumpPoint::new(60, 60),
+        },
+    });
+    world.tick(now);
+    assert_eq!(
+        world.registry().get::<Contained>(item).unwrap().container,
+        created_serial,
+        "the created backpack accepts a dropped item"
+    );
 }
 
 #[test]

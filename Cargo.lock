@@ -2685,6 +2685,7 @@ dependencies = [
  "openshard-config",
  "openshard-entities",
  "openshard-gateway",
+ "openshard-items",
  "openshard-map",
  "openshard-movement",
  "openshard-protocol",

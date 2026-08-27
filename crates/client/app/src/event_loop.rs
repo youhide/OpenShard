@@ -5,7 +5,7 @@
 //! is the seam between what winit reports and the method that already knows
 //! what to do with it.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use openshard_client_render::camera::RealPixel;
 use openshard_client_render::gump::GumpPixel;
@@ -20,6 +20,16 @@ use crate::app::App;
 use crate::picking::SelectedIdentity;
 use crate::world::{footing, guide};
 use crate::{DOUBLE_CLICK, PAGE_PIXELS, desk, keyboard, keys, panes, shell, steer};
+
+/// How far `App::last_advance` may lag behind the redraw cadence before
+/// `about_to_wait` stops trusting `App::watched` and ticks the state clock
+/// directly. Well above a healthy watched frame's gap (a redraw interval of
+/// at most [`FRAME_DELAY`](openshard_client_render::animation::FRAME_DELAY),
+/// 80ms) so ordinary vsync jitter never trips it, and well below "the player
+/// would notice" so a stalled draw loop costs a fraction of a second rather
+/// than lasting until the next `Focused`/`Occluded`/input event happens to
+/// arrive.
+const STALLED_DRAW_TOLERANCE: Duration = Duration::from_millis(250);
 
 impl App {
     /// Send every movement step which is due now.
@@ -922,7 +932,22 @@ impl ApplicationHandler<()> for App {
         }
         if now >= self.next_tick {
             self.next_tick = now + self.redraw_interval();
-            if self.watched() {
+            // `watched()` trusts `Focused`/`Occluded`, and a compositor is free
+            // to delay or never send the one that would clear it: a surface
+            // fully covered or swept to another workspace stops receiving frame
+            // callbacks before winit reports either event, and on the loop's own
+            // account (`Focused` and `Occluded` are `WindowEvent`s, dispatched
+            // the same way `RedrawRequested` is) it may not report it in time to
+            // matter. `draw` — the only caller of `tick` while watched — never
+            // runs without one, so trusting the flag alone here can wait on a
+            // frame callback that never arrives, and the state clock stops with
+            // it. Measuring staleness against `last_advance` catches that
+            // regardless of what the flag currently says: a window actually
+            // being shown re-runs `draw` well inside this bound, and one that
+            // is not gets ticked here instead of waiting on a callback that
+            // will not come until it is shown again.
+            let stalled = now.saturating_duration_since(self.last_advance) > STALLED_DRAW_TOLERANCE;
+            if self.watched() && !stalled {
                 self.ask_redraw();
             } else if !walk_due {
                 self.tick(now);

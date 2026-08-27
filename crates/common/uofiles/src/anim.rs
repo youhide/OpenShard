@@ -360,6 +360,59 @@ impl BodyKind {
         }
     }
 
+    /// Which group means "standing, mounted", or `None` for a kind that never
+    /// rides.
+    ///
+    /// A human's is 25, `PeopleAnimationGroup.OnmountStand` — the frames a
+    /// rider is drawn from are not the on-foot stand's, because they seat the
+    /// body in a saddle rather than plant its feet on the ground. `None` for a
+    /// monster and an animal: nothing in `Layer::MOUNT` ever equips onto one,
+    /// so the block those kinds' own numbering could name here is simply never
+    /// reached — the mount itself keeps playing its ordinary
+    /// [`standing`](Self::standing).
+    ///
+    /// # What is deliberately not here
+    ///
+    /// `26`-`29` (`OnmountAttack`/`OnmountAttackBow`/`OnmountAttackCrossbow`/
+    /// `OnmountSlapHorse`) are the mounted combat poses, and choosing among
+    /// them needs the same equipped-weapon fact
+    /// [`standing_at_war`](Self::standing_at_war) is already missing — see its
+    /// own note. A mounted fight plays this stand and the ordinary swing
+    /// action over it until that fact exists.
+    pub const fn standing_mounted(self) -> Option<AnimationGroup> {
+        match self {
+            Self::Monster | Self::Animal => None,
+            Self::Human => Some(AnimationGroup(25)),
+        }
+    }
+
+    /// Which group means "walking, mounted", or `None` for a kind that never
+    /// rides.
+    ///
+    /// A human's is 23, `PeopleAnimationGroup.OnmountRideSlow`. `None` for
+    /// [`standing_mounted`](Self::standing_mounted)'s reason.
+    pub const fn walking_mounted(self) -> Option<AnimationGroup> {
+        match self {
+            Self::Monster | Self::Animal => None,
+            Self::Human => Some(AnimationGroup(23)),
+        }
+    }
+
+    /// Which group means "running, mounted", or `None` for a kind that never
+    /// rides.
+    ///
+    /// A human's is 24, `PeopleAnimationGroup.OnmountRideFast`. `None` for
+    /// [`standing_mounted`](Self::standing_mounted)'s reason — unlike
+    /// [`running`](Self::running), this is never reached for a monster or an
+    /// animal in the first place, so there is no "keeps walking" fallback to
+    /// state here.
+    pub const fn running_mounted(self) -> Option<AnimationGroup> {
+        match self {
+            Self::Monster | Self::Animal => None,
+            Self::Human => Some(AnimationGroup(24)),
+        }
+    }
+
     /// The first index block belonging to `body`.
     ///
     /// The three cases of `AnimationsLoader.CalculateOffset`, in blocks rather

@@ -20,6 +20,8 @@ use openshard_client_render::mobiles::{self, Mobile};
 use openshard_client_render::{light, occlusion};
 use openshard_map::grid::Tile;
 use openshard_map::map::WorldMap;
+use openshard_map::overlay::Doors;
+use openshard_movement::{Footing, PLAYER_HEIGHT, arrival_z};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Graphic;
@@ -49,6 +51,19 @@ pub(crate) struct HudTimings {
     pub occluders: Duration,
     pub picking: Duration,
     pub perf: Duration,
+}
+
+/// The surface a world cursor means on a tile.
+///
+/// The map's own prediction is the fallback, but it cannot see what the shard
+/// has placed live over it. In particular, a house reaches the client as
+/// component items: its floor is visible and walkable through the live overlay,
+/// yet absent from the map file. Reading only the fallback made a drag released
+/// over that floor send the land's z and put the item below the floor.
+fn standing_z(footing: &Footing<'_>, tile: Tile, near_z: i8, fallback_z: i8) -> i8 {
+    arrival_z(footing, tile, i32::from(near_z), PLAYER_HEIGHT)
+        .and_then(|z| i8::try_from(z).ok())
+        .unwrap_or(fallback_z)
 }
 
 impl App {
@@ -130,14 +145,20 @@ impl App {
         // z-units apart — the land is water at -15 and the planks are at -3 — and
         // a marker drawn at the land's height sits a tile and a half down the
         // screen from the boards it is meant to be lying on, which is what made
-        // the cursor unable to hit a pier tile at all. `predict_z` is the same
-        // "which surface, coming from here" the walk itself uses, asked from the
-        // body's own height so a floor overhead does not win over the street.
+        // the cursor unable to hit a pier tile at all. `arrival_z` asks the
+        // same live footing the walk itself uses, from the body's own height so
+        // a floor overhead does not win over the street.
         let terrain = terrain(&self.resources);
-        let stand = terrain.predict_z(x, y, i32::from(self.world.motion.planning_state().position.z));
+        let fallback = terrain.predict_z(x, y, i32::from(self.world.motion.planning_state().position.z));
         // Clamped rather than unwrapped: a `z` outside `i8` is a corrupt
         // block, and a diamond at the wrong height beats a panic in a HUD.
-        let stand_z = stand.clamp(i32::from(i8::MIN), i32::from(i8::MAX)) as i8;
+        let fallback_z = fallback.clamp(i32::from(i8::MIN), i32::from(i8::MAX)) as i8;
+        let stand_z = standing_z(
+            &footing(&self.resources, Doors::AsTheyStand),
+            tile,
+            self.world.motion.planning_state().position.z,
+            fallback_z,
+        );
         // The shape of the surface being marked, and the decision belongs here
         // rather than in the painter: only the map knows whether the height a
         // body stands at is the land's own — in which case the surface is a
@@ -247,8 +268,8 @@ impl App {
     /// over water at `-15`, and reading the pixel at the water's height resolved
     /// every pier tile to one more than a tile away — the cursor could not be
     /// put on the boards at all, which is what this is written against. The
-    /// same `predict_z` the walk uses, so the tile the cursor names and the tile
-    /// a step lands on are one answer rather than two.
+    /// same live footing the walk uses, so the tile the cursor names and the
+    /// tile a step lands on are one answer rather than two.
     ///
     /// `camera` is the frame's own and not `self.control`'s, for the reason
     /// [`App::frame_facts`] takes one: what tile a pixel is over is a question
@@ -263,8 +284,14 @@ impl App {
         let (mut x, mut y) = camera::unproject(world_px, planning.position.z);
         if let Some(tile) = Self::in_bounds(x, y, self.resources.map()) {
             let terrain = terrain(&self.resources);
-            let z = terrain.predict_z(tile.x, tile.y, near);
-            let z = z.clamp(i32::from(i8::MIN), i32::from(i8::MAX)) as i8;
+            let fallback = terrain.predict_z(tile.x, tile.y, near);
+            let fallback_z = fallback.clamp(i32::from(i8::MIN), i32::from(i8::MAX)) as i8;
+            let z = standing_z(
+                &footing(&self.resources, Doors::AsTheyStand),
+                tile,
+                planning.position.z,
+                fallback_z,
+            );
             (x, y) = camera::unproject(world_px, z);
         }
         let tile = Self::in_bounds(x, y, self.resources.map())?;
@@ -1345,6 +1372,25 @@ impl App {
             // nobody asked for sooner.
             pacing: self.pacing(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openshard_map::overlay::{Cover, Overlay};
+
+    /// A house arrives as live component art rather than map statics. A cursor
+    /// over its floor must therefore read the overlay's surface, not the land
+    /// beneath it, or an item drag sends the wrong z to the shard.
+    #[test]
+    fn a_live_house_floor_is_the_drop_surface() {
+        let tile = Tile::new(100, 100);
+        let mut overlay = Overlay::default();
+        overlay.set(tile, vec![Cover::standing(7, 0)]);
+        let footing = Footing::new(None, &overlay, Doors::AsTheyStand);
+
+        assert_eq!(standing_z(&footing, tile, 0, 0), 7);
     }
 }
 

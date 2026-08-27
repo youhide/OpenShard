@@ -571,6 +571,20 @@ pub enum EffectKind {
     FixedFrom = 0x03,
 }
 
+impl EffectKind {
+    /// Decode the wire byte, or `None` for a value ServUO never sends.
+    #[must_use]
+    pub const fn from_wire(byte: u8) -> Option<Self> {
+        match byte {
+            0x00 => Some(Self::Moving),
+            0x01 => Some(Self::Lightning),
+            0x02 => Some(Self::FixedXyz),
+            0x03 => Some(Self::FixedFrom),
+            _ => None,
+        }
+    }
+}
+
 /// `0x70` — a graphical effect: a projectile, a strike, a fixed animation. 28 bytes.
 ///
 /// `art` is the effect's sprite (a fireball graphic, a bolt). `from`/`to` are the
@@ -620,6 +634,53 @@ impl EncodePacket for GraphicalEffect {
         out.u16(0x0000); // two reserved bytes ServUO zeroes
         out.bool(self.fixed_direction);
         out.bool(self.explode);
+    }
+}
+
+impl DecodePacket for GraphicalEffect {
+    const ID: u8 = 0x70;
+
+    fn decode_body(
+        reader: &mut crate::codec::PacketReader<'_>,
+        _version: ClientVersion,
+    ) -> Result<Self, crate::error::DecodeError> {
+        let byte = reader.u8()?;
+        let Some(kind) = EffectKind::from_wire(byte) else {
+            return Err(crate::error::DecodeError::UnknownValue {
+                field: "graphical effect kind",
+                value: u32::from(byte),
+            });
+        };
+        let from = Serial::new(reader.u32()?);
+        let to = Serial::new(reader.u32()?);
+        let art = Graphic(reader.u16()?);
+        let from_point = Point {
+            x: reader.u16()?,
+            y: reader.u16()?,
+            z: reader.u8()? as i8,
+        };
+        let to_point = Point {
+            x: reader.u16()?,
+            y: reader.u16()?,
+            z: reader.u8()? as i8,
+        };
+        let speed = reader.u8()?;
+        let duration = reader.u8()?;
+        let _reserved = reader.u16()?;
+        let fixed_direction = reader.bool()?;
+        let explode = reader.bool()?;
+        Ok(Self {
+            kind,
+            from,
+            to,
+            art,
+            from_point,
+            to_point,
+            speed,
+            duration,
+            fixed_direction,
+            explode,
+        })
     }
 }
 

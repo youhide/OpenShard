@@ -727,12 +727,20 @@ impl App {
         // A creature under the cursor takes the click, and no item is used: it
         // is what the highlight is telling the player they are pointing at, and
         // using the barrel *behind* the shopkeeper is the one answer that is
-        // certainly wrong. What a mobile's double-click asks for is the
-        // paperdoll — the same `0x06` an item gets, answered differently by the
-        // shard (`DoubleClick::interpret`). Ctrl turns that same gesture into
-        // the protocol's explicit paperdoll request; this is how a player can
-        // inspect a vendor without replacing its normal double-click-to-trade
-        // behaviour.
+        // certainly wrong. What a mobile's ordinary double-click asks for is a
+        // raw `0x06` — the same request an item gets, answered differently by
+        // the shard (`DoubleClick::interpret`), which is what makes it
+        // context-sensitive rather than always the paperdoll: on a stranger it
+        // opens theirs, and a player who double-clicks *themselves* gets their
+        // own paperdoll on foot but dismounts in the saddle
+        // (`openshard_items::containers::double_click`). Ctrl turns the same
+        // gesture into the protocol's *explicit* paperdoll request instead — a
+        // `0x06` with bit 31 set, routed straight to
+        // `openshard_items::containers::paperdoll_request` before the shard
+        // ever asks what the target is doing — which is how a player can
+        // inspect a vendor's doll without replacing its normal
+        // double-click-to-trade behaviour, or check their own doll while
+        // mounted without an ordinary self-click dismounting them.
         let drawn = self.drawn_now(&window.atlases.mobiles);
         let on_mobile = mobiles::pick_iter(
             drawn.iter().map(|(_, mobile)| mobile),
@@ -747,13 +755,7 @@ impl App {
             // shard having named it — the offline viewer's placeholder — and
             // there is nothing to ask about.
             if let Some(serial) = drawn[index.position()].0 {
-                let own = self
-                    .world
-                    .authoritative
-                    .view
-                    .as_ref()
-                    .is_some_and(|view| view.player.serial == serial);
-                if own || self.input.ctrl_held {
+                if self.input.ctrl_held {
                     if let Some(link) = self.world.shard.link() {
                         link.paperdoll(serial);
                     }

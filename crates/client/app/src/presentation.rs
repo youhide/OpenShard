@@ -1685,6 +1685,24 @@ impl App {
             .window
             .as_ref()
             .map(|window| self.drawn_now(&window.atlases.mobiles));
+        // A house reaches the renderer as many ordinary item pieces. Keep its
+        // origin beside those pieces so the World tab can reveal a dropped item
+        // below it without changing the lighting or the picking index space.
+        let mut drawn_items = Vec::new();
+        let mut drawn_item_serials = Vec::new();
+        for ((item, serial), house) in self
+            .world
+            .presentation
+            .items
+            .iter()
+            .zip(self.world.presentation.item_serials.iter())
+            .zip(self.world.presentation.item_houses.iter())
+        {
+            if (*house && self.graphics.drawing.houses) || (!*house && self.graphics.drawing.items) {
+                drawn_items.push(*item);
+                drawn_item_serials.push(*serial);
+            }
+        }
         let on_mobile = match (owns_pointer, self.window.as_ref(), &drawn_mobiles) {
             (true, Some(window), Some(drawn)) => mobiles::pick_iter_with_interior(
                 drawn.iter().map(|(_, mobile)| mobile),
@@ -1700,7 +1718,7 @@ impl App {
         let on_item = match owns_pointer && on_mobile.is_none() {
             true => self.window.as_ref().and_then(|window| {
                 items::pick_with_interior(
-                    &self.world.presentation.items,
+                    &drawn_items,
                     &camera,
                     &self.resources.tiledata,
                     &self.world.presentation.tile_animations,
@@ -1712,6 +1730,24 @@ impl App {
             }),
             false => None,
         };
+        // A press runs after this frame has finished, when this draw list may
+        // have changed. Preserve the source-art offset now so a ground item
+        // cannot snap its cursor preview to the sprite centre on lift.
+        let on_item_grab = on_item.and_then(|index| {
+            let item = drawn_items.get(index.what.position())?;
+            self.window.as_ref().and_then(|window| {
+                items::grab_at(
+                    item,
+                    &camera,
+                    &self.resources.tiledata,
+                    &self.world.presentation.tile_animations,
+                    &window.atlases.statics,
+                    &cutaway,
+                    cursor,
+                    self.gump_scale(),
+                )
+            })
+        });
         // And the map's own furniture, asked beside the items rather than only
         // where they found nothing. Asked every frame rather than at the click,
         // because it is what the *tile marker* has to know — a wall under the
@@ -1808,11 +1844,9 @@ impl App {
             .selected
             .and_then(SelectedIdentity::as_hovered_item)
             .and_then(|selected| {
-                self.world
-                    .presentation
-                    .item_serials
+                drawn_item_serials
                     .iter()
-                    .zip(self.world.presentation.items.iter())
+                    .zip(drawn_items.iter())
                     .position(|(serial, item)| selected.matches(*serial, item.graphic, item.at))
                     .map(openshard_client_render::items::ItemIndex::new)
             });
@@ -1828,6 +1862,9 @@ impl App {
                 item: lit_item,
             },
             drawn_mobiles,
+            drawn_items,
+            drawn_item_serials,
+            on_item_grab,
             on_mobile,
             on_item,
             held_mobile,
@@ -1866,9 +1903,10 @@ impl App {
         // wall or roof when Ctrl-click chooses a route through a house. See
         // [`crate::picking::HoveredItem`].
         self.picking.hover.item = facts.on_item.map(|index| crate::picking::HoveredItem {
-            serial: self.world.presentation.item_serials[index.position()],
-            graphic: self.world.presentation.items[index.position()].graphic,
-            at: self.world.presentation.items[index.position()].at,
+            serial: facts.drawn_item_serials[index.position()],
+            graphic: facts.drawn_items[index.position()].graphic,
+            at: facts.drawn_items[index.position()].at,
+            grab: facts.on_item_grab.unwrap_or_default(),
         });
     }
 
@@ -1905,6 +1943,9 @@ impl App {
             interior,
             pick,
             drawn_mobiles,
+            drawn_items,
+            drawn_item_serials: _,
+            on_item_grab: _,
             on_mobile: _,
             on_item: _,
             held_mobile,
@@ -2047,6 +2088,12 @@ impl App {
                 &self.world.presentation.multi_preview,
                 &self.world.presentation.tile_animations,
             ));
+        // An arrow's own art, the same reason: it draws through the static
+        // atlas too, and a shot that lands before its atlas page is resident
+        // would simply not appear.
+        wanted
+            .statics
+            .extend(self.world.presentation.effects.iter().map(|effect| effect.art));
 
         // How big this client's own windows draw, read before the surface is
         // borrowed below: it is the shell's live copy and not the app's loaded
@@ -2499,6 +2546,7 @@ impl App {
             selected_item,
             held_mobile,
             &drawn,
+            &drawn_items,
         );
         let geometry_cost = geometry_started.elapsed();
         let assembly_costs = geometry.assembly_costs;

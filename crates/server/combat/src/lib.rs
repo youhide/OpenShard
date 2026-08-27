@@ -31,7 +31,7 @@ use openshard_state::components::{
     body_opens_doors, creature_base_sound,
 };
 use openshard_state::sectors::in_range;
-use openshard_state::weapon::{LAYER_ONE_HANDED, LAYER_TWO_HANDED};
+use openshard_state::weapon::{ARROW, LAYER_ONE_HANDED, LAYER_TWO_HANDED, WeaponKind};
 use openshard_state::{Action, Skill, TICKS_PER_SECOND, WorldState, WorldTick};
 
 pub mod armor;
@@ -581,20 +581,45 @@ pub fn retaliate_players(state: &mut WorldState, blows: &[MobileDamaged]) {
     }
 }
 
+/// One shot about to be resolved this tick — either a creature's innate
+/// [`RangedAttack`], or a mobile that merely wields a `WeaponKind::Ranged` weapon,
+/// read fresh off it every tick the same way [`equipped_weapon`](weapons::equipped_weapon)
+/// itself is: no component is ever mirrored onto a player for holding a bow.
+struct Volley {
+    target: Serial,
+    range: u8,
+    kind: DamageType,
+    /// The ammunition this shot spends, and what runs out when it cannot be fired.
+    /// `None` for an innate attack — a dragon's breath has nothing to run out of.
+    ammo: Option<Graphic>,
+    /// The graphic the shot itself flies as.
+    art: Graphic,
+}
+
+/// What a shot that could not be fired for want of ammunition tells the shooter —
+/// ServUO's `BaseRanged` refusal, split by which the weapon wants.
+fn out_of_ammo_message(ammo: Graphic) -> &'static str {
+    if ammo == ARROW {
+        "You do not have enough arrows."
+    } else {
+        "You do not have enough bolts."
+    }
+}
+
 /// Strike, for every mobile whose swing is due.
 ///
 /// The interactive half of combat, run each tick against the tick counter so it
 /// reads no clock. A swing lands when the attacker is in war mode, has a target
 /// within [`MELEE_RANGE`] on the same facet, and its prepared timer is up.
 /// Loose every ranged attack whose timer is up: a warlike combatant with a
-/// [`RangedAttack`], a target inside its reach but beyond arm's length, and a
-/// clear line to it fires — through [`damage`], the one door all damage passes,
-/// so resistance and murder attribution already apply. Sharing the swing timer
-/// with melee means a creature closes to bite or stands to shoot, never both
-/// in one beat.
+/// [`RangedAttack`] *or* a wielded ranged weapon, a target inside its reach but
+/// beyond arm's length, and a clear line to it fires — through [`damage`], the
+/// one door all damage passes, so resistance and murder attribution already
+/// apply. Sharing the swing timer with melee means a creature closes to bite or
+/// stands to shoot, never both in one beat.
 pub fn volleys(state: &mut WorldState) {
     let now = state.ticks;
-    let ready: Vec<(EntityId, Serial, u8, DamageType)> = state
+    let ready: Vec<(EntityId, Volley)> = state
         .registry
         .query::<Combat>()
         .filter_map(|(attacker, combat)| {
@@ -604,13 +629,46 @@ pub fn volleys(state: &mut WorldState) {
             {
                 return None;
             }
-            let ranged = state.registry.get::<RangedAttack>(attacker)?;
-            combat
-                .target()
-                .map(|target| (attacker, target, ranged.range.get(), ranged.kind))
+            let target = combat.target()?;
+            if let Some(ranged) = state.registry.get::<RangedAttack>(attacker) {
+                return Some((
+                    attacker,
+                    Volley {
+                        target,
+                        range: ranged.range.get(),
+                        kind: ranged.kind,
+                        ammo: None,
+                        art: ARROW_GRAPHIC,
+                    },
+                ));
+            }
+            let weapon = weapons::equipped_weapon(state, attacker)?;
+            if weapon.kind != WeaponKind::Ranged {
+                return None; // melee's beat — `swings` handles this attacker
+            }
+            Some((
+                attacker,
+                Volley {
+                    target,
+                    range: weapon.range.map_or(0, |r| r.get()),
+                    kind: DamageType::Physical,
+                    ammo: weapon.ammo,
+                    art: weapon.effect_art.unwrap_or(ARROW_GRAPHIC),
+                },
+            ))
         })
         .collect();
-    for (attacker, target_serial, range, kind) in ready {
+    for (
+        attacker,
+        Volley {
+            target: target_serial,
+            range,
+            kind,
+            ammo,
+            art,
+        },
+    ) in ready
+    {
         let Some(target) = state.registry.entity_of(target_serial) else {
             clear_target(state, attacker);
             continue;
@@ -637,8 +695,26 @@ pub fn volleys(state: &mut WorldState) {
         }
         let by = state.registry.serial_of(attacker);
         let pace = swing_speed(state, attacker);
+        // A shot that cannot be fired for want of ammunition still costs the swing
+        // timer — otherwise an empty quiver retries every tick instead of once per
+        // swing interval, and spams the refusal just as fast.
+        let ammo_ok = match (ammo, by) {
+            (Some(graphic), Some(shooter))
+                if openshard_items::take_from_backpack(state, shooter, graphic, 1) > 0 =>
+            {
+                true
+            }
+            (Some(graphic), _) => {
+                state.system_message(attacker, out_of_ammo_message(graphic));
+                false
+            }
+            (None, _) => true,
+        };
         if let Some(combat) = state.registry.get_mut::<Combat>(attacker) {
             combat.schedule_swing(now + pace);
+        }
+        if !ammo_ok {
+            continue;
         }
         // The bolt's flight, then the thwack — emitted before the blow lands, so
         // the mark is still drawn for the arrow to fly at. A moving effect from
@@ -647,7 +723,7 @@ pub fn volleys(state: &mut WorldState) {
             kind: EffectKind::Moving,
             from: by,
             to: Some(target_serial),
-            art: ARROW_GRAPHIC,
+            art,
             from_point: Point::new(from.x, from.y, from.z),
             to_point: Point::new(to.x, to.y, to.z),
             speed: RANGED_EFFECT_SPEED,
@@ -822,7 +898,12 @@ pub fn prepare_swings(state: &mut WorldState) {
         .collect();
 
     for (attacker, target_serial, due) in pending {
-        if state.registry.has::<RangedAttack>(attacker)
+        // A ranged attacker — innate or a wielded bow/crossbow — has no melee
+        // wind-up: it stands and looses on `volleys`'s own beat instead.
+        let is_ranged = state.registry.has::<RangedAttack>(attacker)
+            || weapons::equipped_weapon(state, attacker)
+                .is_some_and(|weapon| weapon.kind == WeaponKind::Ranged);
+        if is_ranged
             || state.registry.has::<Hidden>(attacker)
             || state
                 .registry

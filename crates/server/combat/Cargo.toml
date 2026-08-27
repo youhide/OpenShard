@@ -15,6 +15,8 @@ workspace = true
 openshard-config.workspace = true
 openshard-entities.workspace = true
 openshard-gateway.workspace = true
+# `take_from_backpack`: what an archer's shot spends from their own pack.
+openshard-items.workspace = true
 # `Doors`: a sight line is traced with the doors as they stand.
 openshard-map.workspace = true
 openshard-movement.workspace = true

@@ -1890,7 +1890,9 @@ fn world_panel(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut R
     // something else is standing in front of: the G-buffer holds one answer per
     // pixel, so a wall behind a body is not dimmed or half-shown in a diagnostic,
     // it is simply not in the picture — the body's pixels are the body's. Ticking
-    // the crowd off draws the same street with nobody in it.
+    // the crowd off draws the same street with nobody in it. Houses are server
+    // multis expanded into item pieces, so they have their own switch: an item
+    // dropped under a roof remains visible when only houses are unticked.
     //
     // Everything still stands in the occlusion grid and still casts its own
     // shadow whatever is ticked here — see `frame::Draw`. That is the difference
@@ -1905,10 +1907,8 @@ fn world_panel(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut R
             &mut draw.statics,
             "the map's statics — walls, floors, roofs, furniture",
         ),
-        (
-            &mut draw.items,
-            "the server's items — what was dropped and what a pack placed",
-        ),
+        (&mut draw.items, "items — dropped or placed things"),
+        (&mut draw.houses, "houses"),
         (&mut draw.mobiles, "mobiles"),
     ] {
         changed |= ui.checkbox(on, label).changed();

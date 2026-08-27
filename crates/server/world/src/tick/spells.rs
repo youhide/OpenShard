@@ -342,10 +342,11 @@ impl World {
                 }
             }
             SpellEffect::Resurrect => {
-                // Raise the aimed ghost. A no-op on the living (or on a bad
-                // target), so a misfired Resurrection wastes the cast, no more.
-                if let Some(entity) = target_serial.and_then(|s| self.state.registry.entity_of(s)) {
-                    self.resurrect(entity, false);
+                // Aimed at either the ghost or its body. The core identifies the
+                // body's owner and restores that original outfit before removing
+                // the corpse.
+                if let Some(target) = target_serial {
+                    self.resurrect_target(target, false);
                 }
             }
             SpellEffect::Mark => self.mark_rune(caster, target_serial),

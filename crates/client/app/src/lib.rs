@@ -1069,8 +1069,10 @@ pub fn run<D: Dial + Send + 'static>(
                 corpses: Vec::new(),
                 items: Vec::new(),
                 item_serials: Vec::new(),
+                item_houses: Vec::new(),
                 multi_preview: Vec::new(),
                 damage_numbers: Vec::new(),
+                effects: Vec::new(),
                 health_estimates: std::collections::BTreeMap::new(),
                 crowd: {
                     // The body's ease, which is not the camera's — see `STARTUP_EASE`.

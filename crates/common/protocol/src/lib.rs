@@ -77,6 +77,7 @@ pub mod localized;
 pub mod login;
 pub mod mapedit;
 pub mod mobile;
+pub mod mounts;
 pub mod packet;
 pub mod party;
 pub mod properties;

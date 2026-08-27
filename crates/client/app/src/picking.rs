@@ -5,6 +5,7 @@
 //! for the selection panel. Neither is a fallback for the other.
 
 use openshard_client_render::depth::Hit;
+use openshard_client_render::gump::GumpPixel;
 use openshard_client_render::items::ItemIndex;
 use openshard_client_render::statics::PickedStatic;
 use openshard_protocol::serial::Serial;
@@ -95,6 +96,9 @@ pub struct HoveredItem {
     pub graphic: Graphic,
     /// Where the piece the cursor actually hit stands.
     pub at: Point,
+    /// The texel in the sprite under the pointer, in the cursor preview's
+    /// gump pixels. It lets a ground-item drag preserve the point grabbed.
+    pub grab: GumpPixel,
 }
 
 impl HoveredItem {
@@ -230,6 +234,7 @@ mod tests {
             serial,
             graphic: Graphic(0),
             at: Point::new(1400, 1600, 0),
+            grab: GumpPixel::default(),
         }
     }
 
@@ -266,6 +271,7 @@ mod tests {
             serial: house,
             graphic: Graphic(0x0006),
             at: Point::new(1400, 1600, 7),
+            grab: GumpPixel::default(),
         };
 
         assert!(wall.matches(house, Graphic(0x0006), Point::new(1400, 1600, 7)));

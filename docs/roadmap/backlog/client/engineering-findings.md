@@ -101,6 +101,42 @@
   in a file a parallel session had open. A named constructor (`RadarFrame::
   empty()`, beside the doc that already explains why the sample is reset) is the
   shape.
+- **A layer's `graphic` is two index spaces wearing one type.**
+  [`EquipmentLayer::graphic`](../../../../crates/client/render/src/mobiles.rs) is
+  an `AnimId` — a worn item's picture — for every layer except `Layer::MOUNT`,
+  where it is a creature's `Graphic`. The two happen to index the same
+  `anim.idx`, which is why it works, and nothing but a doc comment says which one
+  a given layer holds; `mount_of` opens it with `Graphic(saddle.graphic.0)`,
+  which is exactly the newtype-crossing `docs/style.md` is about. The shape is
+  either a second field or an enum over the two, and it is not free: the field is
+  built in three places and read in four.
+- **A seam tested from each end separately is not a tested seam, and the
+  dismount is the proof.** `world/src/tick/tests.rs`'s
+  `a_horse_is_mounted_and_dismounted_by_double_click` asserted that the shard
+  sends the rider's own client a `0x1D` naming the saddle — and it did, and had
+  all along. `client/net`'s `WorldView` had a `remove_from_equipment` and three
+  callers, none of them the `0x1D` arm. So one side proved it spoke and the other
+  proved it could listen, and nobody asked whether the words arrived: the saddle
+  stayed on the body for ever, the rider stayed drawn in it, and the horse stood
+  beside them. `items::consume`'s worn-item-eaten path had the identical hole and
+  nobody had noticed *it* either, which is what says this is a method problem
+  rather than a mount one. The fix closed both, but the check that would have
+  caught them is an end-to-end one, and
+  [`crates/e2e/shard/tests/`](../../../../crates/e2e/shard/tests/) is where it
+  belongs — `paperdoll_buttons.rs`'s own header already names this exact failure
+  mode ("a client that never folds what it decoded") as the fourth of four.
+  **A ride is not cheap to drive from there**, which is the reason it does not
+  exist yet and the thing to price before starting: a creature can only be put in
+  the world through `.admin` → the gump → a button → a target cursor → a click,
+  because `.add` lays items and there is no staff verb that lays a mobile. Either
+  that chain is walked, or the missing verb is the smaller piece of work and the
+  test comes free after it.
+- **The rider is seated by the frame's own anchor, not by species.** The
+  reference client carries a per-mount pixel correction (`Mounts.cs`'s `OffsetY`,
+  non-zero only for the unusually tall or short — a unicorn at −9, a tiger at
+  +18) and this engine applies none, because every mount it currently spawns is
+  an ordinary-height animal. `openshard_protocol::mounts` is where the column
+  would go, and the day a unicorn is rideable is the day it is owed.
 - **The lighting proptest fails on fresh seeds, and its regression file grows
   every time somebody runs the suite.**
   [`render/tests/lighting.rs`](../../../../crates/client/render/tests/lighting.rs)'s

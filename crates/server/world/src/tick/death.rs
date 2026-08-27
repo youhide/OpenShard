@@ -11,11 +11,6 @@ const CORPSE_DECAY_TICKS: u64 = 7 * 60 * TICKS_PER_SECOND;
 
 /// The outer-torso layer the death shroud wears at — ServUO's `Layer.OuterTorso`.
 const OUTER_TORSO_LAYER: Layer = Layer(0x16);
-/// The outer-torso robe issued to a player brought back to life.
-const RESURRECTION_ROBE_GRAPHIC: Graphic = Graphic(0x1F03);
-/// The axe carried in the two-handed weapon slot after resurrection.
-const RESURRECTION_AXE_GRAPHIC: Graphic = Graphic(0x0F49);
-
 /// The two body graphics that share the skeleton loot table.
 const SKELETON_BODIES: [Graphic; 2] = [Graphic(0x0032), Graphic(0x0038)];
 /// A skeleton always carries a modest purse; the inclusive upper bound is 45.
@@ -145,7 +140,7 @@ impl World {
             } else {
                 format!("a corpse of {owner}")
             };
-            let story = Corpse::from_death(owner, killer);
+            let story = Corpse::from_player_death(owner, serial, killer);
             if let Some(corpse) = self.spawn_corpse(at, facet, body, facing, name, story) {
                 // Everyone but the dying player, who is about to be told by
                 // `0x2C` and has a ghost to watch rather than a corpse to pair.
@@ -330,9 +325,9 @@ impl World {
     }
 
     /// Bring a ghost back to life: lift the [`Ghost`] marker, restore the living
-    /// body it remembered, strip the death shroud, and tell the client it is alive
-    /// again. Nothing happens to a mobile that is not a ghost. The corpse stays
-    /// where it lies — a resurrected player walks back to loot it, as in UO.
+    /// body it remembered, and reclaim its own corpse. The body vanishes with
+    /// any unclaimed loot while the worn items recorded on it return to their
+    /// original layers. Nothing happens to a mobile that is not a ghost.
     ///
     /// `full` decides how many hit points come back. A spell or a bandage — the
     /// price of which was surviving the fight that killed you, or somebody else's
@@ -359,7 +354,7 @@ impl World {
             "a connected player keeps Combat through the ghost transition"
         );
         self.strip_death_shroud(serial);
-        self.equip_resurrection_kit(serial);
+        self.restore_player_corpse(serial);
 
         // A healer's offer may still be standing (a bandage or a spell can land
         // while a ghost has not yet answered "wouldst thou like to be
@@ -392,6 +387,74 @@ impl World {
         // refreshed health bar rides the fresh `0x78` draw.
         self.tell_own_client_body(entity, serial, false, living);
         self.redraw_after_body_change(entity, serial);
+    }
+
+    /// Resolve a resurrection target. A living/ghost mobile is the traditional
+    /// target; accepting the corpse itself makes the spell's cursor behave like
+    /// the classic body-side use as well.
+    pub(super) fn resurrect_target(&mut self, target: Serial, full: bool) {
+        let Some(target) = self.state.registry.entity_of(target) else {
+            return;
+        };
+        if self.state.registry.has::<Ghost>(target) {
+            self.resurrect(target, full);
+            return;
+        }
+        let owner = self
+            .state
+            .registry
+            .get::<Corpse>(target)
+            .and_then(|corpse| corpse.player);
+        if let Some(owner) = owner.and_then(|serial| self.state.registry.entity_of(serial)) {
+            self.resurrect(owner, full);
+        }
+    }
+
+    /// Restore the items that were worn at death, then retire the player's own
+    /// corpse through the normal container-removal path. Loot that was added to
+    /// the corpse, or gear already taken by another player, is not conjured back.
+    fn restore_player_corpse(&mut self, mobile: Serial) {
+        let corpse = self.state.registry.query::<Corpse>().find_map(|(entity, story)| {
+            (story.player == Some(mobile))
+                .then(|| {
+                    self.state
+                        .registry
+                        .serial_of(entity)
+                        .map(|serial| (entity, serial))
+                })
+                .flatten()
+        });
+        let Some((corpse, corpse_serial)) = corpse else {
+            return;
+        };
+        let equipment = self
+            .state
+            .registry
+            .get::<Corpse>(corpse)
+            .map(|story| story.equipment.clone())
+            .unwrap_or_default();
+        for worn in equipment {
+            let Some(item) = self.state.registry.entity_of(worn.item) else {
+                continue;
+            };
+            if self
+                .state
+                .registry
+                .get::<Contained>(item)
+                .is_none_or(|contained| contained.container != corpse_serial)
+            {
+                continue;
+            }
+            let _ = relocate_item(
+                &mut self.state,
+                item,
+                LiveItemLocation::equipped(Equipped {
+                    mobile,
+                    layer: worn.layer,
+                }),
+            );
+        }
+        items::remove_ground_item(&mut self.state, corpse, corpse_serial);
     }
 
     /// Despawn the death shroud a ghost wears, if any. The mobile's fresh `0x78`
@@ -432,29 +495,6 @@ impl World {
         };
         establish_item_location(&mut self.state, item, LiveItemLocation::equipped(equipped))
             .expect("a fresh death shroud has one valid wearer");
-    }
-
-    /// Give a resurrected player the shard's minimal fighting kit. Their former
-    /// equipment remains on the corpse, so these fresh items are intentionally
-    /// separate from it: a robe plus one axe are immediately usable. A weapon
-    /// in the two-handed layer excludes the main hand, so issuing a dagger as
-    /// well would create an impossible outfit.
-    fn equip_resurrection_kit(&mut self, mobile: Serial) {
-        let hue = Hue(0);
-        let _ = items::equip_worn_item(
-            &mut self.state,
-            mobile,
-            RESURRECTION_ROBE_GRAPHIC,
-            hue,
-            OUTER_TORSO_LAYER,
-        );
-        let _ = items::equip_worn_item(
-            &mut self.state,
-            mobile,
-            RESURRECTION_AXE_GRAPHIC,
-            hue,
-            openshard_state::weapon::LAYER_TWO_HANDED,
-        );
     }
 
     /// Forget a mobile whose body just changed from every screen, then reveal it

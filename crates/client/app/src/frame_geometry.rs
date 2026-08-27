@@ -258,6 +258,7 @@ pub(crate) fn assemble_geometry(
     selected_item: Option<openshard_client_render::items::ItemIndex>,
     held_mobile: Option<openshard_client_render::mobiles::MobileIndex>,
     drawn: &[Mobile],
+    drawn_items: &[openshard_client_render::items::GroundItem],
 ) -> FrameGeometry {
     // The shard's clock is the ordinary path. It reaches us as a stepped
     // `0x4F`; `Daylight` turns that into a continuous ambient over the few
@@ -320,28 +321,17 @@ pub(crate) fn assemble_geometry(
         .map(openshard_client_render::mobiles::OpaqueMask::fingerprint);
     let static_atlas_revision = window.atlases.statics.revision();
     let animation_tick = world.presentation.tile_animations.tick();
-    // The house being drawn under a `0x99` cursor, chained on so the renderer is
-    // handed one list. Borrowed when there is no preview, which is nearly always
-    // — the concatenation costs a frame's allocation only while somebody is
-    // holding a deed.
-    let drawn_items: std::borrow::Cow<'_, [openshard_client_render::items::GroundItem]> =
-        if world.presentation.multi_preview.is_empty() {
-            std::borrow::Cow::Borrowed(&world.presentation.items)
-        } else {
-            std::borrow::Cow::Owned(
-                world
-                    .presentation
-                    .items
-                    .iter()
-                    .chain(world.presentation.multi_preview.iter())
-                    .copied()
-                    .collect(),
-            )
-        };
-    // Over the *chained* list, which is what makes the preview move: the cache
-    // key is what the frame draws, and a preview that slid a tile without
-    // changing the fingerprint would be a house frozen where the pointer was.
-    let items_fingerprint = items_fingerprint(&drawn_items);
+    // A house being previewed under a `0x99` cursor follows the same Houses
+    // visibility switch as an authoritative multi.
+    let multi_preview: &[openshard_client_render::items::GroundItem] = if graphics.drawing.houses {
+        &world.presentation.multi_preview
+    } else {
+        &[]
+    };
+    // The complete list is in the cache identity: hidden items remain in the
+    // occlusion grid and a change to one must not reuse static geometry made
+    // against its old volumes.
+    let items_fingerprint = items_fingerprint(&world.presentation.items);
     // Map-static volume ownership depends on the occlusion grid, which exists
     // only for a non-flat sky. Server items also participate in that grid, so
     // leave the collector live whenever any are present. The cache is therefore
@@ -384,10 +374,10 @@ pub(crate) fn assemble_geometry(
     let inputs = frame::Inputs {
         map: resources.map(),
         // The preview is collected separately below with an open cutaway. It
-        // remains in `drawn_items` for the cache fingerprint, but it is not an
-        // authoritative server item and must not lose its roof or upper walls
-        // merely because the player is standing inside another building.
+        // is not authoritative and must not lose its roof or upper walls merely
+        // because the player is standing inside another building.
         items: &world.presentation.items,
+        drawn_items,
         camera: &camera,
         tiledata: &resources.tiledata,
         animations: &world.presentation.tile_animations,
@@ -464,7 +454,7 @@ pub(crate) fn assemble_geometry(
         items: mut item_geometry,
     } = assembled;
     let preview_geometry = items::collect(
-        &world.presentation.multi_preview,
+        multi_preview,
         &camera,
         &resources.tiledata,
         &world.presentation.tile_animations,
@@ -475,6 +465,28 @@ pub(crate) fn assemble_geometry(
         None,
     );
     item_geometry.absorb(preview_geometry);
+    // An arrow's or bolt's flight: a handful of ad-hoc quads at a continuous
+    // world position, not tile-snapped like everything else this collector
+    // draws — `effects::collect` skips the occlusion-aware walk entirely,
+    // since none of these is an occluder or a thing a click can land on.
+    let flying: Vec<openshard_client_render::effects::FlyingArrow> = world
+        .presentation
+        .effects
+        .iter()
+        .map(|effect| openshard_client_render::effects::FlyingArrow {
+            art: effect.art,
+            from: effect.from,
+            to: effect.to,
+            progress: effect.progress(),
+        })
+        .collect();
+    item_geometry
+        .quads
+        .extend(openshard_client_render::effects::collect(
+            &flying,
+            &camera,
+            openshard_client_render::atlas::StaticArt::Pages(&window.atlases.statics),
+        ));
     let mut costs = GeometryCosts {
         ground_quads: quads.len(),
         ..GeometryCosts::default()
@@ -537,7 +549,7 @@ pub(crate) fn assemble_geometry(
     // The same quads as the picture's, so the ring lands on the sprite
     // rather than beside it — see `items::outlined`.
     let outline_quads = items::outlined(
-        &world.presentation.items,
+        drawn_items,
         &camera,
         &resources.tiledata,
         &world.presentation.tile_animations,
@@ -557,7 +569,7 @@ pub(crate) fn assemble_geometry(
     // into different masks: this is what a click named, not what the
     // cursor is over.
     let selected_item_outline = items::outlined(
-        &world.presentation.items,
+        drawn_items,
         &camera,
         &resources.tiledata,
         &world.presentation.tile_animations,
@@ -652,19 +664,26 @@ pub(crate) struct FrameFacts {
     /// list `on_mobile` indexes into, and `None` before there is a window at
     /// all.
     pub(crate) drawn_mobiles: Option<Vec<(Who, Mobile)>>,
+    /// The server item list this frame actually draws, with serials kept in
+    /// matching positions for hover and selection.
+    pub(crate) drawn_items: Vec<openshard_client_render::items::GroundItem>,
+    pub(crate) drawn_item_serials: Vec<openshard_protocol::serial::Serial>,
+    /// Where in the picked ground sprite the pointer was. Captured while the
+    /// completed frame is available for a later press.
+    pub(crate) on_item_grab: Option<openshard_client_render::gump::GumpPixel>,
     /// The creature the cursor is over, indexing `drawn_mobiles` — the
     /// unfiltered form of [`Pick::mobile`], kept here because
     /// `App::draw_from` reads it back into `self.picking` regardless of the
     /// highlight mode: what a click selects is not a question about lighting.
     pub(crate) on_mobile: Option<openshard_client_render::mobiles::MobileIndex>,
-    /// The item the cursor is over, indexing `self.world.presentation.items` — the
+    /// The item the cursor is over, indexing [`Self::drawn_items`] — the
     /// unfiltered form of [`Pick::item`], for the same reason.
     pub(crate) on_item: Option<openshard_client_render::items::ItemIndex>,
     /// The server-confirmed combat target, or what a click is holding when no
     /// target is active, turned back into an index into `drawn_mobiles`.
     pub(crate) held_mobile: Option<openshard_client_render::mobiles::MobileIndex>,
     /// The diagnostic selection, turned back into an index into
-    /// `self.world.presentation.item_serials`.
+    /// [`Self::drawn_item_serials`].
     pub(crate) selected_item: Option<openshard_client_render::items::ItemIndex>,
 }
 

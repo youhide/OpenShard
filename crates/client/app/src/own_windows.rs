@@ -47,6 +47,8 @@ mod sync;
 
 const MAX_STACK: u16 = 60_000;
 const GOLD_GRAPHIC: Graphic = Graphic(0x0EED);
+const ARROW_GRAPHIC: Graphic = Graphic(0x0F3F);
+const BOLT_GRAPHIC: Graphic = Graphic(0x1BFB);
 /// The permanent plaque created beside a house.  It is an ordinary world item
 /// on the wire, but it is house infrastructure rather than something a player
 /// can put in a pack.
@@ -129,7 +131,10 @@ fn next_stack_step(items: &[ContainedItem]) -> Option<StackStep> {
         let matches = |item: &&ContainedItem| {
             item.graphic == target.graphic
                 && item.hue == target.hue
-                && (target.graphic == GOLD_GRAPHIC || target.amount.0 > 1 || item.amount.0 > 1)
+                // The container wire format does not carry `Stackable`.  A
+                // single coin, arrow or bolt has amount one, so recognise the
+                // three intrinsic stack arts as well as already-visible piles.
+                && (intrinsically_stackable(target.graphic) || target.amount.0 > 1 || item.amount.0 > 1)
         };
         let donors: Vec<_> = items[target_index + 1..].iter().filter(matches).collect();
         let Some(source) = donors
@@ -148,6 +153,10 @@ fn next_stack_step(items: &[ContainedItem]) -> Option<StackStep> {
         });
     }
     None
+}
+
+const fn intrinsically_stackable(graphic: Graphic) -> bool {
+    matches!(graphic, GOLD_GRAPHIC | ARROW_GRAPHIC | BOLT_GRAPHIC)
 }
 
 impl App {
@@ -235,9 +244,10 @@ impl App {
     /// A plain click remains available to the normal selection/double-click
     /// use path in the event loop.
     pub(crate) fn press_world_item(&mut self) -> bool {
-        let Some(serial) = self.picking.hover.item.map(|item| item.serial) else {
+        let Some(hovered) = self.picking.hover.item else {
             return false;
         };
+        let serial = hovered.serial;
         let Some(item) = self
             .world
             .authoritative
@@ -265,9 +275,9 @@ impl App {
                 hue: item.hue,
             },
             origin: hand::DragOrigin::Ground,
-            // A ground sprite has no gump-local grab point — see `centre_of`,
-            // which a worn item's press asks the same question of.
-            grab: hand::centre_of(item.graphic, &self.resources.art),
+            // The completed frame preserved the actual art texel under the
+            // pointer, already in the cursor preview's gump pixels.
+            grab: hovered.grab,
         });
         true
     }
@@ -932,10 +942,10 @@ mod stack_tests {
     use openshard_protocol::items::ItemAmount;
     use openshard_protocol::wire::Hue;
 
-    fn pile(serial: u32, amount: u16) -> ContainedItem {
+    fn pile(serial: u32, graphic: Graphic, amount: u16) -> ContainedItem {
         ContainedItem {
             serial: Serial::new(serial).expect("item serial"),
-            graphic: GOLD_GRAPHIC,
+            graphic,
             amount: ItemAmount(amount),
             at: GumpPoint::new(0, 0),
             grid: GridSlot(0),
@@ -946,9 +956,9 @@ mod stack_tests {
     #[test]
     fn stacking_prefers_a_whole_pile_that_fits() {
         let items = [
-            pile(0x4000_0001, 50_000),
-            pile(0x4000_0002, 20_000),
-            pile(0x4000_0003, 5_000),
+            pile(0x4000_0001, GOLD_GRAPHIC, 50_000),
+            pile(0x4000_0002, GOLD_GRAPHIC, 20_000),
+            pile(0x4000_0003, GOLD_GRAPHIC, 5_000),
         ];
         assert_eq!(
             next_stack_step(&items),
@@ -962,20 +972,40 @@ mod stack_tests {
 
     #[test]
     fn stacking_splits_only_enough_to_fill_sixty_thousand() {
-        let items = [pile(0x4000_0001, 55_000), pile(0x4000_0002, 20_000)];
+        let items = [
+            pile(0x4000_0001, GOLD_GRAPHIC, 55_000),
+            pile(0x4000_0002, GOLD_GRAPHIC, 20_000),
+        ];
         assert_eq!(next_stack_step(&items).expect("one pass").amount, 5_000);
     }
 
     #[test]
     fn full_piles_are_skipped_on_the_way_to_a_remainder() {
         let items = [
-            pile(0x4000_0001, MAX_STACK),
-            pile(0x4000_0002, 15_000),
-            pile(0x4000_0003, 10_000),
+            pile(0x4000_0001, GOLD_GRAPHIC, MAX_STACK),
+            pile(0x4000_0002, GOLD_GRAPHIC, 15_000),
+            pile(0x4000_0003, GOLD_GRAPHIC, 10_000),
         ];
         let step = next_stack_step(&items).expect("the remainder piles merge");
         assert_eq!(step.target, items[1].serial);
         assert_eq!(step.amount, 10_000);
+    }
+
+    #[test]
+    fn stacking_recognises_single_arrows_and_bolts() {
+        for graphic in [ARROW_GRAPHIC, BOLT_GRAPHIC] {
+            let items = [pile(0x4000_0001, graphic, 1), pile(0x4000_0002, graphic, 1)];
+            assert_eq!(
+                next_stack_step(&items),
+                Some(StackStep {
+                    source: items[1].serial,
+                    target: items[0].serial,
+                    amount: 1,
+                }),
+                "0x{:04X} is stackable as a singleton",
+                graphic.0
+            );
+        }
     }
 
     // The split's own bounds moved with the rule: `ItemPress::split` is what

@@ -32,7 +32,7 @@ use openshard_state::components::{
     Amount, Body, Client, Combat, Contained, Container, Corpse, Decays, Decoration, Door, Drawn, Equipped,
     Ghost, House, HouseSign, ItemAffix, ItemAffixes, KeyValue, Name, PoisonCharges, Position,
     RUNEBOOK_ENTRIES, RUNEBOOK_GRAPHIC, Ridden, Riding, RuneMark, Runebook, RunebookEntry, SPELLBOOK_GRAPHIC,
-    Seated, Spellbook, Stackable, Weapon, mount_item_for, scroll_spell,
+    Seated, Spellbook, Stackable, Weapon, scroll_spell,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{
@@ -44,6 +44,7 @@ use tracing::{debug, warn};
 
 mod backpack;
 mod capacity;
+mod carve;
 mod consume;
 mod containers;
 mod decay;
@@ -61,6 +62,7 @@ mod weight;
 
 pub use backpack::*;
 pub use capacity::*;
+pub use carve::*;
 pub use consume::*;
 pub use containers::*;
 pub use decay::*;

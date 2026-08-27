@@ -27,10 +27,11 @@
 //! body around the far side of a building it cannot see from here.
 //!
 //! All three answer the same question a step at a time, so they are answered in
-//! one place: whichever is asking, a step leaves every [`WALK_HOLD`] (or every
-//! [`RUN_HOLD`] with shift down, which is what running is), and never two
-//! at once. Separate timers, one per input, would take two steps a beat the
-//! moment a player nudged an arrow while walking to a destination.
+//! one place: whichever is asking, a step leaves every
+//! [`step_hold`](openshard_movement::step_hold) — four rates, chosen by whether
+//! shift is down and whether the body is in a saddle — and never two at once.
+//! Separate timers, one per input, would take two steps a beat the moment a
+//! player nudged an arrow while walking to a destination.
 //!
 //! The keyboard outranks the mouse, and either mouse mode outranks the other —
 //! see [`Steering::asking`] for the order — and taking hold of a higher one
@@ -186,10 +187,12 @@ use openshard_map::overlay::Doors;
 #[cfg(test)]
 use openshard_movement::find_path;
 use openshard_movement::{
-    Around, COARSE_MIN_DISTANCE, Detour, Footing, Heading, Lean, Leeway, LongExit, NavigationGraph, RUN_HOLD,
-    SearchExit, Step, WALK_HOLD, Weight, destination_place, find_path_toward, search_long_path, search_path,
+    Around, COARSE_MIN_DISTANCE, Detour, Footing, Heading, Lean, Leeway, LongExit, NavigationGraph,
+    SearchExit, Step, Weight, destination_place, find_path_toward, search_long_path, search_path,
     step_allowed,
 };
+#[cfg(test)]
+use openshard_movement::{MOUNTED_RUN_HOLD, RUN_HOLD, WALK_HOLD};
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::world::Point;
 
@@ -667,6 +670,15 @@ pub struct Steering {
     /// What a turn costs the step it precedes — see [`Turning`], and
     /// [`Steering::set_turning`].
     turning: Turning,
+    /// Whether the body is in a saddle, for [`Steering::interval`] alone.
+    ///
+    /// The one fact about the *shard's* answer that this module has to know: a
+    /// mount halves how long a step takes, so a cadence that does not know about
+    /// it asks for the next step a whole hold late. Unlike the two settings
+    /// above it is not a preference — it is a fact off the wire, restated on
+    /// every fold of the world view by [`Steering::set_mounted`], the same way
+    /// [`crate::world::PlayerMotion::accept_local`] is told it per step.
+    mounted: bool,
 }
 
 impl Steering {
@@ -758,6 +770,17 @@ impl Steering {
     /// there is no state to reset when it changes.
     pub fn set_turning(&mut self, turning: Turning) {
         self.turning = turning;
+    }
+
+    /// The body is in a saddle, or is not — the shard's word, folded in with the
+    /// rest of the world view.
+    ///
+    /// Deliberately not re-timed, for [`Steering::set_running`]'s reason: a
+    /// walker that mounts mid-step keeps the deadline it already had, and the
+    /// next one is a gallop's. Re-arming here would hand a step to every player
+    /// who swung into the saddle at the right moment.
+    pub fn set_mounted(&mut self, mounted: bool) {
+        self.mounted = mounted;
     }
 
     /// Drop the plan that was made against an older terrain snapshot.
@@ -1419,11 +1442,17 @@ impl Steering {
     }
 
     /// How long a step takes at the pace being asked for.
+    ///
+    /// The *real* rate and not `common/movement`'s floor, and the same one the
+    /// glide is drawn over — see this module's header, and [`step_hold`](
+    /// openshard_movement::step_hold), which is where the four rates are named.
+    /// A cadence that disagrees with the hold is not merely slow: the body
+    /// crosses its tile in the hold and then stands still for whatever the
+    /// cadence has left over, which reads as a stutter rather than as a pace.
+    /// That is what a mount blind to its own saddle used to do — asked for a
+    /// step every `RUN_HOLD` while galloping across a tile in half of it.
     fn interval(&self) -> Duration {
-        match self.keys.running() {
-            true => RUN_HOLD,
-            false => WALK_HOLD,
-        }
+        openshard_movement::step_hold(self.keys.running(), self.mounted)
     }
 
     /// Where to actually step, given a held `direction` the terrain may or may
@@ -1846,6 +1875,84 @@ mod tests {
                 Readings::plain(open_ground())
             ),
             Some(Facing::running(Direction::North))
+        );
+    }
+
+    /// The saddle halves the gap again, and the gap it halves is the one the
+    /// glide is drawn over.
+    ///
+    /// The regression this exists for: the cadence knew about shift and not
+    /// about the saddle, so a gallop asked for a step every [`RUN_HOLD`] while
+    /// `crowd` crossed the tile in [`MOUNTED_RUN_HOLD`] — half of it. That is
+    /// two complaints from one number: the ride is no faster than a run, and it
+    /// stutters, because the body arrives at the next tile and then stands on it
+    /// for as long again.
+    #[test]
+    fn a_saddle_halves_the_gap_the_way_shift_does() {
+        let start = Instant::now();
+        let mut steering = Steering::default();
+        steering.set_running(true);
+        steering.set_mounted(true);
+
+        assert_eq!(
+            steering.press(
+                Direction::SouthEast,
+                here(),
+                start,
+                Direction::SouthEast,
+                Readings::plain(open_ground())
+            ),
+            Some(Facing::running(Direction::SouthEast))
+        );
+        let gallop = MOUNTED_RUN_HOLD.as_millis() as u64;
+        assert_eq!(
+            gallop * 2,
+            RUN_HOLD.as_millis() as u64,
+            "a gallop is a run doubled"
+        );
+        assert_eq!(
+            steering.due(
+                at(start, gallop - 1),
+                here(),
+                Direction::SouthEast,
+                Readings::plain(open_ground())
+            ),
+            None
+        );
+        assert_eq!(
+            steering.due(
+                at(start, gallop),
+                here(),
+                Direction::SouthEast,
+                Readings::plain(open_ground())
+            ),
+            Some(Facing::running(Direction::SouthEast)),
+            "a gallop's step is due a mounted hold after the last one, not a run's"
+        );
+    }
+
+    /// A mount at a walk keeps a runner's pace, which is ServUO's `WalkMount`
+    /// equalling its `RunFoot` — the equivalence `common/movement` pins, read
+    /// here through the one `step_hold` both ends share.
+    #[test]
+    fn a_mount_at_a_walk_keeps_a_runners_pace() {
+        let start = Instant::now();
+        let mut steering = Steering::default();
+        steering.set_mounted(true);
+
+        steering
+            .press(
+                Direction::North,
+                here(),
+                start,
+                Direction::North,
+                Readings::plain(open_ground()),
+            )
+            .unwrap();
+        assert_eq!(
+            steering.deadline(),
+            Some(at(start, RUN_HOLD.as_millis() as u64)),
+            "led at a walk, not galloped and not trudged"
         );
     }
 

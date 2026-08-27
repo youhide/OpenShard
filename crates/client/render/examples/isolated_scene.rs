@@ -946,6 +946,7 @@ fn main() {
     let inputs = openshard_client_render::frame::Inputs {
         map: &synthetic,
         items: &items,
+        drawn_items: &items,
         // No storey selection here: this scene is one hand-built rectangle, not
         // a building, and `parity.md`'s rule is that a diagnostic differs from
         // the client only in values it states out loud. `None` is what every

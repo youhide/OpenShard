@@ -2258,9 +2258,11 @@ mod tests {
         let path = temp_db("corpse-story");
         let story = crate::record::CorpseData {
             owner: "a lich".into(),
+            player: None,
             killer: Some("Rowena".into()),
             examined_by: Some("Mordred".into()),
             looters: vec!["Vesper".into(), "Rowena".into()],
+            carved: true,
             // And which way it lies: the picture's other half, saved here
             // because the item row's `amount` already carries the body.
             facing: 6,

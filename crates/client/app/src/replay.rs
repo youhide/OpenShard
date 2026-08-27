@@ -294,7 +294,15 @@ mod tests {
         // window does for the body it issues steps for.
         crowd.commanding(None);
         let (body, hue) = (Graphic(400), Hue::NONE);
-        let mut mobile = crowd.snap(None, start, body, Facing::walking(Direction::East), hue, false);
+        let mut mobile = crowd.snap(
+            None,
+            start,
+            body,
+            Facing::walking(Direction::East),
+            hue,
+            false,
+            false,
+        );
         let mut follower = Follower::new(Rig::HARD);
         let mut scope = Scope::new(Duration::from_secs(60));
 
@@ -303,8 +311,8 @@ mod tests {
             crowd.advance(frame);
             for step in replay.advance(frame) {
                 mobile = match step.glided {
-                    true => crowd.see(None, step.to, body, step.facing, hue, false),
-                    false => crowd.snap(None, step.to, body, step.facing, hue, false),
+                    true => crowd.see(None, step.to, body, step.facing, hue, false, false),
+                    false => crowd.snap(None, step.to, body, step.facing, hue, false, false),
                 };
             }
             // Read every frame and not stored: a glide is a position off a

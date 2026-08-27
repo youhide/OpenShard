@@ -162,6 +162,7 @@ fn draw_britain(
     let inputs = frame::Inputs {
         map: &map,
         items: &[],
+        drawn_items: &[],
         camera: &camera,
         tiledata: &tiledata,
         animations: &animations,

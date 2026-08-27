@@ -69,7 +69,11 @@ pub fn decay(state: &mut WorldState) {
 /// The shared tail of [`decay`] and [`consume`](crate::consume): a decaying
 /// container takes its loot with it (classic UO), and so does a consumed one,
 /// rather than leaving orphans pointing at a gone serial.
-pub(crate) fn remove_ground_item(state: &mut WorldState, item: EntityId, serial: Serial) {
+/// Remove a ground item and its entire contained tree.
+///
+/// Corpse resurrection uses the same path as decay so the corpse is forgotten
+/// by every viewer, removed from the map grid, and cannot leave orphaned loot.
+pub fn remove_ground_item(state: &mut WorldState, item: EntityId, serial: Serial) {
     let facet = state.facet_of(item);
     for watcher in state.watchers_of(item) {
         state.forget(watcher, item, serial);

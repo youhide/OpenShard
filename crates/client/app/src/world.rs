@@ -22,8 +22,9 @@ use openshard_client_render::items::GroundItem;
 use openshard_client_render::mobiles::Mobile;
 use openshard_client_render::statics::StaticGeometry;
 use openshard_protocol::direction::Facing;
+use openshard_protocol::feedback::GraphicalEffect;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::Hue;
+use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 
 use crate::crowd::{Crowd, Who};
@@ -52,6 +53,45 @@ pub struct DamageNumber {
     /// shown over another mobile.
     pub hue: Hue,
     pub elapsed: Duration,
+}
+
+/// How many world tiles a flying effect crosses per second.
+///
+/// A chosen feel, not a ported number: ServUO's `speed` byte and ClassicUO's own
+/// travel rate are both expressed in that client's isometric screen-pixel space
+/// (`MovingEffect.IntervalInMs`), which has no honest conversion into this
+/// renderer's own world-tile coordinates without porting its skewed offset math
+/// wholesale. A bow's ten-tile max range arriving in under a second reads as the
+/// fast, near-instant arrow real UO shows.
+const EFFECT_TILES_PER_SECOND: f32 = 15.0;
+
+/// An arrow or bolt in flight — presentation-only, spawned by a `0x70` and aged
+/// on its own clock the way [`DamageNumber`] is. Unlike a damage number it is
+/// anchored to two world points rather than to a mobile, so it is drawn wherever
+/// its own straight line says, not at anyone's head.
+#[derive(Clone, Copy, Debug)]
+pub struct FlyingEffect {
+    /// The shot's own sprite.
+    pub art: Graphic,
+    pub from: Point,
+    pub to: Point,
+    pub elapsed: Duration,
+    /// How long the whole flight takes — [`EFFECT_TILES_PER_SECOND`] applied to
+    /// the endpoints' tile distance, computed once at spawn.
+    pub duration: Duration,
+}
+
+impl FlyingEffect {
+    /// How far along its flight this effect is: `0.0` at the source, `1.0` once
+    /// it has arrived (and due for removal).
+    #[must_use]
+    pub fn progress(&self) -> f32 {
+        if self.duration.is_zero() {
+            1.0
+        } else {
+            (self.elapsed.as_secs_f32() / self.duration.as_secs_f32()).min(1.0)
+        }
+    }
 }
 
 /// The delayed part of an overhead health bar. The shard's current health is
@@ -219,6 +259,10 @@ pub struct PresentationWorld {
     /// Ground-item render data and the parallel wire serials used for picks.
     pub items: Vec<GroundItem>,
     pub item_serials: Vec<Serial>,
+    /// Whether the matching item is a piece expanded from a server multi
+    /// (normally a house). This stays parallel to [`Self::items`] so the World
+    /// tab can independently hide houses and ordinary ground items.
+    pub item_houses: Vec<bool>,
     /// The house a `0x99` cursor is drawing under the pointer, expanded into its
     /// pieces. Empty whenever no multi cursor is up.
     ///
@@ -239,6 +283,11 @@ pub struct PresentationWorld {
     /// Animation and glide history, which belongs to presentation rather than
     /// authoritative state.
     pub crowd: Crowd,
+    /// Arrows and bolts in flight, aged and culled the way [`damage_numbers`]
+    /// are — a `0x70` is an event, not a fact to keep past its own flight.
+    ///
+    /// [`damage_numbers`]: Self::damage_numbers
+    pub effects: Vec<FlyingEffect>,
 }
 
 /// Every input that can change cached map-static geometry.
@@ -336,6 +385,10 @@ impl PresentationWorld {
         }
         self.damage_numbers
             .retain(|number| number.elapsed < DAMAGE_NUMBER_HOLD);
+        for effect in &mut self.effects {
+            effect.elapsed += elapsed;
+        }
+        self.effects.retain(|effect| effect.progress() < 1.0);
         for estimate in self.health_estimates.values_mut() {
             estimate.elapsed += elapsed;
         }
@@ -352,6 +405,35 @@ impl PresentationWorld {
                 elapsed: Duration::ZERO,
             });
         }
+    }
+
+    /// Start tracking a shard-sent moving effect — a `0x70` naming an arrow or
+    /// bolt's flight. The travel time is this client's own pacing
+    /// ([`EFFECT_TILES_PER_SECOND`]), not the wire's `speed`/`duration`: those
+    /// are ClassicUO's own real-time units for its isometric screen-pixel
+    /// space, which has no honest conversion into this renderer's world tiles
+    /// without porting that client's skewed offset arithmetic wholesale.
+    ///
+    /// A fixed or lightning effect is dropped rather than mis-drawn as a
+    /// flight it is not — nothing sends either yet (`docs/archery.md`'s
+    /// backlog), and a wrong picture is worse than none.
+    pub(crate) fn fire(&mut self, effect: GraphicalEffect) {
+        if effect.kind != openshard_protocol::feedback::EffectKind::Moving {
+            return;
+        }
+        let dx = f32::from(effect.to_point.x) - f32::from(effect.from_point.x);
+        let dy = f32::from(effect.to_point.y) - f32::from(effect.from_point.y);
+        let tiles = dx.hypot(dy);
+        // A same-tile or vanishingly short shot still gets a moment on screen
+        // rather than vanishing the instant it is drawn.
+        let seconds = (tiles / EFFECT_TILES_PER_SECOND).max(0.05);
+        self.effects.push(FlyingEffect {
+            art: effect.art,
+            from: effect.from_point,
+            to: effect.to_point,
+            elapsed: Duration::ZERO,
+            duration: Duration::from_secs_f32(seconds),
+        });
     }
 
     /// Start (or retarget) the fake-health interpolation at a newly confirmed
@@ -457,6 +539,18 @@ pub struct HouseShape {
 pub struct PlayerMotion {
     network: NetworkMotion,
     game: GameMotion,
+    /// Whether the player is in the saddle, for [`GameMotion::start`]'s hold
+    /// alone — the one fact about appearance that is also a fact about
+    /// movement, since a mount changes how long a tile actually takes and not
+    /// merely how the step is drawn. `Crowd` is still the sole source of
+    /// everything else about how the body looks, per this struct's own doc.
+    ///
+    /// Stored here rather than threaded per transition: [`NetworkMotion::transitions`]
+    /// may queue several steps deep, and re-deriving a mount state per queued
+    /// entry would need a fact this core has nowhere to keep between packets
+    /// anyway. A saddle does not change mid-step, so the latest [`Crowd::command`](
+    /// crate::crowd::Crowd::command) call's answer is current for all of them.
+    mounted: bool,
 }
 
 /// Discrete, server-synchronised movement state.
@@ -563,16 +657,28 @@ impl PlayerMotion {
                 drawn: Gaze::on(at),
                 transition: None,
             },
+            mounted: false,
         }
     }
 
     /// Atomically accept one local protocol step and name the transition it
     /// starts.  The sequence survives until its matching acknowledgement.
-    pub fn accept_local(&mut self, body: link::Body, sequence: openshard_protocol::world::StepSequence) {
+    ///
+    /// `mounted` is restated on every step, the same way [`Crowd::command`](
+    /// crate::crowd::Crowd::command)'s own caller restates it: nothing here
+    /// keeps a subscription to the player's equipment, so a step is the only
+    /// moment this core is told.
+    pub fn accept_local(
+        &mut self,
+        body: link::Body,
+        sequence: openshard_protocol::world::StepSequence,
+        mounted: bool,
+    ) {
         let from = self.network.predicted;
         self.network.predicted = body.predicted;
         self.network.corrected = false;
         self.network.pending.push_back(PendingStep { sequence });
+        self.mounted = mounted;
         self.start_transition(from, self.network.predicted);
         self.debug_assert_valid();
     }
@@ -739,8 +845,12 @@ impl PlayerMotion {
             let Some(next) = self.network.transitions.front().copied() else {
                 break;
             };
-            self.game
-                .start(next.from.position, next.to.position, next.to.facing.running);
+            self.game.start(
+                next.from.position,
+                next.to.position,
+                next.to.facing.running,
+                self.mounted,
+            );
             if remaining.is_zero() {
                 break;
             }
@@ -808,7 +918,8 @@ impl PlayerMotion {
         }
         self.network.transitions.push_back(MotionTransition { from, to });
         if self.game.transition.is_none() {
-            self.game.start(from.position, to.position, to.facing.running);
+            self.game
+                .start(from.position, to.position, to.facing.running, self.mounted);
         } else {
             assert_eq!(
                 self.game, game_before,
@@ -853,7 +964,7 @@ impl PlayerMotion {
 }
 
 impl GameMotion {
-    fn start(&mut self, from: Point, to: Point, running: bool) {
+    fn start(&mut self, from: Point, to: Point, running: bool, mounted: bool) {
         if from == to {
             self.snap(to);
             return;
@@ -864,7 +975,7 @@ impl GameMotion {
             from: self.walked,
             to: Gaze::on(to),
             elapsed: Duration::ZERO,
-            takes: openshard_movement::step_hold(running),
+            takes: openshard_movement::step_hold(running, mounted),
         });
     }
 
@@ -1194,8 +1305,10 @@ mod tests {
             corpses: Vec::new(),
             items: Vec::new(),
             item_serials: Vec::new(),
+            item_houses: Vec::new(),
             multi_preview: Vec::new(),
             damage_numbers: Vec::new(),
+            effects: Vec::new(),
             health_estimates: BTreeMap::new(),
             crowd: Crowd::default(),
         };
@@ -1255,6 +1368,7 @@ mod tests {
                 corrected: false,
             },
             openshard_protocol::world::StepSequence(7),
+            false,
         );
         let before = motion.clone();
 
@@ -1282,6 +1396,7 @@ mod tests {
                 corrected: false,
             },
             openshard_protocol::world::StepSequence(1),
+            false,
         );
         motion.accept_local(
             link::Body {
@@ -1292,6 +1407,7 @@ mod tests {
                 corrected: false,
             },
             openshard_protocol::world::StepSequence(2),
+            false,
         );
 
         motion.accept_network(Some(link::Movement::Ack {
@@ -1322,6 +1438,7 @@ mod tests {
                 corrected: false,
             },
             openshard_protocol::world::StepSequence(1),
+            false,
         );
         motion.accept_local(
             link::Body {
@@ -1332,6 +1449,7 @@ mod tests {
                 corrected: false,
             },
             openshard_protocol::world::StepSequence(2),
+            false,
         );
         let rejected = openshard_client_net::walk::Predicted {
             position: Point::new(100, 100, 0),
@@ -1443,15 +1561,27 @@ mod tests {
             corrected: false,
         };
 
-        motion.accept_local(local(first, east), openshard_protocol::world::StepSequence(1));
+        motion.accept_local(
+            local(first, east),
+            openshard_protocol::world::StepSequence(1),
+            false,
+        );
         motion.advance(openshard_movement::WALK_HOLD / 2);
         let active = motion.game;
 
         // The direction change is a turn at the predicted endpoint, followed
         // by a step in that new direction. Both may arrive before another
         // frame, but neither may reset the eastbound crossing in progress.
-        motion.accept_local(local(first, north), openshard_protocol::world::StepSequence(2));
-        motion.accept_local(local(second, north), openshard_protocol::world::StepSequence(3));
+        motion.accept_local(
+            local(first, north),
+            openshard_protocol::world::StepSequence(2),
+            false,
+        );
+        motion.accept_local(
+            local(second, north),
+            openshard_protocol::world::StepSequence(3),
+            false,
+        );
 
         assert_eq!(motion.game, active);
         assert_eq!(motion.transition_from(), Some(start));
@@ -1475,7 +1605,11 @@ mod tests {
             corrected: false,
         };
 
-        motion.accept_local(local(end, east), openshard_protocol::world::StepSequence(1));
+        motion.accept_local(
+            local(end, east),
+            openshard_protocol::world::StepSequence(1),
+            false,
+        );
         // At display cadence the eased body deliberately trails the exact
         // crossing by several pixels. A hard camera follows this same gaze, so
         // snapping it here would be a camera jump of the same size.
@@ -1491,7 +1625,11 @@ mod tests {
         );
         let visual_before_turn = motion.game;
 
-        motion.accept_local(local(end, north), openshard_protocol::world::StepSequence(2));
+        motion.accept_local(
+            local(end, north),
+            openshard_protocol::world::StepSequence(2),
+            false,
+        );
 
         assert_eq!(
             motion.game, visual_before_turn,
@@ -1544,6 +1682,7 @@ mod tests {
                     corrected: false,
                 },
                 openshard_protocol::world::StepSequence(sequence),
+                false,
             );
         }
 
@@ -1578,6 +1717,7 @@ mod tests {
                 corrected: false,
             },
             openshard_protocol::world::StepSequence(17),
+            false,
         );
         online.accept_network(Some(link::Movement::Ack {
             sequence: openshard_protocol::world::StepSequence(17),

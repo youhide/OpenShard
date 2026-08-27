@@ -249,7 +249,7 @@ impl ServerPacket {
             Self::HarvestPreview(_) => <HarvestPreview as EncodePacket>::ID,
             Self::HarvestRefused(_) => <HarvestRefused as EncodePacket>::ID,
             Self::HarvestCompleted(_) => <HarvestCompleted as EncodePacket>::ID,
-            Self::Effect(_) => GraphicalEffect::ID,
+            Self::Effect(_) => <GraphicalEffect as EncodePacket>::ID,
             Self::HuedEffect(_) => HuedEffect::ID,
             Self::LoginDenied(_) => <LoginDenied as EncodePacket>::ID,
             Self::ShardList(_) => <ShardList as EncodePacket>::ID,
@@ -778,6 +778,11 @@ impl ServerPacket {
             <PlaySound as DecodePacket>::ID => decode_server(packet, version)
                 .map(Self::PlaySound)
                 .map_err(ServerDecodeError::PlaySound)?,
+            // The arrow's flight: `volleys` already sends it for a ranged shot,
+            // NPC or player, so this is the client's other half of that packet.
+            <GraphicalEffect as DecodePacket>::ID => decode_server(packet, version)
+                .map(Self::Effect)
+                .map_err(ServerDecodeError::Effect)?,
             <PlayMusic as DecodePacket>::ID => decode_server(packet, version)
                 .map(Self::PlayMusic)
                 .map_err(ServerDecodeError::PlayMusic)?,
@@ -876,6 +881,8 @@ pub enum ServerDecodeError {
     AttackTarget(DecodeError),
     /// `0xA1` did not decode.
     Health(DecodeError),
+    /// `0x70` did not decode.
+    Effect(DecodeError),
     /// `0x54` did not decode.
     PlaySound(DecodeError),
     /// `0x6D` did not decode.
@@ -995,6 +1002,7 @@ impl fmt::Display for ServerDecodeError {
             Self::WarMode(error) => ("0x72 war mode", error),
             Self::AttackTarget(error) => ("0xAA attack target", error),
             Self::Health(error) => ("0xA1 health bar", error),
+            Self::Effect(error) => ("0x70 graphical effect", error),
             Self::PlaySound(error) => ("0x54 play sound", error),
             Self::PlayMusic(error) => ("0x6D play music", error),
             Self::Animation(error) => ("0x6E animation", error),
@@ -2126,6 +2134,30 @@ mod tests {
                 "{packet:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_flying_arrow_round_trips_through_server_packet_decode() {
+        // `0x70` had an encoder and no decoder at all until this — a shard could
+        // send an archer's shot but no client (including this repo's own) could
+        // ever read it back. `HuedEffect`/`0xC0` deliberately stays undecoded:
+        // nothing sends it yet.
+        let serial = Serial::new(0x0000_002A).unwrap();
+        let target = Serial::new(0x0000_002B).unwrap();
+        let packet = ServerPacket::Effect(GraphicalEffect {
+            kind: crate::feedback::EffectKind::Moving,
+            from: Some(serial),
+            to: Some(target),
+            art: crate::wire::Graphic(0x0F42),
+            from_point: crate::world::Point::new(1000, 1000, 0),
+            to_point: crate::world::Point::new(1005, 1000, 0),
+            speed: 18,
+            duration: 1,
+            fixed_direction: false,
+            explode: false,
+        });
+        let bytes = packet.encode(version());
+        assert_eq!(ServerPacket::decode(&bytes, version()), Ok(Some(packet)));
     }
 
     #[test]

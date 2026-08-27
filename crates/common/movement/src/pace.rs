@@ -36,6 +36,16 @@ pub const RUN_INTERVAL: Duration = Duration::from_millis(100);
 /// a long gallop.
 pub const MOUNTED_RUN_INTERVAL: Duration = Duration::from_millis(50);
 
+/// How long one step actually takes, mounted and running — the real gap
+/// [`MOUNTED_RUN_INTERVAL`] floors, the way [`RUN_HOLD`] is to [`RUN_INTERVAL`].
+///
+/// ServUO's `RunMount`, 100ms, and exactly half [`RUN_HOLD`]: a gallop crosses
+/// a tile in the time an on-foot run crosses half of one. A walking mount
+/// needs no constant of its own — ServUO's `WalkMount` equals its `RunFoot`,
+/// so [`RUN_HOLD`] already is a mounted walk's real gap, the same way
+/// [`WalkPace::allow`] charges the two the same [`RUN_INTERVAL`] floor.
+pub const MOUNTED_RUN_HOLD: Duration = Duration::from_millis(2 * MOUNTED_RUN_INTERVAL.as_millis() as u64);
+
 /// How long one step actually takes, on foot, at a walk.
 ///
 /// [`WALK_INTERVAL`] twice, and derived from it rather than written out: the
@@ -65,8 +75,17 @@ pub const RUN_HOLD: Duration = Duration::from_millis(2 * RUN_INTERVAL.as_millis(
 /// deterministic walk oracle.  Server acknowledgement latency is deliberately
 /// absent: the client starts a predicted step now, and an answer only confirms
 /// it or corrects it later.
-pub const fn step_hold(running: bool) -> Duration {
-    if running { RUN_HOLD } else { WALK_HOLD }
+///
+/// `mounted` picks among the four real rates [`MOUNTED_RUN_HOLD`] documents:
+/// a saddle halves the ordinary hold at a run, and at a walk it already
+/// matches the on-foot run — so a mounted walk reuses [`RUN_HOLD`] rather
+/// than naming a fifth constant equal to a fourth.
+pub const fn step_hold(running: bool, mounted: bool) -> Duration {
+    match (mounted, running) {
+        (true, true) => MOUNTED_RUN_HOLD,
+        (true, false) | (false, true) => RUN_HOLD,
+        (false, false) => WALK_HOLD,
+    }
 }
 
 /// How far a nominal step has advanced, clamped at its destination.
@@ -303,12 +322,27 @@ mod tests {
         assert_eq!(WALK_HOLD.as_millis(), 400, "ServUO WalkFoot");
         assert_eq!(RUN_HOLD.as_millis(), 200, "ServUO RunFoot");
         assert_eq!(RUN_HOLD * 2, WALK_HOLD, "a run is a walk doubled");
+        assert_eq!(MOUNTED_RUN_HOLD.as_millis(), 100, "ServUO RunMount");
+        assert_eq!(MOUNTED_RUN_HOLD * 2, RUN_HOLD, "a gallop is a run doubled");
+    }
+
+    #[test]
+    fn a_mounted_walk_keeps_the_run_holds_pace() {
+        // ServUO's `WalkMount` equals its `RunFoot`: a horse at a walk is drawn
+        // no slower than a person at a run, the same equivalence
+        // `a_walking_mount_earns_the_running_rate` asserts for the pace budget.
+        assert_eq!(step_hold(false, true), RUN_HOLD);
     }
 
     #[test]
     fn nominal_step_progress_is_constant_and_shared_by_the_client_and_its_oracle() {
-        assert_eq!(step_hold(false), WALK_HOLD);
-        assert_eq!(step_hold(true), RUN_HOLD);
+        assert_eq!(step_hold(false, false), WALK_HOLD);
+        assert_eq!(step_hold(true, false), RUN_HOLD);
+        assert_eq!(
+            step_hold(true, true),
+            MOUNTED_RUN_HOLD,
+            "a gallop is the fastest hold"
+        );
         assert_eq!(step_progress(Duration::ZERO, WALK_HOLD), 0.0);
         assert_eq!(step_progress(WALK_HOLD / 4, WALK_HOLD), 0.25);
         assert_eq!(step_progress(WALK_HOLD, WALK_HOLD), 1.0);

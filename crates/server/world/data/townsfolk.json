@@ -186,7 +186,9 @@
       { "graphic": 4130, "amount": 20, "price": 2, "name": "fletcher tools" },
       { "graphic": 3920, "amount": 20, "price": 55, "name": "crossbow" },
       { "graphic": 5117, "amount": 20, "price": 55, "name": "heavy crossbow" },
-      { "graphic": 5042, "amount": 20, "price": 40, "name": "bow" }
+      { "graphic": 5042, "amount": 20, "price": 40, "name": "bow" },
+      { "graphic": 3903, "amount": 500, "price": 2, "name": "arrows" },
+      { "graphic": 7163, "amount": 500, "price": 2, "name": "bolts" }
     ],
     "butcher": [
       { "graphic": 2425, "amount": 20, "price": 7, "name": "bacon" },

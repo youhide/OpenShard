@@ -30,6 +30,7 @@ use crate::atlas::{AtlasPixel, StaticArt};
 use crate::camera::{Camera, RealPixel, ViewPixel};
 use crate::cutaway::Cutaway;
 use crate::depth;
+use crate::gump::GumpPixel;
 use crate::sprite::SpriteQuad;
 use crate::statics::{Placed, on_screen, place_cutaway, placed_rect, quad_of};
 
@@ -389,6 +390,34 @@ fn place<'a>(
     )
 }
 
+/// Where the pointer took hold of a ground sprite, in gump-art pixels.
+///
+/// The world and cursor preview use the same static art, but the world is
+/// transformed by camera zoom and the preview by interface scale. Mapping the
+/// picked real pixel through both keeps its art texel under the pointer after a
+/// lift.
+#[must_use]
+pub fn grab_at<'a>(
+    item: &GroundItem,
+    camera: &Camera,
+    tiledata: &TileData,
+    animations: &StaticAnimations,
+    atlas: impl Into<StaticArt<'a>>,
+    cutaway: &Cutaway,
+    cursor: RealPixel,
+    gump_scale: f32,
+) -> Option<GumpPixel> {
+    // Use the drawing path's placement: a pile's displayed graphic and an
+    // animated item's current frame must not drift from the picture picked.
+    let placed = place(item, camera, tiledata, animations, atlas, cutaway)?;
+    let top_left = camera.to_viewport_exact(placed.at);
+    let scale = gump_scale.max(f32::MIN_POSITIVE);
+    Some(GumpPixel::new(
+        ((cursor.x as f32 - top_left.x) / scale).round() as i32,
+        ((cursor.y as f32 - top_left.y) / scale).round() as i32,
+    ))
+}
+
 /// Where each counted pile's digits hang, and what they say.
 ///
 /// The [`crate::text::Label`] anchor for every item [`stack_label`] gives a
@@ -648,6 +677,37 @@ mod tests {
             (quads.quads[0].rect.width, quads.quads[0].rect.height),
             (30.0, 50.0)
         );
+    }
+
+    #[test]
+    fn a_ground_grab_keeps_the_exact_picked_texel_at_the_cursor() {
+        let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
+        let graphic = Graphic(0x0EED);
+        let item = GroundItem {
+            amount: ItemAmount::ONE,
+            at: Point::new(100, 100, 0),
+            graphic,
+            hue: Hue::NONE,
+        };
+        let atlas = atlas(graphic, 30, 50);
+        let sprite = atlas.sprite(graphic).expect("packed");
+        let top_left = camera.to_viewport_exact(stand_on(&camera, item.at, &sprite));
+
+        let grab = grab_at(
+            &item,
+            &camera,
+            &TileData::empty(),
+            &StaticAnimations::default(),
+            &atlas,
+            &Cutaway::OPEN,
+            RealPixel::new(top_left.x.round() as i32 + 24, top_left.y.round() as i32 + 18),
+            2.0,
+        )
+        .expect("drawn art has a placement");
+
+        // A preview gump pixel is two real display pixels here. Its texel at
+        // `(12, 9)` consequently returns to the exact real cursor position.
+        assert_eq!(grab, GumpPixel::new(12, 9));
     }
 
     /// A pile's count hangs from the top edge of its own picture, centred.

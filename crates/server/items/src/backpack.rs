@@ -14,6 +14,11 @@ use openshard_protocol::wire::{Graphic, Hue};
 /// The paperdoll layer a backpack is worn on. ServUO's `Layer.Backpack`.
 pub const BACKPACK_LAYER: Layer = Layer(0x15);
 
+/// The world art of the ordinary backpack.
+pub const BACKPACK_GRAPHIC: Graphic = Graphic(0x0E75);
+/// The container gump the client uses for an ordinary backpack.
+pub const BACKPACK_GUMP: Graphic = Graphic(0x003C);
+
 /// The container a mobile wears as its backpack, if it has one.
 ///
 /// A mobile without one is not an error: a creature has no pack, and a reward or
@@ -57,12 +62,60 @@ pub fn give_to_backpack(
             return false;
         }
     }
-    // Coins are currency rather than discrete loot: a one-coin reward still
-    // belongs on the existing pile even when its source omitted the flag.
-    if stackable || graphic == GOLD_GRAPHIC {
+    // Currency and ammunition still belong on an existing pile when their
+    // source omitted the flag (for example, a legacy one-arrow save).
+    if stackable || intrinsically_stackable(graphic) {
         crate::give(state, backpack, graphic, hue, u32::from(amount));
     } else {
         crate::place_one(state, backpack, graphic, hue, amount);
+    }
+    true
+}
+
+/// Create one or more empty containers in a mobile's backpack.
+///
+/// A container cannot go through [`give_to_backpack`]: that path deliberately
+/// creates a bare item from a graphic.  Keeping this separate means the staff
+/// catalogue's backpack is a real bag rather than an inert `0x0E75` picture.
+/// The same capacity check applies before any item is made.
+pub fn give_containers_to_backpack(
+    state: &mut WorldState,
+    mobile: Serial,
+    graphic: Graphic,
+    gump: Graphic,
+    hue: Hue,
+    amount: u16,
+) -> bool {
+    if amount == 0 {
+        return true;
+    }
+    let Some(backpack) = backpack_of(state, mobile) else {
+        return false;
+    };
+    let Some(owner) = state.registry.entity_of(mobile) else {
+        return false;
+    };
+    let each = u32::from(state.tiles().item_weight(graphic.0)) * 100;
+    let stones = u16::try_from(each.saturating_mul(u32::from(amount)) / 100).unwrap_or(u16::MAX);
+    if crate::check_hold(state, owner, backpack, usize::from(amount), stones).is_some() {
+        return false;
+    }
+
+    for _ in 0..amount {
+        let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
+            warn!("out of item serials; container was not created");
+            return false;
+        };
+        state.registry.insert(entity, Drawn { id: graphic, hue });
+        state.registry.insert(entity, Container { gump });
+        let contained = Contained {
+            container: backpack,
+            position: GumpPoint::new(60, 60),
+            grid: GridSlot(crate::item_count(state, backpack)),
+        };
+        establish_item_location(state, entity, ItemLocation::contained(contained))
+            .expect("a newly created container has one valid parent");
+        tell_watchers_updated(state, backpack, entity);
     }
     true
 }
@@ -87,9 +140,13 @@ fn room_for(
     amount: u16,
     stackable: bool,
 ) -> bool {
-    let merges = (stackable || graphic == GOLD_GRAPHIC)
+    let merges = (stackable || intrinsically_stackable(graphic))
         && contained_items(state, backpack).any(|(entity, _)| {
-            state.registry.has::<Stackable>(entity)
+            (state.registry.has::<Stackable>(entity)
+                || state
+                    .registry
+                    .get::<Drawn>(entity)
+                    .is_some_and(|drawn| intrinsically_stackable(drawn.id)))
                 && state
                     .registry
                     .get::<Drawn>(entity)

@@ -1529,15 +1529,29 @@ impl WorldView {
             }
             // Mobiles walking out of range and items being picked up arrive the
             // same way — the client does not distinguish, it just forgets the
-            // serial. Only one of the three places can ever hold it: a serial is
-            // a mobile, or a ground item, or inside exactly one container.
+            // serial. **Every place this view can be holding it has to be asked**,
+            // and there are four that draw something: a mobile, a ground item,
+            // one container's contents, and a layer of somebody's outfit.
             //
             // The container arm is what makes an item picked *out* of a bag
             // leave the window it was drawn in — there is no "removed from
             // container" packet, a `0x1D` is the whole of it.
+            //
+            // The outfit arm is the same argument, and it was missing. There is
+            // no "take this off" packet either: a worn item that goes *somewhere*
+            // is unequipped by the packet announcing where it went — a `0x25`
+            // into a bag, a `0x2E` onto another layer, both of which call
+            // `remove_from_equipment` on the way past — but a worn item that
+            // simply ceases to exist is announced by a `0x1D` and nothing else.
+            // The shard has two such paths (`items::consume` for a worn thing
+            // eaten or broken where it sat, and `items::mounts`' dismount, which
+            // is a saddle that stops existing) and both left the item drawn on
+            // the body for ever. Riding was where it showed: the horse landed
+            // beside its rider and the rider stayed in the saddle.
             ServerPacket::Remove(remove) => {
                 let had_mobile = self.mobiles.remove(&remove.serial).is_some();
                 let had_item = self.items.remove(&remove.serial).is_some();
+                let had_worn = self.remove_from_equipment(remove.serial);
                 let mut was_held = false;
                 for held in self.contents.values_mut() {
                     let before = held.len();
@@ -1575,6 +1589,7 @@ impl WorldView {
                 let had_design = self.designs.remove(&remove.serial).is_some();
                 had_mobile
                     || had_item
+                    || had_worn
                     || was_held
                     || had_window
                     || had_corpse_equipment
@@ -2235,6 +2250,80 @@ mod tests {
             !view.apply(&ServerPacket::Remove(Remove { serial: item.serial })),
             "forgetting something already gone changes nothing"
         );
+    }
+
+    /// A worn item that stops existing is announced by a `0x1D` and nothing
+    /// else, so the outfit is one of the places a remove has to look.
+    ///
+    /// The two paths that reach it are `items::consume` — a worn thing eaten or
+    /// broken where it sat — and the dismount below. Neither sends anything
+    /// naming a *destination*, which is what the `0x25`/`0x2E` arms undress a
+    /// body by, so before this the item stayed drawn on the body for ever.
+    #[test]
+    fn a_remove_takes_a_worn_item_off_whoever_is_wearing_it() {
+        let mut view = WorldView::entered(start());
+        view.apply(&ServerPacket::MobileIncoming(MobileIncoming {
+            serial: other(),
+            body: Graphic(0x0190),
+            position: Point::new(1476, 1770, 20),
+            facing: Facing::walking(Direction::South),
+            hue: Hue::NONE,
+            flags: StatusFlags::NONE,
+            notoriety: Notoriety::Innocent,
+            equipment: vec![shirt()],
+        }));
+
+        assert!(view.apply(&ServerPacket::Remove(Remove {
+            serial: shirt().serial
+        })));
+        assert!(
+            view.mobiles
+                .get(&other())
+                .expect("still on screen")
+                .equipment
+                .is_empty(),
+            "the shirt stopped existing, so it stopped being worn"
+        );
+        assert!(
+            !view.apply(&ServerPacket::Remove(Remove {
+                serial: shirt().serial
+            })),
+            "forgetting something already gone changes nothing"
+        );
+    }
+
+    /// The whole of a dismount, as this end sees it: a `0x2E` put a saddle on
+    /// the mount layer, and a `0x1D` is the only thing that takes it off again.
+    ///
+    /// What `client/app` reads off this list is *whether the player is riding* —
+    /// the animation group, the mount drawn under them, and the pace a step is
+    /// asked at all come from the presence of `Layer::MOUNT`. Left behind, the
+    /// horse lands beside its rider and the rider stays in the saddle.
+    #[test]
+    fn a_saddle_is_taken_off_by_the_remove_that_ends_the_ride() {
+        let saddle = Equipment {
+            serial: Serial::new(0x4000_00C8).unwrap(),
+            graphic: Graphic(0x3E9F),
+            layer: openshard_protocol::wire::Layer::MOUNT,
+            hue: Hue::NONE,
+        };
+        let mut view = WorldView::entered(start());
+
+        assert!(view.apply(&ServerPacket::EquipUpdate(
+            openshard_protocol::items::EquipUpdate {
+                item: saddle.serial,
+                graphic: saddle.graphic,
+                layer: saddle.layer,
+                mobile: view.player.serial,
+                hue: saddle.hue,
+            }
+        )));
+        assert_eq!(view.player.equipment, vec![saddle], "in the saddle");
+
+        assert!(view.apply(&ServerPacket::Remove(Remove {
+            serial: saddle.serial
+        })));
+        assert!(view.player.equipment.is_empty(), "and back on foot");
     }
 
     fn paperdoll_of(serial: Serial) -> ServerPacket {

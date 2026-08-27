@@ -28,7 +28,7 @@ pub fn try_mount(state: &mut WorldState, player: EntityId, target: EntityId, tar
     let Some(&Body { id: body, hue }) = state.registry.get::<Body>(target) else {
         return false;
     };
-    let Some(mount_graphic) = mount_item_for(body) else {
+    let Some(mount_graphic) = openshard_protocol::mounts::mount_item_for(body) else {
         return false;
     };
     if state.registry.has::<Client>(target)
@@ -103,14 +103,15 @@ pub fn dismount(state: &mut WorldState, player: EntityId) {
     // the rider's own. It rode out as a `0x2E` (equipment is drawn as part of the
     // wearer's `0x78`, and never enters anyone's `seen`), so `forget` would find
     // nothing to remove and send no `0x1D`, leaving the rider looking mounted.
-    // The remove goes straight to the equip audience, the way `drag.rs` unequips
-    // a worn item; the client then drops the mount layer and redraws on foot.
+    //
+    // [`broadcast_unequip`] and not a copy of its body: it is the one mirror of
+    // [`broadcast_equip`], and this file used to spell the same loop out by hand
+    // — the way a second copy of a rule is always eventually the stale one.
+    // Taking a worn thing off is one act with one audience, whether it went into
+    // a bag, was eaten where it sat (`items::consume`) or was a saddle that
+    // stopped existing.
     if let Some(item_serial) = state.registry.serial_of(item) {
-        for watcher in equip_audience(state, player) {
-            if let Some(&Client { connection, .. }) = state.registry.get::<Client>(watcher) {
-                state.send_packet(connection, &ServerPacket::Remove(Remove { serial: item_serial }));
-            }
-        }
+        crate::equip::broadcast_unequip(state, item_serial, player);
     }
     despawn_item(state, item);
 

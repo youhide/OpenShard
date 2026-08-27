@@ -31,6 +31,7 @@ use openshard_client_render::mobiles;
 use openshard_client_render::radar::{RadarCache, RadarLodSelector, RadarWorkQueue};
 use openshard_protocol::direction::Facing;
 use openshard_protocol::serial::Serial;
+use openshard_protocol::wire::Layer;
 use openshard_protocol::world::Point;
 
 use crate::chat::Chat;
@@ -708,6 +709,10 @@ impl App {
                 sweep.server_updates.animations += 1;
                 true
             }
+            crate::link::Update::Effect(_) => {
+                sweep.server_updates.animations += 1;
+                true
+            }
             // And not the ground, nor the graph baked over it: neither is the
             // shard talking in the sense this counts. The ground arrives before
             // the zoom this soak counts traffic after, and the graph comes from a
@@ -889,6 +894,7 @@ impl App {
                 self.world.presentation.player.hue,
             );
             let equipment = std::mem::take(&mut self.world.presentation.player.equipment);
+            let mounted = equipment.iter().any(|layer| layer.layer == Layer::MOUNT);
             let war = self
                 .world
                 .authoritative
@@ -905,6 +911,7 @@ impl App {
                 motion.facing,
                 hue,
                 war,
+                mounted,
             );
             self.world.presentation.player.equipment = equipment;
             self.world.presentation.cutaway_at = motion.position;
@@ -952,6 +959,7 @@ impl App {
                 self.world.motion.set_local(step.to, step.facing);
                 let motion = self.world.motion.planning_state();
                 let equipment = std::mem::take(&mut self.world.presentation.player.equipment);
+                let mounted = equipment.iter().any(|layer| layer.layer == Layer::MOUNT);
                 self.world.presentation.player = self.world.presentation.crowd.snap(
                     self.world.me(),
                     motion.position,
@@ -959,6 +967,7 @@ impl App {
                     motion.facing,
                     self.world.presentation.player.hue,
                     war,
+                    mounted,
                 );
                 self.world.presentation.player.equipment = equipment;
             }

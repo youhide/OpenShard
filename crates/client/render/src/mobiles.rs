@@ -40,7 +40,7 @@ use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::{Graphic, Hue, Layer};
 use openshard_protocol::world::Point;
 use openshard_tiles::AnimId;
-use openshard_uofiles::anim::{AnimationFrameIndex, AnimationGroup};
+use openshard_uofiles::anim::{AnimationFrameIndex, AnimationGroup, BodyKind};
 use openshard_uofiles::equipconv::EquipConv;
 
 use std::rc::Rc;
@@ -154,6 +154,13 @@ pub struct EquipmentLayer {
     /// [`EquipConv`] has nothing to say about it — its own tiledata `AnimID`,
     /// not its wire graphic. [`EquipConv::resolve`] is keyed on this same
     /// number, not on the wire graphic either.
+    ///
+    /// [`Layer::MOUNT`] is the exception, and it is one of space rather than of
+    /// index: a mount is not drawn on the rider's frame at all, so what this
+    /// carries there is the *creature's* body id — read from the same
+    /// `anim.idx`, under the mount's own group, by [`mount_of`]. Where that
+    /// number comes from and why it is not the file's is `crowd::mount_picture`,
+    /// in `client/app`, which is where the wire's list becomes this one.
     pub graphic: AnimId,
     /// Its hue, or [`Hue::NONE`] for none.
     pub hue: Hue,
@@ -265,6 +272,9 @@ pub fn walked_offset(mobile: &Mobile) -> Vec2 {
 /// Also yields every equipment layer's *resolved* body-anim triple, so the
 /// atlas has what a worn item needs before [`collect`] asks for it — its own
 /// `AnimID` ordinarily, or [`EquipConv`]'s override where this body has one.
+/// And, for a mounted rider, the mount's own body under its own group — see
+/// [`mount_of`], whose key this is not: the mount plays a different group
+/// from the rider it is packed alongside.
 pub fn needed_animations(mobiles: &[Mobile], equip_conv: &EquipConv) -> Vec<crate::atlas::AnimationKey> {
     let mut wanted: Vec<crate::atlas::AnimationKey> = Vec::new();
     for mobile in mobiles {
@@ -281,6 +291,13 @@ pub fn needed_animations(mobiles: &[Mobile], equip_conv: &EquipConv) -> Vec<crat
             if let Some((graphic, _)) = worn_graphic(mobile, layer, equip_conv) {
                 wanted.push(crate::atlas::AnimationKey::new(graphic, mobile.group, direction));
             }
+        }
+        if let Some((mount_body, _, mount_group)) = mount_of(mobile) {
+            wanted.push(crate::atlas::AnimationKey::new(
+                mount_body,
+                mount_group,
+                direction,
+            ));
         }
     }
     wanted.sort_unstable();
@@ -301,9 +318,9 @@ pub fn needed_animations(mobiles: &[Mobile], equip_conv: &EquipConv) -> Vec<crat
 /// The order is [`crate::paperdoll::world_order`]'s — the reference's table,
 /// not the wire's arrival order. That table also drops two layers outright: the
 /// mount, which is a body of its own on the ground rather than a picture on
-/// this one, and the backpack, which the reference draws on a doll and never on
-/// a walking body (`Filter(order, includeBackpack: false, ...)` in
-/// `PaperdollOrder.BuildInWorld`).
+/// this one (see [`mount_of`], which draws it), and the backpack, which the
+/// reference draws on a doll and never on a walking body (`Filter(order,
+/// includeBackpack: false, ...)` in `PaperdollOrder.BuildInWorld`).
 ///
 /// Borrows the matching worn layers in their draw order. The fixed order table
 /// and the renderer both avoid allocation and never copy an `EquipmentLayer`
@@ -313,6 +330,70 @@ fn drawn_layers<'a>(mobile: &'a Mobile) -> impl Iterator<Item = &'a EquipmentLay
         openshard_uofiles::anim::is_female(mobile.body) || openshard_uofiles::anim::is_gargoyle(mobile.body);
     crate::paperdoll::world_ordered(&mobile.equipment, alt_torso, mobile.facing)
         .filter_map(move |layer| mobile.equipment.iter().find(|item| item.layer == layer))
+}
+
+/// Which of a mounted rider's three groups the horse under them is drawn from
+/// — [`mount_of`]'s bridge between the rider's own group numbering and the
+/// mount's completely different one, since nothing else here ever needs to
+/// name a stance apart from the group number that plays it.
+enum MountedStance {
+    Standing,
+    Walking,
+    Running,
+}
+
+/// The rider's mount, as a second body to draw beneath them — `None` for a
+/// mobile that either is not drawn from one of [`BodyKind::Human`]'s mounted
+/// groups or, despite that, carries no `Layer::MOUNT` item (a status the wire
+/// disagreed with itself about, no worse handled than any other absent frame).
+///
+/// A mount is never a picture riding the wearer's own frame the way a hat is
+/// — [`drawn_layers`] drops `Layer::MOUNT` from that list outright — because
+/// it is a whole second animated body. It shares the rider's [`Mobile::frame`]
+/// and [`Mobile::facing`] (the two play in lockstep: they are one server-side
+/// step, drawn as two sprites) but never the rider's *group* — a horse under
+/// a rider sitting the mounted stand is still an animal at its own
+/// [`BodyKind::standing`], not at the human numbering's 25.
+///
+/// Gated on the rider's group and not on the equipment list alone, so the two
+/// facts this crate is handed cannot fall out of step: `crowd.rs` sets the
+/// mounted group and equips the saddle together (`Tracked::mounted`), but the
+/// group is the one that says the atlas actually holds the seated pose, and a
+/// horse must not appear under a body drawn standing on its own two feet —
+/// mid-dismount, for the one frame between the item leaving and the group
+/// catching up, this returns `None` and the horse is simply not drawn.
+///
+/// No offset is applied to seat the rider higher than [`place`]'s ordinary
+/// anchor would put them: every mount this engine currently spawns
+/// ([`openshard_protocol::mounts`]) is an ordinary-height animal, and the
+/// mounted frames' own baked anchor already seats a rider correctly on one.
+/// The reference client's per-species pixel correction
+/// (`Mounts.cs`'s `OffsetY`, non-zero only for the unusually tall or short —
+/// a unicorn, a tiger) is a backlog entry for whenever such a mount exists
+/// here, not a silent approximation now.
+fn mount_of(mobile: &Mobile) -> Option<(Graphic, Hue, AnimationGroup)> {
+    let human = BodyKind::Human;
+    let stance = if Some(mobile.group) == human.standing_mounted() {
+        MountedStance::Standing
+    } else if Some(mobile.group) == human.walking_mounted() {
+        MountedStance::Walking
+    } else if Some(mobile.group) == human.running_mounted() {
+        MountedStance::Running
+    } else {
+        return None;
+    };
+    let saddle = mobile.equipment.iter().find(|item| item.layer == Layer::MOUNT)?;
+    if saddle.graphic == AnimId(0) {
+        return None;
+    }
+    let mount_body = Graphic(saddle.graphic.0);
+    let mount_kind = BodyKind::of(mount_body);
+    let group = match stance {
+        MountedStance::Standing => mount_kind.standing(),
+        MountedStance::Walking => mount_kind.walking(),
+        MountedStance::Running => mount_kind.running().unwrap_or_else(|| mount_kind.walking()),
+    };
+    Some((mount_body, saddle.hue, group))
 }
 
 /// What one worn layer draws with, and what hue — or `None` for a layer that
@@ -394,9 +475,21 @@ struct Placement {
 /// files hold no animation for is read under the one they do:
 /// `openshard_uofiles::anim::animation_body`, which is what draws a ghost. Every
 /// caller passes the key it packed with, so this never re-derives either.
-fn place(mobile: &Mobile, body: Graphic, camera: &Camera, atlas: &AnimAtlas) -> Option<Placement> {
+///
+/// `group` is likewise not always [`Mobile::group`]: every ordinary caller
+/// passes that field straight through, but a mounted rider's own mount plays
+/// its *own* group — an animal's ordinary [`BodyKind::standing`], never the
+/// human numbering the rider is drawn from — while still sharing the rider's
+/// frame and facing. See [`mount_of`].
+fn place(
+    mobile: &Mobile,
+    body: Graphic,
+    group: AnimationGroup,
+    camera: &Camera,
+    atlas: &AnimAtlas,
+) -> Option<Placement> {
     let (direction, mirrored) = openshard_uofiles::anim::facing(mobile.facing);
-    let key = FrameKey::new(AnimationKey::new(body, mobile.group, direction), mobile.frame);
+    let key = FrameKey::new(AnimationKey::new(body, group, direction), mobile.frame);
     let packed = atlas.frame(key)?;
 
     // Tiles and not the pixels it is between: the order steps once, at the tile
@@ -540,6 +633,7 @@ fn push_quads(
     let Some(placement) = place(
         mobile,
         openshard_uofiles::anim::animation_body(mobile.body),
+        mobile.group,
         camera,
         atlas,
     ) else {
@@ -547,6 +641,28 @@ fn push_quads(
     };
     let order = placement.order;
     let billboard = billboard_offset(mobile);
+    // The mount, if this body is drawn mounted — pushed *before* the rider so
+    // that the stable sort below keeps it behind: both share `order`, and a
+    // tie is won by whichever [`Vec`] position is later. See [`mount_of`] for
+    // why this is a whole second body rather than a layer over the rider's
+    // own frame.
+    if let Some((mount_body, mount_hue, mount_group)) = mount_of(mobile) {
+        if let Some(mount) = place(mobile, mount_body, mount_group, camera, atlas) {
+            out.push((
+                order,
+                SpriteQuad {
+                    rect: mount.rect,
+                    region: mount.region,
+                    depth: order.to_depth(base),
+                    hue: u32::from(hue.unwrap_or(mount_hue).0),
+                    place: crate::place::Place::of_mobile(mobile.at),
+                    twin: billboard,
+                    owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
+                    volumes: crate::impostor::Range::default(),
+                },
+            ));
+        }
+    }
     out.push((
         order,
         SpriteQuad {
@@ -569,7 +685,7 @@ fn push_quads(
         let Some((graphic, worn_hue)) = worn_graphic(mobile, layer, equip_conv) else {
             continue;
         };
-        let Some(worn) = place(mobile, graphic, camera, atlas) else {
+        let Some(worn) = place(mobile, graphic, mobile.group, camera, atlas) else {
             continue;
         };
         out.push((
@@ -687,13 +803,17 @@ pub fn pick_iter_with_interior<'a>(
         if !cutaway.shows_mobile(mobile.at.z) || !interior.is_none_or(|frame| frame.shows_at(mobile.at)) {
             continue;
         }
-        // The body first, then what it wears: any one of them is the creature.
+        // The body first, then what it wears, then the mount under it, if
+        // any: any one of them is the creature — see [`mount_of`]'s own note
+        // that a mounted rider is still picked as one body, never two.
         let body = openshard_uofiles::anim::animation_body(mobile.body);
-        let worn = drawn_layers(mobile)
-            .filter_map(|layer| worn_graphic(mobile, layer, equip_conv).map(|(graphic, _)| graphic));
+        let worn = drawn_layers(mobile).filter_map(|layer| {
+            worn_graphic(mobile, layer, equip_conv).map(|(graphic, _)| (graphic, mobile.group))
+        });
+        let mount = mount_of(mobile).map(|(mount_body, _, mount_group)| (mount_body, mount_group));
         let mut touched = None;
-        for graphic in std::iter::once(body).chain(worn) {
-            let Some(placement) = place(mobile, graphic, camera, atlas) else {
+        for (graphic, group) in std::iter::once((body, mobile.group)).chain(worn).chain(mount) {
+            let Some(placement) = place(mobile, graphic, group, camera, atlas) else {
                 continue;
             };
             if !opaque_under(&placement, atlas, in_view) {
@@ -759,6 +879,7 @@ pub fn screen_rect(mobile: &Mobile, camera: &Camera, atlas: &AnimAtlas) -> Optio
     let placement = place(
         mobile,
         openshard_uofiles::anim::animation_body(mobile.body),
+        mobile.group,
         camera,
         atlas,
     )?;
@@ -896,6 +1017,7 @@ pub fn opaque_mask(mobile: &Mobile, camera: &Camera, atlas: &AnimAtlas) -> Optio
     let placement = place(
         mobile,
         openshard_uofiles::anim::animation_body(mobile.body),
+        mobile.group,
         camera,
         atlas,
     )?;
@@ -929,6 +1051,7 @@ pub fn head_anchor(mobile: &Mobile, camera: &Camera, atlas: &AnimAtlas) -> Optio
     let placement = place(
         mobile,
         openshard_uofiles::anim::animation_body(mobile.body),
+        mobile.group,
         camera,
         atlas,
     )?;
@@ -1016,6 +1139,7 @@ mod tests {
         place(
             mobile,
             openshard_uofiles::anim::animation_body(mobile.body),
+            mobile.group,
             camera,
             atlas,
         )
@@ -1196,6 +1320,95 @@ mod tests {
             ),
             Some(MobileIndex::new(0)),
             "the robe's own pixels did not count as the creature",
+        );
+    }
+
+    /// A mounted rider's saddle equips like any other worn item, but it is not
+    /// drawn as one: [`mount_of`] turns it into a whole second body, packed and
+    /// drawn under its own group rather than the rider's.
+    #[test]
+    fn a_mounted_rider_draws_the_horse_beneath_them() {
+        let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
+        let atlas = AnimAtlas::pack([
+            (
+                // The rider: a human drawn from the mounted stand, 25.
+                FrameKey::new(
+                    AnimationKey::new(Graphic(400), AnimationGroup(25), AnimationDirection(0)),
+                    AnimationFrameIndex(0),
+                ),
+                AnimFrame {
+                    center_x: 12,
+                    center_y: -3,
+                    image: Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
+                },
+            ),
+            (
+                // The mount: an animal body at its own ordinary stand, 2 —
+                // never the rider's 25, which the numbering does not share.
+                FrameKey::new(
+                    AnimationKey::new(Graphic(200), AnimationGroup(2), AnimationDirection(0)),
+                    AnimationFrameIndex(0),
+                ),
+                AnimFrame {
+                    center_x: 22,
+                    center_y: 0,
+                    image: Image::new(44, 44, vec![Color16(0x7C00); 44 * 44]),
+                },
+            ),
+        ])
+        .expect("both frames fit");
+        let mobile = Mobile {
+            group: AnimationGroup(25),
+            equipment: vec![EquipmentLayer {
+                graphic: AnimId(200),
+                hue: Hue::NONE,
+                layer: Layer::MOUNT,
+            }]
+            .into(),
+            ..body_at(100, Direction::SouthEast)
+        };
+        assert_eq!(
+            needed_animations(std::slice::from_ref(&mobile), &no_equip()),
+            vec![
+                AnimationKey::new(Graphic(200), AnimationGroup(2), AnimationDirection(0)),
+                AnimationKey::new(Graphic(400), AnimationGroup(25), AnimationDirection(0)),
+            ],
+            "the mount's own group is packed alongside the rider's",
+        );
+        let quads = collect(
+            std::slice::from_ref(&mobile),
+            &camera,
+            &atlas,
+            &Cutaway::OPEN,
+            &no_equip(),
+            None,
+        );
+        assert_eq!(quads.len(), 2, "the horse and its rider, nothing else drawn");
+    }
+
+    /// A rider whose group has not caught up with a dropped saddle — the one
+    /// frame between the equipment leaving and [`Crowd::change_to`] landing on
+    /// the on-foot stand — draws no horse rather than a stale one.
+    #[test]
+    fn a_dropped_saddle_with_the_group_not_yet_caught_up_draws_no_horse() {
+        let mobile = Mobile {
+            group: AnimationGroup(4),
+            equipment: vec![EquipmentLayer {
+                graphic: AnimId(200),
+                hue: Hue::NONE,
+                layer: Layer::MOUNT,
+            }]
+            .into(),
+            ..body_at(100, Direction::SouthEast)
+        };
+        assert_eq!(
+            needed_animations(std::slice::from_ref(&mobile), &no_equip()),
+            vec![AnimationKey::new(
+                Graphic(400),
+                AnimationGroup(4),
+                AnimationDirection(0)
+            )],
+            "an on-foot stand packs no mount, whatever is still equipped",
         );
     }
 

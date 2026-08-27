@@ -50,6 +50,7 @@ pub mod debug;
 pub mod depth;
 pub mod doors;
 pub mod dump;
+pub mod effects;
 pub mod facing;
 pub mod follow;
 pub mod frame;

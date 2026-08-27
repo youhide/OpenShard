@@ -177,11 +177,19 @@ Four exist — `crafting`, `state`, `npc`, `world` — and are the pattern:
   not exist will not compile. What a runtime load would report on the first
   craft of the day, this reports before the crate builds.
 - **Invariants the data must satisfy are the script's job, not the data's.**
-  `build.rs` sorts `BODY_TYPES` and `MOUNTS` by id, because `body_type` binary-
-  searches them and a table sorted by hand decays the first time somebody
-  appends a row. The same script asserts there is no duplicate id — the case a
-  binary search would answer arbitrarily, and a `match` would answer with
-  whichever arm came first, so a creature quietly wears another one's name.
+  `build.rs` sorts `BODY_TYPES` by id, because `body_type` binary-searches it and
+  a table sorted by hand decays the first time somebody appends a row. The same
+  script asserts there is no duplicate id — the case a binary search would answer
+  arbitrarily, and a `match` would answer with whichever arm came first, so a
+  creature quietly wears another one's name.
+- **A hundred rows is the threshold, and the other side of it is a shared
+  module.** The thirty-row mount table came *back* out of `state/data/` when the
+  client turned out to need it too — a saddle on the wire is an item and the
+  thing drawn under the rider is a creature, and neither end can derive the other.
+  It is `openshard_protocol::mounts` now: small enough to read as source, and in
+  the crate both ends of the wire already share. The invariants did not go with
+  the `build.rs` — they became the module's own tests, which is what the rule
+  above is actually asking for.
 - **Prose stays in the source.** The doc comments for the generated items live
   in `build.rs`, not in the JSON: a data file is a poor place to explain why
   ServUO's `StatTotal` sums the *undivided* scales.

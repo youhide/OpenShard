@@ -499,7 +499,11 @@ pub fn give(
     // Every pile of the same art already in there, in registry order.
     let piles: Vec<EntityId> = contained_items(state, container)
         .filter(|(entity, _)| {
-            state.registry.has::<Stackable>(*entity)
+            (state.registry.has::<Stackable>(*entity)
+                || state
+                    .registry
+                    .get::<Drawn>(*entity)
+                    .is_some_and(|g| intrinsically_stackable(g.id)))
                 && state
                     .registry
                     .get::<Drawn>(*entity)
@@ -523,6 +527,9 @@ pub fn give(
         if moved > 0 {
             let total = amount_of(state, pile) + moved as u16;
             state.registry.insert(pile, Amount(total));
+            if intrinsically_stackable(graphic) {
+                state.registry.insert(pile, Stackable);
+            }
             tell_watchers_updated(state, container, pile);
             last = Some(pile);
             left -= moved;

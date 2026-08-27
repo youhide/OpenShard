@@ -1000,6 +1000,51 @@ Found while planning this, and not to be lost in it.
   frame, but "two things ask and one of them is redundant most of the time" is
   the shape of a rule nobody can state later. Each early return asking for its
   own frame would let the net go.
+- **A Wayland surface the compositor stops compositing can stop the state
+  clock too, and `watched()` cannot always see it in time.** Reproduced live
+  under Sway: moving the window to the scratchpad, or off to a workspace that
+  is not on screen, is more than `Occluded` — `Focused` and `Occluded` are
+  ordinary `WindowEvent`s, dispatched on the same wake as `RedrawRequested`,
+  and a compositor free to withhold the surface's frame callback is equally
+  free to sit on those two. `draw` is the only caller of `tick` while
+  `watched()` reads true, so a `next_tick` cadence that only asks for another
+  redraw waits on a callback the compositor has already stopped sending —
+  which is what a player saw as "the world doesn't live in a window without
+  focus, and I only hear the fight when I switch back". `about_to_wait` now
+  measures staleness against `App::last_advance` directly
+  (`STALLED_DRAW_TOLERANCE`, 250ms) and ticks regardless of what the flag says
+  once the gap is wider than a healthy frame — fixed, and it buys real time.
+  It does not buy all of it: on the same Sway session, `about_to_wait` itself
+  stopped firing at all some seconds into a fully hidden window — a stall one
+  level below `ControlFlow::WaitUntil`, inside winit's own Wayland/calloop
+  dispatch, that no flag this client holds can see or correct.
+
+  Tried, and ruled out: driving the loop by hand with
+  `EventLoopExtPumpEvents::pump_app_events` on an app-owned, aggressively short
+  timeout (50ms) instead of the blocking `run_app`. If the stall were
+  `run_app`'s own internal retry declining to return control, an outer bound
+  winit cannot see past would have forced a wake anyway — and for a while it
+  did, an explicit `Continue` every 50ms proving the pump itself is sound. But
+  the freeze recurred at the exact same place: one `pump_app_events` call, deep
+  in a single `RedrawRequested` dispatch, stopped returning at all, with our own
+  `draw` already back on the stack (bracketed with prints either side of
+  `get_current_texture` — both fired, fast, for the last frame that ever
+  presented) and nothing after it in this crate that blocks. So the hang is
+  inside winit's Wayland backend itself, past the point our code returns
+  control, and no timeout parameter we can pass reaches it. Bounding our own
+  wait does not help when the callback we handed winit is the thing that stops
+  coming back.
+
+  What is left, ranked: pin the exact winit version and platform combination
+  this needs (Sway/wlroots here; unconfirmed on X11, GNOME/Mutter, KDE/KWin,
+  Windows, macOS) and file it upstream with the repro above; try a winit major
+  bump once one exists, since `EventLoopProxy::send_event` becoming `wake_up`
+  is one sign this API area is still moving; or decouple the state clock from
+  winit's loop entirely — a thread of its own for `tick`, on the same footing
+  as the `shard` thread in `link.rs`, so a wedged render loop no longer takes
+  the world's clock down with it. The last one is the only option guaranteed
+  to work regardless of where the wedge turns out to live, and it is a real
+  redesign of this file, not a threshold.
 - **`Frame::wait` is a lower bound on what was spent waiting for the display.**
   It times `get_current_texture`, which is where `Fifo` blocks — but a backend is
   free to make `submit` or `present` block instead, and that time lands in the

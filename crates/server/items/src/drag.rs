@@ -127,7 +127,7 @@ pub fn pick_up(state: &mut WorldState, connection: ConnectionId, serial: RawSeri
             || state
                 .registry
                 .get::<Drawn>(item)
-                .is_some_and(|drawn| drawn.id == GOLD_GRAPHIC);
+                .is_some_and(|drawn| intrinsically_stackable(drawn.id));
         if amount > 0 && amount < total && stackable {
             // Normalise legacy gold while it participates, so the correction
             // survives persistence and every later stack operation.
@@ -176,7 +176,7 @@ pub fn pick_up(state: &mut WorldState, connection: ConnectionId, serial: RawSeri
             || state
                 .registry
                 .get::<Drawn>(item)
-                .is_some_and(|drawn| drawn.id == GOLD_GRAPHIC);
+                .is_some_and(|drawn| intrinsically_stackable(drawn.id));
         if amount > 0 && amount < total && stackable {
             state.registry.insert(item, Stackable);
             spawn_contained_leftover(state, item, total - amount, contained);

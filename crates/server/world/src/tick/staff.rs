@@ -110,6 +110,9 @@ impl World {
                     self.state.refuse_harvest(actor);
                 }
             }
+            openshard_state::TargetPurpose::Carve { tool } => {
+                items::carve(&mut self.state, actor, tool, response.object);
+            }
             openshard_state::TargetPurpose::GuildInvite => {
                 // Re-checked here: the cursor outlives the click that raised it,
                 // and a leader who disbanded or was deposed while it was up
@@ -274,14 +277,26 @@ impl World {
                     let Some(serial) = self.state.registry.serial_of(actor) else {
                         return;
                     };
-                    if items::give_to_backpack(
-                        &mut self.state,
-                        serial,
-                        item.graphic,
-                        item.hue,
-                        item.amount,
-                        item.stackable,
-                    ) {
+                    let created = if item.graphic == items::BACKPACK_GRAPHIC {
+                        items::give_containers_to_backpack(
+                            &mut self.state,
+                            serial,
+                            item.graphic,
+                            items::BACKPACK_GUMP,
+                            item.hue,
+                            item.amount,
+                        )
+                    } else {
+                        items::give_to_backpack(
+                            &mut self.state,
+                            serial,
+                            item.graphic,
+                            item.hue,
+                            item.amount,
+                            item.stackable,
+                        )
+                    };
+                    if created {
                         gm::notify(
                             &mut self.state,
                             actor,

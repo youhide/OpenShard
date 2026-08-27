@@ -84,6 +84,9 @@ pub fn equipped_weapon(state: &WorldState, mobile: EntityId) -> Option<WeaponDat
             miss_sound: base.map_or(0, |weapon| weapon.miss_sound),
             is_axe: base.is_some_and(|weapon| weapon.is_axe),
             hands: base.and_then(|weapon| weapon.hands),
+            ammo: base.and_then(|weapon| weapon.ammo),
+            effect_art: base.and_then(|weapon| weapon.effect_art),
+            range: base.and_then(|weapon| weapon.range),
         }),
         None => base,
     }

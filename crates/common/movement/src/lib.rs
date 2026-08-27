@@ -74,7 +74,8 @@ pub use detour::{Around, Detour, Leeway, Step};
 pub use footing::{Bodies, Footing};
 pub use navigation::{COARSE_MIN_DISTANCE, LongExit, NavigationGraph, find_long_path, search_long_path};
 pub use pace::{
-    Pace, RUN_HOLD, RUN_INTERVAL, WALK_BUFFER, WALK_HOLD, WALK_INTERVAL, WalkPace, step_hold, step_progress,
+    MOUNTED_RUN_HOLD, Pace, RUN_HOLD, RUN_INTERVAL, WALK_BUFFER, WALK_HOLD, WALK_INTERVAL, WalkPace,
+    step_hold, step_progress,
 };
 pub(crate) use path::{Effort, Rigour, debug_enabled, find_path_toward_within, find_path_within};
 pub use path::{PathSearch, SearchExit, Weight, destination_place, find_path, find_path_toward, search_path};

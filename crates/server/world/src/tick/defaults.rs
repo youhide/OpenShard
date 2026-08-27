@@ -11,12 +11,9 @@ pub const TICK_INTERVAL: Duration = Duration::from_millis(25);
 
 /// A human male body.
 pub(super) const BODY_HUMAN_MALE: Graphic = Graphic(0x0190);
-/// The graphic and container gump of a starting backpack. The gump `0x003C` is
-/// the bag window the client draws when it is opened; the layer it rides on is
-/// `openshard_items::BACKPACK_LAYER`, which was written out in five places
-/// across two crates until N4 — see `docs/protocol_newtypes.md`.
-pub(super) const BACKPACK_GRAPHIC: Graphic = Graphic(0x0E75);
-pub(super) const BACKPACK_GUMP: Graphic = Graphic(0x003C);
+/// The graphic and gump of a starting backpack.  They belong to `items`, where
+/// staff-created backpacks use the same pair.
+pub(super) use openshard_items::{BACKPACK_GRAPHIC, BACKPACK_GUMP};
 /// The skin hue a character gets when nothing else chose one — the same one
 /// Sphere hands a body with no stored colour.
 pub(super) const DEFAULT_HUE: u16 = 0x83EA;

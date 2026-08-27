@@ -380,6 +380,24 @@ what survives. The rule: keep the graphic the shard sent, and derive the drawn
 one where it is drawn (`GroundItem::displayed`). Verified by reading the four
 entries out of `tiledata.mul` by hand at the offsets below.
 
+**A mount item's tiledata `AnimID` names an animation that does not exist, and
+the mount table is not optional.** Every other worn layer draws from its own
+tiledata `AnimID`, so a saddle looks like it should be no different. It is not:
+in the `0x3E90`–`0x3EBF` block a stock 7.0 install still carries the ship
+leftovers the ids were minted over. `0x3E9F` — the ordinary brown horse, the
+commonest mount on any shard — is *named* "ship", sits on layer `0x11`, and
+carries `AnimID` 820; `anim.idx`'s entry for body 820 is `0xFFFFFFFF`, no
+animation at all. A client that believes the file packs nothing, places nothing,
+and draws a rider gliding along with clear ground underneath — which looks like a
+renderer bug and is a data one. Neighbouring rows are wrong in the same way and
+one, `0x3EA4` (the frenzied ostard, `AnimID` 218 = `0x00DA`), is accidentally
+right, which is worse: a spot check can pass. So the item→body mapping is a
+table, `openshard_protocol::mounts`, ported from ServUO's `BaseMount` subclasses
+— and the reference client carries the same table for the same reason
+(`Game/Data/Mounts.cs`), where it is worth noting that its own copy *omits*
+`0x3E9F` and falls through to the very `AnimID` that is a lie. Ours holds all
+thirty rows and both directions of them.
+
 **Read a tiledata answer straight out of the file before believing a layer is
 wrong.** The file is 3,188,736 bytes, which is the High Seas layout exactly —
 41 bytes a static entry, 8-byte flags — and that arithmetic is what says the

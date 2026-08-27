@@ -435,9 +435,11 @@ impl World {
             // an anonymous one.
             corpse: registry.get::<Corpse>(item).map(|story| CorpseData {
                 owner: story.owner.clone(),
+                player: story.player,
                 killer: story.killer.clone(),
                 examined_by: story.examined_by.clone(),
                 looters: story.looters.clone(),
+                carved: story.carved,
                 // The half of the picture `amount` cannot carry — see
                 // `CorpseData::facing`. A corpse with no `CorpseBody` is the
                 // bodiless sack `lay_corpse` lays, which faces nowhere.
@@ -1796,7 +1798,7 @@ impl World {
         let Some(rider) = self.state.registry.entity_of(rider_serial) else {
             return;
         };
-        let Some(body) = openshard_state::components::mount_body_for(graphic) else {
+        let Some(body) = openshard_protocol::mounts::mount_body_for(graphic) else {
             return;
         };
         let Ok((mount, _)) = self.state.registry.spawn_with_serial(SerialKind::Mobile) else {
@@ -1825,9 +1827,11 @@ fn restored_facing(record: &ItemRecord) -> Direction {
 fn corpse_from(story: &CorpseData) -> Corpse {
     Corpse {
         owner: story.owner.clone(),
+        player: story.player,
         killer: story.killer.clone(),
         examined_by: story.examined_by.clone(),
         looters: story.looters.clone(),
+        carved: story.carved,
         equipment: story
             .equipment
             .iter()

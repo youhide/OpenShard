@@ -173,6 +173,9 @@ impl World {
             return;
         };
         match graphic {
+            _ if items::is_carving_tool(graphic) => {
+                items::use_carving_tool(&mut self.state, player, item);
+            }
             _ if openshard_state::instrument::instrument_data(graphic).is_some() => {
                 skills::play_instrument(&mut self.state, player, item);
             }

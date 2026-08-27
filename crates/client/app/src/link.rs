@@ -32,7 +32,8 @@ use openshard_protocol::chunks::{
     Changes, ChangesReply, ChangesRequest, PublishNotice, WorldNotice, WorldRevision,
 };
 use openshard_protocol::feedback::{
-    Animation, HarvestCompleted, HarvestRefused, HarvestToolVisual, NewAnimation, SwingTiming,
+    Animation, GraphicalEffect, HarvestCompleted, HarvestRefused, HarvestToolVisual, NewAnimation,
+    SwingTiming,
 };
 use openshard_protocol::gump::GumpId;
 use openshard_protocol::gump::GumpPoint;
@@ -189,6 +190,8 @@ pub enum Update {
     Animation(Animation),
     /// The server asked one mobile to play a modern, body-agnostic animation.
     NewAnimation(NewAnimation),
+    /// A graphical effect — today, always an arrow or bolt in flight.
+    Effect(GraphicalEffect),
     /// The exact duration of the immediately following swing animation.
     SwingTiming(SwingTiming),
     /// A backpack harvesting tool to draw for the immediately following action.
@@ -1449,6 +1452,9 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                 }
                 if let openshard_protocol::server_packet::ServerPacket::NewAnimation(animation) = packet {
                     report(Update::NewAnimation(animation));
+                }
+                if let openshard_protocol::server_packet::ServerPacket::Effect(effect) = packet {
+                    report(Update::Effect(effect));
                 }
                 if let openshard_protocol::server_packet::ServerPacket::SwingTiming(timing) = packet {
                     report(Update::SwingTiming(timing));

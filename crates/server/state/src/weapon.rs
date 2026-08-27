@@ -27,6 +27,7 @@
 use crate::Skill;
 use openshard_config::CombatEra;
 use openshard_protocol::wire::{Graphic, Layer};
+use openshard_protocol::world::RangedRange;
 
 /// The paperdoll layer a one-handed weapon sits on (UO layer 1).
 pub const LAYER_ONE_HANDED: Layer = Layer(1);
@@ -177,6 +178,18 @@ pub struct WeaponData {
     pub miss_sound: u16,
     /// Whether Lumberjacking lends this weapon a damage bonus (an axe).
     pub is_axe: bool,
+    /// The ammunition this weapon fires, one graphic per shot. `None` for every
+    /// melee row — a melee weapon has no ammunition concept at all, which is the
+    /// case `Option` exists for, not "unknown."
+    pub ammo: Option<Graphic>,
+    /// The graphic the shot itself is drawn with while it crosses the gap —
+    /// ServUO's per-weapon `EffectID` (the bow fires `0x0F42`, both crossbows fire
+    /// `0x1BFE`). `None` for melee, matching [`ammo`](Self::ammo).
+    pub effect_art: Option<Graphic>,
+    /// How far this weapon reaches — ServUO's `DefMaxRange` (the bow's ten tiles,
+    /// eight for both crossbows: a bow outranges a crossbow, so this is not one
+    /// shared constant). `None` for melee, matching [`ammo`](Self::ammo).
+    pub range: Option<RangedRange>,
     /// The paperdoll layer this weapon class insists on, where it does not trust
     /// `tiledata.mul` — `None` for the great majority, which take the client's
     /// byte.
@@ -330,10 +343,22 @@ static WEAPONS: &[WeaponData] = &[
     w(0x1403, FENCING, PIERCING, 50,  4, 32, 55, 10, 13, 200, 0x238, false), // Short spear
     w(0x0E87, FENCING, PIERCING, 45,  4, 16, 43, 12, 15, 250, 0x238, false), // Pitchfork
     // -- Archery (BaseRanged) -----------------------------------------------------
-    both_hands(w(0x13B2, ARCHERY, RANGED,   20,  9, 41, 25, 25, 25, 425, 0x238, false)), // Bow
-    both_hands(w(0x0F50, ARCHERY, RANGED,   18,  8, 43, 24, 18, 24, 450, 0x238, false)), // Crossbow
-    both_hands(w(0x13FD, ARCHERY, RANGED,   10, 11, 56, 22, 22, 22, 500, 0x238, false)), // Heavy crossbow
+    // Range is ServUO's `DefMaxRange`: the bow outreaches both crossbows.
+    both_hands(ranged(w(0x13B2, ARCHERY, RANGED,   20,  9, 41, 25, 25, 25, 425, 0x238, false), ARROW, ARROW_EFFECT, 10)), // Bow
+    both_hands(ranged(w(0x0F50, ARCHERY, RANGED,   18,  8, 43, 24, 18, 24, 450, 0x238, false), BOLT, BOLT_EFFECT, 8)), // Crossbow
+    both_hands(ranged(w(0x13FD, ARCHERY, RANGED,   10, 11, 56, 22, 22, 22, 500, 0x238, false), BOLT, BOLT_EFFECT, 8)), // Heavy crossbow
 ];
+
+/// Arrow — ServUO's `Arrow.cs` (`0x0F3F`), what the bow fires and what a shot
+/// spends from the shooter's own pack. Public so `combat` can tell an empty
+/// quiver from an empty case of bolts when a shot cannot be fired.
+pub const ARROW: Graphic = Graphic(0x0F3F);
+/// Bolt — ServUO's `Bolt.cs` (`0x1BFB`), what both crossbows fire.
+pub const BOLT: Graphic = Graphic(0x1BFB);
+/// The bow's shot in flight — ServUO's `Bow.EffectID`.
+const ARROW_EFFECT: Graphic = Graphic(0x0F42);
+/// Both crossbows' shot in flight — ServUO's `Crossbow`/`HeavyCrossbow.EffectID`.
+const BOLT_EFFECT: Graphic = Graphic(0x1BFE);
 
 // Short names for the two enum columns, so the table above stays one weapon per
 // readable line. They exist for the table and nothing else.
@@ -361,6 +386,16 @@ const fn both_hands(mut weapon: WeaponData) -> WeaponData {
 /// class *insists*, and a future tiledata that disagrees should not change it.
 const fn one_hand(mut weapon: WeaponData) -> WeaponData {
     weapon.hands = Some(LAYER_ONE_HANDED);
+    weapon
+}
+
+/// Attach the ammunition, flight graphic and reach to a `Ranged`-kind row — the
+/// three facts that only apply to a fired weapon, kept out of `w()`'s already-long
+/// argument list the way `both_hands`/`one_hand` keep the hand override out of it.
+const fn ranged(mut weapon: WeaponData, ammo: Graphic, effect_art: Graphic, range: u8) -> WeaponData {
+    weapon.ammo = Some(ammo);
+    weapon.effect_art = Some(effect_art);
+    weapon.range = RangedRange::new(range);
     weapon
 }
 
@@ -396,6 +431,9 @@ const fn w(
         miss_sound,
         is_axe,
         hands: None,
+        ammo: None,
+        effect_art: None,
+        range: None,
     }
 }
 
@@ -482,6 +520,43 @@ mod tests {
         assert_eq!(kind(0x0F5C), WeaponKind::Bashing); // mace
         assert_eq!(kind(0x1401), WeaponKind::Piercing); // kryss
         assert_eq!(kind(0x13B2), WeaponKind::Ranged); // bow
+    }
+
+    #[test]
+    fn only_the_ranged_rows_carry_ammo_a_flight_graphic_and_a_reach() {
+        let row = |graphic: u16| weapon_data(Graphic(graphic)).expect("in the table");
+        let bow = row(0x13B2);
+        assert_eq!(bow.ammo, Some(Graphic(0x0F3F)), "bow fires arrows");
+        assert_eq!(bow.effect_art, Some(Graphic(0x0F42)), "bow's own flight graphic");
+        assert_eq!(
+            bow.range.map(RangedRange::get),
+            Some(10),
+            "bow outreaches a crossbow"
+        );
+        for graphic in [0x0F50, 0x13FD] {
+            // Crossbow, heavy crossbow: both fire bolts, not arrows, and reach less far.
+            let crossbow = row(graphic);
+            assert_eq!(
+                crossbow.ammo,
+                Some(Graphic(0x1BFB)),
+                "0x{graphic:04X} fires bolts"
+            );
+            assert_eq!(
+                crossbow.effect_art,
+                Some(Graphic(0x1BFE)),
+                "0x{graphic:04X}'s own flight graphic"
+            );
+            assert_eq!(
+                crossbow.range.map(RangedRange::get),
+                Some(8),
+                "0x{graphic:04X}'s reach"
+            );
+        }
+        // A melee row has no ammunition concept at all.
+        let sword = row(0x0F61);
+        assert_eq!(sword.ammo, None);
+        assert_eq!(sword.effect_art, None);
+        assert_eq!(sword.range, None);
     }
 
     #[test]

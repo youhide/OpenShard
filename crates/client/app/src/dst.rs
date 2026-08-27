@@ -243,7 +243,10 @@ impl Oracle {
             }
 
             let Some(direction) = held else { continue };
-            let takes = step_hold(running);
+            // The oracle walks a scripted body with no equipment to read, the
+            // same reason every `crowd.see`/`crowd.snap` call in this module
+            // states `false` for it too.
+            let takes = step_hold(running, false);
             // A turn costs nothing. It is a `0x02` of its own — turning is a
             // step in UO and the shard acks it — but it is not a *delay*: the
             // shard answers a turn before it charges the pace budget, so the
@@ -509,7 +512,7 @@ impl Sim {
         let mut crowd = Crowd::default();
         crowd.set_ease(ease);
         crowd.commanding(me());
-        let player = crowd.see(me(), START, BODY, facing, Hue::NONE, false);
+        let player = crowd.see(me(), START, BODY, facing, Hue::NONE, false, false);
         Self {
             now: Duration::ZERO,
             base: Instant::now(),
@@ -775,12 +778,24 @@ impl Sim {
             }
             // `App::entered`, for our own body.
             self.player = match corrected {
-                true => self
-                    .crowd
-                    .snap(me(), predicted.position, BODY, predicted.facing, Hue::NONE, false),
-                false => self
-                    .crowd
-                    .see(me(), predicted.position, BODY, predicted.facing, Hue::NONE, false),
+                true => self.crowd.snap(
+                    me(),
+                    predicted.position,
+                    BODY,
+                    predicted.facing,
+                    Hue::NONE,
+                    false,
+                    false,
+                ),
+                false => self.crowd.see(
+                    me(),
+                    predicted.position,
+                    BODY,
+                    predicted.facing,
+                    Hue::NONE,
+                    false,
+                    false,
+                ),
             };
             // `App::user_event`: a step arriving while nobody was moving finds
             // the animation clock armed at the standing rate, and the first
@@ -989,7 +1004,7 @@ impl MotionKernel {
     fn new(at: Point, facing: Facing) -> Self {
         let mut crowd = Crowd::default();
         crowd.commanding(me());
-        let player = crowd.see(me(), at, BODY, facing, Hue::NONE, false);
+        let player = crowd.see(me(), at, BODY, facing, Hue::NONE, false, false);
         Self {
             motion: PlayerMotion::new(at, facing),
             crowd,
@@ -998,7 +1013,7 @@ impl MotionKernel {
     }
 
     fn predict(&mut self, body: Body, sequence: openshard_protocol::world::StepSequence) {
-        self.motion.accept_local(body, sequence);
+        self.motion.accept_local(body, sequence, false);
         self.project();
     }
 

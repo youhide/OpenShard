@@ -1439,6 +1439,13 @@ pub enum TargetPurpose {
         /// while the cursor was up mines nothing.
         tool: EntityId,
     },
+    /// A bladed tool waiting for a corpse to carve. The tool is kept as an
+    /// entity and checked again when the click lands, so dropping it while the
+    /// cursor is up cannot still turn a carcass into resources.
+    Carve {
+        /// The dagger, knife, or cleaver that raised the cursor.
+        tool: EntityId,
+    },
     /// A guild leader's cursor, waiting for whoever is to be asked to join.
     ///
     /// Carries nothing: the guild is the one the clicker leads, and it is read

@@ -162,6 +162,13 @@ struct VertexOut {
     // stranger's alpha and answer about the atlas's packing.
     @location(10) @interpolate(flat) region: vec4<f32>,
     @location(11) @interpolate(flat) opacity: f32,
+    // [`SpriteQuad::with_screen_rotation`] borrows the twin word only for a
+    // `Place::NOWHERE` row, where a twin has no meaning. It is the clockwise
+    // rotation to undo while sampling the rotated picture's bounding quad.
+    @location(12) @interpolate(flat) rotation: f32,
+    // The bounding quad's dimensions before the rotation is undone. The atlas
+    // region gives the original picture's dimensions, not these expanded ones.
+    @location(13) @interpolate(flat) bound_size: vec2<f32>,
 };
 
 // Virtual pixels one unit of height lifts a sprite up the screen —
@@ -419,6 +426,10 @@ fn vs_main(
     out.hue = hue & 0xffffu;
     let encoded_opacity = (hue >> 16u) & 0xffu;
     out.opacity = select(1.0, f32(encoded_opacity) / 255.0, encoded_opacity != 0u);
+    // `Place::NOWHERE` is `(0, 128)`, not zeroed bytes: `Place::packed`
+    // offsets its zero height by 128 even when its kind is `Nothing`.
+    out.rotation = select(0.0, bitcast<f32>(twin), all(place == vec2<u32>(0u, 128u)));
+    out.bound_size = size;
     out.place = place;
     out.pixel_y = pixel.y;
     out.bottom_y = origin.y + size.y;
@@ -441,7 +452,28 @@ const HUE_PARTIAL_FLAG: u32 = 0x8000u;
 
 @fragment
 fn fs_main(in: VertexOut) -> FragmentOut {
-    let color = textureSample(atlas_texture, atlas_sampler, in.uv);
+    var uv = in.uv;
+    if in.rotation != 0.0 {
+        // `in.uv` first names a point in the enclosing axis-aligned bound.
+        // Turn it back into the original picture before sampling. Texture
+        // dimensions are the original sprite's on-screen dimensions here: the
+        // ordinary static path maps one atlas texel to one virtual pixel.
+        let bound = (in.uv - in.region.xy) / in.region.zw;
+        let point = (bound - vec2<f32>(0.5, 0.5)) * in.bound_size;
+        let sin_rotation = sin(in.rotation);
+        let cos_rotation = cos(in.rotation);
+        let original = vec2<f32>(
+            cos_rotation * point.x + sin_rotation * point.y,
+            -sin_rotation * point.x + cos_rotation * point.y,
+        );
+        let original_size = abs(in.region.zw) * vec2<f32>(textureDimensions(atlas_texture));
+        let source = original / original_size + vec2<f32>(0.5, 0.5);
+        if any(source < vec2<f32>(0.0, 0.0)) || any(source > vec2<f32>(1.0, 1.0)) {
+            discard;
+        }
+        uv = in.region.xy + source * in.region.zw;
+    }
+    let color = textureSample(atlas_texture, atlas_sampler, uv);
 
     // The sprite's shape. Discarding rather than blending is what keeps the
     // pass independent of draw order — a discarded fragment writes no depth

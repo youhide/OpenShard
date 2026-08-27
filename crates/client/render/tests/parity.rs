@@ -256,6 +256,7 @@ fn assemble_and_draw(
     let inputs = frame::Inputs {
         map,
         items,
+        drawn_items: items,
         camera,
         tiledata,
         animations,

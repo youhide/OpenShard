@@ -8,7 +8,7 @@
 //! Britannia that is not on this list is either a person or a monster.
 //!
 //! **Every rideable body is tamable**, and that half is derived rather than written
-//! twice: [`crate::components::mount_item_for`] already knows the thirty mounts, and
+//! twice: [`openshard_protocol::mounts::mount_item_for`] already knows the thirty mounts, and
 //! a horse you cannot tame is a horse nobody can have. What the table below adds is
 //! the creatures that are tamable and *not* rideable — the bears, the birds, the
 //! pack animals — plus a taming difficulty for the mounts, which the mount table has
@@ -41,7 +41,7 @@ pub fn tamable(body: Graphic) -> Option<Tamable> {
     }
     // Anything you can ride, you can tame — asked of the mount table by body, which
     // is the direction `mount_item_for` answers.
-    crate::components::mount_item_for(body).map(|_| Tamable {
+    openshard_protocol::mounts::mount_item_for(body).map(|_| Tamable {
         min_skill: MOUNT_MIN_SKILL,
         slots: FollowerSlots::ONE,
     })

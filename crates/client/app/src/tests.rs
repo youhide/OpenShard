@@ -429,6 +429,7 @@ fn the_group_packed_is_the_group_the_crowd_is_playing() {
         facing,
         Hue::NONE,
         false,
+        false,
     );
     // The snapshot the app would store in `self.world.presentation.player`: walking, because a
     // step had just landed when the packet was folded.
@@ -438,6 +439,7 @@ fn the_group_packed_is_the_group_the_crowd_is_playing() {
         Graphic(PLAYER),
         facing,
         Hue::NONE,
+        false,
         false,
     );
     let walking = stepped.group;
@@ -476,6 +478,7 @@ fn a_frame_snapshot_reuses_a_mobiles_equipment() {
         Graphic(400),
         Facing::walking(Direction::SouthEast),
         Hue::NONE,
+        false,
         false,
     );
     player.equipment = vec![openshard_client_render::mobiles::EquipmentLayer {
