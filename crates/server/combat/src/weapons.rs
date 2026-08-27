@@ -116,17 +116,28 @@ mod tests {
     use openshard_protocol::wire::Graphic;
     use openshard_state::weapon::{swing_base, weapon_data};
 
+    /// A count of tenths of a second, as the ticks it comes to.
+    ///
+    /// The formulas below answer in tenths and [`crate::swing_ticks`] converts;
+    /// the conversion is stated once here so the expectations are the *arithmetic*
+    /// and not the tick rate. Written out, they read 54 at the 50ms tick and 108
+    /// at the 25ms one, which is a test that has to be edited whenever the loop
+    /// changes and says nothing about the formula either time.
+    const fn tenths(count: u64) -> u64 {
+        count * openshard_state::TICKS_PER_SECOND / 10
+    }
+
     #[test]
     fn the_se_and_ml_formulas_match_their_arithmetic() {
         // Era 3 (SE), longsword aos_speed 30, dex 100, scale 80000:
-        // 80000/((100+100)·30) - 2 = 13 - 2 = 11 ticks → 11·10/4 = 27 tenths → 54.
-        assert_eq!(crate::swing_ticks(100, 30, 3, 80000), 54);
+        // 80000/((100+100)·30) - 2 = 13 - 2 = 11 ticks → 11·10/4 = 27 tenths.
+        assert_eq!(crate::swing_ticks(100, 30, 3, 80000), tenths(27));
         // Era 4 (ML), longsword ml_speed 350 (3.50s), dex 100 (scale ignored):
-        // 350·4/100 - 100/30 = 14 - 3 = 11 ticks → 27 tenths → 54.
-        assert_eq!(crate::swing_ticks(100, 350, 4, 0), 54);
+        // 350·4/100 - 100/30 = 14 - 3 = 11 ticks → 27 tenths.
+        assert_eq!(crate::swing_ticks(100, 350, 4, 0), tenths(27));
         // Era 0 floors at 5 tenths where pre-AoS (era 1) would go faster.
-        assert_eq!(crate::swing_ticks(255, 255, 0, 15000), 10); // 5 tenths ·2
-        assert!(crate::swing_ticks(255, 255, 1, 15000) < 10);
+        assert_eq!(crate::swing_ticks(255, 255, 0, 15000), tenths(5));
+        assert!(crate::swing_ticks(255, 255, 1, 15000) < tenths(5));
         // And the speed those formulas are fed comes from the era's own column.
         let sword = weapon_data(Graphic(0x0F61)).expect("longsword");
         assert_eq!(swing_base(sword, CombatEra::new(3)), 30);

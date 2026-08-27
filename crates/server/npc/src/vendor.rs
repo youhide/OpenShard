@@ -94,8 +94,9 @@ fn in_trade_range(state: &WorldState, player: EntityId, vendor: EntityId) -> boo
 }
 
 /// How long a bought-out shelf takes to refill, in ticks. ServUO's
-/// `BaseVendor.DelayRestock` is an hour of real time; at 20Hz that is this.
-pub const RESTOCK_TICKS: u64 = 60 * 60 * 20;
+/// `BaseVendor.DelayRestock` is an hour of real time, so this is that hour in
+/// whatever the tick rate happens to be.
+pub const RESTOCK_TICKS: u64 = 60 * 60 * openshard_state::TICKS_PER_SECOND;
 
 /// Fill a vendor's stock from a script's lines. See `Command::StockVendor`.
 /// Replaces nothing: lines add to whatever the crate already holds.

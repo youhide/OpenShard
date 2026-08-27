@@ -72,8 +72,12 @@ const CROWD_REACH: u32 = 32;
 ///
 /// Public for the same reason [`PATH_BUDGET`] is: the test that pins the
 /// blindness a kept route buys has to wait exactly this long for one to lapse,
-/// and a copy of `40` in the test would be a second place to change it.
-pub const REPATH_TICKS: u64 = 40;
+/// and a copy of the number in the test would be a second place to change it.
+///
+/// Two seconds times the tick rate rather than the tick count it comes to: it is
+/// a span of real time, and the bare `40` it used to be became one second the
+/// day the tick halved.
+pub const REPATH_TICKS: u64 = 2 * openshard_state::TICKS_PER_SECOND;
 
 /// How far the quarry may drift from a route's goal before the route is stale.
 const GOAL_DRIFT: u32 = 2;
@@ -113,10 +117,10 @@ pub enum Goal {
 }
 
 /// How long a creature stands watch after a chase found no way through, in
-/// ticks (~10s) — ServUO's guard timeout. Watching, not wall-shuffling; when it
-/// expires the creature goes back to its life, and a quarry that becomes
+/// ticks — ten seconds, ServUO's guard timeout. Watching, not wall-shuffling;
+/// when it expires the creature goes back to its life, and a quarry that becomes
 /// reachable is re-acquired the normal way.
-const GUARD_TICKS: u64 = 200;
+const GUARD_TICKS: u64 = 10 * openshard_state::TICKS_PER_SECOND;
 
 /// A chase is abandoned beyond this many times the creature's sight — chasing
 /// forever across the map is nobody's behaviour.
@@ -151,7 +155,7 @@ const CHASE_RANGE_MIN: u32 = 12;
 /// Public for the same reason [`PATH_BUDGET`] is: the test that pins the memory
 /// has to wait exactly this long for it to lapse, and a copy of the number in
 /// the test would be a second place to change it.
-pub const REFUSAL_TICKS: u64 = 200;
+pub const REFUSAL_TICKS: u64 = 10 * openshard_state::TICKS_PER_SECOND;
 
 /// A creature this tough never runs — ServUO's "500 hits does not flee" rule.
 const BRAVE_HITS: u16 = 500;

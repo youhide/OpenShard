@@ -47,8 +47,8 @@ const GUARD_SIGHT: Sight = Sight(8);
 /// threshold, so "red" means the same thing to the guards as to the health bar.
 const MURDER_THRESHOLD: u16 = 5;
 /// How long a guard sticks around with nothing to do before vanishing, in ticks
-/// (~40s at 20Hz). ServUO's idle timer wanders it a while, then deletes it.
-const IDLE_TICKS: u64 = 40 * 20;
+/// — forty seconds. ServUO's idle timer wanders it a while, then deletes it.
+const IDLE_TICKS: u64 = 40 * openshard_state::TICKS_PER_SECOND;
 /// The male and female guard bodies — plain humans, as ServUO's guard is.
 const GUARD_BODIES: [Graphic; 2] = [Graphic(0x0190), Graphic(0x0191)];
 /// Plate and a halberd, so it reads as a guard on sight: `(graphic, layer, hue)`.

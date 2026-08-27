@@ -36,8 +36,16 @@ pub(super) const START: (u16, u16) = (1363, 1600);
 /// `interval + rng.below(beat_jitter(interval))` (`npc::next_beat`) —
 /// deliberately, so a crowd does not act in unison — and a loop sized to the bare
 /// interval turns every "wait one beat" here into a coin flip on the seed. The
-/// widest beat these tests wait on is the idle amble, twice the 8-tick default.
-pub(super) const AI_THINK_TICKS: u64 = 16 + 16 / openshard_npc::BEAT_JITTER_FRACTION;
+/// widest beat these tests wait on is the idle amble, twice the default creature
+/// step.
+///
+/// Derived from that step rather than written out: as the bare `16` it used to
+/// be, it was two ambles at the 50ms tick and one at the 25ms one, which turned
+/// every "wait a beat" loop below into a coin flip the day the tick changed.
+pub(super) const AI_THINK_TICKS: u64 = {
+    let amble = 2 * Gameplay::ticks_from_ms(400);
+    amble + amble / openshard_npc::BEAT_JITTER_FRACTION
+};
 
 /// Ticks a bare-handed, default-dexterity mobile waits between swings under
 /// the default rules — the pace the combat tests reckon against. `dex 100`,
@@ -3181,7 +3189,7 @@ fn gameplay_config_reaches_the_systems() {
     let item = entity(&world, serial);
     let decay = world.state.registry.get::<Decays>(item).unwrap();
     assert!(
-        decay.at_tick > world.state.ticks && decay.at_tick <= world.state.ticks + 100,
+        decay.at_tick > world.state.ticks && decay.at_tick <= world.state.ticks + Gameplay::ticks(5),
         "the five-second decay reached mark_decay (at_tick {}, now {})",
         decay.at_tick,
         world.state.ticks
@@ -6527,11 +6535,13 @@ fn swing_speed_sets_the_cadence() {
     // Five is fewer than the default interval. The configured pace still wins;
     // the client compresses the seven visible frames into those five ticks.
     const _: () = assert!(5 < WRESTLING_SWING_TICKS);
-    assert!(
-        packets_for(&mut world, player).iter().any(|packet| {
-            packet[0] == 0xBF && packet.len() == 13 && packet[9..13] == 250_u32.to_be_bytes()
-        })
-    );
+    // What five ticks is in milliseconds, which is the unit the wire carries —
+    // `WorldState::animate_timed` does this same conversion, and writing the
+    // answer out here would be a second place the tick rate is spelled.
+    let five_ticks_ms = (5 * 1_000 / TICKS_PER_SECOND) as u32;
+    assert!(packets_for(&mut world, player).iter().any(|packet| {
+        packet[0] == 0xBF && packet.len() == 13 && packet[9..13] == five_ticks_ms.to_be_bytes()
+    }));
     for _ in 0..5 {
         world.tick(now);
     }
@@ -6960,9 +6970,9 @@ fn a_servuo_cast_waits_out_its_delay_then_targets() {
     );
     let _ = packets_for(&mut world, connection);
 
-    // Wait out the cast delay.
+    // Wait out the cast delay — a second of it.
     let mut later = now;
-    for _ in 0..20 {
+    for _ in 0..Gameplay::ticks(1) {
         later += TICK_INTERVAL;
         world.tick(later);
     }
@@ -7899,9 +7909,9 @@ fn poison_field_poisons_who_stands_in_it() {
     });
     world.tick(now);
 
-    // The poison pulse lands a second and a half in.
+    // The poison pulse lands a second and a half in, so two seconds sees it.
     let mut later = now;
-    for _ in 0..35 {
+    for _ in 0..Gameplay::ticks(2) {
         later += TICK_INTERVAL;
         world.tick(later);
     }
@@ -8258,9 +8268,9 @@ fn paralyze_field_freezes_who_stands_in_it() {
     });
     world.tick(now);
 
-    // The pulse catches who stands on it within a beat.
+    // The pulse catches who stands on it within a beat, and a second is one.
     let mut later = now;
-    for _ in 0..15 {
+    for _ in 0..Gameplay::ticks(1) {
         later += TICK_INTERVAL;
         world.tick(later);
     }
@@ -12852,7 +12862,10 @@ fn a_banker_greets_a_nearby_player() {
     // names the visitor.
     spawn_banker(&mut world, Point::new(START.0 + 2, START.1, 0), now);
     world.drain_outbound().count();
-    for _ in 0..45 {
+    // One beat and its whole jitter span, off the constants themselves rather
+    // than a tick count that only held at one tick rate.
+    let beat = openshard_npc::BEAT_TICKS;
+    for _ in 0..(beat + beat / openshard_npc::BEAT_JITTER_FRACTION) {
         world.tick(now);
     }
     // Speech is Unicode `0xAE` now, so the name is UTF-16; strip the zero bytes
@@ -17321,7 +17334,7 @@ fn the_chase_pace_is_the_operators_knob() {
             .next()
             .unwrap();
         let mut later = now;
-        for _ in 0..40 {
+        for _ in 0..Gameplay::ticks(2) {
             later += TICK_INTERVAL;
             world.tick(later);
         }
@@ -18227,7 +18240,12 @@ fn spawn_archer_bodied(world: &mut World, body: u16, at: Point, now: Instant) ->
         notoriety: Notoriety::from_bits(5),
         damage: 7,
         resistance: openshard_protocol::world::PhysicalResistance::new(0),
-        swing: 10,
+        // Half a second between shots, stated as a span rather than as the bare
+        // `10` it used to be. That ten was half a second at the 50ms tick and a
+        // quarter at the 25ms one — and a quarter-second swing re-faces a kiting
+        // archer at its quarry faster than its own beat can step away, so it
+        // spent every beat turning round and never opened the gap.
+        swing: Gameplay::ticks_from_ms(500),
         sight: Sight(10),
         aggression: Aggression::from_bits(2),
         beat: 0,
@@ -18271,7 +18289,7 @@ fn a_ranged_creature_volleys_from_a_distance() {
     spawn_archer(&mut world, Point::new(START.0, START.1 + 5, 0), now);
 
     let mut later = now;
-    for _ in 0..40 {
+    for _ in 0..Gameplay::ticks(2) {
         later += TICK_INTERVAL;
         world.tick(later);
     }
@@ -18291,7 +18309,7 @@ fn a_pressed_archer_backs_away() {
     let archer = spawn_archer(&mut world, Point::new(START.0, START.1 + 1, 0), now);
 
     let mut later = now;
-    for _ in 0..40 {
+    for _ in 0..Gameplay::ticks(2) {
         later += TICK_INTERVAL;
         world.tick(later);
     }

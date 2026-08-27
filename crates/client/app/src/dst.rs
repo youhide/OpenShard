@@ -63,7 +63,7 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use openshard_client_net::walk::{Moved, Predicted, Walk};
+use openshard_client_net::walk::{Predicted, Walk};
 use openshard_client_render::bench::{Cadence, Metrics, Sample};
 use openshard_client_render::camera::{Camera, TILE_HEIGHT, TILE_WIDTH};
 use openshard_client_render::chart;
@@ -122,6 +122,15 @@ enum Input {
     Release(Direction),
     /// Shift went down or came up.
     Running(bool),
+    /// The player got into or out of a saddle.
+    ///
+    /// A scripted act rather than a parameter of the scenario, for
+    /// [`Input::Running`]'s reason: the saddle changes the pace of the *next*
+    /// step and both timelines have to be told about it in the same instant.
+    /// Mounting is an ordinary equipment change on the wire — see
+    /// `net_command`'s `set_mounted` — so nothing here waits for a packet of
+    /// its own either.
+    Mounted(bool),
 }
 
 /// A scripted input and the moment it happens.
@@ -149,6 +158,22 @@ const fn release(millis: u64, direction: Direction) -> Act {
     }
 }
 
+/// Shift, at `millis`.
+const fn running(millis: u64, shift: bool) -> Act {
+    Act {
+        at: Duration::from_millis(millis),
+        input: Input::Running(shift),
+    }
+}
+
+/// Getting into the saddle, at `millis`.
+const fn mount(millis: u64, saddle: bool) -> Act {
+    Act {
+        at: Duration::from_millis(millis),
+        input: Input::Mounted(saddle),
+    }
+}
+
 /// One crossing on the intent timeline: where the body goes, from when, over
 /// how long.
 #[derive(Clone, Copy, Debug)]
@@ -161,6 +186,29 @@ struct Knot {
     from: (f64, f64),
     /// The tile it arrives at.
     to: (f64, f64),
+}
+
+/// One tile crossed, on the intent timeline.
+///
+/// A free function because [`Oracle::build`] pushes a knot from two places — the
+/// step that falls due, and the one a release found already committed — and the
+/// arithmetic of "one tile that way" must be the same both times.
+fn cross(
+    knots: &mut Vec<Knot>,
+    position: &mut (f64, f64),
+    at: Duration,
+    takes: Duration,
+    direction: Direction,
+) {
+    let (dx, dy) = direction.step();
+    let arrives = (position.0 + f64::from(dx), position.1 + f64::from(dy));
+    knots.push(Knot {
+        at,
+        takes,
+        from: *position,
+        to: arrives,
+    });
+    *position = arrives;
 }
 
 /// Where the body would be, if the ask reached the screen with nothing in
@@ -191,11 +239,12 @@ impl Oracle {
     ///   whichever way the body was facing when it was asked for — a turn is a
     ///   packet, not a delay (see the module docs);
     /// - shift changes the pace of the *next* step and does not re-time the one
-    ///   already due.
+    ///   already due, and the saddle is the same rule at the other rate.
     fn build(start: Point, script: &[Act], until: Duration) -> Self {
         let mut knots = Vec::new();
         let mut position = (f64::from(start.x), f64::from(start.y));
         let mut running = false;
+        let mut mounted = false;
         let mut held: Option<Direction> = None;
         let mut due: Option<Duration> = None;
         let mut acts = script.iter().copied().peekable();
@@ -228,12 +277,38 @@ impl Oracle {
                         }
                     }
                     Input::Release(_) => {
+                        let was_held = held;
+                        // Letting go does not un-send a step already committed.
+                        // The ask leaves up to [`steer::LOOKAHEAD`] before its
+                        // deadline — that is what keeps the walk continuous
+                        // across a tile boundary — so a key released inside that
+                        // window has already bought its step.
+                        //
+                        // The knot is still at the deadline and not at the
+                        // release: an early ask is queued behind the crossing
+                        // under way and begins exactly when that one ends. Being
+                        // early buys smoothness, never ground.
+                        let committed = due.filter(|step| *step <= now + crate::steer::LOOKAHEAD);
                         held = None;
                         due = None;
+                        if let (Some(step), Some(direction)) = (committed, was_held) {
+                            if step <= until {
+                                let takes = step_hold(running, mounted);
+                                cross(&mut knots, &mut position, step, takes, direction);
+                                // The deadline survives the release: a crossing
+                                // is under way, and a press landing inside it is
+                                // queued by the same rule any other press is.
+                                due = Some(step + takes);
+                            }
+                        }
                         continue;
                     }
                     Input::Running(shift) => {
                         running = shift;
+                        continue;
+                    }
+                    Input::Mounted(saddle) => {
+                        mounted = saddle;
                         continue;
                     }
                 }
@@ -243,10 +318,11 @@ impl Oracle {
             }
 
             let Some(direction) = held else { continue };
-            // The oracle walks a scripted body with no equipment to read, the
-            // same reason every `crowd.see`/`crowd.snap` call in this module
-            // states `false` for it too.
-            let takes = step_hold(running, false);
+            // The four real rates, chosen by the two facts the script carries.
+            // The same call `steer.rs` arms its cadence from and `GameMotion`
+            // glides over, so a scenario that mounts is measured against a
+            // gallop rather than against a walk that happens to be quick.
+            let takes = step_hold(running, mounted);
             // A turn costs nothing. It is a `0x02` of its own — turning is a
             // step in UO and the shard acks it — but it is not a *delay*: the
             // shard answers a turn before it charges the pace budget, so the
@@ -254,15 +330,7 @@ impl Oracle {
             // on the frame the key went down. So the direction asked for is the
             // direction walked, from the first millisecond, and this oracle is
             // constant velocity and nothing else.
-            let (dx, dy) = direction.step();
-            let arrives = (position.0 + f64::from(dx), position.1 + f64::from(dy));
-            knots.push(Knot {
-                at: now,
-                takes,
-                from: position,
-                to: arrives,
-            });
-            position = arrives;
+            cross(&mut knots, &mut position, now, takes, direction);
             due = Some(now + takes);
         }
 
@@ -407,10 +475,24 @@ struct Sim {
     base: Instant,
 
     steering: crate::steer::Steering,
-    /// The client's prediction. On the net task in the real client, which is
-    /// why the hop to it is modelled below rather than called inline.
+    /// The client's prediction — `AuthoritativeWorld::walk`, on the app thread
+    /// exactly as `App::step_online` holds it.
     walk: Walk,
+    /// **Where the body actually is**, and the whole reason this harness is not
+    /// a copy of `Crowd`: since `docs/movement_state_refactor.md` the local
+    /// body's pose comes from this core and never from the crowd — see
+    /// `PresentationWorld::project_local_motion`, which is the line that
+    /// overwrites what the crowd would have said. A harness that sampled the
+    /// crowd was measuring a code path the window no longer draws from.
+    motion: PlayerMotion,
     crowd: Crowd,
+    /// Whether the body is in a saddle.
+    ///
+    /// Restated into `Steering` and into every `accept_local` from here, which
+    /// is what `App` does with the mount layer it reads out of the view — so
+    /// the cadence and the glide cannot disagree about which of the four rates
+    /// is being walked.
+    mounted: bool,
     /// The body as `App` holds it: the tile, and the glide it was last drawn
     /// with.
     player: Mobile,
@@ -448,8 +530,15 @@ struct Sim {
     /// by arrival.
     to_shard: VecDeque<(Duration, ToShard)>,
     to_client: VecDeque<(Duration, ToClient)>,
-    /// The prediction crossing the mpsc back into the window — `link::Update`.
-    to_window: VecDeque<(Duration, Predicted, bool)>,
+    /// The movement fact a folded packet carried, crossing the mpsc back into
+    /// the window — `link::Update::Mutation`'s movement half.
+    ///
+    /// Only the *server's* half travels this way. A local prediction does not:
+    /// `Walk` lives on the app thread, so `App::step_online` predicts and folds
+    /// the step into `PlayerMotion` in the same call, with no hop at all — and
+    /// a harness that queued it here would invent a delay the client does not
+    /// have.
+    to_window: VecDeque<(Duration, link::Movement)>,
 
     net: Net,
     rng: Rng,
@@ -532,7 +621,9 @@ impl Sim {
                 steering
             },
             walk: Walk::new(START, facing),
+            motion: PlayerMotion::new(START, facing),
             crowd,
+            mounted: false,
             player,
             shard: Walker::new(START, facing),
             field: field(&walls),
@@ -672,12 +763,15 @@ impl Sim {
                 match act.input {
                     Input::Press(direction) => {
                         // What this end can see, not `self.field` — see the note
-                        // on `about_to_wait`.
+                        // on `about_to_wait`. And where the *movement core* says
+                        // the body is planning from, which is `App`'s own
+                        // `motion.planning_state()` and not the drawn sprite.
+                        let motion = self.motion.planning_state();
                         if let Some(facing) = self.steering.press(
                             direction,
-                            self.player.at,
+                            motion.position,
                             self.instant(),
-                            self.player.facing,
+                            motion.facing.direction,
                             Readings::plain(Footing::new(None, &self.seen, self.doors)),
                         ) {
                             self.send(facing);
@@ -685,6 +779,13 @@ impl Sim {
                     }
                     Input::Release(direction) => self.steering.release(direction),
                     Input::Running(shift) => self.steering.set_running(shift),
+                    // `net_command`'s own two lines: the saddle is a fact about
+                    // the *cadence* as well as about the picture, so it reaches
+                    // the steering and is restated into every step from here.
+                    Input::Mounted(saddle) => {
+                        self.mounted = saddle;
+                        self.steering.set_mounted(saddle);
+                    }
                 }
             }
             self.deliver();
@@ -753,58 +854,67 @@ impl Sim {
                     continue;
                 }
             };
-            // The net task's fold: `link.rs`'s `fold`, minus the `WorldView`,
+            // The net task's fold, called rather than restated — `link::fold`
+            // is the same function the real one runs, minus the `WorldView`,
             // which holds nothing our own body is drawn from.
-            let moved = self.walk.on_packet(&packet).unwrap();
-            // Only a correction is worth publishing. A `0x22` confirms a
-            // position the screen already has — see `link::Body`.
-            if let Moved::Snapped { .. } = moved {
+            let folded = crate::link::fold(&mut self.walk, &packet).unwrap();
+            if let Some(movement) = folded.movement {
                 let at = self.now;
-                self.to_window.push_back((at, self.walk.predicted(), true));
+                self.to_window.push_back((at, movement));
             }
         }
 
         while self.to_window.front().is_some_and(|(at, ..)| *at <= self.now) {
-            let (_, predicted, corrected) = self.to_window.pop_front().unwrap();
-            // `App::user_event`: the crowd's clock is brought up to date before
-            // the packet is folded in, or the step is timestamped at the last
-            // frame and the *next* crossing is measured from there.
-            self.crowd.advance(self.now - self.last_advance);
-            self.last_advance = self.now;
+            let (_, movement) = self.to_window.pop_front().unwrap();
+            // `App::on_update`: the clocks are brought up to date before the
+            // packet is folded in, or the step is timestamped at the last frame
+            // and the *next* crossing is measured from there.
+            self.advance_clocks();
+            self.motion.accept_network(Some(movement));
             // `App::entered`: a rollback is what makes the steering's idea of
             // the facing it asked for a lie, and it is told so.
-            if corrected {
-                self.steering.corrected(predicted.facing.direction);
+            if self.motion.corrected() {
+                self.steering
+                    .corrected(self.motion.planning_state().facing.direction);
             }
-            // `App::entered`, for our own body.
-            self.player = match corrected {
-                true => self.crowd.snap(
-                    me(),
-                    predicted.position,
-                    BODY,
-                    predicted.facing,
-                    Hue::NONE,
-                    false,
-                    false,
-                ),
-                false => self.crowd.see(
-                    me(),
-                    predicted.position,
-                    BODY,
-                    predicted.facing,
-                    Hue::NONE,
-                    false,
-                    false,
-                ),
-            };
+            self.project();
             // `App::user_event`: a step arriving while nobody was moving finds
             // the animation clock armed at the standing rate, and the first
             // 80ms of the glide would be drawn frozen.
             let soon = self.now + GLIDE_INTERVAL;
-            if self.crowd.anyone_gliding() && self.next_tick > soon {
+            if self.gliding() && self.next_tick > soon {
                 self.next_tick = soon;
             }
         }
+    }
+
+    /// Both presentation clocks to `now` — `world::advance_presentation_to`,
+    /// which is the one call `App` makes before it folds anything or draws.
+    fn advance_clocks(&mut self) {
+        let elapsed = self.now.saturating_sub(self.last_advance);
+        self.motion.advance_with_ease(elapsed, self.crowd.ease());
+        self.crowd.advance(elapsed);
+        self.last_advance = self.now;
+    }
+
+    /// `net_command::project_motion`, and then the one line the frame builder
+    /// adds after it — `PresentationWorld::project_local_motion`, which is what
+    /// makes the movement core and not the crowd the source of the local pose.
+    fn project(&mut self) {
+        project_motion(
+            &mut self.crowd,
+            me(),
+            &mut self.player,
+            self.motion.render_state(),
+            false,
+        );
+        self.player.drawn = self.motion.drawn();
+    }
+
+    /// Whether anything on screen still needs display-rate frames —
+    /// `WorldState::anyone_gliding`, which asks the movement core first.
+    fn gliding(&self) -> bool {
+        self.motion.is_gliding() || self.crowd.anyone_gliding()
     }
 
     /// The ten lines of `App::about_to_wait` that walking goes through.
@@ -824,10 +934,13 @@ impl Sim {
         // Twice at most, exactly as `App::about_to_wait` does it: a turn costs
         // no time, so the step it precedes leaves in the same wake.
         for _ in 0..2 {
+            // `App::advance_walk`'s own source for both: the movement core, not
+            // the sprite it projects.
+            let motion = self.motion.planning_state();
             let Some(facing) = self.steering.due(
                 self.instant(),
-                self.player.at,
-                self.player.facing,
+                motion.position,
+                motion.facing.direction,
                 Readings::plain(Footing::new(None, &self.seen, self.doors)),
             ) else {
                 break;
@@ -836,8 +949,7 @@ impl Sim {
         }
         if self.now >= self.next_tick {
             let elapsed = self.now - self.last_advance;
-            self.crowd.advance(elapsed);
-            self.last_advance = self.now;
+            self.advance_clocks();
             self.next_tick = self.now + self.redraw_interval();
             self.sample(elapsed);
         }
@@ -853,22 +965,26 @@ impl Sim {
     /// that is smooth under this harness is smooth at 60Hz, and not the other
     /// way round.
     fn redraw_interval(&self) -> Duration {
-        match self.crowd.anyone_gliding() {
+        match self.gliding() {
             true => GLIDE_INTERVAL,
             false => openshard_client_render::animation::FRAME_DELAY,
         }
     }
 
-    /// `App::walk` with a link: ask, predict, and publish the prediction.
+    /// `App::step_online`: bring the clocks up to date, ask, predict, and fold
+    /// the prediction into the movement core — all of it in this one call, and
+    /// none of it across a hop.
     ///
-    /// Two hops, both of them an mpsc in the real client: the command out to
-    /// the net task, and the snapshot back. Modelled with no delay of their own
-    /// — they are a channel between two threads of one process — but modelled,
-    /// because the *order* they impose is real.
+    /// The order matters and is the real one: the clocks first (a step
+    /// timestamped at the last frame starts its crossing in the past), then the
+    /// `0x02` onto the wire, then `PlayerMotion::accept_local`, which is what
+    /// starts the glide. Only the *shard's* answer travels — see
+    /// [`Sim::to_window`].
     fn send(&mut self, facing: Facing) {
         // `App::walk`'s own order: the use of every shut leaf this step has to
         // get past leaves first, and the `0x02` behind it.
         self.open_door_ahead(facing);
+        self.advance_clocks();
         let before = self.walk.predicted().position;
         // No map, so no height: `|_, _| None` is what a caller without one
         // passes, and the flat prediction is the honest answer.
@@ -888,7 +1004,23 @@ impl Sim {
         }
         let at = self.now + self.hop();
         self.to_shard.push_back((at, ToShard::Step(packet)));
-        self.to_window.push_back((self.now, self.walk.predicted(), false));
+        // `App::apply_prediction`, called on the same thread and in the same
+        // instant the `0x02` left: the body moves on this end's own prediction
+        // and the `0x22` changes nothing on screen.
+        let body = Body {
+            predicted: self.walk.predicted(),
+            corrected: false,
+        };
+        let sequence = self
+            .walk
+            .newest_pending_sequence()
+            .expect("an accepted step is pending");
+        self.motion.accept_local(body, sequence, self.mounted);
+        self.project();
+        let soon = self.now + GLIDE_INTERVAL;
+        if self.gliding() && self.next_tick > soon {
+            self.next_tick = soon;
+        }
     }
 
     /// `App::open_door_ahead`, and the rule itself is the same call the window
@@ -950,12 +1082,16 @@ impl Sim {
 
     /// Where the body is drawn this frame, in tiles, and where the eye went.
     ///
-    /// `App::draw` reads the glide from the crowd every frame rather than from
-    /// the `Mobile` it last stored, and so does this: the stored one is as old
-    /// as the last packet. `elapsed` is the span the crowd's clock was just
-    /// advanced by, which is the same value `App::draw` hands the camera.
+    /// `App::draw` reads the glide from the movement core every frame rather
+    /// than from the `Mobile` it last stored, and so does this: the stored one
+    /// is as old as the last packet. `elapsed` is the span the clocks were just
+    /// advanced by, which is the same value `App::follow_player` hands the
+    /// camera.
     fn sample(&mut self, elapsed: Duration) {
-        self.player.drawn = self.crowd.drawn_for(me()).expect("the crowd knows our body");
+        // The movement core and not the crowd — see [`Sim::motion`]. This is
+        // `PresentationWorld::project_local_motion`, the line `advance_to_clocks`
+        // runs for our own serial after the crowd has supplied the group.
+        self.player.drawn = self.motion.drawn();
         // `App::follow_player`, with the same gaze the sprite is placed from.
         let gaze = mobiles::gaze(&self.player);
         // And the trace is that same gaze read back in tiles, rather than a
@@ -984,6 +1120,30 @@ impl Sim {
             }
         }
         worst
+    }
+
+    /// How far behind the oracle the body was **on average** over one window of
+    /// the run.
+    ///
+    /// What a *drift* is measured with, and a mean rather than a worst because
+    /// the worst of a jittered quantity is a sample of the jitter: over a window
+    /// of a second it moves by a good fraction of a late wake for no reason at
+    /// all. A lag that is the same at the end of a walk as at the beginning is
+    /// one late wake; a lag that has grown is every late wake since the walk
+    /// started.
+    fn lag_within(&self, oracle: &Oracle, from: Duration, to: Duration) -> f64 {
+        let mut total = 0.0f64;
+        let mut frames = 0u32;
+        for (when, drawn) in &self.trace {
+            if *when < from || *when > to {
+                continue;
+            }
+            let want = oracle.at(*when);
+            total += ((drawn.0 - want.0).powi(2) + (drawn.1 - want.1).powi(2)).sqrt();
+            frames += 1;
+        }
+        assert!(frames > 20, "only {frames} frames in the window");
+        total / f64::from(frames)
     }
 }
 
@@ -1097,13 +1257,23 @@ fn continuous(sim: &Sim, hold: Duration) {
 /// `0x21` and a body yanked backwards. Measured on the asks rather than on the
 /// acks, because this is the client's own cadence and it must be right before
 /// the wire is involved.
+///
+/// The floor is a hold less [`steer::LOOKAHEAD`](crate::steer::LOOKAHEAD), and
+/// that is the whole of the slack: a step under way is asked for up to a frame
+/// before its deadline so its crossing is queued and begins the instant the one
+/// before it ends. It buys no *ground* — the deadline it is early against is
+/// still chained from the one before, which is what [`tracks`] holds against the
+/// oracle — so the cadence is exactly the hold and only the asks are a frame
+/// ahead of it.
 #[track_caller]
 fn paced(sim: &Sim, hold: Duration) {
+    let floor = hold - crate::steer::LOOKAHEAD;
     for pair in sim.stepped_at.windows(2) {
         let gap = pair[1] - pair[0];
         assert!(
-            gap + Duration::from_millis(1) >= hold,
-            "two steps left {gap:?} apart, which is faster than the {hold:?} a body walks"
+            gap + Duration::from_millis(1) >= floor,
+            "two steps left {gap:?} apart, which is faster than the {floor:?} \
+             a body walks even with a frame of lookahead"
         );
     }
 }
@@ -1161,6 +1331,74 @@ fn never_outran_a_walk(sim: &Sim, hold: Duration, times: f64) {
     );
 }
 
+/// Assert the drawn body never *stopped* while the walk was under way.
+///
+/// The other half of [`never_outran_a_walk`], and the half nothing in this file
+/// had. Every measure here bounds the body from above — a corridor around the
+/// oracle, a ceiling on one frame's ground — and a body that arrives on its tile,
+/// stands there for a fraction of a step and then sets off again sits inside all
+/// of them: it is never ahead of the oracle and never covers too much ground.
+/// It is also exactly what a player reports as a *ragged* walk, so a pace whose
+/// only unmeasured property is this one can pass every assertion here and still
+/// stutter ten times a second.
+///
+/// # Why a pause is a property of the pace and not of the wire
+///
+/// The step is asked for when the event loop wakes, and the loop wakes on the
+/// display's grid: a step due at `t` leaves at `t + w` for a lateness `w` under
+/// one frame. The glide then runs for the nominal hold from *there*, so it ends
+/// at `t + w + hold` while the next one begins at `t + hold + w'`. The gap is
+/// `w' - w` — the *difference* of two latenesses, not their size — and it is a
+/// pause whenever the second wake is earlier in its frame than the first.
+///
+/// A frame of lateness is 4% of a walk, 8% of a run and **17% of a gallop**,
+/// which is why the complaint arrives about the horse. The rule that answers it
+/// is the one `crowd::crossing` already states for everybody else's body:
+/// the crossing ends on the cadence, so lateness is spent on the crossing's
+/// *length* rather than banked as standing still.
+///
+/// `times` is the fraction of the nominal speed the slowest frame may fall to.
+/// Measured only over frames wholly inside the walk — before the first step and
+/// after the last arrival the body is standing on purpose.
+#[track_caller]
+fn never_stalled(sim: &Sim, hold: Duration, times: f64) {
+    let (Some(&first), Some(&last)) = (sim.stepped_at.first(), sim.stepped_at.last()) else {
+        panic!("nothing walked, so nothing stalled");
+    };
+    let (mut worst, mut when) = (f64::INFINITY, Duration::ZERO);
+    let mut measured = 0u32;
+    for pair in sim.trace.windows(2) {
+        let ((before, was), (at, now)) = (pair[0], pair[1]);
+        // Wholly inside the walk: the frame must both begin after the first step
+        // left and end before the last one has landed.
+        if before < first || at > last + hold {
+            continue;
+        }
+        let dt = at.saturating_sub(before);
+        // A wake that is not a frame — two things happening in one instant — is
+        // not a speed. A millisecond is well under the 16ms glide clock and well
+        // over the resolution the trace is kept at.
+        if dt < Duration::from_millis(1) {
+            continue;
+        }
+        let moved = (now.0 - was.0).abs().max((now.1 - was.1).abs());
+        let ratio = moved / (dt.as_secs_f64() / hold.as_secs_f64());
+        measured += 1;
+        if ratio < worst {
+            (worst, when) = (ratio, at);
+        }
+    }
+    assert!(
+        measured > 50,
+        "only {measured} frames fell inside the walk: a floor nothing walked over is not an assertion",
+    );
+    assert!(
+        worst >= times,
+        "at a hold of {hold:?} the body covered {worst:.2} of a step's ground in one frame \
+         at {when:?}, which is a body that stopped on its tile and then set off again"
+    );
+}
+
 /// Assert the reference rig put the eye exactly on the drawn body, every frame.
 ///
 /// `Rig::HARD` *is* that sentence — it is every time constant at zero — so what
@@ -1202,8 +1440,15 @@ fn eye_is_the_body(sim: &Sim) {
 }
 
 /// Ten steps east, held from the first millisecond.
+///
+/// Let go at 3900 and not at 4000, which is the eleventh step's deadline. A
+/// release landing *on* a deadline is genuinely ambiguous — the key was down for
+/// the whole hold that step was owed for — and with a frame of lookahead
+/// (`steer::LOOKAHEAD`) the ask has already left. Scenarios that want ten steps
+/// should say so unambiguously; the boundary itself has a scenario of its own,
+/// [`a_key_released_on_the_deadline_has_already_bought_its_step`].
 fn ten_steps_east() -> Vec<Act> {
-    vec![press(0, Direction::East), release(4_000, Direction::East)]
+    vec![press(0, Direction::East), release(3_900, Direction::East)]
 }
 
 // --- The scenarios ---------------------------------------------------------
@@ -1634,6 +1879,203 @@ fn running_the_whole_way_is_never_refused_as_a_speedhack() {
     tracks(&sim, &oracle, 0.02);
     assert_eq!(sim.refused, 0, "twenty steps at RUN_HOLD");
     assert_eq!(sim.shard.position, Point::new(1020, 1000, 0));
+}
+
+/// A gallop is the same walk at the fastest of the four rates, and it has to
+/// track the same oracle.
+///
+/// The saddle halves the hold, so everything a late wake costs is worth twice
+/// what it is at a run and four times what it is on foot. Nothing else about the
+/// scenario changes — which is the point: if the cadence, the glide and the
+/// shard's budget all read the same [`step_hold`], a horse is not a special case.
+#[test]
+fn a_gallop_tracks_the_oracle_the_way_a_walk_does() {
+    let script = vec![
+        mount(0, true),
+        running(0, true),
+        press(0, Direction::East),
+        release(4_000, Direction::East),
+    ];
+    let until = Duration::from_millis(4_000);
+    let oracle = Oracle::build(START, &script, until);
+    let net = Net {
+        latency: Duration::from_millis(80),
+        jitter: Duration::from_millis(40),
+        wake_jitter: Duration::ZERO,
+    };
+    let mut sim = Sim::new(Direction::East, net, 11, Vec::new());
+    sim.run(&script, until);
+
+    tracks(&sim, &oracle, 0.02);
+    paced(&sim, openshard_movement::MOUNTED_RUN_HOLD);
+    assert_eq!(sim.refused, 0, "forty steps at a gallop are not a speedhack");
+    assert_eq!(
+        sim.shard.position,
+        Point::new(1040, 1000, 0),
+        "four seconds at 100ms a tile"
+    );
+}
+
+/// **The complaint this whole pass came from: the gallop is ragged.**
+///
+/// The wire is quiet and the only thing wrong with the world is that the event
+/// loop wakes on the display's grid — a frame of lateness, which is what a real
+/// one has. At a walk that is 4% of a step and nobody sees it; at a gallop it is
+/// 17%, ten times a second, and it is the thing a person reports.
+///
+/// So the measures are run at all three paces on the same script. The one that
+/// bounds the body from above held at every pace and always did; [`never_stalled`]
+/// is the one that says the body was still *moving*, and it is what a body drawn
+/// over the nominal hold from the moment its prediction arrived cannot do — the
+/// slowest frame of that client, over this scenario, was a quarter of a walk.
+///
+/// The bounds are a fifth of a per cent either side of the nominal speed, which
+/// is not a threshold that happens to hold: with the step asked for a frame
+/// early the crossing is *queued* before the one under way finishes, so it
+/// begins with the remainder of the same frame and the walk is one constant
+/// velocity from the first tile to the last. The measured worst frame is 1.000
+/// at all three paces and all eight seeds; anything that regresses it will move
+/// the number, not creep up on a margin.
+#[test]
+fn a_late_wake_is_spent_on_the_crossing_and_never_banked_as_standing_still() {
+    // One frame at 60Hz, which is how late `about_to_wait` can be to notice a
+    // step's deadline while the loop is redrawing.
+    let late = GLIDE_INTERVAL;
+    for (pace, hold) in [
+        (Vec::new(), WALK_HOLD),
+        (vec![running(0, true)], openshard_movement::RUN_HOLD),
+        (
+            vec![mount(0, true), running(0, true)],
+            openshard_movement::MOUNTED_RUN_HOLD,
+        ),
+    ] {
+        let until = Duration::from_millis(4_000);
+        let mut script = pace;
+        script.push(press(0, Direction::East));
+        script.push(release(4_000, Direction::East));
+        let oracle = Oracle::build(START, &script, until);
+        for seed in 0..8 {
+            let net = Net {
+                latency: Duration::from_millis(60),
+                jitter: Duration::from_millis(20),
+                wake_jitter: late,
+            };
+            let mut sim = Sim::new(Direction::East, net, seed, Vec::new());
+            sim.run(&script, until);
+
+            // Three late wakes' worth of tile, the same corridor
+            // `wake_up_jitter_does_not_accumulate` allows and for the same
+            // reasons — scaled by the hold, so it is the same *fraction* of a
+            // step at every pace.
+            let corridor = 3.0 * late.as_secs_f64() / hold.as_secs_f64() + 0.02;
+            tracks(&sim, &oracle, corridor);
+            never_outran_a_walk(&sim, hold, 1.001);
+            never_stalled(&sim, hold, 0.999);
+            // Not [`paced`]: a wake that is late by a whole frame and then early
+            // by one puts two *asks* a frame closer together than the hold, which
+            // is honest movement the player already made and exactly what the
+            // shard's bucket exists to absorb. The judge of that is the shard,
+            // and it is the line below.
+            assert_eq!(sim.refused, 0, "seed {seed} at {hold:?}: not a speedhack");
+        }
+    }
+}
+
+/// And the loop that is later than the lookahead can cover.
+///
+/// A frame of lookahead answers a frame of lateness. Past that there is nothing
+/// a client can do about the pause — it does not know which way the next step
+/// goes until it asks — so what is left to hold is that the pause is not also a
+/// *drift*: the crossing after it is shortened to end on the cadence
+/// ([`crossing_left`](openshard_movement::crossing_left)), so the body is back on
+/// the oracle's schedule by the next tile instead of falling a wake further
+/// behind on every one of them.
+///
+/// Forty steps rather than ten, because that is the whole question: a lag of one
+/// late wake is invisible and a lag of forty is a tile.
+#[test]
+fn a_loop_later_than_the_lookahead_keeps_the_cadence_it_cannot_keep_the_stride() {
+    // Two and a half frames — a client dropping frames, not one running well.
+    let late = Duration::from_millis(40);
+    // The key is never let go inside the run. At forty milliseconds of lateness
+    // the deadlines themselves wander by nearly half a hold, so a release landing
+    // anywhere near the end of the scenario is a step the two timelines can
+    // legitimately disagree about — and this scenario is about the middle of a
+    // long gallop, not about the last tile of one.
+    let until = Duration::from_millis(3_800);
+    let script = vec![
+        mount(0, true),
+        running(0, true),
+        press(0, Direction::East),
+        release(9_000, Direction::East),
+    ];
+    let oracle = Oracle::build(START, &script, until);
+    for seed in 0..8 {
+        let net = Net {
+            latency: Duration::from_millis(60),
+            jitter: Duration::from_millis(20),
+            wake_jitter: late,
+        };
+        let mut sim = Sim::new(Direction::East, net, seed, Vec::new());
+        sim.run(&script, until);
+
+        // Two late wakes' worth of tile — the one that asked for the step and
+        // the one that drew it — which at 40ms of a 100ms hold is most of a
+        // tile, and is the whole of what a client dropping frames can be held
+        // to. What matters is that it is a constant and not a count of steps,
+        // which is the assertion below.
+        let corridor = 2.0 * late.as_secs_f64() / openshard_movement::MOUNTED_RUN_HOLD.as_secs_f64() + 0.02;
+        tracks(&sim, &oracle, corridor);
+        never_outran_a_walk(&sim, openshard_movement::MOUNTED_RUN_HOLD, 2.0);
+        assert_eq!(sim.refused, 0, "seed {seed}: a dropped frame is not a speedhack");
+        // And the claim itself, which a corridor cannot make on its own: the lag
+        // at the end of the walk is the lag at the start. A crossing that ran the
+        // nominal length from wherever the ask arrived would add a wake's worth
+        // of lag per tile, and this is the window that would show it.
+        let first = sim.lag_within(&oracle, Duration::from_millis(200), Duration::from_millis(1_000));
+        let last = sim.lag_within(
+            &oracle,
+            Duration::from_millis(3_000),
+            Duration::from_millis(3_800),
+        );
+        assert!(
+            last <= first + 0.05,
+            "seed {seed}: the body was {first:.3} tiles behind on average in the first second \
+             and {last:.3} in the last, so the lateness is accumulating"
+        );
+    }
+}
+
+/// The one instant the lookahead is visible from outside: a key let go exactly
+/// as a step falls due.
+///
+/// The ask left a frame ago, so the step is taken and the body crosses the tile.
+/// It is a coin flip either way — the key was held for the whole hold that step
+/// was owed for — and it is written down because it is the only behaviour a
+/// player could tell apart from the client that waited for the deadline, and
+/// because the oracle has to agree about it or every scenario that releases on a
+/// deadline reads as an off-by-one tile.
+#[test]
+fn a_key_released_on_the_deadline_has_already_bought_its_step() {
+    // Ten holds of walking, and the release lands on the eleventh deadline.
+    let script = vec![press(0, Direction::East), release(4_000, Direction::East)];
+    let until = Duration::from_millis(4_400);
+    let oracle = Oracle::build(START, &script, until);
+    // A quiet wire and a punctual loop: what is under test is the rule and not
+    // its behaviour under jitter.
+    let mut sim = Sim::new(Direction::East, Net::default(), 2, Vec::new());
+    sim.run(&script, until);
+
+    assert_eq!(
+        sim.shard.position,
+        Point::new(1011, 1000, 0),
+        "the eleventh step was committed before the key came up"
+    );
+    // And the extra tile is at the deadline on both timelines — being early buys
+    // smoothness, never ground.
+    tracks(&sim, &oracle, 0.02);
+    assert_eq!(oracle.knots.len(), 11);
+    assert_eq!(oracle.knots[10].at, Duration::from_millis(4_000));
 }
 
 /// The complaint this rule came from: the body is facing one way and the player
@@ -2072,6 +2514,60 @@ fn the_reference_rig_puts_the_eye_on_the_body_every_frame() {
     eye_is_the_body(&kiting);
 }
 
+/// A gallop moves the eye four times as fast as a walk and no more roughly.
+///
+/// The camera is locked to the body, so every frame the body does not move is a
+/// frame the whole world does not move — and the eye is where that shows up as
+/// a number rather than as a complaint. [`Metrics`] is the bench's own reading
+/// of it: peak speed, peak acceleration and the RMS of the jerk between frames,
+/// over the same [`Sample`] type `client/render`'s scripted walks produce.
+///
+/// The claim is *proportion*. A gallop crosses a tile in a quarter of a walk's
+/// hold, so its peak speed is four walks and its acceleration and jerk are what
+/// a constant-velocity crossing has: whatever the ends of the walk contribute,
+/// and nothing per tile. A body that stopped on each tile and set off again
+/// would put a step of acceleration at every one of them — at ten tiles a second
+/// rather than two and a half — and this is the reading that would show it.
+#[test]
+fn a_gallop_moves_the_eye_four_times_as_fast_and_no_more_roughly() {
+    let net = Net {
+        latency: Duration::from_millis(60),
+        jitter: Duration::from_millis(20),
+        wake_jitter: GLIDE_INTERVAL,
+    };
+    let seconds = Duration::from_millis(3_000);
+    let measure = |pace: Vec<Act>| {
+        let mut script = pace;
+        script.push(press(0, Direction::East));
+        let mut sim = Sim::new(Direction::East, net, 5, Vec::new());
+        sim.run(&script, seconds);
+        Metrics::of(&sim.eyes)
+    };
+    let walk = measure(Vec::new());
+    let gallop = measure(vec![mount(0, true), running(0, true)]);
+
+    // Four tiles for every one, to the pixel the eye is quantised to.
+    let times = gallop.travel / walk.travel;
+    assert!(
+        (3.9..4.1).contains(&times),
+        "the gallop covered {times:.2} times the walk's ground ({:.0}px against {:.0}px)",
+        gallop.travel,
+        walk.travel,
+    );
+    // And the roughness *per pixel travelled* is no worse. Not the raw jerk: a
+    // body that legitimately moves four times as fast has four times the speed
+    // to lose at each end of the run, so an absolute bound would be a bound on
+    // the pace rather than on the stutter.
+    let walk_jerk = walk.jerk_rms / walk.travel;
+    let gallop_jerk = gallop.jerk_rms / gallop.travel;
+    assert!(
+        gallop_jerk <= walk_jerk * 1.5,
+        "per pixel travelled the gallop jerked {:.3e} against the walk's {:.3e}",
+        gallop_jerk,
+        walk_jerk,
+    );
+}
+
 /// The bench's synthetic walk is the walk this client actually does.
 ///
 /// The bench flies a rig over a scripted body with no wire, no prediction and
@@ -2129,18 +2625,26 @@ fn the_camera_is_told_the_height_apart_from_the_ground() {
     assert_eq!(gaze.lift, 0.0, "a flat field lifts nothing");
     assert_eq!(gaze.eye().pixel().y, gaze.y.round() as i32);
 
-    // And a body standing twenty units up: the ground is unchanged and the lift
-    // is the whole of the difference.
-    let standing = Point::new(sim.player.at.x, sim.player.at.y, 20);
-    let raised = Mobile {
-        at: standing,
-        drawn: openshard_client_render::follow::Gaze::on(standing),
-        ..sim.player
-    };
-    let up = mobiles::gaze(&raised);
-    assert_eq!((up.x, up.y), (gaze.x, gaze.y), "the ground did not move");
+    // And the same body twenty units up: the ground is unchanged and the lift is
+    // the whole of the difference.
+    //
+    // Both built from one tile, and deliberately not from the drawn body above:
+    // the walk is still under way at `until`, so `Mobile::at` is the tile being
+    // stepped *onto* while `drawn` is somewhere between the two. Comparing a
+    // raised tile against a mid-stride glide would be a question about the
+    // step's phase rather than about `z`.
+    let tile = Point::new(sim.player.at.x, sim.player.at.y, 0);
+    let standing = Point::new(tile.x, tile.y, 20);
+    let mut body = sim.player.clone();
+    body.at = tile;
+    body.drawn = openshard_client_render::follow::Gaze::on(tile);
+    let ground = mobiles::gaze(&body);
+    body.at = standing;
+    body.drawn = openshard_client_render::follow::Gaze::on(standing);
+    let up = mobiles::gaze(&body);
+    assert_eq!((up.x, up.y), (ground.x, ground.y), "the ground did not move");
     assert_eq!(up.lift, 80.0, "twenty units, four pixels each");
-    assert_eq!(up.eye().pixel().y, gaze.eye().pixel().y - 80);
+    assert_eq!(up.eye().pixel().y, ground.eye().pixel().y - 80);
 }
 
 /// The mash: the arrows hammered at thirty presses a second, which is faster

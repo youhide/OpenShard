@@ -185,7 +185,11 @@ pub struct MobileDied {
 ///   tenths of a second, floored at one tenth.
 /// - **Era 2 (AoS):** the same, halved, floored at 1.2s (twelve tenths).
 ///
-/// At the 50ms tick a tenth of a second is two ticks, so the result is doubled.
+/// The reference's answer is in tenths of a second and the shard counts ticks, so
+/// the result is scaled by [`TICKS_PER_SECOND`] over ten. Written that way and not
+/// as the number it currently comes to: this used to be a bare `* 2`, correct at
+/// the 50ms tick it was written under, and it silently halved every swing on the
+/// shard the day the tick became 25ms.
 /// Eras 0, 3 and 4 need weapon weight or ML-format speeds the shard has no data
 /// for yet, so config validation accepts only 1 and 2; an
 /// unknown era here falls back to era 1.
@@ -232,7 +236,7 @@ pub const fn swing_ticks(dex: u16, base: u64, era: u8, scale: u64) -> u64 {
             if t == 0 { 1 } else { t }
         }
     };
-    tenths * 2
+    tenths * TICKS_PER_SECOND / 10
 }
 
 /// Deal damage to a mobile, of a kind its resistance to that kind reduces.
@@ -971,7 +975,7 @@ fn attackable(state: &WorldState, entity: EntityId) -> bool {
 const MURDER_THRESHOLD: u16 = 5;
 /// How long one murder count takes to fade — Sphere's short-term default, eight
 /// hours at the tick rate. A reformed killer washes blue eventually, not never.
-const MURDER_DECAY_TICKS: u64 = 8 * 3600 * 20;
+const MURDER_DECAY_TICKS: u64 = 8 * 3600 * TICKS_PER_SECOND;
 
 /// Tally a killed innocent against `killer`, turn it red once the tally reaches
 /// the threshold, and start the slow fade if it is not already running.

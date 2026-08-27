@@ -595,7 +595,36 @@ pub struct GameMotion {
     walked: Gaze,
     drawn: Gaze,
     transition: Option<GameTransition>,
+    /// How long the body has stood on its tile **since a crossing ended**.
+    ///
+    /// The cadence, kept in the only clock this core has. `steer.rs` arms each
+    /// step from the deadline that has just passed rather than from the wake
+    /// that noticed it, so the crossings are due on an exact grid — but the ask
+    /// still leaves when the event loop gets round to it. A frame of lookahead
+    /// (`steer::LOOKAHEAD`) is what normally gets the next crossing queued
+    /// before this one ends; where the loop was later than that, the difference
+    /// is banked here and spent on the next crossing's *length* instead
+    /// ([`crossing_left`](openshard_movement::crossing_left)), which is the same
+    /// schedule `crowd::crossing` gives every body this client does not command.
+    ///
+    /// **`None` is not zero**: it is a body with no crossing behind it — one that
+    /// has never walked, or one just put down by a correction — and there is no
+    /// schedule to be late against. Banking a standing body's time as though
+    /// there were is what made the very first step of a walk short by however
+    /// long the window took to notice the key, which is a stride the player sees
+    /// end early and then a pause.
+    ///
+    /// Capped at [`STOOD_STILL`] so a body standing in a bank for an hour does
+    /// not accumulate a number; the band would refuse it anyway.
+    since: Option<Duration>,
 }
+
+/// The longest gap [`GameMotion::since`] bothers to remember.
+///
+/// Above the slowest hold and far under any pause a person would call standing
+/// still, so it never truncates a real cadence and never lets a long stand
+/// accumulate into a number.
+const STOOD_STILL: Duration = openshard_movement::WALK_HOLD;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct GameTransition {
@@ -656,6 +685,7 @@ impl PlayerMotion {
                 walked: Gaze::on(at),
                 drawn: Gaze::on(at),
                 transition: None,
+                since: None,
             },
             mounted: false,
         }
@@ -836,6 +866,9 @@ impl PlayerMotion {
     /// local player's position: that remains owned by this core.
     pub fn advance_with_ease(&mut self, elapsed: Duration, ease: crate::crowd::Ease) {
         let mut remaining = elapsed;
+        // Whether there was a crossing to *finish* in this call, which is what
+        // tells a gap in the cadence apart from a body that was simply standing.
+        let was_crossing = self.game.transition.is_some();
         while self.game.transition.is_some() {
             remaining = self.game.advance(remaining);
             if self.game.transition.is_some() {
@@ -853,6 +886,19 @@ impl PlayerMotion {
             );
             if remaining.is_zero() {
                 break;
+            }
+        }
+        // The gap between the schedule and the ask, which the next crossing is
+        // what spends. Opened by the frame that finished a crossing with nothing
+        // queued — at whatever was left of it — and extended by every frame the
+        // body then spends standing. A step queued behind a running one never
+        // reaches here: it is started above with `remaining` still in hand, so
+        // its own crossing is the full nominal length and the walk is already
+        // continuous through the tile boundary.
+        if self.game.transition.is_none() {
+            match was_crossing {
+                true => self.game.settled(remaining),
+                false => self.game.stood_still(elapsed),
             }
         }
         self.game.ease(ease, elapsed);
@@ -969,20 +1015,34 @@ impl GameMotion {
             self.snap(to);
             return;
         }
+        let nominal = openshard_movement::step_hold(running, mounted);
         self.transition = Some(GameTransition {
             // Starting from the last continuous pose preserves continuity if a
             // trusted source supplies consecutive steps faster than a frame.
             from: self.walked,
             to: Gaze::on(to),
             elapsed: Duration::ZERO,
-            takes: openshard_movement::step_hold(running, mounted),
+            // Scheduled by when it should *end* and not by how long it takes:
+            // whatever the body has been standing since the last crossing
+            // finished comes out of this one, so a late ask costs the walk a
+            // little speed rather than a pause per tile. See
+            // [`GameMotion::since`].
+            takes: openshard_movement::crossing_left(
+                nominal.saturating_sub(self.since.unwrap_or(Duration::ZERO)),
+                nominal,
+            ),
         });
+        self.since = None;
     }
 
     fn snap(&mut self, at: Point) {
         self.walked = Gaze::on(at);
         self.drawn = Gaze::on(at);
         self.transition = None;
+        // A correction ends the cadence: the tile the body is put back on was
+        // never crossed, so there is no schedule left to catch up with. Same cut
+        // `Crowd::snap` makes for a body it only hears about.
+        self.since = None;
     }
 
     /// Advance one transition and return the part of `elapsed` that belongs to
@@ -999,6 +1059,22 @@ impl GameMotion {
         self.walked = transition.to.back_towards(transition.from, left);
         self.transition = (transition.elapsed < transition.takes).then_some(transition);
         elapsed.saturating_sub(used)
+    }
+
+    /// A crossing has just finished with nothing queued behind it: start the
+    /// gap, at whatever was left of the frame that ended it.
+    fn settled(&mut self, left: Duration) {
+        self.since = Some(left.min(STOOD_STILL));
+    }
+
+    /// Extend a gap already begun.
+    ///
+    /// Deliberately silent for a body that has never crossed anything — see
+    /// [`GameMotion::since`], where `None` is the fact and not a zero.
+    fn stood_still(&mut self, gap: Duration) {
+        if let Some(since) = self.since.as_mut() {
+            *since = since.saturating_add(gap).min(STOOD_STILL);
+        }
     }
 
     /// Smooth the visual pose after the exact walk has moved.  Keeping this

@@ -222,6 +222,45 @@ pub const TURN_HOLD: Duration = Duration::from_millis(80);
 /// (`Constants.TURN_DELAY_FAST`) — the same behaviour, spun through quicker.
 pub const TURN_HOLD_FAST: Duration = Duration::from_millis(45);
 
+/// How early a step may leave.
+///
+/// # Why a step is allowed to be early at all
+///
+/// The cadence is exact: [`Steering::next_due`] chains each deadline from the
+/// last one rather than from the wake that noticed it, so a walk does not drift
+/// however late the loop is. What it cannot fix is that the *ask* still leaves
+/// when the loop gets round to it, and a loop is woken by the operating system
+/// whenever it gets round to it and never early.
+///
+/// That lateness lands on the picture and nowhere else. The body finishes
+/// crossing its tile on the deadline, the step that would carry it onto the next
+/// one is not asked for until a moment after, and for that moment the body
+/// stands on its tile. It is a few milliseconds — 4% of a walk, and nobody has
+/// ever reported it — but it is a *fraction of a step*, so the same few
+/// milliseconds are 17% of a gallop, ten times a second, and that is what a
+/// person on a horse reports as a ragged run.
+///
+/// So the step is allowed to leave up to a frame before it is due. Then the
+/// prediction is already queued when the crossing under way finishes, and
+/// [`PlayerMotion::advance_with_ease`](crate::world::PlayerMotion::advance_with_ease)
+/// starts it with the remainder of the very same frame — the walk is continuous
+/// through the tile boundary rather than merely arriving on time either side of
+/// it.
+///
+/// # What it does not do
+///
+/// **It does not make the body faster.** The deadline it is early against is
+/// still chained from the deadline before it, so the *k*-th step is due at
+/// `k` holds after the first however early each one leaves. What moves is the
+/// moment the client commits to a step, by at most one frame; the shard's own
+/// budget (`openshard_movement::WalkPace`) is a bucket sized in tens of steps
+/// precisely so that arrival jitter of this size is not an accusation.
+///
+/// One glide interval, because that is the grain the loop actually wakes on: a
+/// larger value would commit the player's input further ahead than a frame for
+/// no more smoothness, and a smaller one would not cover a frame's lateness.
+pub(crate) const LOOKAHEAD: Duration = crate::GLIDE_INTERVAL;
+
 /// What the mouse is asking for, which is not always a walk.
 ///
 /// The cursor's *distance* from the body is a question of its own, and the
@@ -670,6 +709,15 @@ pub struct Steering {
     /// What a turn costs the step it precedes — see [`Turning`], and
     /// [`Steering::set_turning`].
     turning: Turning,
+    /// Whether [`Steering::due`] is the end of a crossing, rather than of a turn.
+    ///
+    /// What [`LOOKAHEAD`] is allowed against, and only that. Being early is worth
+    /// something exactly when there is a tile being crossed for the next step to
+    /// be queued behind: it is the queueing that makes the walk continuous, not
+    /// the earliness. A turn covers no ground and is drawn by nothing, so a turn
+    /// let out a frame early would only be a turn that costs a frame less —
+    /// [`TURN_HOLD`] is 80ms and a frame of it is a fifth.
+    crossing: bool,
     /// Whether the body is in a saddle, for [`Steering::interval`] alone.
     ///
     /// The one fact about the *shard's* answer that this module has to know: a
@@ -1074,9 +1122,13 @@ impl Steering {
     /// Only while something is asking for one. The floor outlives the asking
     /// (see [`Steering::due`]'s field) and a loop woken by a floor nobody is
     /// waiting on would wake for a step it then declines to take, over and over.
+    ///
+    /// [`Steering::early`] ahead of the deadline, which is the same shift
+    /// [`Steering::free`] applies: the loop has to be *awake* before the step is
+    /// allowed to leave, or the lookahead buys nothing.
     pub fn deadline(&self) -> Option<Instant> {
         match self.asking_for_anything() {
-            true => self.due,
+            true => self.due.map(|due| due - self.early()),
             false => None,
         }
     }
@@ -1178,7 +1230,9 @@ impl Steering {
         // while a destination is still set outranks it and is answered below.
         if self.keys.asking().is_none() && self.goal.is_some() && self.route.is_empty() {
             self.was = Some(from);
-            self.arm(self.interval(), now);
+            // Nothing is being crossed — this is a destination waiting on a
+            // corridor — so the beat that follows is not one to leave early for.
+            self.arm(self.interval(), now, false);
             return None;
         }
 
@@ -1245,6 +1299,11 @@ impl Steering {
                             // in the way (a door, another body) is gone.
                             true => {
                                 self.charge(Some(step), now, facing);
+                                // Charged like a step but *no step left*, so
+                                // there is no crossing for the retry to be early
+                                // against: a body pressed into a corner would
+                                // otherwise re-ask a frame sooner every hold.
+                                self.crossing = false;
                                 return None;
                             }
                             false => step,
@@ -1298,8 +1357,9 @@ impl Steering {
         let facing = self.asked.unwrap_or(facing);
         self.asked = Some(step.direction);
         if step.direction == facing {
-            // Ground is being covered: the real thing, paced at the real rate.
-            self.arm(self.interval(), now);
+            // Ground is being covered: the real thing, paced at the real rate,
+            // and the one deadline the next step may be asked for ahead of.
+            self.arm(self.interval(), now, true);
             return;
         }
         if let Some(hold) = self.turning.hold() {
@@ -1307,8 +1367,9 @@ impl Steering {
             // special is needed to *make* it wait — the deadline is the queue
             // rule's whole mechanism, and arming it for a shorter interval than
             // a step's is the entire difference between this and the branch
-            // below.
-            self.arm(hold, now);
+            // below. Not a crossing: nothing is being drawn moving, so the step
+            // this delay is in front of waits the whole of it.
+            self.arm(hold, now, false);
             return;
         }
         // A second direction change with no step between is not the "turn
@@ -1319,11 +1380,14 @@ impl Steering {
         // it is instead of letting it through as another turn — see the field's
         // own doc for what letting it through cost.
         if self.turned {
-            self.arm(self.interval(), now);
+            self.arm(self.interval(), now, true);
             return;
         }
         self.walking = true;
         self.turned = true;
+        // The free turn covers no ground either, and the step it buys leaves in
+        // this same wake — there is nothing in flight to be early against.
+        self.crossing = false;
         // Where the clock was is either a deadline that has just passed —
         // charging from `now` instead would fold this wake's lateness into the
         // cadence, which is the drift `next_due` exists to refuse — or nothing
@@ -1333,13 +1397,19 @@ impl Steering {
 
     /// Arm the clock for a step of length `interval`, and declare the walk under
     /// way.
-    fn arm(&mut self, interval: Duration, now: Instant) {
+    ///
+    /// `crossing` is whether the thing being paced covers ground — a step — or
+    /// merely squares the body up, which is a turn. Only the first is drawn as a
+    /// glide, so only the first is worth asking for early: see
+    /// [`Steering::crossing`] and [`LOOKAHEAD`].
+    fn arm(&mut self, interval: Duration, now: Instant, crossing: bool) {
         // Read before the walk is declared under way: what `next_due` needs to
         // know is whether the deadline it is chaining from belongs to a walk
         // that was still going.
         let due = self.next_due(now, interval);
         self.walking = true;
         self.turned = false;
+        self.crossing = crossing;
         self.due = Some(due);
     }
 
@@ -1350,7 +1420,28 @@ impl Steering {
     /// here, and nothing anywhere clears [`Steering::due`] — so this is false for
     /// exactly as long as a step is being walked, however the asking arrived.
     fn free(&self, now: Instant) -> bool {
-        self.due.is_none_or(|due| now >= due)
+        self.due.is_none_or(|due| now + self.early() >= due)
+    }
+
+    /// How far before its deadline the next step may leave — [`LOOKAHEAD`]
+    /// while a walk is under way, and nothing otherwise.
+    ///
+    /// Gated on both, because of what the lookahead is *for*: it fills the queue
+    /// behind a crossing that is still running, so that one begins the instant
+    /// the other ends.
+    ///
+    /// A body that is *standing* has no crossing to queue behind, so leaving
+    /// early would buy no smoothness at all — and it would still shift the
+    /// deadline, because [`Steering::due`] outlives the walk as a rate floor and
+    /// a walk restarted against it would then chain its whole cadence a frame
+    /// early. A body that is *turning* has nothing drawn moving either, and
+    /// [`TURN_HOLD`] is 80ms — a frame of that is a fifth of the delay a player
+    /// is meant to see.
+    const fn early(&self) -> Duration {
+        match self.walking && self.crossing {
+            true => LOOKAHEAD,
+            false => Duration::ZERO,
+        }
     }
 
     /// Whether any input is asking to walk at all.
@@ -1711,6 +1802,19 @@ mod tests {
         start + Duration::from_millis(millis)
     }
 
+    /// The wake at which a step *due* `millis` after `start` may actually leave.
+    ///
+    /// [`LOOKAHEAD`] before its deadline, which is the whole of the difference:
+    /// a step taken while a walk is under way is asked for a frame early so its
+    /// crossing is queued behind the one being drawn rather than beginning after
+    /// a pause on the tile. It buys no ground — the deadline it is early against
+    /// is still chained from the one before it — so the *rate* the assertions
+    /// below are about is unchanged, and stating the shift here is what keeps it
+    /// from being restated at every boundary.
+    fn ask_at(start: Instant, millis: u64) -> Instant {
+        at(start, millis) - LOOKAHEAD
+    }
+
     /// Where the body stands in the tests below. Nothing here reads a map, so
     /// the height is only carried through.
     fn here() -> Point {
@@ -1735,7 +1839,7 @@ mod tests {
         // Nothing is due until a whole step has passed.
         assert_eq!(
             steering.due(
-                at(start, 399),
+                ask_at(start, 399),
                 here(),
                 Direction::NorthWest,
                 Readings::plain(open_ground())
@@ -1744,7 +1848,7 @@ mod tests {
         );
         assert_eq!(
             steering.due(
-                at(start, 400),
+                ask_at(start, 400),
                 here(),
                 Direction::NorthWest,
                 Readings::plain(open_ground())
@@ -1753,7 +1857,7 @@ mod tests {
         );
         assert_eq!(
             steering.due(
-                at(start, 401),
+                ask_at(start, 401),
                 here(),
                 Direction::NorthWest,
                 Readings::plain(open_ground())
@@ -1791,7 +1895,7 @@ mod tests {
                 None
             );
         }
-        assert_eq!(steering.deadline(), Some(at(start, 400)), "the first press's");
+        assert_eq!(steering.deadline(), Some(ask_at(start, 400)), "the first press's");
     }
 
     #[test]
@@ -1812,7 +1916,7 @@ mod tests {
         );
         assert_eq!(
             steering.due(
-                at(start, 199),
+                ask_at(start, 199),
                 here(),
                 Direction::SouthEast,
                 Readings::plain(open_ground())
@@ -1821,7 +1925,7 @@ mod tests {
         );
         assert_eq!(
             steering.due(
-                at(start, 200),
+                ask_at(start, 200),
                 here(),
                 Direction::SouthEast,
                 Readings::plain(open_ground())
@@ -1912,7 +2016,7 @@ mod tests {
         );
         assert_eq!(
             steering.due(
-                at(start, gallop - 1),
+                ask_at(start, gallop - 1),
                 here(),
                 Direction::SouthEast,
                 Readings::plain(open_ground())
@@ -1921,7 +2025,7 @@ mod tests {
         );
         assert_eq!(
             steering.due(
-                at(start, gallop),
+                ask_at(start, gallop),
                 here(),
                 Direction::SouthEast,
                 Readings::plain(open_ground())
@@ -1951,7 +2055,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             steering.deadline(),
-            Some(at(start, RUN_HOLD.as_millis() as u64)),
+            Some(ask_at(start, RUN_HOLD.as_millis() as u64)),
             "led at a walk, not galloped and not trudged"
         );
     }
@@ -2880,7 +2984,7 @@ mod tests {
                 None
             );
         }
-        assert_eq!(steering.deadline(), Some(at(start, 400)));
+        assert_eq!(steering.deadline(), Some(ask_at(start, 400)));
     }
 
     /// A drag restates the destination on every raw mouse-move event — tens a
@@ -3027,7 +3131,7 @@ mod tests {
         assert_eq!(steering.goal(), None, "but the destination is dropped at once");
         assert_eq!(
             steering.due(
-                at(start, 399),
+                ask_at(start, 399),
                 here(),
                 Direction::East,
                 Readings::plain(open_ground())
@@ -3036,7 +3140,7 @@ mod tests {
         );
         assert_eq!(
             steering.due(
-                at(start, 400),
+                ask_at(start, 400),
                 here(),
                 Direction::NorthWest,
                 Readings::plain(open_ground())
@@ -3081,14 +3185,14 @@ mod tests {
         );
         assert_eq!(
             steering.deadline(),
-            Some(at(start, 400)),
+            Some(ask_at(start, 400)),
             "the deadline the step already had, not an earlier one"
         );
         // And it is the *new* direction that leaves at it: the queue is one step
         // deep and every press rebuilds it.
         assert_eq!(
             steering.due(
-                at(start, 400),
+                ask_at(start, 400),
                 here(),
                 Direction::East,
                 Readings::plain(open_ground())
@@ -3144,7 +3248,7 @@ mod tests {
                 "nor by asking the clock at {now:?}"
             );
         }
-        assert_eq!(steering.deadline(), Some(at(start, 400)));
+        assert_eq!(steering.deadline(), Some(ask_at(start, 400)));
     }
 
     /// The mouse-heading counterpart to the mash above, and the regression a
@@ -3253,7 +3357,7 @@ mod tests {
         );
         assert_eq!(
             steering.deadline(),
-            Some(at(start, 2_400)),
+            Some(ask_at(start, 2_400)),
             "and the step after it is a whole hold away, measured from the press"
         );
     }
@@ -3311,7 +3415,7 @@ mod tests {
         );
         assert_eq!(
             steering.deadline(),
-            Some(at(start, turn + 400)),
+            Some(ask_at(start, turn + 400)),
             "and from there it is an ordinary walk"
         );
     }
@@ -3428,7 +3532,7 @@ mod tests {
             Some(Facing::walking(Direction::East)),
             "and the step it was for, in the same instant"
         );
-        assert_eq!(steering.deadline(), Some(at(start, 400)));
+        assert_eq!(steering.deadline(), Some(ask_at(start, 400)));
     }
 
     /// Fast rotation is the same rule at ClassicUO's own faster number, and
@@ -3459,7 +3563,7 @@ mod tests {
             ),
             Some(Facing::walking(Direction::East))
         );
-        assert_eq!(steering.deadline(), Some(at(start, turn + 400)));
+        assert_eq!(steering.deadline(), Some(ask_at(start, turn + 400)));
     }
 
     /// A turn is a step and is paced like one, so spinning the cursor round the
@@ -3617,7 +3721,7 @@ mod tests {
             None,
             "the same heading restated is not a fresh ask"
         );
-        assert_eq!(steering.deadline(), Some(at(start, 400)));
+        assert_eq!(steering.deadline(), Some(ask_at(start, 400)));
     }
 
     /// A blocked cardinal has no legal diagonal past it at all (see `detour`'s

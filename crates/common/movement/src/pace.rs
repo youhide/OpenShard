@@ -88,6 +88,45 @@ pub const fn step_hold(running: bool, mounted: bool) -> Duration {
     }
 }
 
+/// How long a crossing should take, given how long is left before it is *due to
+/// end*.
+///
+/// # Why a crossing is scheduled by its end and not by its start
+///
+/// A glide has to end exactly when the next one begins, or the walk is not
+/// continuous. Both ways of being wrong read as a stutter once a tile: finish
+/// early and the body stands on its tile until the next step is asked for,
+/// finish late and that step yanks it forward from wherever it had got to.
+///
+/// A step is asked for when the event loop wakes, and a loop wakes on the
+/// display's grid and never early. So a step due at `t` leaves at `t + w` for
+/// some lateness `w` under one frame, and a crossing drawn for the nominal hold
+/// *from there* ends at `t + w + nominal` while the next begins at
+/// `t + nominal + w'`. The body therefore stands still for `w' - w` — the
+/// difference of two latenesses, which is positive about half the time.
+///
+/// One frame of lateness is 4% of a walk, 8% of a run and **17% of a gallop**,
+/// which is why a mount is what a person notices. Spending the lateness on the
+/// crossing's *length* instead of banking it as standing still costs the same
+/// few per cent in speed, where nobody can see it.
+///
+/// # The band
+///
+/// Believed only within half and double the nominal length, because outside it
+/// the number is not a pace at all: much less is a body that had stopped and
+/// started again, much more is a crossing whose schedule was lost. Both are
+/// answered with the nominal hold, which is at least a walking speed.
+///
+/// Read by both ends of the client — `crowd.rs` for a body it only hears about,
+/// and the app's own movement core for the one it commands — so the two cannot
+/// drift into two different bands.
+pub fn crossing_left(left: Duration, nominal: Duration) -> Duration {
+    match left >= nominal / 2 && left <= nominal * 2 {
+        true => left,
+        false => nominal,
+    }
+}
+
 /// How far a nominal step has advanced, clamped at its destination.
 ///
 /// One shared interpolation fraction keeps the production movement core and

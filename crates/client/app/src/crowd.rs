@@ -1787,13 +1787,13 @@ impl Tracked {
 /// for the frames between the boundary and the arrival, and a retroactive start
 /// makes the next frame catch up all at once.
 ///
-/// Believed only within half and double the nominal length, which is the band
-/// [`glide_time`] trusts a measurement in and for the same reason: outside it
-/// there is no cadence to chain from — a body that had stopped, a step answered
-/// after a stall, a rollback — and the wire's own claim is at least a walking
-/// speed. Everyone else gets the nominal length too, because nothing on the wire
-/// says when an NPC set off and a schedule invented for a guessed pace would
-/// move it somewhere it never was.
+/// The band it is believed in is [`crossing_left`](openshard_movement::crossing_left),
+/// which is where the rule itself lives now: the app's own movement core draws
+/// the body this client commands and needs the identical schedule, so the band
+/// is stated once in `common/movement` beside the four rates and read from both
+/// ends. Everyone else gets the nominal length, because nothing on the wire says
+/// when an NPC set off and a schedule invented for a guessed pace would move it
+/// somewhere it never was.
 fn crossing(previous: Option<Step>, commanded: bool, now: Duration, nominal: Duration) -> Duration {
     if !commanded {
         return nominal;
@@ -1805,10 +1805,7 @@ fn crossing(previous: Option<Step>, commanded: bool, now: Duration, nominal: Dur
     let Some(left) = ends.checked_sub(now) else {
         return nominal;
     };
-    match left >= nominal / 2 && left <= nominal * 2 {
-        true => left,
-        false => nominal,
-    }
+    openshard_movement::crossing_left(left, nominal)
 }
 
 /// Whether a move of one tile is what happened, in the distance UO measures.

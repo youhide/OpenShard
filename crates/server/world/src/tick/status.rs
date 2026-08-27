@@ -26,7 +26,11 @@ use openshard_state::components::{Riding, body_is_female};
 /// How often the derived numbers are recomputed, in ticks: twice a second. Fast
 /// enough that gold falling out of a purchase reads as immediate, slow enough
 /// that the pack walk is nothing next to the rest of the tick.
-pub(super) const STATUS_REFRESH_TICKS: u64 = 10;
+///
+/// Derived from the tick rate rather than written out, because "twice a second"
+/// is the decision and the tick count is only how it is spelled: as a bare `10`
+/// it quietly became four times a second when the tick halved.
+pub(super) const STATUS_REFRESH_TICKS: u64 = TICKS_PER_SECOND / 2;
 
 // What this pass remembers between runs is `StatusSnapshot`, and it lives on the
 // connection's row in `openshard_state` rather than here: it is about what a

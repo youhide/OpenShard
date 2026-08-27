@@ -224,7 +224,11 @@ pub(crate) fn escortable_says(state: &mut WorldState, npc: Option<EntityId>, tex
 
 /// Ticks between an escortable's steps — a townsperson's amble, so a player does
 /// not have to stand still and wait for it.
-const ESCORT_BEAT_TICKS: u64 = 6;
+///
+/// Three tenths of a second, stated as such rather than as a tick count for the
+/// reason [`ESCORT_PATIENCE_TICKS`] is: the bare `6` it used to be halved to
+/// 150ms — faster than a player can run — when the tick rate doubled.
+const ESCORT_BEAT_TICKS: u64 = 3 * TICKS_PER_SECOND / 10;
 
 /// How close is close enough to stop following. One tile back, so it does not
 /// tread on the escorter's heels or block a doorway they are trying to use.

@@ -38,8 +38,13 @@ use openshard_state::{Rng, WorldState, WorldTick};
 
 use crate::speech::{bark_line, greeting_for};
 
-/// How long between an NPC's beats, in ticks (~2s at 20Hz).
-pub const BEAT_TICKS: u64 = 40;
+/// How long between an NPC's beats, in ticks — two seconds.
+///
+/// In seconds times [`TICKS_PER_SECOND`] rather than as a tick count, because it
+/// is a span of real time and the tick rate is not a constant of the universe:
+/// the bare `40` this used to be was two seconds at the 50ms tick and one at the
+/// 25ms one, which is every townsperson in the world walking twice as fast.
+pub const BEAT_TICKS: u64 = 2 * openshard_state::TICKS_PER_SECOND;
 /// What fraction of a beat's interval that beat is spread over: one in this many.
 ///
 /// Sphere re-rolls an idle NPC's timer at the end of *every* beat —

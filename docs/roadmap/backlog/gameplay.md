@@ -2,6 +2,46 @@
 
 [Backlog](README.md) · [Roadmap](../README.md)
 
+## The tick moved and thirteen constants did not
+
+`TICK_INTERVAL` went from 50ms to 25ms and `TICKS_PER_SECOND` from 20 to 40, and
+every timer written as a bare tick count went on meaning what it meant at the old
+rate — which is half the wall-clock it was chosen for. None of them was
+arithmetically wrong; what changed underneath them was the unit.
+
+The engine ones, now derived from `TICKS_PER_SECOND` and fixed:
+
+- `combat::swing_ticks` ended `tenths * 2`, so **every swing on the shard was at
+  twice its era's speed**. This is the one a player would have felt.
+- `combat::MURDER_DECAY_TICKS` — eight hours had become four.
+- `combat::vitals::{HITS_REGEN_TICKS, STAMINA_REGEN_TICKS}` — both twice as fast.
+- `npc::live::BEAT_TICKS` — every townsperson living at double speed.
+- `npc::guards::IDLE_TICKS`, `npc::vendor::RESTOCK_TICKS` — half their spans.
+- `ai::{REPATH_TICKS, GUARD_TICKS, REFUSAL_TICKS}` — a two-second repath window
+  became one, and two ten-second memories became five.
+- `quests::progress::ESCORT_BEAT_TICKS` — an escortable ambling at 150ms a tile,
+  faster than a player can run.
+- `world::tick::defaults::SAVE_EVERY_TICKS` and `tick::status::STATUS_REFRESH_TICKS`
+  — a world saving and a status bar refreshing at twice their documented rates.
+
+`TICK_INTERVAL` and `TICKS_PER_SECOND` are now welded by a `const` assertion in
+`tick/defaults.rs`, so the next person to move the tick gets a compile error
+instead of a shard that quietly runs at half speed in a dozen places.
+
+Left open:
+
+- **Every remaining bare tick count is a latent one of these.** The sweep covered
+  the constants that name a span of real time; it did not cover the tick counts
+  passed as *arguments* — a spawner's `swing`, a script's `beat`, a decoration
+  file's delay. Those are data, and data files carry the same unit ambiguity with
+  nowhere to put a `const` assertion.
+- **A kiting archer can livelock**, and that is how the tick change was caught: a
+  turn costs a whole beat (`motion::step`'s turn-as-step), and combat re-faces a
+  fighter at its target before each swing. Where the swing is quicker than the
+  beat the creature spends every beat turning round and never opens the gap. The
+  fixture now states 500ms rather than a tick count, which hides it again; the
+  rule that a turn and a step compete for one beat is the real thing to look at.
+
 ## Not built, and until now not written down
 
 A sweep of this file against the code turned up a set of gaps that were not

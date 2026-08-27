@@ -70,8 +70,13 @@ fn store_stamina(state: &mut WorldState, mobile: EntityId, current: u16, max: u1
     state.registry.insert(mobile, Stamina { current, max });
 }
 
-/// Ticks between one-point health regeneration pulses.
-pub const HITS_REGEN_TICKS: u64 = 220;
+/// Ticks between one-point health regeneration pulses — eleven seconds.
+///
+/// In seconds times [`TICKS_PER_SECOND`](openshard_state::TICKS_PER_SECOND) and
+/// not as the tick count it comes to, because it *is* a span of real time: the
+/// bare `220` this used to be was eleven seconds at the 50ms tick and five and a
+/// half at the 25ms one, and nothing said which of the two was meant.
+pub const HITS_REGEN_TICKS: u64 = 11 * openshard_state::TICKS_PER_SECOND;
 
 /// Heal living, non-poisoned wounded mobiles once per regeneration pulse.
 pub fn regen_hits(state: &mut WorldState) {
@@ -99,8 +104,10 @@ pub fn regen_hits(state: &mut WorldState) {
     }
 }
 
-/// Ticks between one-point stamina regeneration pulses.
-pub const STAMINA_REGEN_TICKS: u64 = 30;
+/// Ticks between one-point stamina regeneration pulses — a second and a half.
+///
+/// Stated in seconds for [`HITS_REGEN_TICKS`]'s reason.
+pub const STAMINA_REGEN_TICKS: u64 = 3 * openshard_state::TICKS_PER_SECOND / 2;
 
 /// Restore one stamina point to each winded mobile on a regeneration pulse.
 pub fn regen_stamina(state: &mut WorldState) {
