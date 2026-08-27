@@ -6906,6 +6906,78 @@ fn a_fight_with_everything_that_happens_to_one_still_has_no_blank_tick() {
     }
 }
 
+/// Walking up to a fight, which is the one thing an edge cannot tell you about.
+///
+/// A phase and a refusal both cross the wire only when they *change*, so a
+/// client that was not watching at the moment of the change is never told at
+/// all. Approaching an archer held off by a wall drew a body standing still with
+/// nothing over its head — and a standing refusal never changes, so "until its
+/// next transition" is, for that case, never. The health bar has ridden along
+/// with the draw for exactly this reason since it was written; combat state now
+/// does too.
+#[test]
+fn a_fighter_you_walk_up_to_arrives_with_what_it_is_doing() {
+    // Mid-draw: the newcomer is owed the bar.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let fighter = world.state.players[&connection];
+    let archer = world.state.registry.serial_of(fighter).unwrap();
+    arm_with_bow(&mut world, connection);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 20_000, now);
+    engage(&mut world, connection, mob, now);
+    for _ in 0..40 {
+        world.tick(now);
+    }
+    let newcomer = enter(&mut world, now);
+    let arrival = packets_for(&mut world, newcomer);
+    let intervals = action_phase_intervals(&arrival, archer);
+    assert_eq!(
+        intervals.len(),
+        1,
+        "a body drawn mid-draw arrives with the draw on it"
+    );
+    assert!(
+        intervals[0] > 0 && intervals[0] < 2_500,
+        "and with what is *left* of the interval ({}ms of 2500), so the newcomer's bar \
+         lines up with everybody else's rather than starting over",
+        intervals[0]
+    );
+    assert_eq!(
+        action_stages(&arrival, archer),
+        vec![ActionStage::Load.to_bits()],
+        "including which stretch of it the bow is in"
+    );
+}
+
+/// The other half of walking up to a fight, and the half that never corrects
+/// itself: a refusal is a *standing* state, so "you will hear about it at its
+/// next transition" means never for as long as the wall stands.
+#[test]
+fn a_fighter_you_walk_up_to_arrives_wearing_its_refusal() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let fighter = world.state.players[&connection];
+    let archer = world.state.registry.serial_of(fighter).unwrap();
+    arm_with_bow(&mut world, connection);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 20_000, now);
+    let mob_entity = entity(&world, mob);
+    engage(&mut world, connection, mob, now);
+    world
+        .state
+        .teleport(mob_entity, Point::new(START.0 + 25, START.1, 0));
+    for _ in 0..40 {
+        world.tick(now);
+    }
+    let newcomer = enter(&mut world, now);
+    assert_eq!(
+        action_balks(&packets_for(&mut world, newcomer), archer),
+        vec![InterruptReason::OutOfReach.to_bits()],
+        "and a fighter standing in a refusal arrives wearing it"
+    );
+}
+
 /// A concealed fighter's own screen, which is the one hole the scripted chain
 /// above cannot reach: it needs the *commit* to happen from cover, and a running
 /// action reveals its owner at the impact.

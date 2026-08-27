@@ -28,9 +28,9 @@ use openshard_movement::{Footing, MapTerrain, NavigationGraph};
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::combat::{AttackTarget, HealthBar, WarMode};
 use openshard_protocol::feedback::{
-    Animation, BalkState, CombatActionBalked, CombatActionEnded, CombatActionOutcome, CombatActionPhase,
-    CombatActionStage, HarvestCompleted, HarvestPreview, HarvestToolVisual, InterruptReason, NewAnimation,
-    PlaySound, SwingDuration, SwingTiming,
+    ActionStage, Animation, BalkState, CombatActionBalked, CombatActionEnded, CombatActionOutcome,
+    CombatActionPhase, CombatActionStage, HarvestCompleted, HarvestPreview, HarvestToolVisual,
+    InterruptReason, NewAnimation, PlaySound, SwingDuration, SwingTiming,
 };
 use openshard_protocol::items::WorldItem;
 use openshard_protocol::localized;
@@ -3344,6 +3344,73 @@ impl WorldState {
                 self.outbox.push(Outbound { connection, packet });
             }
         }
+        // And what this body is doing about fighting, for the health bar's own
+        // reason two blocks up: a fighter's action and its refusal both cross
+        // the wire as *edges*, so a client that was not watching when the edge
+        // happened is never told at all. Walking up to an archer held off by a
+        // wall, or to a swordsman half way through a stroke, drew a body
+        // standing still with nothing over its head until its next transition —
+        // which for a standing refusal can be never.
+        for packet in self.combat_state_packets(other, version) {
+            self.outbox.push(Outbound { connection, packet });
+        }
+    }
+
+    /// The standing combat state of `entity`, as the packets that would have
+    /// told a watcher about it — for a client that has just been given the body
+    /// and missed every edge that came before.
+    ///
+    /// The three marks a fighter can be wearing, in the order the client must
+    /// read them: the action, the stretch of it that action is in, and the
+    /// refusal. An outcome is deliberately not among them — a verdict is a thing
+    /// that *happened*, it fades on its own, and re-announcing a hit to somebody
+    /// who arrived after it would put a word on screen for a blow they did not
+    /// see land.
+    ///
+    /// An untelegraphed action sends nothing, which is the same audience rule
+    /// [`announce_action`](Self::announce_action) applies: arriving in front of
+    /// a concealed fighter is not a way to be told about the ambush.
+    fn combat_state_packets(&self, entity: EntityId, version: ClientVersion) -> Vec<Vec<u8>> {
+        let Some(actor) = self.registry.serial_of(entity) else {
+            return Vec::new();
+        };
+        let mut packets = Vec::new();
+        if let Some(&action) = self.registry.get::<CombatAction>(entity) {
+            if action.telegraphed {
+                // The interval is what is *left* of it, not what it started as:
+                // `wire_phase` measures from now, so a watcher arriving half way
+                // through a draw gets half a draw and their bar lines up with
+                // everybody else's.
+                packets.push(
+                    ServerPacket::CombatActionPhase(CombatActionPhase {
+                        actor,
+                        target: action.target,
+                        kind: action.wire_kind(),
+                        phase: action.wire_phase(self.ticks),
+                    })
+                    .encode(version),
+                );
+                if action.stage != ActionStage::FIRST {
+                    packets.push(
+                        ServerPacket::CombatActionStage(CombatActionStage {
+                            actor,
+                            stage: action.stage,
+                        })
+                        .encode(version),
+                    );
+                }
+            }
+        }
+        if let Some(&Balked { reason }) = self.registry.get::<Balked>(entity) {
+            packets.push(
+                ServerPacket::CombatActionBalked(CombatActionBalked {
+                    actor,
+                    balk: BalkState::Blocked(reason),
+                })
+                .encode(version),
+            );
+        }
+        packets
     }
 
     /// The `0xBF 0x1D` that says which revision a designed house's picture is

@@ -569,6 +569,23 @@ const FALL_HELD: Duration = Duration::from_secs(5);
 /// blow being reported and not one from an exchange ago.
 const OUTCOME_HOLD: Duration = Duration::from_millis(1_200);
 
+/// How long a bar that has run out of interval is still drawn, waiting for the
+/// shard to say how it ended.
+///
+/// **The interval is a prediction; the ending is a fact, and only one of them is
+/// ours.** The bar used to vanish the instant its own arithmetic said the impact
+/// was due, which makes the picture wrong whenever the two clocks disagree by
+/// any amount at all — and they always disagree, because the shard measures in
+/// ticks it may be late delivering and this measures in the wall clock of a
+/// frame. A shard running even slightly behind its own tick rate therefore blanks
+/// the tail of *every single action*: a bar, then nothing, then the next bar.
+///
+/// So a finished bar is held, full, until the ending arrives. It reads correctly
+/// — a full bar is a blow that is due — and the timeout behind it goes back to
+/// being what it was always described as: a bound on a leak, for a body that
+/// walked out of range mid-swing and will never be told about again.
+const RUNNING_GRACE: Duration = Duration::from_secs(3);
+
 /// One combat action a body is part way through, as the wire told it.
 ///
 /// The wire's own [`ActionPhase`] is kept whole rather than unpacked into a flag
@@ -1836,12 +1853,16 @@ impl Crowd {
     ///
     /// Two things time out here, and neither is how an action is supposed to
     /// end. An outcome fades at [`OUTCOME_HOLD`] because it is a message and not
-    /// a state. A *running* action that outlives its own interval is the bound
-    /// on a leak: every action ends and every end crosses the wire
-    /// (`docs/combat_actions.md`'s D2), so in the ordinary run
-    /// [`Crowd::end_action`] has already replaced it — what this stops is a body
-    /// that walked out of range mid-swing holding a full bar for as long as the
-    /// client is connected.
+    /// a state. A *running* action that outlives its own interval **by
+    /// [`RUNNING_GRACE`]** is the bound on a leak: every action ends and every
+    /// end crosses the wire (`docs/combat_actions.md`'s D2), so in the ordinary
+    /// run [`Crowd::end_action`] has already replaced it — what this stops is a
+    /// body that walked out of range mid-swing holding a full bar for as long as
+    /// the client is connected.
+    ///
+    /// The grace is the difference between a bound and a schedule, and it is the
+    /// whole reason the tail of an action is no longer blank: see
+    /// [`RUNNING_GRACE`].
     pub fn preparing(&self, who: Who) -> Option<ActionProgress> {
         let record = self.actions.get(&who?)?;
         let ended = record
@@ -1851,7 +1872,7 @@ impl Crowd {
         let running = record.running.and_then(|action| {
             let elapsed = self.now.saturating_sub(action.started);
             let span = Duration::from_millis(u64::from(action.phase.duration().millis()));
-            if elapsed > span {
+            if elapsed > span + RUNNING_GRACE {
                 return None;
             }
             let fill = match action.phase {
@@ -2591,8 +2612,14 @@ mod tests {
     /// The bound on a leak, not part of the mechanism: an action whose end
     /// packet this client never heard — the actor walked out of range mid-swing
     /// — must not hold a full bar over its head forever.
+    ///
+    /// And the other half, which is what the bound is *for*: right up to that
+    /// point the bar is still there, full. The interval is this client's
+    /// arithmetic and the ending is the shard's fact, and dropping the bar the
+    /// moment the arithmetic ran out blanked the tail of every action the shard
+    /// was even slightly late to finish. See [`RUNNING_GRACE`].
     #[test]
-    fn an_action_whose_end_never_arrived_stops_at_its_impact() {
+    fn an_action_whose_end_never_arrived_is_held_full_and_then_let_go() {
         let (mut crowd, who, mobile) = standing_crowd();
         crowd.begin_action(phase(
             mobile,
@@ -2602,7 +2629,21 @@ mod tests {
             },
         ));
         crowd.advance(Duration::from_millis(1_601));
-        assert_eq!(crowd.preparing(who), None);
+        assert_eq!(
+            crowd.preparing(who).and_then(|progress| progress.running),
+            Some(RunningAction {
+                kind: CombatActionKind::Breath,
+                fill: ActionFill::Releasing { filled: 1.0 },
+                stage: ActionStage::FIRST,
+            }),
+            "a blow that is due reads as a full bar, not as an empty patch of sky"
+        );
+        crowd.advance(RUNNING_GRACE);
+        assert_eq!(
+            crowd.preparing(who),
+            None,
+            "and an ending that never came is still bounded"
+        );
     }
 
     /// A refusal is a *state*, and the difference from an outcome is the whole

@@ -711,6 +711,39 @@ for — and the oracle says so by tick number rather than by inspection.
   `announce_stage` takes the whole action now for the same reason — so the stages
   of an action cannot reach a wider room than the commit they belong to.
 
+**Ф4.4 — an edge is not a state. ✅ Built.** Ф4.3 ran the fight and found the
+ambusher, and the report came back again: *still* places where nothing is drawn.
+Ф4.3's oracle could not have caught them, because all three are about a screen
+that **missed the edge** rather than about a tick that had nothing to say. *Done
+when:* the shard asserts the invariant on itself rather than being asked to
+prove it, and a client that was not watching when something changed is told
+anyway.
+
+- **The assert, where the answer is established.** `commit_actions` ends by
+  walking every fighter and insisting that one in war and alive holds either a
+  `CombatAction` or a `Balked`. An assertion and not a repair: a pass that
+  invented a reason for the odd one out would hide precisely the defect this is
+  here to name. `#[cfg(debug_assertions)]`, so the playground runs it on every
+  tick and a release shard pays nothing.
+- **Combat state rides along with the draw, like the health bar.** A phase and a
+  refusal cross the wire as *edges*, so a client that was elsewhere at the moment
+  of the change is never told at all — and a standing refusal has no next change,
+  which makes "never" literal. Walking up to an archer held off by a wall drew a
+  body standing still with nothing over its head. `WorldState::show` now sends
+  the action (with what is *left* of its interval, so the newcomer's bar lines up
+  with everybody else's), the stage it is in, and the refusal. The health bar has
+  had this exact paragraph written above it since it was added; combat never got
+  one.
+- **The client's bar died on its own arithmetic.** The interval is a prediction
+  and the ending is a fact, and only the second is the shard's. Dropping the bar
+  the instant the prediction ran out makes the picture wrong whenever the two
+  clocks disagree by any amount — and they always do, because the shard measures
+  in ticks it may be late delivering and the client measures in the wall clock of
+  a frame. A shard running even slightly behind its tick rate blanked the tail of
+  *every single action*. A finished bar is now held, full — which reads correctly,
+  a full bar is a blow that is due — until the ending arrives, with `RUNNING_GRACE`
+  behind it as what the timeout was always described as: a bound on a leak.
+
 **Ф5 — the fight costs something.** D9: an opening stamina cost at the commit, a
 per-tick `Drain` while sustaining, the owed fatigue spent at the impact, `Winded`
 as a condition the table can read, and the regeneration pulse excluding anyone
@@ -742,8 +775,25 @@ index of armed squares, and that index is a design rather than a variant.
 
 ## Backlog
 
-Found while building Ф1, Ф2, Ф3, Ф4, Ф4.1, Ф4.2 and Ф4.3, and none of it belonged
-to any of them.
+Found while building Ф1, Ф2, Ф3, Ф4 and the four half-phases after them, and none
+of it belonged to any of them.
+
+**From Ф4.4:**
+
+- **Nothing re-sends combat state on a resync.** `show` covers a body arriving on
+  a screen; it does not cover a screen arriving at a body, which is what a
+  `0x22`-driven rebuild or a reconnect is. Whether the client drops its crowd
+  records there has not been checked, and if it does, the same silence comes back
+  by the one route the reveal fix does not cover.
+- **`RUNNING_GRACE` is a number nobody has watched.** Three seconds is long
+  enough that no ordinary lateness blanks a bar and short enough to bound a leak,
+  and both halves of that sentence are guesses. The first person to fight on a
+  loaded shard should disagree with it out loud.
+- **The assert walks every fighter every tick.** Two extra passes over
+  `query::<Combat>` in a debug build, on a pass that already makes two. Bounded by
+  fighters and not by mobiles, so it is affordable — but it is the first check in
+  this crate whose cost scales with the fight rather than with the defect, and a
+  shard with a thousand combatants in a debug build will notice.
 
 **From Ф4.3:**
 

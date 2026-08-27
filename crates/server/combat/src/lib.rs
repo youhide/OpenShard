@@ -1073,7 +1073,46 @@ pub fn commit_actions(state: &mut WorldState) {
     for entity in stale {
         state.set_balked(entity, BalkState::Clear);
     }
+
+    debug_assert_accounted_for(state);
 }
+
+/// **Every fighter in war is doing something or held up by something.** The
+/// invariant this whole pass exists to hold, checked where it is established
+/// rather than trusted.
+///
+/// It is an assertion and not a repair on purpose. A fighter with neither is a
+/// bug in one of the four verbs, and a pass that quietly invented a reason for
+/// it would hide exactly the defect this is here to name — which is how the
+/// silence lasted as long as it did. The guard is the same one `pending` uses:
+/// a mobile at peace owes nobody a picture, and a dead one has stopped.
+///
+/// Off in release. It walks every fighter on the shard, which is cheap at the
+/// scale a tick already pays for `query::<Combat>` twice, but it is a
+/// development check and not a rule the world depends on.
+#[cfg(debug_assertions)]
+fn debug_assert_accounted_for(state: &WorldState) {
+    let unaccounted: Vec<Serial> = state
+        .registry
+        .query::<Combat>()
+        .filter(|&(fighter, combat)| {
+            combat.warmode()
+                && attackable(state, fighter)
+                && !state.registry.has::<CombatAction>(fighter)
+                && !state.registry.has::<Balked>(fighter)
+        })
+        .filter_map(|(fighter, _)| state.registry.serial_of(fighter))
+        .collect();
+    assert!(
+        unaccounted.is_empty(),
+        "the commit pass left {} fighter(s) in war with neither an action nor a refusal, \
+         which is a body standing still with nothing over its head: {unaccounted:?}",
+        unaccounted.len()
+    );
+}
+
+#[cfg(not(debug_assertions))]
+const fn debug_assert_accounted_for(_state: &WorldState) {}
 
 /// Record that `attacker` could not begin an action, and say so on the edge.
 ///
