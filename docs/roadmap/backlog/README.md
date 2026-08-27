@@ -29,22 +29,9 @@ here. Order, not dates.
 - [ ] Complete house customisation C3–C4.
 - [ ] Resolve the data-table and Felucca-converter findings below.
 
-### Red at HEAD
+### Formatting drift
 
-Two suites fail on a clean tree, and neither is anybody's current work. They are
-here because "all four commands are expected to be silent" stops meaning
-anything the moment two of them are not.
-
-- [ ] `openshard-movement --test walk_scenes`: `a_villa_stair_carries_a_body_to_its_first_floor`
-      and `a_route_climbs_from_a_villas_ground_floor_to_its_first_floor` — the
-      storey above pulls a body up through its own floor, and the route up a
-      villa stair takes a step that is not the one the scene asserts.
-- [ ] `openshard-protocol --test bare_integer_fields`: the N10 allowlist has
-      drifted behind `src/`. Four bare fields are unlisted —
-      `HarvestPreview::action`, `HarvestPreview::cycles`, and `WeatherChange`'s
-      `intensity` and `temperature`. Each wants a type or a reasoned entry, and
-      the check cannot be trusted to catch a fifth while it is red for four.
-- [ ] `cargo fmt --all` also has pre-existing drift in `server/housing/src/lib.rs`,
+- [ ] `cargo fmt --all` has pre-existing drift in `server/housing/src/lib.rs`,
       `server/housing/src/tests.rs` and `server/world/src/tick/houses.rs`.
 
 ### Operations

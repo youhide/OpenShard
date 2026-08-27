@@ -51,6 +51,7 @@ use openshard_client_render::facing::{Face, Prism};
 use openshard_client_render::follow::Rig;
 use openshard_client_render::light;
 use openshard_client_render::solid::Cut;
+use openshard_protocol::feedback::{CombatActionKind, CombatActionOutcome, InterruptReason};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::RangedRange;
@@ -59,8 +60,10 @@ use winit::window::Window;
 use crate::desk::{Desk, Tab};
 use openshard_movement::sight::{EYE, Stop};
 
+use crate::crowd::ActionFill;
 use crate::diagnostics::{
-    HealthBar, Height, Hud, Navigation, PickedTile, PriorityZ, Route, Selection, SightLine, TerrainOverlay,
+    ActionBar, HealthBar, Height, Hud, Navigation, PickedTile, PriorityZ, Route, Selection, SightLine,
+    TerrainOverlay,
 };
 use crate::graphics::{HighlightStyle, HighlightTarget};
 use crate::world::{Shard, WorldState};
@@ -2650,6 +2653,7 @@ fn draw_world_overlays(
         }
     }
     draw_health_bars(&world, &camera, &hud.health_bars, viewport.min);
+    draw_action_bars(&world, &camera, &hud.action_bars, viewport.min);
     // The tile marker, and only when the tile is what is lit: an item under the
     // cursor takes the highlight, and a diamond drawn under its ring would be
     // the client answering "what would a click do here" twice.
@@ -2800,6 +2804,287 @@ fn draw_health_bars(
                 egui::StrokeKind::Middle,
             );
         }
+    }
+}
+
+/// The preparation bars, and beside each one the state it is in.
+///
+/// `docs/combat_actions.md`'s Ф4. Three marks and not one, and the two extra
+/// ones are the point: a bar answers *how far along*, and it cannot answer
+/// *what of* — a blow and a drawn bow fill the same rectangle — nor *and then
+/// what happened*, which is the question a fight actually leaves behind. So the
+/// glyph on the left names what is being prepared, the filling names the phase,
+/// and the word on the right carries the last outcome, including the one no
+/// picture in this client has ever been able to state: the reason an action
+/// stopped.
+///
+/// The two halves are drawn together on purpose. A fighter's next gesture opens
+/// on the tick the last one landed, so an outcome drawn *instead of* a bar would
+/// be legible only for the final blow of a fight — see `crowd::ActionRecord`,
+/// where the measurement is. An exchange therefore reads as a bar filling with
+/// the previous blow's verdict standing beside it.
+///
+/// Above the health line rather than below it. The health bar is what a player
+/// reads first and its place is learned; a row inserted underneath would move
+/// the mana bar every time somebody swung.
+fn draw_action_bars(
+    painter: &egui::Painter,
+    camera: &Camera,
+    bars: &[ActionBar],
+    viewport_origin: egui::Pos2,
+) {
+    const WIDTH: f32 = 42.0;
+    const HEIGHT: f32 = 3.0;
+    // Clear of the health bar, which `draw_health_bars` centres 8 above the
+    // anchor and draws 5 tall: its top edge is 10.5 up, and this is the first
+    // row above that does not touch it.
+    const GAP: f32 = 15.0;
+    // The glyph's box, and how far its centre sits from the bar's left edge.
+    const GLYPH: f32 = 8.0;
+    const MARGIN: f32 = 4.0;
+
+    let physical_to_points = 1.0 / painter.ctx().pixels_per_point();
+    let font = egui::FontId::proportional(9.0);
+    for bar in bars {
+        let projected = camera.to_viewport(bar.anchor);
+        let centre = viewport_origin
+            + egui::vec2(
+                projected.x * physical_to_points,
+                projected.y * physical_to_points - GAP,
+            );
+        let rect = egui::Rect::from_center_size(centre, egui::vec2(WIDTH, HEIGHT));
+        let glyph_at = egui::pos2(rect.left() - MARGIN - GLYPH / 2.0, rect.center().y);
+        let label_at = egui::pos2(rect.right() + MARGIN, rect.center().y);
+        // What is being prepared, if anything. No bar at all between gestures:
+        // an empty rectangle reads as a fighter about to do something, and the
+        // one thing a body between blows is not doing is preparing.
+        if let Some(running) = bar.progress.running {
+            let colour = action_colour(running.kind);
+            painter.rect_filled(
+                rect.expand(1.0),
+                1.0,
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180),
+            );
+            match running.fill {
+                // The whole bar, held: an armed action is *ready*, and a
+                // fraction here would be its endurance running out — which is
+                // not what a watcher is being told. The stroke is what says it
+                // is waiting rather than landing.
+                ActionFill::Armed => painter.rect_filled(rect, 1.0, colour),
+                ActionFill::Releasing { filled } => painter.rect_filled(
+                    egui::Rect::from_min_size(
+                        rect.min,
+                        egui::vec2(rect.width() * filled.clamp(0.0, 1.0), rect.height()),
+                    ),
+                    1.0,
+                    colour,
+                ),
+            };
+            let stroke = match running.fill {
+                ActionFill::Armed => egui::Stroke::new(1.2, egui::Color32::from_rgb(255, 230, 80)),
+                ActionFill::Releasing { .. } => {
+                    egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(20, 20, 20, 220))
+                }
+            };
+            painter.rect_stroke(rect, 1.0, stroke, egui::StrokeKind::Middle);
+            draw_kind_glyph(painter, glyph_at, GLYPH, colour, running.kind);
+        }
+        // How the last one ended, on the right, in its own colour. It outlives
+        // the action it belongs to and fades on its own — see
+        // `crowd::OUTCOME_HOLD` — so this is the one mark that can be here with
+        // no bar under it, and the one that stays while the next bar fills.
+        if let Some(outcome) = bar.progress.ended {
+            let colour = outcome_colour(outcome);
+            painter.text(
+                label_at,
+                egui::Align2::LEFT_CENTER,
+                outcome_label(outcome),
+                font.clone(),
+                colour,
+            );
+            // With nothing running the left box is free, and the ending takes
+            // it: a word alone beside an empty stretch of sky is harder to
+            // attach to a body than a mark where the glyph always is.
+            if bar.progress.running.is_none() {
+                draw_outcome_glyph(painter, glyph_at, GLYPH, colour, outcome);
+            }
+        } else if let Some(running) = bar.progress.running {
+            // The state in a word, and only when no outcome is competing for
+            // the same place: what a fighter *is* doing is already drawn twice
+            // over there, and what just happened is the scarcer fact.
+            painter.text(
+                label_at,
+                egui::Align2::LEFT_CENTER,
+                action_state_label(running.kind, running.fill),
+                font.clone(),
+                action_colour(running.kind),
+            );
+        }
+    }
+}
+
+/// What each kind of impact is drawn as.
+///
+/// Drawn and not written: a glyph out of a font this client does not ship is a
+/// box on somebody else's machine, and these have to read at eight pixels beside
+/// a moving body.
+fn draw_kind_glyph(
+    painter: &egui::Painter,
+    centre: egui::Pos2,
+    size: f32,
+    colour: egui::Color32,
+    kind: CombatActionKind,
+) {
+    let half = size / 2.0;
+    let stroke = egui::Stroke::new(1.4, colour);
+    match kind {
+        // A stroke through the box: the blade's path, which is the whole of what
+        // a swing is.
+        CombatActionKind::Swing => {
+            painter.line_segment(
+                [
+                    egui::pos2(centre.x - half, centre.y + half),
+                    egui::pos2(centre.x + half, centre.y - half),
+                ],
+                stroke,
+            );
+        }
+        // A shaft and a head, pointing the way it will travel.
+        CombatActionKind::Shot => {
+            painter.line_segment(
+                [
+                    egui::pos2(centre.x - half, centre.y),
+                    egui::pos2(centre.x + half, centre.y),
+                ],
+                stroke,
+            );
+            for corner in [centre.y - half * 0.7, centre.y + half * 0.7] {
+                painter.line_segment(
+                    [
+                        egui::pos2(centre.x + half, centre.y),
+                        egui::pos2(centre.x, corner),
+                    ],
+                    stroke,
+                );
+            }
+        }
+        // A cone widening away from the mouth: what a breath does that an arrow
+        // does not is spread.
+        CombatActionKind::Breath => {
+            for corner in [centre.y - half, centre.y + half] {
+                painter.line_segment(
+                    [
+                        egui::pos2(centre.x - half, centre.y),
+                        egui::pos2(centre.x + half, corner),
+                    ],
+                    stroke,
+                );
+            }
+        }
+    }
+}
+
+/// What each ending is drawn as: it landed, it found air, it was stopped, or the
+/// arm gave out.
+fn draw_outcome_glyph(
+    painter: &egui::Painter,
+    centre: egui::Pos2,
+    size: f32,
+    colour: egui::Color32,
+    outcome: CombatActionOutcome,
+) {
+    let half = size / 2.0;
+    let stroke = egui::Stroke::new(1.4, colour);
+    match outcome {
+        CombatActionOutcome::Hit => {
+            painter.circle_filled(centre, half * 0.8, colour);
+        }
+        CombatActionOutcome::Miss => {
+            painter.circle_stroke(centre, half * 0.8, stroke);
+        }
+        // A cross, the one mark that reads as *stopped* rather than as any
+        // amount of anything.
+        CombatActionOutcome::Interrupted(_) => {
+            for slope in [-1.0, 1.0] {
+                painter.line_segment(
+                    [
+                        egui::pos2(centre.x - half, centre.y + half * slope),
+                        egui::pos2(centre.x + half, centre.y - half * slope),
+                    ],
+                    stroke,
+                );
+            }
+        }
+        // A bar and nothing crossing it: the wait ran out, and nothing happened
+        // at all.
+        CombatActionOutcome::Expired => {
+            painter.line_segment(
+                [
+                    egui::pos2(centre.x - half, centre.y),
+                    egui::pos2(centre.x + half, centre.y),
+                ],
+                stroke,
+            );
+        }
+    }
+}
+
+/// The colour a kind of impact is drawn in, kept apart from the health palette
+/// on purpose: a bar over a body already means notoriety, and a second bar in
+/// the same colours would be read as more of the same fact.
+fn action_colour(kind: CombatActionKind) -> egui::Color32 {
+    match kind {
+        CombatActionKind::Swing => egui::Color32::from_rgb(190, 200, 215),
+        CombatActionKind::Shot => egui::Color32::from_rgb(235, 185, 90),
+        CombatActionKind::Breath => egui::Color32::from_rgb(215, 95, 205),
+    }
+}
+
+/// The colour an ending is drawn in. An interruption is the shard's *answer* to
+/// a question the player asked by attacking, so it is the one that is warned
+/// about rather than merely reported.
+fn outcome_colour(outcome: CombatActionOutcome) -> egui::Color32 {
+    match outcome {
+        CombatActionOutcome::Hit => egui::Color32::from_rgb(220, 55, 45),
+        CombatActionOutcome::Miss => egui::Color32::from_rgb(180, 180, 185),
+        CombatActionOutcome::Interrupted(_) => egui::Color32::from_rgb(255, 200, 60),
+        CombatActionOutcome::Expired => egui::Color32::from_rgb(140, 140, 160),
+    }
+}
+
+/// What a running action says about itself in one word.
+fn action_state_label(kind: CombatActionKind, fill: ActionFill) -> &'static str {
+    match (kind, fill) {
+        (CombatActionKind::Swing, ActionFill::Armed) => "swing · held",
+        (CombatActionKind::Swing, ActionFill::Releasing { .. }) => "swing",
+        (CombatActionKind::Shot, ActionFill::Armed) => "aim · held",
+        (CombatActionKind::Shot, ActionFill::Releasing { .. }) => "shot",
+        (CombatActionKind::Breath, ActionFill::Armed) => "breath · held",
+        (CombatActionKind::Breath, ActionFill::Releasing { .. }) => "breath",
+    }
+}
+
+/// How an action ended, in the words the wire's own reasons are named by.
+///
+/// Every one of `InterruptReason`'s arms has a phrase here rather than a default:
+/// the reason a swing vanished is the whole thing this packet was added to say,
+/// and a new arm that fell through to "stopped" would silently un-say it for
+/// exactly the case somebody had just gone to the trouble of naming.
+fn outcome_label(outcome: CombatActionOutcome) -> &'static str {
+    match outcome {
+        CombatActionOutcome::Hit => "hit",
+        CombatActionOutcome::Miss => "miss",
+        CombatActionOutcome::Expired => "expired",
+        CombatActionOutcome::Interrupted(reason) => match reason {
+            InterruptReason::TargetGone => "target gone",
+            InterruptReason::OutOfReach => "out of reach",
+            InterruptReason::NoLineOfSight => "no line of sight",
+            InterruptReason::Pacified => "pacified",
+            InterruptReason::Abandoned => "abandoned",
+            InterruptReason::NoAmmo => "no ammo",
+            InterruptReason::Moved => "moved",
+            InterruptReason::Struck => "struck",
+        },
     }
 }
 
@@ -4527,6 +4812,56 @@ mod tests {
         ] {
             assert_eq!(health_colour(notoriety), colour, "{notoriety:?}");
         }
+    }
+
+    /// The reason an action stopped is the whole of what `CombatActionEnded`
+    /// was added to say, so every arm of the wire's list has a phrase of its
+    /// own. A new one that fell through to a catch-all would un-say it for
+    /// exactly the case somebody had just gone to the trouble of naming — which
+    /// is what this asserts by naming them all here too.
+    #[test]
+    fn every_way_an_action_can_end_has_a_word_of_its_own() {
+        let mut said = std::collections::HashSet::new();
+        for outcome in [
+            CombatActionOutcome::Hit,
+            CombatActionOutcome::Miss,
+            CombatActionOutcome::Expired,
+            CombatActionOutcome::Interrupted(InterruptReason::TargetGone),
+            CombatActionOutcome::Interrupted(InterruptReason::OutOfReach),
+            CombatActionOutcome::Interrupted(InterruptReason::NoLineOfSight),
+            CombatActionOutcome::Interrupted(InterruptReason::Pacified),
+            CombatActionOutcome::Interrupted(InterruptReason::Abandoned),
+            CombatActionOutcome::Interrupted(InterruptReason::NoAmmo),
+            CombatActionOutcome::Interrupted(InterruptReason::Moved),
+            CombatActionOutcome::Interrupted(InterruptReason::Struck),
+        ] {
+            assert!(
+                said.insert(outcome_label(outcome)),
+                "{outcome:?} shares its word with another ending",
+            );
+        }
+    }
+
+    /// A kind and an outcome are two different questions, and a palette that
+    /// answered both in one colour would make a landed blow and a swing the
+    /// same picture.
+    #[test]
+    fn the_action_palette_separates_the_three_kinds_and_the_four_endings() {
+        let kinds = [
+            CombatActionKind::Swing,
+            CombatActionKind::Shot,
+            CombatActionKind::Breath,
+        ]
+        .map(action_colour);
+        let endings = [
+            CombatActionOutcome::Hit,
+            CombatActionOutcome::Miss,
+            CombatActionOutcome::Expired,
+            CombatActionOutcome::Interrupted(InterruptReason::Moved),
+        ]
+        .map(outcome_colour);
+        let distinct: std::collections::HashSet<_> = kinds.iter().chain(endings.iter()).collect();
+        assert_eq!(distinct.len(), kinds.len() + endings.len());
     }
 
     #[test]

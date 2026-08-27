@@ -32,8 +32,8 @@ use openshard_protocol::chunks::{
     Changes, ChangesReply, ChangesRequest, PublishNotice, WorldNotice, WorldRevision,
 };
 use openshard_protocol::feedback::{
-    Animation, CombatActionEnded, GraphicalEffect, HarvestCompleted, HarvestRefused, HarvestToolVisual,
-    NewAnimation, SwingTiming,
+    Animation, CombatActionEnded, CombatActionPhase, GraphicalEffect, HarvestCompleted, HarvestRefused,
+    HarvestToolVisual, NewAnimation, SwingTiming,
 };
 use openshard_protocol::gump::GumpId;
 use openshard_protocol::gump::GumpPoint;
@@ -200,6 +200,9 @@ pub enum Update {
     HarvestRefused(HarvestRefused),
     /// The shard finished a harvest and has queued its result, if any.
     HarvestCompleted(HarvestCompleted),
+    /// A mobile has entered a phase of a combat action: it is drawing something,
+    /// or it has just released it.
+    CombatActionPhase(CombatActionPhase),
     /// A mobile's combat action is over — and, when it never landed, why.
     CombatActionEnded(CombatActionEnded),
     /// A designed house's picture, still as bytes.
@@ -1469,6 +1472,9 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                 }
                 if let openshard_protocol::server_packet::ServerPacket::HarvestCompleted(completion) = packet {
                     report(Update::HarvestCompleted(completion));
+                }
+                if let openshard_protocol::server_packet::ServerPacket::CombatActionPhase(phase) = packet {
+                    report(Update::CombatActionPhase(phase));
                 }
                 if let openshard_protocol::server_packet::ServerPacket::CombatActionEnded(ended) = packet {
                     report(Update::CombatActionEnded(ended));

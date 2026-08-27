@@ -535,6 +535,13 @@ impl App {
             link::Update::HarvestCompleted(completion) => {
                 ("harvest completed", format!("serial={}", completion.serial))
             }
+            link::Update::CombatActionPhase(phase) => (
+                "combat action phase",
+                format!(
+                    "serial={} kind={:?} phase={:?}",
+                    phase.actor, phase.kind, phase.phase
+                ),
+            ),
             link::Update::CombatActionEnded(ended) => (
                 "combat action ended",
                 format!("serial={} outcome={:?}", ended.actor, ended.outcome),
@@ -607,6 +614,7 @@ impl App {
             link::Update::HarvestCompleted(completion) => {
                 self.world.presentation.crowd.complete_harvest(completion);
             }
+            link::Update::CombatActionPhase(phase) => self.world.presentation.crowd.begin_action(phase),
             link::Update::CombatActionEnded(ended) => self.world.presentation.crowd.end_action(ended),
             // The connection ended, for any of the reasons the shard thread
             // returns: the socket closed, a packet would not frame, the player

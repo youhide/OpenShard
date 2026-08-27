@@ -43,8 +43,9 @@ use openshard_client_render::mobiles::{EquipmentLayer, Mobile};
 use openshard_movement::step_hold;
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::feedback::{
-    Animation, AnimationFrameCount, CombatActionEnded, CombatActionOutcome, DEFAULT_ANIMATION_FRAME_MS,
-    HarvestPreview, HarvestRefused, HarvestToolVisual, NewAnimation, SwingTiming,
+    ActionPhase, Animation, AnimationFrameCount, CombatActionEnded, CombatActionKind, CombatActionOutcome,
+    CombatActionPhase, DEFAULT_ANIMATION_FRAME_MS, HarvestPreview, HarvestRefused, HarvestToolVisual,
+    NewAnimation, SwingTiming,
 };
 use openshard_protocol::mobile::Equipment;
 use openshard_protocol::serial::Serial;
@@ -559,6 +560,99 @@ struct Fall {
 /// a serial cannot plausibly be reused inside it.
 const FALL_HELD: Duration = Duration::from_secs(5);
 
+/// How long the way an action ended stays on screen after it is over.
+///
+/// The bar answers *what is happening*; this is what answers *what just
+/// happened*, and the second question is the one a fight leaves behind. Long
+/// enough to read a word at a glance, and short enough that it is the *last*
+/// blow being reported and not one from an exchange ago.
+const OUTCOME_HOLD: Duration = Duration::from_millis(1_200);
+
+/// One combat action a body is part way through, as the wire told it.
+///
+/// The wire's own [`ActionPhase`] is kept whole rather than unpacked into a flag
+/// beside a number: it already says which of the two intervals it is carrying —
+/// how long an armed action may wait, how long a released one takes to land —
+/// and a second local copy of that distinction would be a second thing to keep
+/// in step with the shard.
+#[derive(Clone, Copy, Debug)]
+struct PendingAction {
+    /// What the impact will do.
+    kind: CombatActionKind,
+    /// The phase this body entered, and the interval that phase measures.
+    phase: ActionPhase,
+    /// The crowd's own clock when the phase packet arrived. The interval is
+    /// measured from here rather than from a server tick, for the reason every
+    /// other clock in this module is local: what is being drawn is a picture
+    /// ageing on this screen.
+    started: Duration,
+}
+
+/// What this client last heard about one body's fighting: what it is preparing,
+/// and how the one before that ended.
+///
+/// **Two facts side by side and not two states**, which is a correction of the
+/// obvious design and the reason is measurable. A fighter's next gesture opens
+/// on the very tick the last one lands — `Combat::next_swing` is still the
+/// impact, see `docs/combat_actions.md`'s Ф1 backlog — so an outcome that were
+/// merely *replaced* by the next commit would be on screen for one frame at
+/// most, and the word "hit" would be legible only for the last blow of a fight.
+/// The two are therefore remembered independently, and an exchange reads as a
+/// bar filling with the previous blow's verdict still standing beside it.
+#[derive(Clone, Copy, Debug)]
+struct ActionRecord {
+    /// The action being prepared now. `None` for a body between gestures, which
+    /// is a real state and not a missing value: it is the picture of somebody
+    /// who has just landed a blow and not yet begun the next.
+    running: Option<PendingAction>,
+    /// How the last one ended and when, held for [`OUTCOME_HOLD`] from then.
+    /// `None` until this body has finished an action in this client's sight.
+    ended: Option<(CombatActionOutcome, Duration)>,
+}
+
+/// What a body's combat action looks like right now, for whoever draws it.
+///
+/// The projection of [`ActionRecord`] the HUD is owed: the wire's durations are
+/// already spent against this client's clock, and what is left is what a picture
+/// is made of. Never handed out with both halves empty — see
+/// [`Crowd::preparing`], which answers `None` for a body with nothing to say.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct ActionProgress {
+    /// What the impact will do and how far along it is, for a body part way
+    /// through an action.
+    pub running: Option<RunningAction>,
+    /// How the last one ended, while that is still worth saying.
+    ///
+    /// This is the half of a fight the client could never draw: a blow that
+    /// vanished said nothing, and *"it landed"*, *"it missed"* and *"the wall
+    /// got in the way"* were the same picture — nothing at all.
+    pub ended: Option<CombatActionOutcome>,
+}
+
+/// An action part way through, as a picture wants it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct RunningAction {
+    /// A drawn bow is not a raised axe.
+    pub kind: CombatActionKind,
+    /// Which half of the action's life this is.
+    pub fill: ActionFill,
+}
+
+/// How much of a preparation bar is filled, which is a different question in
+/// each phase.
+///
+/// Not a fraction and a flag: an armed action has an endurance, but the fraction
+/// of it that has gone is *not* what a watcher is being told — the picture is a
+/// fighter holding something ready, and it is held until the world releases it
+/// or the arm gives out.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum ActionFill {
+    /// Waiting on the world. The bar is held rather than filling.
+    Armed,
+    /// Landing: `filled` runs from `0.0` at the release to `1.0` at the impact.
+    Releasing { filled: f32 },
+}
+
 /// Everyone on screen, aged.
 #[derive(Clone, Debug)]
 pub struct Crowd {
@@ -584,6 +678,19 @@ pub struct Crowd {
     speech: HashMap<Who, Vec<Speech>>,
     /// Server-owned duration for the immediately following action, by mobile.
     swing_timings: HashMap<Serial, Duration>,
+    /// What each body is part way through committing, by the actor the phase
+    /// packet named.
+    ///
+    /// Keyed by [`Serial`] and not by [`Who`]: an action always belongs to a
+    /// body the shard has named, so there is no phase packet the offline
+    /// placeholder could ever be the actor of.
+    ///
+    /// Separate from `tracked`'s `action`, which is an *animation*: the two are
+    /// told by different packets, they end at different moments — a landed blow
+    /// keeps swinging through its last frames while its preparation is over —
+    /// and one of them is the shard's authority about a fight where the other is
+    /// this client's picture of a body.
+    actions: HashMap<Serial, ActionRecord>,
     /// Tool pictures received just before their paired action packet.
     pending_harvest_tools: HashMap<Serial, EquipmentLayer>,
     /// Real time since this crowd was built. Its own clock rather than an
@@ -619,6 +726,7 @@ impl Default for Crowd {
             falls: HashMap::new(),
             speech: HashMap::new(),
             swing_timings: HashMap::new(),
+            actions: HashMap::new(),
             pending_harvest_tools: HashMap::new(),
             now: Duration::ZERO,
             commanded: None,
@@ -1343,6 +1451,36 @@ impl Crowd {
         }
     }
 
+    /// The shard's word that a body has entered a phase of a combat action.
+    ///
+    /// Latest-wins, and that is a rule rather than an accident. The packet
+    /// arrives more than once for one action by design: an armed action
+    /// announces again when it releases, and a `Slow` rule re-announces a
+    /// running one with its impact pushed further out
+    /// (`docs/combat_actions.md`'s Ф3). Both are the same action handing this
+    /// client a *new* interval to measure, so both restart the picture from now
+    /// — a bar still filling towards the old impact would be the desync the
+    /// re-announcement exists to prevent.
+    ///
+    /// This does not touch the animation: what the body is drawn doing is the
+    /// ordinary action packet's, and this is the fact behind it.
+    pub fn begin_action(&mut self, phase: CombatActionPhase) {
+        let started = self.now;
+        let record = self.actions.entry(phase.actor).or_insert(ActionRecord {
+            running: None,
+            ended: None,
+        });
+        // The previous blow's verdict is deliberately left standing: it is a
+        // *different* action's, it fades on its own clock, and the whole reason
+        // it is a separate field is that the next commit lands on the same tick
+        // as the last impact. See [`ActionRecord`].
+        record.running = Some(PendingAction {
+            kind: phase.kind,
+            phase: phase.phase,
+            started,
+        });
+    }
+
     /// The shard's word that a combat action is over, and how it ended.
     ///
     /// Only an end that did *not* land stops the picture. A hit and a miss **are**
@@ -1354,7 +1492,20 @@ impl Crowd {
     ///
     /// A fall is terminal and outlives a cancelled swing, and a harvest is not
     /// this packet's to cancel — the stroke on screen may be an axe on a tree.
+    ///
+    /// The *record* ends on every outcome, including the two that leave the
+    /// picture running: a blow that landed is a blow nobody is still preparing,
+    /// and it is at exactly that moment the outcome becomes the thing worth
+    /// saying. That is the split this method is made of — the animation and the
+    /// action end at two different moments, and only one of them is here.
     pub fn end_action(&mut self, ended: CombatActionEnded) {
+        let at = self.now;
+        let record = self.actions.entry(ended.actor).or_insert(ActionRecord {
+            running: None,
+            ended: None,
+        });
+        record.running = None;
+        record.ended = Some((ended.outcome, at));
         if matches!(
             ended.outcome,
             CombatActionOutcome::Hit | CombatActionOutcome::Miss
@@ -1558,6 +1709,7 @@ impl Crowd {
     pub fn retain(&mut self, present: impl Fn(Who) -> bool) {
         self.tracked.retain(|who, _| present(*who));
         self.speech.retain(|who, _| present(*who));
+        self.actions.retain(|serial, _| present(Some(*serial)));
     }
 
     /// Record that `who` said `text`, above whatever they were already saying.
@@ -1597,6 +1749,57 @@ impl Crowd {
             .flatten()
             .filter(|line| self.now.saturating_sub(line.started) < SPEECH_HOLD)
             .map(|line| (line.text.as_str(), line.font, line.hue))
+    }
+
+    /// What `who` is doing about fighting, or `None` for a body that is not.
+    ///
+    /// Checked against the clock here rather than expired in [`Crowd::advance`],
+    /// for [`Crowd::speaking`]'s reason: nothing downstream needs to know the
+    /// *moment* a bar goes stale, only whether it still is one, and a lazy check
+    /// is one fewer place that has to agree with the holds.
+    ///
+    /// Two things time out here, and neither is how an action is supposed to
+    /// end. An outcome fades at [`OUTCOME_HOLD`] because it is a message and not
+    /// a state. A *running* action that outlives its own interval is the bound
+    /// on a leak: every action ends and every end crosses the wire
+    /// (`docs/combat_actions.md`'s D2), so in the ordinary run
+    /// [`Crowd::end_action`] has already replaced it — what this stops is a body
+    /// that walked out of range mid-swing holding a full bar for as long as the
+    /// client is connected.
+    pub fn preparing(&self, who: Who) -> Option<ActionProgress> {
+        let record = self.actions.get(&who?)?;
+        let ended = record
+            .ended
+            .filter(|(_, at)| self.now.saturating_sub(*at) < OUTCOME_HOLD)
+            .map(|(outcome, _)| outcome);
+        let running = record.running.and_then(|action| {
+            let elapsed = self.now.saturating_sub(action.started);
+            let span = Duration::from_millis(u64::from(action.phase.duration().millis()));
+            if elapsed > span {
+                return None;
+            }
+            let fill = match action.phase {
+                ActionPhase::Armed { .. } => ActionFill::Armed,
+                // A zero interval is a lie the wire refuses to tell (see
+                // `CombatActionPhase`), so this is a division guard and not a
+                // case: a released action that takes no time has already
+                // arrived.
+                ActionPhase::Releasing { .. } => ActionFill::Releasing {
+                    filled: match span.is_zero() {
+                        true => 1.0,
+                        false => (elapsed.as_secs_f32() / span.as_secs_f32()).clamp(0.0, 1.0),
+                    },
+                },
+            };
+            Some(RunningAction {
+                kind: action.kind,
+                fill,
+            })
+        });
+        match (running, ended) {
+            (None, None) => None,
+            (running, ended) => Some(ActionProgress { running, ended }),
+        }
     }
 }
 
@@ -2092,6 +2295,234 @@ mod tests {
                 "a {outcome:?} left the wrong body on screen"
             );
         }
+    }
+
+    /// A body the crowd has seen, doing nothing in particular.
+    fn standing_crowd() -> (Crowd, Who, Serial) {
+        let who = serial(1);
+        let mut crowd = Crowd::default();
+        crowd.see(
+            who,
+            Point::new(10, 10, 0),
+            Graphic(PLAYER),
+            Facing::walking(Direction::South),
+            Hue::NONE,
+            false,
+            false,
+        );
+        (crowd, who, who.expect("a serial"))
+    }
+
+    /// One phase packet, as the shard sends it.
+    fn phase(actor: Serial, kind: CombatActionKind, phase: ActionPhase) -> CombatActionPhase {
+        CombatActionPhase {
+            actor,
+            target: Serial::new(0x99).expect("a nonzero serial"),
+            kind,
+            phase,
+        }
+    }
+
+    /// A body preparing something, with nothing behind it yet.
+    fn running(kind: CombatActionKind, fill: ActionFill) -> Option<ActionProgress> {
+        Some(ActionProgress {
+            running: Some(RunningAction { kind, fill }),
+            ended: None,
+        })
+    }
+
+    /// A released action is the bar filling: it began at the commit and the
+    /// impact is the far end. The whole point of the packet is that this
+    /// fraction is the shard's interval and not a guess off an animation.
+    #[test]
+    fn a_released_action_fills_across_its_own_interval() {
+        let (mut crowd, who, mobile) = standing_crowd();
+        crowd.begin_action(phase(
+            mobile,
+            CombatActionKind::Swing,
+            ActionPhase::Releasing {
+                impact_in: openshard_protocol::feedback::SwingDuration(1_600),
+            },
+        ));
+        assert_eq!(
+            crowd.preparing(who),
+            running(CombatActionKind::Swing, ActionFill::Releasing { filled: 0.0 }),
+        );
+
+        crowd.advance(Duration::from_millis(400));
+        assert_eq!(
+            crowd.preparing(who),
+            running(CombatActionKind::Swing, ActionFill::Releasing { filled: 0.25 }),
+        );
+
+        crowd.advance(Duration::from_millis(1_200));
+        assert_eq!(
+            crowd.preparing(who),
+            running(CombatActionKind::Swing, ActionFill::Releasing { filled: 1.0 }),
+            "the bar is full at the impact, not past it",
+        );
+    }
+
+    /// An armed action is *waiting*, and a bar creeping along its endurance
+    /// would read as an impact approaching. It is held instead.
+    #[test]
+    fn an_armed_action_is_held_rather_than_filling() {
+        let (mut crowd, who, mobile) = standing_crowd();
+        crowd.begin_action(phase(
+            mobile,
+            CombatActionKind::Shot,
+            ActionPhase::Armed {
+                endurance: openshard_protocol::feedback::SwingDuration(8_000),
+            },
+        ));
+        crowd.advance(Duration::from_millis(4_000));
+        assert_eq!(
+            crowd.preparing(who),
+            running(CombatActionKind::Shot, ActionFill::Armed),
+            "half the endurance gone is still a held bow",
+        );
+    }
+
+    /// A `Slow` rule pushes the impact and re-announces it, and a bar still
+    /// running towards the old one is exactly the desync the re-announcement
+    /// exists to stop.
+    #[test]
+    fn a_re_announced_impact_restarts_the_bar() {
+        let (mut crowd, who, mobile) = standing_crowd();
+        let announce = |crowd: &mut Crowd, millis: u32| {
+            crowd.begin_action(phase(
+                mobile,
+                CombatActionKind::Swing,
+                ActionPhase::Releasing {
+                    impact_in: openshard_protocol::feedback::SwingDuration(millis),
+                },
+            ));
+        };
+        announce(&mut crowd, 1_600);
+        crowd.advance(Duration::from_millis(800));
+        announce(&mut crowd, 1_600);
+        assert_eq!(
+            crowd.preparing(who),
+            running(CombatActionKind::Swing, ActionFill::Releasing { filled: 0.0 }),
+        );
+    }
+
+    /// The half a picture could never state: *why* it stopped. Every outcome
+    /// ends the preparation — a landed blow is not something anyone is still
+    /// preparing — and the reason outlives it by [`OUTCOME_HOLD`].
+    #[test]
+    fn every_ending_ends_the_bar_and_says_which_it_was() {
+        for outcome in [
+            CombatActionOutcome::Hit,
+            CombatActionOutcome::Miss,
+            CombatActionOutcome::Expired,
+            CombatActionOutcome::Interrupted(InterruptReason::NoLineOfSight),
+        ] {
+            let (mut crowd, who, mobile) = standing_crowd();
+            crowd.begin_action(phase(
+                mobile,
+                CombatActionKind::Swing,
+                ActionPhase::Releasing {
+                    impact_in: openshard_protocol::feedback::SwingDuration(1_600),
+                },
+            ));
+            crowd.advance(Duration::from_millis(800));
+            crowd.end_action(CombatActionEnded {
+                actor: mobile,
+                outcome,
+            });
+            assert_eq!(
+                crowd.preparing(who),
+                Some(ActionProgress {
+                    running: None,
+                    ended: Some(outcome),
+                }),
+                "a {outcome:?} left the wrong state on screen",
+            );
+
+            crowd.advance(OUTCOME_HOLD);
+            assert_eq!(
+                crowd.preparing(who),
+                None,
+                "a {outcome:?} is a message and not a state to hold",
+            );
+        }
+    }
+
+    /// The case the two halves were split for. A fighter's next gesture opens
+    /// on the tick the last one landed, so the commit and the ending arrive
+    /// together; a record that held one *or* the other would show the verdict
+    /// for a single frame, and "hit" would be unreadable in every fight that
+    /// went beyond one blow.
+    #[test]
+    fn a_verdict_stands_beside_the_next_blow_it_arrived_with() {
+        let (mut crowd, who, mobile) = standing_crowd();
+        let swing = phase(
+            mobile,
+            CombatActionKind::Swing,
+            ActionPhase::Releasing {
+                impact_in: openshard_protocol::feedback::SwingDuration(1_600),
+            },
+        );
+        crowd.begin_action(swing);
+        crowd.advance(Duration::from_millis(1_600));
+        // Both on the same tick, in the order the shard sends them: the blow
+        // resolves and the next one is committed in the same pass.
+        crowd.end_action(CombatActionEnded {
+            actor: mobile,
+            outcome: CombatActionOutcome::Hit,
+        });
+        crowd.begin_action(swing);
+
+        assert_eq!(
+            crowd.preparing(who),
+            Some(ActionProgress {
+                running: Some(RunningAction {
+                    kind: CombatActionKind::Swing,
+                    fill: ActionFill::Releasing { filled: 0.0 },
+                }),
+                ended: Some(CombatActionOutcome::Hit),
+            }),
+        );
+
+        // And the verdict is the *previous* blow's alone: it goes at its own
+        // hold, without waiting for the swing it is standing beside.
+        crowd.advance(OUTCOME_HOLD);
+        assert_eq!(
+            crowd.preparing(who).expect("the swing is still running").ended,
+            None,
+        );
+    }
+
+    /// The bound on a leak, not part of the mechanism: an action whose end
+    /// packet this client never heard — the actor walked out of range mid-swing
+    /// — must not hold a full bar over its head forever.
+    #[test]
+    fn an_action_whose_end_never_arrived_stops_at_its_impact() {
+        let (mut crowd, who, mobile) = standing_crowd();
+        crowd.begin_action(phase(
+            mobile,
+            CombatActionKind::Breath,
+            ActionPhase::Releasing {
+                impact_in: openshard_protocol::feedback::SwingDuration(1_600),
+            },
+        ));
+        crowd.advance(Duration::from_millis(1_601));
+        assert_eq!(crowd.preparing(who), None);
+    }
+
+    #[test]
+    fn retain_forgets_actions_along_with_position() {
+        let (mut crowd, who, mobile) = standing_crowd();
+        crowd.begin_action(phase(
+            mobile,
+            CombatActionKind::Swing,
+            ActionPhase::Releasing {
+                impact_in: openshard_protocol::feedback::SwingDuration(1_600),
+            },
+        ));
+        crowd.retain(|_| false);
+        assert_eq!(crowd.preparing(who), None);
     }
 
     /// The stroke on screen may be an axe on a tree: a combat action's end is

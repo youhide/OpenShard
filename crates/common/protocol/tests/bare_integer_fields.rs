@@ -182,8 +182,29 @@ const ALLOWLIST: &[(&str, &str, &str)] = &[
     ("feedback.rs", "duration", "GraphicalEffect: same"),
     (
         "feedback.rs",
+        "action",
+        "HarvestPreview: body-specific animation index; openshard_state::Action lives above protocol",
+    ),
+    (
+        "feedback.rs",
+        "cycles",
+        "HarvestPreview: a presentation-only count, with no protocol-level domain",
+    ),
+    (
+        "feedback.rs",
         "render_mode",
         "HuedEffect: no non-test caller constructs one, nothing to classify against",
+    ),
+    // -- weather presentation quantities -----------------------------------
+    (
+        "world.rs",
+        "intensity",
+        "WeatherChange: the classic client's particle-count byte, a presentation quantity",
+    ),
+    (
+        "world.rs",
+        "temperature",
+        "WeatherChange: a client presentation byte; weather rules live above protocol",
     ),
     // -- skill numbers whose domain lives above protocol: N7 amendment ------
     (

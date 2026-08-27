@@ -271,6 +271,22 @@ pub struct HealthBar {
     pub targeted: bool,
 }
 
+/// One overhead preparation bar, anchored in world-viewport pixels.
+///
+/// `docs/combat_actions.md`'s Ф4. The pair of packets Ф1 put on the wire finally
+/// reaches a screen here: what a fighter is committed to, how far into it they
+/// are, and — for a moment after it is over — how it ended. The colour and the
+/// glyph stay presentation decisions, the same division [`HealthBar`] makes with
+/// notoriety: this carries the wire's facts and an adapter such as egui resolves
+/// them for its palette.
+pub struct ActionBar {
+    /// Top-centre of the body sprite, in the world's viewport. The same anchor
+    /// [`HealthBar`] uses, so the two stack rather than being placed twice.
+    pub anchor: ViewPixel,
+    /// What this body is doing about fighting, and how far into it.
+    pub progress: crate::crowd::ActionProgress,
+}
+
 /// A current/max resource in the health-bar scale.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ResourceBar {
@@ -364,6 +380,11 @@ pub struct Hud {
     /// Unpublished statics already placed in the local draft.
     pub editor_static_draft: Vec<openshard_map::map::StaticItem>,
     pub health_bars: Vec<HealthBar>,
+    /// What each visible body is part way through committing, and how the last
+    /// one ended. Every watcher's, not only the player's: the packets are
+    /// broadcast, and an archer at full draw across the street is the picture
+    /// the telegraph was built for.
+    pub action_bars: Vec<ActionBar>,
     pub draw: openshard_client_render::frame::Draw,
     pub cutaway_disabled: bool,
     pub body_overlap_transparency_disabled: bool,

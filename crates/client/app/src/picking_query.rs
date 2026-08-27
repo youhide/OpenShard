@@ -32,9 +32,9 @@ use std::time::{Duration, Instant};
 use crate::app::App;
 use crate::crowd::Who;
 use crate::diagnostics::{
-    CompositeTelemetry, HealthBar, HealthPoints, Height, Hud, InteriorCell, InteriorDoor, InteriorOverlay,
-    OccluderSurface, Pick, PickedItem, PickedMobile, PickedTile, PriorityZ, RadarTelemetry, Route, Selection,
-    SightLine, TerrainOverlay, TileDepth,
+    ActionBar, CompositeTelemetry, HealthBar, HealthPoints, Height, Hud, InteriorCell, InteriorDoor,
+    InteriorOverlay, OccluderSurface, Pick, PickedItem, PickedMobile, PickedTile, PriorityZ, RadarTelemetry,
+    Route, Selection, SightLine, TerrainOverlay, TileDepth,
 };
 use crate::graphics::HighlightTarget;
 use crate::picking::SelectedIdentity;
@@ -1349,6 +1349,7 @@ impl App {
             editor_static_preview: self.map_editor.static_preview_at(self.resources.map(), pick),
             editor_static_draft: self.map_editor.static_draft_previews(self.resources.map()),
             health_bars: self.health_bars(camera, drawn_mobiles),
+            action_bars: self.action_bars(camera, drawn_mobiles),
             goal: self.steer.goal().map(|at| self.tile_info(Tile::new(at.x, at.y))),
             ttf_active: self.ttf_active(),
             ttf_available: self.resources.ttf_font.is_some(),
@@ -1442,6 +1443,33 @@ impl App {
                     notoriety,
                     targeted,
                 })
+            })
+            .collect()
+    }
+
+    /// Every drawn body that is part way through a combat action, or has just
+    /// finished one.
+    ///
+    /// Deliberately not folded into [`Self::health_bars`], which it visibly
+    /// resembles: that one is built from the *view* — a fact the wire restates
+    /// in full with every world update — and this one from the crowd's own
+    /// clock, which is the only thing that knows how far into an interval a
+    /// fighter is. One loop over the same list would have to hold both, and the
+    /// two answer to different owners.
+    ///
+    /// A body with no wire identity has no action: the phase packet names an
+    /// actor, and the offline placeholder is nobody's actor.
+    fn action_bars(&self, camera: Camera, drawn_mobiles: Option<&[(Who, Mobile)]>) -> Vec<ActionBar> {
+        let (Some(drawn_mobiles), Some(window)) = (drawn_mobiles, self.window.as_ref()) else {
+            return Vec::new();
+        };
+
+        drawn_mobiles
+            .iter()
+            .filter_map(|(who, drawn)| {
+                let progress = self.world.presentation.crowd.preparing(*who)?;
+                let anchor = mobiles::head_anchor(drawn, &camera, &window.atlases.mobiles)?;
+                Some(ActionBar { anchor, progress })
             })
             .collect()
     }

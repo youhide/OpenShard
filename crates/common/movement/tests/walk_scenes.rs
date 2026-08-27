@@ -595,13 +595,13 @@ fn a_villa_stair_carries_a_body_to_its_first_floor() {
     );
     assert_eq!(can_step(&footing, tread, ground), Some(ground));
 
-    // And the ground floor is still the ground floor: a body walking under the
-    // boards is not lifted onto them, and the wall that stands on them is not
-    // in its way either.
+    // The boards are a ceiling to the ground floor.  A body taller than that
+    // seven-unit gap cannot walk into the column below them; reaching this
+    // floor has to use the stair rather than passing through it from below.
     assert_eq!(
         can_step(&footing, Point::new(4, 5, 0), Point::new(4, 4, 0)),
-        Some(Point::new(4, 4, 0)),
-        "the storey above pulled a body up through its own floor"
+        None,
+        "the storey above let a body pass through its own floor"
     );
     // What is *not* asserted here: that the ground under (4, 3) stays open. A
     // plaster wall based at seven spans up to twenty-six, and a body sixteen
@@ -614,8 +614,8 @@ fn a_villa_stair_carries_a_body_to_its_first_floor() {
     // that, and a body does not step seven units into the air.
     assert_eq!(
         can_step(&footing, Point::new(6, 5, 0), Point::new(6, 4, 0)),
-        Some(Point::new(6, 4, 0)),
-        "the boards were climbed from the ground beside them"
+        None,
+        "the boards leave too little headroom for a body on the ground beside them"
     );
 }
 
@@ -672,8 +672,8 @@ fn a_route_climbs_from_a_villas_ground_floor_to_its_first_floor() {
     let route = find_path(&footing, under, upstairs, 200, Weight::EXACT).expect("the villa has a staircase");
     assert_eq!(
         route,
-        vec![Direction::SouthEast, Direction::NorthWest],
-        "the way up is onto the stair and back over one's own column",
+        vec![Direction::South, Direction::East, Direction::NorthWest],
+        "the floor blocks the diagonal's east flank, so the stair is reached around it",
     );
     // Walked by the shipped step rule: a route the search invented that the
     // step rule refuses is worse than no route at all.
@@ -683,13 +683,11 @@ fn a_route_climbs_from_a_villas_ground_floor_to_its_first_floor() {
     }
     assert_eq!(at, upstairs, "the loop comes home one storey up");
 
-    // Both directions, because the step rule is not symmetric and the closed
-    // set is what used to decide this: coming down, the boards are climbed
-    // again from the tread, so the way back to the ground is round the house.
-    let down = find_path(&footing, upstairs, under, 200, Weight::EXACT).expect("there is a way down");
-    let mut at = upstairs;
-    for &dir in &down {
-        at = step_allowed(&footing, at, dir).expect("the search planned a step nobody may take");
-    }
-    assert_eq!(at, under, "the way down does not end on the floor it started on");
+    // The lower place is a valid *start* for this fixture, but not a place a
+    // sixteen-unit body can enter through seven units of headroom.  The stair
+    // gives the upper floor an exit, not a way through its own boards.
+    assert!(
+        find_path(&footing, upstairs, under, 200, Weight::EXACT).is_none(),
+        "a route down passed a body through the first-floor boards"
+    );
 }

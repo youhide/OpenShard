@@ -527,9 +527,41 @@ Two new interrupt reasons cross the wire with it, `Moved` and `Struck`. Walking,
 running and riding all end under `Moved`: what a watcher is told is that the
 fighter moved, not which of the three it was doing.
 
-**Ф4 — the preparation bar.** The client draws its own pending action, off the
-pair from Ф1: filling between `Began` and `Ended` when the action is timed, held
-when it is armed, emptied by an interruption.
+**Ф4 — the preparation bar. ✅ Built.** The client draws the pending action off
+the pair from Ф1: filling between the commit and the end when the action is
+timed, held when it is armed, gone on an interruption. *Done when:* a fighter's
+gesture has a bar over it that agrees with the shard's own interval, and an
+action that stopped says why instead of vanishing.
+
+What landed, and the four things worth knowing before reading the code:
+
+- **It is over everyone, not only the player.** The plan said *"the player's own
+  preparation bar"* and the wire had already decided otherwise: both packets go
+  through `broadcast_packet`, so an archer at full draw across the street is a
+  fact this client already had and was throwing away. `CombatActionPhase` was
+  decoded by the protocol crate and routed nowhere — Ф4 is largely the missing
+  `link::Update` arm.
+- **The bar has a state beside it, and the state is a second question.** A
+  rectangle answers *how far along*; it cannot answer *what of* — a blow and a
+  drawn bow fill the same rectangle — nor *what just happened*, which is the
+  question a fight actually leaves behind. So the glyph on the left names the
+  kind, the filling names the phase, and a word on the right carries the
+  outcome, `InterruptReason` and all. The glyphs are drawn rather than written:
+  a codepoint out of a font this client does not ship is a box on somebody
+  else's machine.
+- **What is running and how the last one ended are two fields, not two states.**
+  The obvious model — one record, either running or ended — was built first and
+  is wrong for a measurable reason: the next gesture opens on the tick the last
+  one lands (`next_swing` is still the impact, see the Ф1 backlog), so an
+  outcome merely *replaced* by the next commit would be on screen for a single
+  frame, and "hit" would be legible only for the final blow of a fight. They are
+  remembered independently, and an exchange reads as a bar filling with the
+  previous blow's verdict standing beside it.
+- **`Crowd::end_action` now ends two things at two moments.** The animation
+  keeps its old rule — a hit and a miss run their last frames, because those
+  frames *are* the impact — while the *record* ends on every outcome, because a
+  blow that landed is a blow nobody is still preparing. That split is the whole
+  method.
 
 **Ф5 — the fight costs something.** D9: an opening stamina cost at the commit, a
 per-tick `Drain` while sustaining, the owed fatigue spent at the impact, `Winded`
@@ -562,7 +594,36 @@ index of armed squares, and that index is a design rather than a variant.
 
 ## Backlog
 
-Found while building Ф1, Ф2 and Ф3, and none of it belonged to any of them.
+Found while building Ф1, Ф2, Ф3 and Ф4, and none of it belonged to any of them.
+
+**From Ф4:**
+
+- **The armed bar drops the one number an armed action has.** `expires_at`
+  crosses the wire as the phase's own interval and the picture spends none of
+  it: a bow about to give out is drawn exactly like one just armed. Held rather
+  than filling is the right shape (a creeping bar reads as an impact
+  approaching), but *nearly out* is a real thing to say and nothing says it. Ф7
+  is where an armed action first exists, and this is its first question.
+- **Nothing arms, so half the picture is exercised only by tests.**
+  `ActionFill::Armed` is reachable from the wire and unreachable from the shard
+  until Ф7. It is built and covered deliberately — the wire was frozen at Ф1 for
+  this reason — but nobody has *looked* at a held bar.
+- **The bar has no switch.** Every other overlay in this client is behind one
+  (`show_sight`, `show_terrain`, the interior index); this draws always, because
+  it is the answer to "there are still too many questions about what combat is
+  doing". The first person who wants a clean screenshot will want a toggle, and
+  the place for it is `GraphicsSettings` beside the others.
+- **A word over every head is a word in English.** The outcome labels are
+  hard-coded strings in `shell.rs`, which is what every other diagnostic in the
+  HUD does; the day this client grows a string table they are on its list.
+- **`Abandoned` covers four things and `Moved` covers three, and now something
+  reads them.** Both Ф1 and Ф3 wrote down that the first reader would want them
+  apart, and predicted it would be this phase. It is: *"disengaged"* and
+  *"died"* are one word on screen, and so are *"walked"* and *"rode"*. Splitting
+  either costs one byte on the wire and no compatibility.
+- **Nothing tests that a bar lands over the right head.** The state machine has
+  tests and the palette has tests; the anchoring is `mobiles::head_anchor`,
+  shared with the health bar, and untested for both.
 
 **From Ф3:**
 
