@@ -77,13 +77,19 @@ Three axes, and keeping them apart is the whole design:
 | axis | question | example |
 |---|---|---|
 | **kind** | what the impact *does* | a blow, a shot that spends a round, a breath |
-| **trigger** | *when* the impact happens | a clock, riding through the target, a held aim |
+| **watch** | what *releases* it | nothing (release at once), a target stepping out of cover, a rider passing through |
 | **rules** | what the world does to it *in between* | a run slows the draw, a wound spoils it |
 
-A lance charge is `Swing` with an `OnPass` trigger. Overwatch is `Shot` with a
-`Held` one. Neither needs a new kind, and neither is a special case in the tick —
-which is what makes them cheap once the axes are separate, and unbuildable while
-they are fused into one deadline.
+**Every action releases on a clock. The watch decides when that clock starts.**
+An ordinary swing starts it at the commit; an overwatching archer starts it when
+something walks out from behind the wall. There is no variant of an action that
+resolves the instant its condition is met — the release is a real interval, always,
+and D10 is why.
+
+So a charge is not a kind and not a trigger: it is `Swing` with `Watch::Contact`
+and a short release. An archer covering a doorway is `Shot` with
+`Watch::TargetInSight` and the same release the bow always had. Neither is a
+special case in the tick.
 
 One component, present only while something is happening:
 
@@ -92,7 +98,7 @@ One component, present only while something is happening:
 pub struct CombatAction {
     pub target: Serial,
     pub kind: ActionKind,
-    pub trigger: Trigger,
+    pub phase: Phase,
     pub started_at: WorldTick,
     /// Accumulated while the action runs, spent once at the hit roll.
     pub accuracy: i16,
@@ -111,15 +117,29 @@ pub enum ActionKind {
     Breath { reach: TileReach },
 }
 
-pub enum Trigger {
-    /// The ordinary swing and the ordinary draw. A rule may push the tick out.
-    AtTick { completes_at: WorldTick },
-    /// The charge: it lands when movement carries the attacker through the
-    /// committed target's reach, and it carries the momentum that did it.
-    OnPass { since: WorldTick, expires_at: WorldTick },
-    /// The held aim. It lands when the target re-enters reach and sight, and
-    /// never on its own. `expires_at` is the arm's endurance, not its timing.
-    Held { expires_at: WorldTick },
+pub enum Phase {
+    /// Ready and waiting on the world. `expires_at` is the arm's endurance, not
+    /// its timing: an action that is never released ends when it runs out.
+    Armed { watch: Watch, expires_at: WorldTick },
+    /// Released. The impact lands at this tick, and a rule may still push it.
+    Releasing { impact: WorldTick },
+}
+
+/// What the world has to do for an armed action to be released.
+///
+/// Each is a fact the server already computes at a seam it already runs. This
+/// is deliberately a closed enum and not a predicate language: a watch that
+/// cannot be named here is a watch nobody can cost, and the tick has to be able
+/// to answer all of them in bounded time.
+pub enum Watch {
+    /// The committed target becomes visible again — steps out from behind the
+    /// wall, the tree, the door that just opened.
+    TargetInSight,
+    /// The committed target comes within the action's reach.
+    TargetInReach,
+    /// Movement carries the attacker through the target's reach, at whatever
+    /// speed it was travelling: the joust, the passing blow.
+    Contact,
 }
 ```
 
@@ -128,25 +148,30 @@ the word *ranged* taken out of it: once a blow has a reach too, the newtype is
 about tiles between two fighters and not about which half of the weapon table it
 came from. Ф5 is where it is renamed; until then `Swing` commits the constant.
 
-Three verbs run over it, once per tick, in this order:
+Four verbs run over it, once per tick, in this order:
 
 **Commit.** No action, engaged, recovery elapsed. Every precondition is tested
 *here*: attackable, same facet, within the weapon's reach, sight clear, not
 pacified, ammunition present, stamina enough to lift the thing. On success the
 round leaves the pack, the opening stamina is spent, the component is inserted, the
-fighter faces the target, cover breaks, and the animation goes out.
+fighter faces the target, and cover breaks. An ordinary attack commits straight
+into `Releasing` and its animation goes out with it; an armed one commits into
+`Armed` and draws the arm rather than the stroke.
 
-**Sustain.** An action exists and has not fired. The condition rules for its kind
-are applied for this tick (below). A rule may push a clock, add to `accuracy`, add
-to `owed_stamina`, or end the action. So may the world: a target that died, logged
-out or left the committed reach. A held or charging action is *sustained the same
-way* — this is where the cost of standing at full draw accrues.
+**Sustain.** An action exists and has not landed. The condition rules for its kind
+are applied for this tick. A rule may push the impact, add to `accuracy`, add to
+`owed_stamina`, or end the action. So may the world: a target that died, logged out
+or left the committed reach. **Both phases are sustained the same way** — an armed
+fighter is spending, is interruptible, and can be spoiled, which is what stops
+"wait for the perfect moment" from being a free option.
 
-**Resolve.** The trigger fired: the tick arrived, movement carried the attacker
-through, or the held target came back into reach. The hit roll is made with the
-accumulated `accuracy`, the owed fatigue is spent, damage or a miss follows, a
-`Shot` emits its projectile, the outcome goes to every watcher, and recovery is
-scheduled.
+**Release.** An `Armed` action whose watch is satisfied this tick becomes
+`Releasing { impact: now + release }`, and *this* is where the stroke's animation
+and its timing go out. A watch that never fires ends the action at `expires_at`.
+
+**Resolve.** `now >= impact`. The hit roll is made with the accumulated `accuracy`,
+the owed fatigue is spent, damage or a miss follows, a `Shot` emits its projectile,
+the outcome goes to every watcher, and recovery is scheduled.
 
 `Combat::next_swing` keeps a job, and it is now a narrow one: **when the next
 commit may happen.** It is recovery, not a swing. Nothing else reads it.
@@ -235,24 +260,50 @@ polearm at two tiles becomes one row of data. It is not the foundation, and doin
 both at once would mean debugging the state machine and the merge in the same
 change.
 
-**D8 — The impact is not always a clock, and that is a variant rather than a
-flag.** A mounted charge lands when the horse carries its rider through the target,
-at whatever moment that happens; an overwatching archer lands when something walks
-into the doorway. Neither has a duration, so neither can be expressed as a deadline
-that the world is allowed to nudge — they are a *different question about when*.
-Making `Trigger` an enum keeps one sustain loop for all three; making
-`completes_at` an `Option` instead would have meant every reader asking "and what
-does absent mean here", which is the case `CLAUDE.local.md`'s `Option` rule exists
-to refuse.
+**D8 — What starts the clock is a separate question from the clock, and the answers
+are a closed list.** A rider's blow lands because the horse carried him through; an
+archer's because the target stepped out of the doorway; and there will be more of
+these than either of us can list today — that is precisely the argument for a
+`Watch` the tick can enumerate rather than a general predicate. Three things follow
+from making it an enum instead of a callback or a script hook:
 
-Two things follow that the ordinary path never needed. **Movement becomes an input
-to combat, not an observer of it** — `OnPass` fires from the step itself, in the
-same seam D5 already uses, with the momentum in hand (was it a run, how many tiles
-were closed) so a charge can be scored by the speed that delivered it. And **an
-untriggered action needs an endurance**: `expires_at` on both `OnPass` and `Held`
-is what stops a couched lance from being a permanent property of a rider and an
-overwatch from being free. It is the arm's endurance, and D9 is what makes it cost
-something before it runs out.
+- **Every watch is a fact the server already computes.** `TargetInSight` is
+  `sight_clear`, which the commit already calls; `TargetInReach` is `in_range`;
+  `Contact` is pushed from the step. Adding a watch means naming an existing seam,
+  not inventing a new source of truth.
+- **The cost stays bounded and is bounded by the right thing.** The sustain pass
+  evaluates one watch per *armed action*, and the number of armed actions is the
+  number of fighters who chose to arm — not a function of world size. A watch that
+  cannot be answered that way does not get added.
+- **Movement becomes an input to combat, not an observer of it.** `Contact` fires
+  from the step itself, in the seam D5 already uses, with the momentum in hand
+  (was it a run, how many tiles were closed), so a charge can be scored by the
+  speed that delivered it.
+
+And an armed action needs an endurance: `expires_at` is what stops a couched lance
+from being a permanent property of a rider and an overwatch from being free. D9 is
+what makes it cost something *before* it runs out.
+
+**D10 — The release is an interval, never an instant, and it is per weapon.** Even
+a watch that fires on the perfect tick does not put an arrow in anyone: an armed
+action becomes `Releasing` and lands `release` ticks later. Three separate reasons,
+and any one of them would be enough:
+
+- **Nothing can be drawn in zero time.** An impact resolved on the tick its
+  condition was met gives the client no frames for the loose, and the arrow appears
+  out of a standing body — which is the bug this whole plan started from, rebuilt
+  in a new place.
+- **The rules still bite during it.** The release window is the interval in which a
+  spoiling wound or a stumble can still take the shot away, so an armed archer is
+  fast but not instantaneous, and a defender has something to do about it.
+- **It is the number that balances arming at all.** Without it, waiting is strictly
+  better than shooting: a held shot would beat an equal opponent's timed one every
+  time, for free. With it, arming trades the opening delay for a shorter release
+  and pays fatigue for the privilege.
+
+`release` sits on the weapon row beside `reach` and the swing base — a crossbow
+takes longer to get away than a bow — and a fighter with no armed capability never
+reads it, because their commit goes straight to `Releasing` with the full interval.
 
 **D9 — Stamina is spent by combat, in the module that already spends it.**
 `combat::vitals` owns the step cost, the `Riding` and overload branches, the winded
@@ -279,21 +330,26 @@ means "forget the timing you were given" (`crowd.rs:1339`). Announcing an armed
 action as a zero-length timed one would be a lie in the one place the client is
 supposed to read intent.
 
-- **`CombatActionBegan`** — `0xBF` subcommand `OPENSHARD_SUBCOMMANDS + 16`, the
+- **`CombatActionPhase`** — `0xBF` subcommand `OPENSHARD_SUBCOMMANDS + 16`, the
   first free one after `HarvestCompleted` (`feedback.rs:333`). Actor, target, kind,
-  and *how it will land*: a duration in milliseconds, or the fact that it is armed
-  and waiting. `SwingTiming` stays exactly as it is — harvesting uses it too
-  (`skills/src/handlers/harvest.rs:543`) and it is not combat's to repurpose.
+  and the phase it just entered: *armed*, with the endurance it will hold for, or
+  *releasing*, with the milliseconds to the impact. It is sent on the commit and
+  again on the release, because those are two things a watcher can see and the
+  second is not implied by the first — an armed archer who looses is a different
+  picture from an armed archer, and the client is told rather than guessing from
+  the arrival of an animation. `SwingTiming` stays exactly as it is: harvesting
+  uses it too (`skills/src/handlers/harvest.rs:543`) and it is not combat's to
+  repurpose.
 - **`CombatActionEnded`** — subcommand `+ 17`. Actor and outcome: `Hit`, `Miss`,
-  `Interrupted { reason }`.
+  `Interrupted { reason }`, `Expired`.
 
 Stock clients skip unknown extended commands, so there is no compatibility cost and
 no existing packet changes shape.
 
-The player's own preparation bar (Ф4) then reads a pair rather than inferring one:
-it fills between the two packets when the action is timed, and shows a held state
-when it is armed — which is the picture an overwatching archer needs and a filling
-bar could never draw.
+The player's own preparation bar (Ф4) then reads a small state machine rather than
+inferring one from a duration: a held indicator while armed, a bar filling through
+the release, emptied by an interruption. That is the picture an overwatching archer
+needs, and a bar that could only fill was never going to draw it.
 
 ## The phases
 
@@ -301,10 +357,10 @@ bar could never draw.
 spend one axis of the model, and every one of them is a phase rather than a
 feature only because Ф1 separated the axes.
 
-**Ф1 — the object.** `CombatAction`, the commit/sustain/resolve split, and both
-new packets — `Trigger::AtTick` alone, but the enum exists from the first commit
-so the wire never has to be revised for the other two. Melee only; behaviour
-deliberately unchanged except that the
+**Ф1 — the object.** `CombatAction`, the four verbs, and both new packets. Only
+`Phase::Releasing` is reachable — nothing arms yet — but the phase enum and the
+packet that carries it exist from the first commit, so the wire is never revised
+for Ф7. Melee only; behaviour deliberately unchanged except that the
 silent `continue` becomes a named interruption and the client stops an animation it
 would have run out. `prepare_swings` and `SwingWindup` are retired into it — the
 marker becomes a phase of a real object. *Done when:* a target that dies mid-swing
@@ -340,14 +396,21 @@ number in that sentence is an operator setting.
 become one. The polearm at two tiles is then a number, and the halberd is content
 rather than engineering.
 
-**Ф7 — triggers that are not a clock.** D8's other two variants, and they are one
-piece of work rather than two. `OnPass` fires from the movement seam and scores the
-charge by the momentum that delivered it — the mounted joust, where the hit is the
-riding-through. `Held` fires from the sustain pass when the committed target
-returns to reach and sight — overwatch, the drawn bow on a doorway. Both need
-`expires_at` honoured and both need Ф5's drain, or an armed fighter is a fighter
-who has paid nothing. *Done when:* a rider at a gallop lands a blow by passing, and
-an archer can arm a shot at a door and spend it on whatever comes through.
+**Ф7 — arming, and the watches.** `Phase::Armed`, the release delay (D10), and all
+three watches — one piece of work, not three, because they differ only in which
+already-computed fact the sustain pass asks for. `TargetInSight` and
+`TargetInReach` are evaluated per armed action against its own target;
+`Contact` is pushed from the movement seam with the momentum that delivered it.
+Both `expires_at` and Ф5's drain are load-bearing here: an armed fighter who has
+paid nothing makes waiting strictly better than fighting. *Done when:* an archer
+can arm a shot at a doorway and spend it on whoever steps out, a rider at a gallop
+lands a blow by passing through, and neither lands the instant its watch fires.
+
+A fourth watch will be wanted before this is a week old — a doorway watched with no
+target chosen yet, which is *"anyone hostile enters this square"* rather than a
+question about one committed opponent. It is deliberately not in Ф7: it is the
+first watch that cannot be answered from the armed action alone, so it needs an
+index of armed squares, and that index is a design rather than a variant.
 
 ## What this does not cover
 
