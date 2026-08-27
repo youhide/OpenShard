@@ -785,10 +785,11 @@ impl App {
         // behind it while it walks.
         let from = self.world.motion.route_origin();
         let (to, at_quarry) = Self::aim(self.quarry(), hover)?;
+        let reach = self.graphics.sight_reach;
         if let Some(cached) = self
             .sight_cache
             .as_ref()
-            .filter(|cached| cached.from == from && cached.to == to)
+            .filter(|cached| cached.from == from && cached.to == to && cached.reach == reach)
         {
             return cached.sight.clone();
         }
@@ -804,10 +805,15 @@ impl App {
             // mid-air with nothing to say which end the archer stands at.
             openshard_movement::sight::Extent::WholeLine,
         );
-        let sight = Some(Arc::new(SightLine { trace, at_quarry }));
+        let sight = Some(Arc::new(SightLine {
+            trace,
+            at_quarry,
+            reach,
+        }));
         self.sight_cache = Some(crate::app::SightCache {
             from,
             to,
+            reach,
             sight: sight.clone(),
         });
         sight
@@ -1069,6 +1075,9 @@ impl App {
         if let Some(show) = request.show_sight {
             self.graphics.show_sight = show;
         }
+        if let Some(reach) = request.sight_reach {
+            self.graphics.sight_reach = reach;
+        }
         if let Some(show) = request.show_interiors {
             self.graphics.show_interiors = show;
         }
@@ -1312,6 +1321,7 @@ impl App {
             route,
             show_sight: self.graphics.show_sight,
             sight,
+            sight_reach: self.graphics.sight_reach,
             show_occluders: self.graphics.show_occluders,
             show_solids: self.graphics.show_solids,
             solids_only: self.graphics.solids_only,
@@ -1601,6 +1611,51 @@ mod sight_tests {
             App::aim(None, None),
             None,
             "with nothing aimed at there is nothing to draw"
+        );
+    }
+
+    /// A clear look ten tiles long, and the reach it is read against.
+    fn look_ten_tiles(reach: u8) -> SightLine {
+        let steps = (11..20)
+            .map(|y| openshard_movement::sight::SightStep {
+                tile: Tile::new(10, y),
+                ray_z: openshard_movement::sight::EYE,
+                stop: None,
+            })
+            .collect();
+        SightLine {
+            trace: openshard_movement::sight::SightTrace {
+                from: Point::new(10, 10, 0),
+                to: Point::new(10, 20, 0),
+                steps,
+                stopped: None,
+            },
+            at_quarry: false,
+            reach: openshard_protocol::world::RangedRange::new(reach).expect("a reach of some tiles"),
+        }
+    }
+
+    /// The other half of the shard's refusal: a ray that arrives and an arrow
+    /// that does not. `obstruction` asks `in_range` *before* it asks the sight
+    /// line, and this overlay used to draw only the second of the two.
+    #[test]
+    fn a_clear_look_past_the_weapons_reach_is_still_not_a_shot() {
+        let short = look_ten_tiles(4);
+        assert!(short.trace.clear(), "the fixture is a clear look");
+        assert_eq!(short.distance(), 10, "Chebyshev, ten tiles up the column");
+        assert!(!short.within_reach(), "ten tiles is not four");
+        assert_eq!(
+            short.steps_within_reach(),
+            4,
+            "the four tiles at distances one through four"
+        );
+
+        let long = look_ten_tiles(10);
+        assert!(long.within_reach(), "a reach of ten covers ten tiles");
+        assert_eq!(
+            long.steps_within_reach(),
+            long.trace.steps.len(),
+            "every step of a look inside the reach is inside the reach"
         );
     }
 }

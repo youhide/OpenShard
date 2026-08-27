@@ -16,7 +16,18 @@ use openshard_client_render::frame;
 use openshard_client_render::impostor::Fringe;
 use openshard_client_render::interiors::{FloorView, ZSliceView};
 use openshard_client_render::occlusion;
-use openshard_protocol::world::Light;
+use openshard_protocol::world::{Light, RangedRange};
+
+/// Arm's length, in tiles: the reach the sight overlay starts at.
+///
+/// The shard calls it `MELEE_REACH` and it is what every fighter holding no bow
+/// strikes at. Written out here rather than borrowed from `openshard-combat`,
+/// which is a server crate this client must never depend on — the same reason
+/// [`GraphicsSettings::sight_reach`] is a knob and not a fact off the wire.
+pub const MELEE_SIGHT_REACH: RangedRange = match RangedRange::new(1) {
+    Some(reach) => reach,
+    None => panic!("arm's length is one tile, which is not zero"),
+};
 
 /// A smooth visual reading of the shard's stepped `0x4F` light level.
 ///
@@ -218,6 +229,20 @@ pub struct GraphicsSettings {
     /// a frame, which is cheap, and a picture nobody is looking at is still a
     /// picture nobody asked for.
     pub show_sight: bool,
+    /// The reach the sight overlay draws its limit at, in tiles.
+    ///
+    /// **A knob, because the client is not told the answer.** A shot is refused
+    /// by two tests — the distance against the weapon's reach, and then the ray
+    /// — and only the second is a thing this client can compute: the reach lives
+    /// in the shard's weapon table, keyed by graphic, and nothing on the wire
+    /// carries it. Reading it off the graphic in our own hands would be a second
+    /// copy of a rule the shard owns, which is the very thing `docs/sight.md`'s
+    /// D1 refused for the ray itself.
+    ///
+    /// So a person names it: `1` is arm's length — the shard's own `MELEE_REACH`,
+    /// which is why it is the default — and a bow is ten. `.sight` is where the
+    /// shard's number can be read against the one named here.
+    pub sight_reach: RangedRange,
     /// Whether the development overlay draws the R1 interior index. It does
     /// not gate ordinary geometry until R2 explicitly makes it an input.
     pub show_interiors: bool,

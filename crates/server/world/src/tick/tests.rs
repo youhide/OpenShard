@@ -6305,6 +6305,51 @@ fn an_archer_with_no_arrows_cannot_fire() {
     );
 }
 
+/// `.sight` reports **both** halves of a refusal, and the reach is the half no
+/// ray can carry.
+///
+/// `obstruction` asks `in_range` before it asks the sight line, so a clear look
+/// across open ground is not a shot when the weapon does not carry that far.
+/// This command answered only the ray's half, which read as permission.
+#[test]
+fn dot_sight_names_the_distance_and_the_reach_of_the_weapon_in_hand() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let actor = world.state.players[&connection];
+    let far = Point::new(START.0 + 14, START.1, 0);
+
+    // Bare hands first: arm's length, and everything past the next tile is out
+    // of reach however open the ground is.
+    crate::gm::report_sight(&mut world.state, actor, far);
+    let barehanded = packets_for(&mut world, connection);
+    assert!(
+        barehanded
+            .iter()
+            .any(|p| p.first() == Some(&0x1C) && p.windows(20).any(|w| w == b"14 tiles away, reach")),
+        "the distance and the reach are not both in the report"
+    );
+    assert!(
+        barehanded
+            .iter()
+            .any(|p| p.first() == Some(&0x1C) && p.windows(12).any(|w| w == b"out of reach")),
+        "fourteen tiles from a fist read as a shot"
+    );
+
+    // And with a bow on: the same look, the same ground, a reach of ten — still
+    // short of fourteen, which is the point of saying the number rather than a
+    // verdict alone.
+    arm_with_bow(&mut world, connection);
+    crate::gm::report_sight(&mut world.state, actor, far);
+    let armed = packets_for(&mut world, connection);
+    assert!(
+        armed
+            .iter()
+            .any(|p| p.first() == Some(&0x1C) && p.windows(8).any(|w| w == b"reach 10")),
+        "the bow's own reach is not what the report read"
+    );
+}
+
 /// A bow on the back and a quiver in the pack — what every archery scene below
 /// starts from, and the fixture that has to agree with itself: the graphic worn
 /// is the one the weapon table calls a bow, and the round given is the one that

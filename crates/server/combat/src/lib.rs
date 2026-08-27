@@ -660,6 +660,19 @@ fn ranged_action(state: &WorldState, attacker: EntityId) -> Option<ActionKind> {
     })
 }
 
+/// How far `attacker` can presently strike — the weapon's own reach, or arm's
+/// length for everyone who has none.
+///
+/// The same reading [`commit_actions`] takes at the commit, minus the action it
+/// builds around it. It exists because half of an [`obstruction`] refusal is a
+/// number nobody outside this crate could say: `.sight` reports a clear look
+/// that is still not a shot, and "clear, and fourteen tiles from a bow that
+/// reaches ten" is the whole of that answer.
+#[must_use]
+pub fn reach_of(state: &WorldState, attacker: EntityId) -> RangedRange {
+    ranged_action(state, attacker).map_or(MELEE_REACH, ActionKind::reach)
+}
+
 /// Whether `attacker`'s pack holds a round of the kind its shot wants.
 ///
 /// A read and not a draw: the round leaves the pack at the loose, so what the

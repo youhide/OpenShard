@@ -81,12 +81,12 @@ const _: () = assert!(
 
 /// UO's distance: Chebyshev, because the client draws a square.
 ///
-/// From Sphere's `GetDistSightBase`. A diagonal step covers the same distance as
-/// a straight one, which is also why diagonal movement costs no extra time.
+/// The measurement itself is [`Point::distance`], where both ends of the wire
+/// can reach it — the client's sight overlay draws the line a reach check is
+/// decided along, and a second copy of the arithmetic is a second answer. This
+/// name stays because the whole server counts tiles through it.
 pub fn distance(a: Point, b: Point) -> u32 {
-    let dx = u32::from(a.x.abs_diff(b.x));
-    let dy = u32::from(a.y.abs_diff(b.y));
-    dx.max(dy)
+    a.distance(b)
 }
 
 /// Whether `b` is within `range` of `a`.

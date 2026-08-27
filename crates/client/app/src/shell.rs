@@ -53,6 +53,7 @@ use openshard_client_render::light;
 use openshard_client_render::solid::Cut;
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::world::RangedRange;
 use winit::window::Window;
 
 use crate::desk::{Desk, Tab};
@@ -98,6 +99,11 @@ pub struct Request {
     /// them: one Bresenham walk of the line a shot would fly along. See
     /// `docs/sight.md`.
     pub show_sight: Option<bool>,
+    /// Name the reach the sight overlay draws its limit at, on the frame the
+    /// number was changed. See
+    /// [`GraphicsSettings::sight_reach`](crate::graphics::GraphicsSettings::sight_reach)
+    /// for why a person names it and the shard does not.
+    pub sight_reach: Option<RangedRange>,
     /// Switch the R1 interior-index overlay on or off. It is deliberately a
     /// diagnostic request: no normal world geometry consults this setting.
     pub show_interiors: Option<bool>,
@@ -2160,6 +2166,35 @@ fn tile_tab(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut Requ
     {
         request.show_sight = Some(sight);
     }
+    // The reach, named by a person. The shard refuses a shot for two reasons and
+    // the ray is only one of them; the other is this number against the distance,
+    // and nothing on the wire carries it — see `GraphicsSettings::sight_reach`.
+    // A drag value rather than a slider: the interesting numbers are few and
+    // exact (1 for a fist, 10 for a bow), and a slider invites sweeping past them.
+    ui.horizontal(|ui| {
+        let mut reach = hud.sight_reach.get();
+        if ui
+            .add(
+                egui::DragValue::new(&mut reach)
+                    .range(1..=u8::MAX)
+                    .prefix("reach "),
+            )
+            .on_hover_text(
+                "how far the weapon in your hands strikes, in tiles — 1 is arm's length, \
+                 a bow is 10. The shard does not send this, so it is named here; `.sight` \
+                 says what the shard itself would use",
+            )
+            .changed()
+        {
+            // The knob cannot reach zero, so the newtype cannot fail; a reach of
+            // no tiles is not a weapon that strikes its own square.
+            request.sight_reach = RangedRange::new(reach);
+        }
+        ui.label(match &hud.sight {
+            Some(sight) => format!("{} tiles away", sight.distance()),
+            None => "nothing aimed at".to_owned(),
+        });
+    });
     // The verdict in words, because the picture says *where* the ray stopped
     // and only this says what stopped it. A refusal names the tile, the art,
     // the span it occupies and the height the ray was at — which is the whole
@@ -2172,7 +2207,23 @@ fn tile_tab(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut Requ
             };
             match sight.trace.stopped {
                 None => {
-                    ui.label(format!("sight {aimed}: clear, {} tiles", sight.trace.steps.len()));
+                    // A clear ray is not yet a shot, and this is the line that
+                    // used to say it was: the reach test is the other half of the
+                    // shard's refusal, and a look that gets there over a distance
+                    // an arrow does not cover is exactly the case a person reads
+                    // this overlay to understand.
+                    let far = match sight.within_reach() {
+                        true => String::new(),
+                        false => format!(
+                            " — but out of reach, {} > {}",
+                            sight.distance(),
+                            sight.reach.get()
+                        ),
+                    };
+                    ui.label(format!(
+                        "sight {aimed}: clear, {} tiles{far}",
+                        sight.trace.steps.len()
+                    ));
                 }
                 Some(step) => {
                     let ray = step.ray_z;
@@ -3688,6 +3739,13 @@ const ROUTE_HIGH_Z: egui::Color32 = egui::Color32::from_rgb(60, 135, 255);
 /// overlay washes tiles with, so one vocabulary answers "can I stand there"
 /// wherever the question is asked.
 const BLOCKED: egui::Color32 = egui::Color32::from_rgb(255, 40, 40);
+/// Ground the sight ray crosses but the weapon does not reach, drawn amber.
+///
+/// A third colour rather than the red above, because it is a different refusal:
+/// red is the world in the way and this is the arm too short, and a person
+/// reading the overlay has to be able to tell "move" from "get closer". See
+/// `docs/sight.md`.
+const OUT_OF_REACH: egui::Color32 = egui::Color32::from_rgb(255, 190, 60);
 
 /// The same colour at a chosen alpha — a wash and an outline of one hue.
 fn washed(colour: egui::Color32, alpha: u8) -> egui::Color32 {
@@ -4250,8 +4308,35 @@ fn draw_sight(painter: &egui::Painter, camera: &Camera, sight: &SightLine, viewp
             .map(|index| index + 1)
     });
     let reached = stopped.map_or(points.len(), |index| index + 1);
-    for segment in points[..reached].windows(2) {
-        painter.line_segment([segment[0], segment[1]], egui::Stroke::new(2.0, STANDABLE));
+    // Where the weapon runs out, as an index into the same polyline: one past the
+    // leading end again, since the steps are offset by it. The whole line is
+    // within reach when the aim itself is — the count then runs to the last step
+    // and the far endpoint is the target, which the shard would allow.
+    let in_reach = match sight.within_reach() {
+        true => points.len(),
+        false => sight.steps_within_reach() + 1,
+    };
+    for (index, segment) in points[..reached].windows(2).enumerate() {
+        // Two reasons a segment is not a shot, and the one that comes first
+        // along the ray is the one drawn: a wall five tiles out is why the arrow
+        // stops, whether or not the bow could have carried further. Past the
+        // reach and short of the wall, the line is amber — the ray goes on and
+        // the arrow does not.
+        let colour = match index + 1 < in_reach {
+            true => STANDABLE,
+            false => OUT_OF_REACH,
+        };
+        painter.line_segment([segment[0], segment[1]], egui::Stroke::new(2.0, colour));
+    }
+    // And where it ran out, marked the way the stop is marked, so the two limits
+    // read as the same kind of fact. Only when the aim is actually beyond it:
+    // with the target in reach there is no limit crossed to point at.
+    if in_reach < points.len() {
+        let arm = 4.0;
+        let at = points[in_reach - 1];
+        let stroke = egui::Stroke::new(2.0, OUT_OF_REACH);
+        painter.line_segment([at + egui::vec2(-arm, 0.0), at + egui::vec2(arm, 0.0)], stroke);
+        painter.line_segment([at + egui::vec2(0.0, -arm), at + egui::vec2(0.0, arm)], stroke);
     }
     // Past the blocker the ray does not go, and the dashes say so — the same
     // thing a route's dashed half says about a walk that does not arrive.

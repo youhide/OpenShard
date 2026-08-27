@@ -14,6 +14,7 @@ use openshard_client_render::statics::PickedStatic;
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::world::RangedRange;
 
 use crate::graphics::{HighlightStyle, HighlightTarget};
 
@@ -192,6 +193,59 @@ pub struct SightLine {
     /// rather than at the tile under the cursor. The first is the question the
     /// shard is really asking; the second is a person surveying a piece of map.
     pub at_quarry: bool,
+    /// The reach the picture draws its limit at — the knob's number, not the
+    /// shard's, because the shard does not send one. See
+    /// [`GraphicsSettings::sight_reach`](crate::graphics::GraphicsSettings::sight_reach).
+    ///
+    /// It rides here rather than being read off the settings at draw time so
+    /// that the drawn picture and the words beside it are one snapshot: a knob
+    /// turned between them would put a line and a verdict from two different
+    /// reaches on the same frame.
+    pub reach: RangedRange,
+}
+
+impl SightLine {
+    /// How far the aim is, in tiles — the same Chebyshev count the shard's reach
+    /// test is decided by.
+    #[must_use]
+    pub fn distance(&self) -> u32 {
+        self.trace.from.distance(self.trace.to)
+    }
+
+    /// Whether the aim is inside [`reach`](Self::reach).
+    ///
+    /// **The other half of a refusal.** A shot is barred by this or by the ray,
+    /// and the ray is all the trace knows about: a clear line to something
+    /// fourteen tiles from a bow that reaches ten is a look that gets there and
+    /// an arrow that does not.
+    #[must_use]
+    pub fn within_reach(&self) -> bool {
+        self.distance() <= u32::from(self.reach.get())
+    }
+
+    /// How many of [`trace`](Self::trace)'s steps stand inside the reach.
+    ///
+    /// The count, and so also the index of the first step outside it: what the
+    /// picture needs to know where to change colour. Every step is *measured*
+    /// from the archer rather than counted off along the line, so that the place
+    /// the colour changes is the same arithmetic the shard's refusal is, and not
+    /// an assumption about how Bresenham's walk advances.
+    #[must_use]
+    pub fn steps_within_reach(&self) -> usize {
+        let reach = u32::from(self.reach.get());
+        self.trace
+            .steps
+            .iter()
+            .take_while(|step| {
+                let tile = openshard_protocol::world::Point {
+                    x: step.tile.x,
+                    y: step.tile.y,
+                    z: self.trace.from.z,
+                };
+                self.trace.from.distance(tile) <= reach
+            })
+            .count()
+    }
 }
 
 /// One overhead health line, anchored in world-viewport pixels.
@@ -330,6 +384,9 @@ pub struct Hud {
     pub show_sight: bool,
     /// The look it draws, when it is on and there is something to look at.
     pub sight: Option<Arc<SightLine>>,
+    /// The reach its knob presently names, so the strip can draw the knob at the
+    /// number the picture was built with.
+    pub sight_reach: RangedRange,
     pub show_occluders: bool,
     pub show_solids: bool,
     pub solids_only: bool,

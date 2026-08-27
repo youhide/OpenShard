@@ -668,8 +668,25 @@ pub(crate) fn report_sight(state: &mut WorldState, actor: EntityId, to: Point) {
             false => "blocked",
         }
     )];
+    // The *other* half of a refusal, and the half the ray cannot carry. A shot
+    // is barred by two tests — `in_range` and then the sight line — and the
+    // second is all this command used to report, so a clear look at something
+    // fourteen tiles away read as permission when the bow reaches ten. The reach
+    // is the one the attacker would commit to right now, off the weapon in its
+    // hands: `openshard_combat::reach_of` is what the commit itself reads.
+    let reach = openshard_combat::reach_of(state, actor);
+    let distance = from.distance(to);
+    lines.push(format!(
+        "  {distance} tiles away, reach {}: {}",
+        reach.get(),
+        match distance <= u32::from(reach.get()) {
+            true => "within",
+            false => "out of reach",
+        }
+    ));
     // Every stop, not only the first: the first is the verdict and the rest are
     // what a person moving one tile sideways is about to meet instead.
+    let stops = trace.steps.iter().filter(|step| step.stop.is_some()).count();
     lines.extend(trace.steps.iter().filter_map(|step| {
         let stop = step.stop?;
         let ray = step.ray_z;
@@ -700,7 +717,7 @@ pub(crate) fn report_sight(state: &mut WorldState, actor: EntityId, to: Point) {
             }
         })
     }));
-    if lines.len() == 1 {
+    if stops == 0 {
         lines.push(format!(
             "  {} tiles crossed, nothing in the way",
             trace.steps.len()

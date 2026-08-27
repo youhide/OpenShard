@@ -1154,6 +1154,10 @@ pub fn run<D: Dial + Send + 'static>(
             // The sight overlay is a debugging picture, and off until somebody
             // asks for it: see `GraphicsSettings::show_sight`.
             show_sight: false,
+            // Arm's length, which is the shard's `MELEE_REACH` and the reach of
+            // every fighter holding no bow. A person shooting one turns it up:
+            // see `GraphicsSettings::sight_reach` for why this is a knob at all.
+            sight_reach: graphics::MELEE_SIGHT_REACH,
             show_interiors: false,
             buildings: false,
             z_slice: false,

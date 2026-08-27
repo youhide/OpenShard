@@ -62,6 +62,27 @@ impl Point {
     pub const fn new(x: u16, y: u16, z: i8) -> Self {
         Self { x, y, z }
     }
+
+    /// UO's distance: Chebyshev, because the client draws a square.
+    ///
+    /// From Sphere's `GetDistSightBase`. A diagonal step covers the same
+    /// distance as a straight one, which is also why diagonal movement costs no
+    /// extra time. Height is not in it: two points one above the other are the
+    /// same tile as far as reach, aggro and the view range are concerned.
+    ///
+    /// It lives on the point rather than in one of the crates that measure,
+    /// because both ends of the wire measure and must agree: the shard decides a
+    /// blow by it ([`RangedRange`] against this number), and the client's sight
+    /// overlay draws where that decision changes.
+    #[must_use]
+    pub const fn distance(self, other: Self) -> u32 {
+        let dx = self.x.abs_diff(other.x) as u32;
+        let dy = self.y.abs_diff(other.y) as u32;
+        match dx > dy {
+            true => dx,
+            false => dy,
+        }
+    }
 }
 
 impl fmt::Display for Point {

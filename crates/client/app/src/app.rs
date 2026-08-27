@@ -32,7 +32,7 @@ use openshard_client_render::radar::{RadarCache, RadarLodSelector, RadarWorkQueu
 use openshard_protocol::direction::Facing;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Layer;
-use openshard_protocol::world::Point;
+use openshard_protocol::world::{Point, RangedRange};
 
 use crate::chat::Chat;
 use crate::diagnostics::{OccluderSurface, Route, TerrainOverlay};
@@ -377,6 +377,10 @@ pub(crate) struct RouteCache {
 pub(crate) struct SightCache {
     pub(crate) from: Point,
     pub(crate) to: Point,
+    /// The reach the held line was built with. Part of the key and not merely a
+    /// field: turning the knob changes where the picture stops being a shot,
+    /// which is a different picture of the same two points.
+    pub(crate) reach: RangedRange,
     pub(crate) sight: Option<Arc<crate::diagnostics::SightLine>>,
 }
 
