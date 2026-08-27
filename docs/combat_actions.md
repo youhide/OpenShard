@@ -5,10 +5,12 @@ deadline arrives damage appears. Everything a player could read as an intention 
 the raised axe, the drawn bow, the moment it could still be spoiled — is either
 absent or is a picture with no fact behind it.
 
-This is the plan that gives the started action a name, a duration, an owner and an
-end. It is the foundation the interesting things stand on: a polearm that reaches
-two tiles, a shot loosed at a run, an archer holding a drawn bow on a doorway. None
-of those is built here. All of them are unbuildable until this is.
+This is the plan that gives the started action a name, an owner, a reason to end
+and something that makes it land. It is the foundation the interesting things stand
+on: a polearm that reaches two tiles, a shot loosed at a run, a rider whose blow is
+the riding-through, an archer holding a drawn bow on a doorway, and a fight that
+tires the people in it. None of those is built here. All of them are unbuildable
+until this is.
 
 > Read [`combat.md`](combat.md) first: it is the loop this plan cuts into, and its
 > D7 (a server-sent animation is a one-shot with its own clock) is the rule this
@@ -70,18 +72,32 @@ each visible in the code:
 
 ## The model
 
+Three axes, and keeping them apart is the whole design:
+
+| axis | question | example |
+|---|---|---|
+| **kind** | what the impact *does* | a blow, a shot that spends a round, a breath |
+| **trigger** | *when* the impact happens | a clock, riding through the target, a held aim |
+| **rules** | what the world does to it *in between* | a run slows the draw, a wound spoils it |
+
+A lance charge is `Swing` with an `OnPass` trigger. Overwatch is `Shot` with a
+`Held` one. Neither needs a new kind, and neither is a special case in the tick —
+which is what makes them cheap once the axes are separate, and unbuildable while
+they are fused into one deadline.
+
 One component, present only while something is happening:
 
 ```rust
-/// What this combatant is doing right now, and when it lands.
+/// What this combatant is doing right now, and what will make it land.
 pub struct CombatAction {
     pub target: Serial,
     pub kind: ActionKind,
+    pub trigger: Trigger,
     pub started_at: WorldTick,
-    /// Moves: a condition rule may push the impact out (see the rules table).
-    pub completes_at: WorldTick,
     /// Accumulated while the action runs, spent once at the hit roll.
     pub accuracy: i16,
+    /// Fatigue owed at the impact, gathered a tick at a time while holding.
+    pub owed_stamina: u16,
 }
 
 pub enum ActionKind {
@@ -94,6 +110,17 @@ pub enum ActionKind {
     /// field.
     Breath { reach: TileReach },
 }
+
+pub enum Trigger {
+    /// The ordinary swing and the ordinary draw. A rule may push the tick out.
+    AtTick { completes_at: WorldTick },
+    /// The charge: it lands when movement carries the attacker through the
+    /// committed target's reach, and it carries the momentum that did it.
+    OnPass { since: WorldTick, expires_at: WorldTick },
+    /// The held aim. It lands when the target re-enters reach and sight, and
+    /// never on its own. `expires_at` is the arm's endurance, not its timing.
+    Held { expires_at: WorldTick },
+}
 ```
 
 `TileReach` is today's `RangedRange` (`crates/server/combat/src/weapons.rs`) with
@@ -105,18 +132,21 @@ Three verbs run over it, once per tick, in this order:
 
 **Commit.** No action, engaged, recovery elapsed. Every precondition is tested
 *here*: attackable, same facet, within the weapon's reach, sight clear, not
-pacified, ammunition present. On success the round leaves the pack, the component
-is inserted, the fighter faces the target, cover breaks, and the animation goes out
-with its `SwingTiming` — melee and ranged alike.
+pacified, ammunition present, stamina enough to lift the thing. On success the
+round leaves the pack, the opening stamina is spent, the component is inserted, the
+fighter faces the target, cover breaks, and the animation goes out.
 
-**Sustain.** An action exists and has not completed. The condition rules for its
-kind are applied for this tick (below). A rule may push `completes_at`, add to
-`accuracy`, or end the action. So may the world: a target that died, logged out or
-left the committed reach.
+**Sustain.** An action exists and has not fired. The condition rules for its kind
+are applied for this tick (below). A rule may push a clock, add to `accuracy`, add
+to `owed_stamina`, or end the action. So may the world: a target that died, logged
+out or left the committed reach. A held or charging action is *sustained the same
+way* — this is where the cost of standing at full draw accrues.
 
-**Resolve.** `now >= completes_at`. The hit roll is made with the accumulated
-`accuracy`, damage or a miss follows, a `Shot` emits its projectile, the outcome
-goes to every watcher, and recovery is scheduled.
+**Resolve.** The trigger fired: the tick arrived, movement carried the attacker
+through, or the held target came back into reach. The hit roll is made with the
+accumulated `accuracy`, the owed fatigue is spent, damage or a miss follows, a
+`Shot` emits its projectile, the outcome goes to every watcher, and recovery is
+scheduled.
 
 `Combat::next_swing` keeps a job, and it is now a narrow one: **when the next
 commit may happen.** It is recovery, not a swing. Nothing else reads it.
@@ -159,6 +189,9 @@ pub enum ActorCondition {
     Struck,
     /// Line of sight to the committed target is gone this tick.
     Blinded,
+    /// Below `vitals::WINDED_PERCENT` of the stamina pool — the threshold that
+    /// already makes a step cost extra (`combat/src/vitals.rs:44`).
+    Winded,
 }
 
 pub enum ActionEffect {
@@ -168,6 +201,8 @@ pub enum ActionEffect {
     Slow { percent: u16 },
     /// Taken off the hit roll when the action resolves.
     Sway { penalty: i16 },
+    /// Fatigue per tick while the condition holds, owed at the impact.
+    Drain { stamina: u16 },
 }
 ```
 
@@ -200,24 +235,76 @@ polearm at two tiles becomes one row of data. It is not the foundation, and doin
 both at once would mean debugging the state machine and the merge in the same
 change.
 
+**D8 — The impact is not always a clock, and that is a variant rather than a
+flag.** A mounted charge lands when the horse carries its rider through the target,
+at whatever moment that happens; an overwatching archer lands when something walks
+into the doorway. Neither has a duration, so neither can be expressed as a deadline
+that the world is allowed to nudge — they are a *different question about when*.
+Making `Trigger` an enum keeps one sustain loop for all three; making
+`completes_at` an `Option` instead would have meant every reader asking "and what
+does absent mean here", which is the case `CLAUDE.local.md`'s `Option` rule exists
+to refuse.
+
+Two things follow that the ordinary path never needed. **Movement becomes an input
+to combat, not an observer of it** — `OnPass` fires from the step itself, in the
+same seam D5 already uses, with the momentum in hand (was it a run, how many tiles
+were closed) so a charge can be scored by the speed that delivered it. And **an
+untriggered action needs an endurance**: `expires_at` on both `OnPass` and `Held`
+is what stops a couched lance from being a permanent property of a rider and an
+overwatch from being free. It is the arm's endurance, and D9 is what makes it cost
+something before it runs out.
+
+**D9 — Stamina is spent by combat, in the module that already spends it.**
+`combat::vitals` owns the step cost, the `Riding` and overload branches, the winded
+threshold and both regeneration pulses (`crates/server/combat/src/vitals.rs`).
+An action's opening cost and its per-tick `Drain` go there, beside
+`spend_step_stamina`, as one more named spender — not into the tick, and not into a
+second pool.
+
+One interaction has to be decided here or the numbers become a fight between two
+constants nobody can tune: **`regen_stamina` restores a point every 1.5 seconds to
+everything below full** (`vitals.rs:110`), so a held draw draining a point a second
+would net-drain a third of one. A mobile with a `CombatAction` in sustain is
+therefore **excluded from the regeneration pulse** — holding a bow at full draw
+does not rest you, which is both the honest physical answer and the one that makes
+`Drain` mean what its number says.
+
 ## The wire
 
-**One new packet.** The beginning already crosses: `SwingTiming` carries the
-duration, and the client draws from it. What has never existed is the end.
+**Two new packets, and the second one is why the first is needed.** This was one
+packet until D8: the beginning already crossed as `SwingTiming`, which carries a
+duration, and only the end was missing. But a charge and a held aim *have no
+duration*, and the encoding has no room to say so — a zero in that field already
+means "forget the timing you were given" (`crowd.rs:1339`). Announcing an armed
+action as a zero-length timed one would be a lie in the one place the client is
+supposed to read intent.
 
-`CombatActionEnded` — `0xBF` subcommand `OPENSHARD_SUBCOMMANDS + 16`, the first
-free one after `HarvestCompleted` (`feedback.rs:333`). It carries the actor's
-serial and the outcome. Stock clients skip unknown extended commands, so there is
-no compatibility cost, and no existing packet changes shape.
+- **`CombatActionBegan`** — `0xBF` subcommand `OPENSHARD_SUBCOMMANDS + 16`, the
+  first free one after `HarvestCompleted` (`feedback.rs:333`). Actor, target, kind,
+  and *how it will land*: a duration in milliseconds, or the fact that it is armed
+  and waiting. `SwingTiming` stays exactly as it is — harvesting uses it too
+  (`skills/src/handlers/harvest.rs:543`) and it is not combat's to repurpose.
+- **`CombatActionEnded`** — subcommand `+ 17`. Actor and outcome: `Hit`, `Miss`,
+  `Interrupted { reason }`.
 
-The player's own preparation bar (Ф4) needs nothing further on the wire: the client
-already knows its own serial, already receives its own `SwingTiming`, and already
-holds `view::Player::attacking` from the `0xAA`.
+Stock clients skip unknown extended commands, so there is no compatibility cost and
+no existing packet changes shape.
+
+The player's own preparation bar (Ф4) then reads a pair rather than inferring one:
+it fills between the two packets when the action is timed, and shows a held state
+when it is armed — which is the picture an overwatching archer needs and a filling
+bar could never draw.
 
 ## The phases
 
-**Ф1 — the object.** `CombatAction`, the commit/sustain/resolve split, and
-`CombatActionEnded`. Melee only; behaviour deliberately unchanged except that the
+Ф1–Ф4 are the foundation and are ordered by what a player can see. Ф5–Ф7 each
+spend one axis of the model, and every one of them is a phase rather than a
+feature only because Ф1 separated the axes.
+
+**Ф1 — the object.** `CombatAction`, the commit/sustain/resolve split, and both
+new packets — `Trigger::AtTick` alone, but the enum exists from the first commit
+so the wire never has to be revised for the other two. Melee only; behaviour
+deliberately unchanged except that the
 silent `continue` becomes a named interruption and the client stops an animation it
 would have run out. `prepare_swings` and `SwingWindup` are retired into it — the
 marker becomes a phase of a real object. *Done when:* a target that dies mid-swing
@@ -236,27 +323,42 @@ the effect table in operator settings, defaults chosen so that walking is free,
 running sways, and a mount is neutral. *Done when:* shooting on the move works and
 its penalty is a config line an operator can change without a rebuild.
 
-**Ф4 — the preparation bar.** The client draws its own pending action: a bar
-filling from the animation's start to its promised impact, emptied by an
-interruption. Client-side only, off facts it already holds.
+**Ф4 — the preparation bar.** The client draws its own pending action, off the
+pair from Ф1: filling between `Began` and `Ended` when the action is timed, held
+when it is armed, emptied by an interruption.
 
-**Ф5 — reach as data, and one pass.** D7: `reach` on every weapon row rather than
+**Ф5 — the fight costs something.** D9: an opening stamina cost at the commit, a
+per-tick `Drain` while sustaining, the owed fatigue spent at the impact, `Winded`
+as a condition the table can read, and the regeneration pulse excluding anyone
+mid-action. This is where holding a draw becomes a decision rather than a free
+option, and it is a precondition for Ф7 being balanceable at all. *Done when:* a
+fighter who swings without pause runs down; a held bow tires the archer; and every
+number in that sentence is an operator setting.
+
+**Ф6 — reach as data, and one pass.** D7: `reach` on every weapon row rather than
 `MELEE_RANGE` in one function and `range` in the other; `swings` and `volleys`
 become one. The polearm at two tiles is then a number, and the halberd is content
 rather than engineering.
 
-**Ф6 — the hold.** An action that reaches full draw and *waits* — for a tick, for a
-target to enter its reach, for a door to open. Overwatch is a fourth verb between
-sustain and resolve, and it is buildable only because the first five phases made
-"an action in progress" a thing that exists.
+**Ф7 — triggers that are not a clock.** D8's other two variants, and they are one
+piece of work rather than two. `OnPass` fires from the movement seam and scores the
+charge by the momentum that delivered it — the mounted joust, where the hit is the
+riding-through. `Held` fires from the sustain pass when the committed target
+returns to reach and sight — overwatch, the drawn bow on a doorway. Both need
+`expires_at` honoured and both need Ф5's drain, or an armed fighter is a fighter
+who has paid nothing. *Done when:* a rider at a gallop lands a blow by passing, and
+an archer can arm a shot at a door and spend it on whatever comes through.
 
 ## What this does not cover
 
-- **Special moves, combos and stamina costs.** The wrestling opener and combo
-  (`lib.rs:1355-1400`) keep working through the new object untouched; giving them
-  phases of their own is a separate design.
+- **What a mount does beyond delivering the charge.** `Riding` exists and Ф7 reads
+  it, but a mount's effect on reach, on damage, and on being dismounted is not
+  decided here.
+- **Special moves and combos.** The wrestling opener and combo (`lib.rs:1355-1400`)
+  keep working through the new object untouched; giving them phases of their own is
+  a separate design.
 - **Casting.** Spells have their own timing today and are not folded in here. They
-  are the obvious second customer for `CombatAction`, and the day a third appears
-  is the day the component should be renamed and moved out of combat.
-- **Mounted combat rules beyond the condition row.** `Riding` exists; what a mount
-  does to reach, to damage or to being dismounted is not decided here.
+  are the obvious second customer for `CombatAction` — a cast is a timed action with
+  a `Struck → Break` rule and a mana cost, which is this model with two words
+  changed — and the day a third appears is the day the component should be renamed
+  and moved out of combat.
