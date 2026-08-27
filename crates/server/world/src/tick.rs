@@ -681,11 +681,13 @@ impl World {
         for (serial, direction) in npc::live(&mut self.state) {
             self.step(serial, direction);
         }
-        // The three verbs of a combat action. Apply the world to what is already
-        // running — ending, with a reason on the wire, whatever the world has
-        // spoiled — then land what has reached its impact, then start what a
-        // ready fighter promises, telling the client the exact server-owned
-        // interval to that impact.
+        // The three verbs of a combat action, and every fighter goes through
+        // them — a swordsman, an archer and a thing that breathes fire differ at
+        // the impact and nowhere in the schedule. Apply the world to what is
+        // already running — ending, with a reason on the wire, whatever the
+        // world has spoiled — then land what has reached its impact, then start
+        // what a ready fighter promises, telling the client the exact
+        // server-owned interval to that impact.
         //
         // Committing *last* is what makes a fight continuous: a blow that lands
         // this tick opens its next gesture in the same tick, so the animation
@@ -694,7 +696,6 @@ impl World {
         combat::sustain_actions(&mut self.state);
         combat::resolve_actions(&mut self.state);
         combat::commit_actions(&mut self.state);
-        combat::volleys(&mut self.state);
         // A poisoner who fumbled a dose onto themselves. `skills` decides it and
         // says so; applying poison is combat's one door, and this is the tick
         // closing the gap — the decide-then-apply split again.

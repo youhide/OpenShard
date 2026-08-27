@@ -81,7 +81,7 @@ crate, owning its domain events:
 | `chat` | `say`/`speak`, speech ranges | `MobileSpoke` |
 | `skills` | the skill table's rules: the band check, the gain curve, stat gain, the usable skills | `SkillUsed`, `SkillChanged`, `SkillRequested` |
 | `magic` | the 64-spell Magery table, `pay_and_roll`/`heal`/`regen_mana`, the timed stat buffs (`apply_stat_buff`/`expire_buffs`) | `SpellCast` |
-| `combat` | `damage`/`die`/`swings`/`volleys`/`attack`, poison pulses, criminal flagging, the swing formula | `MobileDamaged`, `MobileDied` |
+| `combat` | `damage`/`die`/`attack`, the three action passes (`commit`/`sustain`/`resolve`), poison pulses, criminal flagging, the swing formula | `MobileDamaged`, `MobileDied` |
 | `items` | spawn/drag/stack/decay/containers/equip/doors/mounts/trade, one module each | `ItemSpawned` |
 | `ai` | the creature brain: LOS aggro, cached-path chase, give-up, kiting, fleeing, retaliation | — |
 | `npc` | townsfolk: generated appearance and names, the greet/face/wander beat, the keyword answers, banker and vendor services, the town guards, and the creature `spawn` rule | `MobileSpawned` |
@@ -467,7 +467,7 @@ The real tick, in order (`world/src/tick.rs`):
 tick:
   apply queued commands          network input, script output — one order
   ai think / npc live            brains decide; the tick applies the steps
-  combat                         swings, volleys, criminal/murder expiry, poison
+  combat                         sustain/resolve/commit, criminal/murder expiry, poison
   magic                          buff expiry, mana regen, casts in flight
   items                          decay, doors swinging shut
   spawners                       regions refill their dead

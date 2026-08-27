@@ -21,8 +21,10 @@ table to describe an earlier revision.
 ## What is already there, and what is missing
 
 **The server owns the rules.** `crates/server/combat/src/lib.rs` has `attack`,
-`swings`, `volleys`, `damage`, `die`, `war_mode`, poison, criminality and murder
-decay; `crates/server/world/src/tick/death.rs` has `lay_corpse`, the ghost, the
+the three passes a blow or a shot runs through (`commit_actions`,
+`sustain_actions`, `resolve_actions` — see
+[`combat_actions.md`](combat_actions.md)), `damage`, `die`, `war_mode`, poison,
+criminality and murder decay; `crates/server/world/src/tick/death.rs` has `lay_corpse`, the ghost, the
 death shroud, the seven-minute rot and the loot hooks;
 `crates/server/server/src/dispatch.rs:143` turns a `0x05` into
 `Command::Attack`. A `.set` on hits or an NPC that fights back exercises the

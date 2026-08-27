@@ -44,6 +44,11 @@ Every gate on a shot — reach, line of sight, ammunition — is tested inside
 `volleys` (`lib.rs:624`) on the single tick the arrow leaves. That is the ten
 seconds of standing still, exactly.
 
+> **Both paragraphs are the record of what was here, not of what is.** Ф1 retired
+> `prepare_swings` into `commit_actions`, and Ф2 retired `volleys` into the same
+> three passes — there is no ranged half of the tick any more. They are left
+> standing because the phases below are read against them.
+
 ## The root cause, in one sentence
 
 **The server owns a deadline, not an action.**
@@ -109,12 +114,14 @@ pub struct CombatAction {
 pub enum ActionKind {
     /// A blow, committed to a reach read from the weapon at the commit.
     Swing { reach: TileReach },
-    /// A shot from a wielded ranged weapon; the round is already out of the pack.
-    Shot { reach: TileReach, nocked: Graphic },
+    /// A shot from a wielded ranged weapon. `nocked` is the round it spends at
+    /// the loose and `art` what crosses the gap — both frozen off the weapon it
+    /// was holding at the commit, so a bow swapped mid-draw changes neither.
+    Shot { reach: TileReach, nocked: Graphic, art: Graphic },
     /// An innate ranged attack — a `RangedAttack` component, a breath weapon.
     /// It carries no ammunition, and that is a difference in kind, not a missing
-    /// field.
-    Breath { reach: TileReach },
+    /// field. `damage` is the other thing a breath does not share with an arrow.
+    Breath { reach: TileReach, damage: DamageType, art: Graphic },
 }
 
 pub enum Phase {
@@ -204,13 +211,30 @@ an outcome with a name, never a `continue`.
 it a cancelled telegraph keeps playing. See the wire section — it is one new
 subcommand, not two.
 
-**D3 — The arrow is taken at the nock and returned on any end but a shot.** Two
+**D3 — The quiver is asked at the nock and the round is taken at the loose.** Two
 things follow, and they are the whole reason to choose this: *"you have no arrows"*
 is said at the start of the draw rather than ten seconds later, and an archer who
-was interrupted is not silently robbed. The return goes into the backpack through
-`items::give`, the door the beggar's gold already uses. Death, logout and shutdown
-all abort the action, so all three return the round; a plan that forgot one of the
-three would leak an arrow per interruption, forever.
+was interrupted is not silently robbed.
+
+> **Amended at Ф2, and this is the mechanism changing rather than the goal.** The
+> decision as written took the round at the nock and handed it back on any end but
+> a shot — and named the hazard itself: death, logout and shutdown all abort an
+> action, and a plan that forgot one of the three would leak an arrow per
+> interruption, forever. It could not be built as written. The one door out of a
+> `CombatAction` is `WorldState::end_combat_action`, which lives in `state`, and
+> `items::give` is unreachable from there — `items` depends on `state`, not the
+> other way about — while `skills`'s Peacemaking and Hiding, which also end
+> actions through `disengage`, cannot depend on `combat` either (`combat` calls
+> `skills` for the hit roll). Every remaining shape was a mailbox: a component or
+> a bus event drained by a later pass, plus an explicit drain in `disconnect`
+> before the logout snapshot reads the inventory, or the arrow is eaten anyway.
+>
+> Asking instead of taking reaches both goals with none of that: the refusal is
+> still at the nock, and an interrupted archer is not robbed **because nothing was
+> ever taken**. The whole leak class the decision warned about stops existing.
+> What it costs is one case — a round that leaves the pack *during* the draw
+> (dropped, traded, handed away) — and that case is now an end with a name,
+> `Interrupted(NoAmmo)`, rather than a silent misfire.
 
 **D4 — Interruption is a declared table, not a flag on the weapon.** A boolean
 *"movement breaks this"* cannot express shooting on the move at a penalty, which is
@@ -409,12 +433,43 @@ component (nothing owes any until Ф5), and the release verb exists only as the
 `Armed` expiry inside sustain, because a watch nobody can satisfy is a stub
 rather than a verb. Ф7 is where it becomes one.
 
-**Ф2 — the bow draws.** `Shot` commits at the start of the interval: reach, sight
-and the nocked round tested there, animation and timing sent there, the arrow loosed
-at completion. The visible fix — the archer no longer stands for ten seconds and
-then teleports an arrow. *Done when:* an empty quiver refuses at the nock, an
-interrupted draw returns its arrow, and a bow at ten tiles is a body drawing a bow
-for the whole interval.
+**Ф2 — the bow draws. ✅ Built.** `Shot` commits at the start of the interval:
+reach, sight and the nocked round tested there, animation and timing sent there,
+the arrow loosed at completion. The visible fix — the archer no longer stands for
+ten seconds and then teleports an arrow. *Done when:* an empty quiver refuses at
+the nock, an interrupted draw costs its archer no arrow, and a bow at ten tiles is
+a body drawing a bow for the whole interval.
+
+What landed, and the four things worth knowing before reading the code:
+
+- **`volleys` is gone.** There is one schedule now and three impacts. `ActionKind`
+  grew `Shot { reach, nocked, art }` and `Breath { reach, damage, art }`, and the
+  three passes ask it four questions — `reach`, `flight`, `round`, `damage_type` —
+  where they used to ask which pass they were in. A blow, an arrow and a breath
+  differ at `resolve_actions` and nowhere else.
+- **A shot fires at any distance inside its reach, arm's length included.** The
+  old refusal below `MELEE_RANGE` existed only because the melee pass would
+  otherwise strike in the same beat, and there is no melee pass any more; ServUO
+  puts no floor under a bow either. What that *removes* is a ranged attacker
+  clubbing at point blank, which nothing on this shard ever wanted — an archer
+  brain kites out of that tile rather than standing in it.
+- **A commit does not turn a shooter toward its mark.** A blow is delivered by the
+  body, so the body turns; a shot is delivered down a line. The rule is not
+  cosmetic: a step in a direction a mobile is not facing *turns* it instead of
+  moving it, so re-aiming an archer at every nock spends the beat it was going to
+  escape with, and a kiting brain that beats no faster than the shard re-aims it
+  never opens the gap at all. `spawn_archer` in the tick tests already carried
+  that finding from the other end, and the first build of this phase reproduced
+  it exactly.
+- **A shot is announced whichever way the roll goes.** The bolt flew and twanged
+  before anyone could know whether it would land, so the flight and the sound go
+  out ahead of the hit roll; a blow is the other way about — the thwack *is* the
+  sound of landing, and a whiff has a whistle of its own. Wrestling's chain is
+  melee's alone: an arrow neither continues one nor breaks one.
+
+And one behaviour that changed on the way past: a pacified archer stops shooting.
+`volleys` never read `Pacified` — only the melee pass did — so a bard's calm
+silenced swordsmen and left bowmen firing.
 
 **Ф3 — the rules table.** D4 and D5: conditions pushed in from movement and damage,
 the effect table in operator settings, defaults chosen so that walking is free,
@@ -456,7 +511,34 @@ index of armed squares, and that index is a design rather than a variant.
 
 ## Backlog
 
-Found while building Ф1, and none of it belongs to Ф1.
+Found while building Ф1 and Ф2, and none of it belonged to either.
+
+**From Ф2:**
+
+- **A shot's reach is a weapon column and a blow's is still a constant.** One
+  `ActionKind` holds both now, so the seam is visible in a single `match` instead
+  of split across two tick functions — which is exactly Ф6's job and exactly why
+  it is cheap now. `MELEE_REACH` is the last hard-coded reach in the crate.
+- **A pacified archer stops shooting, and nobody asked for that this phase.** It
+  is the right answer — `volleys` simply never read `Pacified` where the melee
+  pass did — but it is a live change to what Peacemaking does, and no test covered
+  the ranged half before or after.
+- **A shot at point blank now fires instead of clubbing.** Faithful to ServUO, and
+  the AI never wanted the tile anyway, but a *player* wielding a bow beside their
+  target used to swing it and now looses. Whether a bow should have a melee mode
+  at all is content, not engineering, and belongs with Ф6's weapon rows.
+- **`deliver_affix_poison` now rolls on a landed shot.** A `HitPoison` bow poisons
+  what it hits, which is what ServUO does (`BaseRanged.OnHit` *is* `BaseWeapon.OnHit`
+  with a flight in front of it). A Poisoning *coating* is still melee's alone,
+  because the skill refuses to smear anything but a blade or a point — that is the
+  skill's rule and not a branch in combat, which is why there is no branch here.
+- **Nothing consumes `Breath`'s `art`, and it is always the arrow graphic.** A
+  `RangedAttack` carries a reach and a damage kind but no picture, so a dragon's
+  breath crosses the gap drawn as an arrow. The field is on the action so the
+  impact stays self-describing; filling it needs a column on `RangedAttack`, which
+  is a content question.
+
+**From Ф1:**
 
 - **`Combat::next_swing` is still the impact, not a recovery.** The model calls
   it "when the next commit may happen"; as built it is re-pinned to the impact at
@@ -476,10 +558,10 @@ Found while building Ф1, and none of it belongs to Ф1.
   interval — which makes stepping in and out of reach a real defensive move
   nobody balanced. Whether the answer is a grace window or a partial credit is
   Ф3's question, since it is exactly a condition/effect row.
-- **`volleys` still clears a target and schedules its own beat**, so the two
+- ~~**`volleys` still clears a target and schedules its own beat**, so the two
   halves of "who is fighting whom" now live in two shapes: an action for melee,
-  a deadline for shots. That is Ф2's whole job and it is named here only so the
-  duplication is not mistaken for a design.
+  a deadline for shots.~~ **Closed by Ф2**, which was its whole job: there is one
+  shape and one schedule.
 - **The tick's swing timing has three call sites and one arithmetic.**
   `animate_timed`, `preview_harvest` and now `CombatAction::wire_phase` each turn
   ticks into milliseconds; the third one is deliberately the only copy in the

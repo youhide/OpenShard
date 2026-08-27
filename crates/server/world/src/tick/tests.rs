@@ -6160,7 +6160,7 @@ fn a_creature_can_be_given_combat_skills() {
 #[test]
 fn a_bow_deals_its_own_damage_band() {
     // A ranged attacker with a bow rolls the bow's damage (9..=41), not the flat
-    // bare-hands 5 — the weapon table drives volleys the way it drives swings.
+    // bare-hands 5 — the weapon table drives a shot the way it drives a blow.
     use openshard_state::components::RangedAttack;
     let now = Instant::now();
     let mut world = world();
@@ -6203,8 +6203,8 @@ fn a_bow_deals_its_own_damage_band() {
 #[test]
 fn a_wielded_bow_fights_at_range_with_no_ranged_attack_component() {
     // A player who merely equips a bow and has arrows in their pack fights at
-    // range on that alone — no script-inserted `RangedAttack`. `volleys` derives
-    // the reach and ammo from the weapon table itself.
+    // range on that alone — no script-inserted `RangedAttack`. The commit
+    // derives the reach and the round from the weapon table itself.
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
@@ -6284,6 +6284,114 @@ fn an_archer_with_no_arrows_cannot_fire() {
             .iter()
             .any(|p| p.first() == Some(&0x1C) && p.windows(6).any(|w| w == b"arrows")),
         "the shooter is told their quiver is empty"
+    );
+    assert!(
+        action_phase(&refusal).is_none(),
+        "and told at the nock: no bow was ever drawn, so there is no action to interrupt"
+    );
+}
+
+/// The visible half of Ф2. A shot is a committed action like any other, so it
+/// announces itself at the start of the interval it will take — the archer is a
+/// body drawing a bow for the whole of it, not a statue that spits an arrow.
+#[test]
+fn a_drawn_bow_announces_a_shot_for_the_whole_interval() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(player_entity).unwrap();
+    items::equip_worn_item(
+        &mut world.state,
+        serial,
+        openshard_protocol::wire::Graphic(0x13B2),
+        openshard_protocol::wire::Hue(0),
+        Layer(2),
+    )
+    .unwrap(); // bow
+    assert!(items::give_to_backpack(
+        &mut world.state,
+        serial,
+        Graphic(0x0F3F),
+        Hue(0),
+        20,
+        true
+    ));
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 50, now);
+    let _ = packets_for(&mut world, connection);
+    // The bow's own pace, not wrestling's: the interval announced has to be the
+    // one the shard will actually wait, or the drawing body and the arrow part
+    // company.
+    let draw = combat::swing_speed(&world.state, player_entity);
+    engage(&mut world, connection, mob, now);
+
+    assert_eq!(
+        action_phase(&packets_for(&mut world, connection)),
+        Some((
+            openshard_protocol::feedback::CombatActionKind::Shot.to_bits(),
+            1,
+            (draw * (1_000 / openshard_state::TICKS_PER_SECOND)) as u32,
+        )),
+        "a shot, released, landing one bow interval from now"
+    );
+}
+
+/// D3, from the end that matters to a player: a draw that is spoiled costs no
+/// arrow. Nothing is taken at the nock, so there is nothing to hand back through
+/// death, a logout or a shutdown — the three the plan warned would leak one
+/// apiece if any of them were forgotten.
+#[test]
+fn an_interrupted_draw_costs_the_archer_no_arrow() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(player_entity).unwrap();
+    items::equip_worn_item(
+        &mut world.state,
+        serial,
+        openshard_protocol::wire::Graphic(0x13B2),
+        openshard_protocol::wire::Hue(0),
+        Layer(2),
+    )
+    .unwrap(); // bow
+    assert!(items::give_to_backpack(
+        &mut world.state,
+        serial,
+        Graphic(0x0F3F),
+        Hue(0),
+        20,
+        true
+    ));
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 50, now);
+    let mob_entity = entity(&world, mob);
+    engage(&mut world, connection, mob, now);
+    let _ = packets_for(&mut world, connection);
+    let quiver = items::backpack_of(&world.state, serial).unwrap();
+    assert_eq!(
+        items::count_in_container(&world.state, quiver, Graphic(0x0F3F)),
+        20,
+        "the nock only looked; the arrow is still in the pack"
+    );
+
+    // Out past the bow's reach while the string is still bent.
+    world
+        .state
+        .teleport(mob_entity, Point::new(START.0 + 15, START.1, 0));
+    world.tick(now);
+
+    assert_eq!(
+        action_end(&packets_for(&mut world, connection)),
+        Some((
+            CombatActionOutcome::Interrupted(InterruptReason::OutOfReach).to_bits(),
+            InterruptReason::OutOfReach.to_bits()
+        )),
+        "the draw ends, and names why"
+    );
+    assert_eq!(
+        items::count_in_container(&world.state, quiver, Graphic(0x0F3F)),
+        20,
+        "and the archer is not robbed of the arrow it never loosed"
     );
 }
 

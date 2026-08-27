@@ -2347,8 +2347,8 @@ pub struct SwingSpeed {
 /// What a combatant is doing right now, and what will make it land.
 ///
 /// Present only while something is happening, and it is the whole of what the
-/// fighter promised: the reach, the target and (later) the round are frozen into
-/// it at the commit and are never re-derived at the impact. That is the
+/// fighter promised: the reach, the target and the round are frozen into it at
+/// the commit and are never re-derived at the impact. That is the
 /// difference between this and the scalar deadline it replaced — a deadline can
 /// only arrive, while an action can be sustained, spoiled, and *ended with a
 /// reason the player is told*. `docs/combat_actions.md` is the plan.
@@ -2390,6 +2390,24 @@ pub struct CombatAction {
 pub enum ActionKind {
     /// A blow, committed to the reach read from the weapon at the commit.
     Swing { reach: RangedRange },
+    /// A shot from a wielded ranged weapon. `nocked` is the round it will spend
+    /// at the loose and `art` the graphic that crosses the gap, both frozen at
+    /// the commit off the weapon the fighter was holding then — a bow swapped
+    /// mid-draw does not change what is already on the string.
+    Shot {
+        reach: RangedRange,
+        nocked: Graphic,
+        art: Graphic,
+    },
+    /// An innate ranged attack — a [`RangedAttack`] component, a breath weapon.
+    /// It carries no ammunition, and that is a difference in kind, not a missing
+    /// field. `damage` is what it deals, which is the other thing a breath does
+    /// not share with an arrow.
+    Breath {
+        reach: RangedRange,
+        damage: DamageType,
+        art: Graphic,
+    },
 }
 
 /// Which half of an action's life it is in.
@@ -2424,6 +2442,60 @@ pub enum Watch {
     Contact,
 }
 
+impl ActionKind {
+    /// The reach it was committed to. Read at the impact in place of asking the
+    /// weapon again: what the fighter promised is what the fighter is held to.
+    #[must_use]
+    pub const fn reach(self) -> RangedRange {
+        match self {
+            Self::Swing { reach } | Self::Shot { reach, .. } | Self::Breath { reach, .. } => reach,
+        }
+    }
+
+    /// The graphic that crosses the gap when this lands, or `None` for an
+    /// impact that never leaves arm's length.
+    ///
+    /// This and [`round`](Self::round) are the whole of what a shot and a blow
+    /// differ by. Nowhere in the schedule — which is why one pass runs both.
+    #[must_use]
+    pub const fn flight(self) -> Option<Graphic> {
+        match self {
+            Self::Swing { .. } => None,
+            Self::Shot { art, .. } | Self::Breath { art, .. } => Some(art),
+        }
+    }
+
+    /// The round this spends at the impact, or `None` when it spends none: a
+    /// blow, and a breath weapon that has nothing to run out of.
+    #[must_use]
+    pub const fn round(self) -> Option<Graphic> {
+        match self {
+            Self::Shot { nocked, .. } => Some(nocked),
+            Self::Swing { .. } | Self::Breath { .. } => None,
+        }
+    }
+
+    /// What kind of damage the impact deals. Steel and arrows are physical; a
+    /// breath is whatever the creature breathes.
+    #[must_use]
+    pub const fn damage_type(self) -> DamageType {
+        match self {
+            Self::Swing { .. } | Self::Shot { .. } => DamageType::Physical,
+            Self::Breath { damage, .. } => damage,
+        }
+    }
+
+    /// How it reads on the wire.
+    #[must_use]
+    pub const fn wire(self) -> CombatActionKind {
+        match self {
+            Self::Swing { .. } => CombatActionKind::Swing,
+            Self::Shot { .. } => CombatActionKind::Shot,
+            Self::Breath { .. } => CombatActionKind::Breath,
+        }
+    }
+}
+
 impl CombatAction {
     /// The tick this action lands on, or `None` while it is still armed.
     #[must_use]
@@ -2434,21 +2506,16 @@ impl CombatAction {
         }
     }
 
-    /// The reach it committed to. Read at the impact in place of asking the
-    /// weapon again: what the fighter promised is what the fighter is held to.
+    /// The reach it committed to — [`ActionKind::reach`] of what it is doing.
     #[must_use]
     pub const fn reach(self) -> RangedRange {
-        match self.kind {
-            ActionKind::Swing { reach } => reach,
-        }
+        self.kind.reach()
     }
 
     /// How this action reads on the wire.
     #[must_use]
     pub const fn wire_kind(self) -> CombatActionKind {
-        match self.kind {
-            ActionKind::Swing { .. } => CombatActionKind::Swing,
-        }
+        self.kind.wire()
     }
 
     /// The phase as the wire says it, given the tick it is being announced on.

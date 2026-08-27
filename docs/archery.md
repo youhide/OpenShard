@@ -1,5 +1,15 @@
 # Archery — arrows, ranged combat, and the flight itself
 
+> **`volleys()` no longer exists.** This document is the record of how the ranged
+> path was built and why; [`combat_actions.md`](combat_actions.md)'s Ф2 retired
+> that function into the three passes every action now runs through, so a shot is
+> committed, sustained and resolved exactly like a blow. Everything below about
+> *what* a shot does — reach off the weapon row, ammunition, the `0x70` flight —
+> still holds; only the place it happens moved. Two rules it wrote were changed
+> there and are named in that phase: a shot inside `MELEE_RANGE` is now fired
+> rather than refused, and the round is drawn at the loose rather than tested and
+> spent in the same tick.
+
 Archery looked half-built and was actually three-quarters built: `WeaponKind::Ranged`,
 the Archery skill, the whole weapon-data table for bow/crossbow/heavy crossbow, and
 even the player's own nock-and-loose *animation* already existed and were already

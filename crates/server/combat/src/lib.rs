@@ -17,6 +17,12 @@
 //! drives the same machinery — a brain that hands a creature a `Combat` is
 //! fought by these three exactly as a player is.
 //!
+//! **A blow, a shot and a breath are one schedule and three impacts.** They are
+//! committed, sustained and resolved by the same three passes, and differ only
+//! in what arrives: a projectile crossing the gap, a round leaving the pack.
+//! That is why an archer is a body drawing a bow for the whole interval rather
+//! than a statue that spits an arrow at the end of one.
+//!
 //! What the machine buys over the deadline it replaced is that an action can
 //! *end*: every one of them finishes as a hit, a miss or a named interruption,
 //! and the end crosses the wire, so a telegraph that was cancelled stops being
@@ -433,7 +439,8 @@ pub fn war_mode(state: &mut WorldState, connection: ConnectionId, war: bool) {
 }
 
 /// Set a player's attack target. The blow itself is not struck here — this only
-/// aims; [`swings`] turns "in war mode, in reach, timer up" into damage.
+/// aims; [`commit_actions`] turns "in war mode, in reach, recovery up" into a
+/// blow or a shot that is on its way.
 pub fn attack(state: &mut WorldState, connection: ConnectionId, target: Option<Serial>) {
     let Some(&player) = state.players.get(&connection) else {
         return;
@@ -613,19 +620,51 @@ pub fn retaliate_players(state: &mut WorldState, blows: &[MobileDamaged]) {
     }
 }
 
-/// One shot about to be resolved this tick — either a creature's innate
-/// [`RangedAttack`], or a mobile that merely wields a `WeaponKind::Ranged` weapon,
-/// read fresh off it every tick the same way [`equipped_weapon`](weapons::equipped_weapon)
-/// itself is: no component is ever mirrored onto a player for holding a bow.
-struct Volley {
-    target: Serial,
-    range: u8,
-    kind: DamageType,
-    /// The ammunition this shot spends, and what runs out when it cannot be fired.
-    /// `None` for an innate attack — a dragon's breath has nothing to run out of.
-    ammo: Option<Graphic>,
-    /// The graphic the shot itself flies as.
-    art: Graphic,
+/// The action a ranged attacker would open, or `None` for a fighter who has no
+/// way to reach anything but arm's length.
+///
+/// Either a creature's innate [`RangedAttack`], or a mobile that merely wields a
+/// `WeaponKind::Ranged` weapon — read fresh at every commit the same way
+/// [`equipped_weapon`](weapons::equipped_weapon) itself is, so no component is
+/// ever mirrored onto a player for holding a bow. The innate attack is asked
+/// first: a creature that breathes fire does not stop breathing it for picking
+/// up a crossbow.
+fn ranged_action(state: &WorldState, attacker: EntityId) -> Option<ActionKind> {
+    if let Some(ranged) = state.registry.get::<RangedAttack>(attacker) {
+        return Some(ActionKind::Breath {
+            reach: ranged.range,
+            damage: ranged.kind,
+            art: ARROW_GRAPHIC,
+        });
+    }
+    let weapon = weapons::equipped_weapon(state, attacker)?;
+    if weapon.kind != WeaponKind::Ranged {
+        return None;
+    }
+    // All three shipped ranged rows carry a reach, a round and a flight graphic
+    // together (`weapon::ranged` sets them in one place). A row with a ranged
+    // kind and none of them is a hole in the table rather than a weapon that
+    // shoots for free, and its bearer falls back on clubbing with it.
+    Some(ActionKind::Shot {
+        reach: weapon.range?,
+        nocked: weapon.ammo?,
+        art: weapon.effect_art.unwrap_or(ARROW_GRAPHIC),
+    })
+}
+
+/// Whether `attacker`'s pack holds a round of the kind its shot wants.
+///
+/// A read and not a draw: the round leaves the pack at the loose, so what the
+/// nock needs is only the answer to "is there one", and an interrupted draw has
+/// nothing to hand back. A mobile with no pack at all — every creature — carries
+/// no rounds, which is why a beast that shoots does it with a [`RangedAttack`]
+/// and not with a bow.
+fn carries_round(state: &WorldState, attacker: EntityId, round: Graphic) -> bool {
+    let Some(serial) = state.registry.serial_of(attacker) else {
+        return false;
+    };
+    openshard_items::backpack_of(state, serial)
+        .is_some_and(|pack| openshard_items::count_in_container(state, pack, round) > 0)
 }
 
 /// What a shot that could not be fired for want of ammunition tells the shooter —
@@ -638,147 +677,24 @@ fn out_of_ammo_message(ammo: Graphic) -> &'static str {
     }
 }
 
-/// Strike, for every mobile whose swing is due.
+/// The flight of a shot, from where it was loosed to the mark it was aimed at.
 ///
-/// The interactive half of combat, run each tick against the tick counter so it
-/// reads no clock. A swing lands when the attacker is in war mode, has a target
-/// within [`MELEE_RANGE`] on the same facet, and its prepared timer is up.
-/// Loose every ranged attack whose timer is up: a warlike combatant with a
-/// [`RangedAttack`] *or* a wielded ranged weapon, a target inside its reach but
-/// beyond arm's length, and a clear line to it fires — through [`damage`], the
-/// one door all damage passes, so resistance and murder attribution already
-/// apply. Sharing the swing timer with melee means a creature closes to bite or
-/// stands to shoot, never both in one beat.
-pub fn volleys(state: &mut WorldState) {
-    let now = state.ticks;
-    let ready: Vec<(EntityId, Volley)> = state
-        .registry
-        .query::<Combat>()
-        .filter_map(|(attacker, combat)| {
-            if !combat.warmode()
-                || combat.next_swing().is_none_or(|next| now < next)
-                || !attackable(state, attacker)
-            {
-                return None;
-            }
-            let target = combat.target()?;
-            if let Some(ranged) = state.registry.get::<RangedAttack>(attacker) {
-                return Some((
-                    attacker,
-                    Volley {
-                        target,
-                        range: ranged.range.get(),
-                        kind: ranged.kind,
-                        ammo: None,
-                        art: ARROW_GRAPHIC,
-                    },
-                ));
-            }
-            let weapon = weapons::equipped_weapon(state, attacker)?;
-            if weapon.kind != WeaponKind::Ranged {
-                return None; // melee's beat — `swings` handles this attacker
-            }
-            Some((
-                attacker,
-                Volley {
-                    target,
-                    range: weapon.range.map_or(0, |r| r.get()),
-                    kind: DamageType::Physical,
-                    ammo: weapon.ammo,
-                    art: weapon.effect_art.unwrap_or(ARROW_GRAPHIC),
-                },
-            ))
-        })
-        .collect();
-    for (
-        attacker,
-        Volley {
-            target: target_serial,
-            range,
-            kind,
-            ammo,
-            art,
-        },
-    ) in ready
-    {
-        let Some(target) = state.registry.entity_of(target_serial) else {
-            clear_target(state, attacker);
-            continue;
-        };
-        if !attackable(state, target) {
-            clear_target(state, attacker);
-            continue;
-        };
-        let (Some(&Position(from)), Some(&Position(to))) = (
-            state.registry.get::<Position>(attacker),
-            state.registry.get::<Position>(target),
-        ) else {
-            continue;
-        };
-        let facet = state.facet_of(attacker);
-        if state.facet_of(target) != facet
-            || in_range(from, to, MELEE_RANGE)
-            || !in_range(from, to, u32::from(range))
-        {
-            continue; // melee's beat, or out of reach — the brain closes in
-        }
-        if !openshard_movement::sight_clear(&state.footing(facet, Doors::AsTheyStand), from, to) {
-            continue; // no shooting through walls
-        }
-        let by = state.registry.serial_of(attacker);
-        let pace = swing_speed(state, attacker);
-        // A shot that cannot be fired for want of ammunition still costs the swing
-        // timer — otherwise an empty quiver retries every tick instead of once per
-        // swing interval, and spams the refusal just as fast.
-        let ammo_ok = match (ammo, by) {
-            (Some(graphic), Some(shooter))
-                if openshard_items::take_from_backpack(state, shooter, graphic, 1) > 0 =>
-            {
-                true
-            }
-            (Some(graphic), _) => {
-                state.system_message(attacker, out_of_ammo_message(graphic));
-                false
-            }
-            (None, _) => true,
-        };
-        if let Some(combat) = state.registry.get_mut::<Combat>(attacker) {
-            combat.schedule_swing(now + pace);
-        }
-        if !ammo_ok {
-            continue;
-        }
-        // The bolt's flight, then the thwack — emitted before the blow lands, so
-        // the mark is still drawn for the arrow to fly at. A moving effect from
-        // shooter to target, then the hit sound, both to everyone who can see it.
-        let arrow = GraphicalEffect {
-            kind: EffectKind::Moving,
-            from: by,
-            to: Some(target_serial),
-            art,
-            from_point: Point::new(from.x, from.y, from.z),
-            to_point: Point::new(to.x, to.y, to.z),
-            speed: RANGED_EFFECT_SPEED,
-            duration: 1,
-            fixed_direction: false,
-            explode: false,
-        };
-        state.animate(attacker, Action::Attack);
-        state.broadcast_packet(attacker, &ServerPacket::Effect(arrow));
-        let sound = attack_sound(state, attacker, RANGED_HIT_SOUND);
-        state.play_sound(attacker, sound);
-        // The bolt still flew and twanged; on a miss it simply finds no mark. The
-        // hit roll trains the shooter's Archery the same as a melee swing trains
-        // its weapon. Damage precedence matches melee via `scaled_blow`.
-        if check_hit(state, attacker, target, 0) {
-            let blow = scaled_blow(state, attacker, target);
-            if let Some(hit) = state.registry.serial_of(target) {
-                damage(state, hit, blow.amount, kind, by);
-                if blow.critical {
-                    state.system_message(attacker, "Critical hit!");
-                }
-            }
-        }
+/// Emitted before the blow lands, so the mark is still drawn for the arrow to
+/// fly at: a target killed by the same impact is swept off the map a moment
+/// later, and an effect addressed to it then would cross the wire naming
+/// nobody.
+fn projectile(from: Point, to: Point, by: Option<Serial>, at: Serial, art: Graphic) -> GraphicalEffect {
+    GraphicalEffect {
+        kind: EffectKind::Moving,
+        from: by,
+        to: Some(at),
+        art,
+        from_point: from,
+        to_point: to,
+        speed: RANGED_EFFECT_SPEED,
+        duration: 1,
+        fixed_direction: false,
+        explode: false,
     }
 }
 
@@ -839,39 +755,86 @@ pub fn resolve_actions(state: &mut WorldState) {
             state.face_point(attacker, target_pos);
             state.animate(attacker, Action::Attack);
         }
+        // The round leaves the pack here, at the loose, and this is the one
+        // thing the commit could not settle: an archer may have dropped, traded
+        // or drunk away their quiver while the bow was bending. It costs the
+        // shot and says so by name rather than by silence.
+        if let Some(round) = action.kind.round() {
+            let drawn =
+                by.is_some_and(|shooter| openshard_items::take_from_backpack(state, shooter, round, 1) > 0);
+            if !drawn {
+                state.system_message(attacker, out_of_ammo_message(round));
+                set_next_swing(state, attacker, now + swing_speed(state, attacker));
+                state.end_combat_action(
+                    attacker,
+                    CombatActionOutcome::Interrupted(InterruptReason::NoAmmo),
+                );
+                continue;
+            }
+        }
+        // A shot announces itself whichever way the roll goes: the bolt flew and
+        // twanged before anyone could know whether it would land. A blow is the
+        // other way about — its thwack *is* the sound of landing, and a whiff
+        // has a whistle of its own below.
+        let flight = action.kind.flight();
+        if let Some(art) = flight {
+            let Some(&Position(from)) = state.registry.get::<Position>(attacker) else {
+                continue;
+            };
+            let arrow = projectile(from, target_pos, by, target_serial, art);
+            state.broadcast_packet(attacker, &ServerPacket::Effect(arrow));
+            let twang = attack_sound(state, attacker, RANGED_HIT_SOUND);
+            state.play_sound(attacker, twang);
+        }
         // Roll to hit (and train the weapon skill by trying), spending whatever
         // the action accumulated on its way here. A miss whistles past and does
         // no damage; the timer resets either way.
         if !check_hit(state, attacker, target, action.accuracy) {
-            state.registry.remove::<WrestlingCombo>(attacker);
-            state.play_sound(attacker, SoundId(miss_sound(state, attacker)));
+            if flight.is_none() {
+                state.registry.remove::<WrestlingCombo>(attacker);
+                state.play_sound(attacker, SoundId(miss_sound(state, attacker)));
+            }
             set_next_swing(state, attacker, now + swing_speed(state, attacker));
             state.end_combat_action(attacker, CombatActionOutcome::Miss);
             continue;
         }
         let mut blow = scaled_blow(state, attacker, target);
-        if is_wrestling(state, attacker) {
-            if wrestling_combo_lands(state, attacker, target_serial) {
-                blow.amount =
-                    (u32::from(blow.amount) * (100 + u32::from(WRESTLING_COMBO_DAMAGE_PERCENT)) / 100) as u16;
-                restore_wrestling_stamina(state, attacker);
-                state.system_message(attacker, "Combo strike!");
+        // Wrestling is bare hands finding a body, so an arrow and a breath are
+        // outside it entirely: neither continues a chain nor breaks one.
+        if flight.is_none() {
+            if is_wrestling(state, attacker) {
+                if wrestling_combo_lands(state, attacker, target_serial) {
+                    blow.amount = (u32::from(blow.amount) * (100 + u32::from(WRESTLING_COMBO_DAMAGE_PERCENT))
+                        / 100) as u16;
+                    restore_wrestling_stamina(state, attacker);
+                    state.system_message(attacker, "Combo strike!");
+                }
+            } else {
+                // A weapon hit interrupts a bare-handed sequence even if the
+                // fighter puts it away before the combo window expires.
+                state.registry.remove::<WrestlingCombo>(attacker);
             }
-        } else {
-            // A weapon hit interrupts a bare-handed sequence even if the fighter
-            // puts it away before the combo window expires.
-            state.registry.remove::<WrestlingCombo>(attacker);
         }
         // The blow lands with the attacker's own thwack — a creature's growl, a
-        // human's fist — from the attacker, who is still here even when the blow
-        // just killed the target.
-        let sound = attack_sound(state, attacker, MELEE_HIT_SOUND);
-        damage(state, target_serial, blow.amount, DamageType::Physical, by);
+        // human's fist. Read before the damage, because Reactive Armor can kill
+        // the attacker with its own blow and a corpse has no growl left; a shot
+        // has no thwack at all, having already twanged on the way out.
+        let thwack = flight
+            .is_none()
+            .then(|| attack_sound(state, attacker, MELEE_HIT_SOUND));
+        damage(state, target_serial, blow.amount, action.kind.damage_type(), by);
         if blow.critical {
             state.system_message(attacker, "Critical hit!");
         }
-        state.play_sound(attacker, sound);
-        // A coated blade spends a dose into whatever it just cut.
+        if let Some(sound) = thwack {
+            state.play_sound(attacker, sound);
+        }
+        // A coated blade spends a dose into whatever it just cut, and a weapon
+        // whose affixes carry poison rolls them — a bow among them, which is
+        // ServUO's rule too: `BaseRanged.OnHit` is `BaseWeapon.OnHit` with a
+        // flight in front of it. The Poisoning skill itself still refuses to
+        // smear a bow (it coats blades and points only), so a *coating* remains
+        // melee's alone by the skill's rule rather than by a branch here.
         deliver_weapon_poison(state, attacker, target_serial, now);
         deliver_affix_poison(state, attacker, target_serial, now);
         set_next_swing(state, attacker, now + swing_speed(state, attacker));
@@ -888,13 +851,14 @@ pub fn resolve_actions(state: &mut WorldState) {
 /// Start an action for every fighter who is ready for one — the first verb.
 ///
 /// Every precondition is tested *here*, and what the fighter promises is frozen
-/// into the component: the target, and the reach the blow is committed to. The
-/// server owns the timer, including operator combat settings, dexterity,
-/// scripted [`SwingSpeed`], range and live sight, and sending the ordinary
-/// action at the start of that authoritative interval keeps the client
-/// synchronized without asking it to duplicate rules it cannot fully know. A due
-/// swing that was held out of reach opens a full interval when the fighters
-/// meet, rather than landing before a frame can be shown.
+/// into the component: the target, the reach it is committed to, and — for a
+/// shot — which round it will spend and what that round flies as. The server
+/// owns the timer, including operator combat settings, dexterity, scripted
+/// [`SwingSpeed`], range and live sight, and sending the ordinary action at the
+/// start of that authoritative interval keeps the client synchronized without
+/// asking it to duplicate rules it cannot fully know. A due swing that was held
+/// out of reach opens a full interval when the fighters meet, rather than
+/// landing before a frame can be shown.
 ///
 /// Only [`Phase::Releasing`] is reachable: arming is the last phase of
 /// `docs/combat_actions.md` and nothing commits into a watch yet.
@@ -913,17 +877,10 @@ pub fn commit_actions(state: &mut WorldState) {
         .collect();
 
     for (attacker, target_serial, due) in pending {
-        // A ranged attacker — innate or a wielded bow/crossbow — has no melee
-        // wind-up: it stands and looses on `volleys`'s own beat instead. That is
-        // the ten seconds of standing still, and closing it is the next phase.
-        let is_ranged = state.registry.has::<RangedAttack>(attacker)
-            || weapons::equipped_weapon(state, attacker)
-                .is_some_and(|weapon| weapon.kind == WeaponKind::Ranged);
         // A mobile a bard has calmed does not start one — ServUO's `BardPacified`.
-        if is_ranged
-            || state
-                .registry
-                .has::<openshard_state::components::Pacified>(attacker)
+        if state
+            .registry
+            .has::<openshard_state::components::Pacified>(attacker)
         {
             continue;
         }
@@ -943,12 +900,33 @@ pub fn commit_actions(state: &mut WorldState) {
             }
             continue;
         };
-        // The reach a swing commits to. One tile today, and a constant rather
-        // than a weapon row until reach becomes data — the polearm falls exactly
-        // on that seam.
-        let reach = MELEE_REACH;
-        if obstruction(state, attacker, target, reach).is_some() {
+        // Which of the three this fighter is about to make. Whoever can shoot
+        // shoots, at arm's length as readily as across a field: ServUO puts no
+        // floor under a bow's range either, and the old `volleys` refusal to
+        // fire inside [`MELEE_RANGE`] only existed because the melee pass would
+        // otherwise strike in the same beat. There is one pass now.
+        //
+        // The melee half commits to a constant rather than a weapon row until
+        // reach becomes data, and the polearm falls exactly on that seam; the
+        // ranged half already reads its reach off the weapon, which is what
+        // makes the seam visible here.
+        let kind = ranged_action(state, attacker).unwrap_or(ActionKind::Swing { reach: MELEE_REACH });
+        if obstruction(state, attacker, target, kind.reach()).is_some() {
             continue;
+        }
+        // The quiver is asked here, at the nock, and not ten seconds later at
+        // the loose: an archer with nothing to shoot is told before drawing
+        // rather than after standing through a whole interval. The round is not
+        // taken yet — it leaves the pack when the arrow does, so a draw that is
+        // spoiled cannot rob its archer, and nothing has to be handed back
+        // through the ends an action can have. The refusal still costs the
+        // interval, or an empty quiver would repeat itself every tick.
+        if let Some(round) = kind.round() {
+            if !carries_round(state, attacker, round) {
+                state.system_message(attacker, out_of_ammo_message(round));
+                set_next_swing(state, attacker, now + swing_speed(state, attacker));
+                continue;
+            }
         }
         // A concealed fighter is not telegraphed: drawing a wind-up would break
         // cover before the blow, which is the whole of an ambush.
@@ -975,7 +953,7 @@ pub fn commit_actions(state: &mut WorldState) {
         set_next_swing(state, attacker, impact);
         let action = CombatAction {
             target: target_serial,
-            kind: ActionKind::Swing { reach },
+            kind,
             phase: Phase::Releasing { impact },
             started_at: now,
             accuracy,
@@ -983,7 +961,16 @@ pub fn commit_actions(state: &mut WorldState) {
         };
         state.registry.insert(attacker, action);
         if telegraphed {
-            state.face_toward(attacker, target);
+            // A blow is delivered by the body, so the body turns to deliver it.
+            // A shot is delivered down a line, and turning the shooter at every
+            // nock would take a kiting archer's step away from it: a step in a
+            // direction the mobile is not facing turns instead of moving, so a
+            // brain that beats no faster than the shard re-aims it spends every
+            // beat spinning and never opens the gap. See `spawn_archer`, which
+            // carries the same finding from the other end.
+            if kind.flight().is_none() {
+                state.face_toward(attacker, target);
+            }
             state.break_cover(attacker);
             state.animate_timed(attacker, Action::Attack, impact.saturating_sub(now));
             state.announce_action(attacker, action);

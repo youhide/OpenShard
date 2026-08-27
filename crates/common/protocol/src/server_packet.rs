@@ -794,7 +794,7 @@ impl ServerPacket {
             <PlaySound as DecodePacket>::ID => decode_server(packet, version)
                 .map(Self::PlaySound)
                 .map_err(ServerDecodeError::PlaySound)?,
-            // The arrow's flight: `volleys` already sends it for a ranged shot,
+            // The arrow's flight: combat already sends it when a shot lands,
             // NPC or player, so this is the client's other half of that packet.
             <GraphicalEffect as DecodePacket>::ID => decode_server(packet, version)
                 .map(Self::Effect)

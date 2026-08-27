@@ -468,6 +468,11 @@ pub enum InterruptReason {
     Pacified,
     /// The actor stopped: it disengaged, aimed at somebody else, died, or left.
     Abandoned,
+    /// The round the shot was committed to was gone from the pack by the loose —
+    /// dropped, traded or given away while the bow was being drawn. The refusal
+    /// for an empty quiver comes at the nock instead, before there is an action
+    /// to interrupt at all.
+    NoAmmo,
 }
 
 impl InterruptReason {
@@ -481,6 +486,7 @@ impl InterruptReason {
             Self::NoLineOfSight => 3,
             Self::Pacified => 4,
             Self::Abandoned => 5,
+            Self::NoAmmo => 6,
         }
     }
 
@@ -493,6 +499,7 @@ impl InterruptReason {
             3 => Some(Self::NoLineOfSight),
             4 => Some(Self::Pacified),
             5 => Some(Self::Abandoned),
+            6 => Some(Self::NoAmmo),
             _ => None,
         }
     }

@@ -602,7 +602,10 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction
                 return flee_step(state, creature, facet, pos, target_pos);
             }
             // A ranged fighter kites: back off from a foe at its heels, stand
-            // and shoot inside its reach (the volley system does the firing),
+            // and shoot inside its reach (`combat::commit_actions` does the
+            // shooting, and deliberately does not turn a shooter toward its
+            // mark — a step in a direction the mobile is not facing turns
+            // instead of moving, so re-aiming it every nock would pin it here),
             // and only close in when out of range or out of sight line.
             if let Some(&RangedAttack { range, .. }) = state.registry.get::<RangedAttack>(creature) {
                 let gap = distance(pos, target_pos);
