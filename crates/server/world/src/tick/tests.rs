@@ -9,7 +9,8 @@ use openshard_movement::scene::Scene;
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::feedback::{
-    CombatActionEnded, CombatActionOutcome, CombatActionPhase, InterruptReason,
+    ActionStage, CombatActionBalked, CombatActionEnded, CombatActionOutcome, CombatActionPhase,
+    CombatActionStage, InterruptReason,
 };
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::items::DropDestination;
@@ -5529,6 +5530,38 @@ fn action_end(packets: &[Vec<u8>]) -> Option<(u8, u8)> {
     })
 }
 
+/// Every "cannot begin" and "can begin again" in the batch, in order.
+///
+/// All of them and not the first: the claim these tests make is about the
+/// *edges* — that a refusal is said once and lifted once — and a helper that
+/// returned only the first could not tell one packet from forty identical ones.
+/// Both of these read one *actor's* packets out of the batch, and that is not
+/// fussiness: every fighter on screen broadcasts these, and a creature walking
+/// towards its quarry is held up by reach for as long as it is walking. A helper
+/// that took the batch whole would be asserting on whoever spoke first.
+fn action_balks(packets: &[Vec<u8>], actor: Serial) -> Vec<u8> {
+    subcommand_bytes(packets, CombatActionBalked::SUBCOMMAND, actor)
+}
+
+/// Every stage transition this actor announced, in order.
+fn action_stages(packets: &[Vec<u8>], actor: Serial) -> Vec<u8> {
+    subcommand_bytes(packets, CombatActionStage::SUBCOMMAND, actor)
+}
+
+/// The trailing byte of every `0xBF` of this subcommand that names `actor` —
+/// the shape both packets share: id, length, subcommand, actor, one byte.
+fn subcommand_bytes(packets: &[Vec<u8>], subcommand: u16, actor: Serial) -> Vec<u8> {
+    packets
+        .iter()
+        .filter(|packet| {
+            packet.first() == Some(&0xBF)
+                && packet.get(3..5) == Some(&subcommand.to_be_bytes()[..])
+                && packet.get(5..9) == Some(&actor.raw().to_be_bytes()[..])
+        })
+        .map(|packet| packet[9])
+        .collect()
+}
+
 /// The kind, phase and interval of the first "this action began" it broadcast.
 fn action_phase(packets: &[Vec<u8>]) -> Option<(u8, u8, u32)> {
     packets.iter().find_map(|packet| {
@@ -5650,6 +5683,7 @@ fn an_armed_action_that_is_never_released_expires() {
             accuracy: 0,
             applied: ConditionSet::EMPTY,
             telegraphed: true,
+            stage: ActionStage::FIRST,
         },
     );
     world.tick(now);
@@ -6445,6 +6479,109 @@ fn an_interrupted_draw_costs_the_archer_no_arrow() {
         items::count_in_container(&world.state, quiver, Graphic(0x0F3F)),
         20,
         "and the archer is not robbed of the arrow it never loosed"
+    );
+}
+
+/// The defect this phase was built for, in the place it was met: an archer whose
+/// quarry has gone out of reach. Under the old commit pass that was a bare
+/// `continue` — no packet, no word, nothing on screen — for as long as the
+/// distance held, which from a player's seat is a shard that has stopped.
+///
+/// Three claims, and the second is the one that keeps it affordable: the refusal
+/// is **said once**, it is **not repeated** while it holds, and it is **lifted
+/// once** when the way is clear. A per-tick packet would be forty a second per
+/// held-up fighter.
+#[test]
+fn an_archer_held_out_of_reach_says_so_once_and_says_so_until_it_is_not() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    let archer = world.state.registry.serial_of(player_entity).unwrap();
+    arm_with_bow(&mut world, connection);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 50, now);
+    let mob_entity = entity(&world, mob);
+    engage(&mut world, connection, mob, now);
+    let _ = packets_for(&mut world, connection);
+
+    // Out past the bow's reach. The draw already in flight ends with a reason —
+    // that is Ф1's — and the commit that cannot follow it is this one's.
+    world
+        .state
+        .teleport(mob_entity, Point::new(START.0 + 20, START.1, 0));
+    world.tick(now);
+    assert_eq!(
+        action_balks(&packets_for(&mut world, connection), archer),
+        vec![InterruptReason::OutOfReach.to_bits()],
+        "the commit that could not happen says what is in the way"
+    );
+
+    // And keeps not happening, in silence: the state is standing, so the wire
+    // carries the edges and nothing in between.
+    for _ in 0..5 {
+        world.tick(now);
+    }
+    assert!(
+        action_balks(&packets_for(&mut world, connection), archer).is_empty(),
+        "a refusal that has not changed is not re-sent every tick"
+    );
+
+    // Back within reach, and the way is clear again — said once, in the same
+    // tick the shot commits.
+    world
+        .state
+        .teleport(mob_entity, Point::new(START.0 + 3, START.1, 0));
+    world.tick(now);
+    let packets = packets_for(&mut world, connection);
+    assert_eq!(
+        action_balks(&packets, archer),
+        vec![0],
+        "clear is a zero, and it is sent exactly once"
+    );
+    assert!(
+        action_phase(&packets).is_some(),
+        "and the shot the archer was held off from is committed in the same tick"
+    );
+}
+
+/// The other half of what a player is owed while a bow is bending: **which part
+/// of the draw this is.** A bar answers *how far along* and cannot answer *how
+/// far along what* — a bow coming up and a bow held at full draw fill the same
+/// rectangle — so the shard walks the stages and announces each one it enters.
+///
+/// The shipped shares put a shot's boundaries at 10/60/90 percent of the
+/// interval, so a whole draw crosses three of them. `Ready` is not among them:
+/// every action opens in it, and a packet saying what the commit already implied
+/// would be a packet nobody needed.
+#[test]
+fn a_drawn_bow_is_announced_stage_by_stage_as_it_bends() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    let archer = world.state.registry.serial_of(player_entity).unwrap();
+    arm_with_bow(&mut world, connection);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 50, now);
+    engage(&mut world, connection, mob, now);
+    let draw = combat::swing_speed(&world.state, player_entity);
+    let _ = packets_for(&mut world, connection);
+
+    let mut seen = Vec::new();
+    for _ in 0..draw {
+        world.tick(now);
+        seen.extend(action_stages(&packets_for(&mut world, connection), archer));
+        if seen.len() >= 3 {
+            break;
+        }
+    }
+    assert_eq!(
+        seen,
+        vec![
+            ActionStage::Load.to_bits(),
+            ActionStage::Aim.to_bits(),
+            ActionStage::Release.to_bits(),
+        ],
+        "the string is drawn, then held, then loosed — in that order and each once"
     );
 }
 

@@ -32,8 +32,8 @@ use openshard_protocol::chunks::{
     Changes, ChangesReply, ChangesRequest, PublishNotice, WorldNotice, WorldRevision,
 };
 use openshard_protocol::feedback::{
-    Animation, CombatActionEnded, CombatActionPhase, GraphicalEffect, HarvestCompleted, HarvestRefused,
-    HarvestToolVisual, NewAnimation, SwingTiming,
+    Animation, CombatActionBalked, CombatActionEnded, CombatActionPhase, CombatActionStage, GraphicalEffect,
+    HarvestCompleted, HarvestRefused, HarvestToolVisual, NewAnimation, SwingTiming,
 };
 use openshard_protocol::gump::GumpId;
 use openshard_protocol::gump::GumpPoint;
@@ -147,7 +147,7 @@ pub enum GroundSource {
     /// no chunks at all; one behind costs the difference.
     Fetched {
         /// Where kept worlds live. The client's own working directory, beside
-        /// `client_ui.toml`, and named by the caller rather than assumed here:
+        /// `client_ui.ron`, and named by the caller rather than assumed here:
         /// this file knows about a socket, not about where a client keeps
         /// things.
         cache: std::path::PathBuf,
@@ -205,6 +205,11 @@ pub enum Update {
     CombatActionPhase(CombatActionPhase),
     /// A mobile's combat action is over — and, when it never landed, why.
     CombatActionEnded(CombatActionEnded),
+    /// A fighter cannot begin an action at all, or can again. The third thing a
+    /// watcher can see: standing there unable to start, and what is in the way.
+    CombatActionBalked(CombatActionBalked),
+    /// A running action has entered a new stretch — drawn, held, loosed.
+    CombatActionStage(CombatActionStage),
     /// A designed house's picture, still as bytes.
     ///
     /// The one packet that crosses this seam undecoded, and it has a reason:
@@ -1478,6 +1483,12 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                 }
                 if let openshard_protocol::server_packet::ServerPacket::CombatActionEnded(ended) = packet {
                     report(Update::CombatActionEnded(ended));
+                }
+                if let openshard_protocol::server_packet::ServerPacket::CombatActionBalked(balked) = packet {
+                    report(Update::CombatActionBalked(balked));
+                }
+                if let openshard_protocol::server_packet::ServerPacket::CombatActionStage(stage) = packet {
+                    report(Update::CombatActionStage(stage));
                 }
                 // Undivided: which packets move the player is [`Walk`]'s answer
                 // and `Walk` belongs to the owner. The desync a fold can find,

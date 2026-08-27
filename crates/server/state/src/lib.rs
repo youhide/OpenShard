@@ -36,6 +36,7 @@
 //! The tick that drives all this, and the systems that act on it, live above.
 
 pub mod action_rules;
+pub mod action_stages;
 pub mod armor;
 pub mod boat;
 pub mod components;

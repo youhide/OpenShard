@@ -735,6 +735,14 @@ impl App {
                 sweep.server_updates.animations += 1;
                 true
             }
+            crate::link::Update::CombatActionBalked(_) => {
+                sweep.server_updates.animations += 1;
+                true
+            }
+            crate::link::Update::CombatActionStage(_) => {
+                sweep.server_updates.animations += 1;
+                true
+            }
             crate::link::Update::Effect(_) => {
                 sweep.server_updates.animations += 1;
                 true

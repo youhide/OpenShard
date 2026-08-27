@@ -376,9 +376,50 @@ therefore **excluded from the regeneration pulse** — holding a bow at full dra
 does not rest you, which is both the honest physical answer and the one that makes
 `Drain` mean what its number says.
 
+**D11 — A commit that cannot happen is a state with a name, not a quiet
+`continue`.** D1 said this and made it true at exactly one end. At the impact a
+failed precondition became an outcome with a reason on the wire; at the *commit*
+the pass went on declining in silence, every tick, for as long as the obstacle
+lasted. The two ends were never the same rule, and the difference is invisible in
+the code — one is a `continue` inside a loop that ends actions, the other a
+`continue` inside a loop that starts them.
+
+What that costs is not subtle once seen. An archer whose quarry steps round a
+corner produces **nothing**: no packet, no word, no picture, until the corner is
+gone. From a player's seat that is a shard that has stopped working, and it was
+reported as exactly that. So a refusal is a component while it holds
+(`Balked`) and an edge on the wire in both directions — said when it begins,
+said when it lifts, silent in between. A fighter held off by a wall costs two
+packets for as long as the wall stands, not forty a second.
+
+It is deliberately **not** an outcome and **not** a phase. An outcome is a thing
+that happened and fades; a phase belongs to an action that exists. This is a
+standing condition of a fighter with no action, and the client holds it with no
+clock at all — the shard says when it is over, which is the only thing that can
+know.
+
+**D12 — Where a draw ends and an aim begins is the shard's, and it crosses the
+wire.** A bar answers *how far along* and cannot answer *how far along what*: a
+bow coming up, a bow bending and a bow held at full draw fill the same rectangle,
+and for the whole of Ф4 they were the same word too. The four stretches —
+`Ready`, `Load`, `Aim`, `Release` — are named neutrally because the same four fit
+a blow, a shot and a breath; the word each is *drawn* as belongs to the kind.
+
+The boundaries are an operator setting (`gameplay.action_stages`, keyed by kind,
+three shares with the release as the remainder) for the reason the rules table is
+one: *"an archer spends half the interval drawing and a third of it holding"* is
+a shard's choice. Which means the client cannot compute it. A picture that read
+*"past 60% is aiming"* off its own percentage would be stating a fact nobody gave
+it, and would be wrong on every shard that retuned the shares — the same
+invention D6 keeps the client out of. So the server walks the stages and
+announces each transition, and **a stage never goes backwards**: a `Slow` lowers
+the fraction elapsed, and a fighter who has drawn a bow has not un-drawn it.
+
 ## The wire
 
-**Two new packets, and the second one is why the first is needed.** This was one
+**Four packets now, and the two later ones were found by playing rather than by
+reading.** What follows describes the first two as Ф1 shipped them; D11's and
+D12's are below. This was one
 packet until D8: the beginning already crossed as `SwingTiming`, which carries a
 duration, and only the end was missing. But a charge and a held aim *have no
 duration*, and the encoding has no room to say so — a zero in that field already
@@ -398,6 +439,16 @@ supposed to read intent.
   repurpose.
 - **`CombatActionEnded`** — subcommand `+ 17`. Actor and outcome: `Hit`, `Miss`,
   `Interrupted { reason }`, `Expired`.
+- **`CombatActionBalked`** — subcommand `+ 18`, D11's. Actor and one byte:
+  either what is in the way or a zero meaning the way is clear. The byte shares
+  its numbering with an interruption's reason, which is free — a reason is never
+  written as `0`, because that is already the filler an outcome that is not an
+  interruption writes. Sent on the edge in both directions and never in between.
+- **`CombatActionStage`** — subcommand `+ 19`, D12's. Actor and which of the four
+  stretches it just entered. Deliberately not folded into `CombatActionPhase`,
+  which carries the interval a bar is measured against: a stage changes *inside*
+  that interval, and re-sending the phase to say so would restart the client's
+  clock and reset the very bar the stage annotates.
 
 Stock clients skip unknown extended commands, so there is no compatibility cost and
 no existing packet changes shape.
@@ -411,7 +462,10 @@ needs, and a bar that could only fill was never going to draw it.
 
 Ф1–Ф4 are the foundation and are ordered by what a player can see. Ф5–Ф7 each
 spend one axis of the model, and every one of them is a phase rather than a
-feature only because Ф1 separated the axes.
+feature only because Ф1 separated the axes. Ф4.1 is between them and was not
+planned: it is what the first person to *play* the finished picture found
+missing, and both halves of it are D1 finally applied at the end it was never
+applied to.
 
 **Ф1 — the object. ✅ Built.** `CombatAction`, the four verbs, and both new
 packets. Only `Phase::Releasing` is reachable — nothing arms yet — but the phase
@@ -563,6 +617,36 @@ What landed, and the four things worth knowing before reading the code:
   blow that landed is a blow nobody is still preparing. That split is the whole
   method.
 
+**Ф4.1 — the silence between actions. ✅ Built.** D11 and D12, and it is a
+half-phase rather than a phase because it was not planned: it is what the first
+person to *play* Ф4 found. The report was that the picture was mostly missing and
+that an archer produced long stretches of nothing at all — and both halves of
+that were true, for two unrelated reasons. *Done when:* a fighter who cannot act
+says what is in the way for as long as it is in the way, and a drawn bow says
+which part of the draw it is in.
+
+What landed, and the four things worth knowing before reading the code:
+
+- **The commit pass had three silent `continue`s and now has none.** Pacified,
+  target gone, and — the one a player meets — `obstruction`: out of reach, no
+  line of sight, another facet. Each is now a `Balked` component and an edge on
+  the wire. `commit_actions` collects the set it refused this tick and clears
+  everyone else's, so the lift is as automatic as the refusal and neither needs
+  a second seam to remember it.
+- **The archer is the case, and not by coincidence.** A blow's reach is one
+  tile, so a melee fighter's refusal lasts the moment it takes to step; a bow
+  reaches ten, and a quarry that walks behind a building holds the archer in
+  refusal for as long as it stays there. That is why this looked like a shard
+  that had stopped rather than like a missing word.
+- **A stage is announced, never derived.** `sustain_actions` walks the shares
+  and sends only transitions; `Ready` is not among them, because every action
+  opens in it and a packet saying what the commit already implied is a packet
+  nobody needed. The client assumes `FIRST` at the commit and is told the rest.
+- **The refusal takes the bar's own place on screen.** Not a line of its own: it
+  is the answer to the same question — there is no bar here, and this is why.
+  The outcome word keeps the right-hand slot, so a miss and the refusal that
+  follows it are both legible in the one moment both are true.
+
 **Ф5 — the fight costs something.** D9: an opening stamina cost at the commit, a
 per-tick `Drain` while sustaining, the owed fatigue spent at the impact, `Winded`
 as a condition the table can read, and the regeneration pulse excluding anyone
@@ -594,7 +678,34 @@ index of armed squares, and that index is a design rather than a variant.
 
 ## Backlog
 
-Found while building Ф1, Ф2, Ф3 and Ф4, and none of it belonged to any of them.
+Found while building Ф1, Ф2, Ф3, Ф4 and Ф4.1, and none of it belonged to any of
+them.
+
+**From Ф4.1:**
+
+- **A fighter in war mode with no target says nothing, and that may be the next
+  complaint.** It is not a refusal — nothing was asked for — so there is no
+  `Balked` to send, and the screen is as blank as it was for the case this phase
+  fixed. Whether *"standing, no quarry"* is worth a picture is a question about
+  what war mode means on screen, not about the commit pass, and it wants asking
+  before it is answered.
+- **The stage shares are three numbers per kind and nobody has looked at them
+  in motion.** They were chosen to read as sentences — a blow is mostly its
+  wind-up, a bow is mostly its draw and hold — and they are an operator setting
+  precisely so the first person to watch a fight can disagree. Nothing in the
+  numbers is load-bearing.
+- **`Balked` is per fighter and reasons do not compose.** A target that is both
+  out of reach *and* behind a wall reports whichever `obstruction` tests first,
+  which is reach. That is the same ordering the impact has always used, and it
+  is only visible now that somebody reads the answer.
+- **Nothing tests that a refusal survives the fighter it belongs to
+  disappearing.** The component goes with the entity and the client's record
+  goes with `retain`, so the two ends agree by construction rather than by
+  assertion — which is exactly the shape of thing that stops being true quietly.
+- **The stage walk costs one table lookup per running action per tick.** Bounded
+  by the number of fighters mid-action, which is the bound D8 argues for, but it
+  is the first thing in the sustain pass that runs for every action every tick
+  rather than on an event.
 
 **From Ф4:**
 

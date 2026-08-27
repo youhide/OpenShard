@@ -29,11 +29,15 @@
 //! drawn instead of running out its promised duration over an empty tile. See
 //! `docs/combat_actions.md`.
 
+use std::collections::HashSet;
+
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_map::overlay::Doors;
 use openshard_protocol::combat::{AttackTarget, WarMode};
-use openshard_protocol::feedback::{CombatActionOutcome, EffectKind, GraphicalEffect, InterruptReason};
+use openshard_protocol::feedback::{
+    ActionStage, BalkState, CombatActionOutcome, EffectKind, GraphicalEffect, InterruptReason,
+};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
@@ -41,9 +45,9 @@ use openshard_protocol::wire::{Graphic, SoundId};
 use openshard_protocol::world::{Point, PoisonLevel, RangedRange};
 use openshard_state::action_rules::{ActionEffect, ActorCondition, ConditionSet};
 use openshard_state::components::{
-    ActionKind, BehaviourBuffs, Body, Client, Combat, CombatAction, CriminalUntil, DamageType, Frozen, Ghost,
-    Guard, Hidden, Hitpoints, ItemAffix, ItemAffixes, MeleeDamage, MurderDecay, Murders, Phase,
-    PoisonCharges, Poisoned, Position, RangedAttack, Resistance, Skills, Stamina, Stats, SwingSpeed,
+    ActionKind, Balked, BehaviourBuffs, Body, Client, Combat, CombatAction, CriminalUntil, DamageType,
+    Frozen, Ghost, Guard, Hidden, Hitpoints, ItemAffix, ItemAffixes, MeleeDamage, MurderDecay, Murders,
+    Phase, PoisonCharges, Poisoned, Position, RangedAttack, Resistance, Skills, Stamina, Stats, SwingSpeed,
     WrestlingAmbushCooldown, WrestlingCombo, WrestlingInterceptCooldown, WrestlingOpener, WrestlingStride,
     body_is_female, body_opens_doors, creature_base_sound,
 };
@@ -908,12 +912,20 @@ pub fn commit_actions(state: &mut WorldState) {
         })
         .collect();
 
+    // Whoever this pass refused, and why. Everything else that holds a `Balked`
+    // is cleared at the end — a fighter who committed, who stopped fighting, or
+    // whose obstacle is gone. **Every path out of the loop below records one or
+    // the other**: a `continue` that leaves this set untouched is the silent
+    // refusal this pass was built to stop having.
+    let mut balked: HashSet<EntityId> = HashSet::new();
+
     for (attacker, target_serial, due) in pending {
         // A mobile a bard has calmed does not start one — ServUO's `BardPacified`.
         if state
             .registry
             .has::<openshard_state::components::Pacified>(attacker)
         {
+            balk(state, &mut balked, attacker, InterruptReason::Pacified);
             continue;
         }
         let Some(target) = state
@@ -930,6 +942,7 @@ pub fn commit_actions(state: &mut WorldState) {
             if now >= due {
                 clear_target(state, attacker);
             }
+            balk(state, &mut balked, attacker, InterruptReason::TargetGone);
             continue;
         };
         // Which of the three this fighter is about to make. Whoever can shoot
@@ -943,7 +956,12 @@ pub fn commit_actions(state: &mut WorldState) {
         // ranged half already reads its reach off the weapon, which is what
         // makes the seam visible here.
         let kind = ranged_action(state, attacker).unwrap_or(ActionKind::Swing { reach: MELEE_REACH });
-        if obstruction(state, attacker, target, kind.reach()).is_some() {
+        // The commonest refusal on the shard, and the one that used to be a bare
+        // `continue`: a target round a corner or two tiles past a bow's reach.
+        // An archer stands in this state for as long as the quarry stays there,
+        // so it is the one a player is most likely to be looking at.
+        if let Some(reason) = obstruction(state, attacker, target, kind.reach()) {
+            balk(state, &mut balked, attacker, reason);
             continue;
         }
         // The quiver is asked here, at the nock, and not ten seconds later at
@@ -957,6 +975,10 @@ pub fn commit_actions(state: &mut WorldState) {
             if !carries_round(state, attacker, round) {
                 state.system_message(attacker, out_of_ammo_message(round));
                 set_next_swing(state, attacker, now + swing_speed(state, attacker));
+                // The message goes to the archer alone and says it once; the
+                // standing state is what a watcher — the archer's own screen
+                // included — reads for as long as the quiver is empty.
+                balk(state, &mut balked, attacker, InterruptReason::NoAmmo);
                 continue;
             }
         }
@@ -991,6 +1013,7 @@ pub fn commit_actions(state: &mut WorldState) {
             accuracy,
             applied: ConditionSet::EMPTY,
             telegraphed,
+            stage: ActionStage::FIRST,
         };
         state.registry.insert(attacker, action);
         if telegraphed {
@@ -1009,6 +1032,32 @@ pub fn commit_actions(state: &mut WorldState) {
             state.announce_action(attacker, action);
         }
     }
+
+    // Everyone still standing in a refusal this pass did not renew is free of
+    // it: the wall was opened, the quarry stepped back into reach, the fighter
+    // committed, or the fight is over. Walked over the component rather than
+    // over every combatant, so the cost is the number of fighters actually held
+    // up and not the number of fighters.
+    let stale: Vec<EntityId> = state
+        .registry
+        .query::<Balked>()
+        .map(|(entity, _)| entity)
+        .filter(|entity| !balked.contains(entity))
+        .collect();
+    for entity in stale {
+        state.set_balked(entity, BalkState::Clear);
+    }
+}
+
+/// Record that `attacker` could not begin an action, and say so on the edge.
+///
+/// The set is what the end of the commit pass reads to tell a refusal that is
+/// still in force from one that has been lifted; [`WorldState::set_balked`] is
+/// what decides whether anything crosses the wire, so calling this every tick
+/// costs a component lookup and a hash insert and sends nothing.
+fn balk(state: &mut WorldState, balked: &mut HashSet<EntityId>, attacker: EntityId, reason: InterruptReason) {
+    balked.insert(attacker);
+    state.set_balked(attacker, BalkState::Blocked(reason));
 }
 
 /// Apply the world to every running action — the second verb, and the one the
@@ -1093,8 +1142,57 @@ pub fn sustain_actions(state: &mut WorldState) {
         if let Phase::Armed { expires_at, .. } = action.phase {
             if now >= expires_at {
                 state.end_combat_action(attacker, CombatActionOutcome::Expired);
+                continue;
             }
         }
+        advance_stage(state, attacker, now);
+    }
+}
+
+/// Move a running action into the stretch its interval says it is in, and tell
+/// every watcher when that changes.
+///
+/// The component is re-read rather than taken from the sustain loop's copy: a
+/// condition rule applied earlier in the same pass may have pushed the impact
+/// out (`Slow`) or ended the action outright, and a stage computed from the
+/// stale interval would be announced against a schedule nobody is on any more.
+///
+/// **A stage never goes backwards.** A `Slow` lowers the fraction of the
+/// interval that has passed, and a fighter who has drawn a bow has not un-drawn
+/// it; the shot simply hangs at full draw for longer, which is what a rule that
+/// slows an archer means. Only a forward move is recorded and only a forward
+/// move is announced.
+///
+/// An untelegraphed action says nothing, for the reason it has no wind-up
+/// either: a concealed fighter narrating their own draw would give away the
+/// ambush the concealment is for.
+fn advance_stage(state: &mut WorldState, attacker: EntityId, now: WorldTick) {
+    let Some(&action) = state.registry.get::<CombatAction>(attacker) else {
+        return;
+    };
+    let Some(impact) = action.impact() else {
+        // An armed action is not running through an interval — it is waiting on
+        // the world, and its stage is whatever it was armed in. Ф7's release is
+        // what starts a clock for this to walk.
+        return;
+    };
+    let span = impact.saturating_sub(action.started_at);
+    let elapsed = now.saturating_sub(action.started_at);
+    // A zero-length interval is already at its impact: an action that takes no
+    // time is entirely its release. Not a case so much as a division guard.
+    let percent = match span {
+        0 => 100,
+        span => u16::try_from(elapsed.saturating_mul(100) / span).unwrap_or(100),
+    };
+    let stage = state.gameplay.action_stages.stage_at(action.kind, percent);
+    if stage <= action.stage {
+        return;
+    }
+    let mut moved = action;
+    moved.stage = stage;
+    state.registry.insert(attacker, moved);
+    if action.telegraphed {
+        state.announce_stage(attacker, stage);
     }
 }
 

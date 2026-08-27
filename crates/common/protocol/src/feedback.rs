@@ -456,7 +456,7 @@ impl ActionPhase {
 /// A closed list, and each entry is a fact the server tests at a seam it already
 /// runs. The player is owed the reason: a swing that vanished with no word is
 /// the defect `docs/combat_actions.md` opens with.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum InterruptReason {
     /// The committed target died, logged out, or left the facet.
     TargetGone,
@@ -724,6 +724,233 @@ impl DecodePacket for CombatActionEnded {
             },
         )?;
         Ok(Self { actor, outcome })
+    }
+}
+
+/// Which named stretch of a released action the actor has just entered.
+///
+/// A bar answers *how far along* and cannot answer *how far along what* — an
+/// archer who has the string at their cheek and one who has only lifted the bow
+/// occupy the same rectangle. These are the four stretches every kind of impact
+/// is made of, and the reason they are named neutrally rather than *draw* /
+/// *swing* is that the same four fit all three kinds: what a watcher is told is
+/// the shape of the effort, and the word it is drawn as is the kind's.
+///
+/// Where each begins is an operator setting, not a constant here: the shard owns
+/// the boundaries and the wire only carries which side of them the action is on.
+/// That is what keeps this a fact rather than the client's guess from a
+/// percentage — the one thing a picture must never invent.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum ActionStage {
+    /// The weapon is coming up. Nothing is committed to a direction yet, and
+    /// this is the stretch an action spends being *begun*.
+    Ready,
+    /// The effort: the bow bends, the arm cocks, the lungs fill.
+    Load,
+    /// Held on the mark. The last stretch in which a defender can still spoil
+    /// what is coming.
+    Aim,
+    /// The stroke, the loose, the exhalation — the part that reaches the impact.
+    Release,
+}
+
+impl ActionStage {
+    /// The first stretch of any action, which is what a commit announces.
+    pub const FIRST: Self = Self::Ready;
+
+    /// The byte this stage is written as. Ordered, and the order is load-bearing:
+    /// an action never goes backwards through them, so a shard comparing two
+    /// stages is comparing progress.
+    #[must_use]
+    pub const fn to_bits(self) -> u8 {
+        match self {
+            Self::Ready => 0,
+            Self::Load => 1,
+            Self::Aim => 2,
+            Self::Release => 3,
+        }
+    }
+
+    /// Read a stage byte, or `None` for one this build does not know.
+    #[must_use]
+    pub const fn from_bits(bits: u8) -> Option<Self> {
+        match bits {
+            0 => Some(Self::Ready),
+            1 => Some(Self::Load),
+            2 => Some(Self::Aim),
+            3 => Some(Self::Release),
+            _ => None,
+        }
+    }
+}
+
+/// Whether a fighter can begin an action at all, and if not, why not.
+///
+/// The state `docs/combat_actions.md`'s D1 left with no name. An action that
+/// fails at the *impact* ends with a reason and the reason crosses the wire; an
+/// action that never began because the target is round a corner produced
+/// nothing at all — the commit pass simply declined, every tick, in silence.
+/// From a screen that is indistinguishable from a shard that has stopped
+/// working, which is exactly what it was mistaken for.
+///
+/// Not an outcome and not a phase: an outcome is a thing that *happened* and
+/// fades, and a phase belongs to an action that exists. This is a standing
+/// condition of a fighter with no action, and it lasts as long as the obstacle
+/// does — which is why it is sent on entering and again on leaving rather than
+/// every tick it holds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BalkState {
+    /// Cannot begin, and this is what is in the way.
+    Blocked(InterruptReason),
+    /// Can begin again: whatever stood in the way is gone.
+    Clear,
+}
+
+impl BalkState {
+    /// The byte this state is written as. `0` is *clear* — which is free,
+    /// because [`InterruptReason::to_bits`] never writes a zero.
+    #[must_use]
+    pub const fn to_bits(self) -> u8 {
+        match self {
+            Self::Blocked(reason) => reason.to_bits(),
+            Self::Clear => 0,
+        }
+    }
+
+    /// Read a balk byte, or `None` for a reason this build does not know.
+    #[must_use]
+    pub const fn from_bits(bits: u8) -> Option<Self> {
+        match bits {
+            0 => Some(Self::Clear),
+            other => match InterruptReason::from_bits(other) {
+                Some(reason) => Some(Self::Blocked(reason)),
+                None => None,
+            },
+        }
+    }
+}
+
+/// `0xBF` subcommand `0xE012` — a fighter cannot begin an action, or can again.
+///
+/// The third thing a watcher can see a fighter doing, after *preparing* and
+/// *having just finished*: standing there unable to start. Sent on the edge in
+/// both directions and never in between, so a bowman held off by a wall costs
+/// two packets and not one per tick.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CombatActionBalked {
+    /// Whose commit is being refused, or is refused no longer.
+    pub actor: Serial,
+    /// What is in the way, or that nothing is.
+    pub balk: BalkState,
+}
+
+impl CombatActionBalked {
+    /// The extended-command envelope.
+    pub const ID: u8 = 0xBF;
+    /// Follows [`CombatActionEnded::SUBCOMMAND`].
+    pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 18;
+    /// Id, length, subcommand, actor and the balk byte.
+    pub const LENGTH_BYTES: u16 = 10;
+}
+
+impl EncodePacket for CombatActionBalked {
+    const ID: u8 = Self::ID;
+    const LENGTH: PacketLength = PacketLength::Fixed(Self::LENGTH_BYTES);
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u16(Self::LENGTH_BYTES);
+        out.u16(Self::SUBCOMMAND);
+        out.u32(self.actor.raw());
+        out.u8(self.balk.to_bits());
+    }
+}
+
+impl DecodePacket for CombatActionBalked {
+    const ID: u8 = Self::ID;
+
+    fn decode_body(
+        reader: &mut crate::codec::PacketReader<'_>,
+        _version: ClientVersion,
+    ) -> Result<Self, crate::error::DecodeError> {
+        let subcommand = reader.u16()?;
+        if subcommand != Self::SUBCOMMAND {
+            return Err(crate::error::DecodeError::UnknownValue {
+                field: "0xBF subcommand for combat action balk",
+                value: u32::from(subcommand),
+            });
+        }
+        let actor = Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
+            field: "combat action actor",
+            value: 0,
+        })?;
+        let balk_bits = reader.u8()?;
+        let balk = BalkState::from_bits(balk_bits).ok_or(crate::error::DecodeError::UnknownValue {
+            field: "combat action balk",
+            value: u32::from(balk_bits),
+        })?;
+        Ok(Self { actor, balk })
+    }
+}
+
+/// `0xBF` subcommand `0xE013` — a running action has entered a new stage.
+///
+/// Deliberately not folded into [`CombatActionPhase`], which carries the
+/// interval a picture is measured against: a stage changes *within* that
+/// interval, and re-sending the phase would restart the client's clock and reset
+/// the very bar the stage is meant to annotate.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CombatActionStage {
+    /// Whose action it is.
+    pub actor: Serial,
+    /// The stretch just entered.
+    pub stage: ActionStage,
+}
+
+impl CombatActionStage {
+    /// The extended-command envelope.
+    pub const ID: u8 = 0xBF;
+    /// Follows [`CombatActionBalked::SUBCOMMAND`].
+    pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 19;
+    /// Id, length, subcommand, actor and the stage byte.
+    pub const LENGTH_BYTES: u16 = 10;
+}
+
+impl EncodePacket for CombatActionStage {
+    const ID: u8 = Self::ID;
+    const LENGTH: PacketLength = PacketLength::Fixed(Self::LENGTH_BYTES);
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u16(Self::LENGTH_BYTES);
+        out.u16(Self::SUBCOMMAND);
+        out.u32(self.actor.raw());
+        out.u8(self.stage.to_bits());
+    }
+}
+
+impl DecodePacket for CombatActionStage {
+    const ID: u8 = Self::ID;
+
+    fn decode_body(
+        reader: &mut crate::codec::PacketReader<'_>,
+        _version: ClientVersion,
+    ) -> Result<Self, crate::error::DecodeError> {
+        let subcommand = reader.u16()?;
+        if subcommand != Self::SUBCOMMAND {
+            return Err(crate::error::DecodeError::UnknownValue {
+                field: "0xBF subcommand for combat action stage",
+                value: u32::from(subcommand),
+            });
+        }
+        let actor = Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
+            field: "combat action actor",
+            value: 0,
+        })?;
+        let stage_bits = reader.u8()?;
+        let stage = ActionStage::from_bits(stage_bits).ok_or(crate::error::DecodeError::UnknownValue {
+            field: "combat action stage",
+            value: u32::from(stage_bits),
+        })?;
+        Ok(Self { actor, stage })
     }
 }
 
@@ -1250,6 +1477,68 @@ mod tests {
             CombatActionOutcome::from_bits(2, InterruptReason::Pacified.to_bits()),
             Some(CombatActionOutcome::Interrupted(InterruptReason::Pacified))
         );
+    }
+
+    /// The balk byte shares its numbering with an interruption's reason, which
+    /// is only sound because a reason is never `0` — that zero is what *clear*
+    /// is written as.
+    #[test]
+    fn a_balk_names_what_is_in_the_way_and_clears_with_a_zero() {
+        let blocked = CombatActionBalked {
+            actor: mobile(0x0000_1234),
+            balk: BalkState::Blocked(InterruptReason::NoLineOfSight),
+        };
+        let packet = encode_packet(&blocked, version());
+        assert_eq!(packet.len(), usize::from(CombatActionBalked::LENGTH_BYTES));
+        assert_eq!(packet[0], CombatActionBalked::ID);
+        assert_eq!(&packet[1..3], &CombatActionBalked::LENGTH_BYTES.to_be_bytes());
+        assert_eq!(&packet[3..5], &CombatActionBalked::SUBCOMMAND.to_be_bytes());
+        assert_eq!(&packet[5..9], &0x0000_1234_u32.to_be_bytes());
+        assert_eq!(packet[9], 3, "no line of sight");
+        assert_eq!(
+            decode_packet::<CombatActionBalked>(&packet, version()),
+            Ok(blocked)
+        );
+
+        let clear = CombatActionBalked {
+            actor: mobile(0x0000_1234),
+            balk: BalkState::Clear,
+        };
+        let packet = encode_packet(&clear, version());
+        assert_eq!(packet[9], 0, "clear");
+        assert_eq!(decode_packet::<CombatActionBalked>(&packet, version()), Ok(clear));
+    }
+
+    #[test]
+    fn a_stage_carries_which_stretch_of_an_action_began() {
+        let stage = CombatActionStage {
+            actor: mobile(0x0000_1234),
+            stage: ActionStage::Aim,
+        };
+        let packet = encode_packet(&stage, version());
+        assert_eq!(packet.len(), usize::from(CombatActionStage::LENGTH_BYTES));
+        assert_eq!(&packet[3..5], &CombatActionStage::SUBCOMMAND.to_be_bytes());
+        assert_eq!(&packet[5..9], &0x0000_1234_u32.to_be_bytes());
+        assert_eq!(packet[9], 2, "aim");
+        assert_eq!(decode_packet::<CombatActionStage>(&packet, version()), Ok(stage));
+    }
+
+    /// The four stretches are ordered, and the sustain pass compares them to
+    /// decide whether an action has moved on — so the bytes have to sort the
+    /// same way the stages do.
+    #[test]
+    fn the_stages_are_written_in_the_order_they_happen() {
+        let stages = [
+            ActionStage::Ready,
+            ActionStage::Load,
+            ActionStage::Aim,
+            ActionStage::Release,
+        ];
+        for pair in stages.windows(2) {
+            assert!(pair[0] < pair[1], "{:?} comes before {:?}", pair[0], pair[1]);
+            assert!(pair[0].to_bits() < pair[1].to_bits());
+        }
+        assert_eq!(ActionStage::FIRST, ActionStage::Ready);
     }
 
     #[test]

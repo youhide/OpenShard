@@ -43,8 +43,9 @@ use openshard_client_render::mobiles::{EquipmentLayer, Mobile};
 use openshard_movement::step_hold;
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::feedback::{
-    ActionPhase, Animation, AnimationFrameCount, CombatActionEnded, CombatActionKind, CombatActionOutcome,
-    CombatActionPhase, DEFAULT_ANIMATION_FRAME_MS, HarvestPreview, HarvestRefused, HarvestToolVisual,
+    ActionPhase, ActionStage, Animation, AnimationFrameCount, BalkState, CombatActionBalked,
+    CombatActionEnded, CombatActionKind, CombatActionOutcome, CombatActionPhase, CombatActionStage,
+    DEFAULT_ANIMATION_FRAME_MS, HarvestPreview, HarvestRefused, HarvestToolVisual, InterruptReason,
     NewAnimation, SwingTiming,
 };
 use openshard_protocol::mobile::Equipment;
@@ -586,6 +587,14 @@ struct PendingAction {
     /// other clock in this module is local: what is being drawn is a picture
     /// ageing on this screen.
     started: Duration,
+    /// Which named stretch of the action the shard last said it was in.
+    ///
+    /// Told rather than derived, and that is the whole point of the extra
+    /// packet: where a draw stops and an aim begins is an operator setting on
+    /// the shard, so a client reading it off its own bar's percentage would be
+    /// stating a fact nobody gave it — and would be wrong on every shard that
+    /// retuned the shares.
+    stage: ActionStage,
 }
 
 /// What this client last heard about one body's fighting: what it is preparing,
@@ -608,6 +617,15 @@ struct ActionRecord {
     /// How the last one ended and when, held for [`OUTCOME_HOLD`] from then.
     /// `None` until this body has finished an action in this client's sight.
     ended: Option<(CombatActionOutcome, Duration)>,
+    /// What is stopping this body from beginning one at all.
+    ///
+    /// The third fact, and unlike the other two it has **no clock**: an outcome
+    /// is a message and fades, a running action arrives with its own interval,
+    /// and this is a *standing condition* — an archer whose quarry went round a
+    /// corner is held up for exactly as long as the corner is there. The shard
+    /// sends it on the edge in both directions, so what ends it is being told it
+    /// ended, and nothing else.
+    balked: Option<InterruptReason>,
 }
 
 /// What a body's combat action looks like right now, for whoever draws it.
@@ -627,6 +645,13 @@ pub struct ActionProgress {
     /// vanished said nothing, and *"it landed"*, *"it missed"* and *"the wall
     /// got in the way"* were the same picture — nothing at all.
     pub ended: Option<CombatActionOutcome>,
+    /// What is stopping this body from starting anything, if something is.
+    ///
+    /// The gap the other two left: a fighter who *wants* to act and cannot was
+    /// drawn exactly like a fighter standing about, for as long as the obstacle
+    /// lasted. An archer holding at a target behind a wall is the case a player
+    /// meets first, and it read as the shard having quietly stopped.
+    pub balked: Option<InterruptReason>,
 }
 
 /// An action part way through, as a picture wants it.
@@ -636,6 +661,8 @@ pub struct RunningAction {
     pub kind: CombatActionKind,
     /// Which half of the action's life this is.
     pub fill: ActionFill,
+    /// Which named stretch of it the shard last announced.
+    pub stage: ActionStage,
 }
 
 /// How much of a preparation bar is filled, which is a different question in
@@ -1469,6 +1496,7 @@ impl Crowd {
         let record = self.actions.entry(phase.actor).or_insert(ActionRecord {
             running: None,
             ended: None,
+            balked: None,
         });
         // The previous blow's verdict is deliberately left standing: it is a
         // *different* action's, it fades on its own clock, and the whole reason
@@ -1478,7 +1506,18 @@ impl Crowd {
             kind: phase.kind,
             phase: phase.phase,
             started,
+            // Every action opens in the first stretch and is *told* about each
+            // one after it. Assumed here rather than waited for because a commit
+            // and the first stage are the same moment on the shard, and sending
+            // both would be a packet saying what the other one already implies.
+            stage: ActionStage::FIRST,
         });
+        // A commit is proof the obstacle is gone, whether or not the clearing
+        // packet has been applied yet: a fighter cannot both be held up and be
+        // swinging. The shard sends the clear too — this is the belt, and it is
+        // here so a dropped or reordered pair can never leave a bar filling
+        // under the words "out of reach".
+        record.balked = None;
     }
 
     /// The shard's word that a combat action is over, and how it ended.
@@ -1503,6 +1542,7 @@ impl Crowd {
         let record = self.actions.entry(ended.actor).or_insert(ActionRecord {
             running: None,
             ended: None,
+            balked: None,
         });
         record.running = None;
         record.ended = Some((ended.outcome, at));
@@ -1525,6 +1565,42 @@ impl Crowd {
         tracked.harvest_tool = None;
         let standing = tracked.standing_group();
         tracked.change_to(standing);
+    }
+
+    /// The shard's word that a fighter cannot begin an action, or can again.
+    ///
+    /// Held without a clock, unlike everything else in this module: an outcome
+    /// is a message that fades and an action arrives with an interval to age
+    /// against, but this is a *condition* — it lasts precisely as long as the
+    /// wall, the distance or the empty quiver does, and the shard says when that
+    /// is over. Timing it out locally would put the picture back to the silence
+    /// this packet exists to end.
+    pub fn balk_action(&mut self, balked: CombatActionBalked) {
+        let record = self.actions.entry(balked.actor).or_insert(ActionRecord {
+            running: None,
+            ended: None,
+            balked: None,
+        });
+        record.balked = match balked.balk {
+            BalkState::Blocked(reason) => Some(reason),
+            BalkState::Clear => None,
+        };
+    }
+
+    /// The shard's word that a running action has moved into a new stretch.
+    ///
+    /// Only ever applied to an action this client already knows about: a stage
+    /// with no phase under it is a stage for an action that began out of sight
+    /// or was already ended here, and inventing a record to hold it would draw a
+    /// stretch of something nobody is doing.
+    pub fn stage_action(&mut self, staged: CombatActionStage) {
+        let Some(record) = self.actions.get_mut(&staged.actor) else {
+            return;
+        };
+        let Some(running) = record.running.as_mut() else {
+            return;
+        };
+        running.stage = staged.stage;
     }
 
     /// Start the local half of a harvest at its targeting click.
@@ -1794,11 +1870,18 @@ impl Crowd {
             Some(RunningAction {
                 kind: action.kind,
                 fill,
+                stage: action.stage,
             })
         });
-        match (running, ended) {
-            (None, None) => None,
-            (running, ended) => Some(ActionProgress { running, ended }),
+        // Deliberately not timed out with the other two: see [`balk_action`].
+        let balked = record.balked;
+        match (running, ended, balked) {
+            (None, None, None) => None,
+            (running, ended, balked) => Some(ActionProgress {
+                running,
+                ended,
+                balked,
+            }),
         }
     }
 }
@@ -2323,11 +2406,19 @@ mod tests {
         }
     }
 
-    /// A body preparing something, with nothing behind it yet.
+    /// A body preparing something, with nothing behind it yet. An action opens
+    /// in the first stretch and is told about every one after it, so this is the
+    /// shape of everything the shard has not yet said anything more about.
     fn running(kind: CombatActionKind, fill: ActionFill) -> Option<ActionProgress> {
+        staged(kind, fill, ActionStage::FIRST)
+    }
+
+    /// The same, part way through — for the tests that are about the stretches.
+    fn staged(kind: CombatActionKind, fill: ActionFill, stage: ActionStage) -> Option<ActionProgress> {
         Some(ActionProgress {
-            running: Some(RunningAction { kind, fill }),
+            running: Some(RunningAction { kind, fill, stage }),
             ended: None,
+            balked: None,
         })
     }
 
@@ -2436,6 +2527,7 @@ mod tests {
                 Some(ActionProgress {
                     running: None,
                     ended: Some(outcome),
+                    balked: None,
                 }),
                 "a {outcome:?} left the wrong state on screen",
             );
@@ -2480,8 +2572,10 @@ mod tests {
                 running: Some(RunningAction {
                     kind: CombatActionKind::Swing,
                     fill: ActionFill::Releasing { filled: 0.0 },
+                    stage: ActionStage::FIRST,
                 }),
                 ended: Some(CombatActionOutcome::Hit),
+                balked: None,
             }),
         );
 
@@ -2508,6 +2602,115 @@ mod tests {
             },
         ));
         crowd.advance(Duration::from_millis(1_601));
+        assert_eq!(crowd.preparing(who), None);
+    }
+
+    /// A refusal is a *state*, and the difference from an outcome is the whole
+    /// reason it is a third field: an archer whose quarry is behind a wall is
+    /// held up for as long as the wall stands, and a word that faded after a
+    /// second would put the picture back to the silence this packet ends.
+    #[test]
+    fn a_refusal_stands_until_the_shard_lifts_it() {
+        let (mut crowd, who, mobile) = standing_crowd();
+        crowd.balk_action(CombatActionBalked {
+            actor: mobile,
+            balk: BalkState::Blocked(InterruptReason::OutOfReach),
+        });
+        assert_eq!(
+            crowd.preparing(who),
+            Some(ActionProgress {
+                running: None,
+                ended: None,
+                balked: Some(InterruptReason::OutOfReach),
+            }),
+        );
+
+        // Ten times the hold an outcome gets, and it is still there.
+        crowd.advance(OUTCOME_HOLD * 10);
+        assert_eq!(
+            crowd.preparing(who).expect("still held up").balked,
+            Some(InterruptReason::OutOfReach),
+            "a standing condition does not fade; the shard says when it is over",
+        );
+
+        crowd.balk_action(CombatActionBalked {
+            actor: mobile,
+            balk: BalkState::Clear,
+        });
+        assert_eq!(crowd.preparing(who), None);
+    }
+
+    /// The belt beside the shard's braces: a commit is itself proof the way is
+    /// clear, so a bar can never fill under the words "out of reach" even if the
+    /// clearing packet were lost or arrived late.
+    #[test]
+    fn committing_an_action_clears_a_standing_refusal() {
+        let (mut crowd, who, mobile) = standing_crowd();
+        crowd.balk_action(CombatActionBalked {
+            actor: mobile,
+            balk: BalkState::Blocked(InterruptReason::NoLineOfSight),
+        });
+        crowd.begin_action(phase(
+            mobile,
+            CombatActionKind::Shot,
+            ActionPhase::Releasing {
+                impact_in: openshard_protocol::feedback::SwingDuration(1_600),
+            },
+        ));
+        assert_eq!(
+            crowd.preparing(who),
+            running(CombatActionKind::Shot, ActionFill::Releasing { filled: 0.0 }),
+        );
+    }
+
+    /// A draw opens in the first stretch and is *told* every one after it. The
+    /// bar and the stretch move independently on purpose: where a draw ends and
+    /// an aim begins is an operator setting on the shard, and a client reading
+    /// it off its own percentage would be wrong on every shard that retuned it.
+    #[test]
+    fn a_bow_walks_the_stretches_the_shard_announces() {
+        let (mut crowd, who, mobile) = standing_crowd();
+        crowd.begin_action(phase(
+            mobile,
+            CombatActionKind::Shot,
+            ActionPhase::Releasing {
+                impact_in: openshard_protocol::feedback::SwingDuration(1_000),
+            },
+        ));
+        assert_eq!(
+            crowd.preparing(who),
+            staged(
+                CombatActionKind::Shot,
+                ActionFill::Releasing { filled: 0.0 },
+                ActionStage::Ready,
+            ),
+        );
+
+        crowd.advance(Duration::from_millis(500));
+        crowd.stage_action(CombatActionStage {
+            actor: mobile,
+            stage: ActionStage::Aim,
+        });
+        assert_eq!(
+            crowd.preparing(who),
+            staged(
+                CombatActionKind::Shot,
+                ActionFill::Releasing { filled: 0.5 },
+                ActionStage::Aim,
+            ),
+        );
+    }
+
+    /// A stretch of an action nobody here knows about is not an action: the
+    /// packet is dropped rather than made into a record with no interval, which
+    /// would be a bar this client could neither fill nor age.
+    #[test]
+    fn a_stage_for_no_running_action_is_dropped() {
+        let (mut crowd, who, mobile) = standing_crowd();
+        crowd.stage_action(CombatActionStage {
+            actor: mobile,
+            stage: ActionStage::Release,
+        });
         assert_eq!(crowd.preparing(who), None);
     }
 

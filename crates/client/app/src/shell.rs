@@ -51,7 +51,7 @@ use openshard_client_render::facing::{Face, Prism};
 use openshard_client_render::follow::Rig;
 use openshard_client_render::light;
 use openshard_client_render::solid::Cut;
-use openshard_protocol::feedback::{CombatActionKind, CombatActionOutcome, InterruptReason};
+use openshard_protocol::feedback::{ActionStage, CombatActionKind, CombatActionOutcome, InterruptReason};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::RangedRange;
@@ -372,7 +372,7 @@ impl Shell {
     ///
     /// This is deliberately read from the shell's [`Desk`], not the app's
     /// startup copy: a drag changes this value immediately, while the latter
-    /// is only refreshed when the client exits and writes `client_ui.toml`.
+    /// is only refreshed when the client exits and writes `client_ui.ron`.
     pub fn fonts(&self) -> crate::desk::FontSizes {
         self.desk.fonts
     }
@@ -2889,6 +2889,29 @@ fn draw_action_bars(
             painter.rect_stroke(rect, 1.0, stroke, egui::StrokeKind::Middle);
             draw_kind_glyph(painter, glyph_at, GLYPH, colour, running.kind);
         }
+        // A fighter who wants to act and cannot. It takes the bar's own place
+        // rather than a line of its own, because it is the *answer to the same
+        // question*: there is no bar here, and this is why there is no bar here.
+        // Nothing else can be in that place at the same time — the shard clears
+        // a refusal at the commit that ends it.
+        if let Some(reason) = bar.progress.balked {
+            let colour = balk_colour();
+            painter.text(
+                rect.left_center(),
+                egui::Align2::LEFT_CENTER,
+                interrupt_label(reason),
+                font.clone(),
+                colour,
+            );
+            // The left box is shared with the outcome mark, and for the moment
+            // after a blow both are true: the swing missed *and* the next one
+            // cannot start. The verdict has a hold of barely a second and this
+            // has none at all, so the fading one gets the box and this takes it
+            // back when it goes.
+            if bar.progress.ended.is_none() {
+                draw_balk_glyph(painter, glyph_at, GLYPH, colour);
+            }
+        }
         // How the last one ended, on the right, in its own colour. It outlives
         // the action it belongs to and fades on its own — see
         // `crowd::OUTCOME_HOLD` — so this is the one mark that can be here with
@@ -2915,7 +2938,7 @@ fn draw_action_bars(
             painter.text(
                 label_at,
                 egui::Align2::LEFT_CENTER,
-                action_state_label(running.kind, running.fill),
+                action_state_label(running.kind, running.fill, running.stage),
                 font.clone(),
                 action_colour(running.kind),
             );
@@ -3053,14 +3076,78 @@ fn outcome_colour(outcome: CombatActionOutcome) -> egui::Color32 {
 }
 
 /// What a running action says about itself in one word.
-fn action_state_label(kind: CombatActionKind, fill: ActionFill) -> &'static str {
-    match (kind, fill) {
-        (CombatActionKind::Swing, ActionFill::Armed) => "swing · held",
-        (CombatActionKind::Swing, ActionFill::Releasing { .. }) => "swing",
-        (CombatActionKind::Shot, ActionFill::Armed) => "aim · held",
-        (CombatActionKind::Shot, ActionFill::Releasing { .. }) => "shot",
-        (CombatActionKind::Breath, ActionFill::Armed) => "breath · held",
-        (CombatActionKind::Breath, ActionFill::Releasing { .. }) => "breath",
+///
+/// A released action names the *stretch* it is in and not merely its kind: a bow
+/// coming up, a bow bending and a bow held on a mark are three different things
+/// to be looking at, and until the shard began announcing them they were all the
+/// word "shot" beside a rectangle. The stretch is the shard's own — see
+/// `state::action_stages` — so the word here is a translation and never a guess.
+///
+/// An armed action ignores the stretch, because *held* is the whole of what it
+/// is doing: it is not part way through anything, it is waiting on the world.
+fn action_state_label(kind: CombatActionKind, fill: ActionFill, stage: ActionStage) -> &'static str {
+    match fill {
+        ActionFill::Armed => match kind {
+            CombatActionKind::Swing => "swing · held",
+            CombatActionKind::Shot => "aim · held",
+            CombatActionKind::Breath => "breath · held",
+        },
+        ActionFill::Releasing { .. } => match (kind, stage) {
+            (CombatActionKind::Swing, ActionStage::Ready) => "raising",
+            (CombatActionKind::Swing, ActionStage::Load) => "winding up",
+            (CombatActionKind::Swing, ActionStage::Aim) => "set",
+            (CombatActionKind::Swing, ActionStage::Release) => "striking",
+            (CombatActionKind::Shot, ActionStage::Ready) => "raising bow",
+            (CombatActionKind::Shot, ActionStage::Load) => "drawing",
+            (CombatActionKind::Shot, ActionStage::Aim) => "aiming",
+            (CombatActionKind::Shot, ActionStage::Release) => "loosing",
+            (CombatActionKind::Breath, ActionStage::Ready) => "rearing",
+            (CombatActionKind::Breath, ActionStage::Load) => "inhaling",
+            (CombatActionKind::Breath, ActionStage::Aim) => "fixing",
+            (CombatActionKind::Breath, ActionStage::Release) => "breathing",
+        },
+    }
+}
+
+/// The colour a standing refusal is drawn in.
+///
+/// Neither a kind's colour nor an outcome's: what it says is *nothing is
+/// happening, and here is why*, which is a third thing. Dimmer than an
+/// interruption's warning yellow, because it is a state a fighter can sit in
+/// harmlessly for a minute, not an event that just cost them a blow.
+fn balk_colour() -> egui::Color32 {
+    egui::Color32::from_rgb(170, 155, 110)
+}
+
+/// A refusal's mark: a bar with a slash through it — *not this, and here is what
+/// is in the way*. Deliberately unlike the interruption cross, which is an
+/// action that was stopped rather than one that never started.
+fn draw_balk_glyph(painter: &egui::Painter, centre: egui::Pos2, size: f32, colour: egui::Color32) {
+    let half = size / 2.0;
+    let stroke = egui::Stroke::new(1.4, colour);
+    painter.circle_stroke(centre, half * 0.85, stroke);
+    painter.line_segment(
+        [
+            egui::pos2(centre.x - half * 0.6, centre.y + half * 0.6),
+            egui::pos2(centre.x + half * 0.6, centre.y - half * 0.6),
+        ],
+        stroke,
+    );
+}
+
+/// Why an action stopped, or why one cannot start — the same list read by two
+/// different questions, and deliberately one function so the two never drift
+/// into two vocabularies for one fact.
+fn interrupt_label(reason: InterruptReason) -> &'static str {
+    match reason {
+        InterruptReason::TargetGone => "target gone",
+        InterruptReason::OutOfReach => "out of reach",
+        InterruptReason::NoLineOfSight => "no line of sight",
+        InterruptReason::Pacified => "pacified",
+        InterruptReason::Abandoned => "abandoned",
+        InterruptReason::NoAmmo => "no ammo",
+        InterruptReason::Moved => "moved",
+        InterruptReason::Struck => "struck",
     }
 }
 
@@ -3075,16 +3162,7 @@ fn outcome_label(outcome: CombatActionOutcome) -> &'static str {
         CombatActionOutcome::Hit => "hit",
         CombatActionOutcome::Miss => "miss",
         CombatActionOutcome::Expired => "expired",
-        CombatActionOutcome::Interrupted(reason) => match reason {
-            InterruptReason::TargetGone => "target gone",
-            InterruptReason::OutOfReach => "out of reach",
-            InterruptReason::NoLineOfSight => "no line of sight",
-            InterruptReason::Pacified => "pacified",
-            InterruptReason::Abandoned => "abandoned",
-            InterruptReason::NoAmmo => "no ammo",
-            InterruptReason::Moved => "moved",
-            InterruptReason::Struck => "struck",
-        },
+        CombatActionOutcome::Interrupted(reason) => interrupt_label(reason),
     }
 }
 

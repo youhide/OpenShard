@@ -28,8 +28,9 @@ use openshard_movement::{Footing, MapTerrain, NavigationGraph};
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::combat::{AttackTarget, HealthBar, WarMode};
 use openshard_protocol::feedback::{
-    Animation, CombatActionEnded, CombatActionOutcome, CombatActionPhase, HarvestCompleted, HarvestPreview,
-    HarvestToolVisual, InterruptReason, NewAnimation, PlaySound, SwingDuration, SwingTiming,
+    ActionStage, Animation, BalkState, CombatActionBalked, CombatActionEnded, CombatActionOutcome,
+    CombatActionPhase, CombatActionStage, HarvestCompleted, HarvestPreview, HarvestToolVisual,
+    InterruptReason, NewAnimation, PlaySound, SwingDuration, SwingTiming,
 };
 use openshard_protocol::items::WorldItem;
 use openshard_protocol::localized;
@@ -47,10 +48,11 @@ use openshard_tiles::TileData;
 use openshard_uofiles::anim::BodyKind;
 
 use crate::action_rules::ActionRules;
+use crate::action_stages::ActionStages;
 use crate::boat::Plank;
 use crate::components::{
-    Access, Amount, Body, Client, Combat, CombatAction, Contained, CorpseBody, CraftedBy, Drawn, Equipped,
-    Ghost, Heading, HearsGhosts, Hidden, Hitpoints, HouseDesign, InRegion, ItemAffix, ItemAffixes,
+    Access, Amount, Balked, Body, Client, Combat, CombatAction, Contained, CorpseBody, CraftedBy, Drawn,
+    Equipped, Ghost, Heading, HearsGhosts, Hidden, Hitpoints, HouseDesign, InRegion, ItemAffix, ItemAffixes,
     ItemLocation, Meditating, Movement, Name, Position, Quality, SettledItemLocation, Staff, Stamina,
     Stealthing, TradeWindow, body_opens_doors, creature_name,
 };
@@ -179,6 +181,11 @@ pub struct Gameplay {
     /// walk, sways at a run, and steadies on horseback"* is a shard's choice,
     /// and a boolean on the weapon cannot say it.
     pub action_rules: ActionRules,
+    /// How a running action's interval divides into the stretches a watcher is
+    /// told about — up, drawn, held, loosed. The boundaries are the shard's and
+    /// never the client's: a picture that guessed them from a percentage would
+    /// be inventing a fact the shard never stated.
+    pub action_stages: ActionStages,
     /// Chance, in per-mille, for a landed weapon or ranged blow to be critical.
     /// A shard extension: zero keeps strictly classic damage rolls.
     pub critical_chance: u16,
@@ -409,6 +416,7 @@ impl Default for Gameplay {
             combat_era: CombatEra::new(1),
             speed_scale_factor: 10000,
             action_rules: ActionRules::shipped(),
+            action_stages: ActionStages::shipped(),
             critical_chance: 50,
             critical_damage_percent: 150,
             skill_cap: 1000,
@@ -2572,6 +2580,60 @@ impl WorldState {
                 phase: action.wire_phase(now),
             }),
         );
+    }
+
+    /// Tell everyone who can see `mobile` that its action has entered a new
+    /// stretch — the bow is drawn, the arm is set, the arrow is away.
+    ///
+    /// A companion to [`announce_action`](Self::announce_action) and not part of
+    /// it: a phase carries the interval a watcher measures its bar against, and
+    /// re-sending one to say the stage moved would restart that measurement.
+    /// This says only which stretch, and leaves the clock alone.
+    pub fn announce_stage(&mut self, mobile: EntityId, stage: ActionStage) {
+        let Some(actor) = self.registry.serial_of(mobile) else {
+            return;
+        };
+        self.broadcast_packet(
+            mobile,
+            &ServerPacket::CombatActionStage(CombatActionStage { actor, stage }),
+        );
+    }
+
+    /// Record that `mobile` cannot begin an action, and tell every watcher what
+    /// is in the way — or that nothing is any more.
+    ///
+    /// **Sent on the edge, in both directions, and never in between.** A bowman
+    /// held off by a wall is two packets for as long as the wall stands, not one
+    /// per tick: the [`Balked`] component is what remembers, and this only
+    /// speaks when the answer changes. A repeat of the same reason is therefore
+    /// silence on purpose, not a dropped update.
+    ///
+    /// Returns whether anything changed.
+    pub fn set_balked(&mut self, mobile: EntityId, balk: BalkState) -> bool {
+        let held = self.registry.get::<Balked>(mobile).map(|balked| balked.reason);
+        let wanted = match balk {
+            BalkState::Blocked(reason) => Some(reason),
+            BalkState::Clear => None,
+        };
+        if held == wanted {
+            return false;
+        }
+        match wanted {
+            Some(reason) => {
+                self.registry.insert(mobile, Balked { reason });
+            }
+            None => {
+                self.registry.remove::<Balked>(mobile);
+            }
+        }
+        let Some(actor) = self.registry.serial_of(mobile) else {
+            return true;
+        };
+        self.broadcast_packet(
+            mobile,
+            &ServerPacket::CombatActionBalked(CombatActionBalked { actor, balk }),
+        );
+        true
     }
 
     /// End `mobile`'s combat action, if it has one, and tell every watcher how.

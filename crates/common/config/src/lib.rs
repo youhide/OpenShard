@@ -296,6 +296,64 @@ pub struct GameplayConfig {
     /// condition/effect table of `docs/combat_actions.md`'s D4.
     #[serde(default = "default_action_rules")]
     pub action_rules: ActionRulesConfig,
+    /// How a running action's interval divides into the named stretches a
+    /// watcher is told about — raising, loading, aiming, releasing.
+    #[serde(default = "default_action_stages")]
+    pub action_stages: ActionStagesConfig,
+}
+
+/// Where one kind of action's named stretches begin, as percentages of the whole
+/// interval.
+///
+/// Three numbers and not four: the release is whatever is left, so the shard can
+/// never be configured into an action that ends before it lands. Each is the
+/// *share* of the interval that stretch occupies, in order, and their sum must
+/// not pass 100 — a file that oversubscribes the interval is rejected at load
+/// rather than silently truncated.
+///
+/// ```toml
+/// [gameplay.action_stages.shot]
+/// ready = 10   # the bow comes up
+/// load  = 50   # the string is drawn
+/// aim   = 30   # held on the mark
+/// # the remaining 10% is the loose
+/// ```
+///
+/// A share left out of a row is `0`, which is a real answer — a kind whose whole
+/// interval is one long release writes nothing at all. As with
+/// [`ConditionRulesConfig`], a row an operator writes is the *whole* row: the
+/// shipped shares are not merged back into it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct StageSharesConfig {
+    /// Bringing the weapon up.
+    #[serde(default)]
+    pub ready: u8,
+    /// The effort — bending the bow, cocking the arm.
+    #[serde(default)]
+    pub load: u8,
+    /// Held on the mark.
+    #[serde(default)]
+    pub aim: u8,
+}
+
+/// The whole stage table, keyed by what the action is.
+///
+/// Keyed by kind for [`ActionRulesConfig`]'s reason: what a *shot* is made of is
+/// one line an operator can read, where a column on every weapon row is fifty
+/// places for two of them to disagree.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionStagesConfig {
+    /// How a blow divides.
+    #[serde(default = "default_swing_stages")]
+    pub swing: StageSharesConfig,
+    /// How a shot divides.
+    #[serde(default = "default_shot_stages")]
+    pub shot: StageSharesConfig,
+    /// How an innate ranged attack divides.
+    #[serde(default = "default_breath_stages")]
+    pub breath: StageSharesConfig,
 }
 
 /// What happens to a running combat action when a condition catches it.
@@ -601,6 +659,65 @@ fn default_action_rules() -> ActionRulesConfig {
     ActionRulesConfig::shipped()
 }
 
+/// A blow: up, back, set, and through. The wind-up is the longest of the four
+/// because it is the part a defender watches — a swing that were mostly *strike*
+/// would be a telegraph nobody could read in time.
+const fn default_swing_stages() -> StageSharesConfig {
+    StageSharesConfig {
+        ready: 15,
+        load: 45,
+        aim: 20,
+    }
+}
+
+/// A bow: lift, draw, hold, loose. The hold is longer than a blow's set and the
+/// loose shorter than a blow's strike, which is the shape of the thing — an
+/// archer spends their interval *aiming*, and the arrow leaves in an instant.
+const fn default_shot_stages() -> StageSharesConfig {
+    StageSharesConfig {
+        ready: 10,
+        load: 50,
+        aim: 30,
+    }
+}
+
+/// A breath: rear back, fill, fix, and let go. Mostly the filling, because that
+/// is the part a creature is visibly doing.
+const fn default_breath_stages() -> StageSharesConfig {
+    StageSharesConfig {
+        ready: 20,
+        load: 50,
+        aim: 20,
+    }
+}
+
+impl StageSharesConfig {
+    /// What the three shares add up to. The release is `100` minus this, so a
+    /// sum past a hundred is the one way to write a row that cannot be run.
+    #[must_use]
+    pub const fn claimed(&self) -> u16 {
+        self.ready as u16 + self.load as u16 + self.aim as u16
+    }
+}
+
+impl ActionStagesConfig {
+    /// The table this build ships with, named for [`ActionRulesConfig::shipped`]'s
+    /// reason: the systems crate holds the same three rows in its own vocabulary
+    /// and a test compares them.
+    #[must_use]
+    pub const fn shipped() -> Self {
+        Self {
+            swing: default_swing_stages(),
+            shot: default_shot_stages(),
+            breath: default_breath_stages(),
+        }
+    }
+}
+
+fn default_action_stages() -> ActionStagesConfig {
+    ActionStagesConfig::shipped()
+}
+
 impl Default for GameplayConfig {
     fn default() -> Self {
         Self {
@@ -641,6 +758,7 @@ impl Default for GameplayConfig {
             npc_work_hour: default_npc_work_hour(),
             npc_home_hour: default_npc_home_hour(),
             action_rules: default_action_rules(),
+            action_stages: default_action_stages(),
             expansion: default_expansion(),
         }
     }
@@ -1122,6 +1240,14 @@ pub enum ConfigError {
         /// The percentage given.
         percent: u16,
     },
+    /// A `gameplay.action_stages` row claims more of the interval than there is,
+    /// leaving the release — which is the part that lands — nothing at all.
+    StageSharesOversubscribed {
+        /// Which kind of action the row is for.
+        kind: &'static str,
+        /// What the three shares add up to.
+        claimed: u16,
+    },
     /// `gameplay.critical_damage_percent` would make a critical weaker than a
     /// normal landed hit.
     CriticalDamageBelowNormal {
@@ -1237,6 +1363,12 @@ impl fmt::Display for ConfigError {
                  {MAX_SLOW_PERCENT}% — beyond that the impact is pushed so far out that \
                  nobody watching will see the action land, which reads as a shard that \
                  swallowed the blow rather than as the setting doing its job"
+            ),
+            Self::StageSharesOversubscribed { kind, claimed } => write!(
+                f,
+                "gameplay.action_stages.{kind} gives its stages {claimed}% of the interval; \
+                 ready + load + aim must be at most 100 — the release is what is left over, \
+                 and it is the stretch the impact happens in"
             ),
             Self::CriticalDamageBelowNormal { percent } => write!(
                 f,
@@ -1377,6 +1509,18 @@ impl Config {
                         return Err(ConfigError::SlowPercentTooHigh { kind, percent });
                     }
                 }
+            }
+        }
+        // The release is the remainder, so a row that spends the whole interval
+        // on getting ready leaves the impact nowhere to happen.
+        for (kind, shares) in [
+            ("swing", &self.gameplay.action_stages.swing),
+            ("shot", &self.gameplay.action_stages.shot),
+            ("breath", &self.gameplay.action_stages.breath),
+        ] {
+            let claimed = shares.claimed();
+            if claimed > 100 {
+                return Err(ConfigError::StageSharesOversubscribed { kind, claimed });
             }
         }
         if self.gameplay.critical_damage_percent < 100 {

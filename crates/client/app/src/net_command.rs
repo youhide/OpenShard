@@ -546,6 +546,14 @@ impl App {
                 "combat action ended",
                 format!("serial={} outcome={:?}", ended.actor, ended.outcome),
             ),
+            link::Update::CombatActionBalked(balked) => (
+                "combat action balked",
+                format!("serial={} balk={:?}", balked.actor, balked.balk),
+            ),
+            link::Update::CombatActionStage(stage) => (
+                "combat action stage",
+                format!("serial={} stage={:?}", stage.actor, stage.stage),
+            ),
             link::Update::Design(bytes) => ("design", format!("bytes={}", bytes.len())),
             link::Update::Ground { snapshot, .. } => (
                 "ground",
@@ -616,6 +624,8 @@ impl App {
             }
             link::Update::CombatActionPhase(phase) => self.world.presentation.crowd.begin_action(phase),
             link::Update::CombatActionEnded(ended) => self.world.presentation.crowd.end_action(ended),
+            link::Update::CombatActionBalked(balked) => self.world.presentation.crowd.balk_action(balked),
+            link::Update::CombatActionStage(stage) => self.world.presentation.crowd.stage_action(stage),
             // The connection ended, for any of the reasons the shard thread
             // returns: the socket closed, a packet would not frame, the player
             // logged out. Three things happen and the reason for all three is

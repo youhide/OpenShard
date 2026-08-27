@@ -20,7 +20,9 @@ use openshard_gateway::ConnectionId;
 use openshard_movement::Walker;
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::containers::GridSlot;
-use openshard_protocol::feedback::{ActionPhase, CombatActionKind, SwingDuration};
+use openshard_protocol::feedback::{
+    ActionPhase, ActionStage, CombatActionKind, InterruptReason, SwingDuration,
+};
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::identity::AccountName;
 use openshard_protocol::items::CorpseEquipmentItem;
@@ -2388,6 +2390,33 @@ pub struct CombatAction {
     /// impact instead, and this is what tells the resolve which of the two
     /// happened rather than making it guess from a marker.
     pub telegraphed: bool,
+    /// Which named stretch of the interval it is in — up, drawn, held, loosed.
+    ///
+    /// Remembered rather than recomputed for each watcher, because what crosses
+    /// the wire is the *transition*: the sustain pass compares the stage the
+    /// shares say it should be in against this one and announces only a change.
+    /// It never goes backwards — a `Slow` that pushes the impact out lowers the
+    /// fraction elapsed, and a fighter who has drawn a bow has not un-drawn it.
+    pub stage: ActionStage,
+}
+
+/// A fighter who wants to act and cannot, and what is in the way.
+///
+/// Present only while the refusal holds, exactly as [`CombatAction`] is present
+/// only while an action does. The two are mutually exclusive by construction:
+/// the commit pass either starts an action or records why it could not.
+///
+/// This is the state `docs/combat_actions.md`'s D1 named and did not build. D1
+/// says a precondition that fails is *"an outcome with a name, never a
+/// `continue`"* — and that was made true at the impact and left false at the
+/// commit, where the pass declined in silence for as long as the obstacle
+/// lasted. A target behind a wall therefore produced no packet, no word and no
+/// picture, which from a screen is indistinguishable from a shard that has
+/// stopped running. It was reported as exactly that.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Balked {
+    /// What the commit pass refused on, most recently.
+    pub reason: InterruptReason,
 }
 
 /// What a combat action's impact does.
