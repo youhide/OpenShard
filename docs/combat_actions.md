@@ -872,6 +872,46 @@ index of armed squares, and that index is a design rather than a variant.
 Found while building Ф1, Ф2, Ф3, Ф4 and the five half-phases after them, and none
 of it belonged to any of them.
 
+**From Ф4.6 — the first stall a recorded log was pointed at:**
+
+- 🚩 **The shard announces tick-milliseconds and the tick is not 25ms.** A bow
+  fight in the playground, read off `combat-1787895032.log`, says the same thing
+  five rounds running: `commit Shot releasing over 1600ms`, and then the `end`
+  arrives **6500ms** later. The stages fall at their proper *shares* of that
+  6500ms (`Load` at 0.11, `Release` at 0.80), and the next commit follows the end
+  by one millisecond — so nothing is waiting anywhere, and the whole excess is
+  inside the interval the shard measured in its own ticks. There is no second
+  place the time can be: `impact = now + swing_speed` and `wire_phase` is
+  `ticks_to_millis(impact - now)`, so the announcement and the schedule are the
+  same number in tick-space and *cannot* disagree. What disagrees is the tick
+  with the second: 64 ticks took 6500ms, which is **~9.8 ticks per second against
+  a declared 40**. `MissedTickBehavior::Delay` is what turns an overrunning tick
+  into a slow clock rather than a burst, and it is right to — but nothing
+  anywhere says the clock went slow. The ratio also *falls* across the five
+  rounds — 5.24, 4.93, 4.20, 4.15, 4.06 — which is the client's startup draining
+  off the shared core and settling at four times too slow, never at one.
+  - What a player sees is exactly the report: the bar fills in 1.6 seconds and
+    then the body stands there for five more.
+  - This is the hole two entries below — *"the recorder has no server half"* —
+    collecting. Ф4.5 verified the interval **tick by tick**, and a tick-by-tick
+    oracle is blind to this by construction: it is the one defect that lives
+    entirely in the conversion between the two clocks.
+  - The instrument comes before the fix: the shard measures how long its own tick
+    took and says so when the answer is not the one it published. Whether the
+    right answer after that is a faster shard, a wire that carries wall-clock
+    milliseconds, or an announcement that admits the shard's real rate is a
+    decision nobody can take while the rate is a number nobody has.
+- **A mark that was pressed for is not in the log it was pressed into.** The
+  session that produced the file above pressed `k` and the saved log holds no
+  `MARK` line, with 40 entries against a capacity of 4000 — so nothing was
+  dropped and the mark was never recorded. The candidates are all ownership:
+  `Owner::Speech`, `Owner::Pane`, or egui holding the keyboard through a focused
+  text field — the recorder panel's own *Note* box is one, so reaching for the
+  panel can be what disarms the key meant to replace it. `k` is not in
+  `egui_may_see`'s exemption, which today contains only `Tab`. Whatever ate it,
+  the key gave no sign: a hotkey that is swallowed and a hotkey that is pressed
+  look identical from the outside.
+
 **From Ф4.5:**
 
 - **A kiting archer is turned every commit, and nobody has watched one since.**
