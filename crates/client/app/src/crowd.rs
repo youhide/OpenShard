@@ -456,10 +456,10 @@ impl ActionAnimation {
                 let elapsed_in_cycle = self.elapsed.as_nanos() % cycle_ns;
                 (elapsed_in_cycle.saturating_mul(u128::from(frames)) / cycle_ns) as u16
             }
-            // A combat timing names one wind-up to its impact. Showing all art
-            // at 80ms here made a slow weapon finish its visible swing in half
-            // a second, then idle invisibly for the rest of its interval.
-            (None, Some(duration)) => staged_swing_frame(self.elapsed, duration, self.delay, frames),
+            // A combat timing names one wind-up to its impact, and the art is
+            // spread evenly across it: the gesture takes exactly as long as the
+            // shard says the action does.
+            (None, Some(duration)) => timed_swing_frame(self.elapsed, duration, frames),
             (None, None) => {
                 let ticks = self.elapsed.as_nanos() / self.delay.as_nanos().max(1);
                 (ticks % u128::from(frames)) as u16
@@ -491,33 +491,33 @@ impl ActionAnimation {
     }
 }
 
-/// Place sparse combat art on the server-owned wind-up timeline.
+/// Place sparse combat art evenly along the server-owned wind-up timeline.
 ///
-/// One normal cadence enters the anticipation pose; it remains readable until
-/// the final few ordinary-cadence frames immediately before impact. This makes
-/// slow and fast weapons differ in their wind-up rather than in a jarring
-/// playback-rate change. Harvest previews provide their own repeating cycle
-/// and deliberately do not take this path.
-fn staged_swing_frame(elapsed: Duration, duration: Duration, cadence: Duration, frames: u16) -> u16 {
-    if frames <= 2 || duration <= cadence.saturating_mul(u32::from(frames)) {
-        let progress = elapsed.as_nanos().saturating_mul(u128::from(frames)) / duration.as_nanos().max(1);
-        return u16::try_from(progress.min(u128::from(frames - 1))).unwrap_or(frames - 1);
-    }
-
-    const ANTICIPATION_FRAME: u16 = 1;
-    if elapsed < cadence {
-        return 0;
-    }
-    let release_frames = frames - ANTICIPATION_FRAME - 1;
-    let release_span = cadence.saturating_mul(u32::from(release_frames));
-    let release_at = duration.saturating_sub(release_span);
-    if elapsed < release_at {
-        return ANTICIPATION_FRAME;
-    }
-    let released = elapsed.saturating_sub(release_at).as_nanos() / cadence.as_nanos().max(1);
-    ANTICIPATION_FRAME
-        + 1
-        + u16::try_from(released.min(u128::from(release_frames - 1))).unwrap_or(release_frames - 1)
+/// **The gesture takes exactly as long as the action does**, which is the whole
+/// of the rule: the shard says a shot is 1600ms and the seven frames of the bow
+/// are spread across 1600ms, so a body that is preparing something is a body
+/// that is visibly moving for the whole of it.
+///
+/// It used to be staged instead — one ordinary cadence into an "anticipation"
+/// pose, that single frame *held* for as long as it took, then the remaining
+/// frames flicked through at 80ms each immediately before the impact. The
+/// arithmetic of that on a 2.5-second draw was 2020ms frozen on frame 1 and
+/// 400ms of the entire shot, and what it drew was a statue that twitched: it was
+/// reported, in as many words, as *"the character just stands there and then
+/// suddenly fires"*. The bar beside it was meanwhile filling honestly, so the
+/// picture also contradicted itself — a body that had not moved under a bar at
+/// sixty percent.
+///
+/// The staging was written to stop a slow weapon finishing its visible swing in
+/// half a second and then idling invisibly, which is a real defect and the
+/// opposite end of this one. Spreading solves it too, and without inventing a
+/// pose the art never had.
+///
+/// Harvest previews provide their own repeating cycle and deliberately do not
+/// take this path: an axe on a tree is many strokes, not one.
+fn timed_swing_frame(elapsed: Duration, duration: Duration, frames: u16) -> u16 {
+    let progress = elapsed.as_nanos().saturating_mul(u128::from(frames)) / duration.as_nanos().max(1);
+    u16::try_from(progress.min(u128::from(frames - 1))).unwrap_or(frames - 1)
 }
 
 /// Who a tracked body is.
@@ -2811,18 +2811,30 @@ mod tests {
             delay: 0,
         });
 
+        // Six frames over 4800ms is eight hundred milliseconds a frame, and the
+        // claim is that they are *evenly* eight hundred: the gesture is slowed
+        // to fit the interval rather than posed at the start of it.
+        // Six frames over 4800ms is eight hundred milliseconds a frame, and the
+        // claim is that they are *evenly* eight hundred: the gesture is slowed
+        // to fit the interval rather than posed at the start of it. Walked as
+        // "at the boundary" and "a millisecond before the next", because an
+        // off-by-one here is a frame that never shows.
         assert_eq!(crowd.group_for(who), Some(AnimationGroup(13)));
-        crowd.advance(Duration::from_millis(79));
-        assert_eq!(crowd.frame_for(who, AnimationFrameCount(6)), 0);
-        crowd.advance(Duration::from_millis(1));
-        assert_eq!(crowd.frame_for(who, AnimationFrameCount(6)), 1);
-        crowd.advance(Duration::from_millis(400));
-        assert_eq!(
-            crowd.frame_for(who, AnimationFrameCount(6)),
-            1,
-            "a long timed swing keeps its anticipation readable"
-        );
-        crowd.advance(Duration::from_millis(4_320));
+        for frame in 0..6_u16 {
+            assert_eq!(
+                crowd.frame_for(who, AnimationFrameCount(6)),
+                frame,
+                "frame {frame} should begin at {}ms of a 4800ms swing",
+                u64::from(frame) * 800
+            );
+            crowd.advance(Duration::from_millis(799));
+            assert_eq!(
+                crowd.frame_for(who, AnimationFrameCount(6)),
+                frame,
+                "and should still be showing a millisecond before the next"
+            );
+            crowd.advance(Duration::from_millis(1));
+        }
         assert_eq!(
             crowd.group_for(who),
             Some(BodyKind::Human.standing()),
@@ -2830,41 +2842,54 @@ mod tests {
         );
     }
 
-    /// A combat swing's *interval* is gameplay timing, not a playback-rate
-    /// command. Different weapons and dexterity may change when damage lands,
-    /// but the classic slash must keep its normal sprite cadence.
+    /// A combat swing's *interval* is gameplay timing, and the art is stretched
+    /// over it: a slower weapon is a slower gesture, all the way through, and
+    /// never the same gesture with a pause in it.
+    ///
+    /// The claim is the ratio rather than a frame number, which is what makes it
+    /// a test of the rule instead of of one duration. It is the half of the
+    /// picture the bar cannot supply — a bar at sixty percent over a body that
+    /// has not moved is a screen contradicting itself, and that was the
+    /// arithmetic of the staged wind-up this replaced.
     #[test]
-    fn timed_combat_uses_its_server_interval_for_a_readable_windup() {
+    fn a_timed_swing_spreads_its_art_across_the_whole_interval() {
+        // Sampled at the *middle* of each frame's slot — `(2n+1)/14` of the
+        // interval — so the claim is about which seventh the art is in and not
+        // about which side of a boundary integer division lands on.
         for duration in [1_600_u32, 3_200] {
-            let who = serial(1);
-            let mobile = who.expect("a serial");
-            let mut crowd = Crowd::default();
-            crowd.see(
-                who,
-                Point::new(10, 10, 0),
-                Graphic(PLAYER),
-                Facing::walking(Direction::South),
-                Hue::NONE,
-                false,
-                false,
-            );
-            crowd.time_swing(SwingTiming {
-                serial: mobile,
-                duration: openshard_protocol::feedback::SwingDuration(duration),
-            });
-            crowd.play_new(NewAnimation {
-                serial: mobile,
-                animation_type: 0,
-                action: 4, // one-handed slash
-                delay: 0,
-            });
+            for frame in [0_u16, 1, 4, 6] {
+                let elapsed = duration * (2 * u32::from(frame) + 1) / 14;
+                let expected = frame;
+                let who = serial(1);
+                let mobile = who.expect("a serial");
+                let mut crowd = Crowd::default();
+                crowd.see(
+                    who,
+                    Point::new(10, 10, 0),
+                    Graphic(PLAYER),
+                    Facing::walking(Direction::South),
+                    Hue::NONE,
+                    false,
+                    false,
+                );
+                crowd.time_swing(SwingTiming {
+                    serial: mobile,
+                    duration: openshard_protocol::feedback::SwingDuration(duration),
+                });
+                crowd.play_new(NewAnimation {
+                    serial: mobile,
+                    animation_type: 0,
+                    action: 4, // one-handed slash, seven frames
+                    delay: 0,
+                });
 
-            crowd.advance(Duration::from_millis(400));
-            assert_eq!(
-                crowd.frame_for(who, AnimationFrameCount(7)),
-                1,
-                "a {duration}ms combat interval rushed through its attack art"
-            );
+                crowd.advance(Duration::from_millis(u64::from(elapsed)));
+                assert_eq!(
+                    crowd.frame_for(who, AnimationFrameCount(7)),
+                    expected,
+                    "{elapsed}ms into a {duration}ms swing is {expected} sevenths of the art"
+                );
+            }
         }
     }
 
