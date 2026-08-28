@@ -8,10 +8,10 @@
 //! interval a picture is measured against, and a stage changes inside that
 //! interval without moving it.
 //!
-//! Two properties are load-bearing:
+//! Three properties are load-bearing:
 //!
 //! - **The boundaries are the shard's, never the client's.** A client that
-//!   guessed *"past 60% is aiming"* from a percentage would be inventing a fact
+//!   guessed *"past 60% is drawing"* from a percentage would be inventing a fact
 //!   the shard never stated, and every shard that retuned the shares would be
 //!   drawn wrong by every client. So the server holds the table, computes the
 //!   stage, and sends the transition.
@@ -19,6 +19,13 @@
 //!   mid-action, which lowers the fraction of the interval that has passed; the
 //!   fighter has not un-drawn the bow, so the stage is held rather than rewound.
 //!   [`ActionStage`] is ordered for exactly this comparison.
+//! - **[`ActionStage::Aim`] is not in this table at all.** Aiming is *holding*,
+//!   and a released action holds nothing: its impact is coming whether or not
+//!   anybody waits for it. Given a share of the interval it read on screen as a
+//!   stretch in which the bow was already bent and the arrow had not left — a
+//!   delay with no cause, and it was reported as one. `Aim` is the stage a
+//!   [`Phase::Armed`](crate::components::Phase::Armed) action sits in, which is
+//!   the only thing on this shard that waits on purpose.
 
 use openshard_config::{ActionStagesConfig, StageSharesConfig};
 use openshard_protocol::feedback::ActionStage;
@@ -27,9 +34,9 @@ use crate::components::ActionKind;
 
 /// Where one kind of action's stages begin, as shares of its whole interval.
 ///
-/// Three shares and not four: the release is the remainder, so no table can
+/// Two shares and not three: the release is the remainder, so no table can
 /// describe an action that finishes getting ready and then has nothing left to
-/// land in. `config` validates that the three do not pass a hundred, so the
+/// land in. `config` validates that the two do not pass a hundred, so the
 /// arithmetic here has no failure case.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct StageShares {
@@ -37,8 +44,6 @@ pub struct StageShares {
     pub ready: u8,
     /// The share spent on the effort — the bow bending, the arm cocking.
     pub load: u8,
-    /// The share spent held on the mark.
-    pub aim: u8,
 }
 
 impl StageShares {
@@ -48,7 +53,6 @@ impl StageShares {
         Self {
             ready: shares.ready,
             load: shares.load,
-            aim: shares.aim,
         }
     }
 
@@ -59,19 +63,19 @@ impl StageShares {
     /// own impact is in anyway.
     ///
     /// A share of zero is a stage this kind skips, and skipping is the right
-    /// behaviour rather than a degenerate one: a shard whose blow is all
-    /// wind-up and no aim writes a zero there and never sends that transition.
+    /// behaviour rather than a degenerate one: a shard whose blow is all strike
+    /// and no wind-up writes a zero there and never sends that transition.
+    ///
+    /// [`ActionStage::Aim`] is never returned. See the module header: holding is
+    /// an armed action's, and this walks the interval of a released one.
     #[must_use]
     pub const fn stage_at(self, elapsed_percent: u16) -> ActionStage {
         let ready = self.ready as u16;
         let load = ready + self.load as u16;
-        let aim = load + self.aim as u16;
         if elapsed_percent < ready {
             ActionStage::Ready
         } else if elapsed_percent < load {
             ActionStage::Load
-        } else if elapsed_percent < aim {
-            ActionStage::Aim
         } else {
             ActionStage::Release
         }
@@ -91,8 +95,8 @@ pub struct ActionStages {
 
 impl ActionStages {
     /// What this build ships with, and the three sentences it is meant to read
-    /// as: **a blow is mostly its wind-up, a shot is mostly its draw and hold,
-    /// and a breath is mostly the filling of the lungs.**
+    /// as: **a blow is mostly its wind-up, a shot is mostly its draw, and a
+    /// breath is mostly the filling of the lungs.**
     ///
     /// Every field of every row is written out — no update syntax over a base —
     /// for [`ActionRules::shipped`](crate::action_rules::ActionRules::shipped)'s
@@ -101,21 +105,9 @@ impl ActionStages {
     #[must_use]
     pub const fn shipped() -> Self {
         Self {
-            swing: StageShares {
-                ready: 15,
-                load: 45,
-                aim: 20,
-            },
-            shot: StageShares {
-                ready: 10,
-                load: 50,
-                aim: 30,
-            },
-            breath: StageShares {
-                ready: 20,
-                load: 50,
-                aim: 20,
-            },
+            swing: StageShares { ready: 15, load: 65 },
+            shot: StageShares { ready: 10, load: 70 },
+            breath: StageShares { ready: 20, load: 60 },
         }
     }
 
@@ -170,18 +162,12 @@ mod tests {
     /// early for every action on the shard.
     #[test]
     fn each_share_owns_its_own_stretch_and_the_release_takes_the_rest() {
-        let shares = StageShares {
-            ready: 10,
-            load: 50,
-            aim: 30,
-        };
+        let shares = StageShares { ready: 10, load: 70 };
         assert_eq!(shares.stage_at(0), ActionStage::Ready);
         assert_eq!(shares.stage_at(9), ActionStage::Ready);
         assert_eq!(shares.stage_at(10), ActionStage::Load);
-        assert_eq!(shares.stage_at(59), ActionStage::Load);
-        assert_eq!(shares.stage_at(60), ActionStage::Aim);
-        assert_eq!(shares.stage_at(89), ActionStage::Aim);
-        assert_eq!(shares.stage_at(90), ActionStage::Release);
+        assert_eq!(shares.stage_at(79), ActionStage::Load);
+        assert_eq!(shares.stage_at(80), ActionStage::Release);
         assert_eq!(shares.stage_at(100), ActionStage::Release);
         assert_eq!(
             shares.stage_at(500),
@@ -194,19 +180,29 @@ mod tests {
     /// rather than reporting a stretch of no length.
     #[test]
     fn a_zero_share_is_a_stage_the_kind_skips() {
-        let all_release = StageShares {
-            ready: 0,
-            load: 0,
-            aim: 0,
-        };
+        let all_release = StageShares { ready: 0, load: 0 };
         assert_eq!(all_release.stage_at(0), ActionStage::Release);
 
-        let no_aim = StageShares {
-            ready: 20,
-            load: 60,
-            aim: 0,
-        };
-        assert_eq!(no_aim.stage_at(79), ActionStage::Load);
-        assert_eq!(no_aim.stage_at(80), ActionStage::Release);
+        let no_lift = StageShares { ready: 0, load: 80 };
+        assert_eq!(no_lift.stage_at(0), ActionStage::Load);
+        assert_eq!(no_lift.stage_at(79), ActionStage::Load);
+        assert_eq!(no_lift.stage_at(80), ActionStage::Release);
+    }
+
+    /// The stretch this table does *not* have, asserted so that nobody puts it
+    /// back by widening the walk. Aiming is holding, holding is an armed
+    /// action's, and `combat::advance_stage` is the one place it is entered —
+    /// a share of a running interval spent "aimed" is a delay with no cause, and
+    /// that is what it read as when there was one.
+    #[test]
+    fn no_share_of_a_running_interval_is_ever_the_aim() {
+        let shares = StageShares { ready: 10, load: 70 };
+        for percent in 0..=200 {
+            assert_ne!(
+                shares.stage_at(percent),
+                ActionStage::Aim,
+                "{percent}% of a released action's interval reported an aim"
+            );
+        }
     }
 }

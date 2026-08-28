@@ -516,13 +516,33 @@ pub fn attack(state: &mut WorldState, connection: ConnectionId, target: Option<S
             .registry
             .get::<WrestlingInterceptCooldown>(player)
             .is_none_or(|cooldown| now >= cooldown.until);
-    let pace = swing_speed(state, player);
-    let next = if ambush {
-        now
-    } else if intercept {
-        now + (pace / 2).max(1)
+    // **Naming the opponent you are already fighting is not a change of mind.**
+    // Everything below rewrites the schedule and abandons whatever was mid-swing,
+    // which is right for a new target and destructive for the same one: a second
+    // attack packet — a re-click, a script, a client that re-asserts its target —
+    // threw away a bow at four fifths of its draw and started a fresh full
+    // interval, so the archer stood, the bar reset, and the only thing that
+    // crossed the wire was `Abandoned`. It was reported as exactly that. Nothing
+    // here has anything to add for a fight already in progress, so it says so and
+    // stops.
+    let renewing = previous_target == Some(serial) && state.registry.has::<CombatAction>(player);
+    let next = if renewing {
+        // Left exactly where it was: the running action owns this schedule and
+        // `commit_actions` pinned it to the impact being promised.
+        state
+            .registry
+            .get::<Combat>(player)
+            .and_then(|combat| combat.next_swing())
+            .unwrap_or(now)
     } else {
-        now + pace
+        let pace = swing_speed(state, player);
+        if ambush {
+            now
+        } else if intercept {
+            now + (pace / 2).max(1)
+        } else {
+            now + pace
+        }
     };
     let aimed = state
         .registry
@@ -539,10 +559,12 @@ pub fn attack(state: &mut WorldState, connection: ConnectionId, target: Option<S
     // committed to a target, and does not follow a change of mind. Face a
     // reachable target immediately; `commit_actions` starts the gesture this
     // tick and tells the client how long it lasts before impact.
-    state.end_combat_action(
-        player,
-        CombatActionOutcome::Interrupted(InterruptReason::Abandoned),
-    );
+    if !renewing {
+        state.end_combat_action(
+            player,
+            CombatActionOutcome::Interrupted(InterruptReason::Abandoned),
+        );
+    }
     if melee_reachable(state, player, target_entity) {
         state.face_toward(player, target_entity);
     }
@@ -1035,16 +1057,18 @@ pub fn commit_actions(state: &mut WorldState) {
         };
         state.registry.insert(attacker, action);
         if telegraphed {
-            // A blow is delivered by the body, so the body turns to deliver it.
-            // A shot is delivered down a line, and turning the shooter at every
-            // nock would take a kiting archer's step away from it: a step in a
-            // direction the mobile is not facing turns instead of moving, so a
-            // brain that beats no faster than the shard re-aims it spends every
-            // beat spinning and never opens the gap. See `spawn_archer`, which
-            // carries the same finding from the other end.
-            if kind.flight().is_none() {
-                state.face_toward(attacker, target);
-            }
+            // **Every fighter turns to what it is about to hit, shot included.**
+            // Ф2 exempted a shot on the argument that a shot is delivered down a
+            // line rather than by the body, and that turning a kiting archer at
+            // every nock costs it the step it was going to escape with — a step
+            // in a direction a mobile is not facing *turns* it instead of moving
+            // it, so a brain that beats no faster than the shard re-aims it never
+            // opens the gap. That is a true fact about the kiting brain and it
+            // was the wrong place to fix it: what a player saw was a body facing
+            // away from the thing it was shooting, which reads as a shard that
+            // has not noticed the fight. The brain's problem is the brain's, and
+            // it is a live one — see the backlog.
+            state.face_toward(attacker, target);
             state.break_cover(attacker);
             state.animate_timed(attacker, Action::Attack, impact.saturating_sub(now));
         }
@@ -1114,6 +1138,32 @@ fn debug_assert_accounted_for(state: &WorldState) {
 #[cfg(not(debug_assertions))]
 const fn debug_assert_accounted_for(_state: &WorldState) {}
 
+/// End `attacker`'s action because something spoiled it, and put the next one a
+/// **whole fresh interval** away.
+///
+/// The second half is the point, and it is a defect this closes rather than a
+/// preference. [`commit_actions`] pins `next_swing` to the impact it is
+/// promising, so an action cut short at nine tenths of its draw left the
+/// schedule nine tenths of the way through — and the replacement committed on
+/// the next tick took the *leftover* as its whole interval. A fighter spoiled
+/// late therefore loosed almost instantly, with a bar that flashed and an arrow
+/// out of a body that had not moved; spoiled early, it drew for nearly twice as
+/// long. Neither is a promise anybody made.
+///
+/// A fresh action is a fresh promise, so it costs a fresh interval. What that
+/// makes true is the sentence `docs/combat_actions.md`'s Ф1 backlog already
+/// claimed — *"the next commit opens a full fresh interval"* — which until now
+/// held only when the spoiled action's impact had already gone by.
+///
+/// Not used for an end that *landed*: [`resolve_actions`] schedules its own
+/// recovery from the impact, which is the same number by a different route and
+/// the route that owns it.
+fn spoil(state: &mut WorldState, attacker: EntityId, reason: InterruptReason) {
+    let next = state.ticks.saturating_add(swing_speed(state, attacker).max(1));
+    set_next_swing(state, attacker, next);
+    state.end_combat_action(attacker, CombatActionOutcome::Interrupted(reason));
+}
+
 /// Record that `attacker` could not begin an action, and say so on the edge.
 ///
 /// The set is what the end of the commit pass reads to tell a refusal that is
@@ -1150,20 +1200,14 @@ pub fn sustain_actions(state: &mut WorldState) {
         // The fighter itself first: a dead or ghosted attacker has no action,
         // whatever its target is doing.
         if !attackable(state, attacker) {
-            state.end_combat_action(
-                attacker,
-                CombatActionOutcome::Interrupted(InterruptReason::Abandoned),
-            );
+            spoil(state, attacker, InterruptReason::Abandoned);
             continue;
         }
         if state
             .registry
             .has::<openshard_state::components::Pacified>(attacker)
         {
-            state.end_combat_action(
-                attacker,
-                CombatActionOutcome::Interrupted(InterruptReason::Pacified),
-            );
+            spoil(state, attacker, InterruptReason::Pacified);
             continue;
         }
         let Some(target) = state
@@ -1171,10 +1215,7 @@ pub fn sustain_actions(state: &mut WorldState) {
             .entity_of(action.target)
             .filter(|&target| attackable(state, target))
         else {
-            state.end_combat_action(
-                attacker,
-                CombatActionOutcome::Interrupted(InterruptReason::TargetGone),
-            );
+            spoil(state, attacker, InterruptReason::TargetGone);
             continue;
         };
         // Against the *committed* reach, not the weapon's reach now: a fighter
@@ -1196,7 +1237,7 @@ pub fn sustain_actions(state: &mut WorldState) {
                 }
             }
             Some(reason) => {
-                state.end_combat_action(attacker, CombatActionOutcome::Interrupted(reason));
+                spoil(state, attacker, reason);
                 continue;
             }
             None => {}
@@ -1206,6 +1247,12 @@ pub fn sustain_actions(state: &mut WorldState) {
         // from becoming a permanent property of a rider.
         if let Phase::Armed { expires_at, .. } = action.phase {
             if now >= expires_at {
+                // The one spoiling that is not an interruption, so it cannot go
+                // through `spoil` — but it owes the same fresh interval, for the
+                // same reason: an arm that gave out has made no promise the next
+                // action should inherit.
+                let next = now.saturating_add(swing_speed(state, attacker).max(1));
+                set_next_swing(state, attacker, next);
                 state.end_combat_action(attacker, CombatActionOutcome::Expired);
                 continue;
             }
@@ -1228,6 +1275,14 @@ pub fn sustain_actions(state: &mut WorldState) {
 /// slows an archer means. Only a forward move is recorded and only a forward
 /// move is announced.
 ///
+/// **[`ActionStage::Aim`] belongs to an armed action and to nothing else.**
+/// Aiming is *holding*, and a released action holds nothing — its impact is
+/// coming whether or not anybody waits for it. It used to be a share of the
+/// interval between the draw and the loose, and what that read as on screen was
+/// a stretch in which the bow was already bent and the arrow had not left: a
+/// delay with no cause, reported as exactly that. The shares now walk
+/// `Ready → Load → Release`, and this is the one place `Aim` is entered.
+///
 /// An untelegraphed action's stages reach its own client and nobody else, which
 /// is the same audience its commit had — `WorldState::announce_stage` reads that
 /// off the action rather than being told, so the two cannot come apart.
@@ -1235,21 +1290,24 @@ fn advance_stage(state: &mut WorldState, attacker: EntityId, now: WorldTick) {
     let Some(&action) = state.registry.get::<CombatAction>(attacker) else {
         return;
     };
-    let Some(impact) = action.impact() else {
-        // An armed action is not running through an interval — it is waiting on
-        // the world, and its stage is whatever it was armed in. Ф7's release is
-        // what starts a clock for this to walk.
-        return;
+    let stage = match action.impact() {
+        Some(impact) => {
+            let span = impact.saturating_sub(action.started_at);
+            let elapsed = now.saturating_sub(action.started_at);
+            // A zero-length interval is already at its impact: an action that
+            // takes no time is entirely its release. Not a case so much as a
+            // division guard.
+            let percent = match span {
+                0 => 100,
+                span => u16::try_from(elapsed.saturating_mul(100) / span).unwrap_or(100),
+            };
+            state.gameplay.action_stages.stage_at(action.kind, percent)
+        }
+        // An armed action is not running through an interval — it is holding on
+        // the mark, waiting on the world, and that *is* the aim. It stays there
+        // until Ф7's release starts a clock for the walk above.
+        None => ActionStage::Aim,
     };
-    let span = impact.saturating_sub(action.started_at);
-    let elapsed = now.saturating_sub(action.started_at);
-    // A zero-length interval is already at its impact: an action that takes no
-    // time is entirely its release. Not a case so much as a division guard.
-    let percent = match span {
-        0 => 100,
-        span => u16::try_from(elapsed.saturating_mul(100) / span).unwrap_or(100),
-    };
-    let stage = state.gameplay.action_stages.stage_at(action.kind, percent);
     if stage <= action.stage {
         return;
     }
@@ -1292,10 +1350,7 @@ pub fn apply_condition(state: &mut WorldState, mobile: EntityId, condition: Acto
     action.applied = action.applied.with(condition);
     match effect {
         ActionEffect::Break => {
-            state.end_combat_action(
-                mobile,
-                CombatActionOutcome::Interrupted(condition.interrupt_reason()),
-            );
+            spoil(state, mobile, condition.interrupt_reason());
         }
         ActionEffect::Sway { penalty } => {
             // Spent once by the hit roll at the impact, beside whatever the
@@ -1730,8 +1785,16 @@ pub fn expire_criminality(state: &mut WorldState) {
 ///
 /// An explicit [`SwingSpeed`] wins — a script pinning an exact cadence, a special
 /// creature. Otherwise the pace is derived from the mobile's dexterity through
-/// [`swing_ticks`], wrestling speed for now (no weapon properties yet). A mobile
-/// with neither swings at the default-dexterity wrestling pace.
+/// [`swing_ticks`], wrestling speed for now (no weapon properties yet), and that
+/// derivation is then taken at the shard's own pace for this *kind* of action
+/// (`gameplay.action_speed`). A mobile with neither swings at the
+/// default-dexterity wrestling pace.
+///
+/// **The scripted [`SwingSpeed`] is deliberately outside the scaling.** It is a
+/// script saying what one creature's cadence *is*; a shard-wide percentage laid
+/// over it would mean the script no longer says that. Everything derived from
+/// the weapon table is scaled, because the weapon table is exactly what the
+/// setting exists to disagree with.
 #[must_use]
 pub fn swing_speed(state: &WorldState, mobile: EntityId) -> u64 {
     if let Some(s) = state.registry.get::<SwingSpeed>(mobile) {
@@ -1748,12 +1811,17 @@ pub fn swing_speed(state: &WorldState, mobile: EntityId) -> u64 {
     let base = weapons::equipped_weapon(state, mobile).map_or(WRESTLING_SPEED, |weapon| {
         u64::from(openshard_state::weapon::swing_base(&weapon, era))
     });
-    swing_ticks(
+    let ticks = swing_ticks(
         dex,
         base,
         state.gameplay.combat_era.value(),
         state.gameplay.speed_scale_factor,
-    )
+    );
+    // Which of the three this mobile would open, asked exactly the way
+    // [`commit_actions`] asks it, so the pace a fighter is scheduled at and the
+    // kind it will actually commit can never be two different answers.
+    let kind = ranged_action(state, mobile).unwrap_or(ActionKind::Swing { reach: MELEE_REACH });
+    state.gameplay.action_speed.scale(kind, ticks)
 }
 
 /// Record one successful step for an unarmed fighter's next first contact.

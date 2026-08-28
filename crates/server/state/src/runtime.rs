@@ -48,6 +48,7 @@ use openshard_tiles::TileData;
 use openshard_uofiles::anim::BodyKind;
 
 use crate::action_rules::ActionRules;
+use crate::action_speeds::ActionSpeeds;
 use crate::action_stages::ActionStages;
 use crate::boat::Plank;
 use crate::components::{
@@ -182,10 +183,15 @@ pub struct Gameplay {
     /// and a boolean on the weapon cannot say it.
     pub action_rules: ActionRules,
     /// How a running action's interval divides into the stretches a watcher is
-    /// told about — up, drawn, held, loosed. The boundaries are the shard's and
+    /// told about — up, drawn, loosed. The boundaries are the shard's and
     /// never the client's: a picture that guessed them from a percentage would
     /// be inventing a fact the shard never stated.
     pub action_stages: ActionStages,
+    /// How long each kind of action takes, as a percentage of what the weapon
+    /// row and the era's formula come to. The third table keyed by kind, and it
+    /// is what makes *"archery here is quicker than the reference"* one line an
+    /// operator can disagree with rather than fifty edited weapon rows.
+    pub action_speed: ActionSpeeds,
     /// Chance, in per-mille, for a landed weapon or ranged blow to be critical.
     /// A shard extension: zero keeps strictly classic damage rolls.
     pub critical_chance: u16,
@@ -417,6 +423,7 @@ impl Default for Gameplay {
             speed_scale_factor: 10000,
             action_rules: ActionRules::shipped(),
             action_stages: ActionStages::shipped(),
+            action_speed: ActionSpeeds::shipped(),
             critical_chance: 50,
             critical_damage_percent: 150,
             skill_cap: 1000,
@@ -3038,7 +3045,13 @@ impl WorldState {
     /// `at` rather than the position on the row, because [`Self::move_to`] calls
     /// this in the middle of a relocation and the two must not be able to
     /// disagree about which tile is being announced.
-    fn send_player_update(&mut self, entity: EntityId, at: Point) {
+    ///
+    /// **Public because a `0x77` about a body is ignored by that body's owner.**
+    /// Any caller that writes a [`Heading`] of its own owes its owner this as
+    /// well, or the client goes on drawing the old facing over an authoritative
+    /// change nothing acknowledged. [`face_point`](Self::face_point) pairs the
+    /// two itself; the tick's decreed step is the other caller that has to.
+    pub fn send_player_update(&mut self, entity: EntityId, at: Point) {
         let Some(&Client { connection, .. }) = self.registry.get::<Client>(entity) else {
             return;
         };

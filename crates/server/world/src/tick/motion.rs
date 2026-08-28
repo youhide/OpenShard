@@ -309,8 +309,27 @@ impl World {
         let facet = self.state.facet_of(entity);
         let was = walker.position;
 
-        // Turn-as-step: a mobile not yet facing this way turns and stays put.
-        if walker.facing.direction != direction {
+        // **A decreed step turns and moves in the same beat.** Turn-as-step is a
+        // rule about a *client's* walk: the client sends a direction, and a
+        // mobile not yet facing that way is answered "you turned" so the two
+        // ends stay in step over a lossy sequence. Nothing about that applies to
+        // a mobile the shard is moving itself — there is no request, no
+        // acknowledgement and no sequence — and applying it anyway cost a
+        // creature one beat out of every direction change.
+        //
+        // What that bought was visible the moment a shot began turning its
+        // shooter: a kiting archer, turned back at each commit, spent the next
+        // beat spinning instead of retreating and never opened the gap. The
+        // wander walk carries the same finding from the other end, and works
+        // around it by re-using the facing it already had.
+        //
+        // The reference does it this way too: `BaseAI.DoMove` sets the
+        // creature's direction and moves in one call, which is why a monster in
+        // the original game walks a diagonal rather than pirouetting on to it.
+        // A turn with no step left is still a turn — that is the `landed`
+        // refusal below, which broadcasts the new facing and stays put.
+        let turned = walker.facing.direction != direction;
+        if turned {
             let facing = Facing::walking(direction);
             walker.facing = facing;
             self.state.registry.insert(entity, Movement(walker));
@@ -320,8 +339,6 @@ impl World {
                 serial,
                 facing,
             });
-            self.state.broadcast_move(entity);
-            return;
         }
 
         // `step_allowed` and not `can_step`: a diagonal may not clip the corner
@@ -371,6 +388,19 @@ impl World {
             openshard_movement::step_allowed(&footing, walker.position, direction)
         });
         let Some(landed) = landed else {
+            // A step that turned and then found a wall is still a turn, and every
+            // screen is owed it: the facing was written above, so this is the one
+            // place that has to say so out loud. A step that was already facing
+            // the right way and found the wall changed nothing and says nothing.
+            //
+            // Both halves, because `0x77` is deliberately ignored by its own
+            // owner — a scripted body that turned into a wall would otherwise go
+            // on being drawn facing the old way on the one screen that matters.
+            // The same pairing `WorldState::face_point` makes.
+            if turned {
+                self.state.broadcast_move(entity);
+                self.state.send_player_update(entity, walker.position);
+            }
             self.state.bus.send(StepRefused {
                 entity,
                 serial,

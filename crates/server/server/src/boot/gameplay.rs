@@ -13,6 +13,7 @@ pub(crate) fn gameplay_of(config: &Config) -> Gameplay {
         speed_scale_factor: g.speed_scale_factor,
         action_rules: openshard_state::action_rules::ActionRules::from_config(&g.action_rules),
         action_stages: openshard_state::action_stages::ActionStages::from_config(&g.action_stages),
+        action_speed: openshard_state::action_speeds::ActionSpeeds::from_config(&g.action_speed),
         critical_chance: g.critical_chance,
         critical_damage_percent: g.critical_damage_percent,
         skill_cap: g.skill_cap,

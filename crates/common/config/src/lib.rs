@@ -297,15 +297,61 @@ pub struct GameplayConfig {
     #[serde(default = "default_action_rules")]
     pub action_rules: ActionRulesConfig,
     /// How a running action's interval divides into the named stretches a
-    /// watcher is told about — raising, loading, aiming, releasing.
+    /// watcher is told about — raising, loading, releasing.
     #[serde(default = "default_action_stages")]
     pub action_stages: ActionStagesConfig,
+    /// How long each kind of action takes, as a percentage of what the weapon
+    /// table and the swing formula come to on their own.
+    #[serde(default = "default_action_speed")]
+    pub action_speed: ActionSpeedsConfig,
+}
+
+/// How long each kind of combat action takes, as a percentage of the interval
+/// the weapon's own row and [`speed_scale_factor`](GameplayConfig::speed_scale_factor)
+/// produce.
+///
+/// `100` is the formula's own answer, `50` is twice as fast, `200` is half. It
+/// is the third table keyed by *kind* rather than by weapon, beside
+/// [`ActionRulesConfig`] and [`ActionStagesConfig`], and for the same reason
+/// they are: *"archery on this shard is quicker than the reference makes it"* is
+/// one line an operator can read and disagree with, where a column edited into
+/// fifty weapon rows is fifty places for two of them to come apart.
+///
+/// **Why a percentage and not the interval itself.** The interval is derived
+/// from dexterity and the weapon, and both of those still have to matter — a
+/// shard that wrote `shot = 1600ms` would have made every bow, every archer and
+/// every point of dexterity the same speed. This scales that answer; it does not
+/// replace it.
+///
+/// ```toml
+/// [gameplay.action_speed]
+/// swing  = 100   # blows keep the formula's pace
+/// shot   = 64    # a default-dexterity bow: 2.5s becomes 1.6s
+/// breath = 100
+/// ```
+///
+/// An explicit `SwingSpeed` on a mobile — a script pinning an exact cadence for
+/// one creature — is **not** scaled by this. It is already the last word on that
+/// mobile's pace, and a percentage applied on top of it would mean a script
+/// could no longer say what it says.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionSpeedsConfig {
+    /// A blow's pace.
+    #[serde(default = "default_swing_speed_percent")]
+    pub swing: u16,
+    /// A shot's pace.
+    #[serde(default = "default_shot_speed_percent")]
+    pub shot: u16,
+    /// An innate ranged attack's pace.
+    #[serde(default = "default_breath_speed_percent")]
+    pub breath: u16,
 }
 
 /// Where one kind of action's named stretches begin, as percentages of the whole
 /// interval.
 ///
-/// Three numbers and not four: the release is whatever is left, so the shard can
+/// Two numbers and not three: the release is whatever is left, so the shard can
 /// never be configured into an action that ends before it lands. Each is the
 /// *share* of the interval that stretch occupies, in order, and their sum must
 /// not pass 100 — a file that oversubscribes the interval is rejected at load
@@ -314,10 +360,18 @@ pub struct GameplayConfig {
 /// ```toml
 /// [gameplay.action_stages.shot]
 /// ready = 10   # the bow comes up
-/// load  = 50   # the string is drawn
-/// aim   = 30   # held on the mark
-/// # the remaining 10% is the loose
+/// load  = 70   # the string is drawn
+/// # the remaining 20% is the loose
 /// ```
+///
+/// **There is no `aim` share, and that is a decision rather than an omission.**
+/// Aiming is *holding*, and an action that is running through an interval is not
+/// holding anything: its impact is coming whether or not anybody waits for it. A
+/// third share between the draw and the loose therefore read on screen as a
+/// stretch where the archer had finished drawing and the arrow had not left —
+/// which is a delay with no cause, and it was reported as one. Holding is what
+/// [`ActionStage::Aim`](openshard_protocol::feedback::ActionStage::Aim) is for,
+/// and an armed action is the only thing that does it.
 ///
 /// A share left out of a row is `0`, which is a real answer — a kind whose whole
 /// interval is one long release writes nothing at all. As with
@@ -332,9 +386,6 @@ pub struct StageSharesConfig {
     /// The effort — bending the bow, cocking the arm.
     #[serde(default)]
     pub load: u8,
-    /// Held on the mark.
-    #[serde(default)]
-    pub aim: u8,
 }
 
 /// The whole stage table, keyed by what the action is.
@@ -659,44 +710,32 @@ fn default_action_rules() -> ActionRulesConfig {
     ActionRulesConfig::shipped()
 }
 
-/// A blow: up, back, set, and through. The wind-up is the longest of the four
+/// A blow: up, back, and through. The wind-up is the longest of the three
 /// because it is the part a defender watches — a swing that were mostly *strike*
 /// would be a telegraph nobody could read in time.
 const fn default_swing_stages() -> StageSharesConfig {
-    StageSharesConfig {
-        ready: 15,
-        load: 45,
-        aim: 20,
-    }
+    StageSharesConfig { ready: 15, load: 65 }
 }
 
-/// A bow: lift, draw, hold, loose. The hold is longer than a blow's set and the
-/// loose shorter than a blow's strike, which is the shape of the thing — an
-/// archer spends their interval *aiming*, and the arrow leaves in an instant.
+/// A bow: lift, draw, loose. The lift is short and the draw is nearly the whole
+/// of it, which is the shape of the thing — an archer spends their interval
+/// *bending the bow*, and the arrow leaves at the end of it.
 const fn default_shot_stages() -> StageSharesConfig {
-    StageSharesConfig {
-        ready: 10,
-        load: 50,
-        aim: 30,
-    }
+    StageSharesConfig { ready: 10, load: 70 }
 }
 
-/// A breath: rear back, fill, fix, and let go. Mostly the filling, because that
-/// is the part a creature is visibly doing.
+/// A breath: rear back, fill, and let go. Mostly the filling, because that is
+/// the part a creature is visibly doing.
 const fn default_breath_stages() -> StageSharesConfig {
-    StageSharesConfig {
-        ready: 20,
-        load: 50,
-        aim: 20,
-    }
+    StageSharesConfig { ready: 20, load: 60 }
 }
 
 impl StageSharesConfig {
-    /// What the three shares add up to. The release is `100` minus this, so a
-    /// sum past a hundred is the one way to write a row that cannot be run.
+    /// What the two shares add up to. The release is `100` minus this, so a sum
+    /// past a hundred is the one way to write a row that cannot be run.
     #[must_use]
     pub const fn claimed(&self) -> u16 {
-        self.ready as u16 + self.load as u16 + self.aim as u16
+        self.ready as u16 + self.load as u16
     }
 }
 
@@ -716,6 +755,43 @@ impl ActionStagesConfig {
 
 fn default_action_stages() -> ActionStagesConfig {
     ActionStagesConfig::shipped()
+}
+
+/// A blow keeps the pace the weapon table and the era formula give it.
+const fn default_swing_speed_percent() -> u16 {
+    100
+}
+
+/// A shot does not. The pre-AoS column makes a bow at default dexterity take two
+/// and a half seconds, and what that reads as on screen is a body standing still
+/// between arrows — the reference's own archery is quicker than this table makes
+/// it, and no integer in the `old_speed` column lands on a round interval. `64`
+/// is the number that turns 2.5s into 1.6s, which is the pace a bow was asked to
+/// have; every other dexterity and every other bow scales with it.
+const fn default_shot_speed_percent() -> u16 {
+    64
+}
+
+/// A breath keeps its creature's own pace: a `RangedAttack` is scripted per
+/// creature already, so there is no weapon table making it wrong.
+const fn default_breath_speed_percent() -> u16 {
+    100
+}
+
+impl ActionSpeedsConfig {
+    /// The table this build ships with.
+    #[must_use]
+    pub const fn shipped() -> Self {
+        Self {
+            swing: default_swing_speed_percent(),
+            shot: default_shot_speed_percent(),
+            breath: default_breath_speed_percent(),
+        }
+    }
+}
+
+fn default_action_speed() -> ActionSpeedsConfig {
+    ActionSpeedsConfig::shipped()
 }
 
 impl Default for GameplayConfig {
@@ -759,6 +835,7 @@ impl Default for GameplayConfig {
             npc_home_hour: default_npc_home_hour(),
             action_rules: default_action_rules(),
             action_stages: default_action_stages(),
+            action_speed: default_action_speed(),
             expansion: default_expansion(),
         }
     }
@@ -1245,8 +1322,15 @@ pub enum ConfigError {
     StageSharesOversubscribed {
         /// Which kind of action the row is for.
         kind: &'static str,
-        /// What the three shares add up to.
+        /// What the two shares add up to.
         claimed: u16,
+    },
+    /// A `gameplay.action_speed` row is zero, which would make that kind of
+    /// action land on the tick it was committed on — no wind-up, no bar, no
+    /// frame in which anything could spoil it.
+    ZeroActionSpeed {
+        /// Which kind of action the row is for.
+        kind: &'static str,
     },
     /// `gameplay.critical_damage_percent` would make a critical weaker than a
     /// normal landed hit.
@@ -1367,8 +1451,15 @@ impl fmt::Display for ConfigError {
             Self::StageSharesOversubscribed { kind, claimed } => write!(
                 f,
                 "gameplay.action_stages.{kind} gives its stages {claimed}% of the interval; \
-                 ready + load + aim must be at most 100 — the release is what is left over, \
+                 ready + load must be at most 100 — the release is what is left over, \
                  and it is the stretch the impact happens in"
+            ),
+            Self::ZeroActionSpeed { kind } => write!(
+                f,
+                "gameplay.action_speed.{kind} is 0; it is a percentage of the interval \
+                 the weapon formula gives, and zero is not a fast action but no action — \
+                 the impact would land on the tick it was committed on, with nothing \
+                 drawn, nothing measured and no moment in which it could be spoiled"
             ),
             Self::CriticalDamageBelowNormal { percent } => write!(
                 f,
@@ -1521,6 +1612,18 @@ impl Config {
             let claimed = shares.claimed();
             if claimed > 100 {
                 return Err(ConfigError::StageSharesOversubscribed { kind, claimed });
+            }
+        }
+        // A percentage of zero is not "instant", it is "no action at all": the
+        // impact would fall on the commit tick, so nothing would ever be drawn,
+        // measured or interrupted. Refused at load rather than run.
+        for (kind, percent) in [
+            ("swing", self.gameplay.action_speed.swing),
+            ("shot", self.gameplay.action_speed.shot),
+            ("breath", self.gameplay.action_speed.breath),
+        ] {
+            if percent == 0 {
+                return Err(ConfigError::ZeroActionSpeed { kind });
             }
         }
         if self.gameplay.critical_damage_percent < 100 {

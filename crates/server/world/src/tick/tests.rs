@@ -501,11 +501,22 @@ fn asking_what_one_connection_was_sent_leaves_the_other_its_own() {
     );
 }
 
+/// **A decreed step turns and moves in the same beat**, where a client's walk
+/// turns first and moves on the next request.
+///
+/// This used to be one rule for both, on the argument that the clients watching
+/// cannot tell who ordered the step — which is true about the *picture* and says
+/// nothing about the *cost*. Turn-as-step exists so that a client sending a
+/// direction over a lossy sequence and a server answering it stay in step; there
+/// is no request, no acknowledgement and no sequence behind a decree, so the
+/// mobile was paying for a protocol it was not speaking. What it cost was one
+/// beat out of every direction change, and that beat is what stopped a kiting
+/// archer from ever opening a gap once its shot began turning it to face its
+/// mark. The reference moves a creature the same way — `BaseAI.DoMove` sets the
+/// direction and moves in one call, which is why a monster walks a diagonal
+/// instead of pirouetting on to it.
 #[test]
-fn a_server_step_turns_first_then_moves() {
-    // Turn-as-step, server side: the first `Step` in a new direction turns
-    // and stays put; the second moves. The same rule a client walk follows,
-    // because the clients watching cannot tell who ordered the step.
+fn a_server_step_turns_and_moves_in_one_beat() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
@@ -529,23 +540,16 @@ fn a_server_step_turns_first_then_moves() {
         direction: dir.to_bits(),
     });
     world.tick(now);
-    assert_eq!(world.bus().read(&mut turned).count(), 1, "first step turns");
-    assert_eq!(world.bus().read(&mut moved).count(), 0, "and does not move");
     assert_eq!(
-        world.state.registry.get::<Position>(entity).unwrap().0,
-        from,
-        "still on the same tile"
+        world.bus().read(&mut turned).count(),
+        1,
+        "the body did turn — this is a step in a direction it was not facing"
     );
-
-    world.queue(Command::Step {
-        serial,
-        direction: dir.to_bits(),
-    });
-    world.tick(now);
     let moves: Vec<MobileMoved> = world.bus().read(&mut moved).copied().collect();
-    assert_eq!(moves.len(), 1, "second step moves");
+    assert_eq!(moves.len(), 1, "and it moved on the same beat");
     assert_eq!(moves[0].from, from);
     assert_eq!(moves[0].to, openshard_movement::step_from(from, dir).unwrap());
+    assert_eq!(moves[0].facing.direction, dir, "facing the way it went");
     assert_eq!(
         world.state.registry.get::<Position>(entity).unwrap().0,
         openshard_movement::step_from(from, dir).unwrap(),
@@ -555,6 +559,58 @@ fn a_server_step_turns_first_then_moves() {
             .iter()
             .any(|packet| packet.first() == Some(&0x20)),
         "a server-decreed player step synchronizes the owning client"
+    );
+}
+
+/// The half of the old rule that survives: a decree that turns into a wall is
+/// still a turn, and every screen is owed it.
+///
+/// The turn is written before the landing is tested, so the refusal path is the
+/// one place that has to broadcast it — a body facing a way no packet mentioned
+/// is the desync this whole area keeps producing.
+#[test]
+fn a_decreed_step_into_a_wall_still_announces_the_turn() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = serial_of(&world, connection);
+    let from = world.state.registry.get::<Position>(entity).unwrap().0;
+    // A body of our own in the way: the crowd rule refuses a step on to an
+    // occupied tile, and it needs no terrain fixture to set up.
+    let facing0 = world.state.registry.get::<Heading>(entity).unwrap().0.direction;
+    let dir = if facing0 == Direction::North {
+        Direction::South
+    } else {
+        Direction::North
+    };
+    let blocked = openshard_movement::step_from(from, dir).unwrap();
+    let _blocker = spawn_mobile_at(&mut world, blocked, 50, now);
+    // And a step of stamina spent, or the shove would carry the body through: a
+    // decreed step is held to the walked one's shove rule, and a rested mobile
+    // is allowed to push. What is under test is the refusal, not the shove.
+    tire(&mut world, entity);
+    let _ = packets_for(&mut world, connection);
+
+    let mut moved: Cursor<MobileMoved> = world.bus().cursor();
+    let mut turned: Cursor<MobileTurned> = world.bus().cursor();
+    world.queue(Command::Step {
+        serial,
+        direction: dir.to_bits(),
+    });
+    world.tick(now);
+    assert_eq!(world.bus().read(&mut turned).count(), 1, "it turned");
+    assert_eq!(world.bus().read(&mut moved).count(), 0, "and went nowhere");
+    assert_eq!(
+        world.state.registry.get::<Heading>(entity).unwrap().0.direction,
+        dir,
+        "the facing is the new one"
+    );
+    assert!(
+        packets_for(&mut world, connection)
+            .iter()
+            .any(|packet| packet.first() == Some(&0x20)),
+        "and the owning client was told, or it draws a body facing the old way"
     );
 }
 
@@ -6934,6 +6990,52 @@ fn a_fight_with_everything_that_happens_to_one_still_has_no_blank_tick() {
     }
 }
 
+/// The fight, printed rather than asserted — the diagnostic behind every
+/// assertion above.
+///
+/// `#[ignore]`d because it proves nothing: it is the thing you run when somebody
+/// says *"he just stands there"* and you need to see the shard's own cadence in
+/// ticks before arguing about frames. Run it with
+/// `cargo test -p openshard-world print_a_bow_fight -- --ignored --nocapture`.
+#[test]
+#[ignore = "a diagnostic, not an assertion: run it by name with --nocapture"]
+fn print_a_bow_fight() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let fighter = world.state.players[&connection];
+    arm_with_bow(&mut world, connection);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 20_000, now);
+    engage(&mut world, connection, mob, now);
+    println!(
+        "swing_speed = {} ticks",
+        combat::swing_speed(&world.state, fighter)
+    );
+    let timeline = fight_timeline(&mut world, connection, fighter, 400, now, |_, _| {});
+
+    // The intervals cannot be read back out of the timeline, so run the wire
+    // side of it separately: what a watcher was told to measure its bar against.
+    let mut wire = super::tests::world();
+    let wire_connection = enter(&mut wire, now);
+    arm_with_bow(&mut wire, wire_connection);
+    let wire_actor = wire
+        .state
+        .registry
+        .serial_of(wire.state.players[&wire_connection])
+        .unwrap();
+    let wire_mob = spawn_mobile_at(&mut wire, Point::new(START.0 + 3, START.1, 0), 20_000, now);
+    engage(&mut wire, wire_connection, wire_mob, now);
+    let mut announced: Vec<(usize, u32)> = Vec::new();
+    for tick in 0..400 {
+        wire.tick(now);
+        for interval in action_phase_intervals(&packets_for(&mut wire, wire_connection), wire_actor) {
+            announced.push((tick, interval));
+        }
+    }
+    println!("phase intervals announced: {announced:?}");
+    println!("the fight, in runs: {:#?}", runs(&timeline));
+}
+
 /// Walking up to a fight, which is the one thing an edge cannot tell you about.
 ///
 /// A phase and a refusal both cross the wire only when they *change*, so a
@@ -7034,8 +7136,12 @@ fn an_ambusher_is_hidden_from_watchers_and_not_from_itself() {
 
     // Short of the impact on purpose: the shot itself breaks cover, and every
     // draw after that one is an ordinary telegraphed draw that watchers are
-    // *supposed* to hear. What is under test is the concealed one.
-    let timeline = fight_timeline(&mut world, connection, fighter, 90, now, |_, _| {});
+    // *supposed* to hear. What is under test is the concealed one. Read off the
+    // draw rather than written down, because the draw is an operator setting
+    // now (`gameplay.action_speed`) and a constant here would quietly start
+    // testing the second draw the day somebody retuned it.
+    let draw = u32::try_from(combat::swing_speed(&world.state, fighter)).unwrap();
+    let timeline = fight_timeline(&mut world, connection, fighter, draw - 2, now, |_, _| {});
     let blank: Vec<usize> = timeline
         .iter()
         .enumerate()
@@ -7121,10 +7227,13 @@ fn a_creature_that_loses_its_quarry_does_not_call_the_quarry_gone() {
 /// far along what* — a bow coming up and a bow held at full draw fill the same
 /// rectangle — so the shard walks the stages and announces each one it enters.
 ///
-/// The shipped shares put a shot's boundaries at 10/60/90 percent of the
-/// interval, so a whole draw crosses three of them. `Ready` is not among them:
+/// The shipped shares put a shot's boundaries at 10 and 80 percent of the
+/// interval, so a whole draw crosses two of them. `Ready` is not among them:
 /// every action opens in it, and a packet saying what the commit already implied
-/// would be a packet nobody needed.
+/// would be a packet nobody needed. Neither is `Aim`, and that is the load-bearing
+/// half of this test — see `action_stages`: aiming is *holding*, an action
+/// running through an interval holds nothing, and the stretch that used to sit
+/// between the draw and the loose read on screen as a delay with no cause.
 #[test]
 fn a_drawn_bow_is_announced_stage_by_stage_as_it_bends() {
     let now = Instant::now();
@@ -7142,18 +7251,15 @@ fn a_drawn_bow_is_announced_stage_by_stage_as_it_bends() {
     for _ in 0..draw {
         world.tick(now);
         seen.extend(action_stages(&packets_for(&mut world, connection), archer));
-        if seen.len() >= 3 {
+        if seen.len() >= 2 {
             break;
         }
     }
     assert_eq!(
         seen,
-        vec![
-            ActionStage::Load.to_bits(),
-            ActionStage::Aim.to_bits(),
-            ActionStage::Release.to_bits(),
-        ],
-        "the string is drawn, then held, then loosed — in that order and each once"
+        vec![ActionStage::Load.to_bits(), ActionStage::Release.to_bits()],
+        "the string is drawn, then loosed — in that order and each once, with no \
+         stretch in between in which the bow is bent and nothing is happening"
     );
 }
 
