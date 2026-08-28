@@ -61,6 +61,8 @@ pub enum StaffCommand {
     Boat,
     /// `.deed <multi id>`
     Deed,
+    /// `.dummy [hits|off]`
+    Dummy,
     /// `.gm [on|off]`
     Gm,
     /// `.go <x> <y> [z] [facet]`
@@ -118,13 +120,14 @@ impl StaffCommand {
     ///
     /// An array and not a `Vec`: it is a constant, and the client walks it on
     /// every keystroke while a command is being typed.
-    pub const ALL: [Self; 31] = [
+    pub const ALL: [Self; 32] = [
         Self::Add,
         Self::AddGold,
         Self::AddStatic,
         Self::Admin,
         Self::Boat,
         Self::Deed,
+        Self::Dummy,
         Self::Gm,
         Self::Go,
         Self::HBan,
@@ -163,6 +166,7 @@ impl StaffCommand {
             Self::Admin => "admin",
             Self::Boat => "boat",
             Self::Deed => "deed",
+            Self::Dummy => "dummy",
             Self::Gm => "gm",
             Self::Go => "go",
             Self::HBan => "hban",
@@ -207,6 +211,7 @@ impl StaffCommand {
             Self::RmStatic => "[nth]",
             Self::SetLand => "<tile id> [z]",
             Self::Boat | Self::Deed | Self::HDesign => "<multi id>",
+            Self::Dummy => "[hits|off]",
             Self::House => "<multi id|@template> [x y z]",
             Self::Gm => "[on|off]",
             Self::HDemolish => "[house serial]",
@@ -247,6 +252,7 @@ impl StaffCommand {
             Self::Admin => "open the administration menu",
             Self::Boat => "put a ship on the water at your feet",
             Self::Deed => "put a house deed in your pack",
+            Self::Dummy => "stand a scarecrow beside you to shoot at",
             Self::Gm => "turn staff mode on or off",
             Self::Go => "jump to coordinates",
             Self::HBan => "click whom to ban from this house",

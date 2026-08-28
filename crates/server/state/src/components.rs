@@ -2008,6 +2008,24 @@ pub struct Banker;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Healer;
 
+/// Marks a mobile as a training scarecrow: something to hit that does nothing
+/// back.
+///
+/// It carries no behaviour of its own, and that is the whole design. A scarecrow
+/// is an ordinary mobile whose *spawn* leaves out every part that would make it
+/// act — no [`Brain`] (so nothing thinks for it, and `ai::retaliate` skips it
+/// where it looks one up), no [`Client`], no melee damage worth the name — so it
+/// falls out of the machinery already there rather than being a case inside it.
+///
+/// What the marker is for is **saying so**: without it, "the thing the staff put
+/// down to shoot at" is only recognisable by guessing from a shape (a mobile
+/// with no brain, grey, standing still), and a guess is what `.dummy off` would
+/// then be removing. It is saved with the mobile for the same reason — a
+/// scarecrow that came back from a restart as an anonymous immobile body would
+/// be exactly that guess, one restart later.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Scarecrow;
+
 /// The trade a townsperson plies, in ServUO's form — "the blacksmith", "the
 /// banker". The `Title` beside a `BaseVendor`'s `Name`.
 ///

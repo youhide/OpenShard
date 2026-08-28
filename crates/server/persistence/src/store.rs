@@ -770,6 +770,7 @@ mod tests {
             banker: false,
             vendor: false,
             healer: false,
+            scarecrow: false,
             title: None,
             npc_home: None,
             night_home: None,

@@ -83,6 +83,7 @@ pub fn run(state: &mut WorldState, actor: EntityId, rest: &str) {
         StaffCommand::Skill => set_skill(state, actor, &args),
         StaffCommand::House => place_house(state, actor, &args),
         StaffCommand::Deed => make_deed(state, actor, &args),
+        StaffCommand::Dummy => place_dummy(state, actor, &args),
         StaffCommand::HFriend => house_list(state, actor, HouseChange::Friend),
         StaffCommand::HCoOwner => house_list(state, actor, HouseChange::CoOwner),
         StaffCommand::HDrop => house_list(state, actor, HouseChange::Drop),
@@ -397,6 +398,181 @@ fn make_key(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         .registry
         .insert(key, openshard_state::components::Name(format!("a key ({value})")));
     notify(state, actor, &format!("A key for lock {value} is in your pack."));
+}
+
+/// What a scarecrow is made of, in one place.
+///
+/// A human body, because the client ships mobile art for people and monsters and
+/// nothing that looks like a target — the *picture* is a stand-in and the
+/// behaviour is the point. Hued the colour of old straw and named for what it
+/// is, so nobody mistakes it for a townsperson somebody forgot to give a trade.
+mod scarecrow {
+    use openshard_protocol::wire::{Graphic, Hue, Layer};
+
+    /// The body: ServUO's `BODY_MALE`, the same one every human wears.
+    pub const BODY: Graphic = Graphic(0x0190);
+    /// Old straw. A hue rather than a body, for the reason above.
+    pub const HUE: Hue = Hue(0x0387);
+    /// A robe, so it reads as a dressed figure rather than a naked person
+    /// standing very still in a field.
+    pub const ROBE: Graphic = Graphic(0x1F03);
+    /// Outer torso — the layer a robe is worn on.
+    pub const ROBE_LAYER: Layer = Layer(0x16);
+    /// What it can take before it falls over, when nobody says.
+    ///
+    /// Generous on purpose: this is a thing to practise against, and one that
+    /// died in the middle of a diagnostic run would take the run with it. It
+    /// mends itself between shots anyway — `combat::vitals::regen_hits` reads
+    /// hit points and asks nothing about brains.
+    pub const HITS: u16 = 10_000;
+    /// How far `.dummy off` looks for one. Far enough to catch the one you just
+    /// put down and walked away from; short enough that it cannot reach into the
+    /// next room and take somebody else's.
+    pub const REMOVE_RANGE: u32 = 20;
+}
+
+/// `.dummy [hits|off]` — stand a scarecrow beside you, or take the nearest away.
+///
+/// **A target that does nothing back**, which is what makes a report about
+/// combat reproducible. Chasing *"he just stands there sometimes"* against a
+/// live creature means the mob, its brain, the line of sight and the operator
+/// are all moving at once, and every run is a different run; against this,
+/// nothing moves but the thing under test.
+///
+/// It is built entirely out of *omissions* rather than out of special cases. The
+/// spawn asks for sight zero, no wander and the aggressive disposition, which is
+/// precisely the combination [`openshard_npc::spawn`] builds **no brain** from —
+/// so nothing thinks for it, nothing walks it, and `ai::retaliate` skips it where
+/// it looks a brain up. It is grey rather than blue so that shooting it flags
+/// nobody criminal, and it deals no damage, so a stray blow from it is not a
+/// thing that can exist.
+///
+/// It stands one tile in front of the operator, the way `.add` drops at their
+/// feet: a fixed distance would be a guess about the room, and the operator can
+/// walk back to whatever range they wanted to test.
+fn place_dummy(state: &mut WorldState, actor: EntityId, args: &[&str]) {
+    if args.first().is_some_and(|word| word.eq_ignore_ascii_case("off")) {
+        remove_dummy(state, actor);
+        return;
+    }
+    let hits = match args.first() {
+        None => scarecrow::HITS,
+        Some(word) => match word.parse::<u16>() {
+            Ok(hits) if hits > 0 => hits,
+            _ => {
+                notify(state, actor, "Usage: .dummy [hits|off]");
+                return;
+            }
+        },
+    };
+    let Some(&Position(at)) = state.registry.get::<Position>(actor) else {
+        return;
+    };
+    let facet = state.facet_of(actor);
+    // One tile the way the operator is looking, and their own tile if there is
+    // nowhere in front — two bodies on one tile is untidy rather than broken,
+    // and it beats refusing to place the thing at all.
+    let facing = state
+        .registry
+        .get::<openshard_state::components::Heading>(actor)
+        .map_or(Direction::South, |heading| heading.0.direction);
+    let stands = openshard_movement::step_from(at, facing).unwrap_or(at);
+    let Some(entity) = openshard_npc::spawn(
+        state,
+        openshard_npc::SpawnSpec {
+            body: scarecrow::BODY,
+            hue: scarecrow::HUE,
+            hits,
+            // Grey: shooting a criminal flags nobody, and a practice target that
+            // made its user a felon would be a trap rather than a tool.
+            notoriety: openshard_protocol::mobile::Notoriety::Criminal,
+            damage: 0,
+            resistance: openshard_protocol::world::PhysicalResistance::new(0),
+            swing: 0,
+            // The three that together mean *no brain*: see the doc above. This
+            // is the whole of "it does not move and does not fight back".
+            sight: openshard_protocol::world::Sight(0),
+            aggression: openshard_state::components::Aggression::Aggressive,
+            beat: 0,
+            ranged: None,
+            ranged_kind: openshard_protocol::world::DamageType::Physical,
+            wander: false,
+            position: stands,
+            facet,
+            name: Some("a scarecrow".to_owned()),
+            title: None,
+            shoe: openshard_npc::ShoeType::Sandals,
+            fame: 0,
+            karma: 0,
+            night_home: None,
+            banker: false,
+            vendor: false,
+            healer: false,
+            equipment: vec![(scarecrow::ROBE, scarecrow::ROBE_LAYER, scarecrow::HUE)],
+            skills: Vec::new(),
+        },
+    ) else {
+        notify(state, actor, "No room for a scarecrow.");
+        return;
+    };
+    state
+        .registry
+        .insert(entity, openshard_state::components::Scarecrow);
+    notify(
+        state,
+        actor,
+        &format!("A scarecrow with {hits} hit points is standing in front of you."),
+    );
+}
+
+/// `.dummy off` — take the nearest scarecrow away.
+///
+/// Nearest rather than clicked, because the thing this removes is the thing the
+/// same command put down a moment ago, and a target cursor for that is a step
+/// nobody wanted. It only ever finds a [`Scarecrow`](openshard_state::components::Scarecrow):
+/// the marker is on the mobile precisely so this is not a guess about which
+/// standing body was a prop.
+fn remove_dummy(state: &mut WorldState, actor: EntityId) {
+    let Some(&Position(at)) = state.registry.get::<Position>(actor) else {
+        return;
+    };
+    let facet = state.facet_of(actor);
+    let nearest = state
+        .registry
+        .query::<openshard_state::components::Scarecrow>()
+        .filter_map(|(entity, _)| {
+            let &Position(stands) = state.registry.get::<Position>(entity)?;
+            (state.facet_of(entity) == facet).then_some(())?;
+            let gap = openshard_state::sectors::distance(at, stands);
+            (gap <= scarecrow::REMOVE_RANGE).then_some((gap, entity))
+        })
+        .min_by_key(|&(gap, _)| gap)
+        .map(|(_, entity)| entity);
+    let Some(entity) = nearest else {
+        notify(state, actor, "There is no scarecrow near you.");
+        return;
+    };
+    // Every fight it was in ends with it, and says so: a watcher whose archer was
+    // mid-draw at a scarecrow that simply vanished would keep drawing the bar.
+    // `despawn_mobile` forgets the body from every screen; this is the other half.
+    let serial = state.registry.serial_of(entity);
+    if let Some(serial) = serial {
+        let fighting: Vec<EntityId> = state
+            .registry
+            .query::<openshard_state::components::Combat>()
+            .filter(|(_, combat)| combat.target() == Some(serial))
+            .map(|(fighter, _)| fighter)
+            .collect();
+        for fighter in fighting {
+            openshard_combat::clear_target(
+                state,
+                fighter,
+                openshard_protocol::feedback::InterruptReason::TargetGone,
+            );
+        }
+    }
+    state.despawn_mobile(entity);
+    notify(state, actor, "The scarecrow is gone.");
 }
 
 /// `.poison <level>` — drop a bottle of poison at the operator's feet.

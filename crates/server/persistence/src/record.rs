@@ -1267,6 +1267,16 @@ pub struct MobileRecord {
     /// loads with no healers rather than failing to parse.
     #[serde(default)]
     pub healer: bool,
+    /// Whether it is a training scarecrow — a prop the staff put down to shoot
+    /// at. Defaulted like `healer`, so an older save loads with none rather than
+    /// failing to parse.
+    ///
+    /// Saved because the alternative is guessing. Everything else about a
+    /// scarecrow is an *absence* — no brain, no damage, no trade — and a mobile
+    /// recognised by what it lacks is a mobile something else will one day
+    /// resemble. `.dummy off` removes what this names.
+    #[serde(default)]
+    pub scarecrow: bool,
     /// The trade it plies, ServUO-style ("the blacksmith"). `None` for a creature.
     ///
     /// Saved because it is a *key*, not decoration: the speech table an NPC answers

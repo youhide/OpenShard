@@ -1018,6 +1018,20 @@ impl App {
                 }
             }
         }
+        // A panel button that is a typed command. Sent as speech, through the
+        // one door every staff command already comes in by, so the shard's
+        // authority gate and its single implementation are the ones that run:
+        // a panel with a private entry point of its own would be a second place
+        // for the button and the word to disagree. The authority test here is
+        // the same belt the item form wears — the shard checks again, and this
+        // only keeps a button that would be refused from being sent at all.
+        if let Some(command) = request.staff_command {
+            if authority.allows(openshard_commands::StaffCommand::AUTHORITY) {
+                if let Some(link) = self.world.shard.link() {
+                    link.say(command, openshard_protocol::speech::TalkMode::Regular);
+                }
+            }
+        }
         // The rebake button. A client with no facet open has nothing to bake a
         // graph *of*, and that is the state the button is disabled in anyway —
         // this is the second net, because a facet is the worker's own argument.

@@ -2000,6 +2000,7 @@ mod tests {
                 banker: false,
                 vendor: true,
                 healer: false,
+                scarecrow: false,
                 title: Some("the vendor".into()),
                 npc_home: Some((1400, 1600, 0)),
                 npc_wander: 2,

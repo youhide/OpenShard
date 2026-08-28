@@ -725,6 +725,7 @@ impl World {
                 banker: registry.has::<Banker>(entity),
                 vendor: registry.has::<Vendor>(entity),
                 healer: registry.has::<Healer>(entity),
+                scarecrow: registry.has::<openshard_state::components::Scarecrow>(entity),
                 title: registry.get::<Title>(entity).map(|t| t.0.clone()),
                 npc_home: npc.map(|n| (n.home.x, n.home.y, n.home.z)),
                 npc_wander: npc.map_or(0, |n| n.wander),
@@ -1567,6 +1568,9 @@ impl World {
             }
             if record.healer {
                 registry.insert(entity, Healer);
+            }
+            if record.scarecrow {
+                registry.insert(entity, openshard_state::components::Scarecrow);
             }
             // The trade, without which a restored NPC is a mute statue: every
             // keyword it answers is looked up by this string.

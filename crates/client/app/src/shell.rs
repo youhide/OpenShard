@@ -195,6 +195,15 @@ pub struct Request {
     pub create_item: Option<AdminItemRequest>,
     /// Raise a server-side target cursor for this animal catalogue entry.
     pub place_creature: Option<u16>,
+    /// Type this staff command for the player, prefix and all (`.dummy`).
+    ///
+    /// A button, and the same sentence a person could have typed: the shard has
+    /// exactly one implementation of every command and exactly one authority
+    /// gate on the way in, so a panel that reached past speech to a private
+    /// entry point would be a second place for the two to disagree. What the
+    /// button buys is not a shortcut past the shard, it is not having to
+    /// remember the word.
+    pub staff_command: Option<String>,
 }
 
 /// What the script picker asked for.
@@ -1016,6 +1025,21 @@ fn admin_items_panel(
     ui.heading("Animals");
     ui.label("Click an animal, then choose its place on the map.");
     catalogue_grid(ui, ANIMALS, |entry| request.place_creature = Some(entry.id));
+    ui.add_space(10.0);
+    ui.heading("Scarecrow");
+    ui.label(
+        "A target that does nothing back: it does not move, does not fight and does not flag you. \
+         Put one down before chasing anything about combat — against a live creature the mob, its \
+         brain and the sight line all move at once, and no two runs are the same run.",
+    );
+    ui.horizontal(|ui| {
+        if ui.button("Stand one in front of me").clicked() {
+            request.staff_command = Some(format!("{}dummy", openshard_commands::PREFIX));
+        }
+        if ui.button("Take the nearest away").clicked() {
+            request.staff_command = Some(format!("{}dummy off", openshard_commands::PREFIX));
+        }
+    });
     ui.add_space(10.0);
     ui.collapsing("Custom item", |ui| {
         ui.label("Graphic and hue accept decimal or 0x hexadecimal values.");

@@ -11438,6 +11438,135 @@ fn a_gm_dot_command_is_run_not_spoken() {
     );
 }
 
+/// `.dummy` — **a target that does nothing back**, which is the whole of what a
+/// scarecrow is for: chasing a report about combat against a live creature means
+/// the mob, its brain and the sight line are all moving at once and no two runs
+/// are the same run.
+///
+/// Everything asserted here is an *absence*, and deliberately: the scarecrow is
+/// built out of the parts `spawn` leaves out rather than out of special cases in
+/// the passes. No brain is the one that carries the rest — nothing thinks for
+/// it, nothing walks it, and `ai::retaliate` skips it where it looks one up.
+#[test]
+fn a_scarecrow_stands_there_and_does_nothing_back() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player = world.state.players[&gm];
+    let at = world.registry().get::<Position>(player).unwrap().0;
+
+    gm_say(&mut world, gm, ".dummy", now);
+
+    let (dummy, _) = world
+        .registry()
+        .query::<openshard_state::components::Scarecrow>()
+        .next()
+        .expect("a scarecrow was put down");
+    assert!(
+        !world.registry().has::<openshard_state::components::Brain>(dummy),
+        "a scarecrow with a brain would wander off, or fight back"
+    );
+    assert_eq!(
+        world.registry().get::<Notoriety>(dummy).copied(),
+        Some(Notoriety::Criminal),
+        "grey, so shooting one flags nobody criminal"
+    );
+    let stood = world.registry().get::<Position>(dummy).unwrap().0;
+    assert!(
+        openshard_state::sectors::distance(at, stood) <= 1,
+        "it stands where the operator was looking, not across the map"
+    );
+
+    // A hundred ticks of the world running, and it has done nothing: no step, no
+    // fight picked, no action committed. The claim a `Brain` assertion cannot
+    // make on its own — something else could always have given it one.
+    for _ in 0..100 {
+        world.tick(now);
+    }
+    assert_eq!(
+        world.registry().get::<Position>(dummy).unwrap().0,
+        stood,
+        "it has not moved"
+    );
+    assert!(!world.registry().has::<Combat>(dummy), "and has picked no fight");
+
+    // And it is a real target: a shot at it commits like a shot at anything.
+    let serial = world.registry().serial_of(dummy).unwrap();
+    arm_with_bow(&mut world, gm);
+    engage(&mut world, gm, serial, now);
+    assert!(
+        world.registry().has::<CombatAction>(player),
+        "a scarecrow can be shot at, which is the entire point of one"
+    );
+}
+
+/// `.dummy off` takes the nearest away, and every fight it was in ends saying so.
+///
+/// The second half is the interesting one. A body that simply stopped existing
+/// leaves its attacker's bar filling towards an impact that will never come —
+/// which is the desync `CombatActionEnded` was added for, arriving by a door
+/// nobody had walked through yet.
+#[test]
+fn removing_a_scarecrow_ends_the_fight_it_was_in() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player = world.state.players[&gm];
+    gm_say(&mut world, gm, ".dummy", now);
+    let (dummy, _) = world
+        .registry()
+        .query::<openshard_state::components::Scarecrow>()
+        .next()
+        .expect("a scarecrow was put down");
+    let serial = world.registry().serial_of(dummy).unwrap();
+    engage(&mut world, gm, serial, now);
+    assert!(world.registry().has::<CombatAction>(player), "a fight is on");
+    let _ = packets_for(&mut world, gm);
+
+    gm_say(&mut world, gm, ".dummy off", now);
+
+    assert_eq!(
+        world
+            .registry()
+            .query::<openshard_state::components::Scarecrow>()
+            .count(),
+        0,
+        "it is gone"
+    );
+    assert!(
+        !world.registry().has::<CombatAction>(player),
+        "and the swing at it went with it"
+    );
+    assert_eq!(
+        action_end(&packets_for(&mut world, gm)),
+        Some((
+            CombatActionOutcome::Interrupted(InterruptReason::TargetGone).to_bits(),
+            InterruptReason::TargetGone.to_bits()
+        )),
+        "with a reason, or the bar fills towards an impact that is never coming"
+    );
+}
+
+/// A scarecrow comes back from a save as a scarecrow.
+///
+/// It is recognisable by a marker and not by its shape — everything else about
+/// one is an absence, and a mobile identified by what it lacks is one something
+/// else will eventually resemble. That marker has to survive the round trip or
+/// `.dummy off` is guessing again, one restart later.
+#[test]
+fn a_saved_scarecrow_is_still_a_scarecrow() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    gm_say(&mut world, gm, ".dummy", now);
+    let records = world.mobile_records();
+    let record = records
+        .iter()
+        .find(|record| record.name.as_deref() == Some("a scarecrow"))
+        .expect("the scarecrow is in the save");
+    assert!(record.scarecrow, "and is saved as one");
+}
+
 #[test]
 fn a_players_dot_text_is_ordinary_speech() {
     // A non-GM saying ".hello" just talks: no command, no privilege leak, and
