@@ -440,9 +440,28 @@ impl Shard {
 ///
 /// Announcement lives here rather than in [`crate::pace`] so that the
 /// measurement stays a measurement: `Pace` can be driven by a test with no
-/// subscriber attached, and nothing it reports depends on having one.
-fn report_pace(pace: &mut crate::pace::Pace, window: crate::pace::Window) {
+/// subscriber attached, and nothing it reports depends on having one. The stop
+/// is here for the same reason — a type that measures a clock should not be able
+/// to end a shard.
+fn report_pace(pace: &mut crate::pace::Pace, window: crate::pace::Window, shutdown: &Shutdown) {
     match pace.verdict(window) {
+        Some(crate::pace::Verdict::GivingUp { window, windows }) => {
+            error!(
+                behind_windows = windows,
+                observed_ticks_per_second = window.observed_rate(),
+                declared_ticks_per_second = openshard_state::TICKS_PER_SECOND,
+                busy_share = window.busy_share(),
+                worst_tick_ms = window.worst.as_secs_f32() * 1000.0,
+                "the tick has been slower than its declared rate for {windows} seconds; every \
+                 interval announced in that time was wrong. Stopping — the world is saved on the \
+                 way out. Raise or clear `[watchdog] tick_behind_windows` to let it run on."
+            );
+            // The same stop Ctrl-C asks for, and deliberately not a panic: a
+            // panic drops the task that writes the world, so it would answer a
+            // silent lie with silent data loss. `run_shard` leaves its loop on
+            // this and saves below it.
+            shutdown.stop();
+        }
         Some(crate::pace::Verdict::FellBehind(window)) => warn!(
             observed_ticks_per_second = window.observed_rate(),
             declared_ticks_per_second = openshard_state::TICKS_PER_SECOND,
@@ -569,7 +588,7 @@ pub async fn run_shard(
     // the slower clock sayable; see `crate::pace` for why the wall clock may be
     // read here and nowhere inside the tick.
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut pace = crate::pace::Pace::new();
+    let mut pace = crate::pace::Pace::new(crate::pace::BehindWindows(config.watchdog.tick_behind_windows));
     let mut key_sweep = tokio::time::interval(KEY_SWEEP);
     key_sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -587,7 +606,7 @@ pub async fn run_shard(
                 // never handed a wall clock, so replay is untouched and a run
                 // with this measurement produces the same world as one without.
                 if let Some(window) = pace.record(began, began.elapsed()) {
-                    report_pace(&mut pace, window);
+                    report_pace(&mut pace, window, &shutdown);
                 }
             }
 

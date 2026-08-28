@@ -104,6 +104,27 @@ database = ""
 #   save_seconds = 120
 save_seconds = 180
 
+[watchdog]
+# What the shard does when it stops keeping its own tick rate.
+#
+# Every duration the shard puts on the wire — a bow's interval, an animation's
+# stretch, a decay, a criminal flag — is a count of ticks converted at 40 a
+# second. A tick that is not 25ms long therefore does not make the shard late, it
+# makes every number the shard says WRONG, and neither the client nor any
+# tick-counting test can notice: both sides of what they compare are in the unit
+# that slipped. This has happened: the tick fell to 6.9 a second, a bow announced
+# 1.6s and landed at 6.5s, and the shard reported nothing because in its own
+# units it was correct throughout.
+#
+# So a shard that has been behind for this many consecutive seconds stops itself,
+# saying why. It is a clean stop and not a crash: the world is saved on the way
+# out. A single slow tick never trips it — that is a disk, a big save, a busy
+# machine — only a run of whole seconds, which is the shard itself.
+#
+# 0 turns the stop off and leaves only the log line. Default is 60.
+#   tick_behind_windows = 120
+tick_behind_windows = 60
+
 [gameplay]
 # The rules knobs — the SphereServer sphere.ini equivalents. Every value here has
 # a working default; uncomment one only to change the shard's feel.

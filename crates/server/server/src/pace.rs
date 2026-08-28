@@ -146,12 +146,30 @@ impl Partial {
     }
 }
 
+/// How many consecutive behind windows the shard tolerates before stopping
+/// itself, straight out of `[watchdog] tick_behind_windows`.
+///
+/// A newtype because it is a count of *windows* and there are three other counts
+/// of things in this module — intervals, ticks behind, milliseconds — and a bare
+/// `u32` passed into [`Pace::new`] would be as valid as any of them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct BehindWindows(pub(crate) u32);
+
+impl BehindWindows {
+    /// Whether this limit ever fires. Zero is an operator saying *"tell me, do
+    /// not stop me"*, which is a real answer and not a disabled feature.
+    const fn stops(self) -> bool {
+        self.0 > 0
+    }
+}
+
 /// The shard's own pace, measured against the one it publishes.
 ///
 /// Fed one call per tick from the driving loop, it answers with a [`Window`]
 /// once a second's worth of intervals have been measured, and otherwise with
 /// nothing. Deciding what to *say* about a window is the caller's — see
-/// [`Pace::verdict`], which is where the standing state and its edges live.
+/// [`Pace::verdict`], which is where the standing state, its edges and the
+/// giving-up live.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Pace {
     /// The interval currently open, or `None` before the first tick.
@@ -164,16 +182,26 @@ pub(crate) struct Pace {
     /// its edges rather than restated every second. `None` until the first
     /// window closes, which is why the first verdict is always spoken.
     said: Option<bool>,
+    /// How many windows in a row have been behind. Reset by any window that is
+    /// not, because what the limit is about is a shard that *stays* wrong: a
+    /// hiccup a second apart, forever, is a different complaint and killing a
+    /// shard for it would be the wrong answer to it.
+    streak: u32,
+    /// The operator's patience, from `[watchdog] tick_behind_windows`.
+    limit: BehindWindows,
 }
 
 impl Pace {
-    /// A pace that has measured nothing.
+    /// A pace that has measured nothing, and the patience it will hold the shard
+    /// to.
     #[must_use]
-    pub(crate) const fn new() -> Self {
+    pub(crate) const fn new(limit: BehindWindows) -> Self {
         Self {
             open: None,
             partial: Partial::empty(),
             said: None,
+            streak: 0,
+            limit,
         }
     }
 
@@ -210,6 +238,21 @@ impl Pace {
     /// and when it stopped.
     pub(crate) fn verdict(&mut self, window: Window) -> Option<Verdict> {
         let behind = window.behind();
+        self.streak = match behind {
+            true => self.streak + 1,
+            false => 0,
+        };
+        // Checked before the edge, and it can only be reached while behind: a
+        // shard that has been wrong for the operator's whole patience has
+        // nothing left to announce a *change* about, and saying "fell behind"
+        // and "giving up" in the same breath would be two lines about one fact.
+        if self.limit.stops() && self.streak == self.limit.0 {
+            self.said = Some(true);
+            return Some(Verdict::GivingUp {
+                window,
+                windows: self.streak,
+            });
+        }
         if self.said == Some(behind) {
             return None;
         }
@@ -229,13 +272,29 @@ pub(crate) enum Verdict {
     FellBehind(Window),
     /// It is keeping it again — or, on the first window of a run, was all along.
     CaughtUp(Window),
+    /// It has been behind for the whole of the operator's patience, and every
+    /// interval it announced in that time was wrong. Said once, at the window
+    /// the limit was reached on, and never again — the stop that follows is what
+    /// happens next, not something this repeats until.
+    GivingUp {
+        /// The window that reached the limit, for the numbers in the line.
+        window: Window,
+        /// How many in a row it took, which is the operator's own setting read
+        /// back to them.
+        windows: u32,
+    },
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Pace, Verdict, WINDOW, Window};
+    use super::{BehindWindows, Pace, Verdict, WINDOW, Window};
     use openshard_world::TICK_INTERVAL;
     use std::time::{Duration, Instant};
+
+    /// The patience of an operator who wants to be told and not stopped. Every
+    /// test about the *edges* uses it, so that none of them can pass by
+    /// accidentally giving up instead of reporting.
+    const NEVER_STOPS: BehindWindows = BehindWindows(0);
 
     /// Drive `pace` through `intervals` ticks spaced `every` apart, each tick's
     /// body costing `body`, and return every verdict it produced.
@@ -259,7 +318,7 @@ mod tests {
     /// falling behind, however long it runs.
     #[test]
     fn a_shard_running_at_its_declared_rate_is_never_behind() {
-        let mut pace = Pace::new();
+        let mut pace = Pace::new(NEVER_STOPS);
         let said = run(&mut pace, WINDOW * 3, TICK_INTERVAL, Duration::from_millis(1));
         assert!(
             said.iter().all(|verdict| matches!(verdict, Verdict::CaughtUp(_))),
@@ -272,7 +331,7 @@ mod tests {
     /// times shorter than the one it delivers.
     #[test]
     fn a_tick_four_times_too_slow_is_reported_as_three_quarters_of_a_second_behind() {
-        let mut pace = Pace::new();
+        let mut pace = Pace::new(NEVER_STOPS);
         let said = run(&mut pace, WINDOW, TICK_INTERVAL * 4, Duration::from_millis(1));
         let [Verdict::FellBehind(window)] = said[..] else {
             panic!("a quarter-speed shard did not report falling behind: {said:?}");
@@ -293,7 +352,7 @@ mod tests {
     /// be a threshold tuned by eye pretending to be a measurement.
     #[test]
     fn a_window_late_by_less_than_a_whole_tick_is_not_behind() {
-        let mut pace = Pace::new();
+        let mut pace = Pace::new(NEVER_STOPS);
         let late = TICK_INTERVAL + Duration::from_micros(100);
         let said = run(&mut pace, WINDOW, late, Duration::from_millis(1));
         assert!(
@@ -305,7 +364,7 @@ mod tests {
     /// One window's measurements, for the assertions that are about the numbers
     /// rather than about what was said.
     fn window_of(every: Duration, body: Duration) -> Window {
-        let mut pace = Pace::new();
+        let mut pace = Pace::new(NEVER_STOPS);
         let start = Instant::now();
         let mut closed = None;
         for step in 0..=WINDOW {
@@ -333,11 +392,60 @@ mod tests {
         );
     }
 
+    /// The watchdog: a shard that stays wrong for the operator's whole patience
+    /// gives up, and does it on the window the limit is reached on rather than a
+    /// window later.
+    #[test]
+    fn a_shard_behind_for_the_whole_limit_gives_up_on_that_window() {
+        let mut pace = Pace::new(BehindWindows(3));
+        let said = run(&mut pace, WINDOW * 4, TICK_INTERVAL * 4, Duration::from_millis(1));
+        // Window 1 is the edge, window 3 is the limit, and window 2 says nothing
+        // because the state did not change in it.
+        assert!(matches!(said[0], Verdict::FellBehind(_)), "the edge: {said:?}");
+        let [_, Verdict::GivingUp { windows, .. }] = said[..] else {
+            panic!("a shard behind for its whole patience did not give up: {said:?}");
+        };
+        assert_eq!(windows, 3, "it gave up after the wrong number of windows");
+    }
+
+    /// A hiccup a second apart forever is a different complaint, and killing a
+    /// shard for it would be the wrong answer to it. The streak is *consecutive*.
+    #[test]
+    fn a_window_that_keeps_the_rate_forgives_the_ones_before_it() {
+        let mut pace = Pace::new(BehindWindows(2));
+        let mut said = run(&mut pace, WINDOW, TICK_INTERVAL * 4, Duration::from_millis(1));
+        said.extend(run(&mut pace, WINDOW, TICK_INTERVAL, Duration::from_millis(1)));
+        said.extend(run(
+            &mut pace,
+            WINDOW,
+            TICK_INTERVAL * 4,
+            Duration::from_millis(1),
+        ));
+        assert!(
+            !said
+                .iter()
+                .any(|verdict| matches!(verdict, Verdict::GivingUp { .. })),
+            "two separated behind windows were treated as a streak of two: {said:?}"
+        );
+    }
+
+    /// Zero is an operator saying *"tell me, do not stop me"*, and it has to be a
+    /// real answer rather than a limit of zero windows that fires immediately.
+    #[test]
+    fn a_patience_of_zero_reports_forever_and_never_gives_up() {
+        let mut pace = Pace::new(NEVER_STOPS);
+        let said = run(&mut pace, WINDOW * 5, TICK_INTERVAL * 4, Duration::from_millis(1));
+        assert!(
+            matches!(said[..], [Verdict::FellBehind(_)]),
+            "a shard told not to stop said something other than the one edge: {said:?}"
+        );
+    }
+
     /// Announced on its edges. A standing state restated every second buries the
     /// log; one stated once hides the recovery.
     #[test]
     fn falling_behind_and_recovering_are_one_line_each() {
-        let mut pace = Pace::new();
+        let mut pace = Pace::new(NEVER_STOPS);
         let mut said = run(&mut pace, WINDOW, TICK_INTERVAL, Duration::from_millis(1));
         said.extend(run(
             &mut pace,

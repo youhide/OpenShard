@@ -59,6 +59,69 @@ pub struct Config {
     /// rebuild. The Sphere `sphere.ini` equivalents, validated at load.
     #[serde(default)]
     pub gameplay: GameplayConfig,
+    /// What the shard does when it stops keeping its own declared tick rate.
+    #[serde(default)]
+    pub watchdog: WatchdogConfig,
+}
+
+/// What the shard does when it stops being the thing it says it is.
+///
+/// # Why a shard that is merely slow is worth stopping
+///
+/// Every duration this shard puts on the wire is a tick count converted at the
+/// declared rate — a bow's `impact_in`, an animation's stretch, a decay, a
+/// criminal flag. A tick that is not 25ms long therefore does not make the shard
+/// *late*: it makes every number the shard says **wrong**, in a way no packet in
+/// the protocol lets a client notice and no tick-by-tick test can see, because
+/// both sides of what such a test compares are counted in the unit that slipped.
+///
+/// That is what happened: an outfit lookup that walked the whole world dropped
+/// the tick to 6.9 of its declared 40, a bow announced 1600ms and landed at
+/// 6500ms, and the shard reported nothing at all because in its own units it was
+/// perfectly correct. A shard in that state is not degraded, it is lying, and it
+/// will go on lying for as long as nobody happens to read a log line.
+///
+/// # Why it stops rather than panics
+///
+/// A panic in the tick loop drops the task that runs it, and that task is the
+/// one that writes the world on its way out — so a panic here would answer a
+/// silent lie with silent data loss. Asking for the same stop that Ctrl-C asks
+/// for gives the same fail-fast and keeps the world: the shard says why, saves,
+/// and exits.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WatchdogConfig {
+    /// How many consecutive one-second windows the shard may run behind its
+    /// declared tick rate before it stops itself. `0` turns the stop off, and
+    /// the shard only says so in the log.
+    ///
+    /// **Consecutive windows and not one long tick**, because those are different
+    /// events with different causes. A single overrun is the outside world — a
+    /// disk that paused, a save that took nine seconds, a machine that had
+    /// something else to do — and killing a shard for it would trade a hiccup
+    /// for an outage. A minute of them is the shard itself, and no amount of
+    /// waiting fixes it.
+    #[serde(default = "default_tick_behind_windows")]
+    pub tick_behind_windows: u32,
+}
+
+impl Default for WatchdogConfig {
+    fn default() -> Self {
+        Self {
+            tick_behind_windows: default_tick_behind_windows(),
+        }
+    }
+}
+
+/// A minute of windows.
+///
+/// Long enough that nothing an operator does on purpose trips it — a world save,
+/// a base-set import, a `.populate` over a whole facet are all seconds and not
+/// minutes — and short enough that nobody plays a whole session against a shard
+/// whose every announced interval is wrong. The defect this was written for held
+/// for as long as the shard was up.
+const fn default_tick_behind_windows() -> u32 {
+    60
 }
 
 /// The gameplay rules an operator tunes: the numbers that were compile-time
