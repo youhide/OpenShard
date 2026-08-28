@@ -62,6 +62,7 @@ pub mod codec;
 pub mod combat;
 pub mod containers;
 pub mod context;
+pub mod craft;
 pub mod design;
 pub mod direction;
 pub mod encoded;

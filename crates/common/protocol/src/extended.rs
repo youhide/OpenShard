@@ -13,11 +13,13 @@
 use crate::casting::CastSpellRequest;
 use crate::chunks::{ChangesRequest, ChunkRequest};
 use crate::context::{ContextMenuRequest, ContextMenuSelect};
+use crate::craft::OpenCraftCatalogue;
 use crate::design::DesignDetailsRequest;
 use crate::error::{DecodeError, expect_id};
 use crate::mapedit::MapEditRequest;
 use crate::mobile::StatLockRequest;
 use crate::party::PartyRequest;
+use crate::world::TurnRequest;
 
 /// A decoded `0xBF` client request.
 ///
@@ -55,6 +57,10 @@ pub enum ExtendedRequest {
     /// Subcommand `0xE009` — commit a bounded batch of canonical map edits
     /// against an exact parent revision.
     MapEdit(MapEditRequest),
+    /// Subcommand `0xE014` — turn on the spot, never step.
+    Turn(TurnRequest),
+    /// `0xBF.0xE015` — open the tool-free craft catalogue.
+    CraftCatalogue(OpenCraftCatalogue),
     /// Any subcommand this engine does not act on — screen size, close-gump
     /// and the rest of the family `0xBF` carries. Not an error:
     /// the same "logged fact, not a dropped connection" treatment
@@ -89,6 +95,10 @@ impl ExtendedRequest {
             ChunkRequest::SUBCOMMAND => Self::Chunks(ChunkRequest::decode_body(&mut reader)?),
             ChangesRequest::SUBCOMMAND => Self::Changes(ChangesRequest::decode_body(&mut reader)?),
             MapEditRequest::SUBCOMMAND => Self::MapEdit(MapEditRequest::decode_body(&mut reader)?),
+            TurnRequest::SUBCOMMAND => Self::Turn(TurnRequest::decode_body(&mut reader)?),
+            OpenCraftCatalogue::SUBCOMMAND => {
+                Self::CraftCatalogue(OpenCraftCatalogue::decode_body(&mut reader)?)
+            }
             other => Self::Unknown(other),
         })
     }

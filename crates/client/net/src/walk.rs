@@ -1,4 +1,5 @@
-//! Walking, from the client's chair: `0x02` out, `0x22` or `0x21` back.
+//! Walking, from the client's chair: typed turn or `0x02` step out, `0x22` or
+//! `0x21` back.
 //!
 //! # Why this has to predict at all
 //!
@@ -6,9 +7,10 @@
 //! colour — and *not* a position. The server has one and does not send it. So
 //! "where am I now?" is a question only this end can answer: it is the tile the
 //! step the ack names was asking for. That is what [`Walk`] keeps, and why it
-//! has to work out turn-versus-step by exactly the rule the server uses. It does
-//! not reimplement that rule — [`openshard_movement::intend`] is the one copy,
-//! and the server's `Walker::request` calls the same function.
+//! decides turn-versus-step locally through [`openshard_movement::intend`]. A
+//! turn is then encoded as [`TurnRequest`], so a combat-facing change while the
+//! packet is in flight cannot make the server reinterpret it as a step. Stock
+//! clients keep the legacy `0x02` inference through `Walker::request`.
 //!
 //! # What it deliberately does not do
 //!
@@ -42,7 +44,9 @@ use openshard_protocol::direction::Facing;
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::packet::FramedClientPacket;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::world::{Point, RawFastwalkKey, RawStepSequence, StepSequence, WalkRequest};
+use openshard_protocol::world::{
+    Point, RawFastwalkKey, RawStepSequence, StepSequence, TurnRequest, WalkRequest,
+};
 
 /// Where this client believes it will be once every step in flight is answered.
 ///
@@ -360,7 +364,7 @@ impl Walk {
         InFlightSteps::new(self.pending.len())
     }
 
-    /// Ask to take one step, and get the `0x02` to write to the socket.
+    /// Ask to turn or take one step, and get the typed turn or `0x02` packet.
     ///
     /// The answer is a [`FramedClientPacket`] rather than a `Vec<u8>` because
     /// this is where the bytes are *made*: the type says they are exactly one
@@ -371,8 +375,8 @@ impl Walk {
     ///
     /// `facing` is a direction and whether to run, exactly as the packet carries
     /// it. Asking for a direction the character is not already facing turns it
-    /// and moves it nowhere — that is a whole step in UO, it gets its own
-    /// sequence number and its own ack, and this predicts it as one.
+    /// and moves it nowhere. It gets its own shared sequence number and ack,
+    /// but a distinct packet so the far end cannot turn it into movement.
     ///
     /// `ground` answers the height to stand at on the target tile, given the
     /// whole point this end believes it is standing at — tile *and* height, not
@@ -418,8 +422,9 @@ impl Walk {
                 in_flight: self.in_flight(),
             });
         }
-        let (position, facing) = match intend(self.predicted.position, self.predicted.facing, facing) {
-            Intent::Turned { facing } => (self.predicted.position, facing),
+        let (position, facing, turning) = match intend(self.predicted.position, self.predicted.facing, facing)
+        {
+            Intent::Turned { facing } => (self.predicted.position, facing, true),
             Intent::Stepped { target, facing } => {
                 // The surface under the target, if the caller knows one, reached
                 // from where this end currently believes it is standing. A tile
@@ -430,7 +435,7 @@ impl Walk {
                     Some(z) => Point::new(target.x, target.y, z),
                     None => target,
                 };
-                (landed, facing)
+                (landed, facing, false)
             }
             Intent::OffTheMap => {
                 return Err(NotSent::AtTheWorldEdge(AtTheWorldEdge {
@@ -447,21 +452,21 @@ impl Walk {
             position,
             facing,
         });
-        let bytes = WalkRequest {
-            facing,
-            sequence,
-            // Never read by anything, on either side of the wire — see
-            // `RawFastwalkKey`. Sending zero is what Sphere's own clients end up
-            // doing once the key is ignored.
-            fastwalk_key: RawFastwalkKey(0),
-        }
-        .encode();
-        // `0x02` is a fixed seven bytes for every client version — see
-        // `client_packet_length` — so the framing answer does not depend on one,
-        // and a `Walk` never learns the connection's version. `None` is the
-        // honest argument rather than a convenient one.
+        let bytes = if turning {
+            TurnRequest { facing, sequence }.encode()
+        } else {
+            WalkRequest {
+                facing,
+                sequence,
+                // Never read by anything, on either side of the wire — see
+                // `RawFastwalkKey`. Sending zero is what Sphere's own clients end up
+                // doing once the key is ignored.
+                fastwalk_key: RawFastwalkKey(0),
+            }
+            .encode()
+        };
         Ok(FramedClientPacket::new(bytes, None)
-            .expect("WalkRequest::encode always writes exactly one whole 0x02 packet"))
+            .expect("a movement encoder always writes exactly one whole packet"))
     }
 
     /// Advance the walk with one packet from the server.
@@ -488,6 +493,14 @@ impl Walk {
                 if !self.out_of_step && update.position == self.confirmed.position =>
             {
                 self.confirmed.facing = update.facing;
+                // With no locally predicted path to preserve, this is the pose
+                // the next input must start from as well. Otherwise a combat
+                // turn leaves `predicted` stale and the client can label a real
+                // direction change as a step — the mirror image of the server
+                // race the typed turn packet closes.
+                if self.pending.is_empty() {
+                    self.predicted.facing = update.facing;
+                }
                 Ok(Moved::Turned {
                     confirmed: self.confirmed,
                 })
@@ -582,6 +595,7 @@ impl Walk {
 #[cfg(test)]
 mod tests {
     use openshard_protocol::direction::Direction;
+    use openshard_protocol::extended::ExtendedRequest;
     use openshard_protocol::serial::Serial;
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_protocol::world::{MapSize, PlayerStart, PlayerUpdate, WalkAck, WalkReject};
@@ -651,7 +665,17 @@ mod tests {
         // the client must predict that or it puts itself a tile ahead of the
         // server for the rest of the session.
         let mut walk = walk();
-        walk.step(Facing::walking(Direction::East), |_, _| None).unwrap();
+        let turn = walk.step(Facing::walking(Direction::East), |_, _| None).unwrap();
+        assert!(matches!(
+            ExtendedRequest::decode(turn.bytes()),
+            Ok(ExtendedRequest::Turn(TurnRequest {
+                facing: Facing {
+                    direction: Direction::East,
+                    running: false,
+                },
+                sequence: RawStepSequence(0),
+            }))
+        ));
         assert_eq!(
             walk.predicted(),
             Predicted {
@@ -661,7 +685,8 @@ mod tests {
             "a turn moves nobody"
         );
 
-        walk.step(Facing::walking(Direction::East), |_, _| None).unwrap();
+        let step = walk.step(Facing::walking(Direction::East), |_, _| None).unwrap();
+        assert_eq!(step.bytes().first(), Some(&0x02));
         assert_eq!(walk.predicted().position, Point::new(101, 100, 0));
         assert_eq!(
             walk.in_flight(),
@@ -810,6 +835,27 @@ mod tests {
     }
 
     #[test]
+    fn a_combat_turn_with_no_pending_steps_becomes_the_next_inputs_facing() {
+        let mut walk = walk();
+        let turn = PlayerUpdate {
+            serial: Serial::new(0x0000_002A).unwrap(),
+            body: Graphic(0x0190),
+            hue: Hue::NONE,
+            flags: openshard_protocol::mobile::StatusFlags::NONE,
+            position: Point::new(100, 100, 0),
+            facing: Facing::walking(Direction::East),
+        };
+        assert!(matches!(
+            walk.on_packet(&ServerPacket::PlayerUpdate(turn)),
+            Ok(Moved::Turned { .. })
+        ));
+
+        let packet = walk.step(Facing::walking(Direction::East), |_, _| None).unwrap();
+        assert_eq!(packet.bytes().first(), Some(&0x02), "east is now a real step");
+        assert_eq!(walk.predicted().position, Point::new(101, 100, 0));
+    }
+
+    #[test]
     fn a_second_player_start_is_a_jump_as_well() {
         let mut walk = walk();
         walk.step(Facing::walking(Direction::North), |_, _| None).unwrap();
@@ -885,7 +931,10 @@ mod tests {
         );
         assert_eq!(
             walk.step(Facing::walking(Direction::East), |_, _| None)
-                .map(|packet| sent_sequence(&packet)),
+                .map(|packet| match ExtendedRequest::decode(packet.bytes()).unwrap() {
+                    ExtendedRequest::Turn(request) => request.sequence.0,
+                    other => panic!("expected the turn away from the edge, got {other:?}"),
+                }),
             Ok(0),
             "and the sequence was not spent on it"
         );

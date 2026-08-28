@@ -33,8 +33,10 @@ Two layers, in this order:
      reason an open doorway is a sight line at all;
    - `WINDOW` is the deliberate hole: a look passes, a step does not.
 2. **The live world** — `sight_clear` ([walk.rs:799](../crates/common/movement/src/walk.rs#L799)) —
-   which asks `Overlay::blocker_anywhere` and reads **only the door flag** off
-   what it finds. A crate is furniture; a shut door is opaque.
+   which asks `Overlay::sight_blocker_at`. A crate is furniture; a shut door
+   is opaque at every height; and a structural house wall stops the ray within
+   its span. Wall-like components with zero tiledata height borrow one storey;
+   platforms retain their real height.
 
 Its callers: combat's `obstruction()`, which every action — a blow, a shot, a
 breath — is asked at its commit and again every tick it runs, a
@@ -127,9 +129,11 @@ pub enum Stop {
     /// A static, with the span that stopped the ray and which reading gave it
     /// that span — a wall lent a storey, or a platform at its own height.
     Static { graphic: Graphic, base: i32, top: i32, wallish: bool },
-    /// A shut door in the live world. It carries no span: the live layer is
-    /// asked without a height at all (see the backlog below).
+    /// A shut door in the live world. It carries no span: it is opaque at any
+    /// height.
     Door,
+    /// A structural house wall in the live world.
+    LiveWall { base: i32, top: i32 },
 }
 
 pub struct SightStep { pub tile: Tile, pub ray_z: i32, pub stop: Option<Stop> }
@@ -271,9 +275,9 @@ visible. None is touched by this plan; each is a candidate for its own.
 - **The interpolation is by tile index, not by distance.** On a diagonal the
   ray's height at a given tile is slightly off where the straight line in world
   space actually is.
-- **Items and mobiles are not in the way at all.** Only doors are read out of
-  the live layer, so a barricade of crates — a thing that visibly stops a body —
-  stops no arrow.
+- **Items and mobiles are not in the way at all.** Structural house walls are
+  the live-layer exception; ordinary furniture remains transparent to the ray,
+  so a barricade of crates — a thing that visibly stops a body — stops no arrow.
 - **The client is not told how far its own weapon reaches.** Ф5's knob is a
   person standing in for a packet: the shard decides `in_range` off its weapon
   table and says nothing about it until asked by `.sight`. A reach on the wire —

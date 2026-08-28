@@ -423,6 +423,13 @@ pub enum Command {
         /// The request.
         request: WalkRequest,
     },
+    /// An OpenShard client explicitly asked to turn without stepping.
+    Turn {
+        /// Which connection.
+        connection: ConnectionId,
+        /// The typed request.
+        request: openshard_protocol::world::TurnRequest,
+    },
     /// A client asked for its own status again — a `0x34` type `0x04`, sent when
     /// the paperdoll opens. The status went out at world entry; this resends it so
     /// a paperdoll opened much later is not stale.
@@ -798,6 +805,12 @@ pub enum Command {
         /// `openshard_skills::use_skill_button` looks it up; the queue is a
         /// delivery, not a checkpoint.
         skill: openshard_protocol::wire::RawSkillId,
+    },
+    /// Open the tool-free craft catalogue. The request has no body: recipes,
+    /// pack, tool and workbench are all authoritative world state.
+    OpenCraftCatalogue {
+        /// Which player asked.
+        connection: ConnectionId,
     },
     /// A client moved one of the status bar's stat arrows (`0xBF` `0x1A`).
     SetStatLock {

@@ -221,6 +221,9 @@ pub(crate) enum Hotkey {
     Inventory,
     /// Use the last object the player explicitly used.
     UseLastItem,
+    /// Open the shard's craft catalogue. Unlike the skill sheet this is a
+    /// server-owned view: it reads the live backpack and nearby workbench.
+    CraftCatalogue,
     /// The minimap. Local, like the skills and status windows and unlike
     /// [`Paperdoll`](Self::Paperdoll): no round trip.
     ///
@@ -305,13 +308,14 @@ impl Hotkey {
     /// The list exists so that "no two actions share a key" is a test rather
     /// than a thing somebody notices — see [`Self::key`], which is also the
     /// question a bindings window asks.
-    pub(crate) const ALL: [Self; 24] = [
+    pub(crate) const ALL: [Self; 25] = [
         Self::Speak,
         Self::DevWindow,
         Self::Relock,
         Self::Paperdoll,
         Self::Inventory,
         Self::UseLastItem,
+        Self::CraftCatalogue,
         Self::Minimap,
         Self::WorldMap,
         Self::PanUp,
@@ -345,6 +349,7 @@ impl Hotkey {
             Self::Inventory => KeyCode::KeyI,
             // F2 is already Fringe and every other function key is occupied.
             Self::UseLastItem => KeyCode::KeyU,
+            Self::CraftCatalogue => KeyCode::KeyC,
             Self::Minimap | Self::WorldMap => KeyCode::KeyM,
             Self::PanUp | Self::FloorUp => KeyCode::PageUp,
             Self::PanDown | Self::FloorDown => KeyCode::PageDown,

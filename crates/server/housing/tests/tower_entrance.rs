@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use openshard_housing::template;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::{Cover, Doors, Overlay};
-use openshard_movement::{Footing, MapTerrain, can_step};
+use openshard_movement::{Footing, MapTerrain, Weight, can_step, find_path, step_allowed};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::{Facet, Point};
 use openshard_uofiles::multi::{
@@ -25,6 +25,15 @@ const STREET: Point = Point::new(1339, 1901, 0);
 const ENTRY_TREAD: Point = Point::new(1339, 1900, 2);
 const NEXT_TREAD: Point = Point::new(1340, 1900, 2);
 const ENTRANCE_SIGN: Point = Point::new(1341, 1900, 8);
+/// A saved character's fifth-storey footing in this tower, and the grass just
+/// outside its south edge.  The walk needs all four stair flights; a direct
+/// route over the roof is not a route a body can take.
+const FIFTH_STOREY: Point = Point::new(1339, 1898, 88);
+const STREET_BELOW: Point = Point::new(1340, 1902, 0);
+/// Kept in sync with `client/app`'s `steer::PLAN_BUDGET`.  This crate is below
+/// the client in the dependency graph, so importing that constant would create
+/// a cycle.
+const CLICK_PLAN_BUDGET: usize = 700;
 
 fn client_dir() -> Option<PathBuf> {
     let dir = PathBuf::from(std::env::var_os("OPENSHARD_CLIENT")?);
@@ -105,4 +114,43 @@ fn legacy_five_story_tower_entrance_is_walkable_on_the_reported_map_tile() {
         Some(Point::new(NEXT_TREAD.x, NEXT_TREAD.y, 7)),
         "the second original stair must be reachable after the entry tread"
     );
+}
+
+/// The client must be able to plan the whole descent from the fifth storey,
+/// rather than only recognising the exterior's first stair tread.  This uses
+/// the same 700-place cap as click-to-walk, so it catches a route that exists
+/// but is impractical for the shipped planner.
+#[test]
+#[ignore = "reads an installed facet and its local custom-house template"]
+fn legacy_five_story_tower_descends_to_the_street_within_the_click_budget() {
+    let Some(dir) = client_dir() else {
+        eprintln!("OPENSHARD_CLIENT is unset — no installed tower to walk");
+        return;
+    };
+    let templates = template::load_directory(&dir.join("openshard-houses"))
+        .expect("the installed custom-house catalogue should decode");
+    let tower = templates
+        .get("legacy-five-story-tower")
+        .expect("the reported tower template should be installed");
+    let snapshot = openshard_uofiles::map::load_facet(&dir, Facet(0)).expect("facet 0 should load");
+    let tiles =
+        openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata should load");
+    let spans = openshard_movement::spans::SpanIndex::build(snapshot.map(), &tiles);
+    let terrain = MapTerrain::new(snapshot.map(), &tiles, &spans);
+    let overlay = tower_overlay(&tiles, tower);
+    let footing = Footing::new(Some(terrain), &overlay, Doors::AsTheyStand);
+
+    let route = find_path(
+        &footing,
+        FIFTH_STOREY,
+        STREET_BELOW,
+        CLICK_PLAN_BUDGET,
+        Weight::PLANNING,
+    )
+    .expect("the fifth storey has a route down to the street within the click budget");
+    let mut at = FIFTH_STOREY;
+    for direction in route {
+        at = step_allowed(&footing, at, direction).expect("the planned descent contains a legal step");
+    }
+    assert_eq!(at, STREET_BELOW, "the route must actually leave the tower");
 }

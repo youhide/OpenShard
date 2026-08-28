@@ -204,9 +204,12 @@ use crate::keys::Held;
 /// stays inside that rather than reaching for the map's diagonal: `take` runs a
 /// plan at most once per step (see its doc), but an unreachable destination —
 /// across an unbroken wall, out over open water — pays the full budget on every
-/// one of those, `STUCK_STEPS` times over and again on every re-click. A budget
-/// sized for "ample" and not "generous" is what keeps that bounded.
-pub const PLAN_BUDGET: usize = 600;
+/// one of those, `STUCK_STEPS` times over and again on every re-click. Seven
+/// hundred also covers the 645 places a full descent through the imported
+/// five-storey tower takes; at 600 the route existed but never reached its
+/// first street tile. A budget sized for "ample" and not "generous" is what
+/// keeps that bounded.
+pub const PLAN_BUDGET: usize = 700;
 
 /// How long the step that follows a turn waits: ClassicUO's
 /// `Constants.TURN_DELAY`, charged in `PlayerMobile.Walk` as

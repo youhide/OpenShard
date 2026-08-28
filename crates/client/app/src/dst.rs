@@ -29,8 +29,9 @@
 //! The **event** timeline is everything below: a step is asked for when the
 //! event loop happens to wake, crosses an mpsc to the net task, is predicted,
 //! crosses back, and is glided over whatever [`crate::crowd::glide_time`] made
-//! of the gap since the last one. Meanwhile the `0x02` crosses a wire with
-//! latency and jitter on it and the shard answers a round trip later.
+//! of the gap since the last one. Meanwhile the typed turn or `0x02` step
+//! crosses a wire with latency and jitter on it and the shard answers a round
+//! trip later.
 //!
 //! The claim under test is that the second reproduces the first. That is not a
 //! tautology dressed as a test: the oracle's knots are at `k * WALK_HOLD` from
@@ -75,6 +76,7 @@ use openshard_map::grid::Tile;
 use openshard_map::overlay::{Cover, Doors, Overlay};
 use openshard_movement::{Footing, WALK_HOLD, Walk as Handled, Walker, step_hold, step_progress};
 use openshard_protocol::direction::{Direction, Facing};
+use openshard_protocol::extended::ExtendedRequest;
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::packet::{FramedClientPacket, decode_packet};
 use openshard_protocol::serial::Serial;
@@ -814,14 +816,24 @@ impl Sim {
             };
             // The one place the wrapper is opened, and it is the simulated
             // socket read — the same seam `link::play` unwraps at.
-            let request: WalkRequest = decode_packet(packet.bytes(), version()).unwrap();
-            let sequence = request.sequence.interpret();
-            let answer = match self.shard.request(
-                request,
-                &Footing::new(None, &self.field, Doors::AsTheyStand),
-                self.instant(),
-                false,
-            ) {
+            let (sequence, handled) = if packet.bytes().first() == Some(&0x02) {
+                let request: WalkRequest = decode_packet(packet.bytes(), version()).unwrap();
+                (
+                    request.sequence.interpret(),
+                    self.shard.request(
+                        request,
+                        &Footing::new(None, &self.field, Doors::AsTheyStand),
+                        self.instant(),
+                        false,
+                    ),
+                )
+            } else {
+                let ExtendedRequest::Turn(request) = ExtendedRequest::decode(packet.bytes()).unwrap() else {
+                    panic!("movement simulation received a non-movement packet")
+                };
+                (request.sequence.interpret(), self.shard.turn(request))
+            };
+            let answer = match handled {
                 Handled::Turned { .. } | Handled::Moved { .. } => ServerPacket::WalkAck(WalkAck {
                     sequence,
                     notoriety: Notoriety::Innocent,

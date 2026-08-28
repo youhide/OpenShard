@@ -719,6 +719,8 @@ pub struct Desk {
     pub movement: Movement,
     /// Values retained by F1's staff item creator.
     pub admin_item: AdminItem,
+    /// The skill and value last used by F1's staff skill tester.
+    pub admin_skill: AdminSkill,
     /// Where the full item-art browser was left in F1.
     pub admin_catalogue: AdminCatalogue,
     /// What F1's combat recorder page was left showing.
@@ -1094,6 +1096,21 @@ pub struct AdminItem {
     pub stackable: bool,
 }
 
+/// The values last entered into F1's staff skill tester.
+///
+/// Kept as strings while edited for the same reason as [`AdminItem`]: an
+/// incomplete decimal such as `100.` is useful while typing and must not be
+/// replaced until the Apply button decides whether it is a value the shard's
+/// `.skill` command accepts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AdminSkill {
+    /// The installed client's spelling of the selected skill.
+    pub name: String,
+    /// Whole points with an optional single decimal place.
+    pub value: String,
+}
+
 /// What the combat recorder's page was left showing.
 ///
 /// Kept beside the rest of the F1 state for its reason: somebody who has narrowed
@@ -1124,7 +1141,7 @@ impl Default for CombatRecorder {
     }
 }
 
-/// The query and page of F1's installed-client item-art browser.
+/// The query and creation settings of F1's installed-client item-art browser.
 ///
 /// It is deliberately just navigation state: art stays in the client resource
 /// archive and is decoded only for the page currently on screen.
@@ -1133,6 +1150,12 @@ impl Default for CombatRecorder {
 pub struct AdminCatalogue {
     pub query: String,
     pub category: AdminItemCategory,
+    /// Kept as text so an incomplete edit does not get rewritten while typing.
+    /// It is validated only when an item from the browser is created.
+    pub amount: String,
+    /// Whether the selected graphic is put in the backpack as one mergeable
+    /// pile, rather than as an ordinary discrete item.
+    pub stackable: bool,
 }
 
 /// Gameplay family used to narrow the administrator's complete item browser.
@@ -1152,6 +1175,8 @@ impl Default for AdminCatalogue {
         Self {
             query: String::new(),
             category: AdminItemCategory::All,
+            amount: "1".to_owned(),
+            stackable: false,
         }
     }
 }
@@ -1163,6 +1188,15 @@ impl Default for AdminItem {
             hue: "0".to_owned(),
             amount: "100".to_owned(),
             stackable: true,
+        }
+    }
+}
+
+impl Default for AdminSkill {
+    fn default() -> Self {
+        Self {
+            name: "Mining".to_owned(),
+            value: "100.0".to_owned(),
         }
     }
 }
@@ -1187,6 +1221,7 @@ impl Default for Desk {
             audio: Audio::default(),
             movement: Movement::default(),
             admin_item: AdminItem::default(),
+            admin_skill: AdminSkill::default(),
             admin_catalogue: AdminCatalogue::default(),
             combat_recorder: CombatRecorder::default(),
             f1: None,
@@ -1399,9 +1434,15 @@ mod tests {
                 amount: "25".to_owned(),
                 stackable: false,
             },
+            admin_skill: AdminSkill {
+                name: "Mining".to_owned(),
+                value: "95.5".to_owned(),
+            },
             admin_catalogue: AdminCatalogue {
                 query: "0x0f52".to_owned(),
                 category: AdminItemCategory::Weapons,
+                amount: "25".to_owned(),
+                stackable: true,
             },
             combat_recorder: CombatRecorder {
                 note: "he stops here".to_owned(),
@@ -1439,6 +1480,7 @@ mod tests {
         assert_eq!(back.admin_catalogue, desk.admin_catalogue);
         assert_eq!(back.movement.auto_open_doors, desk.movement.auto_open_doors);
         assert_eq!(back.admin_item, desk.admin_item);
+        assert_eq!(back.admin_skill, desk.admin_skill);
         assert_eq!(back.combat_recorder, desk.combat_recorder);
         assert_eq!(back.f1, desk.f1);
         std::fs::remove_file(&path).unwrap();

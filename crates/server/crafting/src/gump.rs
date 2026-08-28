@@ -25,12 +25,14 @@ use openshard_protocol::gump::{
     GumpResponse, RawGumpId,
 };
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_state::components::Client;
+use openshard_state::components::{Client, Position, Tool};
 use openshard_state::{CraftGumpContext, CraftGumpPage, WorldState};
 
 use crate::chance::chance;
+use crate::consume;
 use crate::craft;
 use crate::defs::system;
+use crate::environment;
 use crate::recipe::Recipe;
 use crate::system::{CraftSystemDef, SystemId, Text};
 use openshard_protocol::wire::{ClilocId, Graphic, Hue};
@@ -49,8 +51,12 @@ const WINDOW_Y: i32 = 40;
 const LABEL: u32 = 0xFFFF;
 /// The hue a bare (non-cliloc) label takes.
 const LABEL_HUE: u32 = 0x480;
+/// A warm accent for the active category.  It gives the left-hand navigation a
+/// stable visual cursor even when a category spans several pages on the right.
+const SELECTED_LABEL: u32 = 0x35;
 
-/// Rows to a page, in both lists.
+/// Rows to a page, in both lists.  Ten keeps every trade a short click away,
+/// while the wider new list gives each row room for its item art and name.
 const PER_PAGE: usize = 10;
 
 /// The vertical coordinate of one row, refusing a list too large for the gump
@@ -126,6 +132,14 @@ mod misc {
 
     /// Open the material list.
     pub const RESOURCES: ButtonIndex = ButtonIndex(0);
+    /// Re-scan the tool and the facilities around the player.  The window stays
+    /// open while a player walks, so this makes its workbench panel an explicit
+    /// fresh reading rather than a stale promise from when it was opened.
+    pub const REFRESH: ButtonIndex = ButtonIndex(1);
+    /// The preceding slice of the flattened, tool-free catalogue.
+    pub const CATALOGUE_PREV: ButtonIndex = ButtonIndex(2);
+    /// The following slice of the flattened, tool-free catalogue.
+    pub const CATALOGUE_NEXT: ButtonIndex = ButtonIndex(3);
     /// Cancel a craft in flight.
     pub const CANCEL: ButtonIndex = ButtonIndex(11);
 }
@@ -180,8 +194,9 @@ pub fn open(state: &mut WorldState, player: EntityId, context: CraftGumpContext)
         return;
     };
     let layout = match context.page {
+        CraftGumpPage::Catalogue => catalogue(state, player, context.group),
         CraftGumpPage::Details(recipe) => match def.recipes.get(usize::from(recipe)) {
-            Some(recipe) => details(state, player, def, recipe),
+            Some(recipe) => details(state, player, def, recipe, &context),
             None => return,
         },
         _ => main(state, player, def, &context),
@@ -209,6 +224,27 @@ pub fn open(state: &mut WorldState, player: EntityId, context: CraftGumpContext)
     if let Some(row) = state.row_of_mut(player) {
         row.craft_gump = Some(context);
     }
+}
+
+/// Open the complete recipe catalogue with no tool selected.
+///
+/// `tool` keeps its entity shape even in browse mode, so a reply is still tied
+/// to a player-owned context rather than acquiring a second, weaker gump
+/// context. A player is never a [`Tool`], which makes it an unambiguous
+/// read-only sentinel; [`crate::craft::can_craft`] confirms that at its gate.
+pub fn open_catalogue(state: &mut WorldState, player: EntityId) {
+    open(
+        state,
+        player,
+        CraftGumpContext {
+            system: 0,
+            tool: player,
+            group: 0,
+            sub_res: 0,
+            page: CraftGumpPage::Catalogue,
+            notice: None,
+        },
+    );
 }
 
 /// Shut the window and forget it.
@@ -246,40 +282,41 @@ fn main(
 ) -> GumpLayout {
     let mut layout = GumpLayout::new();
     layout.page(0);
-    // Every id and rectangle here is ServUO's, in ServUO's order. It is furniture
-    // and nothing reads it, which is exactly why it is copied rather than
-    // approximated — there is no way to tell a subtly wrong frame from a right
-    // one except by looking at it in a client.
-    layout.background(0, 0, 530, 497, 5054);
-    layout.image_tiled(10, 10, 510, 22, 2624);
-    layout.image_tiled(10, 292, 150, 45, 2624);
-    layout.image_tiled(165, 292, 355, 45, 2624);
-    layout.image_tiled(10, 342, 510, 145, 2624);
-    layout.image_tiled(10, 37, 200, 250, 2624);
-    layout.image_tiled(215, 37, 305, 250, 2624);
-    layout.alpha_region(10, 10, 510, 477);
+    // A workbench rather than two anonymous columns: the wider frame leaves
+    // room for every recipe's actual art, its name, and the material picker
+    // without turning the selection list into a wall of text.
+    layout.background(0, 0, 850, 526, 5054);
+    layout.image_tiled(10, 10, 830, 24, 2624);
+    layout.image_tiled(10, 39, 205, 330, 2624);
+    layout.image_tiled(220, 39, 450, 330, 2624);
+    layout.image_tiled(10, 374, 660, 72, 2624);
+    layout.image_tiled(10, 451, 660, 65, 2624);
+    layout.image_tiled(675, 39, 165, 477, 2624);
+    layout.alpha_region(10, 10, 830, 506);
 
     title(&mut layout, def);
-    layout.html_localized_colored(10, 37, 200, 22, ClilocId(1_044_010), LABEL, false, false); // CATEGORIES
-    layout.html_localized_colored(215, 37, 305, 22, ClilocId(1_044_011), LABEL, false, false); // SELECTIONS
-    layout.html_localized_colored(10, 302, 150, 25, ClilocId(1_044_012), LABEL, false, false); // NOTICES
+    tool_icon(&mut layout, state, context);
+    workbench(&mut layout, state, player, def, context);
+    layout.html_localized_colored(15, 43, 190, 22, ClilocId(1_044_010), LABEL, false, false); // CATEGORIES
+    layout.html_localized_colored(230, 43, 300, 22, ClilocId(1_044_011), LABEL, false, false); // SELECTIONS
+    layout.html_localized_colored(15, 456, 150, 22, ClilocId(1_044_012), LABEL, false, false); // NOTICES
 
-    layout.button(15, 442, 4017, 4019, GumpButton::Reply, 0, ButtonId::CLOSE_BOX);
-    layout.html_localized_colored(50, 445, 150, 18, ClilocId(1_011_441), LABEL, false, false); // EXIT
+    layout.button(490, 479, 4017, 4019, GumpButton::Reply, 0, ButtonId::CLOSE_BOX);
+    layout.html_localized_colored(525, 482, 100, 18, ClilocId(1_011_441), LABEL, false, false); // EXIT
 
     layout.button(
-        115,
-        442,
+        320,
+        479,
         4017,
         4019,
         GumpButton::Reply,
         0,
         button_id(kind::MISC, misc::CANCEL),
     );
-    layout.html_localized_colored(150, 445, 150, 18, ClilocId(1_112_698), LABEL, false, false); // CANCEL MAKE
+    layout.html_localized_colored(355, 482, 130, 18, ClilocId(1_112_698), LABEL, false, false); // CANCEL MAKE
 
     if let Some(notice) = context.notice {
-        layout.html_localized_colored(170, 295, 350, 40, notice, LABEL, false, false);
+        layout.html_localized_colored(170, 456, 140, 48, notice, LABEL, false, false);
     }
 
     // The material row: which metal or wood is selected, and how much of it the
@@ -291,7 +328,7 @@ fn main(
             .or_else(|| axis.entries.first());
         layout.button(
             15,
-            362,
+            398,
             4005,
             4007,
             GumpButton::Reply,
@@ -299,8 +336,10 @@ fn main(
             button_id(kind::MISC, misc::RESOURCES),
         );
         if let Some(entry) = entry {
+            layout.html_localized_colored(50, 382, 250, 18, ClilocId(1_044_055), LABEL, false, false); // MATERIALS
             let held = carried(state, player, axis.graphic, entry.hue);
-            label(&mut layout, 50, 365, 250, entry.name, &held.to_string());
+            label(&mut layout, 50, 401, 250, entry.name, &held.to_string());
+            layout.label(50, 421, LABEL_HUE, format!("{held} available"));
         }
     }
 
@@ -309,41 +348,299 @@ fn main(
     // any `AddPage(1)`, and moving it inside the pagination makes the whole left
     // column vanish the moment a trade's category runs past ten rows — which most
     // of them do.
-    groups(&mut layout, def);
+    groups(&mut layout, def, context.group);
     match context.page {
         CraftGumpPage::Resources => resources(&mut layout, state, player, def),
-        _ => items(&mut layout, def, context.group),
+        _ => items(
+            &mut layout,
+            def,
+            context.group,
+            state.registry.has::<Tool>(context.tool),
+        ),
     }
     layout
 }
 
+/// The catalogue's first page: every recipe, independent of a carried tool.
+///
+/// A trade picker made the catalogue a second path to the old window and hid
+/// the actual answer behind two more clicks.  This is deliberately flattened:
+/// every shipped recipe gets a row (ten per server page), its own art and a
+/// live "ready" reading. A server page is necessary here: a UO gump sends the
+/// layouts for all of its client-side pages in a single `u16`-sized packet, and
+/// all 492 recipes would exceed that packet before the player saw it.
+///
+/// A detail button carries the flattened index, which is resolved back to the
+/// owning trade on reply.
+fn catalogue(state: &WorldState, player: EntityId, page: u16) -> GumpLayout {
+    let mut layout = GumpLayout::new();
+    layout.page(0);
+    layout.background(0, 0, 720, 410, 5054);
+    layout.image_tiled(10, 10, 700, 24, 2624);
+    layout.image_tiled(10, 39, 700, 310, 2624);
+    layout.image_tiled(10, 354, 700, 46, 2624);
+    layout.alpha_region(10, 10, 700, 390);
+    layout.label(20, 14, LABEL_HUE, "CRAFT CATALOGUE");
+    layout.label(
+        20,
+        42,
+        LABEL_HUE,
+        "ALL RECIPES · GREEN = SKILL, MATERIALS AND WORKSHOP READY",
+    );
+    let total = catalogue_recipes().count();
+    let page_count = total.div_ceil(PER_PAGE);
+    let page = usize::from(page).min(page_count.saturating_sub(1));
+    let first = page * PER_PAGE;
+    for (row, (system, recipe)) in catalogue_recipes().skip(first).take(PER_PAGE).enumerate() {
+        let y = row_y(76, row);
+        let ready = catalogue_ready(state, player, system, recipe);
+        layout.button(
+            25,
+            y,
+            4005,
+            4007,
+            GumpButton::Reply,
+            0,
+            button_id(kind::DETAILS, ButtonIndex::from_position(first + row)),
+        );
+        layout.item(65, y - 3, recipe.graphic, recipe.hue);
+        label(&mut layout, 105, y + 3, 310, recipe.name, "");
+        if let Some(requirement) = recipe.skills.first() {
+            layout.html_localized_colored(
+                425,
+                y + 3,
+                140,
+                18,
+                skill_label(requirement.skill),
+                LABEL,
+                false,
+                false,
+            );
+            if recipe.skills.len() > 1 {
+                layout.label(550, y + 3, LABEL_HUE, format!("+{}", recipe.skills.len() - 1));
+            }
+        }
+        layout.label(
+            585,
+            y + 3,
+            if ready { 0x59 } else { 0x21 },
+            if ready { "READY" } else { "MISSING" },
+        );
+    }
+    if page > 0 {
+        layout.button(
+            20,
+            325,
+            4014,
+            4015,
+            GumpButton::Reply,
+            0,
+            button_id(kind::MISC, misc::CATALOGUE_PREV),
+        );
+        layout.label(55, 328, LABEL_HUE, "PREV");
+    }
+    if page + 1 < page_count {
+        layout.button(
+            555,
+            325,
+            4005,
+            4007,
+            GumpButton::Reply,
+            0,
+            button_id(kind::MISC, misc::CATALOGUE_NEXT),
+        );
+        layout.label(590, 328, LABEL_HUE, "NEXT");
+    }
+    layout.label(300, 328, LABEL_HUE, format!("PAGE {} / {page_count}", page + 1));
+    layout.button(575, 370, 4017, 4019, GumpButton::Reply, 0, ButtonId::CLOSE_BOX);
+    layout.html_localized_colored(610, 373, 80, 18, ClilocId(1_011_441), LABEL, false, false); // EXIT
+    layout
+}
+
+/// All recipes in the same stable order the catalogue assigned their button
+/// indexes.  Keeping the flattening in one iterator makes the rendering and
+/// reply mapping mechanically agree. The system is execution metadata only: it
+/// is never presented as the recipe's exclusive parent.
+fn catalogue_recipes() -> impl Iterator<Item = (&'static CraftSystemDef, &'static Recipe)> {
+    crate::defs::SYSTEMS
+        .iter()
+        .flat_map(|system| system.recipes.iter().map(move |recipe| (system, recipe)))
+}
+
+/// Whether a recipe is actionable once a player brings the appropriate tool.
+/// The catalogue has no tool by design, so the indicator intentionally covers
+/// the other authoritative gates: skill, pack and nearby facilities.
+fn catalogue_ready(state: &WorldState, player: EntityId, def: &CraftSystemDef, recipe: &Recipe) -> bool {
+    chance(state, player, def, recipe).all_skills
+        && consume::check(state, player, def, recipe, 0).is_ok()
+        && environment::around(state, player).satisfy(def.needs.union(recipe.needs))
+}
+
+/// Resolve the flattened catalogue index back to the system and per-system
+/// recipe index that normal craft detail pages store in their context.
+fn catalogue_recipe(index: ButtonIndex) -> Option<(SystemId, u16)> {
+    let position = usize::try_from(index.0).ok()?;
+    let (system_index, recipe_index, _) = crate::defs::SYSTEMS
+        .iter()
+        .enumerate()
+        .flat_map(|(system_index, system)| {
+            system
+                .recipes
+                .iter()
+                .enumerate()
+                .map(move |(recipe_index, recipe)| (system_index, recipe_index, recipe))
+        })
+        .nth(position)?;
+    Some((
+        SystemId::from_index(system_index)?,
+        u16::try_from(recipe_index).ok()?,
+    ))
+}
+
 /// The window's own heading.
 fn title(layout: &mut GumpLayout, def: &CraftSystemDef) {
+    title_at(layout, 15, 13, 740, def);
+}
+
+/// A craft-system title at a caller-selected point — shared by the workbench
+/// header and catalogue cards, so both name a trade with the same localised
+/// source.
+fn title_at(layout: &mut GumpLayout, x: i32, y: i32, width: i32, def: &CraftSystemDef) {
     match def.title {
         Text::Cliloc(cliloc) => {
-            layout.html_localized_colored(10, 12, 510, 20, cliloc, LABEL, false, false);
+            layout.html_localized_colored(x, y, width, 20, cliloc, LABEL, false, false);
         }
-        Text::Str(text) => layout.html_colored(10, 12, 510, 20, text, LABEL, false, false),
+        Text::Str(text) => layout.html_colored(x, y, width, 20, text, LABEL, false, false),
     }
+}
+
+/// The tool in the header is a small but useful piece of visual context: a
+/// player who has several trade windows open can identify the bench at a
+/// glance, without spending another label on the same information.
+fn tool_icon(layout: &mut GumpLayout, state: &WorldState, context: &CraftGumpContext) {
+    if state.registry.has::<Tool>(context.tool) {
+        if let Some(tool) = state
+            .registry
+            .get::<openshard_state::components::Drawn>(context.tool)
+        {
+            layout.item(790, 8, tool.id, tool.hue);
+        }
+    }
+}
+
+/// The live workbench reading at the edge of the craft list.  It is intentionally
+/// derived from the same tool and facility facts [`craft::begin`] checks, so a
+/// green line means the player can act on it rather than merely decorating the
+/// gump with a guess.
+fn workbench(
+    layout: &mut GumpLayout,
+    state: &WorldState,
+    player: EntityId,
+    def: &CraftSystemDef,
+    context: &CraftGumpContext,
+) {
+    const X: i32 = 685;
+    layout.label(X, 46, LABEL_HUE, "WORKBENCH");
+    layout.label(X, 72, LABEL_HUE, "TOOL");
+    if let Some(tool) = state.registry.get::<Tool>(context.tool) {
+        layout.label(X, 92, LABEL_HUE, format!("Uses: {}", tool.uses_left));
+        let held = !state.registry.has::<Position>(context.tool);
+        status_line(layout, X, 112, "Carried", held, true);
+    } else {
+        status_line(layout, X, 92, "Tool", false, true);
+    }
+
+    layout.label(X, 145, LABEL_HUE, "NEARBY");
+    let found = environment::around(state, player);
+    facility_line(layout, X, 165, "Forge", found.forge, def.needs.forge);
+    facility_line(layout, X, 185, "Anvil", found.anvil, def.needs.anvil);
+    facility_line(layout, X, 205, "Fire", found.heat, def.needs.heat);
+    facility_line(layout, X, 225, "Oven", found.oven, def.needs.oven);
+    facility_line(layout, X, 245, "Mill", found.mill, def.needs.mill);
+    facility_line(layout, X, 265, "Water", found.water, def.needs.water);
+
+    layout.label(X, 302, LABEL_HUE, "WORKSPACE");
+    let usable_tool = state
+        .registry
+        .get::<Tool>(context.tool)
+        .is_some_and(|tool| tool.uses_left > 0 && !state.registry.has::<Position>(context.tool));
+    status_line(
+        layout,
+        X,
+        322,
+        "Ready to craft",
+        usable_tool && found.satisfy(def.needs),
+        true,
+    );
+    layout.label(X, 350, LABEL_HUE, "Refresh after moving");
+    layout.button(
+        X,
+        475,
+        4005,
+        4007,
+        GumpButton::Reply,
+        0,
+        button_id(kind::MISC, misc::REFRESH),
+    );
+    layout.label(X + 35, 478, LABEL_HUE, "REFRESH");
+}
+
+/// One facility readout.  Optional fixtures remain visible but subdued; a
+/// required missing fixture is a red `MISSING`, the exact reason a craft would
+/// be refused.
+fn facility_line(layout: &mut GumpLayout, x: i32, y: i32, name: &str, found: bool, required: bool) {
+    if !required && !found {
+        layout.label(x, y, LABEL_HUE, format!("{name}: --"));
+    } else {
+        status_line(layout, x, y, name, found, required);
+    }
+}
+
+/// A status label whose colour carries success, failure, or an optional detail.
+fn status_line(layout: &mut GumpLayout, x: i32, y: i32, name: &str, available: bool, required: bool) {
+    let (state, hue) = if available {
+        ("READY", 0x59)
+    } else if required {
+        ("MISSING", 0x21)
+    } else {
+        ("--", LABEL_HUE)
+    };
+    layout.label(x, y, LABEL_HUE, name);
+    layout.label(x + 80, y, hue, state);
 }
 
 /// One line that may be a cliloc with an argument or a bare string.
 fn label(layout: &mut GumpLayout, x: i32, y: i32, width: i32, text: Text, argument: &str) {
+    label_colored(layout, x, y, width, text, argument, LABEL);
+}
+
+/// One line in a caller-selected colour.  The active craft category uses this
+/// instead of a second background gump, so the highlight survives every client
+/// skin and leaves the row's click target unchanged.
+fn label_colored(
+    layout: &mut GumpLayout,
+    x: i32,
+    y: i32,
+    width: i32,
+    text: Text,
+    argument: &str,
+    color: u32,
+) {
     match text {
         Text::Cliloc(cliloc) if argument.is_empty() => {
-            layout.html_localized_colored(x, y, width, 18, cliloc, LABEL, false, false);
+            layout.html_localized_colored(x, y, width, 18, cliloc, color, false, false);
         }
         Text::Cliloc(cliloc) => {
-            layout.html_localized_args(x, y, width, 18, cliloc, argument, LABEL, false, false);
+            layout.html_localized_args(x, y, width, 18, cliloc, argument, color, false, false);
         }
-        Text::Str(line) => layout.label(x, y - 3, LABEL_HUE, line),
+        Text::Str(line) => layout.label(x, y - 3, if color == LABEL { LABEL_HUE } else { color }, line),
     }
 }
 
 /// The left-hand column of categories.
-fn groups(layout: &mut GumpLayout, def: &CraftSystemDef) {
+fn groups(layout: &mut GumpLayout, def: &CraftSystemDef, selected: u16) {
     for (i, group) in def.groups.iter().enumerate() {
-        let y = row_y(80, i);
+        let y = row_y(75, i);
         let index = ButtonIndex::from_position(i);
         layout.button(
             15,
@@ -354,7 +651,11 @@ fn groups(layout: &mut GumpLayout, def: &CraftSystemDef) {
             0,
             button_id(kind::GROUP, index),
         );
-        label(layout, 50, y + 3, 150, *group, "");
+        if u16::try_from(i).ok() == Some(selected) {
+            label_colored(layout, 50, y + 3, 150, *group, "", SELECTED_LABEL);
+        } else {
+            label(layout, 50, y + 3, 150, *group, "");
+        }
     }
 }
 
@@ -363,7 +664,7 @@ fn groups(layout: &mut GumpLayout, def: &CraftSystemDef) {
 /// The index a button carries is the row's place **within the group**, which is
 /// what ServUO's `CreateItemList` sends and what [`recipe_in_group`] turns back
 /// into a recipe.
-fn items(layout: &mut GumpLayout, def: &CraftSystemDef, group: u16) {
+fn items(layout: &mut GumpLayout, def: &CraftSystemDef, group: u16, can_make: bool) {
     let rows: Vec<(usize, &Recipe)> = def
         .recipes
         .iter()
@@ -375,31 +676,36 @@ fn items(layout: &mut GumpLayout, def: &CraftSystemDef, group: u16) {
         let page = page_of(i);
         if row == 0 {
             if i > 0 {
-                layout.button(370, 260, 4005, 4007, GumpButton::Page, page, ButtonId::UNUSED);
-                layout.html_localized_colored(405, 263, 100, 18, ClilocId(1_044_045), LABEL, false, false);
+                layout.button(515, 340, 4005, 4007, GumpButton::Page, page, ButtonId::UNUSED);
+                layout.html_localized_colored(550, 343, 100, 18, ClilocId(1_044_045), LABEL, false, false);
                 // NEXT PAGE
             }
             layout.page(page);
             if i > 0 {
-                layout.button(220, 260, 4014, 4015, GumpButton::Page, page - 1, ButtonId::UNUSED);
-                layout.html_localized_colored(255, 263, 100, 18, ClilocId(1_044_044), LABEL, false, false);
+                layout.button(230, 340, 4014, 4015, GumpButton::Page, page - 1, ButtonId::UNUSED);
+                layout.html_localized_colored(265, 343, 100, 18, ClilocId(1_044_044), LABEL, false, false);
                 // PREV PAGE
             }
         }
-        let y = row_y(60, row);
+        let y = row_y(70, row);
         let index = ButtonIndex::from_position(i);
+        if can_make {
+            layout.button(
+                230,
+                y,
+                4005,
+                4007,
+                GumpButton::Reply,
+                0,
+                button_id(kind::MAKE, index),
+            );
+        } else {
+            layout.label(230, y + 3, LABEL_HUE, "VIEW");
+        }
+        layout.item(270, y - 3, recipe.graphic, recipe.hue);
+        label(layout, 310, y + 3, 270, recipe.name, "");
         layout.button(
-            220,
-            y,
-            4005,
-            4007,
-            GumpButton::Reply,
-            0,
-            button_id(kind::MAKE, index),
-        );
-        label(layout, 255, y + 3, 220, recipe.name, "");
-        layout.button(
-            480,
+            625,
             y,
             4011,
             4012,
@@ -418,17 +724,17 @@ fn resources(layout: &mut GumpLayout, state: &WorldState, player: EntityId, def:
         let page = page_of(i);
         if row == 0 {
             if i > 0 {
-                layout.button(485, 290, 4005, 4007, GumpButton::Page, page, ButtonId::UNUSED);
+                layout.button(635, 340, 4005, 4007, GumpButton::Page, page, ButtonId::UNUSED);
             }
             layout.page(page);
             if i > 0 {
-                layout.button(455, 290, 4014, 4015, GumpButton::Page, page - 1, ButtonId::UNUSED);
+                layout.button(605, 340, 4014, 4015, GumpButton::Page, page - 1, ButtonId::UNUSED);
             }
         }
-        let y = row_y(60, row);
+        let y = row_y(70, row);
         let index = ButtonIndex::from_position(i);
         layout.button(
-            220,
+            230,
             y,
             4005,
             4007,
@@ -437,7 +743,9 @@ fn resources(layout: &mut GumpLayout, state: &WorldState, player: EntityId, def:
             button_id(kind::RESOURCE, index),
         );
         let held = carried(state, player, axis.graphic, entry.hue);
-        label(layout, 255, y + 3, 220, entry.name, &held.to_string());
+        layout.item(270, y - 3, axis.graphic, entry.hue);
+        label(layout, 310, y + 3, 220, entry.name, &held.to_string());
+        layout.label(555, y + 3, LABEL_HUE, held.to_string());
     }
 }
 
@@ -449,45 +757,50 @@ fn resources(layout: &mut GumpLayout, state: &WorldState, player: EntityId, def:
 /// The two percentages are the only place a player can read what the chance
 /// curve is doing, which is why they are drawn from the same [`chance`] the roll
 /// uses rather than from an approximation of it.
-fn details(state: &WorldState, player: EntityId, def: &CraftSystemDef, recipe: &Recipe) -> GumpLayout {
+fn details(
+    state: &WorldState,
+    player: EntityId,
+    def: &CraftSystemDef,
+    recipe: &Recipe,
+    context: &CraftGumpContext,
+) -> GumpLayout {
     let mut layout = GumpLayout::new();
     layout.page(0);
-    layout.background(0, 0, 530, 417, 5054);
-    layout.image_tiled(10, 10, 510, 22, 2624);
-    layout.image_tiled(10, 37, 150, 148, 2624);
-    layout.image_tiled(165, 37, 355, 90, 2624);
-    layout.image_tiled(10, 190, 155, 22, 2624);
-    layout.image_tiled(10, 240, 150, 57, 2624);
-    layout.image_tiled(165, 132, 355, 80, 2624);
-    layout.image_tiled(10, 325, 150, 57, 2624);
-    layout.image_tiled(165, 217, 355, 80, 2624);
-    layout.image_tiled(165, 302, 355, 80, 2624);
-    layout.image_tiled(10, 387, 510, 22, 2624);
-    layout.alpha_region(10, 10, 510, 399);
+    layout.background(0, 0, 680, 500, 5054);
+    layout.image_tiled(10, 10, 660, 24, 2624);
+    layout.image_tiled(10, 39, 220, 385, 2624);
+    layout.image_tiled(235, 39, 435, 168, 2624);
+    layout.image_tiled(235, 212, 435, 212, 2624);
+    layout.image_tiled(10, 429, 660, 61, 2624);
+    layout.alpha_region(10, 10, 660, 480);
 
     title(&mut layout, def);
-    layout.html_localized_colored(170, 40, 150, 20, ClilocId(1_044_053), LABEL, false, false); // ITEM
-    layout.html_localized_colored(10, 217, 150, 22, ClilocId(1_044_055), LABEL, false, false); // MATERIALS
-    layout.html_localized_colored(10, 302, 150, 22, ClilocId(1_044_056), LABEL, false, false); // OTHER
+    layout.html_localized_colored(245, 43, 150, 20, ClilocId(1_044_053), LABEL, false, false); // ITEM
+    layout.html_localized_colored(245, 216, 150, 22, ClilocId(1_044_055), LABEL, false, false); // MATERIALS
+    layout.html_localized_colored(245, 322, 150, 22, ClilocId(1_044_056), LABEL, false, false); // OTHER
 
-    layout.button(405, 387, 4005, 4007, GumpButton::Reply, 0, detail::MAKE);
-    layout.html_localized_colored(445, 390, 150, 18, ClilocId(1_044_151), LABEL, false, false); // MAKE NOW
-    layout.button(15, 387, 4014, 4016, GumpButton::Reply, 0, detail::BACK);
-    layout.html_localized_colored(50, 390, 150, 18, ClilocId(1_044_150), LABEL, false, false); // BACK
+    if state.registry.has::<Tool>(context.tool) {
+        layout.button(490, 452, 4005, 4007, GumpButton::Reply, 0, detail::MAKE);
+        layout.html_localized_colored(525, 455, 120, 18, ClilocId(1_044_151), LABEL, false, false); // MAKE NOW
+    } else {
+        layout.label(470, 455, LABEL_HUE, "VIEW MODE — TOOL REQUIRED");
+    }
+    layout.button(20, 452, 4014, 4016, GumpButton::Reply, 0, detail::BACK);
+    layout.html_localized_colored(55, 455, 120, 18, ClilocId(1_044_150), LABEL, false, false); // BACK
 
-    label(&mut layout, 330, 40, 180, recipe.name, "");
-    layout.item(90, 110, recipe.graphic, recipe.hue);
+    label(&mut layout, 405, 43, 240, recipe.name, "");
+    layout.item(95, 145, recipe.graphic, recipe.hue);
 
     let mut other = 0;
     if recipe.use_all_res {
-        layout.html_localized_colored(170, 302, 310, 18, ClilocId(1_048_176), LABEL, false, false); // makes as many as possible
+        layout.html_localized_colored(405, 322, 240, 18, ClilocId(1_048_176), LABEL, false, false); // makes as many as possible
         other += 1;
     }
     if recipe.markable {
         layout.html_localized_colored(
-            170,
-            302 + other * 20,
-            310,
+            405,
+            322 + other * 20,
+            240,
             18,
             ClilocId(1_044_059),
             LABEL,
@@ -498,28 +811,28 @@ fn details(state: &WorldState, player: EntityId, def: &CraftSystemDef, recipe: &
 
     // One row per required skill, at the value it starts to be possible.
     for (i, want) in recipe.skills.iter().enumerate() {
-        let y = row_y(132, i);
-        layout.html_localized_colored(170, y, 200, 18, skill_label(want.skill), LABEL, false, false);
-        layout.label(430, y, LABEL_HUE, tenths(want.min.max(0)));
+        let y = row_y(126, i);
+        layout.html_localized_colored(245, y, 220, 18, skill_label(want.skill), LABEL, false, false);
+        layout.label(585, y, LABEL_HUE, tenths(want.min.max(0)));
     }
 
     let odds = chance(state, player, def, recipe);
-    layout.html_localized_colored(170, 80, 250, 18, ClilocId(1_044_057), LABEL, false, false); // Success Chance:
-    layout.label(430, 80, LABEL_HUE, percent(odds.success));
+    layout.html_localized_colored(245, 76, 280, 18, ClilocId(1_044_057), LABEL, false, false); // Success Chance:
+    layout.label(585, 76, LABEL_HUE, percent(odds.success));
     if recipe.markable {
-        layout.html_localized_colored(170, 100, 250, 18, ClilocId(1_044_058), LABEL, false, false); // Exceptional Chance:
-        layout.label(430, 100, LABEL_HUE, percent(odds.exceptional));
+        layout.html_localized_colored(245, 100, 280, 18, ClilocId(1_044_058), LABEL, false, false); // Exceptional Chance:
+        layout.label(585, 100, LABEL_HUE, percent(odds.exceptional));
     }
 
     // Four material rows at most, which is ServUO's own limit and more than any
     // recipe in the shipped tables uses.
     for (i, res) in recipe.resources.iter().take(4).enumerate() {
-        let y = row_y(219, i);
+        let y = row_y(248, i);
         let hue = axis_hue(def, res, 0);
         let name = axis_name(def, res, 0).unwrap_or(res.name);
-        label(&mut layout, 170, y, 220, name, "");
-        layout.label(430, y, LABEL_HUE, res.amount.to_string());
-        let _ = hue;
+        layout.item(275, y - 3, res.graphic, hue);
+        label(&mut layout, 315, y, 220, name, "");
+        layout.label(585, y, LABEL_HUE, res.amount.to_string());
     }
     layout
 }
@@ -590,6 +903,39 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
         return true;
     };
 
+    if context.page == CraftGumpPage::Catalogue {
+        let GumpAnswer::Pressed(pressed) = answer else {
+            return true;
+        };
+        let (kind, index) = decode_button(pressed);
+        if kind == kind::DETAILS {
+            let Some((system, recipe)) = catalogue_recipe(index) else {
+                return true;
+            };
+            let mut next = context;
+            next.system = system.raw();
+            next.page = CraftGumpPage::Details(recipe);
+            open(state, player, next);
+        } else if kind == kind::MISC {
+            let mut next = context;
+            match index {
+                misc::CATALOGUE_PREV => {
+                    next.group = next.group.saturating_sub(1);
+                    open(state, player, next);
+                }
+                misc::CATALOGUE_NEXT => {
+                    let pages = catalogue_recipes().count().div_ceil(PER_PAGE);
+                    if usize::from(next.group) + 1 < pages {
+                        next.group += 1;
+                        open(state, player, next);
+                    }
+                }
+                _ => {}
+            }
+        }
+        return true;
+    }
+
     if let CraftGumpPage::Details(recipe) = context.page {
         handle_details(state, player, context, recipe, answer);
         return true;
@@ -618,7 +964,15 @@ fn handle_details(
         // both, exactly as ServUO's `OnResponse` reads it.
         GumpAnswer::Closed => {
             let mut back = context;
-            back.page = CraftGumpPage::Items;
+            // A no-tool context belongs to the flattened catalogue.  Its
+            // `group` is the catalogue page number, so Back returns to the
+            // same slice rather than pretending this recipe had one trade-only
+            // parent in the UI.
+            back.page = if state.registry.has::<Tool>(context.tool) {
+                CraftGumpPage::Items
+            } else {
+                CraftGumpPage::Catalogue
+            };
             open(state, player, back);
         }
         GumpAnswer::Pressed(_) => {}
@@ -681,6 +1035,7 @@ fn handle_list_button(
                 next.page = CraftGumpPage::Resources;
                 open(state, player, next);
             }
+            misc::REFRESH => open(state, player, context),
             misc::CANCEL => {
                 state
                     .registry

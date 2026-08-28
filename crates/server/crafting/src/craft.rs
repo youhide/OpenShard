@@ -118,11 +118,10 @@ fn can_craft(
     if state.registry.serial_of(tool).is_none() {
         return Err(Blocked::NoTool);
     }
-    if state
-        .registry
-        .get::<Tool>(tool)
-        .is_some_and(|worn| worn.uses_left == 0)
-    {
+    let Some(tool_state) = state.registry.get::<Tool>(tool) else {
+        return Err(Blocked::NoTool);
+    };
+    if tool_state.uses_left == 0 {
         return Err(Blocked::Spent);
     }
     // "On your person" is held, worn or in a container the crafter is carrying —

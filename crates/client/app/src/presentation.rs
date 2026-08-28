@@ -2001,6 +2001,7 @@ impl App {
                         world: &self.world,
                         art: &self.resources.art,
                         tiledata: &self.resources.tiledata,
+                        skill_names: &self.resources.skill_names,
                         map_editor: &mut self.map_editor,
                         authority,
                     },

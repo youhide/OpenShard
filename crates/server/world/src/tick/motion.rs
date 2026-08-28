@@ -13,6 +13,25 @@ struct PlayerWalk {
 }
 
 impl World {
+    /// Remember the continuous crossing clients draw after an accepted step.
+    ///
+    /// The shard has already committed the destination tile by the time this is
+    /// called. The deadline is the other half of that fact: until it arrives,
+    /// the body is moving between tiles rather than standing on the new one.
+    fn record_step(&mut self, entity: EntityId, running: bool, mounted: bool) {
+        let hold = openshard_movement::step_hold(running, mounted);
+        let milliseconds = u64::try_from(hold.as_millis()).expect("a movement hold fits in u64 milliseconds");
+        self.state.registry.insert(
+            entity,
+            LastStep {
+                finishes_at: self
+                    .state
+                    .ticks
+                    .saturating_add(Gameplay::ticks_from_ms(milliseconds)),
+            },
+        );
+    }
+
     /// The body a step from `from` toward `direction` would walk into, when the
     /// thing refusing that step is a body at all.
     ///
@@ -116,6 +135,57 @@ impl World {
         self.finish_player_walk(walked, walker, outcome);
     }
 
+    /// Apply an OpenShard turn request that is not allowed to become a step.
+    pub(super) fn turn(&mut self, connection: ConnectionId, request: TurnRequest) {
+        let Some(&entity) = self.state.players.get(&connection) else {
+            debug!(%connection, "typed turn from a connection with no character");
+            return;
+        };
+        let Some(serial) = self.state.registry.serial_of(entity) else {
+            return;
+        };
+        let Some(Movement(mut walker)) = self.state.registry.get::<Movement>(entity).copied() else {
+            return;
+        };
+
+        // Reuse the ordinary acknowledgement/rejection wire. The fastwalk key
+        // is irrelevant, and the request remains typed until after its outcome
+        // has been decided, so this conversion cannot reintroduce the race.
+        let legacy = WalkRequest {
+            facing: request.facing,
+            sequence: request.sequence,
+            fastwalk_key: openshard_protocol::world::RawFastwalkKey(0),
+        };
+        let turned = PlayerWalk {
+            connection,
+            entity,
+            serial,
+            facet: self.state.facet_of(entity),
+            from: walker.position,
+            request: legacy,
+            mounted: self
+                .state
+                .registry
+                .has::<openshard_state::components::Riding>(entity),
+            leaving_seat: false,
+        };
+
+        let frozen = self
+            .state
+            .registry
+            .get::<openshard_state::components::Frozen>(entity)
+            .is_some_and(|frozen| self.state.ticks < frozen.until);
+        if frozen {
+            self.send_walk_reject(connection, legacy, walker);
+            self.notify_self(entity, "You are frozen and cannot move.");
+            return;
+        }
+
+        let outcome = walker.turn(request);
+        self.state.registry.insert(entity, Movement(walker));
+        self.finish_player_walk(turned, walker, outcome);
+    }
+
     /// Paralysis refuses the walk before anything else — so it does not even
     /// break a cast the player cannot then follow with a step.
     fn frozen_refuses_walk(
@@ -166,6 +236,12 @@ impl World {
     }
 
     fn send_walk_reject(&mut self, connection: ConnectionId, request: WalkRequest, walker: Walker) {
+        // A rejection snaps the client to this authoritative tile and ends any
+        // crossing it had predicted. The movement history must make the same
+        // cut or combat can mistake the corrected body for a runner.
+        if let Some(&entity) = self.state.players.get(&connection) {
+            self.state.registry.remove::<LastStep>(entity);
+        }
         self.state.send_packet(
             connection,
             &ServerPacket::WalkReject(WalkReject {
@@ -278,6 +354,7 @@ impl World {
         self.state.registry.insert(walked.entity, Position(position));
         items::occupy_chair(&mut self.state, walked.entity);
         self.state.registry.insert(walked.entity, Heading(facing));
+        self.record_step(walked.entity, walked.request.facing.running, walked.mounted);
         if !walked.mounted {
             combat::record_wrestling_step(&mut self.state, walked.entity);
         }
@@ -498,6 +575,7 @@ impl World {
         // bare position write leaves the player camera at the old tile while
         // the server has already moved its world around them.
         self.state.move_to(entity, facet, landed);
+        self.record_step(entity, false, false);
         self.state.bus.send(MobileMoved {
             entity,
             serial,

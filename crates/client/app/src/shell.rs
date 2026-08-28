@@ -528,6 +528,7 @@ impl Shell {
             world,
             art,
             tiledata,
+            skill_names,
             map_editor,
             authority,
         } = frame;
@@ -548,6 +549,7 @@ impl Shell {
                         world,
                         art,
                         tiledata,
+                        skill_names,
                         map_editor: &mut *map_editor,
                         authority,
                     },
@@ -766,6 +768,8 @@ pub struct ShellFrame<'a> {
     pub art: &'a openshard_uofiles::art::Art,
     /// Installed tile metadata used by catalogue panels.
     pub tiledata: &'a openshard_tiles::TileData,
+    /// Installed skill names used by the staff skill tester.
+    pub skill_names: &'a openshard_uofiles::skills::Skills,
     /// Mutable map-editor session shown by staff panels.
     pub map_editor: &'a mut crate::editor_mode::MapEditor,
     /// Authority granted by the connected shard.
@@ -795,6 +799,7 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
                 world,
                 art,
                 tiledata,
+                skill_names,
                 map_editor,
                 authority,
             },
@@ -1011,9 +1016,12 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
                 Tab::Admin => admin_items_panel(
                     ui,
                     &mut desk.admin_item,
+                    &mut desk.admin_skill,
                     &mut desk.admin_catalogue,
                     art,
                     tiledata,
+                    skill_names,
+                    world,
                     item_catalogue,
                     &mut request,
                 ),
@@ -1136,13 +1144,18 @@ fn combat_recorder_panel(
 fn admin_items_panel(
     ui: &mut egui::Ui,
     item: &mut crate::desk::AdminItem,
+    skill: &mut crate::desk::AdminSkill,
     catalogue: &mut crate::desk::AdminCatalogue,
     art: &openshard_uofiles::art::Art,
     tiledata: &openshard_tiles::TileData,
+    skill_names: &openshard_uofiles::skills::Skills,
+    world: &WorldState,
     item_catalogue: &mut ItemArtCatalogue,
     request: &mut Request,
 ) {
     ui.heading("Administrator catalogue");
+    admin_skills_panel(ui, skill, skill_names, world, request);
+    ui.separator();
     ui.label("Quick access: click an item to put it in your backpack.");
     catalogue_grid(ui, ITEMS, |entry| {
         request.create_item = Some(AdminItemRequest {
@@ -1220,6 +1233,98 @@ fn admin_items_panel(
         .small()
         .weak(),
     );
+}
+
+/// The F1 front end for `.skill <name> <value>`.
+///
+/// The command remains speech rather than gaining a private protocol route:
+/// its authority check, value cap and one-line skill update are therefore the
+/// very same ones used by a staff member typing it into chat.
+fn admin_skills_panel(
+    ui: &mut egui::Ui,
+    skill: &mut crate::desk::AdminSkill,
+    names: &openshard_uofiles::skills::Skills,
+    world: &WorldState,
+    request: &mut Request,
+) {
+    ui.heading("Skill tester");
+    ui.label("Set this character's skill, then immediately try its action in the world.");
+
+    egui::Grid::new("admin skill fields")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            ui.label("Skill");
+            egui::ComboBox::from_id_salt("admin skill name")
+                .selected_text(&skill.name)
+                .show_ui(ui, |ui| {
+                    for (_, known) in names.iter() {
+                        ui.selectable_value(&mut skill.name, known.name.clone(), &known.name);
+                    }
+                });
+            ui.end_row();
+
+            ui.label("Value");
+            ui.add(egui::TextEdit::singleline(&mut skill.value).hint_text("95 or 95.5"));
+            ui.end_row();
+        });
+
+    let current = names
+        .iter()
+        .find(|(_, known)| known.name == skill.name)
+        .and_then(|(id, _)| world.authoritative.view.as_ref()?.player.skills.get(&id.0));
+    match current {
+        Some(line) => ui.label(format!(
+            "Current: {}  |  trained: {}  |  cap: {}",
+            tenths(line.value),
+            tenths(line.base),
+            tenths(line.cap)
+        )),
+        None => ui.label("Current value has not arrived from the shard yet."),
+    };
+
+    match parse_admin_skill(skill) {
+        Ok(command) => {
+            if ui.button("Apply to my character").clicked() {
+                request.staff_command = Some(command);
+            }
+        }
+        Err(problem) => {
+            ui.add_enabled(false, egui::Button::new("Apply to my character"));
+            ui.colored_label(ui.visuals().warn_fg_color, problem);
+        }
+    }
+    ui.label(
+        egui::RichText::new("The shard confirms the applied value in the journal and updates this row.")
+            .small()
+            .weak(),
+    );
+}
+
+fn tenths(value: u16) -> String {
+    format!("{}.{}", value / 10, value % 10)
+}
+
+fn parse_admin_skill(skill: &crate::desk::AdminSkill) -> Result<String, &'static str> {
+    let name: String = skill
+        .name
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect();
+    if name.is_empty() {
+        return Err("Choose a skill.");
+    }
+    let value = skill.value.trim();
+    let valid = value.split_once('.').map_or_else(
+        || value.parse::<u16>().ok().and_then(|whole| whole.checked_mul(10)),
+        |(whole, fraction)| {
+            let whole = whole.parse::<u16>().ok()?;
+            let tenth = fraction.parse::<u16>().ok().filter(|_| fraction.len() == 1)?;
+            whole.checked_mul(10)?.checked_add(tenth)
+        },
+    );
+    valid.ok_or("Enter a whole value or one decimal place, e.g. 95 or 95.5.")?;
+    Ok(format!("{}skill {name} {value}", openshard_commands::PREFIX))
 }
 
 struct ItemCatalogueEntry {
@@ -1415,6 +1520,22 @@ fn item_art_catalogue(
         egui::TextEdit::singleline(&mut catalogue.query)
             .hint_text("Name or graphic ID, e.g. dagger or 0x0f52"),
     );
+    ui.horizontal(|ui| {
+        ui.label("Amount");
+        ui.add(
+            egui::TextEdit::singleline(&mut catalogue.amount)
+                .desired_width(72.0)
+                .hint_text("1"),
+        );
+        ui.checkbox(&mut catalogue.stackable, "Create as one stack");
+    });
+    let amount = parse_u16(&catalogue.amount).filter(|amount| *amount > 0);
+    if amount.is_none() {
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            "Amount must be a whole number from 1 to 65535.",
+        );
+    }
 
     let key = (catalogue.query.trim().to_ascii_lowercase(), catalogue.category);
     if browser.key.as_ref() != Some(&key) {
@@ -1449,12 +1570,14 @@ fn item_art_catalogue(
                     };
                     let name = tiledata.item_name(id).unwrap_or("Unnamed static");
                     if ui.selectable_label(false, format!("{id:#06x}  {name}")).clicked() || clicked {
-                        request.create_item = Some(AdminItemRequest {
-                            graphic: id,
-                            hue: 0,
-                            amount: 1,
-                            stackable: false,
-                        });
+                        if let Some(amount) = amount {
+                            request.create_item = Some(AdminItemRequest {
+                                graphic: id,
+                                hue: 0,
+                                amount,
+                                stackable: catalogue.stackable,
+                            });
+                        }
                     }
                 });
             }
@@ -2416,6 +2539,9 @@ fn tile_tab(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut Requ
                             format!("{reading} 0x{:04X} z {base}..{top} over ray {ray}", graphic.0)
                         }
                         Some(Stop::Door) => format!("a shut door, ray {ray}"),
+                        Some(Stop::LiveWall { base, top }) => {
+                            format!("a house wall z {base}..{top} over ray {ray}")
+                        }
                         // The verdict is the first stop, so it always has one;
                         // this arm exists because the type says it may not, not
                         // because the picture can reach it.
@@ -3037,11 +3163,11 @@ fn draw_action_bars(
                 egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180),
             );
             match running.fill {
+                ActionFill::Arming { filled } |
                 // The whole bar, held: an armed action is *ready*, and a
                 // fraction here would be its endurance running out — which is
                 // not what a watcher is being told. The stroke is what says it
                 // is waiting rather than landing.
-                ActionFill::Armed => painter.rect_filled(rect, 1.0, colour),
                 ActionFill::Releasing { filled } => painter.rect_filled(
                     egui::Rect::from_min_size(
                         rect.min,
@@ -3050,10 +3176,11 @@ fn draw_action_bars(
                     1.0,
                     colour,
                 ),
+                ActionFill::Armed => painter.rect_filled(rect, 1.0, colour),
             };
             let stroke = match running.fill {
                 ActionFill::Armed => egui::Stroke::new(1.2, egui::Color32::from_rgb(255, 230, 80)),
-                ActionFill::Releasing { .. } => {
+                ActionFill::Arming { .. } | ActionFill::Releasing { .. } => {
                     egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(20, 20, 20, 220))
                 }
             };
@@ -3106,13 +3233,28 @@ fn draw_action_bars(
             // The state in a word, and only when no outcome is competing for
             // the same place: what a fighter *is* doing is already drawn twice
             // over there, and what just happened is the scarcer fact.
-            painter.text(
+            let (state, context) = action_state_labels(
+                running.kind,
+                running.fill,
+                running.stage,
+                running.released_from_held_draw,
+            );
+            let state_rect = painter.text(
                 label_at,
                 egui::Align2::LEFT_CENTER,
-                action_state_label(running.kind, running.fill, running.stage),
+                state,
                 font.clone(),
                 action_colour(running.kind),
             );
+            if let Some(context) = context {
+                painter.text(
+                    egui::pos2(state_rect.right() + MARGIN, label_at.y),
+                    egui::Align2::LEFT_CENTER,
+                    context,
+                    font.clone(),
+                    egui::Color32::from_rgb(255, 230, 80),
+                );
+            }
         }
     }
 }
@@ -3256,8 +3398,21 @@ fn outcome_colour(outcome: CombatActionOutcome) -> egui::Color32 {
 ///
 /// An armed action ignores the stretch, because *held* is the whole of what it
 /// is doing: it is not part way through anything, it is waiting on the world.
-fn action_state_label(kind: CombatActionKind, fill: ActionFill, stage: ActionStage) -> &'static str {
-    match fill {
+fn action_state_labels(
+    kind: CombatActionKind,
+    fill: ActionFill,
+    stage: ActionStage,
+    released_from_held_draw: bool,
+) -> (&'static str, Option<&'static str>) {
+    let state = match fill {
+        ActionFill::Arming { .. } => match (kind, stage) {
+            (CombatActionKind::Swing, ActionStage::Ready) => "raising",
+            (CombatActionKind::Swing, _) => "winding up",
+            (CombatActionKind::Shot, ActionStage::Ready) => "raising bow",
+            (CombatActionKind::Shot, _) => "drawing",
+            (CombatActionKind::Breath, ActionStage::Ready) => "rearing",
+            (CombatActionKind::Breath, _) => "inhaling",
+        },
         ActionFill::Armed => match kind {
             CombatActionKind::Swing => "swing · held",
             CombatActionKind::Shot => "aim · held",
@@ -3277,7 +3432,9 @@ fn action_state_label(kind: CombatActionKind, fill: ActionFill, stage: ActionSta
             (CombatActionKind::Breath, ActionStage::Aim) => "fixing",
             (CombatActionKind::Breath, ActionStage::Release) => "breathing",
         },
-    }
+    };
+    let context = (kind == CombatActionKind::Shot && released_from_held_draw).then_some("bow drawn");
+    (state, context)
 }
 
 /// The colour a standing refusal is drawn in.
@@ -4903,7 +5060,7 @@ fn draw_sight(painter: &egui::Painter, camera: &Camera, sight: &SightLine, viewp
     // live layer is asked without a height at all — so the cross above is the
     // whole of what can be said about it.
     let span = match step.stop {
-        Some(Stop::Static { base, top, .. }) => Some((base, top)),
+        Some(Stop::Static { base, top, .. }) | Some(Stop::LiveWall { base, top }) => Some((base, top)),
         // Ground is not a box: it is the tile's own surface, drawn as the
         // diamond it is, from the ray's height up to it.
         Some(Stop::Ground { z }) => Some((step.ray_z, z)),
@@ -5114,6 +5271,32 @@ mod tests {
         assert_eq!(distinct.len(), kinds.len() + endings.len());
     }
 
+    /// The brief loose after overwatch is a second state beside the release,
+    /// not the start of another draw.  The two labels must stay separate so the
+    /// short bar cannot be mistaken for the bow being pulled again.
+    #[test]
+    fn a_loosed_held_bow_names_its_drawn_state_beside_the_release() {
+        assert_eq!(
+            action_state_labels(
+                CombatActionKind::Shot,
+                ActionFill::Releasing { filled: 0.0 },
+                ActionStage::Release,
+                true,
+            ),
+            ("loosing", Some("bow drawn")),
+        );
+        assert_eq!(
+            action_state_labels(
+                CombatActionKind::Shot,
+                ActionFill::Releasing { filled: 0.0 },
+                ActionStage::Release,
+                false,
+            ),
+            ("loosing", None),
+            "a new shot may not pretend it was already held",
+        );
+    }
+
     #[test]
     fn route_height_gradient_uses_the_open_route_minimum_and_maximum_z() {
         let route = [
@@ -5163,6 +5346,27 @@ mod tests {
         assert_eq!(
             parse_admin_item(&empty),
             Err("Amount must be a whole number from 1 to 65535.")
+        );
+    }
+
+    #[test]
+    fn the_admin_skill_form_makes_the_existing_staff_command() {
+        let skill = crate::desk::AdminSkill {
+            name: "Item Identification".to_owned(),
+            value: "95.5".to_owned(),
+        };
+        assert_eq!(
+            parse_admin_skill(&skill),
+            Ok(".skill ItemIdentification 95.5".to_owned())
+        );
+
+        let invalid = crate::desk::AdminSkill {
+            value: "95.55".to_owned(),
+            ..skill
+        };
+        assert_eq!(
+            parse_admin_skill(&invalid),
+            Err("Enter a whole value or one decimal place, e.g. 95 or 95.5.")
         );
     }
 }

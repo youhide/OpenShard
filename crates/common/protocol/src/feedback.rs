@@ -406,15 +406,17 @@ impl CombatActionKind {
     }
 }
 
-/// Which half of an action's life the actor just entered.
+/// Which phase of an action's life the actor just entered.
 ///
 /// The duration means a different thing in each, which is why they are one enum
-/// and not a flag beside a number: an armed action is *waiting* and its number
-/// is how long it can wait, a releasing one is *landing* and its number is how
-/// long that takes. A zero-length timed action would be the lie
+/// and not a flag beside a number: an arming action is preparing, an armed
+/// action is waiting, and a releasing one is landing. A zero-length timed action would be the lie
 /// `docs/combat_actions.md`'s wire section refuses.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ActionPhase {
+    /// Preparing the action before it can be held: a bow is being raised and
+    /// drawn, for this long.
+    Arming { ready_in: SwingDuration },
     /// Ready and waiting on the world, for at most this long.
     Armed { endurance: SwingDuration },
     /// Released: the impact lands after this long.
@@ -426,6 +428,7 @@ impl ActionPhase {
     #[must_use]
     pub const fn to_bits(self) -> u8 {
         match self {
+            Self::Arming { .. } => 2,
             Self::Armed { .. } => 0,
             Self::Releasing { .. } => 1,
         }
@@ -435,6 +438,7 @@ impl ActionPhase {
     #[must_use]
     pub const fn duration(self) -> SwingDuration {
         match self {
+            Self::Arming { ready_in } => ready_in,
             Self::Armed { endurance } => endurance,
             Self::Releasing { impact_in } => impact_in,
         }
@@ -446,6 +450,7 @@ impl ActionPhase {
         match bits {
             0 => Some(Self::Armed { endurance: duration }),
             1 => Some(Self::Releasing { impact_in: duration }),
+            2 => Some(Self::Arming { ready_in: duration }),
             _ => None,
         }
     }
@@ -1442,6 +1447,22 @@ mod tests {
         assert_eq!(packet[13], 1, "a shot");
         assert_eq!(packet[14], 0, "armed");
         assert_eq!(&packet[15..19], &8_000_u32.to_be_bytes());
+        assert_eq!(decode_packet::<CombatActionPhase>(&packet, version()), Ok(phase));
+    }
+
+    #[test]
+    fn an_arming_action_carries_the_time_until_it_can_be_held() {
+        let phase = CombatActionPhase {
+            actor: mobile(0x0000_1234),
+            target: mobile(0x0000_5678),
+            kind: CombatActionKind::Shot,
+            phase: ActionPhase::Arming {
+                ready_in: SwingDuration(1_250),
+            },
+        };
+        let packet = encode_packet(&phase, version());
+        assert_eq!(packet[14], 2, "arming is distinct from held and released");
+        assert_eq!(&packet[15..19], &1_250_u32.to_be_bytes());
         assert_eq!(decode_packet::<CombatActionPhase>(&packet, version()), Ok(phase));
     }
 

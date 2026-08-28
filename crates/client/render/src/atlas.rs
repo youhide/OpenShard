@@ -25,7 +25,7 @@ use openshard_protocol::wire::Graphic;
 use openshard_tiles::{LandTileId, TileData};
 use openshard_uofiles::anim::{Anim, AnimError, AnimFrame, AnimationFrameIndex};
 use openshard_uofiles::art::{Art, ArtError, LAND_TILE_SIZE, land_row};
-use openshard_uofiles::color::Rgb8;
+use openshard_uofiles::color::{Color16, Rgb8};
 use openshard_uofiles::font::{AsciiFonts, FONT_COUNT};
 use openshard_uofiles::image::Image;
 use openshard_uofiles::texmaps::{TexMapError, TexMaps};
@@ -1862,6 +1862,21 @@ pub struct PackedFrame {
     origin: (u32, u32),
 }
 
+/// Which pixels a mobile placement samples.
+///
+/// A regular source is one frame from the client's animation files. The
+/// fallback sources are small built-in silhouettes, used only when that file
+/// has no frame for a mobile the shard has shown us. Keeping this identity
+/// beside the packed frame makes CPU picking ask the same alpha question as
+/// the draw pass.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AnimFrameSource {
+    /// A frame read from `anim.mul`.
+    Frame(FrameKey),
+    /// The generic standing or lying silhouette.
+    Fallback { corpse: bool },
+}
+
 /// Animation frames, packed into one texture.
 ///
 /// The same shelf packing [`StaticAtlas`] uses, keyed by [`FrameKey`] instead of
@@ -1871,6 +1886,10 @@ pub struct PackedFrame {
 /// creature turning — and a draw call binds one texture either way.
 pub struct AnimAtlas {
     frames: BTreeMap<FrameKey, PackedFrame>,
+    /// Two pictures that make an unknown body visible without pretending it
+    /// is another body from the client's files.
+    fallback_standing: PackedFrame,
+    fallback_corpse: PackedFrame,
     /// Every body-group-direction ever offered, animated or not.
     ///
     /// Keyed by the triple and not by [`FrameKey`], because a triple is what a
@@ -1926,12 +1945,45 @@ impl AnimAtlas {
     /// An atlas holding nothing, ready to be grown into.
     fn empty() -> Self {
         let side = ATLAS_SIDE as usize;
-        Self {
+        let mut atlas = Self {
             frames: BTreeMap::new(),
+            // Filled just below. A zero-sized sprite is never sampled: these
+            // placeholders let the value be built before its shelf exists.
+            fallback_standing: empty_packed_frame(),
+            fallback_corpse: empty_packed_frame(),
             asked: BTreeSet::new(),
             shelf: Shelf::default(),
             pixels: vec![0u8; side * side * 4],
             dirty: Dirty::default(),
+        };
+        atlas.fallback_standing = atlas.pack_fallback(fallback_standing());
+        atlas.fallback_corpse = atlas.pack_fallback(fallback_corpse());
+        atlas
+    }
+
+    /// Reserve one built-in silhouette in this atlas.
+    ///
+    /// The images are intentionally not entries in `frames`: a synthetic key
+    /// could collide with a body a shard legitimately names, while a separate
+    /// source says exactly what is on screen.
+    fn pack_fallback(&mut self, frame: AnimFrame) -> PackedFrame {
+        let image = &frame.image;
+        let (width, height) = (image.width(), image.height());
+        let (origin_x, origin_y) = self
+            .shelf
+            .take(u32::from(width), u32::from(height))
+            .expect("the two tiny built-in mobile silhouettes fit in an empty atlas");
+        copy_sprite(&mut self.pixels, image, origin_x, origin_y);
+        PackedFrame {
+            sprite: Sprite {
+                region: region_at(origin_x, origin_y, width, height),
+                width,
+                height,
+                facing: None,
+            },
+            center_x: frame.center_x,
+            center_y: frame.center_y,
+            origin: (origin_x, origin_y),
         }
     }
 
@@ -2089,6 +2141,22 @@ impl AnimAtlas {
         self.frames.get(&key).copied()
     }
 
+    /// A requested frame, or the built-in silhouette appropriate for the
+    /// mobile's state when the client files contain no such frame.
+    #[must_use]
+    pub fn frame_or_fallback(&self, key: FrameKey, corpse: bool) -> (PackedFrame, AnimFrameSource) {
+        match self.frame(key) {
+            Some(frame) => (frame, AnimFrameSource::Frame(key)),
+            None => match corpse {
+                false => (
+                    self.fallback_standing,
+                    AnimFrameSource::Fallback { corpse: false },
+                ),
+                true => (self.fallback_corpse, AnimFrameSource::Fallback { corpse: true }),
+            },
+        }
+    }
+
     /// Whether the pixel at `(x, y)` *within* a frame's own picture is drawn
     /// rather than transparent — [`StaticAtlas::opaque_at`]'s question, asked of
     /// an animation frame.
@@ -2103,7 +2171,22 @@ impl AnimAtlas {
     /// `false` for a frame that is not packed and for a coordinate outside the
     /// picture.
     pub fn opaque_at(&self, key: FrameKey, at: AtlasPixel) -> bool {
-        let Some(packed) = self.frames.get(&key) else {
+        self.opaque_in(self.frames.get(&key).copied(), at)
+    }
+
+    /// [`Self::opaque_at`] for the exact source a mobile placement drew.
+    #[must_use]
+    pub fn source_opaque_at(&self, source: AnimFrameSource, at: AtlasPixel) -> bool {
+        let packed = match source {
+            AnimFrameSource::Frame(key) => self.frames.get(&key).copied(),
+            AnimFrameSource::Fallback { corpse: false } => Some(self.fallback_standing),
+            AnimFrameSource::Fallback { corpse: true } => Some(self.fallback_corpse),
+        };
+        self.opaque_in(packed, at)
+    }
+
+    fn opaque_in(&self, packed: Option<PackedFrame>, at: AtlasPixel) -> bool {
+        let Some(packed) = packed else {
             return false;
         };
         if at.x >= packed.sprite.width || at.y >= packed.sprite.height {
@@ -2125,6 +2208,80 @@ impl AnimAtlas {
         let first = FrameKey::new(animation, AnimationFrameIndex(0));
         let last = FrameKey::new(animation, AnimationFrameIndex(u16::MAX));
         AnimationFrameCount(self.frames.range(first..=last).count() as u16)
+    }
+}
+
+/// A harmless initial value while [`AnimAtlas::empty`] creates its two real
+/// built-in frames. It never reaches a renderer.
+const fn empty_packed_frame() -> PackedFrame {
+    PackedFrame {
+        sprite: Sprite {
+            region: Region {
+                u: 0.0,
+                v: 0.0,
+                du: 0.0,
+                dv: 0.0,
+            },
+            width: 0,
+            height: 0,
+            facing: None,
+        },
+        center_x: 0,
+        center_y: 0,
+        origin: (0, 0),
+    }
+}
+
+/// A neutral upright person-shaped marker, anchored at its feet.
+fn fallback_standing() -> AnimFrame {
+    const WIDTH: u16 = 20;
+    const HEIGHT: u16 = 34;
+    fallback_frame(WIDTH, HEIGHT, 10, 0, |x, y| {
+        // Head, shoulders/arms, torso, then two legs. It is deliberately a
+        // silhouette rather than an invented species or a misleading borrowed
+        // client animation.
+        (7..=12).contains(&x) && y <= 6
+            || (5..=14).contains(&x) && (7..=20).contains(&y)
+            || (2..=17).contains(&x) && (10..=16).contains(&y)
+            || (5..=8).contains(&x) && (21..HEIGHT).contains(&y)
+            || (11..=14).contains(&x) && (21..HEIGHT).contains(&y)
+    })
+}
+
+/// A neutral body-shaped marker, anchored at the corpse's ground tile.
+fn fallback_corpse() -> AnimFrame {
+    const WIDTH: u16 = 34;
+    const HEIGHT: u16 = 18;
+    fallback_frame(WIDTH, HEIGHT, 17, 0, |x, y| {
+        // Boots, torso and a rounder head at the far end. Its low, horizontal
+        // outline distinguishes a corpse from a living unknown mobile.
+        (1..=8).contains(&x) && (6..=12).contains(&y)
+            || (7..=27).contains(&x) && (4..=13).contains(&y)
+            || (12..=24).contains(&x) && (2..=15).contains(&y)
+            || (27..=32).contains(&x) && (5..=12).contains(&y)
+    })
+}
+
+fn fallback_frame(
+    width: u16,
+    height: u16,
+    center_x: i16,
+    center_y: i16,
+    opaque: impl Fn(u16, u16) -> bool,
+) -> AnimFrame {
+    // Neutral medium grey remains readable under ordinary lighting and is not
+    // recoloured unless the server explicitly supplied a mobile hue.
+    const SILHOUETTE: Color16 = Color16(0x4210);
+    let mut pixels = Vec::with_capacity(usize::from(width) * usize::from(height));
+    for y in 0..height {
+        for x in 0..width {
+            pixels.push(opaque(x, y).then_some(SILHOUETTE).unwrap_or(Color16::TRANSPARENT));
+        }
+    }
+    AnimFrame {
+        center_x,
+        center_y,
+        image: Image::new(width, height, pixels),
     }
 }
 

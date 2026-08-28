@@ -719,6 +719,24 @@ fn unblocking_gives_the_ground_back() {
     );
 }
 
+/// House walls enter the live obstruction layer, so sight has to read their
+/// structural span as well as the map's baked statics and shut doors.
+#[test]
+fn a_house_wall_blocks_line_of_sight() {
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner).expect("a legal house");
+
+    assert!(
+        !openshard_movement::sight_clear(
+            &state.footing(Facet(0), Doors::AsTheyStand),
+            Point::new(8, 9, 0),
+            Point::new(11, 9, 0)
+        ),
+        "the cottage wall at (9, 9) did not block the look"
+    );
+}
+
 /// The rule a player notices the absence of: without it, houses go up in the
 /// middle of Britain's streets.
 #[test]

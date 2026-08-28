@@ -19,7 +19,7 @@ use openshard_protocol::packet::encode_packet;
 use openshard_protocol::serial::RawSerial;
 use openshard_protocol::skill::SkillLock;
 use openshard_protocol::wire::{Graphic, Hue, RawSkillId, SoundId};
-use openshard_protocol::world::{Aggression, RangedRange, RawStepSequence};
+use openshard_protocol::world::{Aggression, RangedRange, RawStepSequence, TurnRequest};
 use openshard_skills::SkillUsed;
 use openshard_state::action_rules::{ActionEffect, ActionRules, ConditionEffects, ConditionSet};
 use openshard_state::components::ItemAffix;
@@ -67,6 +67,50 @@ fn bare_hands_take_one_second_at_default_dexterity() {
 
 pub(super) fn world() -> World {
     World::new(START)
+}
+
+/// Regression for the kiting race: the client decided this input was a turn,
+/// then combat turned the authoritative body before the request arrived. A
+/// legacy `0x02` would now be reinterpreted as a step; the typed request must
+/// still leave the position untouched.
+#[test]
+fn a_turn_request_cannot_become_a_step_after_combat_already_turned_the_body() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let before = world.state.registry.get::<Position>(entity).unwrap().0;
+    let east = Facing::walking(Direction::East);
+    let Movement(mut walker) = *world.state.registry.get::<Movement>(entity).unwrap();
+    walker.facing = east;
+    world.state.registry.insert(entity, Movement(walker));
+    world.state.registry.insert(entity, Heading(east));
+    let _ = world.drain_outbound().count();
+
+    world.queue(Command::Turn {
+        connection,
+        request: TurnRequest {
+            facing: east,
+            sequence: RawStepSequence(0),
+        },
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world.state.registry.get::<Position>(entity).unwrap().0,
+        before,
+        "an already-satisfied turn is acknowledged, never re-derived as a step"
+    );
+    assert!(
+        world
+            .drain_outbound()
+            .any(|out| out.packet.first() == Some(&0x22)),
+        "the turn remains in the ordered movement acknowledgement stream"
+    );
+    assert!(
+        !world.state.registry.has::<LastStep>(entity),
+        "a turn does not leave combat's movement marker behind"
+    );
 }
 
 /// The flags a fixture wall carries: impassable, and a wall for the sight line.
@@ -5656,6 +5700,22 @@ fn action_phase(packets: &[Vec<u8>]) -> Option<(u8, u8, u32)> {
     })
 }
 
+/// The last phase transition in a batch. A completed draw may announce Armed
+/// and immediately Releasing in the same tick when sight is already open.
+fn last_action_phase(packets: &[Vec<u8>]) -> Option<(u8, u8, u32)> {
+    packets.iter().rev().find_map(|packet| {
+        (packet.first() == Some(&0xBF)
+            && packet.get(3..5) == Some(&CombatActionPhase::SUBCOMMAND.to_be_bytes()[..]))
+        .then(|| {
+            (
+                packet[13],
+                packet[14],
+                u32::from_be_bytes([packet[15], packet[16], packet[17], packet[18]]),
+            )
+        })
+    })
+}
+
 /// The commit says what is being done, to whom, and how long it has left — the
 /// half of the wire that used to be a bare duration with no subject.
 #[test]
@@ -6489,6 +6549,284 @@ fn arm_with_bow(world: &mut World, connection: ConnectionId) {
     ));
 }
 
+/// Targeted bow overwatch: a cut sight line is a held shot, either participant
+/// may move to open it, and opening it starts a real (non-zero) loose rather
+/// than teleporting an arrow out on the discovery tick.
+#[test]
+fn a_drawn_bow_walks_out_of_cover_and_releases_on_sight() {
+    let now = Instant::now();
+    let mut world = world();
+    stand_on(&mut world, a_wall_two_tiles_across());
+    let connection = enter(&mut world, now);
+    let archer = world.state.players[&connection];
+    let archer_serial = world.state.registry.serial_of(archer).unwrap();
+    arm_with_bow(&mut world, connection);
+    let target = spawn_mobile_at(&mut world, Point::new(START.x + 2, START.y, 0), 50, now);
+    let quiver = items::backpack_of(&world.state, archer_serial).unwrap();
+    let _ = packets_for(&mut world, connection);
+
+    engage(&mut world, connection, target, now);
+    let held = packets_for(&mut world, connection);
+    let arming_ticks = match world.state.registry.get::<CombatAction>(archer).map(|a| a.phase) {
+        Some(Phase::Arming { ready_at, .. }) => ready_at.saturating_sub(world.state.ticks),
+        other => panic!("the covered shot did not begin its draw: {other:?}"),
+    };
+    assert_eq!(
+        action_phase(&held),
+        Some((
+            openshard_protocol::feedback::CombatActionKind::Shot.to_bits(),
+            2,
+            (arming_ticks * (1_000 / TICKS_PER_SECOND)) as u32,
+        )),
+        "the wall starts a mandatory draw instead of skipping straight to held"
+    );
+    assert_eq!(
+        action_stages(&held, archer_serial),
+        Vec::<u8>::new(),
+        "the commit packet itself already implies the first preparation stage"
+    );
+    assert!(matches!(
+        world.state.registry.get::<CombatAction>(archer).map(|a| a.phase),
+        Some(Phase::Arming {
+            watch: Watch::TargetInSight,
+            ..
+        })
+    ));
+    assert_eq!(
+        items::count_in_container(&world.state, quiver, Graphic(0x0F3F)),
+        20,
+        "holding only reserves the idea of a round; it consumes no arrow"
+    );
+
+    // Move south until the line rounds the wall. The accepted walk is applied
+    // before sustain, so the sight watch sees the same authoritative position
+    // in this tick that the movement packet announced.
+    let mut released_packets = Vec::new();
+    let hold_ticks =
+        Gameplay::ticks_from_ms(u64::try_from(openshard_movement::RUN_HOLD.as_millis()).unwrap());
+    for sequence in 0..4 {
+        world.queue(Command::Walk {
+            connection,
+            request: run(sequence, Direction::South),
+        });
+        world.tick(now);
+        released_packets.extend(packets_for(&mut world, connection));
+        // Respect the same crossing deadline the client does before asking for
+        // another step; rejected movement would prove nothing about walking
+        // while armed.
+        for _ in 1..hold_ticks {
+            world.tick(now);
+            released_packets.extend(packets_for(&mut world, connection));
+        }
+    }
+    let ready_at = match world.state.registry.get::<CombatAction>(archer).map(|a| a.phase) {
+        Some(Phase::Arming { ready_at, .. }) => ready_at,
+        other => panic!("opening sight during the draw released too early: {other:?}"),
+    };
+    while world.state.ticks < ready_at {
+        world.tick(now);
+        released_packets.extend(packets_for(&mut world, connection));
+    }
+    assert_ne!(
+        world.state.registry.get::<Position>(archer).unwrap().0,
+        Point::new(START.x, START.y, 0),
+        "the archer walked while the bow was held"
+    );
+    let action = *world
+        .state
+        .registry
+        .get::<CombatAction>(archer)
+        .expect("walking out from the wall released the held shot");
+    let Phase::Releasing { impact } = action.phase else {
+        panic!("the opened sight line did not release overwatch: {action:?}");
+    };
+    let release_ticks = impact.saturating_sub(world.state.ticks);
+    assert!(release_ticks > 0, "a watch never resolves on its trigger tick");
+    assert_eq!(
+        last_action_phase(&released_packets),
+        Some((
+            openshard_protocol::feedback::CombatActionKind::Shot.to_bits(),
+            1,
+            (release_ticks * (1_000 / TICKS_PER_SECOND)) as u32,
+        )),
+        "the client is told the loose began and how long it has"
+    );
+
+    for _ in 1..release_ticks {
+        world.tick(now);
+    }
+    assert_eq!(
+        items::count_in_container(&world.state, quiver, Graphic(0x0F3F)),
+        20,
+        "the arrow remains in the quiver throughout the loose"
+    );
+    world.tick(now);
+    assert_eq!(
+        items::count_in_container(&world.state, quiver, Graphic(0x0F3F)),
+        19,
+        "the arrow is spent only when the released shot actually flies"
+    );
+}
+
+/// The watch belongs to the line between the two mobiles, not to the archer's
+/// movement seam alone: the selected enemy stepping out is the same release.
+#[test]
+fn a_drawn_bow_releases_when_its_enemy_steps_out_of_cover() {
+    let now = Instant::now();
+    let mut world = world();
+    stand_on(&mut world, a_wall_two_tiles_across());
+    let connection = enter(&mut world, now);
+    let archer = world.state.players[&connection];
+    arm_with_bow(&mut world, connection);
+    let target = spawn_mobile_at(&mut world, Point::new(START.x + 2, START.y, 0), 50, now);
+    let target_entity = entity(&world, target);
+    engage(&mut world, connection, target, now);
+    let _ = packets_for(&mut world, connection);
+    let ready_at = match world.state.registry.get::<CombatAction>(archer).map(|a| a.phase) {
+        Some(Phase::Arming {
+            watch: Watch::TargetInSight,
+            ready_at,
+            ..
+        }) => ready_at,
+        other => panic!("a covered shot did not begin its draw: {other:?}"),
+    };
+    while world.state.ticks < ready_at {
+        world.tick(now);
+    }
+    assert!(matches!(
+        world.state.registry.get::<CombatAction>(archer).map(|a| a.phase),
+        Some(Phase::Armed {
+            watch: Watch::TargetInSight,
+            ..
+        })
+    ));
+    let _ = packets_for(&mut world, connection);
+
+    world
+        .state
+        .teleport(target_entity, Point::new(START.x, START.y + 2, 0));
+    world.tick(now);
+
+    assert!(matches!(
+        world.state.registry.get::<CombatAction>(archer).map(|a| a.phase),
+        Some(Phase::Releasing { impact }) if impact > world.state.ticks
+    ));
+    assert_eq!(
+        action_phase(&packets_for(&mut world, connection)).map(|(_, phase, _)| phase),
+        Some(1),
+        "the target opening the line announces the same non-instant release"
+    );
+}
+
+/// A shot committed during a crossing must not rewrite the facing that owns the
+/// walk. The next request in that direction is therefore another step, not the
+/// turn-on-the-spot that made shooting on the run visibly stumble.
+#[test]
+fn a_running_archer_keeps_the_stride_when_a_shot_commits() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let archer = world.state.players[&connection];
+    arm_with_bow(&mut world, connection);
+    let target = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 50, now);
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::Walk {
+        connection,
+        request: run(0, Direction::South),
+    });
+    world.tick(now);
+    let first = world.state.registry.get::<Position>(archer).unwrap().0;
+    assert_eq!(first, Point::new(START.x, START.y + 1, 0), "a real running step");
+
+    // Commit halfway through the crossing rather than on the movement tick: the
+    // detector is the step's real presentation lifetime, not a tick-local flag.
+    let hold_ticks =
+        Gameplay::ticks_from_ms(u64::try_from(openshard_movement::RUN_HOLD.as_millis()).unwrap());
+    for _ in 0..(hold_ticks / 2) {
+        world.tick(now + openshard_movement::RUN_HOLD / 2);
+    }
+    world.queue(Command::WarMode {
+        connection,
+        war: true,
+    });
+    world.queue(Command::Attack {
+        connection,
+        target: Some(target),
+    });
+    world.tick(now + openshard_movement::RUN_HOLD / 2);
+
+    assert_eq!(
+        world.state.registry.get::<Heading>(archer).unwrap().0.direction,
+        Direction::South,
+        "the nock did not turn the running body toward its target"
+    );
+    world.queue(Command::Walk {
+        connection,
+        request: run(1, Direction::South),
+    });
+    world.tick(now + openshard_movement::RUN_HOLD);
+    assert_eq!(
+        world.state.registry.get::<Position>(archer).unwrap().0,
+        Point::new(START.x, START.y + 2, 0),
+        "the following request continued the run instead of paying for a combat turn"
+    );
+}
+
+/// The run bit is the last requested pace, not a movement state. Once its
+/// crossing has ended, an archer is standing and should turn into the shot even
+/// though that bit remains set in `Movement`.
+#[test]
+fn an_archer_turns_to_the_target_after_the_last_step_finishes() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let archer = world.state.players[&connection];
+    arm_with_bow(&mut world, connection);
+    let target_at = Point::new(START.x + 3, START.y, 0);
+    let target = spawn_mobile_at(&mut world, target_at, 50, now);
+
+    world.queue(Command::Walk {
+        connection,
+        request: run(0, Direction::South),
+    });
+    world.tick(now);
+    let hold_ticks =
+        Gameplay::ticks_from_ms(u64::try_from(openshard_movement::RUN_HOLD.as_millis()).unwrap());
+    for _ in 1..hold_ticks {
+        world.tick(now + openshard_movement::RUN_HOLD);
+    }
+    let from = world.state.registry.get::<Position>(archer).unwrap().0;
+    let toward = openshard_movement::direction_toward(from, target_at).unwrap();
+    assert!(
+        world
+            .state
+            .registry
+            .get::<Movement>(archer)
+            .unwrap()
+            .0
+            .facing
+            .running,
+        "the stale run bit is present, so it cannot be the detector"
+    );
+
+    world.queue(Command::WarMode {
+        connection,
+        war: true,
+    });
+    world.queue(Command::Attack {
+        connection,
+        target: Some(target),
+    });
+    world.tick(now + openshard_movement::RUN_HOLD);
+
+    assert_eq!(
+        world.state.registry.get::<Heading>(archer).unwrap().0.direction,
+        toward,
+        "after the crossing the standing archer turns into the shot"
+    );
+}
+
 /// The visible half of Ф2. A shot is a committed action like any other, so it
 /// announces itself at the start of the interval it will take — the archer is a
 /// body drawing a bow for the whole of it, not a statue that spits an arrow.
@@ -6562,65 +6900,58 @@ fn an_interrupted_draw_costs_the_archer_no_arrow() {
     );
 }
 
-/// The defect this phase was built for, in the place it was met: an archer whose
-/// quarry has gone out of reach. Under the old commit pass that was a bare
-/// `continue` — no packet, no word, nothing on screen — for as long as the
-/// distance held, which from a player's seat is a shard that has stopped.
-///
-/// Three claims, and the second is the one that keeps it affordable: the refusal
-/// is **said once**, it is **not repeated** while it holds, and it is **lifted
-/// once** when the way is clear. A per-tick packet would be forty a second per
-/// held-up fighter.
+/// A ranged target out of reach is watched just like one out of sight: the bow
+/// draws, then holds until the same target returns to a shootable position.
 #[test]
-fn an_archer_held_out_of_reach_says_so_once_and_says_so_until_it_is_not() {
+fn an_archer_holds_a_drawn_bow_for_a_target_out_of_reach() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
     let player_entity = world.state.players[&connection];
-    let archer = world.state.registry.serial_of(player_entity).unwrap();
     arm_with_bow(&mut world, connection);
     let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 50, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, connection, mob, now);
     let _ = packets_for(&mut world, connection);
 
-    // Out past the bow's reach. The draw already in flight ends with a reason —
-    // that is Ф1's — and the commit that cannot follow it is this one's.
+    // Out past the bow's reach. The draw already in flight ends with a reason,
+    // and its replacement begins the watched draw.
     world
         .state
         .teleport(mob_entity, Point::new(START.x + 20, START.y, 0));
     world.tick(now);
-    assert_eq!(
-        action_balks(&packets_for(&mut world, connection), archer),
-        vec![InterruptReason::OutOfReach.to_bits()],
-        "the commit that could not happen says what is in the way"
+    assert!(
+        action_phase(&packets_for(&mut world, connection)).is_some(),
+        "the bow begins drawing instead of standing in an out-of-reach refusal"
     );
 
-    // And keeps not happening, in silence: the state is standing, so the wire
-    // carries the edges and nothing in between.
-    for _ in 0..5 {
+    // Let preparation finish: it must now be held, rather than spoiled by range.
+    for _ in 0..100 {
         world.tick(now);
+        if matches!(
+            world.state.registry.get::<CombatAction>(player_entity),
+            Some(action) if matches!(action.phase, Phase::Armed { .. })
+        ) {
+            break;
+        }
     }
     assert!(
-        action_balks(&packets_for(&mut world, connection), archer).is_empty(),
-        "a refusal that has not changed is not re-sent every tick"
+        matches!(
+            world.state.registry.get::<CombatAction>(player_entity),
+            Some(action) if matches!(action.phase, Phase::Armed { .. })
+        ),
+        "a completed draw waits for the target to return within bow range"
     );
 
-    // Back within reach, and the way is clear again — said once, in the same
-    // tick the shot commits.
+    // Back within reach, and the held bow releases against that same target.
     world
         .state
         .teleport(mob_entity, Point::new(START.x + 3, START.y, 0));
     world.tick(now);
     let packets = packets_for(&mut world, connection);
-    assert_eq!(
-        action_balks(&packets, archer),
-        vec![0],
-        "clear is a zero, and it is sent exactly once"
-    );
     assert!(
         action_phase(&packets).is_some(),
-        "and the shot the archer was held off from is committed in the same tick"
+        "the held shot releases in the same tick the target returns"
     );
 }
 

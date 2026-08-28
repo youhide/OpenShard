@@ -45,7 +45,7 @@ use openshard_uofiles::equipconv::EquipConv;
 
 use std::rc::Rc;
 
-use crate::atlas::{AnimAtlas, AnimationKey, AtlasPixel, FrameKey};
+use crate::atlas::{AnimAtlas, AnimFrameSource, AnimationKey, AtlasPixel, FrameKey};
 use crate::camera::{Camera, RealPixel, ViewPixel, ViewPoint, WorldPoint};
 use crate::cutaway::Cutaway;
 use crate::depth;
@@ -455,18 +455,17 @@ struct Placement {
     rect: Rect,
     region: crate::atlas::Region,
     order: depth::Order,
-    /// Which frame of the atlas it is showing. Carried so [`pick`] can ask that
-    /// frame's own texels whether the cursor hit the picture, rather than
-    /// re-deriving the key from the mobile and drifting from what was drawn.
-    key: FrameKey,
+    /// Which atlas picture it is showing. Carried so [`pick`] can ask that
+    /// picture's own texels whether the cursor hit it, rather than re-deriving
+    /// a source from the mobile and drifting from what was drawn.
+    source: AnimFrameSource,
     /// Whether the picture is sampled right to left. The atlas holds one
     /// picture for both facings, so a texel test has to undo the flip — see
     /// [`AnimAtlas::opaque_at`].
     mirrored: bool,
 }
 
-/// The mobile's frame in the atlas, placed on screen — or `None` if the atlas
-/// holds no such frame.
+/// The mobile's frame in the atlas, placed on screen.
 ///
 /// `body` is the atlas key's body id and not always [`Mobile::body`], for two
 /// reasons. An equipment layer's picture lives under its *resolved* body-anim
@@ -490,7 +489,7 @@ fn place(
 ) -> Option<Placement> {
     let (direction, mirrored) = openshard_uofiles::anim::facing(mobile.facing);
     let key = FrameKey::new(AnimationKey::new(body, group, direction), mobile.frame);
-    let packed = atlas.frame(key)?;
+    let (packed, source) = atlas.frame_or_fallback(key, mobile.corpse);
 
     // Tiles and not the pixels it is between: the order steps once, at the tile
     // boundary, where an interpolated one would have a mobile change sides of a
@@ -527,17 +526,17 @@ fn place(
         },
         region,
         order,
-        key,
+        source,
         mirrored,
     })
 }
 
-/// The quads for every mobile whose frame the atlas holds.
+/// The quads for every mobile in the frame.
 ///
-/// A mobile the atlas has no frame for is dropped: the client ships no
-/// animation for that body and group, or the atlas was built before this one
-/// arrived. Both are "nothing to draw", and neither is worth failing a frame
-/// over — the alternative is a creature drawn from another creature's picture.
+/// Where the client files have no matching animation, the body uses the atlas's
+/// built-in neutral silhouette. It makes a missing or newly arrived body
+/// visible without the more misleading alternative of borrowing another
+/// creature's art; corpses receive their own low, lying marker.
 ///
 /// `cutaway` hides a body on the storey above with that storey. It is the same
 /// `max_z` the statics are tested against and deliberately not `no_draw_roofs`:
@@ -641,26 +640,31 @@ fn push_quads(
     };
     let order = placement.order;
     let billboard = billboard_offset(mobile);
+    let body_is_fallback = matches!(placement.source, AnimFrameSource::Fallback { .. });
     // The mount, if this body is drawn mounted — pushed *before* the rider so
     // that the stable sort below keeps it behind: both share `order`, and a
     // tie is won by whichever [`Vec`] position is later. See [`mount_of`] for
     // why this is a whole second body rather than a layer over the rider's
     // own frame.
-    if let Some((mount_body, mount_hue, mount_group)) = mount_of(mobile) {
-        if let Some(mount) = place(mobile, mount_body, mount_group, camera, atlas) {
-            out.push((
-                order,
-                SpriteQuad {
-                    rect: mount.rect,
-                    region: mount.region,
-                    depth: order.to_depth(base),
-                    hue: u32::from(hue.unwrap_or(mount_hue).0),
-                    place: crate::place::Place::of_mobile(mobile.at),
-                    twin: billboard,
-                    owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
-                    volumes: crate::impostor::Range::default(),
-                },
-            ));
+    if !body_is_fallback {
+        if let Some((mount_body, mount_hue, mount_group)) = mount_of(mobile) {
+            if let Some(mount) = place(mobile, mount_body, mount_group, camera, atlas)
+                .filter(|mount| matches!(mount.source, AnimFrameSource::Frame(_)))
+            {
+                out.push((
+                    order,
+                    SpriteQuad {
+                        rect: mount.rect,
+                        region: mount.region,
+                        depth: order.to_depth(base),
+                        hue: u32::from(hue.unwrap_or(mount_hue).0),
+                        place: crate::place::Place::of_mobile(mobile.at),
+                        twin: billboard,
+                        owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
+                        volumes: crate::impostor::Range::default(),
+                    },
+                ));
+            }
         }
     }
     out.push((
@@ -681,6 +685,13 @@ fn push_quads(
         },
     ));
 
+    if body_is_fallback {
+        // A generic body deliberately has no generic clothing. Rendering a
+        // fallback for each missing worn frame would stack several silhouettes
+        // on one tile and obscure the useful marker.
+        return;
+    }
+
     for layer in drawn_layers(mobile) {
         let Some((graphic, worn_hue)) = worn_graphic(mobile, layer, equip_conv) else {
             continue;
@@ -688,6 +699,9 @@ fn push_quads(
         let Some(worn) = place(mobile, graphic, mobile.group, camera, atlas) else {
             continue;
         };
+        if !matches!(worn.source, AnimFrameSource::Frame(_)) {
+            continue;
+        }
         out.push((
             order,
             SpriteQuad {
@@ -807,20 +821,32 @@ pub fn pick_iter_with_interior<'a>(
         // any: any one of them is the creature — see [`mount_of`]'s own note
         // that a mounted rider is still picked as one body, never two.
         let body = openshard_uofiles::anim::animation_body(mobile.body);
-        let worn = drawn_layers(mobile).filter_map(|layer| {
-            worn_graphic(mobile, layer, equip_conv).map(|(graphic, _)| (graphic, mobile.group))
-        });
-        let mount = mount_of(mobile).map(|(mount_body, _, mount_group)| (mount_body, mount_group));
         let mut touched = None;
-        for (graphic, group) in std::iter::once((body, mobile.group)).chain(worn).chain(mount) {
-            let Some(placement) = place(mobile, graphic, group, camera, atlas) else {
-                continue;
-            };
-            if !opaque_under(&placement, atlas, in_view) {
-                continue;
+        let Some(body) = place(mobile, body, mobile.group, camera, atlas) else {
+            continue;
+        };
+        if opaque_under(&body, atlas, in_view) {
+            touched = Some(body.order);
+        }
+        if touched.is_none() && matches!(body.source, AnimFrameSource::Frame(_)) {
+            let worn = drawn_layers(mobile).filter_map(|layer| {
+                worn_graphic(mobile, layer, equip_conv).map(|(graphic, _)| (graphic, mobile.group))
+            });
+            let mount = mount_of(mobile).map(|(mount_body, _, mount_group)| (mount_body, mount_group));
+            for (graphic, group) in worn.chain(mount) {
+                let Some(placement) = place(mobile, graphic, group, camera, atlas) else {
+                    continue;
+                };
+                // `collect` skips a missing equipment or mount frame rather
+                // than stacking a second fallback silhouette on the body.
+                if !matches!(placement.source, AnimFrameSource::Frame(_))
+                    || !opaque_under(&placement, atlas, in_view)
+                {
+                    continue;
+                }
+                touched = Some(placement.order);
+                break;
             }
-            touched = Some(placement.order);
-            break;
         }
         let Some(order) = touched else {
             continue;
@@ -857,7 +883,7 @@ fn opaque_under(placement: &Placement, atlas: &AnimAtlas, in_view: ViewPixel) ->
         true => width - 1 - x,
         false => x,
     };
-    atlas.opaque_at(placement.key, AtlasPixel::new(texel_x, y))
+    atlas.source_opaque_at(placement.source, AtlasPixel::new(texel_x, y))
 }
 
 /// Where a label belongs above this mobile's head, in view pixels — the
@@ -1030,7 +1056,7 @@ pub fn opaque_mask(mobile: &Mobile, camera: &Camera, atlas: &AnimAtlas) -> Optio
                 true => width - 1 - x,
                 false => x,
             };
-            pixels.push(atlas.opaque_at(placement.key, AtlasPixel::new(source_x, y)));
+            pixels.push(atlas.source_opaque_at(placement.source, AtlasPixel::new(source_x, y)));
         }
     }
     Some(OpaqueMask {
@@ -1122,6 +1148,53 @@ mod tests {
             drawn: Gaze::on(Point::new(x, 100, 0)),
             equipment: Vec::new().into(),
         }
+    }
+
+    #[test]
+    fn unknown_mobile_and_its_corpse_use_distinct_clickable_silhouettes() {
+        let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
+        let atlas = AnimAtlas::pack([]).expect("the built-in fallback always fits");
+        let live = body_at(100, Direction::SouthEast);
+        let corpse = Mobile {
+            corpse: true,
+            ..live.clone()
+        };
+
+        let live_rect = screen_rect(&live, &camera, &atlas).expect("unknown mobile has a silhouette");
+        let corpse_rect = screen_rect(&corpse, &camera, &atlas).expect("unknown corpse has a silhouette");
+        assert!(
+            live_rect.height > live_rect.width,
+            "the living fallback is an upright marker"
+        );
+        assert!(
+            corpse_rect.width > corpse_rect.height,
+            "the corpse fallback is a lying marker"
+        );
+        assert_eq!(
+            collect(
+                &[live.clone(), corpse.clone()],
+                &camera,
+                &atlas,
+                &Cutaway::OPEN,
+                &no_equip(),
+                None,
+            )
+            .len(),
+            2,
+            "both missing client animations still produce a quad"
+        );
+        assert_eq!(
+            pick(
+                std::slice::from_ref(&live),
+                &camera,
+                &atlas,
+                &Cutaway::OPEN,
+                &no_equip(),
+                cursor_over(&camera, live_rect, live_rect.width / 2.0, live_rect.height / 2.0),
+            ),
+            Some(MobileIndex::new(0)),
+            "the fallback uses its own opaque pixels for picking"
+        );
     }
 
     /// The viewport pixel a point in the drawn image sits at — the inverse of
@@ -1599,11 +1672,11 @@ mod tests {
         assert!(plain[0].region.du > 0.0);
     }
 
-    /// A mobile the atlas has no frame for is dropped rather than drawn from
-    /// whatever else was packed. Which matters more here than for statics: the
-    /// atlas is keyed by four numbers, so a near miss is another creature.
+    /// A mobile the atlas has no frame for gets the neutral silhouette rather
+    /// than whatever else was packed. Which matters more here than for statics:
+    /// the atlas is keyed by four numbers, so a near miss is another creature.
     #[test]
-    fn a_mobile_with_no_packed_frame_is_dropped() {
+    fn a_mobile_with_no_packed_frame_gets_a_silhouette() {
         let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
         let atlas = atlas(400, 0, 40, 60, (12, -3));
         let missing = Mobile {
@@ -1619,7 +1692,7 @@ mod tests {
             drawn: Gaze::on(Point::new(100, 100, 0)),
             equipment: Vec::new().into(),
         };
-        assert!(
+        assert_eq!(
             collect(
                 std::slice::from_ref(&missing),
                 &camera,
@@ -1628,10 +1701,12 @@ mod tests {
                 &no_equip(),
                 None
             )
-            .is_empty()
+            .len(),
+            1,
+            "a missing frame must not make a server-known mobile disappear"
         );
-        // And the same mobile at frame 0 is not, so the drop above is a
-        // decision about the frame rather than about the body.
+        // And the same mobile at frame 0 uses its actual packed art, so this
+        // is specifically the missing-frame path rather than a body rule.
         assert_eq!(
             collect(
                 &[Mobile {
@@ -1656,8 +1731,8 @@ mod tests {
     /// green while the client draws nothing. `needed_animations` names what the
     /// atlas holds and `collect` asks for what it draws, and the defect this is
     /// written against is the pair disagreeing: `anim.mul` has no block for
-    /// body `0x0192` at all, so an atlas packed under the wire's body is an
-    /// atlas with nothing in it and the mobile is dropped in silence.
+    /// body `0x0192` at all, so an atlas packed under the wire's body cannot
+    /// show the ghost's real animation and falls back to the neutral marker.
     ///
     /// The same disagreement, one field over, is a body that is drawn and never
     /// animates: a frame count asked under a key nothing was packed under is
@@ -1704,7 +1779,7 @@ mod tests {
         );
         // While one packed under the body the shard named holds nothing this
         // asks for — which is what the files themselves look like.
-        assert!(
+        assert_eq!(
             collect(
                 std::slice::from_ref(&ghost),
                 &camera,
@@ -1713,7 +1788,9 @@ mod tests {
                 &no_equip(),
                 None,
             )
-            .is_empty()
+            .len(),
+            1,
+            "a wrongly keyed atlas is visible as a fallback instead of a missing ghost"
         );
     }
 
@@ -1749,10 +1826,10 @@ mod tests {
         assert_eq!(anchor.y as f32, quads[0].rect.y);
     }
 
-    /// A mobile the atlas has no frame for gets no anchor either — the same
-    /// case `collect` drops, asked the other way.
+    /// A mobile the atlas has no frame for gets an anchor above the fallback
+    /// too, so speech and combat numbers remain attached to it.
     #[test]
-    fn head_anchor_is_none_for_an_unpacked_frame() {
+    fn head_anchor_uses_the_fallback_for_an_unpacked_frame() {
         let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
         let atlas = atlas(400, 0, 40, 60, (12, -3));
         let missing = Mobile {
@@ -1767,7 +1844,7 @@ mod tests {
             drawn: Gaze::on(Point::new(100, 100, 0)),
             equipment: Vec::new().into(),
         };
-        assert!(head_anchor(&missing, &camera, &atlas).is_none());
+        assert!(head_anchor(&missing, &camera, &atlas).is_some());
     }
 
     /// A body drawn between two tiles still sorts by the tile it is on.

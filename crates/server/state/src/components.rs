@@ -2376,8 +2376,8 @@ pub struct SwingSpeed {
 ///
 /// The three axes it separates are `kind` (what the impact does), the `watch`
 /// inside [`Phase::Armed`] (what releases it) and the condition rules applied to
-/// it while it runs (what the world does to it in between). Nothing arms yet —
-/// see the phase.
+/// it while it runs (what the world does to it in between). A targeted bow shot
+/// arms on a cut sight line; the reach and contact watches remain later slices.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CombatAction {
     /// The opponent this action was committed to. It does not follow a change
@@ -2385,7 +2385,7 @@ pub struct CombatAction {
     pub target: Serial,
     /// What the impact will do.
     pub kind: ActionKind,
-    /// Which half of its life it is in.
+    /// Which phase of its life it is in.
     pub phase: Phase,
     /// When it was committed — the tick the promise was made on.
     pub started_at: WorldTick,
@@ -2466,15 +2466,22 @@ pub enum ActionKind {
     },
 }
 
-/// Which half of an action's life it is in.
+/// Which phase of an action's life it is in.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Phase {
+    /// Preparing to become armed. Sight may open during this interval, but the
+    /// watch cannot release until `ready_at`: every new shot pays its draw.
+    Arming {
+        watch: Watch,
+        ready_at: WorldTick,
+        expires_at: WorldTick,
+    },
     /// Ready and waiting on the world. `expires_at` is the arm's endurance, not
     /// its timing: an action that is never released ends when it runs out.
     ///
-    /// Nothing constructs this yet — arming is the last phase of the plan — but
-    /// the variant and the packet that carries it exist from the first commit,
-    /// so the wire is never revised for it.
+    /// A bow constructs this with [`Watch::TargetInSight`] when its already
+    /// selected target is in range but behind cover. Other watch kinds are the
+    /// remaining arming work.
     Armed { watch: Watch, expires_at: WorldTick },
     /// Released. The impact lands at this tick, and a rule may still push it.
     Releasing { impact: WorldTick },
@@ -2558,7 +2565,7 @@ impl CombatAction {
     pub const fn impact(self) -> Option<WorldTick> {
         match self.phase {
             Phase::Releasing { impact } => Some(impact),
-            Phase::Armed { .. } => None,
+            Phase::Arming { .. } | Phase::Armed { .. } => None,
         }
     }
 
@@ -2576,12 +2583,15 @@ impl CombatAction {
 
     /// The phase as the wire says it, given the tick it is being announced on.
     ///
-    /// Both halves are an interval in ticks from `now`, and both are saturating:
+    /// Every phase carries an interval in ticks from `now`, and each is saturating:
     /// an impact already in the past is an action about to resolve, not a
     /// negative duration.
     #[must_use]
     pub const fn wire_phase(self, now: WorldTick) -> ActionPhase {
         match self.phase {
+            Phase::Arming { ready_at, .. } => ActionPhase::Arming {
+                ready_in: SwingDuration(ticks_to_millis(ready_at.saturating_sub(now))),
+            },
             Phase::Armed { expires_at, .. } => ActionPhase::Armed {
                 endurance: SwingDuration(ticks_to_millis(expires_at.saturating_sub(now))),
             },
@@ -2704,7 +2714,7 @@ pub struct LastStep {
 impl LastStep {
     /// Whether the client is still drawing this crossing.
     #[must_use]
-    pub const fn in_progress(self, now: WorldTick) -> bool {
+    pub fn in_progress(self, now: WorldTick) -> bool {
         now < self.finishes_at
     }
 }

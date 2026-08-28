@@ -892,6 +892,12 @@ pub(crate) fn report_sight(state: &mut WorldState, actor: EntityId, to: Point) {
             openshard_movement::sight::Stop::Door => {
                 format!("  ({}, {}): a shut door, ray {ray}", step.tile.x, step.tile.y)
             }
+            openshard_movement::sight::Stop::LiveWall { base, top } => {
+                format!(
+                    "  ({}, {}): a house wall z {base}..{top} over ray {ray}",
+                    step.tile.x, step.tile.y
+                )
+            }
         })
     }));
     if stops == 0 {

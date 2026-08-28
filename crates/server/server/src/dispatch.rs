@@ -240,6 +240,11 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
                 connection: id,
                 request,
             }),
+            ExtendedRequest::Turn(request) => Some(Command::Turn {
+                connection: id,
+                request,
+            }),
+            ExtendedRequest::CraftCatalogue(_) => Some(Command::OpenCraftCatalogue { connection: id }),
             ExtendedRequest::Unknown(subcommand) => {
                 debug!(%id, subcommand = format!("0x{subcommand:02X}"), "unhandled 0xBF");
                 None

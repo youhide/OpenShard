@@ -35,7 +35,7 @@ pub use consume::{Materials, Refusal, Share};
 pub use craft::{ItemCrafted, advance_crafts, begin, tool_system};
 pub use defs::{SYSTEMS, system};
 pub use environment::{Facilities, around};
-pub use gump::{CRAFT_GUMP, close, handle, open, owns};
+pub use gump::{CRAFT_GUMP, close, handle, open, open_catalogue, owns};
 pub use recipe::{CraftRes, CraftSkillReq, Recipe, SubRes, SubResAxis};
 pub use smelt::{INGOT_GRAPHIC, smelt};
 pub use system::{CraftSystemDef, Eca, Needs, SystemId, Text};

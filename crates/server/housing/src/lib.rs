@@ -50,6 +50,7 @@ use openshard_protocol::wire::{Graphic, Hue, MultiId};
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{Drawn, House, Position};
 use openshard_state::{FacetState, ItemLocation, WorldState, establish_item_location};
+use openshard_tiles::TileFlags;
 use openshard_uofiles::multi::{Component, Multis, bounds};
 
 /// The first customisable-house foundation id, and the last.
@@ -824,9 +825,21 @@ pub fn footprint_of(
         // This used to read `is_blocking` here and take the height itself, so a
         // house was its walls and nothing else: no floor to stand on above the
         // ground, and stairs that stopped a body instead of lifting one.
-        let covers = Cover::of_static(tiledata.static_tile(graphic.0)).based_at(spot.z);
+        let static_tile = tiledata.static_tile(graphic.0);
+        let flags = static_tile.flags;
+        let covers = Cover::of_static(static_tile).based_at(spot.z);
         let tile = Tile::new(spot.x, spot.y);
-        out.extend(covers.into_iter().map(|cover| Footprint { tile, cover }));
+        out.extend(covers.into_iter().map(|cover| Footprint {
+            tile,
+            // Match `MapTerrain::sight_stop`: a wall-like component lends a
+            // storey to zero-height art, while a platform retains its real
+            // height. A loose crate still takes neither route.
+            cover: match flags.has(TileFlags::WALL | TileFlags::BLOCK | TileFlags::NO_SHOOT) {
+                true => cover.as_sight_wall(),
+                false if flags.is_platform() => cover.as_sight_blocker(),
+                false => cover,
+            },
+        }));
     }
     Ok(out)
 }

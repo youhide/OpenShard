@@ -6,6 +6,7 @@
 //! its sequence and prediction state are owned by [`crate::walk::Walk`].
 
 use openshard_protocol::casting::SpellId;
+use openshard_protocol::craft::OpenCraftCatalogue;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::gump::{RawButtonId, RawGumpId, RawGumpKey, RawSwitchId};
 use openshard_protocol::items::ItemAmount;
@@ -86,6 +87,9 @@ pub enum Outgoing {
         lock: SkillLock,
     },
     UseSkill(RawSkillId),
+    /// Open the tool-free craft catalogue through OpenShard's private `0xBF`
+    /// request. A stock client never sends this, so it remains harmless to one.
+    OpenCraftCatalogue,
     /// Cast a spell selected from a spellbook this client opened.
     CastSpell {
         spellbook: Serial,
@@ -152,6 +156,7 @@ impl Outgoing {
             Self::Virtue(mobile) => crate::doll::virtue(player, mobile),
             Self::SkillLock { skill, lock } => crate::skill::set_lock(skill, lock),
             Self::UseSkill(skill) => crate::skill::use_skill(skill),
+            Self::OpenCraftCatalogue => OpenCraftCatalogue.encode(),
             Self::CastSpell { spellbook, spell } => crate::casting::cast(spellbook, spell),
             Self::QueryProperties(serials) => crate::properties::query(&serials, version),
             Self::PartySay(text) => crate::party::say(&text),
@@ -215,6 +220,17 @@ mod tests {
         assert_eq!(
             ExtendedRequest::decode(&bytes).expect("the typed action encoded one 0xBF"),
             ExtendedRequest::MapEdit(request)
+        );
+    }
+
+    #[test]
+    fn a_catalogue_action_reaches_the_shard_as_its_own_request() {
+        assert_eq!(
+            ExtendedRequest::decode(
+                &Outgoing::OpenCraftCatalogue.encode(Serial::new(0x0000_002A).unwrap(), ClientVersion::TOL)
+            )
+            .expect("the action encoded one extended packet"),
+            ExtendedRequest::CraftCatalogue(openshard_protocol::craft::OpenCraftCatalogue)
         );
     }
 }

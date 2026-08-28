@@ -885,3 +885,64 @@ fn a_tool_off_the_shelf_has_uses_in_it() {
     now += TICK_INTERVAL;
     world.tick(now);
 }
+
+#[test]
+fn the_private_catalogue_opens_without_a_tool_and_selects_a_recipe() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+
+    world.queue(Command::OpenCraftCatalogue { connection });
+    world.tick(now + TICK_INTERVAL);
+    let context = world
+        .state
+        .row_of(player)
+        .and_then(|row| row.craft_gump)
+        .expect("the catalogue is an open craft gump");
+    assert_eq!(context.page, CraftGumpPage::Catalogue);
+    assert_eq!(context.tool, player, "browse mode has no item tool");
+
+    let serial = world.state.registry.serial_of(player).unwrap();
+    world.queue(Command::GumpResponse {
+        connection,
+        response: openshard_protocol::gump::GumpResponse {
+            serial: openshard_protocol::gump::RawGumpKey(serial.raw()),
+            gump_id: openshard_protocol::gump::RawGumpId(openshard_crafting::CRAFT_GUMP.0),
+            // The first flattened catalogue row is a details button: `1 +
+            // kind(2) + index(0) * 7`. It names the first smithing recipe,
+            // without making a craft system a UI parent of the item.
+            button: openshard_protocol::gump::RawButtonId(3),
+            switches: Vec::new(),
+            text_entries: Vec::new(),
+        },
+    });
+    world.tick(now + TICK_INTERVAL * 2);
+    let context = world
+        .state
+        .row_of(player)
+        .and_then(|row| row.craft_gump)
+        .expect("a selected recipe leaves the catalogue open");
+    assert_eq!(context.system, 0, "the recipe's internal craft system");
+    assert_eq!(context.page, CraftGumpPage::Details(0));
+    assert_eq!(context.tool, player, "it remains browse-only");
+
+    // The catalogue omits make buttons, but a client can always manufacture a
+    // gump reply. The sentinel is therefore also checked at the craft gate: a
+    // forged make press cannot turn browsing into free tool-less crafting.
+    world.queue(Command::GumpResponse {
+        connection,
+        response: openshard_protocol::gump::GumpResponse {
+            serial: openshard_protocol::gump::RawGumpKey(serial.raw()),
+            gump_id: openshard_protocol::gump::RawGumpId(openshard_crafting::CRAFT_GUMP.0),
+            button: openshard_protocol::gump::RawButtonId(1), // detail-page MAKE
+            switches: Vec::new(),
+            text_entries: Vec::new(),
+        },
+    });
+    world.tick(now + TICK_INTERVAL * 3);
+    assert!(
+        !world.state.registry.has::<Crafting>(player),
+        "a browse-only context cannot start a craft"
+    );
+}

@@ -125,6 +125,8 @@ pub enum ActionKind {
 }
 
 pub enum Phase {
+    /// Drawing toward a held action. The watch cannot release before ready_at.
+    Arming { watch: Watch, ready_at: WorldTick, expires_at: WorldTick },
     /// Ready and waiting on the world. `expires_at` is the arm's endurance, not
     /// its timing: an action that is never released ends when it runs out.
     Armed { watch: Watch, expires_at: WorldTick },
@@ -167,10 +169,17 @@ running its wind-up pass twice, before and after the blow.
 **Commit.** No action, engaged, recovery elapsed. Every precondition is tested
 *here*: attackable, same facet, within the weapon's reach, sight clear, not
 pacified, ammunition present, stamina enough to lift the thing. On success the
-round leaves the pack, the opening stamina is spent, the component is inserted, the
-fighter faces the target, and cover breaks. An ordinary attack commits straight
+round leaves the pack, the opening stamina is spent, the component is inserted, a
+standing fighter faces the target, and cover breaks. A shot committed during an
+accepted step keeps that step's facing instead. An ordinary attack commits straight
 into `Releasing` and its animation goes out with it; an armed one commits into
 `Armed` and draws the arm rather than the stroke.
+
+The first armed admission is built for a bow whose already selected target is
+inside its committed reach but out of sight: the cut line is not a refusal for
+that shot, it is `Armed { watch: TargetInSight }`. The target remains specific —
+this does not scan a doorway for any hostile mobile — and the quiver is checked at
+the nock but spent only when the released arrow actually flies.
 
 **Sustain.** An action exists and has not landed. The condition rules for its kind
 are applied for this tick. A rule may push the impact, add to `accuracy`, add to
@@ -488,9 +497,9 @@ question stops being about the shard at all: it says everything correctly, and
 the *picture* was posing.
 
 **Ф1 — the object. ✅ Built.** `CombatAction`, the four verbs, and both new
-packets. Only `Phase::Releasing` is reachable — nothing arms yet — but the phase
-enum and the packet that carries it exist from the first commit, so the wire is
-never revised for Ф7. Melee only; behaviour deliberately unchanged except that the
+packets. At this phase only `Phase::Releasing` was reachable, but the armed phase
+and the packet that carries it existed from the first commit, so the wire needed
+no revision when targeted overwatch arrived. Melee only; behaviour deliberately unchanged except that the
 silent `continue` becomes a named interruption and the client stops an animation it
 would have run out. `prepare_swings` and `SwingWindup` are retired into it — the
 marker becomes a phase of a real object. *Done when:* a target that dies mid-swing
@@ -809,14 +818,17 @@ than in an argument.
   still have to matter. The shipped shot runs at 64% because the pre-AoS column
   puts a bow at two and a half seconds and no integer in it lands on a rounder
   number; 1.6s is what an archer was asked to feel like.
-- **Every fighter turns to what it is about to hit, shot included** — and the
-  real defect was underneath. Ф2 exempted a shot because turning a kiting archer
-  costs it the step it was going to escape with, which is true about the brain
-  and was the wrong place to fix it: `tick::motion::step` applied **turn-as-step
-  to a decreed step**. That rule exists so a client's walk and the server's
-  answer stay in step over a lossy sequence, and a mobile the shard moves itself
-  is speaking no such protocol. It turns and moves in one beat now, the way
-  `BaseAI.DoMove` does.
+- **A standing fighter turns to what it is about to hit; a moving archer keeps
+  its stride.** A combat turn changes the player's authoritative walk facing,
+  so the next request in the running direction becomes a turn on the spot and
+  visibly breaks the step. `Facing::running` cannot distinguish the two — it
+  remains set after the body stops — so the tick records the accepted step for
+  exactly the `step_hold` the clients draw and a shot turns only after that
+  crossing ends. The neighbouring kiting defect was real too:
+  `tick::motion::step` applied **turn-as-step to a decreed step**. That rule
+  exists so a client's walk and the server's answer stay in step over a lossy
+  sequence, and a mobile the shard moves itself is speaking no such protocol.
+  It turns and moves in one beat now, the way `BaseAI.DoMove` does.
 - **`.dummy` — a scarecrow, and it is a testing primitive rather than content.**
   Chasing a report against a live creature means the mob, its brain, the sight
   line and the operator are all moving at once and no two runs are the same run.
@@ -851,7 +863,7 @@ number in that sentence is an operator setting.
 become one. The polearm at two tiles is then a number, and the halberd is content
 rather than engineering.
 
-**Ф7 — arming, and the watches.** `Phase::Armed`, the release delay (D10), and all
+**Ф7 — arming, and the watches. 🚧 Target-in-sight slice built.** `Phase::Arming`, `Phase::Armed`, the release delay (D10), and all
 three watches — one piece of work, not three, because they differ only in which
 already-computed fact the sustain pass asks for. `TargetInSight` and
 `TargetInReach` are evaluated per armed action against its own target;
@@ -860,6 +872,14 @@ Both `expires_at` and Ф5's drain are load-bearing here: an armed fighter who ha
 paid nothing makes waiting strictly better than fighting. *Done when:* an archer
 can arm a shot at a doorway and spend it on whoever steps out, a rider at a gallop
 lands a blow by passing through, and neither lands the instant its watch fires.
+
+The targeted archery half now commits when sight alone is cut, pays the configured
+shot row's ready-plus-load share before it can become armed, holds through
+movement by either mobile, and releases over the remaining release share when
+sight becomes clear. Sight opening during the draw never skips that preparation.
+Its held endurance is currently ten seconds.
+`TargetInReach`, `Contact`, per-tick fatigue and an untargeted watched doorway are
+still open; this is deliberately not presented as the whole of Ф7.
 
 A fourth watch will be wanted before this is a week old — a doorway watched with no
 target chosen yet, which is *"anyone hostile enters this square"* rather than a
@@ -1090,10 +1110,9 @@ same reason and by the same amount; so did everything else the shard drives.
   than filling is the right shape (a creeping bar reads as an impact
   approaching), but *nearly out* is a real thing to say and nothing says it. Ф7
   is where an armed action first exists, and this is its first question.
-- **Nothing arms, so half the picture is exercised only by tests.**
-  `ActionFill::Armed` is reachable from the wire and unreachable from the shard
-  until Ф7. It is built and covered deliberately — the wire was frozen at Ф1 for
-  this reason — but nobody has *looked* at a held bar.
+- ~~**Nothing arms, so half the picture is exercised only by tests.**~~ Targeted
+  bow overwatch now reaches `ActionFill::Armed` from the live shard. The other
+  two watches remain test substrate until their Ф7 slices land.
 - **The bar has no switch.** Every other overlay in this client is behind one
   (`show_sight`, `show_terrain`, the interior index); this draws always, because
   it is the answer to "there are still too many questions about what combat is

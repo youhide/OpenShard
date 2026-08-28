@@ -450,6 +450,12 @@ impl ApplicationHandler<()> for App {
                         self.use_last_item();
                         false
                     }
+                    keyboard::Hotkey::CraftCatalogue => {
+                        if let Some(link) = self.world.shard.link() {
+                            link.act(openshard_client_net::action::Outgoing::OpenCraftCatalogue);
+                        }
+                        false
+                    }
                     keyboard::Hotkey::Minimap => {
                         if let Some(open) = self
                             .windows

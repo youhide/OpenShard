@@ -49,7 +49,7 @@ const STREET_Z: i8 = 30;
 /// must not depend on it. A number that drifts apart from that one makes this
 /// test report about a client nobody runs, which is what the assertion below
 /// names it for.
-const PLAN_BUDGET: usize = 600;
+const PLAN_BUDGET: usize = 700;
 
 fn client_dir() -> Option<PathBuf> {
     let dir = PathBuf::from(std::env::var_os("OPENSHARD_CLIENT")?);

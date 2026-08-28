@@ -23,6 +23,7 @@ use std::{fmt, num::NonZeroU8};
 
 use serde::{Deserialize, Serialize};
 
+use crate::access::OPENSHARD_SUBCOMMANDS;
 use crate::codec::{PacketReader, PacketWriter};
 use crate::direction::Facing;
 use crate::error::{DecodeError, WrongPacket};
@@ -839,6 +840,46 @@ pub struct WalkRequest {
     pub sequence: RawStepSequence,
     /// The fastwalk key. Never read — see [`RawFastwalkKey`].
     pub fastwalk_key: RawFastwalkKey,
+}
+
+/// `0xBF.0xE014` — turn on the spot, never take a step.
+///
+/// The stock `0x02` asks for a direction and leaves the server to infer whether
+/// that means a turn or a step from the mobile's facing when the packet arrives.
+/// That is unsafe once combat can turn the same mobile between send and receive:
+/// a request the client predicted as a turn can then be reinterpreted as a step.
+/// OpenShard's client uses this typed request for the turn half of that exchange.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TurnRequest {
+    /// Which way to face. The running bit is retained so the acknowledged pose
+    /// is exactly the pose the client predicted, though it never makes this move.
+    pub facing: Facing,
+    /// The shared walk/turn sequence number. Both request types use one ordered
+    /// acknowledgement stream, so neither can overtake the other.
+    pub sequence: RawStepSequence,
+}
+
+impl TurnRequest {
+    /// The first OpenShard subcommand after the combat-action messages.
+    pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 20;
+
+    /// Read the body after the extended envelope and subcommand.
+    pub(crate) fn decode_body(reader: &mut PacketReader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            facing: Facing::from_bits(reader.u8()?),
+            sequence: RawStepSequence(reader.u8()?),
+        })
+    }
+
+    /// Encode one complete typed turn request.
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        crate::packet::frame_body(0xBF, PacketLength::Variable, |out| {
+            out.u16(Self::SUBCOMMAND);
+            out.u8(self.facing.to_bits());
+            out.u8(self.sequence.0);
+        })
+    }
 }
 
 impl DecodePacket for WalkRequest {
@@ -1737,6 +1778,7 @@ pub const SERVER_CHANGE_LENGTH: PacketLength = PacketLength::Fixed(16);
 mod tests {
     use super::*;
     use crate::direction::Direction;
+    use crate::extended::ExtendedRequest;
     use crate::packet::{client_packet_length, decode_packet, encode_packet};
 
     fn version() -> ClientVersion {
@@ -1745,6 +1787,21 @@ mod tests {
 
     fn facing() -> Facing {
         Facing::running(Direction::SouthEast)
+    }
+
+    #[test]
+    fn a_typed_turn_round_trips_without_becoming_a_walk_request() {
+        let request = TurnRequest {
+            facing: Facing::running(Direction::East),
+            sequence: RawStepSequence(42),
+        };
+        let bytes = request.encode();
+        assert_eq!(bytes[0], 0xBF);
+        assert_eq!(&bytes[3..5], &TurnRequest::SUBCOMMAND.to_be_bytes());
+        assert_eq!(
+            ExtendedRequest::decode(&bytes),
+            Ok(ExtendedRequest::Turn(request))
+        );
     }
 
     /// A client below [`ClientVersion::WIDE_MAP`] is told Felucca and Trammel are

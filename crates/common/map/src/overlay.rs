@@ -154,6 +154,12 @@ pub enum CoverKind {
         /// that will open it. What [`Doors::AllOpen`] leaves out, and the whole
         /// of what "potentially passable" means here.
         door: bool,
+        /// Whether this is a structural wall rather than ordinary furniture.
+        /// Both stop movement, but only a wall stops a sight ray.
+        sight_blocking: bool,
+        /// Whether a sight-blocking cover is wall-like and therefore gets the
+        /// classic one-storey minimum height.
+        sight_wallish: bool,
     },
     /// Somewhere to stand that the map does not have — a deck over open water,
     /// the first floor of a house somebody built this morning.
@@ -205,7 +211,11 @@ impl Cover {
         Self {
             z,
             height,
-            kind: CoverKind::Blocks { door: false },
+            kind: CoverKind::Blocks {
+                door: false,
+                sight_blocking: false,
+                sight_wallish: false,
+            },
         }
     }
 
@@ -215,7 +225,11 @@ impl Cover {
         Self {
             z,
             height,
-            kind: CoverKind::Blocks { door: true },
+            kind: CoverKind::Blocks {
+                door: true,
+                sight_blocking: false,
+                sight_wallish: false,
+            },
         }
     }
 
@@ -308,7 +322,75 @@ impl Cover {
     /// Whether this is a door somebody could open.
     #[must_use]
     pub const fn is_door(self) -> bool {
-        matches!(self.kind, CoverKind::Blocks { door: true })
+        matches!(self.kind, CoverKind::Blocks { door: true, .. })
+    }
+
+    /// Mark a blocking cover as a structural wall which stops sight at its
+    /// height. Furniture remains a movement blocker without becoming opaque.
+    #[must_use]
+    pub const fn as_sight_blocker(self) -> Self {
+        match self.kind {
+            CoverKind::Blocks { door, .. } => Self {
+                kind: CoverKind::Blocks {
+                    door,
+                    sight_blocking: true,
+                    sight_wallish: false,
+                },
+                ..self
+            },
+            CoverKind::Stands { .. } => self,
+        }
+    }
+
+    /// Whether this cover is a structural wall which blocks sight at its height.
+    #[must_use]
+    pub const fn blocks_sight(self) -> bool {
+        matches!(
+            self.kind,
+            CoverKind::Blocks {
+                sight_blocking: true,
+                ..
+            }
+        )
+    }
+
+    /// Mark a blocking cover as a wall-like sight blocker.
+    ///
+    /// The distinction matters for zero-height wall art: it is lent a storey,
+    /// whereas a low platform only blocks a ray that crosses its real span.
+    #[must_use]
+    pub const fn as_sight_wall(self) -> Self {
+        match self.kind {
+            CoverKind::Blocks { door, .. } => Self {
+                kind: CoverKind::Blocks {
+                    door,
+                    sight_blocking: true,
+                    sight_wallish: true,
+                },
+                ..self
+            },
+            CoverKind::Stands { .. } => self,
+        }
+    }
+
+    /// One past the top a structural wall presents to a sight ray.
+    ///
+    /// As for static-map walls, zero-height wall art is lent a storey for sight
+    /// while retaining its original movement span.
+    #[must_use]
+    pub const fn sight_top(self) -> i32 {
+        let sight_wallish = matches!(
+            self.kind,
+            CoverKind::Blocks {
+                sight_wallish: true,
+                ..
+            }
+        );
+        self.bottom()
+            + match sight_wallish && self.height < 15 {
+                true => 15,
+                false => self.height as i32,
+            }
     }
 
     /// Whether this is something in the way rather than somewhere to stand.
@@ -584,6 +666,17 @@ impl Overlay {
             .find(|cover| matches!(cover.kind, CoverKind::Blocks { .. }))
     }
 
+    /// The live-world sight blocker crossed by a ray at `ray_z`, if any.
+    ///
+    /// A shut door is opaque wherever it hangs. Structural walls retain their
+    /// z-span, so an upper-storey wall does not blind the ground floor.
+    #[must_use]
+    pub fn sight_blocker_at(&self, tile: Tile, ray_z: i32) -> Option<Cover> {
+        self.at(tile).iter().copied().find(|cover| {
+            cover.is_door() || (cover.blocks_sight() && cover.bottom() <= ray_z && ray_z < cover.sight_top())
+        })
+    }
+
     /// Every surface the live world put on `tile` — a deck, a house's floor, a
     /// tread of its stairs.
     ///
@@ -636,7 +729,7 @@ impl Cover {
     /// obstructed.
     const fn obstructs_body(self, body: Body, doors: Doors) -> bool {
         match self.kind {
-            CoverKind::Blocks { door: true } if matches!(doors, Doors::AllOpen) => false,
+            CoverKind::Blocks { door: true, .. } if matches!(doors, Doors::AllOpen) => false,
             CoverKind::Blocks { .. } => self.meets(body),
             CoverKind::Stands { .. } => {
                 let surface = self.surface();

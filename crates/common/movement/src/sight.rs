@@ -65,6 +65,13 @@ pub enum Stop {
     /// height in it: `Overlay::blocker_anywhere` is asked about a tile, and a
     /// shut door is opaque at every height of it. See `docs/sight.md`.
     Door,
+    /// A structural wall the live world put there, such as a house component.
+    LiveWall {
+        /// Its base `z`.
+        base: i32,
+        /// One past the wall's sight span.
+        top: i32,
+    },
 }
 
 /// One tile of the line, and the ray's height over it.
@@ -135,9 +142,9 @@ impl SightTrace {
 /// # The two layers
 ///
 /// The map first — [`MapTerrain::sight_stop`](crate::MapTerrain::sight_stop) —
-/// and then the live world, which contributes **shut doors only**. A crate is
-/// furniture, not a wall: `Overlay::blocker_anywhere` finds whatever is in the
-/// way and this reads only the door flag off it.
+/// and then the live world, which contributes shut doors and structural house
+/// walls. A crate is furniture, not a wall: `Overlay::sight_blocker_at` leaves
+/// ordinary live movement blockers out of the ray.
 #[must_use]
 pub fn trace(footing: &Footing<'_>, from: Point, to: Point, extent: Extent) -> SightTrace {
     let tiles = line_tiles(Tile::new(from.x, from.y), Tile::new(to.x, to.y));
@@ -149,7 +156,7 @@ pub fn trace(footing: &Footing<'_>, from: Point, to: Point, extent: Extent) -> S
         let stop = footing
             .map
             .and_then(|map| map.sight_stop(tile, ray_z))
-            .or_else(|| door_stop(footing, tile));
+            .or_else(|| live_stop(footing, tile, ray_z));
         let step = SightStep { tile, ray_z, stop };
         if stop.is_some() && stopped.is_none() {
             stopped = Some(step);
@@ -171,13 +178,18 @@ pub fn trace(footing: &Footing<'_>, from: Point, to: Point, extent: Extent) -> S
     }
 }
 
-/// A shut door on `tile`, if the live world put one there.
-fn door_stop(footing: &Footing<'_>, tile: Tile) -> Option<Stop> {
+/// A live-world obstruction on `tile`, if it stops the ray.
+fn live_stop(footing: &Footing<'_>, tile: Tile, ray_z: i32) -> Option<Stop> {
     footing
         .overlay
-        .blocker_anywhere(tile)
-        .filter(|cover| cover.is_door())
-        .map(|_| Stop::Door)
+        .sight_blocker_at(tile, ray_z)
+        .map(|cover| match cover.is_door() {
+            true => Stop::Door,
+            false => Stop::LiveWall {
+                base: cover.bottom(),
+                top: cover.sight_top(),
+            },
+        })
 }
 
 /// How high the ray is over the `index`th tile of a line `count` tiles long.
@@ -310,9 +322,9 @@ mod tests {
     }
 
     /// With no map at all, the live world is the only thing that can be in the
-    /// way — and only its doors are.
+    /// way: shut doors and walls, but not furniture.
     #[test]
-    fn a_shut_door_is_the_stop_and_a_crate_is_not() {
+    fn a_shut_door_and_a_live_wall_stop_but_a_crate_does_not() {
         let mut live = Overlay::default();
         live.set(Tile::new(10, 10), vec![Cover::door(0, 20)]);
         let footing = Footing::new(None, &live, Doors::AsTheyStand);
@@ -328,6 +340,35 @@ mod tests {
             "the shut door did not stop the look"
         );
         assert!(!looked.clear());
+
+        let mut live = Overlay::default();
+        live.set(Tile::new(10, 10), vec![Cover::blocking(0, 0).as_sight_wall()]);
+        let footing = Footing::new(None, &live, Doors::AsTheyStand);
+        let looked = trace(
+            &footing,
+            Point::new(10, 8, 0),
+            Point::new(10, 12, 0),
+            Extent::WholeLine,
+        );
+        assert_eq!(
+            looked.stopped.map(|step| step.stop),
+            Some(Some(Stop::LiveWall { base: 0, top: 15 })),
+            "a zero-height live wall was not lent its storey"
+        );
+
+        let mut live = Overlay::default();
+        live.set(Tile::new(10, 10), vec![Cover::blocking(0, 5).as_sight_blocker()]);
+        let footing = Footing::new(None, &live, Doors::AsTheyStand);
+        assert!(
+            trace(
+                &footing,
+                Point::new(10, 8, 0),
+                Point::new(10, 12, 0),
+                Extent::WholeLine,
+            )
+            .clear(),
+            "a low platform wall walled off a ray above its real span"
+        );
 
         let mut live = Overlay::default();
         live.set(Tile::new(10, 10), vec![Cover::blocking(0, 20)]);

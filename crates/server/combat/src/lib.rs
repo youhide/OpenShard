@@ -46,10 +46,10 @@ use openshard_protocol::world::{Point, PoisonLevel, RangedRange};
 use openshard_state::action_rules::{ActionEffect, ActorCondition, ConditionSet};
 use openshard_state::components::{
     ActionKind, Balked, BehaviourBuffs, Body, Client, Combat, CombatAction, CriminalUntil, DamageType,
-    Frozen, Ghost, Guard, Hidden, Hitpoints, ItemAffix, ItemAffixes, MeleeDamage, MurderDecay, Murders,
-    Phase, PoisonCharges, Poisoned, Position, RangedAttack, Resistance, Skills, Stamina, Stats, SwingSpeed,
-    WrestlingAmbushCooldown, WrestlingCombo, WrestlingInterceptCooldown, WrestlingOpener, WrestlingStride,
-    body_is_female, body_opens_doors, creature_base_sound,
+    Frozen, Ghost, Guard, Hidden, Hitpoints, ItemAffix, ItemAffixes, LastStep, MeleeDamage, MurderDecay,
+    Murders, Phase, PoisonCharges, Poisoned, Position, RangedAttack, Resistance, Skills, Stamina, Stats,
+    SwingSpeed, Watch, WrestlingAmbushCooldown, WrestlingCombo, WrestlingInterceptCooldown, WrestlingOpener,
+    WrestlingStride, body_is_female, body_opens_doors, creature_base_sound,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::weapon::{ARROW, LAYER_ONE_HANDED, LAYER_TWO_HANDED, WeaponKind};
@@ -93,6 +93,10 @@ pub const SWING_DAMAGE: u16 = 5;
 /// opening disappears.  It keeps an ambush immediate without making it a buff
 /// one can carry across the map.
 const WRESTLING_OPENER_TICKS: u64 = 2 * TICKS_PER_SECOND;
+/// How long a bow may remain at full draw while its committed target is out of
+/// sight or range. Long enough to cross a small room or wait out a doorway,
+/// bounded so a held shot never becomes a permanent combat stance.
+pub const OVERWATCH_ENDURANCE_TICKS: u64 = 10 * TICKS_PER_SECOND;
 /// A victim can be ambushed again only after this recovery.
 const WRESTLING_AMBUSH_COOLDOWN_TICKS: u64 = 12 * TICKS_PER_SECOND;
 /// Three quick steps are enough to turn a normal first swing into an intercept.
@@ -809,7 +813,7 @@ fn resolve_fighter_action(state: &mut WorldState, now: WorldTick, attacker: Enti
     // `damage` is the one place murder is tallied, melee or spell alike.
     let by = state.registry.serial_of(attacker);
 
-    show_impact(state, attacker, target_pos, action.telegraphed);
+    show_impact(state, attacker, target_pos, action.kind, action.telegraphed);
     if !draw_round(state, now, attacker, by, action.kind.round()) {
         return;
     }
@@ -870,7 +874,30 @@ fn resolution_target(
     Some((target, target_pos))
 }
 
-fn show_impact(state: &mut WorldState, attacker: EntityId, target_pos: Point, telegraphed: bool) {
+/// Whether beginning or revealing this action may authoritatively turn its
+/// attacker.
+///
+/// A shot is allowed on the move, and its accepted step owns the body's facing
+/// until the crossing ends. Turning it in the middle changes the walk state as
+/// well as the picture: the player's next request then pays for a turn on the
+/// spot instead of continuing the stride. `Facing::running` cannot answer this
+/// question because it remains set after a runner stops; [`LastStep`] is the
+/// accepted crossing and has the same duration the clients draw.
+fn may_turn_for_action(state: &WorldState, attacker: EntityId, kind: ActionKind) -> bool {
+    !matches!(kind, ActionKind::Shot { .. })
+        || !state
+            .registry
+            .get::<LastStep>(attacker)
+            .is_some_and(|step| step.in_progress(state.ticks))
+}
+
+fn show_impact(
+    state: &mut WorldState,
+    attacker: EntityId,
+    target_pos: Point,
+    kind: ActionKind,
+    telegraphed: bool,
+) {
     // Swinging at somebody is the loudest thing you can do — ServUO calls
     // `RevealingAction` in the combat timer, before the blow is even rolled.
     state.break_cover(attacker);
@@ -878,7 +905,9 @@ fn show_impact(state: &mut WorldState, attacker: EntityId, target_pos: Point, te
     // exactly this moment. A concealed opener had no wind-up to give away, so
     // it is drawn and turned here instead.
     if !telegraphed {
-        state.face_point(attacker, target_pos);
+        if may_turn_for_action(state, attacker, kind) {
+            state.face_point(attacker, target_pos);
+        }
         state.animate(attacker, Action::Attack);
     }
 }
@@ -1019,8 +1048,10 @@ fn finish_hit(
 /// out of reach opens a full interval when the fighters meet, rather than
 /// landing before a frame can be shown.
 ///
-/// Only [`Phase::Releasing`] is reachable: arming is the last phase of
-/// `docs/combat_actions.md` and nothing commits into a watch yet.
+/// A shot whose selected target is out of its committed reach or out of sight
+/// commits into [`Phase::Arming`] and only then [`Phase::Armed`]. This is
+/// targeted overwatch: the same opponent becoming reachable and visible
+/// releases it after the draw; it does not scan the world for a new target.
 pub fn commit_actions(state: &mut WorldState) {
     let now = state.ticks;
     let pending = pending_actions(state);
@@ -1118,12 +1149,22 @@ fn commit_fighter_action(
     // becomes data, and the polearm falls exactly on that seam; the ranged half
     // already reads its reach off the weapon, which makes the seam visible here.
     let kind = ranged_action(state, attacker).unwrap_or(ActionKind::Swing { reach: MELEE_REACH });
-    // The commonest refusal on the shard, and the one that used to be a bare
-    // `continue`: a target round a corner or two tiles past a bow's reach. An
-    // archer stands in this state for as long as the quarry stays there, so it
-    // is the one a player is most likely to be looking at.
-    if let Some(reason) = obstruction(state, attacker, target, kind.reach()) {
-        return CommitDecision::Balked(reason);
+    // A bow and either a cut sight line or excess range begin an action rather
+    // than refusing one: the archer nocks now and holds until this same target
+    // is both in reach and in view. Facet and target life remain hard admission
+    // rules; overwatch is not permission to carry an aim away.
+    let obstruction = obstruction(state, attacker, target, kind.reach());
+    let arms_for_obstruction = matches!(
+        (kind, obstruction),
+        (
+            ActionKind::Shot { .. },
+            Some(InterruptReason::NoLineOfSight | InterruptReason::OutOfReach)
+        )
+    );
+    if let Some(reason) = obstruction {
+        if !arms_for_obstruction {
+            return CommitDecision::Balked(reason);
+        }
     }
     // The quiver is asked here, at the nock, and not ten seconds later at the
     // loose: an archer with nothing to shoot is told before drawing rather than
@@ -1141,8 +1182,48 @@ fn commit_fighter_action(
         }
     }
 
-    start_combat_action(state, now, attacker, target, target_serial, due, kind);
+    if arms_for_obstruction {
+        start_arming_shot(state, now, attacker, target, target_serial, kind);
+    } else {
+        start_combat_action(state, now, attacker, target, target_serial, due, kind);
+    }
     CommitDecision::Committed
+}
+
+/// Nock and draw a shot against one selected target before it may be held.
+fn start_arming_shot(
+    state: &mut WorldState,
+    now: WorldTick,
+    attacker: EntityId,
+    target: EntityId,
+    target_serial: Serial,
+    kind: ActionKind,
+) {
+    debug_assert!(matches!(kind, ActionKind::Shot { .. }));
+    let telegraphed = !state.registry.has::<Hidden>(attacker);
+    let ready_at = now.saturating_add(arming_ticks(state, attacker, kind));
+    let action = CombatAction {
+        target: target_serial,
+        kind,
+        phase: Phase::Arming {
+            watch: Watch::TargetInSight,
+            ready_at,
+            expires_at: ready_at.saturating_add(OVERWATCH_ENDURANCE_TICKS),
+        },
+        started_at: now,
+        accuracy: 0,
+        applied: ConditionSet::EMPTY,
+        telegraphed,
+        stage: ActionStage::FIRST,
+    };
+    state.registry.insert(attacker, action);
+    if telegraphed {
+        if may_turn_for_action(state, attacker, kind) {
+            state.face_toward(attacker, target);
+        }
+        state.break_cover(attacker);
+    }
+    state.announce_action(attacker, action);
 }
 
 fn start_combat_action(
@@ -1189,13 +1270,13 @@ fn start_combat_action(
     };
     state.registry.insert(attacker, action);
     if telegraphed {
-        // **Every fighter turns to what it is about to hit, shot included.** Ф2
-        // exempted a shot because turning a kiting archer at every nock costs it
-        // the step it was going to escape with — a step in a direction a mobile
-        // is not facing turns it instead of moving it. That is a true fact about
-        // the kiting brain and the wrong place to fix it: a body facing away from
-        // the thing it shoots reads as a shard that has not noticed the fight.
-        state.face_toward(attacker, target);
+        // A standing fighter turns into its stroke. A shot already under way
+        // keeps the accepted step's facing: changing the walk state here would
+        // turn the next player request into a turn on the spot and visibly break
+        // the stride. Melee and breath still face their mark unconditionally.
+        if may_turn_for_action(state, attacker, kind) {
+            state.face_toward(attacker, target);
+        }
         state.break_cover(attacker);
         state.animate_timed(attacker, Action::Attack, impact.saturating_sub(now));
     }
@@ -1285,6 +1366,67 @@ fn spoil(state: &mut WorldState, attacker: EntityId, reason: InterruptReason) {
     state.end_combat_action(attacker, CombatActionOutcome::Interrupted(reason));
 }
 
+/// The short interval between an overwatch finding its line and the arrow
+/// leaving. Reuse the release share the operator already chose for this action
+/// kind: a shipped bow spends the last 20% of its ordinary interval loosing.
+fn armed_release_ticks(state: &WorldState, attacker: EntityId, kind: ActionKind) -> u64 {
+    let shares = state.gameplay.action_stages.row(kind);
+    let release_percent = 100_u64.saturating_sub(u64::from(shares.ready) + u64::from(shares.load));
+    (swing_speed(state, attacker).saturating_mul(release_percent) / 100).max(1)
+}
+
+/// The preparation half of a watched shot: ready plus load, excluding release.
+fn arming_ticks(state: &WorldState, attacker: EntityId, kind: ActionKind) -> u64 {
+    let shares = state.gameplay.action_stages.row(kind);
+    let preparation_percent = u64::from(shares.ready) + u64::from(shares.load);
+    (swing_speed(state, attacker).saturating_mul(preparation_percent) / 100).max(1)
+}
+
+/// Finish the mandatory draw and enter the held state.
+fn arm_prepared_action(state: &mut WorldState, now: WorldTick, attacker: EntityId) {
+    let Some(mut action) = state.registry.get::<CombatAction>(attacker).copied() else {
+        return;
+    };
+    let Phase::Arming {
+        watch, expires_at, ..
+    } = action.phase
+    else {
+        return;
+    };
+    action.phase = Phase::Armed { watch, expires_at };
+    action.started_at = now;
+    action.stage = ActionStage::Aim;
+    state.registry.insert(attacker, action);
+    state.announce_action(attacker, action);
+    state.announce_stage(attacker, action);
+}
+
+/// Fire a satisfied watch without resolving it instantly.
+fn release_armed_action(state: &mut WorldState, now: WorldTick, attacker: EntityId, target: EntityId) {
+    let Some(mut action) = state.registry.get::<CombatAction>(attacker).copied() else {
+        return;
+    };
+    debug_assert!(matches!(action.phase, Phase::Armed { .. }));
+    let release = armed_release_ticks(state, attacker, action.kind);
+    let impact = now.saturating_add(release);
+    action.phase = Phase::Releasing { impact };
+    action.started_at = now;
+    // This interval is only the loose. The bow was already raised and loaded
+    // while armed, so re-running those stages would visually draw it twice.
+    action.stage = ActionStage::Release;
+    state.registry.insert(attacker, action);
+    set_next_swing(state, attacker, impact);
+    if action.telegraphed {
+        if may_turn_for_action(state, attacker, action.kind) {
+            state.face_toward(attacker, target);
+        }
+        state.break_cover(attacker);
+        state.animate_timed(attacker, Action::Attack, release);
+    }
+    state.announce_action(attacker, action);
+    state.announce_stage(attacker, action);
+}
+
 /// Record that `attacker` could not begin an action, and say so on the edge.
 ///
 /// The set is what the end of the commit pass reads to tell a refusal that is
@@ -1339,6 +1481,17 @@ pub fn sustain_actions(state: &mut WorldState) {
             spoil(state, attacker, InterruptReason::TargetGone);
             continue;
         };
+        // An arm that was never released gives out. Asked before its watch so a
+        // condition becoming true exactly after the endurance is gone cannot
+        // spend a shot the archer no longer holds.
+        if let Phase::Arming { expires_at, .. } | Phase::Armed { expires_at, .. } = action.phase {
+            if now >= expires_at {
+                let next = now.saturating_add(swing_speed(state, attacker).max(1));
+                set_next_swing(state, attacker, next);
+                state.end_combat_action(attacker, CombatActionOutcome::Expired);
+                continue;
+            }
+        }
         // Against the *committed* reach, not the weapon's reach now: a fighter
         // is held to what it promised, and a weapon swapped mid-swing does not
         // lengthen the blow already in flight.
@@ -1346,11 +1499,51 @@ pub fn sustain_actions(state: &mut WorldState) {
         // A cut line is the one refusal here that is a *rule* rather than a
         // verdict: `Blinded` is a row in the table, and the shipped row breaks
         // the action, which is what this did with a bare reason before there was
-        // a table to route it through. A shard that lets a fighter keep swinging
-        // into the dark now says so in its config. The other two are not
-        // negotiable — a target on another facet or outside the committed reach
-        // is not somewhere a rule can put it back.
-        match obstruction(state, attacker, target, action.reach()) {
+        // a table to route it through. A held bow treats a cut line and excess
+        // range alike while it watches; a shard that lets a fighter keep
+        // swinging into the dark now says so in its config. A target on another
+        // facet is not somewhere a rule can put it back.
+        let obstruction = obstruction(state, attacker, target, action.reach());
+        if let Phase::Arming { ready_at, .. } = action.phase {
+            match obstruction {
+                // Sight changing during the draw neither releases the arrow nor
+                // spoils it. The mandatory preparation clock is the first gate.
+                Some(InterruptReason::NoLineOfSight | InterruptReason::OutOfReach) | None => {}
+                Some(reason) => {
+                    spoil(state, attacker, reason);
+                    continue;
+                }
+            }
+            if now < ready_at {
+                advance_stage(state, attacker, now);
+                continue;
+            }
+            arm_prepared_action(state, now, attacker);
+            if obstruction.is_none() {
+                release_armed_action(state, now, attacker, target);
+            }
+            continue;
+        }
+        if matches!(
+            action.phase,
+            Phase::Armed {
+                watch: Watch::TargetInSight,
+                ..
+            }
+        ) {
+            match obstruction {
+                // This is the state the watch exists to hold, not blindness and
+                // not an interruption. Either mobile may keep moving while it
+                // remains true.
+                Some(InterruptReason::NoLineOfSight | InterruptReason::OutOfReach) => {
+                    advance_stage(state, attacker, now);
+                }
+                Some(reason) => spoil(state, attacker, reason),
+                None => release_armed_action(state, now, attacker, target),
+            }
+            continue;
+        }
+        match obstruction {
             Some(InterruptReason::NoLineOfSight) => {
                 apply_condition(state, attacker, ActorCondition::Blinded);
                 if !state.registry.has::<CombatAction>(attacker) {
@@ -1362,21 +1555,6 @@ pub fn sustain_actions(state: &mut WorldState) {
                 continue;
             }
             None => {}
-        }
-        // An arm that was never released gives out. Nothing arms yet, so nothing
-        // reaches this today; it is the endurance that stops a couched lance
-        // from becoming a permanent property of a rider.
-        if let Phase::Armed { expires_at, .. } = action.phase {
-            if now >= expires_at {
-                // The one spoiling that is not an interruption, so it cannot go
-                // through `spoil` — but it owes the same fresh interval, for the
-                // same reason: an arm that gave out has made no promise the next
-                // action should inherit.
-                let next = now.saturating_add(swing_speed(state, attacker).max(1));
-                set_next_swing(state, attacker, next);
-                state.end_combat_action(attacker, CombatActionOutcome::Expired);
-                continue;
-            }
         }
         advance_stage(state, attacker, now);
     }
@@ -1411,8 +1589,8 @@ fn advance_stage(state: &mut WorldState, attacker: EntityId, now: WorldTick) {
     let Some(&action) = state.registry.get::<CombatAction>(attacker) else {
         return;
     };
-    let stage = match action.impact() {
-        Some(impact) => {
+    let stage = match action.phase {
+        Phase::Releasing { impact } => {
             let span = impact.saturating_sub(action.started_at);
             let elapsed = now.saturating_sub(action.started_at);
             // A zero-length interval is already at its impact: an action that
@@ -1424,10 +1602,24 @@ fn advance_stage(state: &mut WorldState, attacker: EntityId, now: WorldTick) {
             };
             state.gameplay.action_stages.stage_at(action.kind, percent)
         }
+        Phase::Arming { ready_at, .. } => {
+            let span = ready_at.saturating_sub(action.started_at);
+            let elapsed = now.saturating_sub(action.started_at);
+            let shares = state.gameplay.action_stages.row(action.kind);
+            let preparation = u64::from(shares.ready) + u64::from(shares.load);
+            let percent = match span {
+                0 => preparation,
+                span => elapsed.saturating_mul(preparation) / span,
+            };
+            state
+                .gameplay
+                .action_stages
+                .stage_at(action.kind, u16::try_from(percent).unwrap_or(100))
+        }
         // An armed action is not running through an interval — it is holding on
         // the mark, waiting on the world, and that *is* the aim. It stays there
-        // until Ф7's release starts a clock for the walk above.
-        None => ActionStage::Aim,
+        // until its watch starts a release clock for the walk above.
+        Phase::Armed { .. } => ActionStage::Aim,
     };
     if stage <= action.stage {
         return;

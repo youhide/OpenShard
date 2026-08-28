@@ -50,7 +50,7 @@ use openshard_protocol::speech::{Font, RawFont, RawTalkMode, SpokenMessage, Talk
 use openshard_protocol::wire::{Graphic, Hue, Layer, RawHue, RawLayer};
 use openshard_protocol::world::{
     DeathStatus, Facet, Light, LightLevel, LoginComplete, LogoutAck, MapChange, MapSize, PlayerStart,
-    PlayerUpdate, Point, SeasonChange, Sight, WalkAck, WalkReject, WalkRequest,
+    PlayerUpdate, Point, SeasonChange, Sight, TurnRequest, WalkAck, WalkReject, WalkRequest,
 };
 use openshard_protocol::{
     access::{AccessLevel, AuthorityNotice},
@@ -1165,6 +1165,7 @@ impl World {
             Command::PlayCharacter { connection, name } => self.play_character(connection, name),
             Command::Enter(entering) => self.enter(entering),
             Command::Walk { connection, request } => self.walk(connection, request, now),
+            Command::Turn { connection, request } => self.turn(connection, request),
             Command::RequestStatus { connection } => {
                 if let Some(&entity) = self.state.players.get(&connection) {
                     self.send_status(connection, entity);
@@ -1316,6 +1317,11 @@ impl World {
             Command::UseSkillButton { connection, skill } => {
                 if let Some(&player) = self.state.players.get(&connection) {
                     skills::use_skill_button(&mut self.state, player, skill);
+                }
+            }
+            Command::OpenCraftCatalogue { connection } => {
+                if let Some(&player) = self.state.players.get(&connection) {
+                    crafting::open_catalogue(&mut self.state, player);
                 }
             }
             Command::SetStatLock {

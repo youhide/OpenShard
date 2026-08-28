@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use openshard_protocol::direction::{Direction, Facing};
-use openshard_protocol::world::{Point, WalkRequest};
+use openshard_protocol::world::{Point, TurnRequest, WalkRequest};
 
 use openshard_map::grid::Tile;
 use openshard_map::overlay::{Body, Cover, Doors};
@@ -245,6 +245,20 @@ impl Walker {
             position: self.position,
             facing: self.facing,
         }
+    }
+
+    /// Handle an explicitly typed turn request.
+    ///
+    /// Unlike `0x02`, this never derives intent from the current facing. Combat
+    /// may already have turned the body while the packet was in flight; that
+    /// still acknowledges a turn and can never become a step.
+    pub fn turn(&mut self, request: TurnRequest) -> Walk {
+        if self.sequence.accept(request.sequence).is_err() {
+            self.sequence.reset();
+            return Walk::Refused(Refusal::OutOfSequence);
+        }
+        self.facing = request.facing;
+        Walk::Turned { facing: self.facing }
     }
 }
 

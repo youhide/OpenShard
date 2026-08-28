@@ -54,8 +54,8 @@ use crate::boat::Plank;
 use crate::components::{
     Access, Amount, Balked, Body, Client, Combat, CombatAction, Contained, CorpseBody, CraftedBy, Drawn,
     Equipped, Ghost, Heading, HearsGhosts, Hidden, Hitpoints, HouseDesign, InRegion, ItemAffix, ItemAffixes,
-    ItemLocation, Meditating, Movement, Name, Position, Quality, SettledItemLocation, Staff, Stamina,
-    Stealthing, TradeWindow, body_opens_doors, creature_name,
+    ItemLocation, LastStep, Meditating, Movement, Name, Position, Quality, SettledItemLocation, Staff,
+    Stamina, Stealthing, TradeWindow, body_opens_doors, creature_name,
 };
 use crate::connection::Connection;
 use crate::dialogue::Dialogue;
@@ -1334,6 +1334,10 @@ impl HouseGumpRow {
 /// and a second id is a second thing to route.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CraftGumpPage {
+    /// The tool-free catalogue's trade picker.  It deliberately comes before a
+    /// recipe list: a catalogue answers "what exists?" across every craft,
+    /// while an actual tool still opens straight into its own trade.
+    Catalogue,
     /// The recipe list of the selected category.
     Items,
     /// The material list, in place of the recipe list.
@@ -2989,6 +2993,11 @@ impl WorldState {
         if from != facet && !self.facets.contains_key(&facet) {
             return;
         }
+
+        // A jump ends any crossing the client was drawing. Leaving its deadline
+        // behind would make combat call the newly placed body "moving" until an
+        // unrelated old step happened to expire.
+        self.registry.remove::<LastStep>(entity);
 
         if from != facet {
             // Take the traveller off every screen on the facet it is leaving,

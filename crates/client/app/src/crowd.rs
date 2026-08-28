@@ -642,6 +642,17 @@ struct PendingAction {
     /// stating a fact nobody gave it — and would be wrong on every shard that
     /// retuned the shares.
     stage: ActionStage,
+    /// This release follows a completed held draw rather than a fresh commit.
+    ///
+    /// The release packet carries only the time until impact — deliberately, as
+    /// that is the interval its bar measures.  It cannot make the earlier draw
+    /// disappear from the picture, though: a held bow that finds its target
+    /// spends only the short loose, not another full draw.  Keep that fact with
+    /// the locally continuous action so the HUD can name both states beside one
+    /// another.  A watcher who first sees the body during the loose has no
+    /// earlier phase to preserve and says only "loosing", which is the honest
+    /// limit of the packet it received.
+    released_from_held_draw: bool,
 }
 
 /// What this client last heard about one body's fighting: what it is preparing,
@@ -710,6 +721,9 @@ pub struct RunningAction {
     pub fill: ActionFill,
     /// Which named stretch of it the shard last announced.
     pub stage: ActionStage,
+    /// Whether this short release follows a bow that was already held at full
+    /// draw on this client.
+    pub released_from_held_draw: bool,
 }
 
 /// How much of a preparation bar is filled, which is a different question in
@@ -721,6 +735,8 @@ pub struct RunningAction {
 /// or the arm gives out.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ActionFill {
+    /// Raising/loading: `filled` runs from the nock to the full draw.
+    Arming { filled: f32 },
     /// Waiting on the world. The bar is held rather than filling.
     Armed,
     /// Landing: `filled` runs from `0.0` at the release to `1.0` at the impact.
@@ -1535,7 +1551,7 @@ impl Crowd {
     ///
     /// Latest-wins, and that is a rule rather than an accident. The packet
     /// arrives more than once for one action by design: an armed action
-    /// announces again when it releases, and a `Slow` rule re-announces a
+    /// announces again when it looses, and a `Slow` rule re-announces a
     /// running one with its impact pushed further out
     /// (`docs/combat_actions.md`'s Ф3). Both are the same action handing this
     /// client a *new* interval to measure, so both restart the picture from now
@@ -1551,6 +1567,10 @@ impl Crowd {
             ended: None,
             balked: None,
         });
+        let released_from_held_draw = matches!(phase.phase, ActionPhase::Releasing { .. })
+            && record.running.is_some_and(|running| {
+                running.kind == phase.kind && matches!(running.phase, ActionPhase::Armed { .. })
+            });
         // The previous blow's verdict is deliberately left standing: it is a
         // *different* action's, it fades on its own clock, and the whole reason
         // it is a separate field is that the next commit lands on the same tick
@@ -1564,6 +1584,7 @@ impl Crowd {
             // and the first stage are the same moment on the shard, and sending
             // both would be a packet saying what the other one already implies.
             stage: ActionStage::FIRST,
+            released_from_held_draw,
         });
         // A commit is proof the obstacle is gone, whether or not the clearing
         // packet has been applied yet: a fighter cannot both be held up and be
@@ -1918,6 +1939,12 @@ impl Crowd {
                 return None;
             }
             let fill = match action.phase {
+                ActionPhase::Arming { .. } => ActionFill::Arming {
+                    filled: match span.is_zero() {
+                        true => 1.0,
+                        false => (elapsed.as_secs_f32() / span.as_secs_f32()).clamp(0.0, 1.0),
+                    },
+                },
                 ActionPhase::Armed { .. } => ActionFill::Armed,
                 // A zero interval is a lie the wire refuses to tell (see
                 // `CombatActionPhase`), so this is a division guard and not a
@@ -1934,6 +1961,7 @@ impl Crowd {
                 kind: action.kind,
                 fill,
                 stage: action.stage,
+                released_from_held_draw: action.released_from_held_draw,
             })
         });
         // Deliberately not timed out with the other two: see [`balk_action`].
@@ -2655,7 +2683,12 @@ mod tests {
     /// The same, part way through — for the tests that are about the stretches.
     fn staged(kind: CombatActionKind, fill: ActionFill, stage: ActionStage) -> Option<ActionProgress> {
         Some(ActionProgress {
-            running: Some(RunningAction { kind, fill, stage }),
+            running: Some(RunningAction {
+                kind,
+                fill,
+                stage,
+                released_from_held_draw: false,
+            }),
             ended: None,
             balked: None,
         })
@@ -2710,6 +2743,24 @@ mod tests {
             crowd.preparing(who),
             running(CombatActionKind::Shot, ActionFill::Armed),
             "half the endurance gone is still a held bow",
+        );
+    }
+
+    #[test]
+    fn an_arming_action_fills_until_the_bow_is_ready() {
+        let (mut crowd, who, mobile) = standing_crowd();
+        crowd.begin_action(phase(
+            mobile,
+            CombatActionKind::Shot,
+            ActionPhase::Arming {
+                ready_in: openshard_protocol::feedback::SwingDuration(1_600),
+            },
+        ));
+        crowd.advance(Duration::from_millis(800));
+        assert_eq!(
+            crowd.preparing(who),
+            running(CombatActionKind::Shot, ActionFill::Arming { filled: 0.5 }),
+            "the draw is visible as preparation, not a full held bar"
         );
     }
 
@@ -2812,6 +2863,7 @@ mod tests {
                     kind: CombatActionKind::Swing,
                     fill: ActionFill::Releasing { filled: 0.0 },
                     stage: ActionStage::FIRST,
+                    released_from_held_draw: false,
                 }),
                 ended: Some(CombatActionOutcome::Hit),
                 balked: None,
@@ -2853,6 +2905,7 @@ mod tests {
                 kind: CombatActionKind::Breath,
                 fill: ActionFill::Releasing { filled: 1.0 },
                 stage: ActionStage::FIRST,
+                released_from_held_draw: false,
             }),
             "a blow that is due reads as a full bar, not as an empty patch of sky"
         );
@@ -2919,6 +2972,38 @@ mod tests {
         assert_eq!(
             crowd.preparing(who),
             running(CombatActionKind::Shot, ActionFill::Releasing { filled: 0.0 }),
+        );
+    }
+
+    /// A short release after an overwatch is not another draw.  The packet
+    /// names only the release interval, so preserve the preceding armed phase
+    /// in the presentation record and let the HUD state it alongside the loose.
+    #[test]
+    fn a_held_bow_keeps_its_drawn_state_when_it_looses() {
+        let (mut crowd, who, mobile) = standing_crowd();
+        crowd.begin_action(phase(
+            mobile,
+            CombatActionKind::Shot,
+            ActionPhase::Armed {
+                endurance: openshard_protocol::feedback::SwingDuration(8_000),
+            },
+        ));
+        crowd.begin_action(phase(
+            mobile,
+            CombatActionKind::Shot,
+            ActionPhase::Releasing {
+                impact_in: openshard_protocol::feedback::SwingDuration(400),
+            },
+        ));
+        assert_eq!(
+            crowd.preparing(who).and_then(|progress| progress.running),
+            Some(RunningAction {
+                kind: CombatActionKind::Shot,
+                fill: ActionFill::Releasing { filled: 0.0 },
+                stage: ActionStage::FIRST,
+                released_from_held_draw: true,
+            }),
+            "the short loose says that the bow had already been drawn",
         );
     }
 

@@ -106,8 +106,9 @@ pub enum Event {
 /// was supposed to describe.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Seen {
-    /// The bar, and how full: `None` for a body with no action running.
-    pub bar: Option<(CombatActionKind, ActionStage, ActionFill)>,
+    /// The bar, how full it is, and whether the short loose follows a held
+    /// draw: `None` for a body with no action running.
+    pub bar: Option<(CombatActionKind, ActionStage, ActionFill, bool)>,
     /// The word standing beside it, if one was.
     pub outcome: Option<CombatActionOutcome>,
     /// What it was held up by, if anything.
@@ -119,9 +120,14 @@ impl Seen {
     #[must_use]
     pub fn of(progress: ActionProgress) -> Self {
         Self {
-            bar: progress
-                .running
-                .map(|running| (running.kind, running.stage, running.fill)),
+            bar: progress.running.map(|running| {
+                (
+                    running.kind,
+                    running.stage,
+                    running.fill,
+                    running.released_from_held_draw,
+                )
+            }),
             outcome: progress.ended,
             balked: progress.balked,
         }
@@ -245,6 +251,9 @@ impl CombatLog {
 pub fn describe(event: &Event) -> String {
     match event {
         Event::Committed { kind, phase } => match phase {
+            ActionPhase::Arming { ready_in } => {
+                format!("commit  {kind:?} arming over {}ms", ready_in.millis())
+            }
             ActionPhase::Releasing { impact_in } => {
                 format!("commit  {kind:?} releasing over {}ms", impact_in.millis())
             }
@@ -278,12 +287,16 @@ pub fn describe(event: &Event) -> String {
 #[must_use]
 fn describe_seen(seen: Seen) -> String {
     let mut parts: Vec<String> = Vec::new();
-    if let Some((kind, stage, fill)) = seen.bar {
+    if let Some((kind, stage, fill, released_from_held_draw)) = seen.bar {
         parts.push(match fill {
-            ActionFill::Armed => format!("{kind:?} held ({stage:?})"),
-            ActionFill::Releasing { filled } => {
-                format!("{kind:?} {:.0}% ({stage:?})", filled * 100.0)
+            ActionFill::Arming { filled } => {
+                format!("{kind:?} drawing {:.0}% ({stage:?})", filled * 100.0)
             }
+            ActionFill::Armed => format!("{kind:?} held ({stage:?})"),
+            ActionFill::Releasing { filled } if released_from_held_draw => {
+                format!("{kind:?} {:.0}% ({stage:?}; bow drawn)", filled * 100.0)
+            }
+            ActionFill::Releasing { filled } => format!("{kind:?} {:.0}% ({stage:?})", filled * 100.0),
         });
     }
     if let Some(outcome) = seen.outcome {
