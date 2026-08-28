@@ -291,26 +291,26 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
 /// The description cliloc is left 0: a client older than 7.0.13.0 ignores the
 /// field, and a newer one shows the city and inn names either way.
 pub(crate) fn start_cities(facets: &[u8], start: Tile) -> Vec<StartLocation> {
-    fn city(area: &str, name: &str, x: u16, y: u16, z: i8) -> StartLocation {
+    fn city(area: &str, name: &str, position: Point) -> StartLocation {
         StartLocation {
             area: area.to_owned(),
             name: name.to_owned(),
-            position: Point::new(x, y, z),
+            position,
             map: Facet(0),
             description_cliloc: ClilocId(0),
         }
     }
 
     let mut cities: Vec<StartLocation> = [
-        city("Yew", "The Empath Abbey", 633, 858, 0),
-        city("Minoc", "The Barnacle", 2476, 413, 15),
-        city("Britain", "Sweet Dreams Inn", 1496, 1628, 10),
-        city("Moonglow", "The Scholars Inn", 4408, 1168, 0),
-        city("Trinsic", "The Traveler's Inn", 1845, 2745, 0),
-        city("Magincia", "The Great Horns Tavern", 3734, 2222, 20),
-        city("Jhelom", "The Mercenary Inn", 1374, 3826, 0),
-        city("Skara Brae", "The Falconer's Inn", 618, 2234, 0),
-        city("Vesper", "The Ironwood Inn", 2771, 976, 0),
+        city("Yew", "The Empath Abbey", Point::new(633, 858, 0)),
+        city("Minoc", "The Barnacle", Point::new(2476, 413, 15)),
+        city("Britain", "Sweet Dreams Inn", Point::new(1496, 1628, 10)),
+        city("Moonglow", "The Scholars Inn", Point::new(4408, 1168, 0)),
+        city("Trinsic", "The Traveler's Inn", Point::new(1845, 2745, 0)),
+        city("Magincia", "The Great Horns Tavern", Point::new(3734, 2222, 20)),
+        city("Jhelom", "The Mercenary Inn", Point::new(1374, 3826, 0)),
+        city("Skara Brae", "The Falconer's Inn", Point::new(618, 2234, 0)),
+        city("Vesper", "The Ironwood Inn", Point::new(2771, 976, 0)),
     ]
     .into_iter()
     .filter(|city| facets.contains(&city.map.0))
@@ -365,6 +365,14 @@ mod tests {
         assert!(
             cities.iter().any(|city| city.area == "Britain"),
             "Britain is one of them"
+        );
+        assert_eq!(
+            cities
+                .iter()
+                .find(|city| city.area == "Britain")
+                .map(|city| city.position),
+            Some(Point::new(1496, 1628, 10)),
+            "the city's position travels as one value"
         );
         for city in &cities {
             assert_eq!(city.map, Facet(0), "every classic city is on Felucca");

@@ -44,7 +44,7 @@ fn main() {
         openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata should load");
 
     if let Some(land) = map.land(x, y) {
-        let data = tiles.land(land.tile.0);
+        let data = tiles.land(land.tile);
         println!(
             "land 0x{:04X} z {} {:?} blocking {} name {:?}",
             land.tile.0,

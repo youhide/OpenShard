@@ -2816,6 +2816,7 @@ dependencies = [
  "openshard-movement",
  "openshard-protocol",
  "openshard-state",
+ "openshard-tiles",
  "tracing",
 ]
 

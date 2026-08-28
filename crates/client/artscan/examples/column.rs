@@ -51,7 +51,7 @@ fn main() {
     }
     for (x, y) in spots {
         let land = map.land(x, y).expect("land");
-        let ground = tiledata.land(land.tile.0);
+        let ground = tiledata.land(land.tile);
         println!(
             "tile {x},{y}  land {} (0x{:04X})  z {}  {:?}  {:?}",
             land.tile.0, land.tile.0, land.z, ground.name, ground.flags,

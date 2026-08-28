@@ -275,6 +275,8 @@ fn read_name(raw: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use openshard_tiles::LandTileId;
+
     use super::*;
 
     #[test]
@@ -337,7 +339,7 @@ mod tests {
         let read = parse(&synthetic()).unwrap();
         assert_eq!(read.format, TileDataFormat::HighSeas);
 
-        let water = read.tiles.land(0);
+        let water = read.tiles.land(LandTileId(0));
         assert_eq!(water.name, "water");
         assert!(water.flags.is_water());
         assert!(water.flags.is_blocking());

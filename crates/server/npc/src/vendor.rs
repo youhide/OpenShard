@@ -11,11 +11,12 @@ use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_items as items;
 use openshard_map::overlay::Doors;
-use openshard_protocol::containers::{ContainerContents, GridSlot, encode_open_container};
+use openshard_protocol::containers::{ContainedItem, ContainerContents, GridSlot, encode_open_container};
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::{RawSerial, Serial, SerialKind};
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::vendor::{BuyLine, BuyList, Purchase, Sale, SellLine, SellList};
+use openshard_protocol::version::ClientVersion;
 use openshard_protocol::wire::{Graphic, Hue, Layer};
 use openshard_state::components::{
     Amount, Contained, Drawn, Name, Position, Price, Restock, StockRecord, Vendor,
@@ -218,6 +219,103 @@ fn restock_if_due(state: &mut WorldState, vendor: EntityId, stock_serial: Serial
     vendor_says(state, vendor, "I have restocked my wares.");
 }
 
+fn build_buy_lines(state: &WorldState, contents: &[ContainedItem]) -> Vec<BuyLine> {
+    contents
+        .iter()
+        .map(|item| {
+            let entity = state.registry.entity_of(item.serial);
+            let price = entity
+                .and_then(|e| state.registry.get::<Price>(e))
+                .map_or(1, |p| p.0);
+            let name = entity
+                .and_then(|e| state.registry.get::<Name>(e))
+                .map_or_else(|| format!("item {:#06x}", item.graphic.0), |n| n.0.clone());
+            BuyLine { price, name }
+        })
+        .collect()
+}
+
+fn ensure_resale_container(state: &mut WorldState, vendor: EntityId) {
+    // ClassicUO's buy window scans shop layers 0x1A and 0x1B and dereferences
+    // the container on each with no null check. A vendor restored from a save
+    // made before the second crate existed wears only 0x1A, so add 0x1B now or
+    // the client crashes when the shop opens.
+    if worn_container(state, vendor, RESALE_LAYER).is_none() {
+        if let Some(vendor_serial) = state.registry.serial_of(vendor) {
+            items::equip_new_container(
+                state,
+                vendor_serial,
+                STOCK_GRAPHIC,
+                STOCK_GUMP,
+                Hue(0),
+                RESALE_LAYER,
+            );
+        }
+    }
+}
+
+fn send_shop_containers(state: &mut WorldState, connection: ConnectionId, vendor: EntityId) {
+    // ServUO's `SendPacksTo`: tell the client the vendor wears both shop crates
+    // (a `0x2E` equip each) *before* opening. The buy window is keyed on the
+    // vendor and makes ClassicUO look up the vendor's shop-layer packs — which
+    // null-crashes it if the client was never told they exist.
+    for layer in [STOCK_LAYER, RESALE_LAYER] {
+        let pack = worn_container(state, vendor, layer)
+            .and_then(|s| state.registry.entity_of(s))
+            .and_then(|entity| items::equip_packet(state, entity));
+        if let Some(pack) = pack {
+            state.send_packet(connection, &ServerPacket::EquipUpdate(pack));
+        }
+    }
+}
+
+fn send_buy_window(
+    state: &mut WorldState,
+    connection: ConnectionId,
+    vendor_serial: Serial,
+    stock_serial: Serial,
+    version: ClientVersion,
+    contents: &[ContainedItem],
+    lines: &[BuyLine],
+) {
+    // Order and serials from ServUO's `BaseVendor.SendBuyPacket`: contents,
+    // then prices, then the display packet **last** — and the display (`0x24`)
+    // opens on the **vendor's** serial, not the crate's. This is the crux: the
+    // client shows a *buy* interface only when the `0x24` names a mobile; an
+    // item serial (the crate) just opens a plain container gump. The crate is
+    // worn on the vendor's shop layer, so the client links the crate-keyed
+    // contents to the vendor-keyed window itself.
+    state.send_packet(
+        connection,
+        &ServerPacket::ContainerContents(ContainerContents {
+            container: Some(stock_serial),
+            items: contents.to_vec(),
+        }),
+    );
+    state.send_packet(
+        connection,
+        &ServerPacket::BuyList(BuyList {
+            container: stock_serial,
+            lines: lines.to_vec(),
+        }),
+    );
+    state.send(
+        connection,
+        encode_open_container(vendor_serial, SHOP_GUMP, version),
+    );
+    // Send each item's tooltip up front, the way ServUO ships the OPLs with the
+    // buy packets: a client in OPL mode shows the shop name from the tooltip,
+    // so without this the labels read as placeholders until the mouse hovers
+    // each row and the client requests the list itself.
+    if state.gameplay.tooltip_mode != TooltipMode::Off {
+        for item in contents {
+            if let Some(entity) = state.registry.entity_of(item.serial) {
+                state.send_property_list(connection, entity);
+            }
+        }
+    }
+}
+
 /// Open the shop on a double-click, if the clicked mobile is a vendor in
 /// range. Returns whether it was — the caller falls through to the ordinary
 /// double-click when it was not.
@@ -256,84 +354,120 @@ pub fn open_shop(state: &mut WorldState, connection: ConnectionId, serial: Seria
     // The contents and prices key on the stock crate — the client pairs the 0x74
     // lines with the 0x3C items by order, so the same walk builds both.
     let contents = items::contents_of(state, stock_serial);
-    let lines: Vec<BuyLine> = contents
-        .iter()
-        .map(|item| {
-            let entity = state.registry.entity_of(item.serial);
-            let price = entity
-                .and_then(|e| state.registry.get::<Price>(e))
-                .map_or(1, |p| p.0);
-            let name = entity
-                .and_then(|e| state.registry.get::<Name>(e))
-                .map_or_else(|| format!("item {:#06x}", item.graphic.0), |n| n.0.clone());
-            BuyLine { price, name }
-        })
-        .collect();
-    // ClassicUO's buy window scans shop layers 0x1A and 0x1B and dereferences the
-    // container on each with no null check. A vendor restored from a save made
-    // before the second crate existed wears only 0x1A, so add 0x1B now or the
-    // client crashes when the shop opens.
-    if worn_container(state, vendor, RESALE_LAYER).is_none() {
-        if let Some(vendor_serial) = state.registry.serial_of(vendor) {
-            items::equip_new_container(
-                state,
-                vendor_serial,
-                STOCK_GRAPHIC,
-                STOCK_GUMP,
-                Hue(0),
-                RESALE_LAYER,
-            );
-        }
-    }
-
-    // ServUO's `SendPacksTo`: tell the client the vendor wears both shop crates (a
-    // `0x2E` equip each) *before* opening. The buy window (`0x24` below) is keyed
-    // on the vendor and makes ClassicUO look up the vendor's shop-layer packs —
-    // which null-crashes it if the client was never told they exist.
-    for layer in [STOCK_LAYER, RESALE_LAYER] {
-        let pack = worn_container(state, vendor, layer)
-            .and_then(|s| state.registry.entity_of(s))
-            .and_then(|entity| items::equip_packet(state, entity));
-        if let Some(pack) = pack {
-            state.send_packet(connection, &ServerPacket::EquipUpdate(pack));
-        }
-    }
-
-    // Order and serials from ServUO's `BaseVendor.SendBuyPacket`: contents, then
-    // prices, then the display packet **last** — and the display (`0x24`) opens on
-    // the **vendor's** serial, not the crate's. This is the crux: the client shows
-    // a *buy* interface only when the `0x24` names a mobile; an item serial (the
-    // crate) just opens a plain container gump, which is why the window never
-    // appeared. The crate is worn on the vendor's shop layer, so the client links
-    // the crate-keyed contents to the vendor-keyed window itself.
-    state.send_packet(
+    let lines = build_buy_lines(state, &contents);
+    ensure_resale_container(state, vendor);
+    send_shop_containers(state, connection, vendor);
+    send_buy_window(
+        state,
         connection,
-        &ServerPacket::ContainerContents(ContainerContents {
-            container: Some(stock_serial),
-            items: contents.clone(),
-        }),
+        serial,
+        stock_serial,
+        version,
+        &contents,
+        &lines,
     );
-    state.send_packet(
-        connection,
-        &ServerPacket::BuyList(BuyList {
-            container: stock_serial,
-            lines: lines.clone(),
-        }),
-    );
-    state.send(connection, encode_open_container(serial, SHOP_GUMP, version));
-    // Send each item's tooltip up front, the way ServUO ships the OPLs with the
-    // buy packets: a client in OPL mode shows the shop name from the tooltip, so
-    // without this the labels read as placeholders until the mouse hovers each row
-    // and the client requests the list itself.
-    if state.gameplay.tooltip_mode != TooltipMode::Off {
-        for item in &contents {
-            if let Some(entity) = state.registry.entity_of(item.serial) {
-                state.send_property_list(connection, entity);
-            }
-        }
-    }
     debug!(%serial, items = lines.len(), "open_shop: sent buy gump");
     true
+}
+
+struct BasketLine {
+    item: EntityId,
+    amount: u16,
+    graphic: Graphic,
+    hue: Hue,
+}
+
+struct Basket {
+    total: u32,
+    lines: Vec<BasketLine>,
+}
+
+fn price_basket(state: &WorldState, stock_serial: Serial, list: &[Purchase]) -> Basket {
+    let mut total = 0u32;
+    let mut lines = Vec::new();
+    for purchase in list {
+        let Some(item) = purchase
+            .serial
+            .validate()
+            .and_then(|serial| state.registry.entity_of(serial))
+        else {
+            continue;
+        };
+        let held_in = match openshard_state::item_location(state, item) {
+            Some(ItemLocation::Settled(openshard_state::SettledItemLocation::Contained(c))) => {
+                Some(c.container)
+            }
+            _ => None,
+        };
+        if held_in != Some(stock_serial) {
+            continue;
+        }
+        let have = state.registry.get::<Amount>(item).map_or(0, |amount| amount.0);
+        let amount = have.min(purchase.amount.0);
+        if amount == 0 {
+            continue;
+        }
+        let price = state.registry.get::<Price>(item).map_or(1, |price| price.0);
+        let Some(&Drawn { id, hue }) = state.registry.get::<Drawn>(item) else {
+            continue;
+        };
+        total = total.saturating_add(price.saturating_mul(u32::from(amount)));
+        lines.push(BasketLine {
+            item,
+            amount,
+            graphic: id,
+            hue,
+        });
+    }
+    Basket { total, lines }
+}
+
+struct Payment {
+    purse: Serial,
+    from_bank: bool,
+}
+
+fn payment_for(
+    state: &mut WorldState,
+    player: EntityId,
+    vendor: EntityId,
+    backpack: Serial,
+    total: u32,
+) -> Option<Payment> {
+    // ServUO's `BaseVendor` order: the pack whole, then — if the operator
+    // allows it — the bank whole. Never split across the two.
+    let in_pack = items::count_in_container(state, backpack, GOLD_GRAPHIC);
+    let from_bank = if in_pack >= total {
+        false
+    } else if state.gameplay.vendor_bank_payment && items::banked_gold(state, player) >= total {
+        true
+    } else {
+        vendor_says(state, vendor, "Thou canst not afford that.");
+        return None;
+    };
+    let purse = if from_bank {
+        worn_container(state, player, items::BANK_LAYER)?
+    } else {
+        backpack
+    };
+    Some(Payment { purse, from_bank })
+}
+
+fn commit_purchase(
+    state: &mut WorldState,
+    stock_serial: Serial,
+    backpack: Serial,
+    payment: Payment,
+    basket: &Basket,
+) -> bool {
+    items::take_from_container(state, payment.purse, GOLD_GRAPHIC, basket.total);
+    let mut complete = true;
+    for line in &basket.lines {
+        items::remove_from_stack(state, stock_serial, line.item, line.amount);
+        complete &=
+            items::give(state, backpack, line.graphic, line.hue, u32::from(line.amount)).is_complete();
+    }
+    complete
 }
 
 /// Settle a purchase: check the gold, take it, hand the goods over. See
@@ -360,73 +494,27 @@ pub fn buy(state: &mut WorldState, connection: ConnectionId, vendor_serial: RawS
 
     // Price the whole basket first: a purchase is all-or-nothing, so a client
     // that asked for more than it can pay is refused before anything moves.
-    let mut total: u32 = 0;
-    let mut basket: Vec<(EntityId, u16, Graphic, Hue, u32)> = Vec::new();
-    for purchase in list {
-        let Some(item) = purchase
-            .serial
-            .validate()
-            .and_then(|s| state.registry.entity_of(s))
-        else {
-            continue;
-        };
-        let held_in = match openshard_state::item_location(state, item) {
-            Some(ItemLocation::Settled(openshard_state::SettledItemLocation::Contained(c))) => {
-                Some(c.container)
-            }
-            _ => None,
-        };
-        if held_in != Some(stock_serial) {
-            continue;
-        }
-        let have = state.registry.get::<Amount>(item).map_or(0, |a| a.0);
-        let take = have.min(purchase.amount.0);
-        if take == 0 {
-            continue;
-        }
-        let price = state.registry.get::<Price>(item).map_or(1, |p| p.0);
-        let Some(&Drawn { id, hue }) = state.registry.get::<Drawn>(item) else {
-            continue;
-        };
-        total = total.saturating_add(price.saturating_mul(u32::from(take)));
-        basket.push((item, take, id, hue, price));
-    }
-    if basket.is_empty() {
+    let basket = price_basket(state, stock_serial, list);
+    if basket.lines.is_empty() {
         return;
     }
-    // ServUO's `BaseVendor` order: the pack whole, then — if the operator allows
-    // it — the bank whole. Never split across the two, which is the reference's
-    // rule and also the honest one: a purchase either comes out of your hand or
-    // out of your account, and the vendor says which.
-    let in_pack = items::count_in_container(state, backpack, GOLD_GRAPHIC);
-    let from_bank = if in_pack >= total {
-        false
-    } else if state.gameplay.vendor_bank_payment && items::banked_gold(state, player) >= total {
-        true
-    } else {
-        vendor_says(state, vendor, "Thou canst not afford that.");
+    let Some(payment) = payment_for(state, player, vendor, backpack, basket.total) else {
         return;
     };
-    let purse = if from_bank {
-        let Some(bank) = worn_container(state, player, items::BANK_LAYER) else {
-            return;
-        };
-        bank
-    } else {
-        backpack
-    };
-    items::take_from_container(state, purse, GOLD_GRAPHIC, total);
-    for (item, take, graphic, hue, _) in basket {
-        items::remove_from_stack(state, stock_serial, item, take);
-        items::give(state, backpack, graphic, hue, u32::from(take));
-    }
+    let from_bank = payment.from_bank;
+    let complete = commit_purchase(state, stock_serial, backpack, payment, &basket);
     vendor_says(
         state,
         vendor,
-        &if from_bank {
-            format!("The total of thy purchase is {total} gold, withdrawn from thy bank account.")
+        &if !complete {
+            "I could not place all of thy purchase in thy pack.".to_owned()
+        } else if from_bank {
+            format!(
+                "The total of thy purchase is {} gold, withdrawn from thy bank account.",
+                basket.total
+            )
         } else {
-            format!("The total of thy purchase is {total} gold.")
+            format!("The total of thy purchase is {} gold.", basket.total)
         },
     );
 }
@@ -539,8 +627,19 @@ pub fn sell(state: &mut WorldState, connection: ConnectionId, vendor_serial: Raw
     // needs. Clamping it to one stack's worth here was the same silent loss as
     // clamping a merge.
     let paid = earned;
-    items::give(state, backpack, GOLD_GRAPHIC, Hue(0), paid);
-    vendor_says(state, vendor, &format!("The total of thy sale is {paid} gold."));
+    let outcome = items::give(state, backpack, GOLD_GRAPHIC, Hue(0), paid);
+    vendor_says(
+        state,
+        vendor,
+        &if outcome.is_complete() {
+            format!("The total of thy sale is {paid} gold.")
+        } else {
+            format!(
+                "I could place only {} of thy {paid} gold in thy pack.",
+                outcome.given
+            )
+        },
+    );
 }
 
 /// Half the buy price, never less than one coin.

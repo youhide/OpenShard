@@ -414,7 +414,7 @@ fn a_diplomacy_row_declares_on_the_guild_that_row_drew() {
     assert_eq!(drawn.guilds, vec![theirs], "the page listed its own guild");
 
     let war = reply(
-        crate::gump::row_button(crate::gump::DIPLOMACY_BASE, crate::gump::DIPLOMACY_ACTIONS, 0, 0),
+        crate::gump::DIPLOMACY_BUTTONS.button(0, crate::gump::DIPLOMACY_WAR),
         &[],
     );
     crate::handle(&mut state, connection, &war);
@@ -435,7 +435,7 @@ fn a_row_the_window_never_drew_names_nobody() {
     crate::gump::show(&mut state, leader, GuildPage::Diplomacy);
     // One guild was listed; row four is a number the client made up.
     let forged = reply(
-        crate::gump::row_button(crate::gump::DIPLOMACY_BASE, crate::gump::DIPLOMACY_ACTIONS, 4, 0),
+        crate::gump::DIPLOMACY_BUTTONS.button(4, crate::gump::DIPLOMACY_WAR),
         &[],
     );
     crate::handle(&mut state, connection, &forged);
@@ -463,7 +463,7 @@ fn a_roster_row_sets_the_title_typed_beside_it() {
         .expect("the member was drawn");
 
     let set = reply(
-        crate::gump::row_button(crate::gump::ROSTER_BASE, crate::gump::ROSTER_ACTIONS, row, 0),
+        crate::gump::ROSTER_BUTTONS.button(row, crate::gump::ROSTER_TITLE),
         &[(row as u16, "Warlord")],
     );
     crate::handle(&mut state, connection, &set);

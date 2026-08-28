@@ -26,6 +26,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use openshard_client_render::atlas::TextSize;
+use openshard_client_render::follow::FLOOR;
 use openshard_client_render::follow::Rig;
 use openshard_client_render::light;
 use openshard_client_render::solid::Cut;
@@ -774,6 +775,31 @@ pub struct F1Settings {
     pub scope_seconds: f32,
 }
 
+/// The two meaningful forms of a rig's lift-cut threshold.
+///
+/// `Rig` uses positive infinity as an in-band sentinel. Keeping that distinction
+/// here makes corrupt internal values fail at the runtime-to-persistence boundary
+/// instead of turning `NaN` or negative infinity into a plausible camera setting.
+enum RuntimeLiftCut {
+    CutAt(f32),
+    Never,
+}
+
+impl RuntimeLiftCut {
+    fn new(value: f32) -> Self {
+        if value.is_finite() {
+            Self::CutAt(value)
+        } else {
+            assert_eq!(
+                value,
+                f32::INFINITY,
+                "a rig lift cut must be finite or positive infinity"
+            );
+            Self::Never
+        }
+    }
+}
+
 impl Default for F1Settings {
     fn default() -> Self {
         let rig = Rig::HARD;
@@ -889,6 +915,13 @@ impl F1Settings {
     /// Capture exactly the user-facing state, deliberately excluding caches,
     /// counters and the current player's height.
     pub fn from_runtime(graphics: &GraphicsSettings, rig: Rig, ease: Ease, scope_span: Duration) -> Self {
+        let (rig_lift_cut, rig_never_cut) = match RuntimeLiftCut::new(rig.lift_cut) {
+            RuntimeLiftCut::CutAt(value) => (value, false),
+            // A fresh snapshot has no dormant slider value to retain. The rig's
+            // own floor threshold is the value the F1 slider displays when cuts
+            // are enabled again.
+            RuntimeLiftCut::Never => (FLOOR, true),
+        };
         Self {
             draw_land: graphics.drawing.land,
             draw_statics: graphics.drawing.statics,
@@ -922,12 +955,8 @@ impl F1Settings {
             highlight_style: graphics.highlight_style,
             rig_plane_tau: rig.plane_tau,
             rig_lift_tau: rig.lift_tau,
-            rig_lift_cut: if rig.lift_cut.is_finite() {
-                rig.lift_cut
-            } else {
-                0.0
-            },
-            rig_never_cut: !rig.lift_cut.is_finite(),
+            rig_lift_cut,
+            rig_never_cut,
             body_ease_tau: ease.tau,
             scope_seconds: scope_span.as_secs_f32(),
         }
@@ -944,12 +973,14 @@ impl F1Settings {
         if let Some(rig) = request.rig {
             self.rig_plane_tau = rig.plane_tau;
             self.rig_lift_tau = rig.lift_tau;
-            self.rig_lift_cut = if rig.lift_cut.is_finite() {
-                rig.lift_cut
-            } else {
-                0.0
-            };
-            self.rig_never_cut = !rig.lift_cut.is_finite();
+            match RuntimeLiftCut::new(rig.lift_cut) {
+                RuntimeLiftCut::CutAt(value) => {
+                    self.rig_lift_cut = value;
+                    self.rig_never_cut = false;
+                }
+                // The checkbox does not destroy the slider's last useful value.
+                RuntimeLiftCut::Never => self.rig_never_cut = true,
+            }
         }
         if let Some(ease) = request.ease {
             self.body_ease_tau = ease.tau;
@@ -1436,7 +1467,7 @@ mod tests {
 
         desk.save(&ron).unwrap();
         assert!(ron.exists());
-        assert_eq!(Desk::load(&ron).unwrap().movement.always_run, false);
+        assert!(!Desk::load(&ron).unwrap().movement.always_run);
         std::fs::remove_file(&ron).unwrap();
         std::fs::remove_file(&legacy).unwrap();
     }
@@ -1456,6 +1487,48 @@ mod tests {
             RangedRange::new(settings.sight_reach).unwrap_or(MELEE_SIGHT_REACH),
             MELEE_SIGHT_REACH
         );
+    }
+
+    #[test]
+    fn never_cut_keeps_the_last_finite_slider_value() {
+        let mut settings = F1Settings {
+            rig_lift_cut: 73.0,
+            ..F1Settings::default()
+        };
+        let request = crate::shell::Request {
+            rig: Some(Rig {
+                lift_cut: f32::INFINITY,
+                ..Rig::LIFT
+            }),
+            ..crate::shell::Request::default()
+        };
+
+        settings.apply_pending_request(&request);
+
+        assert!(settings.rig_never_cut);
+        assert_eq!(settings.rig_lift_cut, 73.0);
+        assert_eq!(settings.rig().lift_cut, f32::INFINITY);
+    }
+
+    #[test]
+    #[should_panic(expected = "a rig lift cut must be finite or positive infinity")]
+    fn a_nan_runtime_lift_cut_is_not_saved_as_a_real_threshold() {
+        let mut settings = F1Settings::default();
+        let request = crate::shell::Request {
+            rig: Some(Rig {
+                lift_cut: f32::NAN,
+                ..Rig::LIFT
+            }),
+            ..crate::shell::Request::default()
+        };
+
+        settings.apply_pending_request(&request);
+    }
+
+    #[test]
+    #[should_panic(expected = "a rig lift cut must be finite or positive infinity")]
+    fn negative_infinity_is_not_the_never_cut_sentinel() {
+        RuntimeLiftCut::new(f32::NEG_INFINITY);
     }
 
     /// The file's own defaults are the renderer's own, field for field.

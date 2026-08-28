@@ -435,7 +435,10 @@ impl World {
     pub(super) fn collapse_houses(&mut self) {
         for house in openshard_housing::decay::age_and_collect(&mut self.state) {
             let owner = self.state.registry.get::<House>(house).map(|entry| entry.owner);
-            openshard_housing::decay::demolish(&mut self.state, house);
+            if let Err(error) = openshard_housing::decay::demolish(&mut self.state, house) {
+                warn!(?house, ?error, "a collapsed house could not be demolished");
+                continue;
+            }
             // The owner is told if they are here to hear it. Nothing is sent to
             // an absent one: this engine has no offline mail, and inventing one
             // for a single line is a system rather than a message.

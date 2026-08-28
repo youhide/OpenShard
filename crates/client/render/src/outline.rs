@@ -245,7 +245,7 @@ pub struct Outline {
     layout: wgpu::BindGroupLayout,
     uniforms: wgpu::Buffer,
     /// The glow's two pipelines: coverage out of the id mask, then one Kawase
-    /// iteration, run [`GLOW_PASSES`] times between [`Outline::spread`]'s pair.
+    /// iteration, run [`GLOW_PASSES`] times between the cached pair.
     seed: wgpu::RenderPipeline,
     seed_layout: wgpu::BindGroupLayout,
     blur: wgpu::RenderPipeline,
@@ -264,7 +264,18 @@ pub struct Outline {
     /// was. Owned here rather than by the caller: they are this module's
     /// intermediates, nothing else can draw into them, and a caller that had to
     /// resize them would be a caller that can get it wrong.
-    spread: Option<Spread>,
+    spread: SpreadState,
+}
+
+/// Whether the glow targets have been fitted to a frame yet.
+///
+/// An [`Outline`] has no mask size when it is constructed. That is a real
+/// lifecycle state rather than an absent value: the first frame fits the pair,
+/// and later frames either reuse it or replace it after a resize.
+#[derive(Debug)]
+enum SpreadState {
+    Unfitted,
+    Fitted(Spread),
 }
 
 /// The pair the glow is ping-ponged between, and the mask size they were made
@@ -275,6 +286,60 @@ struct Spread {
     /// for "still valid" is against what the caller passes.
     mask: (u32, u32),
     textures: [wgpu::Texture; 2],
+}
+
+impl SpreadState {
+    /// Fit the pair to `mask` and return views for this frame's passes.
+    fn fit(&mut self, device: &wgpu::Device, mask: (u32, u32)) -> [wgpu::TextureView; 2] {
+        if let Self::Fitted(spread) = self {
+            if spread.mask == mask {
+                return spread.views();
+            }
+        }
+
+        let spread = Spread::new(device, mask);
+        let views = spread.views();
+        *self = Self::Fitted(spread);
+        views
+    }
+}
+
+impl Spread {
+    /// Build the pair at half the mask's size in each direction, rounded up.
+    ///
+    /// Half resolution is enough because the glow is a falloff several texels
+    /// wide and the composite reads it through a linear sampler. It is also
+    /// what makes three iterations enough: every texel here reaches two in the
+    /// world's mask.
+    fn new(device: &wgpu::Device, mask: (u32, u32)) -> Self {
+        let size = wgpu::Extent3d {
+            width: mask.0.div_ceil(2).max(1),
+            height: mask.1.div_ceil(2).max(1),
+            depth_or_array_layers: 1,
+        };
+        let target = |label| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: GLOW_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        };
+        Self {
+            mask,
+            textures: [target("glow a"), target("glow b")],
+        }
+    }
+
+    fn views(&self) -> [wgpu::TextureView; 2] {
+        self.textures
+            .each_ref()
+            .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()))
+    }
 }
 
 impl Outline {
@@ -478,7 +543,7 @@ impl Outline {
             blur_layout,
             sampler,
             steps,
-            spread: None,
+            spread: SpreadState::Unfitted,
         }
     }
 
@@ -494,7 +559,7 @@ impl Outline {
         frame: Frame<'_>,
         ring: Ring,
     ) {
-        self.fit_spread(device, frame.mask_size);
+        let spread = self.spread.fit(device, frame.mask_size);
         let mut bytes = Vec::with_capacity(RING_BYTES as usize);
         for value in [
             frame.mask_size.0 as f32,
@@ -516,14 +581,9 @@ impl Outline {
         // the strength written just now is then zero, so the composite never
         // reads what is in there.
         if let Some(glow) = ring.glow {
-            self.spread_mask(device, queue, encoder, frame.mask, glow);
+            self.spread_mask(device, queue, encoder, frame.mask, &spread, glow);
         }
-        let lit = self
-            .spread
-            .as_ref()
-            .expect("fit_spread built the pair a moment ago")
-            .textures[GLOW_PASSES % 2]
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let lit = &spread[GLOW_PASSES % 2];
 
         // A bind group per call, as the blit does: the mask is recreated on
         // every resize and every zoom step, and a cached group would point at a
@@ -542,7 +602,7 @@ impl Outline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&lit),
+                    resource: wgpu::BindingResource::TextureView(lit),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -585,42 +645,6 @@ impl Outline {
         pass.draw(0..4, 0..1);
     }
 
-    /// Make sure the blur's pair matches the mask, building it the first time
-    /// and rebuilding it when the world image is resized or zoomed.
-    ///
-    /// Half the mask's size in each direction, rounded up. Half because the glow
-    /// is the one part of this pipeline whose resolution does not matter: it is
-    /// a falloff several texels wide, and the composite reads it through a
-    /// linear sampler, so the missing detail is detail the blur was about to
-    /// throw away. It is also what makes three iterations enough — every texel
-    /// of reach here is two of the world's.
-    fn fit_spread(&mut self, device: &wgpu::Device, mask: (u32, u32)) {
-        if self.spread.as_ref().is_some_and(|spread| spread.mask == mask) {
-            return;
-        }
-        let size = wgpu::Extent3d {
-            width: mask.0.div_ceil(2).max(1),
-            height: mask.1.div_ceil(2).max(1),
-            depth_or_array_layers: 1,
-        };
-        let target = |label| {
-            device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(label),
-                size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: GLOW_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            })
-        };
-        self.spread = Some(Spread {
-            mask,
-            textures: [target("glow a"), target("glow b")],
-        });
-    }
-
     /// Coverage out of the id mask, then [`GLOW_PASSES`] Kawase iterations
     /// between the pair, leaving the result in `textures[GLOW_PASSES % 2]`.
     ///
@@ -634,15 +658,9 @@ impl Outline {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         mask: &wgpu::TextureView,
+        views: &[wgpu::TextureView; 2],
         glow: Glow,
     ) {
-        let spread = self.spread.as_ref().expect("fit_spread runs first");
-        let views: Vec<wgpu::TextureView> = spread
-            .textures
-            .iter()
-            .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()))
-            .collect();
-
         let seed = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("glow seed"),
             layout: &self.seed_layout,

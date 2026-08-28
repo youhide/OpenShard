@@ -369,8 +369,8 @@ impl TileData {
     /// every id in it came off disk, and a `None` there would mean an unwalkable
     /// hole rather than an error anyone can act on.
     #[must_use]
-    pub fn land(&self, id: u16) -> &LandTile {
-        &self.land[(id as usize) & (LAND_TILE_COUNT - 1)]
+    pub fn land(&self, id: LandTileId) -> &LandTile {
+        &self.land[(id.0 as usize) & (LAND_TILE_COUNT - 1)]
     }
 
     /// A static tile. Total: every `u16` is a valid index.
@@ -437,8 +437,8 @@ impl TileData {
     ///
     /// The id is masked into range exactly as [`land`](Self::land) masks it, so
     /// the two cannot disagree about which row an id names.
-    pub fn set_land_tile(&mut self, id: u16, tile: LandTile) {
-        self.land[(id as usize) & (LAND_TILE_COUNT - 1)] = tile;
+    pub fn set_land_tile(&mut self, id: LandTileId, tile: LandTile) {
+        self.land[(id.0 as usize) & (LAND_TILE_COUNT - 1)] = tile;
     }
 }
 
@@ -565,7 +565,7 @@ mod tests {
         // here would mean one bad tile takes the shard down.
         let data = TileData::empty();
         for id in [0u16, 1, 0x3FFF, 0x4000, 0xFFFF] {
-            let _ = data.land(id);
+            let _ = data.land(LandTileId(id));
         }
     }
 }

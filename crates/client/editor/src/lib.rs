@@ -211,7 +211,7 @@ impl Catalog {
     #[must_use]
     pub fn entry(&self, id: AssetId) -> CatalogEntry<'_> {
         let name = match id {
-            AssetId::Land(id) => defined_name(&self.tiles.land(id.0).name),
+            AssetId::Land(id) => defined_name(&self.tiles.land(id).name),
             AssetId::Static(graphic) => self.tiles.item_name(graphic.0),
         };
         CatalogEntry { id, name }
@@ -263,7 +263,7 @@ impl Catalog {
         match id {
             // Art's container uses one combined graphic index even though
             // tiledata keeps this half typed as `LandTileId`.
-            AssetId::Land(id) => self.art.land(Graphic(id.0)),
+            AssetId::Land(id) => self.art.land(id),
             AssetId::Static(graphic) => self.art.static_art(graphic),
         }
     }
@@ -371,14 +371,14 @@ mod tests {
     fn catalogue() -> Catalog {
         let mut tiles = TileData::empty();
         tiles.set_land_tile(
-            42,
+            LandTileId(42),
             LandTile {
                 name: "Forest Floor".to_owned(),
                 ..LandTile::default()
             },
         );
         tiles.set_land_tile(
-            77,
+            LandTileId(77),
             LandTile {
                 name: "NoName".to_owned(),
                 ..LandTile::default()

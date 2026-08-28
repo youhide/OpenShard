@@ -142,7 +142,7 @@ pub fn gain_stat(state: &mut WorldState, entity: EntityId, stat: StatCode) {
         set_value(&mut next, donor, value_of(stats, donor) - 1);
     }
     set_value(&mut next, stat, value_of(stats, stat) + 1);
-    apply_stats(state, entity, next.strength, next.dexterity, next.intelligence);
+    apply_stats(state, entity, next);
 }
 
 /// Whether this stat's cooldown has passed, stamping it if so — ServUO's

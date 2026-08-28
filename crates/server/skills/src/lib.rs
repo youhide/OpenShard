@@ -123,11 +123,11 @@ pub struct SkillUsed {
 }
 
 /// Set a mobile's stats by serial, and re-cap its pools to match.
-pub fn set_stats(state: &mut WorldState, serial: Serial, strength: u16, dexterity: u16, intelligence: u16) {
+pub fn set_stats(state: &mut WorldState, serial: Serial, stats: Stats) {
     let Some(entity) = state.registry.entity_of(serial) else {
         return;
     };
-    apply_stats(state, entity, strength, dexterity, intelligence);
+    apply_stats(state, entity, stats);
 }
 
 /// Set a mobile's stats and re-cap its hit points, mana and stamina.
@@ -136,26 +136,13 @@ pub fn set_stats(state: &mut WorldState, serial: Serial, strength: u16, dexterit
 /// from them — a stat gain and a `Command::SetStats` both land here. It is also
 /// the door the *skills* a stat lends to are announced from: see
 /// [`SkillChanged`]'s own docs for why a stat change is a skill change.
-pub fn apply_stats(
-    state: &mut WorldState,
-    entity: EntityId,
-    strength: u16,
-    dexterity: u16,
-    intelligence: u16,
-) {
+pub fn apply_stats(state: &mut WorldState, entity: EntityId, stats: Stats) {
     // Every skill's drawn value, taken before the stats move. Fifty-eight reads
     // of a table, on a path walked when an operator types `.set` or a stat gains
     // — the alternative is deciding from the scale columns which skills *could*
     // have moved, which is the same table read plus a rule to get wrong.
     let before = drawn_values(state, entity);
-    state.registry.insert(
-        entity,
-        Stats {
-            strength,
-            dexterity,
-            intelligence,
-        },
-    );
+    state.registry.insert(entity, stats);
     announce_drawn_moves(state, entity, &before);
     // Strength caps hit points, intelligence mana, dexterity stamina; a lowered
     // cap drags the current value down with it, a raised one leaves room to heal
@@ -164,8 +151,8 @@ pub fn apply_stats(
         state.registry.insert(
             entity,
             Hitpoints {
-                current: current.min(strength),
-                max: strength,
+                current: current.min(stats.strength),
+                max: stats.strength,
             },
         );
     }
@@ -173,8 +160,8 @@ pub fn apply_stats(
         state.registry.insert(
             entity,
             Mana {
-                current: current.min(intelligence),
-                max: intelligence,
+                current: current.min(stats.intelligence),
+                max: stats.intelligence,
             },
         );
     }
@@ -182,8 +169,8 @@ pub fn apply_stats(
         state.registry.insert(
             entity,
             Stamina {
-                current: current.min(dexterity),
-                max: dexterity,
+                current: current.min(stats.dexterity),
+                max: stats.dexterity,
             },
         );
     }
@@ -305,7 +292,21 @@ pub fn use_skill(state: &mut WorldState, serial: Serial, skill: u8, min_skill: i
 
 #[cfg(test)]
 mod tests {
-    use super::{PER_MILLE, PERCENT, SkillValue, roll_u16};
+    use super::{PER_MILLE, PERCENT, SkillValue, apply_stats, roll_u16, set_stats};
+
+    #[test]
+    fn stat_mutation_api_carries_stats_as_one_value() {
+        let _: fn(
+            &mut openshard_state::WorldState,
+            openshard_protocol::serial::Serial,
+            openshard_state::components::Stats,
+        ) = set_stats;
+        let _: fn(
+            &mut openshard_state::WorldState,
+            openshard_entities::EntityId,
+            openshard_state::components::Stats,
+        ) = apply_stats;
+    }
 
     #[test]
     fn skill_value_keeps_fixed_point_tenths_explicit() {

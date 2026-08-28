@@ -17,7 +17,7 @@
 
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::{Graphic, Hue};
-use openshard_tiles::{LAND_TILE_COUNT, TextureId, TileData};
+use openshard_tiles::{LAND_TILE_COUNT, LandTileId, TextureId, TileData};
 use openshard_uofiles::anim::{Anim, AnimationDirection, AnimationKey, BodyKind, DIRECTIONS};
 use openshard_uofiles::art::Art;
 use openshard_uofiles::equipconv::EquipConv;
@@ -217,11 +217,11 @@ fn the_land_table_reads_as_names_and_not_as_bytes_from_the_next_field() {
         (0x00A8, "water"),
         (0x03A4, "snow"),
     ] {
-        assert_eq!(data.land(id).name, name, "land {id:#06X}");
+        assert_eq!(data.land(LandTileId(id)).name, name, "land {id:#06X}");
     }
 
     let named = (0..LAND_TILE_COUNT)
-        .filter(|id| !data.land(*id as u16).name.is_empty())
+        .filter(|id| !data.land(LandTileId(*id as u16)).name.is_empty())
         .count();
     // Roughly a quarter of the table is named on 7.0.116.0; the rest is
     // genuinely blank. A stride that had slipped would leave far fewer names
@@ -239,7 +239,7 @@ fn water_is_water_across_the_run_the_client_ships() {
         return;
     };
     for id in 0x00A8u16..=0x00AB {
-        let tile = data.land(id);
+        let tile = data.land(LandTileId(id));
         assert_eq!(tile.name, "water", "land {id:#06X}");
         assert!(tile.flags.is_water(), "land {id:#06X} is not water");
         assert!(tile.flags.is_blocking(), "water blocks a walker");
@@ -248,8 +248,14 @@ fn water_is_water_across_the_run_the_client_ships() {
 
     // And the ground beside it is not water, so the assertion above is not
     // simply true of everything.
-    assert!(!data.land(0x0003).flags.is_water(), "grass is not water");
-    assert!(!data.land(0x0003).flags.is_blocking(), "grass is walkable");
+    assert!(
+        !data.land(LandTileId(0x0003)).flags.is_water(),
+        "grass is not water"
+    );
+    assert!(
+        !data.land(LandTileId(0x0003)).flags.is_blocking(),
+        "grass is walkable"
+    );
 }
 
 #[test]
@@ -309,7 +315,7 @@ fn land_tile_zero_is_a_dummy_and_sets_no_movement_bit() {
     let Some(data) = tiledata() else {
         return;
     };
-    let dummy = data.land(0);
+    let dummy = data.land(LandTileId(0));
     assert!(!dummy.flags.is_water());
     assert!(!dummy.flags.is_blocking());
     assert!(!dummy.flags.is_platform());
@@ -320,8 +326,8 @@ fn land_tile_zero_is_a_dummy_and_sets_no_movement_bit() {
     );
     // The neighbours are ordinary records, which is what makes record 0 a quirk
     // of the file rather than a stride that is wrong everywhere.
-    assert_eq!(data.land(2).name, "NODRAW");
-    assert_eq!(data.land(3).name, "grass");
+    assert_eq!(data.land(LandTileId(2)).name, "NODRAW");
+    assert_eq!(data.land(LandTileId(3)).name, "grass");
 }
 
 #[test]
@@ -337,14 +343,14 @@ fn the_corner_of_felucca_is_ocean_and_britain_is_not() {
 
     let corner = map.land(0, 0).expect("(0,0) is on the map");
     assert!(
-        data.land(corner.tile.0).flags.is_water(),
+        data.land(corner.tile).flags.is_water(),
         "the north-west corner of Felucca is ocean, not tile {}",
         corner.tile.0
     );
 
     let britain = map.land(1495, 1629).expect("Britain is on the map");
     assert!(
-        !data.land(britain.tile.0).flags.is_water(),
+        !data.land(britain.tile).flags.is_water(),
         "the middle of Britain came out as water, so the blocks are misplaced"
     );
 }
@@ -415,7 +421,7 @@ fn land_art_is_a_diamond_with_empty_corners() {
     };
     let art = Art::open(&dir).expect("a client ships artLegacyMUL.uop");
     let grass = art
-        .land(Graphic(3))
+        .land(LandTileId(3))
         .unwrap()
         .expect("land tile 3 is grass and every client has it");
 
@@ -445,7 +451,7 @@ fn land_art_reads_to_the_end_of_the_diamond_and_not_into_the_padding() {
         return;
     };
     let art = Art::open(&dir).unwrap();
-    let grass = art.land(Graphic(3)).unwrap().unwrap();
+    let grass = art.land(LandTileId(3)).unwrap().unwrap();
 
     assert!(!grass.pixel(21, 43).unwrap().is_transparent(), "the bottom point");
     assert!(!grass.pixel(22, 43).unwrap().is_transparent(), "the bottom point");
@@ -470,7 +476,7 @@ fn the_channel_order_is_what_a_shipped_grass_tile_says() {
         return;
     };
     let art = Art::open(&dir).unwrap();
-    let grass = art.land(Graphic(3)).unwrap().unwrap();
+    let grass = art.land(LandTileId(3)).unwrap().unwrap();
 
     let mut sampled = 0;
     let (mut red, mut green, mut blue) = (0u32, 0u32, 0u32);
@@ -498,7 +504,7 @@ fn every_land_tile_the_client_ships_decodes() {
     let mut present = 0;
     for id in 0..0x4000u16 {
         if art
-            .land(Graphic(id))
+            .land(LandTileId(id))
             .unwrap_or_else(|e| panic!("land {id:#06X}: {e}"))
             .is_some()
         {
@@ -652,9 +658,11 @@ fn a_land_tiles_texture_is_the_same_terrain_as_its_art() {
     // Every land graphic that has both pictures, in index order.
     let mut pairs = Vec::new();
     for id in 0..LAND_TILE_COUNT as u16 {
-        let texture = tiles.land(id).texture;
-        let (Some(land), Some(texture)) = (art.land(Graphic(id)).unwrap(), texmaps.texture(texture).unwrap())
-        else {
+        let texture = tiles.land(LandTileId(id)).texture;
+        let (Some(land), Some(texture)) = (
+            art.land(LandTileId(id)).unwrap(),
+            texmaps.texture(texture).unwrap(),
+        ) else {
             continue;
         };
         pairs.push((mean(&land), mean(&texture)));

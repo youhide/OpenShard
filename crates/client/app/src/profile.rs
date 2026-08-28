@@ -267,11 +267,25 @@ pub fn end(gpu: Option<&Gpu>, encoder: &mut wgpu::CommandEncoder, open: Open) {
 fn flatten(results: &[GpuTimerQueryResult], depth: usize, into: &mut Vec<Pass>) {
     for result in results {
         if let Some(time) = &result.time {
-            into.push(Pass {
-                label: result.label.clone(),
-                depth,
-                cost: Duration::from_secs_f64((time.end - time.start).max(0.0)),
-            });
+            match Duration::try_from_secs_f64(time.end - time.start) {
+                Ok(cost) => into.push(Pass {
+                    label: result.label.clone(),
+                    depth,
+                    cost,
+                }),
+                Err(error) => {
+                    // These values have crossed the GPU/driver boundary. A bad
+                    // sample is not a client invariant and must neither panic
+                    // nor impersonate a physically plausible zero-cost pass.
+                    tracing::warn!(
+                        label = %result.label,
+                        start = time.start,
+                        end = time.end,
+                        %error,
+                        "dropping an invalid GPU timestamp range"
+                    );
+                }
+            }
         }
         flatten(&result.nested_queries, depth + 1, into);
     }
@@ -388,6 +402,37 @@ mod tests {
             .map(|pass| pass.cost)
             .sum();
         assert_eq!(total, Duration::from_millis(10));
+    }
+
+    /// A sound pair of timestamps is converted to its width on the GPU's
+    /// clock; their otherwise undefined absolute position is irrelevant.
+    #[test]
+    fn a_valid_timestamp_range_becomes_its_elapsed_duration() {
+        let results = vec![query("ground", 42.0, 42.004, Vec::new())];
+        let mut passes = Vec::new();
+        flatten(&results, 0, &mut passes);
+        assert_eq!(passes[0].cost, Duration::from_millis(4));
+    }
+
+    /// Timestamp data has crossed the GPU/driver boundary, so an inverted pair
+    /// is a bad sample to omit rather than a client invariant to panic on or a
+    /// zero-cost pass to invent.
+    #[test]
+    fn a_reversed_timestamp_range_is_left_out() {
+        let results = vec![query("ground", 2.0, 1.0, Vec::new())];
+        let mut passes = Vec::new();
+        flatten(&results, 0, &mut passes);
+        assert!(passes.is_empty());
+    }
+
+    /// NaN used to survive subtraction and `max` as zero, which made corrupt
+    /// timestamp data look like a real pass that happened to be free.
+    #[test]
+    fn a_nan_timestamp_range_is_left_out() {
+        let results = vec![query("ground", f64::NAN, 1.0, Vec::new())];
+        let mut passes = Vec::new();
+        flatten(&results, 0, &mut passes);
+        assert!(passes.is_empty());
     }
 
     /// A scope the device wrote no timestamp for is absent, not nought: a pass

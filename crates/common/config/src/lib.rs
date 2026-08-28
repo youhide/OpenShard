@@ -1603,161 +1603,10 @@ impl Config {
 
     /// Check everything that would otherwise fail silently at runtime.
     pub fn validate(&self) -> Result<(), ConfigError> {
-        if self.server.advertise.ip().is_unspecified() {
-            return Err(ConfigError::AdvertisedUnspecified);
-        }
-        if self.server.advertise.port() == 0 {
-            return Err(ConfigError::AdvertisedPortZero);
-        }
-        if self.server.advertise.is_ipv6() {
-            return Err(ConfigError::AdvertisedNotIpv4);
-        }
-
-        let length = self.server.name.len();
-        if length == 0 || length > MAX_SHARD_NAME {
-            return Err(ConfigError::BadShardName { length });
-        }
-
-        let mut seen: Vec<String> = Vec::new();
-        for account in &self.accounts {
-            if account.name.0.is_empty() {
-                return Err(ConfigError::EmptyAccountName);
-            }
-            // Login lowercases names, so two accounts differing only in case
-            // would collide at runtime, with one silently shadowing the other.
-            let key = account.name.normalized();
-            if seen.contains(&key) {
-                return Err(ConfigError::DuplicateAccount {
-                    name: account.name.clone(),
-                });
-            }
-            seen.push(key);
-        }
-
-        // An unimplemented era would silently fall through to era 1, giving a feel
-        // the operator did not ask for; name it instead.
-        if !combat_era_is_implemented(self.gameplay.combat_era) {
-            return Err(ConfigError::UnknownCombatEra {
-                era: self.gameplay.combat_era.value(),
-            });
-        }
-        // The swing formula divides by this; zero would panic mid-tick.
-        if self.gameplay.speed_scale_factor == 0 {
-            return Err(ConfigError::ZeroSpeedScaleFactor);
-        }
-        if self.gameplay.critical_chance > 1000 {
-            return Err(ConfigError::CriticalChanceTooHigh {
-                chance: self.gameplay.critical_chance,
-            });
-        }
-        // A slow is the one effect in the table with a number big enough to turn
-        // the rule into a cancellation nobody asked for.
-        for (kind, row) in [
-            ("swing", &self.gameplay.action_rules.swing),
-            ("shot", &self.gameplay.action_rules.shot),
-            ("breath", &self.gameplay.action_rules.breath),
-        ] {
-            for effect in row.effects().into_iter().flatten() {
-                if let ActionEffectConfig::Slow { percent } = effect {
-                    if percent > MAX_SLOW_PERCENT {
-                        return Err(ConfigError::SlowPercentTooHigh { kind, percent });
-                    }
-                }
-            }
-        }
-        // The release is the remainder, so a row that spends the whole interval
-        // on getting ready leaves the impact nowhere to happen.
-        for (kind, shares) in [
-            ("swing", &self.gameplay.action_stages.swing),
-            ("shot", &self.gameplay.action_stages.shot),
-            ("breath", &self.gameplay.action_stages.breath),
-        ] {
-            let claimed = shares.claimed();
-            if claimed > 100 {
-                return Err(ConfigError::StageSharesOversubscribed { kind, claimed });
-            }
-        }
-        // A percentage of zero is not "instant", it is "no action at all": the
-        // impact would fall on the commit tick, so nothing would ever be drawn,
-        // measured or interrupted. Refused at load rather than run.
-        for (kind, percent) in [
-            ("swing", self.gameplay.action_speed.swing),
-            ("shot", self.gameplay.action_speed.shot),
-            ("breath", self.gameplay.action_speed.breath),
-        ] {
-            if percent == 0 {
-                return Err(ConfigError::ZeroActionSpeed { kind });
-            }
-        }
-        if self.gameplay.critical_damage_percent < 100 {
-            return Err(ConfigError::CriticalDamageBelowNormal {
-                percent: self.gameplay.critical_damage_percent,
-            });
-        }
-        // LOD's two knobs only bite when it is on; a zero either freezes every
-        // creature or spins the gate, so reject them rather than run them.
-        if self.gameplay.lod {
-            if self.gameplay.lod_radius == 0 {
-                return Err(ConfigError::ZeroLodRadius);
-            }
-            if self.gameplay.lod_idle_factor == 0 {
-                return Err(ConfigError::ZeroLodIdleFactor);
-            }
-        }
-        // A UO minute of zero divides the tick counter by nothing and leaves the
-        // world at midnight for ever.
-        if self.gameplay.uo_minute_seconds == 0 {
-            return Err(ConfigError::ZeroUoMinuteSeconds);
-        }
-        // A routine whose day wraps midnight would leave every NPC permanently at
-        // one end of it, which reads as the setting doing nothing.
-        if self.gameplay.npc_work_hour >= self.gameplay.npc_home_hour || self.gameplay.npc_home_hour > 23 {
-            return Err(ConfigError::BadNpcHours {
-                work: self.gameplay.npc_work_hour,
-                home: self.gameplay.npc_home_hour,
-            });
-        }
-        // An expansion the shard cannot name would silently advertise nothing,
-        // and the client would quietly drop half its paperdoll.
-        if !expansion_is_known(&self.gameplay.expansion) {
-            return Err(ConfigError::UnknownExpansion {
-                expansion: self.gameplay.expansion.clone(),
-            });
-        }
-        // `gameplay.season`'s own deserialize already refuses a sixth season —
-        // see the `season` module — so there is nothing left to check here.
-        // The gain chance divides by the total skill cap, and a per-stat cap above
-        // the total one is a ceiling that can never be reached — both read as the
-        // caps "not working" rather than as a bad setting.
-        if self.gameplay.total_skill_cap == 0 || self.gameplay.skill_cap == 0 {
-            return Err(ConfigError::ZeroSkillCap);
-        }
-        if self.gameplay.stat_cap == 0 || self.gameplay.stat_cap_individual == 0 {
-            return Err(ConfigError::ZeroStatCap);
-        }
-        if self.gameplay.stat_cap_individual > self.gameplay.stat_cap {
-            return Err(ConfigError::StatCapBelowIndividual {
-                total: self.gameplay.stat_cap,
-                individual: self.gameplay.stat_cap_individual,
-            });
-        }
-        // A base set replaces the *map* files and nothing else, and an entry
-        // that names a facet nobody loads is a typo that leaves the old world
-        // running. Both are checked here rather than at boot so that a config
-        // this wrong never reaches a running shard — see each variant for what
-        // it would otherwise look like.
-        for (&FacetKey(facet), path) in &self.world.base_sets {
-            if path.as_os_str().is_empty() {
-                return Err(ConfigError::EmptyBaseSetPath { facet });
-            }
-            if self.world.client_files.trim().is_empty() {
-                return Err(ConfigError::BaseSetWithoutClientFiles { facet });
-            }
-            if !self.world.facets.contains(&facet.0) {
-                return Err(ConfigError::BaseSetForUnloadedFacet { facet });
-            }
-        }
-        Ok(())
+        validate_server(&self.server)?;
+        validate_accounts(&self.accounts)?;
+        validate_gameplay(&self.gameplay)?;
+        validate_world(&self.world)
     }
 
     /// The IPv4 address to advertise, which is all the `0x8C` packet can carry.
@@ -1773,6 +1622,213 @@ impl Config {
             IpAddr::V6(_) => None,
         }
     }
+}
+
+fn validate_server(server: &ServerConfig) -> Result<(), ConfigError> {
+    if server.advertise.ip().is_unspecified() {
+        return Err(ConfigError::AdvertisedUnspecified);
+    }
+    if server.advertise.port() == 0 {
+        return Err(ConfigError::AdvertisedPortZero);
+    }
+    if server.advertise.is_ipv6() {
+        return Err(ConfigError::AdvertisedNotIpv4);
+    }
+
+    let length = server.name.len();
+    if length == 0 || length > MAX_SHARD_NAME {
+        return Err(ConfigError::BadShardName { length });
+    }
+    Ok(())
+}
+
+fn validate_accounts(accounts: &[AccountConfig]) -> Result<(), ConfigError> {
+    let mut seen: Vec<String> = Vec::new();
+    for account in accounts {
+        if account.name.0.is_empty() {
+            return Err(ConfigError::EmptyAccountName);
+        }
+        // Login lowercases names, so two accounts differing only in case
+        // would collide at runtime, with one silently shadowing the other.
+        let key = account.name.normalized();
+        if seen.contains(&key) {
+            return Err(ConfigError::DuplicateAccount {
+                name: account.name.clone(),
+            });
+        }
+        seen.push(key);
+    }
+    Ok(())
+}
+
+fn validate_gameplay(gameplay: &GameplayConfig) -> Result<(), ConfigError> {
+    validate_combat(gameplay)?;
+    validate_lod(gameplay)?;
+    validate_world_clock(gameplay)?;
+    validate_expansion(gameplay)?;
+    validate_caps(gameplay)
+}
+
+fn validate_combat(gameplay: &GameplayConfig) -> Result<(), ConfigError> {
+    // An unimplemented era would silently fall through to era 1, giving a feel
+    // the operator did not ask for; name it instead.
+    if !combat_era_is_implemented(gameplay.combat_era) {
+        return Err(ConfigError::UnknownCombatEra {
+            era: gameplay.combat_era.value(),
+        });
+    }
+    // The swing formula divides by this; zero would panic mid-tick.
+    if gameplay.speed_scale_factor == 0 {
+        return Err(ConfigError::ZeroSpeedScaleFactor);
+    }
+    if gameplay.critical_chance > 1000 {
+        return Err(ConfigError::CriticalChanceTooHigh {
+            chance: gameplay.critical_chance,
+        });
+    }
+    validate_action_effects(gameplay)?;
+    validate_action_stage_shares(gameplay)?;
+    validate_action_speeds(gameplay)?;
+    if gameplay.critical_damage_percent < 100 {
+        return Err(ConfigError::CriticalDamageBelowNormal {
+            percent: gameplay.critical_damage_percent,
+        });
+    }
+    Ok(())
+}
+
+fn validate_action_effects(gameplay: &GameplayConfig) -> Result<(), ConfigError> {
+    // A slow is the one effect in the table with a number big enough to turn
+    // the rule into a cancellation nobody asked for.
+    for (kind, row) in [
+        ("swing", &gameplay.action_rules.swing),
+        ("shot", &gameplay.action_rules.shot),
+        ("breath", &gameplay.action_rules.breath),
+    ] {
+        for effect in row.effects().into_iter().flatten() {
+            if let ActionEffectConfig::Slow { percent } = effect {
+                if percent > MAX_SLOW_PERCENT {
+                    return Err(ConfigError::SlowPercentTooHigh { kind, percent });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_action_stage_shares(gameplay: &GameplayConfig) -> Result<(), ConfigError> {
+    // The release is the remainder, so a row that spends the whole interval
+    // on getting ready leaves the impact nowhere to happen.
+    for (kind, shares) in [
+        ("swing", &gameplay.action_stages.swing),
+        ("shot", &gameplay.action_stages.shot),
+        ("breath", &gameplay.action_stages.breath),
+    ] {
+        let claimed = shares.claimed();
+        if claimed > 100 {
+            return Err(ConfigError::StageSharesOversubscribed { kind, claimed });
+        }
+    }
+    Ok(())
+}
+
+fn validate_action_speeds(gameplay: &GameplayConfig) -> Result<(), ConfigError> {
+    // A percentage of zero is not "instant", it is "no action at all": the
+    // impact would fall on the commit tick, so nothing would ever be drawn,
+    // measured or interrupted. Refused at load rather than run.
+    for (kind, percent) in [
+        ("swing", gameplay.action_speed.swing),
+        ("shot", gameplay.action_speed.shot),
+        ("breath", gameplay.action_speed.breath),
+    ] {
+        if percent == 0 {
+            return Err(ConfigError::ZeroActionSpeed { kind });
+        }
+    }
+    Ok(())
+}
+
+fn validate_lod(gameplay: &GameplayConfig) -> Result<(), ConfigError> {
+    // LOD's two knobs only bite when it is on; a zero either freezes every
+    // creature or spins the gate, so reject them rather than run them.
+    if gameplay.lod {
+        if gameplay.lod_radius == 0 {
+            return Err(ConfigError::ZeroLodRadius);
+        }
+        if gameplay.lod_idle_factor == 0 {
+            return Err(ConfigError::ZeroLodIdleFactor);
+        }
+    }
+    Ok(())
+}
+
+fn validate_world_clock(gameplay: &GameplayConfig) -> Result<(), ConfigError> {
+    // A UO minute of zero divides the tick counter by nothing and leaves the
+    // world at midnight for ever.
+    if gameplay.uo_minute_seconds == 0 {
+        return Err(ConfigError::ZeroUoMinuteSeconds);
+    }
+    // A routine whose day wraps midnight would leave every NPC permanently at
+    // one end of it, which reads as the setting doing nothing.
+    if gameplay.npc_work_hour >= gameplay.npc_home_hour || gameplay.npc_home_hour > 23 {
+        return Err(ConfigError::BadNpcHours {
+            work: gameplay.npc_work_hour,
+            home: gameplay.npc_home_hour,
+        });
+    }
+    Ok(())
+}
+
+fn validate_expansion(gameplay: &GameplayConfig) -> Result<(), ConfigError> {
+    // An expansion the shard cannot name would silently advertise nothing,
+    // and the client would quietly drop half its paperdoll.
+    if !expansion_is_known(&gameplay.expansion) {
+        return Err(ConfigError::UnknownExpansion {
+            expansion: gameplay.expansion.clone(),
+        });
+    }
+    // `gameplay.season`'s own deserialize already refuses a sixth season —
+    // see the `season` module — so there is nothing left to check here.
+    Ok(())
+}
+
+fn validate_caps(gameplay: &GameplayConfig) -> Result<(), ConfigError> {
+    // The gain chance divides by the total skill cap, and a per-stat cap above
+    // the total one is a ceiling that can never be reached — both read as the
+    // caps "not working" rather than as a bad setting.
+    if gameplay.total_skill_cap == 0 || gameplay.skill_cap == 0 {
+        return Err(ConfigError::ZeroSkillCap);
+    }
+    if gameplay.stat_cap == 0 || gameplay.stat_cap_individual == 0 {
+        return Err(ConfigError::ZeroStatCap);
+    }
+    if gameplay.stat_cap_individual > gameplay.stat_cap {
+        return Err(ConfigError::StatCapBelowIndividual {
+            total: gameplay.stat_cap,
+            individual: gameplay.stat_cap_individual,
+        });
+    }
+    Ok(())
+}
+
+fn validate_world(world: &WorldConfig) -> Result<(), ConfigError> {
+    // A base set replaces the *map* files and nothing else, and an entry
+    // that names a facet nobody loads is a typo that leaves the old world
+    // running. Both are checked here rather than at boot so that a config
+    // this wrong never reaches a running shard — see each variant for what
+    // it would otherwise look like.
+    for (&FacetKey(facet), path) in &world.base_sets {
+        if path.as_os_str().is_empty() {
+            return Err(ConfigError::EmptyBaseSetPath { facet });
+        }
+        if world.client_files.trim().is_empty() {
+            return Err(ConfigError::BaseSetWithoutClientFiles { facet });
+        }
+        if !world.facets.contains(&facet.0) {
+            return Err(ConfigError::BaseSetForUnloadedFacet { facet });
+        }
+    }
+    Ok(())
 }
 
 /// The config shipped with the project, as text.

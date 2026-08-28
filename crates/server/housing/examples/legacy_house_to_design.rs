@@ -98,14 +98,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|extension| extension.to_str())
         .unwrap_or_default();
     let (origin, components) = if extension.eq_ignore_ascii_case("wsc") {
-        wsc_design(&source)?
+        wsc_design(source)?
     } else if source
         .lines()
         .any(|line| line.trim_end().ends_with("num components"))
     {
-        (Origin { x: 0, y: 0, z: 0 }, multiscripter_design(&source)?)
+        (Origin { x: 0, y: 0, z: 0 }, multiscripter_design(source)?)
     } else {
-        (Origin { x: 0, y: 0, z: 0 }, sphere_component_design(&source)?)
+        (Origin { x: 0, y: 0, z: 0 }, sphere_component_design(source)?)
     };
     let document = json!({
         "format": "openshard-house-design/v1",

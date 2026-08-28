@@ -3138,12 +3138,15 @@ fn a_payout_past_the_stack_cap_lands_in_a_second_pile() {
     let player = world.state.players[&connection];
     let backpack = backpack_serial(&world, connection);
 
-    openshard_items::give(
-        &mut world.state,
-        backpack,
-        openshard_protocol::wire::Graphic(GOLD),
-        openshard_protocol::wire::Hue(0),
-        100_000,
+    assert!(
+        openshard_items::give(
+            &mut world.state,
+            backpack,
+            openshard_protocol::wire::Graphic(GOLD),
+            openshard_protocol::wire::Hue(0),
+            100_000,
+        )
+        .is_complete()
     );
 
     let piles: Vec<u16> = world
@@ -6117,6 +6120,7 @@ fn an_even_unskilled_duel_sometimes_misses() {
     let miss = openshard_state::weapon::weapon_data(openshard_protocol::wire::Graphic(0x0F61))
         .unwrap()
         .miss_sound
+        .0
         .to_be_bytes();
     let sound = |id: [u8; 2]| {
         packets
@@ -8214,12 +8218,15 @@ fn ready_caster(world: &mut World, reagent: u16, now: Instant) -> (ConnectionId,
     });
     world.tick(now);
     let backpack = backpack_serial(world, connection);
-    openshard_items::give(
-        &mut world.state,
-        backpack,
-        openshard_protocol::wire::Graphic(reagent),
-        openshard_protocol::wire::Hue(0),
-        20,
+    assert!(
+        openshard_items::give(
+            &mut world.state,
+            backpack,
+            openshard_protocol::wire::Graphic(reagent),
+            openshard_protocol::wire::Hue(0),
+            20,
+        )
+        .is_complete()
     );
     // A full spellbook, so the cast gate — you may cast only what your book holds
     // — passes for every spell a cast test tries.
@@ -8229,7 +8236,9 @@ fn ready_caster(world: &mut World, reagent: u16, now: Instant) -> (ConnectionId,
         openshard_state::components::SPELLBOOK_GRAPHIC,
         openshard_protocol::wire::Hue(0),
         1,
-    ) {
+    )
+    .last
+    {
         world
             .state
             .registry
@@ -8249,7 +8258,9 @@ fn give_full_spellbook(world: &mut World, connection: ConnectionId) {
         openshard_state::components::SPELLBOOK_GRAPHIC,
         openshard_protocol::wire::Hue(0),
         1,
-    ) {
+    )
+    .last
+    {
         world
             .state
             .registry
@@ -8351,12 +8362,15 @@ fn a_travel_spell_asks_for_an_object_and_not_a_patch_of_ground() {
     let (connection, _) = ready_caster(&mut world, BLACK_PEARL, now);
     let backpack = backpack_serial(&world, connection);
     for reagent in [BLOOD_MOSS, MANDRAKE_ROOT] {
-        openshard_items::give(
-            &mut world.state,
-            backpack,
-            openshard_protocol::wire::Graphic(reagent),
-            openshard_protocol::wire::Hue(0),
-            20,
+        assert!(
+            openshard_items::give(
+                &mut world.state,
+                backpack,
+                openshard_protocol::wire::Graphic(reagent),
+                openshard_protocol::wire::Hue(0),
+                20,
+            )
+            .is_complete()
         );
     }
 
@@ -9640,12 +9654,15 @@ fn the_bless_spell_raises_the_targets_stats() {
     let (connection, entity) = ready_caster(&mut world, GARLIC, now);
     let self_serial = serial_of(&world, connection);
     let backpack = backpack_serial(&world, connection);
-    openshard_items::give(
-        &mut world.state,
-        backpack,
-        openshard_protocol::wire::Graphic(MANDRAKE_ROOT),
-        openshard_protocol::wire::Hue(0),
-        20,
+    assert!(
+        openshard_items::give(
+            &mut world.state,
+            backpack,
+            openshard_protocol::wire::Graphic(MANDRAKE_ROOT),
+            openshard_protocol::wire::Hue(0),
+            20,
+        )
+        .is_complete()
     );
     let base = *world.registry().get::<Stats>(entity).unwrap();
 
@@ -13336,11 +13353,20 @@ fn a_characters_inventory_survives_a_logout_and_restore() {
             .any(|r| r.serial == backpack_serial && matches!(r.location, ItemLocation::Equipped { .. })),
         "the backpack is saved as worn"
     );
-    assert!(
-        records.iter().any(|r| r.serial == gold_serial
-            && r.amount == 500
-            && matches!(r.location, ItemLocation::Contained { .. })),
-        "the gold is saved inside, amount and all"
+    let gold_record = records
+        .iter()
+        .find(|record| record.serial == gold_serial)
+        .expect("the gold is in the saved inventory");
+    assert_eq!(gold_record.amount, 500);
+    assert_eq!(
+        gold_record.location,
+        ItemLocation::Contained {
+            container: backpack_serial,
+            x: 40,
+            y: 65,
+            grid: 0,
+        },
+        "the gold keeps its exact container position"
     );
 
     // Log out — the character and its items leave the world.
@@ -13385,9 +13411,13 @@ fn a_characters_inventory_survives_a_logout_and_restore() {
         "the gold came back stackable, so it still merges with more"
     );
     assert_eq!(
-        shard.registry().get::<Contained>(gold).unwrap().container,
-        backpack_serial,
-        "and back inside the same backpack"
+        *shard.registry().get::<Contained>(gold).unwrap(),
+        Contained {
+            container: backpack_serial,
+            position: GumpPoint::new(40, 65),
+            grid: GridSlot(0),
+        },
+        "and back at the same point inside the same backpack"
     );
 }
 
@@ -19327,12 +19357,15 @@ fn a_shop_sells_goods_and_buys_them_back() {
     // A hundred coins in the pack, and a double-click opens the shop: the buy
     // list rides out with the contents.
     let backpack = backpack_serial(&world, gm);
-    openshard_items::give(
-        &mut world.state,
-        backpack,
-        openshard_protocol::wire::Graphic(GOLD),
-        openshard_protocol::wire::Hue(0),
-        100,
+    assert!(
+        openshard_items::give(
+            &mut world.state,
+            backpack,
+            openshard_protocol::wire::Graphic(GOLD),
+            openshard_protocol::wire::Hue(0),
+            100,
+        )
+        .is_complete()
     );
     world.drain_outbound().count();
     world.queue(Command::DoubleClick {

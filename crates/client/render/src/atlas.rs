@@ -11,7 +11,7 @@
 //! though the texture is looked up through `tiledata` by a different id, so a
 //! quad asks both of them the same question.
 //!
-//! The atlases are built for a set of graphics, not for the whole file. A modern
+//! The atlases are built for a set of land tile ids, not for the whole file. A modern
 //! client ships about 4,244 land tiles and the container is 155MB; what is on
 //! screen is a fraction of that, and the browser is the reason the difference
 //! matters rather than an optimisation nobody asked for.
@@ -22,7 +22,7 @@ use std::fmt;
 use openshard_protocol::feedback::AnimationFrameCount;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Graphic;
-use openshard_tiles::TileData;
+use openshard_tiles::{LandTileId, TileData};
 use openshard_uofiles::anim::{Anim, AnimError, AnimFrame, AnimationFrameIndex};
 use openshard_uofiles::art::{Art, ArtError, LAND_TILE_SIZE, land_row};
 use openshard_uofiles::color::Rgb8;
@@ -262,14 +262,14 @@ pub struct Region {
 /// Holds its pixels rather than a GPU handle: this crate does not decide when a
 /// texture is created, and a test wants to read the pixels without a device.
 pub struct LandAtlas {
-    /// Where each graphic sits, indexed by the graphic itself.
+    /// Where each tile sits, indexed by the tile id itself.
     ///
     /// **Dense, and that is a frame-rate decision rather than a style one.**
     /// [`Self::region`] is asked once per visible land tile — 26,732 of them at
     /// the widest zoom — and a `BTreeMap` answers each of those from a node the
     /// cache has long since evicted, in a loop that is already missing on the
     /// map itself. One indexed load costs a miss at worst and none at all for
-    /// the handful of graphics a street repeats. `Graphic` is a `u16`, so the
+    /// the handful of tiles a street repeats. `LandTileId` is a `u16`, so the
     /// table is `u16::MAX + 1` entries — 1.3 MB beside the 16 MB of pixels this
     /// same atlas already holds.
     ///
@@ -286,7 +286,7 @@ pub struct LandAtlas {
     /// absent would otherwise be looked up in a 155MB container on every frame
     /// it is on screen — and would answer "not packed" for ever, which is a
     /// question that never stops being asked.
-    asked: BTreeSet<Graphic>,
+    asked: BTreeSet<LandTileId>,
     /// `ATLAS_SIDE * ATLAS_SIDE` RGBA8 pixels, row-major.
     pixels: Vec<u8>,
     dirty: Dirty,
@@ -307,7 +307,7 @@ impl LandAtlas {
     /// A graphic the client has no art for is skipped, not an error: three
     /// quarters of the land index is genuinely empty, and a map referring to an
     /// empty slot is the file's business, not a failure to draw.
-    pub fn build(art: &Art, wanted: impl IntoIterator<Item = Graphic>) -> Result<Self, AtlasError> {
+    pub fn build(art: &Art, wanted: impl IntoIterator<Item = LandTileId>) -> Result<Self, AtlasError> {
         let mut atlas = Self::empty();
         atlas.add(art, wanted)?;
         // Handed to a renderer whole, so nothing is outstanding: see
@@ -317,7 +317,7 @@ impl LandAtlas {
     }
 
     /// How many graphics in `wanted` this atlas has not been asked for before.
-    pub fn newly_requested(&self, wanted: impl IntoIterator<Item = Graphic>) -> usize {
+    pub fn newly_requested(&self, wanted: impl IntoIterator<Item = LandTileId>) -> usize {
         wanted
             .into_iter()
             .filter(|graphic| !self.asked.contains(graphic))
@@ -328,7 +328,7 @@ impl LandAtlas {
     fn empty() -> Self {
         let side = ATLAS_SIDE as usize;
         Self {
-            regions: vec![None; GRAPHIC_SLOTS].into_boxed_slice(),
+            regions: vec![None; LAND_TILE_SLOTS].into_boxed_slice(),
             packed: 0,
             asked: BTreeSet::new(),
             pixels: vec![0u8; side * side * 4],
@@ -352,12 +352,12 @@ impl LandAtlas {
     /// consistent with what its caller asked for: the caller is expected to
     /// throw it away and build one for what is on screen now, which is what
     /// makes "full" recoverable rather than terminal.
-    pub fn add(&mut self, art: &Art, wanted: impl IntoIterator<Item = Graphic>) -> Result<(), AtlasError> {
+    pub fn add(&mut self, art: &Art, wanted: impl IntoIterator<Item = LandTileId>) -> Result<(), AtlasError> {
         // Sorted and deduplicated, so the same input always produces the same
         // atlas — a frame that changes because a `HashSet` iterated differently
         // is not a frame a test can assert on.
-        let wanted: BTreeSet<Graphic> = wanted.into_iter().collect();
-        let fresh: Vec<Graphic> = wanted
+        let wanted: BTreeSet<LandTileId> = wanted.into_iter().collect();
+        let fresh: Vec<LandTileId> = wanted
             .into_iter()
             .filter(|graphic| !self.asked.contains(graphic))
             .collect();
@@ -365,9 +365,9 @@ impl LandAtlas {
             return Ok(());
         }
         let mut images = Vec::with_capacity(fresh.len());
-        for graphic in &fresh {
-            if let Some(image) = art.land(*graphic)? {
-                images.push((*graphic, image));
+        for tile in &fresh {
+            if let Some(image) = art.land(*tile)? {
+                images.push((*tile, image));
             }
         }
         self.insert(images)?;
@@ -393,10 +393,10 @@ impl LandAtlas {
     /// chose and then assert on the pixels the frame comes back with. Every
     /// sprite is expected to be [`LAND_TILE_SIZE`] square, and only the diamond
     /// inside it is copied.
-    pub fn pack(images: impl IntoIterator<Item = (Graphic, Image)>) -> Result<Self, AtlasError> {
+    pub fn pack(images: impl IntoIterator<Item = (LandTileId, Image)>) -> Result<Self, AtlasError> {
         let mut atlas = Self::empty();
-        let images: Vec<(Graphic, Image)> = images.into_iter().collect();
-        atlas.asked.extend(images.iter().map(|(graphic, _)| *graphic));
+        let images: Vec<(LandTileId, Image)> = images.into_iter().collect();
+        atlas.asked.extend(images.iter().map(|(tile, _)| *tile));
         atlas.insert(images)?;
         atlas.dirty.take();
         Ok(atlas)
@@ -411,10 +411,10 @@ impl LandAtlas {
     /// the one a shelf or a grid can quietly lose.
     pub fn pack_more(
         &mut self,
-        images: impl IntoIterator<Item = (Graphic, Image)>,
+        images: impl IntoIterator<Item = (LandTileId, Image)>,
     ) -> Result<(), AtlasError> {
-        let images: Vec<(Graphic, Image)> = images.into_iter().collect();
-        self.asked.extend(images.iter().map(|(graphic, _)| *graphic));
+        let images: Vec<(LandTileId, Image)> = images.into_iter().collect();
+        self.asked.extend(images.iter().map(|(tile, _)| *tile));
         self.insert(images)
     }
 
@@ -423,8 +423,8 @@ impl LandAtlas {
     /// A graphic already packed is skipped: the caller filtered by what was
     /// *asked*, which is the larger set, and packing one twice would spend a
     /// slot and leave the older region pointing at pixels nothing samples.
-    fn insert(&mut self, images: impl IntoIterator<Item = (Graphic, Image)>) -> Result<(), AtlasError> {
-        let images: BTreeMap<Graphic, Image> = images.into_iter().collect();
+    fn insert(&mut self, images: impl IntoIterator<Item = (LandTileId, Image)>) -> Result<(), AtlasError> {
+        let images: BTreeMap<LandTileId, Image> = images.into_iter().collect();
         if self.packed as usize + images.len() > CAPACITY {
             return Err(AtlasError::Full {
                 wanted: self.packed as usize + images.len(),
@@ -434,7 +434,7 @@ impl LandAtlas {
 
         let side = ATLAS_SIDE as usize;
 
-        for (graphic, image) in images {
+        for (tile, image) in images {
             // The grid is the format's constant, so a sprite of another size is
             // a caller's mistake rather than a file's. Said here because the
             // copy below indexes by `land_row`, which only stays inside a 44
@@ -444,7 +444,7 @@ impl LandAtlas {
                 (LAND_TILE_SIZE, LAND_TILE_SIZE),
                 "a land sprite is always {LAND_TILE_SIZE} square",
             );
-            if self.regions[graphic.0 as usize].is_some() {
+            if self.regions[tile.0 as usize].is_some() {
                 continue;
             }
             let slot = self.packed;
@@ -470,7 +470,7 @@ impl LandAtlas {
                     self.pixels[at + 3] = u8::MAX;
                 }
             }
-            self.regions[graphic.0 as usize] = Some(region_of_slot(slot));
+            self.regions[tile.0 as usize] = Some(region_of_slot(slot));
             self.packed += 1;
         }
 
@@ -500,16 +500,19 @@ impl LandAtlas {
     /// Where a graphic sits, or `None` if the client ships no art for it.
     ///
     /// One indexed load, deliberately — see [`Self::regions`].
-    pub fn region(&self, graphic: Graphic) -> Option<Region> {
-        self.regions[graphic.0 as usize]
+    pub fn region(&self, tile: LandTileId) -> Option<Region> {
+        self.regions[tile.0 as usize]
     }
 }
 
-/// One entry per [`Graphic`], which is a `u16`.
+/// One entry per possible [`LandTileId`] representation, which is a `u16`.
 ///
 /// The whole index rather than the land range, so no caller has to know where
 /// that range ends: the table is a rounding error beside an atlas's pixels, and
 /// a bound nobody can be wrong about is worth more than the bytes.
+const LAND_TILE_SLOTS: usize = u16::MAX as usize + 1;
+
+/// One entry per possible static [`Graphic`] representation.
 const GRAPHIC_SLOTS: usize = u16::MAX as usize + 1;
 
 /// The top-left pixel of a slot. Row-major, which is why slot 0 is the origin.
@@ -569,7 +572,7 @@ pub struct TexmapAtlas {
     /// The ordinary case is that it did not — the client ships 4,116 textures
     /// for 16,384 slots — so without this every flat tile on screen would send
     /// `tiledata` and `texmaps.mul` the same question on every frame, for ever.
-    asked: BTreeSet<Graphic>,
+    asked: BTreeSet<LandTileId>,
     /// Which cells are spoken for, kept between growths: an atlas that forgot
     /// this would hand the next texture a cell it had already filled.
     grid: CellGrid,
@@ -596,7 +599,7 @@ impl TexmapAtlas {
     pub fn build(
         texmaps: &TexMaps,
         tiledata: &TileData,
-        wanted: impl IntoIterator<Item = Graphic>,
+        wanted: impl IntoIterator<Item = LandTileId>,
     ) -> Result<Self, AtlasError> {
         let mut atlas = Self::empty();
         atlas.add(texmaps, tiledata, wanted)?;
@@ -605,7 +608,7 @@ impl TexmapAtlas {
     }
 
     /// How many land-graphic requests have not reached this atlas before.
-    pub fn newly_requested(&self, wanted: impl IntoIterator<Item = Graphic>) -> usize {
+    pub fn newly_requested(&self, wanted: impl IntoIterator<Item = LandTileId>) -> usize {
         wanted
             .into_iter()
             .filter(|graphic| !self.asked.contains(graphic))
@@ -616,7 +619,7 @@ impl TexmapAtlas {
     fn empty() -> Self {
         let side = ATLAS_SIDE as usize;
         Self {
-            regions: vec![None; GRAPHIC_SLOTS].into_boxed_slice(),
+            regions: vec![None; LAND_TILE_SLOTS].into_boxed_slice(),
             packed: 0,
             asked: BTreeSet::new(),
             grid: CellGrid::new(),
@@ -634,12 +637,12 @@ impl TexmapAtlas {
         &mut self,
         texmaps: &TexMaps,
         tiledata: &TileData,
-        wanted: impl IntoIterator<Item = Graphic>,
+        wanted: impl IntoIterator<Item = LandTileId>,
     ) -> Result<(), AtlasError> {
         // Sorted and deduplicated for the same reason as the land atlas: the
         // same input has to produce the same atlas, byte for byte.
-        let wanted: BTreeSet<Graphic> = wanted.into_iter().collect();
-        let fresh: Vec<Graphic> = wanted
+        let wanted: BTreeSet<LandTileId> = wanted.into_iter().collect();
+        let fresh: Vec<LandTileId> = wanted
             .into_iter()
             .filter(|graphic| !self.asked.contains(graphic))
             .collect();
@@ -647,12 +650,12 @@ impl TexmapAtlas {
             return Ok(());
         }
         let mut images = Vec::new();
-        for graphic in &fresh {
+        for tile in &fresh {
             // The indirection this whole atlas exists to follow: a land graphic
             // names a `tiledata` entry, and that entry names a texture.
-            let id = tiledata.land(graphic.0).texture;
+            let id = tiledata.land(*tile).texture;
             if let Some(image) = texmaps.texture(id)? {
-                images.push((*graphic, image));
+                images.push((*tile, image));
             }
         }
         self.insert(images)?;
@@ -672,7 +675,7 @@ impl TexmapAtlas {
     /// and the 64s would otherwise have scattered themselves through every one
     /// of them. Deterministic given the same input, which the frame tests rely
     /// on.
-    pub fn pack(images: impl IntoIterator<Item = (Graphic, Image)>) -> Result<Self, AtlasError> {
+    pub fn pack(images: impl IntoIterator<Item = (LandTileId, Image)>) -> Result<Self, AtlasError> {
         let mut atlas = Self::empty();
         atlas.pack_more(images)?;
         atlas.dirty.take();
@@ -684,10 +687,10 @@ impl TexmapAtlas {
     /// a ground quad samples both.
     pub fn pack_more(
         &mut self,
-        images: impl IntoIterator<Item = (Graphic, Image)>,
+        images: impl IntoIterator<Item = (LandTileId, Image)>,
     ) -> Result<(), AtlasError> {
-        let images: Vec<(Graphic, Image)> = images.into_iter().collect();
-        self.asked.extend(images.iter().map(|(graphic, _)| *graphic));
+        let images: Vec<(LandTileId, Image)> = images.into_iter().collect();
+        self.asked.extend(images.iter().map(|(tile, _)| *tile));
         self.insert(images)
     }
 
@@ -698,9 +701,9 @@ impl TexmapAtlas {
     /// earlier growth's 64s left is a few wasted cells, not a wrong picture. A
     /// single [`pack`](Self::pack) therefore still lays the atlas out exactly as
     /// it always did, byte for byte, which is what the frame tests assert on.
-    fn insert(&mut self, images: impl IntoIterator<Item = (Graphic, Image)>) -> Result<(), AtlasError> {
-        let images: BTreeMap<Graphic, Image> = images.into_iter().collect();
-        let mut order: Vec<(Graphic, Image)> = images.into_iter().collect();
+    fn insert(&mut self, images: impl IntoIterator<Item = (LandTileId, Image)>) -> Result<(), AtlasError> {
+        let images: BTreeMap<LandTileId, Image> = images.into_iter().collect();
+        let mut order: Vec<(LandTileId, Image)> = images.into_iter().collect();
         // Ties broken by graphic, which `BTreeMap` already ordered them by, and
         // `sort_by_key` is stable — so this is a total order and not a
         // "whichever the sort happened to visit first".
@@ -709,8 +712,8 @@ impl TexmapAtlas {
         let side = ATLAS_SIDE as usize;
 
         let wanted = self.packed as usize + order.len();
-        for (graphic, image) in order {
-            if self.regions[graphic.0 as usize].is_some() {
+        for (tile, image) in order {
+            if self.regions[tile.0 as usize].is_some() {
                 continue;
             }
             // Square, and a whole number of cells: both are the format's, and
@@ -756,7 +759,7 @@ impl TexmapAtlas {
             // its own and nothing bleeds along the two far edges of every tile.
             let atlas = ATLAS_SIDE as f32;
             let half = 0.5 / atlas;
-            self.regions[graphic.0 as usize] = Some(Region {
+            self.regions[tile.0 as usize] = Some(Region {
                 u: origin_x as f32 / atlas + half,
                 v: origin_y as f32 / atlas + half,
                 du: f32::from(image.width()) / atlas - 2.0 * half,
@@ -799,8 +802,8 @@ impl TexmapAtlas {
     /// which is what the client does with a tile whose texture is missing — see
     /// `ground.wgsl`.
     /// One indexed load, deliberately — see [`Self::regions`].
-    pub fn region(&self, graphic: Graphic) -> Option<Region> {
-        self.regions[graphic.0 as usize]
+    pub fn region(&self, tile: LandTileId) -> Option<Region> {
+        self.regions[tile.0 as usize]
     }
 }
 
@@ -2829,13 +2832,13 @@ mod tests {
     #[test]
     fn a_large_texture_gets_a_whole_block_and_a_small_one_stays_out_of_it() {
         let atlas = TexmapAtlas::pack([
-            (Graphic(1), texture(64, Color16(0x1F))),
-            (Graphic(2), texture(128, Color16(0x7C00))),
+            (LandTileId(1), texture(64, Color16(0x1F))),
+            (LandTileId(2), texture(128, Color16(0x7C00))),
         ])
         .expect("two textures fit");
 
-        let big = atlas.region(Graphic(2)).expect("packed");
-        let small = atlas.region(Graphic(1)).expect("packed");
+        let big = atlas.region(LandTileId(2)).expect("packed");
+        let small = atlas.region(LandTileId(1)).expect("packed");
         let atlas_side = ATLAS_SIDE as f32;
         // A texture of `n` pixels spans the centres of `n` texels, which is
         // `n - 1` apart: the half-texel inset, stated in pixels.
@@ -2864,11 +2867,11 @@ mod tests {
     #[test]
     fn a_regions_corners_sample_the_first_and_last_texel_of_its_own_texture() {
         let atlas = TexmapAtlas::pack([
-            (Graphic(1), texture(64, Color16(1))),
-            (Graphic(2), texture(64, Color16(2))),
+            (LandTileId(1), texture(64, Color16(1))),
+            (LandTileId(2), texture(64, Color16(2))),
         ])
         .expect("two textures fit");
-        let region = atlas.region(Graphic(1)).expect("packed");
+        let region = atlas.region(LandTileId(1)).expect("packed");
         let side = ATLAS_SIDE as f32;
 
         // What the shader computes at the quad's two extreme corners, in texels.
@@ -2886,17 +2889,17 @@ mod tests {
     fn packed_textures_never_overlap_and_never_leave_the_atlas() {
         // Enough of both sizes to fill several rows, and interleaved so the
         // allocator cannot be right by accident of ordering.
-        let images: Vec<(Graphic, Image)> = (0..200u16)
+        let images: Vec<(LandTileId, Image)> = (0..200u16)
             .map(|i| {
                 let side = if i % 3 == 0 { 128 } else { 64 };
-                (Graphic(i), texture(side, Color16(i | 1)))
+                (LandTileId(i), texture(side, Color16(i | 1)))
             })
             .collect();
         let atlas = TexmapAtlas::pack(images.clone()).expect("200 textures fit in 1024 cells");
 
         let mut claimed = vec![None; TEXMAP_CELLS];
-        for (graphic, image) in images {
-            let region = atlas.region(graphic).expect("packed");
+        for (tile, image) in images {
+            let region = atlas.region(tile).expect("packed");
             let side = ATLAS_SIDE as f32;
             // Back out the half-texel inset: the texel the region starts on is
             // the pixel the texture was packed at.
@@ -2910,8 +2913,8 @@ mod tests {
                 for cx in 0..u32::from(image.width()) / TEXMAP_CELL {
                     let cell =
                         ((y / TEXMAP_CELL + cy) * TEXMAP_CELLS_PER_ROW + x / TEXMAP_CELL + cx) as usize;
-                    assert_eq!(claimed[cell], None, "{graphic:?} overlaps {:?}", claimed[cell]);
-                    claimed[cell] = Some(graphic);
+                    assert_eq!(claimed[cell], None, "{tile:?} overlaps {:?}", claimed[cell]);
+                    claimed[cell] = Some(tile);
                 }
             }
         }
@@ -3162,8 +3165,8 @@ mod tests {
     /// terrain and is the wrong terrain.
     #[test]
     fn an_atlas_that_cannot_hold_them_all_says_so() {
-        let images: Vec<(Graphic, Image)> = (0..TEXMAP_CELLS as u16 + 1)
-            .map(|i| (Graphic(i), texture(64, Color16(1))))
+        let images: Vec<(LandTileId, Image)> = (0..TEXMAP_CELLS as u16 + 1)
+            .map(|i| (LandTileId(i), texture(64, Color16(1))))
             .collect();
         assert!(matches!(TexmapAtlas::pack(images), Err(AtlasError::Full { .. })));
     }
@@ -3600,15 +3603,15 @@ mod growth_tests {
     /// which reads as a seasonal variant rather than as a bug.
     #[test]
     fn a_land_atlas_grown_in_two_steps_is_the_one_built_in_one() {
-        let all: Vec<(Graphic, Image)> = (0..8u16).map(|i| (Graphic(i), land(i * 37 + 1))).collect();
+        let all: Vec<(LandTileId, Image)> = (0..8u16).map(|i| (LandTileId(i), land(i * 37 + 1))).collect();
         let whole = LandAtlas::pack(all.clone()).expect("eight tiles fit");
 
         let mut grown = LandAtlas::pack(all[..3].to_vec()).expect("three tiles fit");
         grown.pack_more(all[3..].to_vec()).expect("five more fit");
 
         assert_eq!(grown.len(), whole.len());
-        for (graphic, _) in &all {
-            assert_eq!(grown.region(*graphic), whole.region(*graphic), "{graphic:?}");
+        for (tile, _) in &all {
+            assert_eq!(grown.region(*tile), whole.region(*tile), "{tile:?}");
         }
         assert_eq!(
             grown.pixels(),
@@ -3623,14 +3626,14 @@ mod growth_tests {
     /// re-asks rather than at the rate it discovers.
     #[test]
     fn offering_a_graphic_twice_packs_it_once() {
-        let mut atlas = LandAtlas::pack([(Graphic(7), land(1))]).expect("one tile fits");
-        let before = atlas.region(Graphic(7));
+        let mut atlas = LandAtlas::pack([(LandTileId(7), land(1))]).expect("one tile fits");
+        let before = atlas.region(LandTileId(7));
         atlas
-            .pack_more([(Graphic(7), land(2)), (Graphic(8), land(3))])
+            .pack_more([(LandTileId(7), land(2)), (LandTileId(8), land(3))])
             .expect("one new tile fits");
 
         assert_eq!(atlas.len(), 2, "the repeat took a slot");
-        assert_eq!(atlas.region(Graphic(7)), before, "the repeat moved it");
+        assert_eq!(atlas.region(LandTileId(7)), before, "the repeat moved it");
     }
 
     /// Only the rows that were written come back, and they are the rows the
@@ -3644,8 +3647,8 @@ mod growth_tests {
     #[test]
     fn the_dirty_band_covers_exactly_the_rows_written() {
         // A row of the land grid is 44 tall and holds `SLOTS_PER_ROW` tiles.
-        let first: Vec<(Graphic, Image)> = (0..SLOTS_PER_ROW as u16)
-            .map(|i| (Graphic(i), land(i + 1)))
+        let first: Vec<(LandTileId, Image)> = (0..SLOTS_PER_ROW as u16)
+            .map(|i| (LandTileId(i), land(i + 1)))
             .collect();
         let mut atlas = LandAtlas::pack(first).expect("one full row fits");
         assert_eq!(
@@ -3656,7 +3659,7 @@ mod growth_tests {
 
         // The next graphic starts the second row.
         atlas
-            .pack_more([(Graphic(1000), land(9))])
+            .pack_more([(LandTileId(1000), land(9))])
             .expect("one more tile fits");
         let tile = LAND_TILE_SIZE as u32;
         let rows = atlas.take_dirty().expect("the second atlas row changed");

@@ -19,7 +19,7 @@ use openshard_tiles::TileData;
 pub fn stand_surfaces(map: &WorldMap, tiledata: &TileData, x: u16, y: u16, swimming: bool) -> Vec<i32> {
     let mut surfaces = Vec::new();
     if let Some(land) = map.land(x, y) {
-        let flags = tiledata.land(land.tile.0).flags;
+        let flags = tiledata.land(land.tile).flags;
         if (flags.is_water() && swimming) || (!flags.is_water() && !flags.is_blocking()) {
             surfaces.push(i32::from(
                 map.average_land_z(x, y).expect("land was just present"),

@@ -591,6 +591,50 @@ fn a_completed_quest_reaches_the_pack() {
     assert_eq!(events[0].key, QuestKey::new("rat_cull"));
 }
 
+#[test]
+fn a_rewarded_quest_without_a_backpack_stays_active_and_charges_nothing() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let mut quest = rat_cull();
+    quest.objectives[0].count = 1;
+    register(&mut world, vec![quest]);
+    let giver = place_giver(&mut world, &["rat_cull"], now);
+
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(giver.raw())),
+    });
+    world.tick(now);
+    press(&mut world, connection, QUEST_GUMP, 4);
+    world.tick(now);
+    let player = world.state.players[&connection];
+    slay_rat(&mut world, player, now);
+    world.tick(now);
+
+    let player_serial = world.state.registry.serial_of(player).expect("the player serial");
+    let backpack = openshard_items::backpack_of(&world.state, player_serial).expect("the starting backpack");
+    assert!(openshard_items::consume(&mut world.state, backpack, 0));
+    assert!(openshard_items::backpack_of(&world.state, player_serial).is_none());
+    let mut completed: Cursor<openshard_quests::QuestCompleted> = world.bus().cursor();
+
+    assert!(
+        !openshard_quests::complete(&mut world.state, player, &QuestKey::new("rat_cull")),
+        "a mobile serial was accepted as the reward container"
+    );
+    let log = log_of(&world, connection);
+    assert_eq!(log.active.len(), 1, "the refused quest left the active log");
+    assert!(
+        log.done.is_empty(),
+        "the refused quest was remembered as completed"
+    );
+    assert_eq!(
+        world.bus().read(&mut completed).count(),
+        0,
+        "the refused turn-in emitted completion"
+    );
+}
+
 /// Put a stack of silk in a container.
 fn put_silk(world: &mut World, container: Serial, amount: u16) -> EntityId {
     let (item, _) = world.state.registry.spawn_with_serial(SerialKind::Item).unwrap();

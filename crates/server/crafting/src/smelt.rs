@@ -125,12 +125,22 @@ pub fn smelt(state: &mut WorldState, smelter: EntityId, ore: EntityId) -> bool {
     openshard_items::consume(state, serial, taking);
     let ingots = u32::from(taking) * INGOTS_PER_ORE;
     let made = openshard_items::give(state, pack, INGOT_GRAPHIC, graphic.hue, ingots);
-    if let Some(made) = made {
+    if let Some(made) = made.last {
         // Ingots stack, and `give` only marks what it *creates* — a merge onto an
         // existing pile leaves the marker where it was.
         state.registry.insert(made, Stackable);
     }
-    state.localized_message(smelter, SMELTED, "");
+    if made.is_complete() {
+        state.localized_message(smelter, SMELTED, "");
+    } else {
+        state.system_message(
+            smelter,
+            &format!(
+                "Only {} of {ingots} ingots could be placed in your pack.",
+                made.given
+            ),
+        );
+    }
     true
 }
 

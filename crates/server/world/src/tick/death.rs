@@ -4,6 +4,7 @@ use openshard_protocol::wire::{Graphic, Hue, Layer};
 use openshard_state::components::{
     CORPSE_GRAPHIC, CORPSE_GUMP, Corpse, DEATH_SHROUD_GRAPHIC, Decays, creature_name, ghost_body,
 };
+use tracing::warn;
 
 /// How long a corpse lies before it rots away with its loot — ServUO's default
 /// seven minutes, in ticks.
@@ -562,9 +563,21 @@ impl World {
             return;
         }
         if stackable {
-            let _ = items::give(&mut self.state, container, graphic, hue, u32::from(amount));
+            let outcome = items::give(&mut self.state, container, graphic, hue, u32::from(amount));
+            if !outcome.is_complete() {
+                warn!(
+                    ?container,
+                    ?graphic,
+                    requested = outcome.requested,
+                    given = outcome.given,
+                    missing = outcome.missing(),
+                    "corpse loot is partial"
+                );
+            }
         } else {
-            let _ = items::place_one(&mut self.state, container, graphic, hue, amount);
+            if items::place_one(&mut self.state, container, graphic, hue, amount).is_none() {
+                warn!(?container, ?graphic, amount, "corpse loot could not be placed");
+            }
         }
     }
 
@@ -755,7 +768,8 @@ impl World {
                 items::GOLD_GRAPHIC,
                 Hue(0),
                 u32::from(gold),
-            );
+            )
+            .last;
             let weapon = items::place_one(&mut self.state, corpse, weapon, Hue(0), 1);
             let bandage = items::place_one(
                 &mut self.state,
@@ -787,13 +801,22 @@ impl World {
 
         let gold = self.corpse_gold(max_hits);
         if gold > 0 {
-            let _ = items::give(
+            let outcome = items::give(
                 &mut self.state,
                 corpse,
                 items::GOLD_GRAPHIC,
                 Hue(0),
                 u32::from(gold),
             );
+            if !outcome.is_complete() {
+                warn!(
+                    ?corpse,
+                    requested = outcome.requested,
+                    given = outcome.given,
+                    missing = outcome.missing(),
+                    "creature gold loot is partial"
+                );
+            }
         }
     }
 

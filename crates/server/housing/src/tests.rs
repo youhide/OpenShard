@@ -28,6 +28,7 @@ use openshard_tiles::{TileData, TileFlags};
 use openshard_uofiles::multi::{Component, Multi, Multis};
 
 use super::*;
+use openshard_state::components::HouseDesign;
 use openshard_state::connection::Connection;
 use openshard_state::{Client, FacetState};
 
@@ -1308,7 +1309,7 @@ fn a_classic_houses_door_comes_down_with_it() {
         .next()
         .expect("the cottage's door");
 
-    decay::demolish(&mut state, house);
+    decay::demolish(&mut state, house).expect("a readable classic house");
 
     assert!(
         state.registry.serial_of(door).is_none(),
@@ -1804,6 +1805,77 @@ fn the_sweep_ages_a_house_and_a_refresh_undoes_it() {
     );
 }
 
+/// A footprint refusal is the first answer: no packing or fixture teardown has
+/// started, and the old obstruction still has a live house behind it.
+#[test]
+fn demolition_refuses_an_unreadable_shape_before_touching_the_house() {
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
+    let house_serial = state.registry.serial_of(house).expect("the house serial");
+    let door = state
+        .registry
+        .query::<openshard_state::components::HouseDoor>()
+        .find(|(_, door)| door.house == house_serial)
+        .map(|(entity, _)| entity)
+        .expect("the cottage door");
+    let sign = state
+        .registry
+        .query::<openshard_state::components::HouseSign>()
+        .find(|(_, sign)| sign.house == house_serial)
+        .map(|(entity, _)| entity)
+        .expect("the cottage sign");
+    let pinned = an_item(&mut state, at, false);
+    let owner_entity = state.registry.entity_of(owner).expect("the owner");
+    storage::lock_down(&mut state, owner_entity, house, pinned, None).expect("the owner may pin it");
+
+    // The persisted design is damaged: its one wall lands west of the facet.
+    // The obstruction index still holds the classic walls established before
+    // that bad row was restored, which is exactly what must not be orphaned.
+    state.registry.insert(
+        house,
+        HouseDesign {
+            components: vec![component(WALL, -20, 0, 0, true)],
+            revision: 7,
+        },
+    );
+
+    assert_eq!(
+        decay::demolish(&mut state, house),
+        Err(decay::DemolishError::CurrentShapeUnreadable(Refusal::OffTheMap))
+    );
+    assert_eq!(
+        state.registry.serial_of(house),
+        Some(house_serial),
+        "the house was deleted"
+    );
+    assert!(state.registry.contains(door), "the fixture door was deleted");
+    assert!(state.registry.contains(sign), "the sign was deleted");
+    assert!(
+        state
+            .registry
+            .has::<openshard_state::components::LockedDown>(pinned),
+        "the item was unpinned"
+    );
+    assert_eq!(
+        state.registry.get::<Position>(pinned).map(|position| position.0),
+        Some(at),
+        "the item was packed before the refusal"
+    );
+    assert!(
+        state.facet_state(Facet(0)).obstructions().holds_anything(9, 9),
+        "the indexed wall was removed"
+    );
+    assert!(
+        state
+            .registry
+            .query::<Drawn>()
+            .all(|(_, drawn)| drawn.id != Graphic(decay::CRATE_GRAPHIC)),
+        "a moving crate was created before the refusal"
+    );
+}
+
 /// The whole of H5 in one house: it comes down, the walls go with it, and what
 /// it was holding is in the crate rather than gone.
 #[test]
@@ -1856,7 +1928,7 @@ fn a_collapsed_house_leaves_a_crate_and_no_walls() {
         }
     }
     assert_eq!(down, vec![house], "the period ran out and nothing collapsed");
-    demolish(&mut state, house);
+    demolish(&mut state, house).expect("a readable collapsed house");
 
     assert!(
         !state
@@ -1929,7 +2001,7 @@ fn an_empty_house_leaves_no_crate() {
     let at = Point::new(10, 10, 0);
     let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
 
-    assert_eq!(crate::decay::demolish(&mut state, house), None);
+    assert_eq!(crate::decay::demolish(&mut state, house), Ok(None));
     assert!(
         state
             .registry
@@ -2246,6 +2318,46 @@ fn a_redesigned_house_takes_its_old_walls_out_and_puts_its_new_ones_in() {
     assert!(
         obstructions.holds_anything(13, 14),
         "and it is still *there*: the new design's floor is somewhere to stand"
+    );
+}
+
+/// A broken saved design is shard damage, not an empty old footprint. Treating
+/// it as the latter commits the replacement while leaving the walls that were
+/// indexed before the damage as invisible collision.
+#[test]
+fn a_redesign_refuses_an_unreadable_current_shape_without_committing() {
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
+    let broken = vec![component(WALL, -20, 0, 0, true)];
+    state.registry.insert(
+        house,
+        HouseDesign {
+            components: broken.clone(),
+            revision: 7,
+        },
+    );
+
+    assert_eq!(
+        design::redesign(&mut state, actor, house, a_lean_to()),
+        Err(design::DesignRefusal::CurrentShapeUnreadable),
+    );
+    assert_eq!(
+        design::revision(&state, house),
+        7,
+        "the failed commit bumped the revision"
+    );
+    assert_eq!(
+        design::shape_of_house(&state, house),
+        Some(broken),
+        "the failed commit replaced the damaged shape"
+    );
+    let obstructions = state.facet_state(Facet(0)).obstructions();
+    assert!(obstructions.holds_anything(9, 9), "the old indexed wall vanished");
+    assert!(
+        !obstructions.holds_anything(13, 13),
+        "the rejected replacement was added to the obstruction index"
     );
 }
 

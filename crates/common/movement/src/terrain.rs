@@ -422,7 +422,7 @@ impl<'a> MapTerrain<'a> {
         let Some(land) = self.map().land(x, y) else {
             return false;
         };
-        let flags = self.tiles().land(land.tile.0).flags;
+        let flags = self.tiles().land(land.tile).flags;
         if flags.is_water() {
             self.swimming
         } else {
@@ -562,7 +562,7 @@ impl<'a> MapTerrain<'a> {
         let land_flags = self
             .map()
             .land(at.x, at.y)
-            .map(|cell| self.tiles().land(cell.tile.0).flags);
+            .map(|cell| self.tiles().land(cell.tile).flags);
         let land_impassable = land_flags.is_some_and(|f| f.is_blocking());
         // Impassable land (water, a mountain) in the object's body blocks it.
         if land_impassable && avg_z > z && z + height > low_z {
@@ -602,7 +602,7 @@ impl MapTerrain<'_> {
     pub fn land_is_water(&self, tile: Tile) -> bool {
         self.map()
             .land(tile.x, tile.y)
-            .is_some_and(|land| self.tiles().land(land.tile.0).flags.is_water())
+            .is_some_and(|land| self.tiles().land(land.tile).flags.is_water())
     }
 
     pub fn can_step(&self, from: Point, to: Point) -> Option<Point> {
@@ -1343,7 +1343,7 @@ mod tests {
         for y in (1600..1900u16).step_by(7) {
             for x in (1350..1600u16).step_by(7) {
                 let cell = terrain.map().land(x, y).unwrap();
-                let flags = terrain.tiles().land(cell.tile.0).flags;
+                let flags = terrain.tiles().land(cell.tile).flags;
                 if flags.is_blocking() || flags.is_water() {
                     continue;
                 }
@@ -1420,7 +1420,7 @@ mod tests {
         for x in 60..160u16 {
             for y in 60..160u16 {
                 let cell = terrain.map().land(x, y).unwrap();
-                if terrain.tiles().land(cell.tile.0).flags.is_water() {
+                if terrain.tiles().land(cell.tile).flags.is_water() {
                     wet += 1;
                     assert_eq!(
                         terrain.surface_at(x, y, i32::from(cell.z)),
@@ -1448,7 +1448,7 @@ mod tests {
         for x in 60..160u16 {
             for y in 60..160u16 {
                 let cell = terrain.map().land(x, y).unwrap();
-                if !terrain.tiles().land(cell.tile.0).flags.is_water() {
+                if !terrain.tiles().land(cell.tile).flags.is_water() {
                     continue;
                 }
                 let z = i32::from(cell.z);

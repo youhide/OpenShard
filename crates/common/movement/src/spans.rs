@@ -41,7 +41,7 @@ use openshard_map::chunk::{BLOCKS_PER_CHUNK, ChunkCoord};
 use openshard_map::grid::{BlockCoord, BlockExtent, BlockIndex};
 use openshard_map::map::{BLOCK_SIZE, CELLS_PER_BLOCK, StaticItem, WorldMap};
 use openshard_map::overlay::Cover;
-use openshard_tiles::{LAND_TILE_COUNT, TileData};
+use openshard_tiles::{LAND_TILE_COUNT, LandTileId, TileData};
 
 use crate::terrain::{MAX_STEP_UP, PLAYER_HEIGHT, static_top};
 
@@ -762,7 +762,7 @@ impl Iterator for Surfaces<'_> {
 fn land_kinds(tiles: &TileData) -> Vec<LandKind> {
     (0..LAND_TILE_COUNT)
         .map(|id| {
-            let flags = tiles.land(id as u16).flags;
+            let flags = tiles.land(LandTileId(id as u16)).flags;
             match (flags.is_water(), flags.is_blocking()) {
                 (true, _) => LandKind::Water,
                 (false, true) => LandKind::Blocked,

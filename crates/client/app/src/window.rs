@@ -38,6 +38,7 @@ use openshard_client_render::solids::SolidsRenderer;
 use openshard_client_render::{ground, light, statics};
 use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
+use openshard_tiles::LandTileId;
 use openshard_tiles::TileData;
 use openshard_uofiles::anim::Anim;
 use openshard_uofiles::art::Art;
@@ -135,13 +136,12 @@ pub(crate) struct AtlasOverflow {
 /// What a frame wants packed, gathered before anything is read from disk.
 ///
 /// Three sets rather than three arguments, because they travel together
-/// everywhere and two of them are keyed by numbers that look alike: a land
-/// graphic and a static graphic are both a `Graphic` and are different index
-/// spaces, which is a mistake a positional argument list would accept in
-/// silence.
+/// everywhere and two of them are keyed by numbers that look alike: a land tile
+/// id and a static graphic are different index spaces, which is a mistake a
+/// positional argument list would accept in silence.
 pub(crate) struct Wanted {
     /// Land graphics, which feed the land atlas and the texture atlas both.
-    pub(crate) land: BTreeSet<Graphic>,
+    pub(crate) land: BTreeSet<LandTileId>,
     /// Static graphics: what the map has standing on the ground, and what the
     /// server has dropped on top of it.
     pub(crate) statics: BTreeSet<Graphic>,

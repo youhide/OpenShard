@@ -1,9 +1,9 @@
 //! `art`: the ground tiles and the sprites standing on them.
 //!
-//! One container holds both, in one index space: `0x0000..0x4000` are land
-//! tiles and everything from `0x4000` up is a static. They are stored in two
-//! *different* formats, so which half of the index a [`Graphic`] falls in
-//! decides how its bytes are read — see [`Art::land`] and [`Art::static_art`].
+//! One container holds both: `0x0000..0x4000` are [`LandTileId`] entries and
+//! everything from `0x4000` up is static art addressed by [`Graphic`]. They are
+//! stored in two *different* formats and index spaces — see [`Art::land`] and
+//! [`Art::static_art`].
 //!
 //! # Land is a fixed diamond, and it is padded
 //!
@@ -42,6 +42,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use openshard_protocol::wire::Graphic;
+use openshard_tiles::LandTileId;
 
 use crate::color::Color16;
 use crate::image::Image;
@@ -71,6 +72,13 @@ pub enum ArtError {
         /// What went wrong.
         detail: String,
     },
+    /// A land entry is there but is not the shape its format requires.
+    MalformedLand {
+        /// Which land tile.
+        tile: LandTileId,
+        /// What went wrong.
+        detail: String,
+    },
 }
 
 impl fmt::Display for ArtError {
@@ -80,6 +88,9 @@ impl fmt::Display for ArtError {
             Self::Malformed { graphic, detail } => {
                 write!(f, "art for graphic {:#06X} is malformed: {detail}", graphic.0)
             }
+            Self::MalformedLand { tile, detail } => {
+                write!(f, "land art for {tile:?} is malformed: {detail}")
+            }
         }
     }
 }
@@ -88,7 +99,7 @@ impl std::error::Error for ArtError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Container(source) => Some(source),
-            Self::Malformed { .. } => None,
+            Self::Malformed { .. } | Self::MalformedLand { .. } => None,
         }
     }
 }
@@ -172,12 +183,12 @@ impl Art {
     ///
     /// The result is always [`LAND_TILE_SIZE`] square, with the corners outside
     /// the diamond transparent.
-    pub fn land(&self, graphic: Graphic) -> Result<Option<Image>, ArtError> {
-        let Some(raw) = self.container.entry(&Self::entry_name(graphic.0 as usize))? else {
+    pub fn land(&self, tile: LandTileId) -> Result<Option<Image>, ArtError> {
+        let Some(raw) = self.container.entry(&Self::entry_name(tile.0 as usize))? else {
             return Ok(None);
         };
-        let raw = raw.get(..LAND_BYTES).ok_or_else(|| ArtError::Malformed {
-            graphic,
+        let raw = raw.get(..LAND_BYTES).ok_or_else(|| ArtError::MalformedLand {
+            tile,
             detail: format!(
                 "a land tile is {LAND_BYTES} bytes and this entry is {}",
                 raw.len()

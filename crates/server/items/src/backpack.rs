@@ -65,11 +65,10 @@ pub fn give_to_backpack(
     // Currency and ammunition still belong on an existing pile when their
     // source omitted the flag (for example, a legacy one-arrow save).
     if stackable || intrinsically_stackable(graphic) {
-        crate::give(state, backpack, graphic, hue, u32::from(amount));
+        crate::give(state, backpack, graphic, hue, u32::from(amount)).is_complete()
     } else {
-        crate::place_one(state, backpack, graphic, hue, amount);
+        crate::place_one(state, backpack, graphic, hue, amount).is_some()
     }
-    true
 }
 
 /// Create one or more empty containers in a mobile's backpack.

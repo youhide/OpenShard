@@ -521,37 +521,59 @@ fn drop_onto_runebook(state: &mut WorldState, connection: ConnectionId, held: He
 
     // A Recall scroll recharges it — ServUO's `Runebook.OnDragDrop`.
     if graphic.and_then(scroll_spell) == Some(RECALL_SPELL) {
-        let Some(mut owned) = state.registry.get::<Runebook>(book).cloned() else {
-            bounce(state, connection, held, DragCancelReason::Other);
-            return;
-        };
-        if owned.charges >= owned.max_charges {
-            state.system_message(player, "That book is fully charged.");
-            bounce(state, connection, held, DragCancelReason::Other);
-            return;
-        }
-        // How many of the pile the book can take. The surplus stays on the
-        // cursor rather than vanishing: clamping here would eat the difference,
-        // which is the shape of every quiet item-loss bug.
-        let room = u32::from(owned.max_charges - owned.charges);
-        let held_amount = u32::from(state.registry.get::<Amount>(held.entity).map_or(1, |a| a.0));
-        let taken = room.min(held_amount);
-        owned.charges += taken as u8;
-        state.registry.insert(book, owned);
-        if taken >= held_amount {
-            despawn_item(state, held.entity);
-        } else {
-            // Put the remainder back where it came from, still a pile.
-            let left = u16::try_from(held_amount - taken).unwrap_or(u16::MAX);
-            state.registry.insert(held.entity, Amount(left));
-            bounce(state, connection, held, DragCancelReason::Other);
-            return;
-        }
-        state.system_message(player, "You recharge the book.");
-        tell_watchers_updated(state, book_serial, book);
+        recharge_runebook(state, connection, held, book, player, book_serial);
         return;
     }
 
+    bind_rune_into_runebook(state, connection, held, book, player, book_serial);
+}
+
+fn recharge_runebook(
+    state: &mut WorldState,
+    connection: ConnectionId,
+    held: HeldItem,
+    book: EntityId,
+    player: EntityId,
+    book_serial: Serial,
+) {
+    let Some(mut owned) = state.registry.get::<Runebook>(book).cloned() else {
+        bounce(state, connection, held, DragCancelReason::Other);
+        return;
+    };
+    if owned.charges >= owned.max_charges {
+        state.system_message(player, "That book is fully charged.");
+        bounce(state, connection, held, DragCancelReason::Other);
+        return;
+    }
+    // How many of the pile the book can take. The surplus stays on the cursor
+    // rather than vanishing: clamping here would eat the difference, which is
+    // the shape of every quiet item-loss bug.
+    let room = u32::from(owned.max_charges - owned.charges);
+    let held_amount = u32::from(state.registry.get::<Amount>(held.entity).map_or(1, |a| a.0));
+    let taken = room.min(held_amount);
+    owned.charges += taken as u8;
+    state.registry.insert(book, owned);
+    if taken >= held_amount {
+        despawn_item(state, held.entity);
+    } else {
+        // Put the remainder back where it came from, still a pile.
+        let left = u16::try_from(held_amount - taken).unwrap_or(u16::MAX);
+        state.registry.insert(held.entity, Amount(left));
+        bounce(state, connection, held, DragCancelReason::Other);
+        return;
+    }
+    state.system_message(player, "You recharge the book.");
+    tell_watchers_updated(state, book_serial, book);
+}
+
+fn bind_rune_into_runebook(
+    state: &mut WorldState,
+    connection: ConnectionId,
+    held: HeldItem,
+    book: EntityId,
+    player: EntityId,
+    book_serial: Serial,
+) {
     // A marked rune becomes an entry, and the rune itself is consumed — ServUO
     // deletes it, which is why the entry carries its own description rather than
     // pointing back at a rune that will not be there.

@@ -243,8 +243,15 @@ impl View {
     ];
 
     /// The next one round, which is what the key that cycles them does.
+    ///
+    /// # Panics
+    ///
+    /// Panics if [`ALL`](Self::ALL) omits this view.
     pub fn next(self) -> Self {
-        let at = Self::ALL.iter().position(|view| *view == self).unwrap_or(0);
+        let at = Self::ALL
+            .iter()
+            .position(|view| *view == self)
+            .expect("View::ALL must contain every view");
         Self::ALL[(at + 1) % Self::ALL.len()]
     }
 

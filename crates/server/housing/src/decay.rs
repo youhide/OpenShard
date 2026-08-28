@@ -156,11 +156,38 @@ pub fn age_and_collect(state: &mut WorldState) -> Vec<EntityId> {
     down
 }
 
+/// Why a house could not be taken down.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DemolishError {
+    /// The entity is not a complete standing house.
+    NotAHouse,
+    /// Its current walls cannot be derived safely. Taking the entity down would
+    /// leave whatever was indexed before as invisible collision.
+    CurrentShapeUnreadable(crate::Refusal),
+}
+
+impl DemolishError {
+    /// What to say to whoever asked for the demolition.
+    #[must_use]
+    pub const fn message(self) -> &'static str {
+        match self {
+            Self::NotAHouse => "That is not a standing house.",
+            Self::CurrentShapeUnreadable(_) => "That house's current walls could not be read.",
+        }
+    }
+}
+
 /// Take a house down, and return the crate its contents went into.
 ///
 /// The one call that destroys a house, whether the owner asked for it or the
-/// clock did. `None` if it was not a house, or if there was nothing to save and
-/// no crate was needed.
+/// clock did. `Ok(None)` if there was nothing to save and no crate was needed.
+///
+/// # Errors
+///
+/// [`DemolishError::NotAHouse`] if the entity is not a complete standing house,
+/// or [`DemolishError::CurrentShapeUnreadable`] if its walls cannot be derived
+/// safely. Either refusal happens before contents, doors, signs, or obstruction
+/// state are touched.
 ///
 /// # What comes out
 ///
@@ -177,11 +204,33 @@ pub fn age_and_collect(state: &mut WorldState) -> Vec<EntityId> {
 /// ground, in one container with the owner's name on nothing. A crate that
 /// rotted would be a shard that eats somebody's belongings on the day their
 /// house came down, which is the failure this whole phase exists to avoid.
-pub fn demolish(state: &mut WorldState, house: EntityId) -> Option<EntityId> {
-    let serial = state.registry.serial_of(house)?;
-    let &Position(at) = state.registry.get::<Position>(house)?;
+pub fn demolish(state: &mut WorldState, house: EntityId) -> Result<Option<EntityId>, DemolishError> {
+    let serial = state.registry.serial_of(house).ok_or(DemolishError::NotAHouse)?;
+    let &Position(at) = state
+        .registry
+        .get::<Position>(house)
+        .ok_or(DemolishError::NotAHouse)?;
     let facet = state.facet_of(house);
-    let multi = state.registry.get::<House>(house)?.multi;
+    let multi = state
+        .registry
+        .get::<House>(house)
+        .ok_or(DemolishError::NotAHouse)?
+        .multi;
+
+    // Preflight before even collecting the things to pack: every mutation below
+    // assumes these are the walls it can later remove. A damaged saved design
+    // used to fall back to an empty footprint at the end, after contents, doors,
+    // and signs had already moved, then delete the house and leave its old
+    // obstruction behind forever.
+    let shape = crate::design::shape_of_house(state, house);
+    let footprint = match crate::footprint_of(state, at, multi, shape.as_deref()) {
+        Ok(footprint) => footprint,
+        // A classic house restored without client files was never put into this
+        // run's obstruction index. Its absent multi therefore means there are no
+        // walls to remove, not that a known wall must be guessed at.
+        Err(crate::Refusal::NoSuchMulti) if shape.is_none() => Vec::new(),
+        Err(reason) => return Err(DemolishError::CurrentShapeUnreadable(reason)),
+    };
 
     // Everything the house was keeping, and everything inside the secures. Read
     // before anything is unpinned, because the pin is what identifies it.
@@ -260,11 +309,9 @@ pub fn demolish(state: &mut WorldState, house: EntityId) -> Option<EntityId> {
     // The shape it actually has: a designed house's walls are on the entity, and
     // unblocking the foundation's instead would leave every tile the two do not
     // share blocked by something that is no longer there.
-    let shape = crate::design::shape_of_house(state, house);
-    let footprint = crate::footprint_of(state, at, multi, shape.as_deref()).unwrap_or_default();
     crate::unblock(state, house, facet, &footprint);
     take_off_the_ground(state, house);
-    crate_entity
+    Ok(crate_entity)
 }
 
 /// Put everything into one crate on the house's tile.

@@ -1006,9 +1006,6 @@ pub(crate) fn encode_world_passes(
                 window
                     .composites
                     .selected_or_more_detailed(block, composite_lod, composite_revision)?;
-            if !texture.has_deferred() {
-                return None;
-            }
             debug_assert_eq!(texture.ground().block(), block);
             let rect = texture.rect_in(camera);
             debug_assert_eq!(

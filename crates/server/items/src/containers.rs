@@ -451,11 +451,65 @@ pub fn spawn_contained_leftover(
     Some(leftover)
 }
 
+/// What [`give`] managed to put in a container.
+///
+/// The count matters: running out of item serials can happen after existing
+/// piles were filled or one new pile was made, so an `Option` of the last pile
+/// cannot distinguish a complete payout from a partial one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[must_use = "a payout can be partial when the item serial pool is exhausted"]
+pub struct GiveOutcome {
+    /// What the caller asked to put in the container.
+    pub requested: u32,
+    /// What was actually put in the container.
+    pub given: u32,
+    /// The last existing or newly-created pile touched, if any.
+    pub last: Option<EntityId>,
+}
+
+impl GiveOutcome {
+    /// Whether the whole requested amount arrived.
+    #[must_use]
+    pub const fn is_complete(self) -> bool {
+        self.given == self.requested
+    }
+
+    /// How much could not be put in the container.
+    #[must_use]
+    pub const fn missing(self) -> u32 {
+        self.requested.saturating_sub(self.given)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct GiveProgress {
+    requested: u32,
+    left: u32,
+    last: Option<EntityId>,
+}
+
+impl GiveProgress {
+    const fn new(requested: u32) -> Self {
+        Self {
+            requested,
+            left: requested,
+            last: None,
+        }
+    }
+
+    const fn outcome(self) -> GiveOutcome {
+        GiveOutcome {
+            requested: self.requested,
+            given: self.requested - self.left,
+            last: self.last,
+        }
+    }
+}
+
 /// Put `amount` of an item into a container by decree — a vendor handing over
-/// goods, a sale paying out gold. Merges onto the existing stackable piles of the
-/// same art and hue, and starts as many new ones as the remainder needs; everyone
-/// with the container open sees each change. Returns the last pile touched, or
-/// `None` when the serial pool is dry.
+/// goods, a sale paying out gold. Merges onto the existing stackable piles of
+/// the same art and hue, and starts as many new ones as the remainder needs;
+/// everyone with the container open sees each change.
 ///
 /// `amount` is a `u32` because a payout is not bounded by what one pile holds: a
 /// large sale earns more gold than [`MAX_STACK`], and taking a `u16` here made
@@ -466,9 +520,9 @@ pub fn give(
     graphic: Graphic,
     hue: Hue,
     amount: u32,
-) -> Option<EntityId> {
+) -> GiveOutcome {
     if amount == 0 {
-        return None;
+        return GiveProgress::new(0).outcome();
     }
     // Two books are single items, never a stack: each carries contents of its
     // own, and two of them merged into one pile of two would share the learned
@@ -476,26 +530,58 @@ pub fn give(
     // elsewhere (a staff command); one off the shelf is blank until scrolls fill
     // it, and a runebook until runes do.
     if graphic == SPELLBOOK_GRAPHIC || graphic == RUNEBOOK_GRAPHIC {
-        let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
-            warn!("out of item serials; nothing given");
-            return None;
-        };
-        state.registry.insert(entity, Drawn { id: graphic, hue });
-        let contained = Contained {
-            container,
-            position: GumpPoint::new(60, 60),
-            grid: GridSlot(0),
-        };
-        establish_item_location(state, entity, ItemLocation::contained(contained))
-            .expect("a newly given book has one valid container parent");
-        if graphic == SPELLBOOK_GRAPHIC {
-            state.registry.insert(entity, Spellbook::default());
-        } else {
-            crate::apply_core_defaults(state, entity, graphic);
-        }
-        tell_watchers_updated(state, container, entity);
-        return Some(entity);
+        return give_book(state, container, graphic, hue, amount);
     }
+
+    let progress = fill_existing_piles(state, container, graphic, hue, amount);
+    spawn_remaining_piles(state, container, graphic, hue, progress)
+}
+
+fn give_book(
+    state: &mut WorldState,
+    container: Serial,
+    graphic: Graphic,
+    hue: Hue,
+    requested: u32,
+) -> GiveOutcome {
+    let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
+        warn!(
+            requested,
+            given = 0,
+            missing = requested,
+            ?container,
+            "out of item serials; payout failed"
+        );
+        return GiveProgress::new(requested).outcome();
+    };
+    state.registry.insert(entity, Drawn { id: graphic, hue });
+    let contained = Contained {
+        container,
+        position: GumpPoint::new(60, 60),
+        grid: GridSlot(0),
+    };
+    establish_item_location(state, entity, ItemLocation::contained(contained))
+        .expect("a newly given book has one valid container parent");
+    if graphic == SPELLBOOK_GRAPHIC {
+        state.registry.insert(entity, Spellbook::default());
+    } else {
+        crate::apply_core_defaults(state, entity, graphic);
+    }
+    tell_watchers_updated(state, container, entity);
+    GiveOutcome {
+        requested,
+        given: 1,
+        last: Some(entity),
+    }
+}
+
+fn fill_existing_piles(
+    state: &mut WorldState,
+    container: Serial,
+    graphic: Graphic,
+    hue: Hue,
+    requested: u32,
+) -> GiveProgress {
     // Every pile of the same art already in there, in registry order.
     let piles: Vec<EntityId> = contained_items(state, container)
         .filter(|(entity, _)| {
@@ -516,14 +602,13 @@ pub fn give(
     // the way a container ends up holding two gold piles after a large payout.
     // Clamping the sum instead would quietly destroy the difference, which is the
     // bug this exists to not have.
-    let mut left = amount;
-    let mut last = None;
+    let mut progress = GiveProgress::new(requested);
     for pile in piles {
-        if left == 0 {
+        if progress.left == 0 {
             break;
         }
         let room = u32::from(MAX_STACK.saturating_sub(amount_of(state, pile)));
-        let moved = left.min(room);
+        let moved = progress.left.min(room);
         if moved > 0 {
             let total = amount_of(state, pile) + moved as u16;
             state.registry.insert(pile, Amount(total));
@@ -531,17 +616,33 @@ pub fn give(
                 state.registry.insert(pile, Stackable);
             }
             tell_watchers_updated(state, container, pile);
-            last = Some(pile);
-            left -= moved;
+            progress.last = Some(pile);
+            progress.left -= moved;
         }
     }
+    progress
+}
 
+fn spawn_remaining_piles(
+    state: &mut WorldState,
+    container: Serial,
+    graphic: Graphic,
+    hue: Hue,
+    mut progress: GiveProgress,
+) -> GiveOutcome {
     // Whatever is still in hand starts new piles, one full one at a time.
-    while left > 0 {
-        let take = left.min(u32::from(MAX_STACK)) as u16;
+    while progress.left > 0 {
+        let take = progress.left.min(u32::from(MAX_STACK)) as u16;
         let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
-            warn!("out of item serials; the rest of the payout is lost");
-            return last;
+            let outcome = progress.outcome();
+            warn!(
+                requested = outcome.requested,
+                given = outcome.given,
+                missing = outcome.missing(),
+                ?container,
+                "out of item serials; payout is partial"
+            );
+            return outcome;
         };
         state.registry.insert(entity, Drawn { id: graphic, hue });
         let contained = Contained {
@@ -554,10 +655,10 @@ pub fn give(
         state.registry.insert(entity, Amount(take));
         state.registry.insert(entity, Stackable);
         tell_watchers_updated(state, container, entity);
-        left -= u32::from(take);
-        last = Some(entity);
+        progress.left -= u32::from(take);
+        progress.last = Some(entity);
     }
-    last
+    progress.outcome()
 }
 
 /// Take `amount` off a contained stack by decree — stock sold out of a
@@ -670,4 +771,61 @@ pub fn contained_record(state: &WorldState, entity: EntityId) -> Option<Containe
         grid,
         hue,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use openshard_protocol::serial::{ITEM_MAX, ITEM_MIN};
+
+    use super::*;
+
+    fn world() -> WorldState {
+        WorldState::new(
+            BTreeMap::new(),
+            Facet(0),
+            openshard_tiles::TileData::empty(),
+            Default::default(),
+            openshard_map::grid::Tile::new(0, 0),
+            1,
+        )
+    }
+
+    #[test]
+    fn give_reports_the_amount_that_landed_before_serial_exhaustion() {
+        let mut state = world();
+        let container_entity = state.registry.spawn();
+        let container = Serial::new(ITEM_MIN).expect("the first item serial");
+        state
+            .registry
+            .bind_serial(container_entity, container)
+            .expect("a fresh serial");
+        state
+            .registry
+            .insert(container_entity, Container { gump: Graphic(1) });
+
+        // Leave exactly ITEM_MAX available. The first pile consumes it and the
+        // one-unit remainder then reaches the exhausted-pool branch.
+        state
+            .registry
+            .reserve_serial(Serial::new(ITEM_MAX - 1).expect("the penultimate item serial"));
+        let outcome = give(
+            &mut state,
+            container,
+            GOLD_GRAPHIC,
+            Hue(0),
+            u32::from(MAX_STACK) + 1,
+        );
+
+        assert_eq!(outcome.requested, u32::from(MAX_STACK) + 1);
+        assert_eq!(outcome.given, u32::from(MAX_STACK));
+        assert_eq!(outcome.missing(), 1);
+        assert!(!outcome.is_complete());
+        assert!(outcome.last.is_some(), "the full first pile was still issued");
+        assert_eq!(
+            count_in_container(&state, container, GOLD_GRAPHIC),
+            u32::from(MAX_STACK)
+        );
+    }
 }

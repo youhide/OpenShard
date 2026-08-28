@@ -13,9 +13,7 @@
 //! asynchronously and a visible block can be drawn without rebuilding its
 //! constituent ground/static quads.
 
-use std::collections::BTreeMap;
-#[cfg(test)]
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
 use openshard_map::grid::BlockCoord;
@@ -583,7 +581,7 @@ pub struct CompositeTexture {
     depth_base: i32,
     texture: wgpu::Texture,
     view: wgpu::TextureView,
-    deferred: Option<DeferredTextures>,
+    deferred: DeferredTextures,
 }
 
 /// GPU planes for a completed deferred composite.  Keeping the owning textures
@@ -604,6 +602,10 @@ struct DeferredTextures {
 impl CompositeTexture {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, key: CompositeKey, pixels: CompositePixels) -> Self {
         let size = pixels.size();
+        let planes = pixels
+            .deferred()
+            .expect("only a completed deferred result can enter the GPU cache");
+        let depth_base = planes.depth_base();
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("map block composite"),
             size: wgpu::Extent3d {
@@ -638,14 +640,12 @@ impl CompositeTexture {
             },
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let deferred = pixels
-            .deferred()
-            .map(|planes| DeferredTextures::new(device, queue, size, planes));
+        let deferred = DeferredTextures::new(device, queue, size, planes);
         Self {
             key,
             ground: FlatGroundBlock::at(key.block, 0),
             size,
-            depth_base: pixels.deferred().map_or(0, DeferredPixels::depth_base),
+            depth_base,
             pixels: Some(pixels),
             texture,
             view,
@@ -694,7 +694,7 @@ impl CompositeTexture {
             depth_base,
             texture,
             view,
-            deferred: Some(DeferredTextures::capture(device, size)),
+            deferred: DeferredTextures::capture(device, size),
         }
     }
 
@@ -718,11 +718,6 @@ impl CompositeTexture {
         self.depth_base
     }
 
-    /// Whether this entry owns all planes required to replace map geometry.
-    pub fn has_deferred(&self) -> bool {
-        self.deferred.is_some()
-    }
-
     /// Texture size and source pixels retained for deterministic replacement.
     pub fn pixels(&self) -> Option<&CompositePixels> {
         self.pixels.as_ref()
@@ -735,24 +730,27 @@ impl CompositeTexture {
 
     fn deferred_views(
         &self,
-    ) -> Option<(
+    ) -> (
         &wgpu::TextureView,
         &wgpu::TextureView,
         &wgpu::TextureView,
         &wgpu::TextureView,
-    )> {
-        let planes = self.deferred.as_ref()?;
-        Some((
-            &planes.ids_view,
-            &planes.position_view,
-            &planes.normal_view,
-            &planes.depth_view,
-        ))
+    ) {
+        (
+            &self.deferred.ids_view,
+            &self.deferred.position_view,
+            &self.deferred.normal_view,
+            &self.deferred.depth_view,
+        )
     }
 
-    fn deferred_textures(&self) -> Option<(&wgpu::Texture, &wgpu::Texture, &wgpu::Texture, &wgpu::Texture)> {
-        let planes = self.deferred.as_ref()?;
-        Some((&planes._ids, &planes._position, &planes._normal, &planes._depth))
+    fn deferred_textures(&self) -> (&wgpu::Texture, &wgpu::Texture, &wgpu::Texture, &wgpu::Texture) {
+        (
+            &self.deferred._ids,
+            &self.deferred._position,
+            &self.deferred._normal,
+            &self.deferred._depth,
+        )
     }
 
     /// The deferred attachment textures, for an explicit diagnostic readback.
@@ -763,7 +761,7 @@ impl CompositeTexture {
     /// into a camera frame.
     pub fn deferred_textures_for_audit(
         &self,
-    ) -> Option<(&wgpu::Texture, &wgpu::Texture, &wgpu::Texture, &wgpu::Texture)> {
+    ) -> (&wgpu::Texture, &wgpu::Texture, &wgpu::Texture, &wgpu::Texture) {
         self.deferred_textures()
     }
 
@@ -774,8 +772,11 @@ impl CompositeTexture {
 
     /// GPU bytes retained by this composite.
     pub fn gpu_bytes(&self) -> u64 {
-        let rgba = self.size.rgba_bytes().unwrap_or(0) as u64;
-        rgba + self.deferred.as_ref().map_or(0, |_| rgba * 7)
+        let rgba = self
+            .size
+            .rgba_bytes()
+            .expect("a GPU composite has an addressable pixel size") as u64;
+        rgba * 8
     }
 }
 
@@ -1767,7 +1768,9 @@ struct DeferredBatch {
     capacity: u64,
     /// Bind groups retain their source textures. Retain only this call's
     /// visible blocks so an evicted composite image is not kept alive here.
-    bindings: Vec<(CompositeKey, wgpu::BindGroup)>,
+    /// The key index keeps frame-to-frame reuse and per-draw lookup logarithmic;
+    /// draw order continues to come from the caller's block slice.
+    bindings: BTreeMap<CompositeKey, wgpu::BindGroup>,
 }
 
 fn write_capture_uniform(
@@ -2319,7 +2322,7 @@ impl CompositeRenderer {
             }),
             instances: Self::deferred_instance_buffer(device, capacity),
             capacity,
-            bindings: Vec::new(),
+            bindings: BTreeMap::new(),
         }
     }
 
@@ -2479,10 +2482,6 @@ impl CompositeRenderer {
         blocks: &[CompositeQuad<'_>],
         depth_adjust: impl Fn(&CompositeQuad<'_>) -> f32,
     ) {
-        let blocks: Vec<_> = blocks
-            .iter()
-            .filter(|block| block.texture.deferred_views().is_some())
-            .collect();
         if blocks.is_empty() {
             return;
         }
@@ -2502,7 +2501,7 @@ impl CompositeRenderer {
         let batch = &self.deferred_batches[batch_index];
         queue.write_buffer(&batch.viewport, 0, &viewport);
         let mut instances = Vec::with_capacity(blocks.len() * 20);
-        for block in &blocks {
+        for block in blocks {
             for value in [block.rect.x, block.rect.y, block.rect.width, block.rect.height] {
                 instances.extend_from_slice(&value.to_le_bytes());
             }
@@ -2512,51 +2511,49 @@ impl CompositeRenderer {
         self.deferred_cpu.upload += upload_started.elapsed();
         let bindings_started = Instant::now();
         let batch = &mut self.deferred_batches[batch_index];
-        batch
-            .bindings
-            .retain(|(key, _)| blocks.iter().any(|block| block.texture.key() == *key));
+        let visible_keys: BTreeSet<_> = blocks.iter().map(|block| block.texture.key()).collect();
+        batch.bindings.retain(|key, _| visible_keys.contains(key));
         let mut bindings_created = 0;
         let mut bindings_reused = 0;
-        for block in &blocks {
-            if batch.bindings.iter().any(|(key, _)| *key == block.texture.key()) {
-                bindings_reused += 1;
-                continue;
+        for block in blocks {
+            let key = block.texture.key();
+            match batch.bindings.entry(key) {
+                std::collections::btree_map::Entry::Occupied(_) => bindings_reused += 1,
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    bindings_created += 1;
+                    let (ids, position, normal, depth) = block.texture.deferred_views();
+                    entry.insert(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("map block deferred composite"),
+                        layout: &self.deferred_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: batch.viewport.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(block.texture.view()),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::TextureView(ids),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::TextureView(position),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: wgpu::BindingResource::TextureView(normal),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 5,
+                                resource: wgpu::BindingResource::TextureView(depth),
+                            },
+                        ],
+                    }));
+                }
             }
-            bindings_created += 1;
-            let (ids, position, normal, depth) = block.texture.deferred_views().expect("filtered above");
-            batch.bindings.push((
-                block.texture.key(),
-                device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("map block deferred composite"),
-                    layout: &self.deferred_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: batch.viewport.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(block.texture.view()),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::TextureView(ids),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: wgpu::BindingResource::TextureView(position),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 4,
-                            resource: wgpu::BindingResource::TextureView(normal),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 5,
-                            resource: wgpu::BindingResource::TextureView(depth),
-                        },
-                    ],
-                }),
-            ));
         }
         let bindings_cost = bindings_started.elapsed();
         let pass_started = Instant::now();
@@ -2616,10 +2613,9 @@ impl CompositeRenderer {
         pass.set_vertex_buffer(0, self.quad.slice(..));
         pass.set_vertex_buffer(1, batch.instances.slice(..));
         for (index, block) in blocks.iter().enumerate() {
-            let (_, bind_group) = batch
+            let bind_group = batch
                 .bindings
-                .iter()
-                .find(|(key, _)| *key == block.texture.key())
+                .get(&block.texture.key())
                 .expect("every deferred block has a cached binding");
             pass.set_bind_group(0, bind_group, &[]);
             pass.draw(0..4, index as u32..index as u32 + 1);
@@ -2640,9 +2636,7 @@ impl CompositeRenderer {
         source: CaptureSource<'_>,
         captured: &CompositeTexture,
     ) {
-        let Some((ids, position, normal, _)) = captured.deferred_views() else {
-            return;
-        };
+        let (ids, position, normal, _) = captured.deferred_views();
         let size = captured.size;
         write_capture_uniform(
             queue,
@@ -2746,9 +2740,7 @@ impl CompositeRenderer {
         source: CaptureSource<'_>,
         captured: &CompositeTexture,
     ) {
-        let Some((_, _, _, depth)) = captured.deferred_textures() else {
-            return;
-        };
+        let (_, _, _, depth) = captured.deferred_textures();
         let size = captured.size;
         write_capture_uniform(
             queue,
@@ -3228,6 +3220,11 @@ mod tests {
             2,
             "each visible source has one reusable deferred binding"
         );
+        assert_eq!(
+            composite.deferred_binding_stats(),
+            (2, 0),
+            "growing the instance buffer rebuilds both bindings against the replacement batch"
+        );
         let mut trimmed = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         composite.begin_frame();
         composite.render_deferred_rebased(
@@ -3251,6 +3248,11 @@ mod tests {
             composite.deferred_batches[0].bindings.len(),
             1,
             "a block outside the next frame cannot retain an evictable texture"
+        );
+        assert_eq!(
+            composite.deferred_binding_stats(),
+            (0, 1),
+            "the retained visible binding is reused without rebuilding it"
         );
         let colors = read_attachment(&device, &queue, &restored);
         let pixel = |x, y| {
@@ -3541,27 +3543,10 @@ mod tests {
         let first = cache.get(key).unwrap();
         let (_, first_ids, first_position, first_normal, first_depth) = (
             read_attachment(&device, &queue, first.texture()),
-            read_attachment(
-                &device,
-                &queue,
-                first.deferred_textures().expect("captured planes").0,
-            ),
-            read_attachment_with_texel_bytes(
-                &device,
-                &queue,
-                first.deferred_textures().expect("captured planes").1,
-                16,
-            ),
-            read_attachment(
-                &device,
-                &queue,
-                first.deferred_textures().expect("captured planes").2,
-            ),
-            read_attachment(
-                &device,
-                &queue,
-                first.deferred_textures().expect("captured planes").3,
-            ),
+            read_attachment(&device, &queue, first.deferred_textures().0),
+            read_attachment_with_texel_bytes(&device, &queue, first.deferred_textures().1, 16),
+            read_attachment(&device, &queue, first.deferred_textures().2),
+            read_attachment(&device, &queue, first.deferred_textures().3),
         );
         let first_color = read_attachment(&device, &queue, first.texture());
         let overwritten: Vec<_> = (0..SIZE * SIZE).flat_map(|_| [0, 255, 0, 255]).collect();
@@ -3654,27 +3639,10 @@ mod tests {
         let first_after = cache.get(key).unwrap();
         let (_, after_ids, after_position, after_normal, after_depth) = (
             read_attachment(&device, &queue, first_after.texture()),
-            read_attachment(
-                &device,
-                &queue,
-                first_after.deferred_textures().expect("captured planes").0,
-            ),
-            read_attachment_with_texel_bytes(
-                &device,
-                &queue,
-                first_after.deferred_textures().expect("captured planes").1,
-                16,
-            ),
-            read_attachment(
-                &device,
-                &queue,
-                first_after.deferred_textures().expect("captured planes").2,
-            ),
-            read_attachment(
-                &device,
-                &queue,
-                first_after.deferred_textures().expect("captured planes").3,
-            ),
+            read_attachment(&device, &queue, first_after.deferred_textures().0),
+            read_attachment_with_texel_bytes(&device, &queue, first_after.deferred_textures().1, 16),
+            read_attachment(&device, &queue, first_after.deferred_textures().2),
+            read_attachment(&device, &queue, first_after.deferred_textures().3),
         );
         assert_eq!(
             read_attachment(&device, &queue, first_after.texture()),
@@ -3824,16 +3792,7 @@ mod tests {
             .is_some()
         );
         queue.submit([encoder.finish()]);
-        let ids = read_attachment(
-            &device,
-            &queue,
-            cache
-                .get(key)
-                .unwrap()
-                .deferred_textures()
-                .expect("captured planes")
-                .0,
-        );
+        let ids = read_attachment(&device, &queue, cache.get(key).unwrap().deferred_textures().0);
         assert!(ids.chunks_exact(4).all(|word| {
             crate::gbuffer::ids_kind(u32::from_le_bytes(word.try_into().unwrap()))
                 == Some(crate::place::Kind::Land)
@@ -4342,7 +4301,7 @@ mod tests {
         else {
             return;
         };
-        let limits = CompositeCacheLimits::new(32, 0).unwrap();
+        let limits = CompositeCacheLimits::new(256, 0).unwrap();
         let mut cache = CompositeCache::with_limits(limits);
         let size = CompositeSize::new(2, 2).unwrap();
         let key = |x| CompositeKey {
@@ -4351,12 +4310,13 @@ mod tests {
             revision: ImmutableRevision(0),
         };
         for x in 0..3 {
-            cache.insert(
-                &device,
-                &queue,
-                key(x),
-                CompositePixels::new(size, vec![x as u8; 16]).unwrap(),
-            );
+            let deferred =
+                DeferredPixels::new(size, vec![0; 4], vec![0.0; 16], vec![0; 4], vec![0.0; 4], 0).unwrap();
+            let pixels = CompositePixels::new(size, vec![x as u8; 16])
+                .unwrap()
+                .with_deferred(deferred)
+                .unwrap();
+            cache.insert(&device, &queue, key(x), pixels);
         }
         // Make block zero newer than block one.  Block two is visible and so
         // protected even though it is the oldest entry after these insertions.
@@ -4369,7 +4329,7 @@ mod tests {
             "the oldest non-visible entry is the LRU tail"
         );
         assert!(cache.get(key(2)).is_some(), "the visible block is protected");
-        assert_eq!(evicted.retained_gpu_bytes, 32);
+        assert_eq!(evicted.retained_gpu_bytes, 256);
     }
 
     #[test]

@@ -143,6 +143,10 @@ pub enum DesignRefusal {
     /// Refused before anything is taken down, so a house is never left as a
     /// hole in the ground by a bad design.
     DrawsNothing,
+    /// The house's current walls cannot be derived, so replacing them would
+    /// leave whatever it blocked before as invisible collision in the world.
+    /// This is damaged shard state rather than a bad design from the actor.
+    CurrentShapeUnreadable,
 }
 
 impl DesignRefusal {
@@ -153,6 +157,7 @@ impl DesignRefusal {
             Self::NotAHouse => "That is not a house.",
             Self::NotYours => "That is not your house to change.",
             Self::DrawsNothing => "A house has to have walls.",
+            Self::CurrentShapeUnreadable => "That house's current walls could not be read.",
         }
     }
 }
@@ -225,7 +230,8 @@ pub fn redesign(
     // entity that no longer stands there — the sort of leak nothing reports and
     // a player finds by walking into thin air.
     let old = shape_of_house(state, house);
-    let old_footprint = crate::footprint_of(state, at, multi, old.as_deref()).unwrap_or_default();
+    let old_footprint = crate::footprint_of(state, at, multi, old.as_deref())
+        .map_err(|_| DesignRefusal::CurrentShapeUnreadable)?;
     crate::unblock(state, house, facet, &old_footprint);
 
     let revision = revision(state, house).wrapping_add(1);

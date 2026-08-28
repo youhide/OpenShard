@@ -163,10 +163,10 @@ fn set_land(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         );
         return;
     };
-    let Some((facet, x, y)) = standing_on(state, actor) else {
+    let Some((facet, at)) = standing_on(state, actor) else {
         return;
     };
-    let Some(was) = ground_at(state, facet, x, y) else {
+    let Some(was) = ground_at(state, facet, at) else {
         notify(state, actor, "There is no map under you.");
         return;
     };
@@ -181,8 +181,8 @@ fn set_land(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         None => was.z,
     };
     let op = openshard_map::patch::PatchOp::SetLand {
-        x,
-        y,
+        x: at.x,
+        y: at.y,
         was,
         now: openshard_map::map::LandCell {
             tile: openshard_tiles::LandTileId(tile),
@@ -208,10 +208,10 @@ fn add_static(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         );
         return;
     };
-    let Some((facet, x, y)) = standing_on(state, actor) else {
+    let Some((facet, tile)) = standing_on(state, actor) else {
         return;
     };
-    let Some(&Position(at)) = state.registry.get::<Position>(actor) else {
+    let Some(&Position(position)) = state.registry.get::<Position>(actor) else {
         return;
     };
     let z = match args.get(1) {
@@ -224,13 +224,13 @@ fn add_static(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         },
         // Where the operator is standing, which is what "under you" means for
         // something that has a height of its own.
-        None => at.z,
+        None => position.z,
     };
     let op = openshard_map::patch::PatchOp::AddStatic {
         item: openshard_map::map::StaticItem {
             tile: Graphic(graphic),
-            x,
-            y,
+            x: tile.x,
+            y: tile.y,
             z,
             hue: Hue::NONE,
         },
@@ -260,7 +260,7 @@ fn remove_static(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         },
         None => 0,
     };
-    let Some((facet, x, y)) = standing_on(state, actor) else {
+    let Some((facet, at)) = standing_on(state, actor) else {
         return;
     };
     let which = openshard_map::patch::StaticId(nth);
@@ -269,7 +269,7 @@ fn remove_static(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         .ground()
         .snapshot()
         .ok_or(openshard_map::patch::PatchError::NoGround)
-        .and_then(|world| openshard_map::patch::PatchOp::remove_static(world.map(), x, y, which));
+        .and_then(|world| openshard_map::patch::PatchOp::remove_static(world.map(), at.x, at.y, which));
     match built {
         Ok(op) => commit_one(state, actor, facet, op, &format!("static {nth} removed")),
         Err(refusal) => notify(state, actor, &format!("Nothing to remove: {refusal}")),
@@ -277,18 +277,18 @@ fn remove_static(state: &mut WorldState, actor: EntityId, args: &[&str]) {
 }
 
 /// The facet and tile the actor is standing on.
-fn standing_on(state: &mut WorldState, actor: EntityId) -> Option<(Facet, u16, u16)> {
+fn standing_on(state: &WorldState, actor: EntityId) -> Option<(Facet, Tile)> {
     let &Position(at) = state.registry.get::<Position>(actor)?;
-    Some((state.facet_of(actor), at.x, at.y))
+    Some((state.facet_of(actor), Tile::new(at.x, at.y)))
 }
 
 /// The land cell at a tile of a facet, or `None` where there is no map.
-fn ground_at(state: &WorldState, facet: Facet, x: u16, y: u16) -> Option<openshard_map::map::LandCell> {
+fn ground_at(state: &WorldState, facet: Facet, at: Tile) -> Option<openshard_map::map::LandCell> {
     state
         .facet_state(facet)
         .ground()
         .snapshot()
-        .and_then(|world| world.map().land(x, y))
+        .and_then(|world| world.map().land(at.x, at.y))
 }
 
 /// Commit one op as a patch of its own, and say what happened.
@@ -746,6 +746,7 @@ fn go_to(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         notify(state, actor, "Usage: .go <x> <y> [z] [facet]");
         return;
     };
+    let destination = Tile::new(x, y);
     let facet = match args.get(3).and_then(parse_u16) {
         Some(named) => {
             let named = named as u8;
@@ -761,11 +762,11 @@ fn go_to(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     // facet with no map (development mode) keeps the actor's current height.
     let z = match args.get(2).and_then(parse_i8) {
         Some(z) => z,
-        None => ground_z(state, facet, x, y)
+        None => ground_z(state, facet, destination)
             .or_else(|| state.registry.get::<Position>(actor).map(|p| p.0.z))
             .unwrap_or(0),
     };
-    state.move_to(actor, facet, Point::new(x, y, z));
+    state.move_to(actor, facet, Point::new(destination.x, destination.y, z));
     notify(state, actor, &format!("Went to {x}, {y}, {z} on facet {facet}."));
 }
 
@@ -936,7 +937,8 @@ fn full_spellbook(state: &mut WorldState, actor: EntityId) {
         notify(state, actor, "You have no backpack.");
         return;
     };
-    if let Some(book) = items::give(state, backpack, SPELLBOOK_GRAPHIC, Hue(0), 1) {
+    let outcome = items::give(state, backpack, SPELLBOOK_GRAPHIC, Hue(0), 1);
+    if let Some(book) = outcome.last {
         state.registry.insert(book, Spellbook::full());
         notify(state, actor, "A full spellbook appears in your pack.");
     }
@@ -990,8 +992,15 @@ fn add_gold(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         notify(state, actor, "You have no backpack.");
         return;
     };
-    if items::give(state, backpack, items::GOLD_GRAPHIC, Hue(0), amount).is_some() {
+    let outcome = items::give(state, backpack, items::GOLD_GRAPHIC, Hue(0), amount);
+    if outcome.is_complete() {
         notify(state, actor, &format!("{amount} gold appears in your pack."));
+    } else {
+        notify(
+            state,
+            actor,
+            &format!("Only {} of {amount} gold could be created.", outcome.given),
+        );
     }
 }
 
@@ -1010,10 +1019,11 @@ fn set_stat(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         dexterity: 0,
         intelligence: 0,
     });
-    let (strength, dexterity, intelligence) = match stat.to_lowercase().as_str() {
-        "str" | "strength" => (value, current.dexterity, current.intelligence),
-        "dex" | "dexterity" => (current.strength, value, current.intelligence),
-        "int" | "intelligence" => (current.strength, current.dexterity, value),
+    let mut next = current;
+    match stat.to_lowercase().as_str() {
+        "str" | "strength" => next.strength = value,
+        "dex" | "dexterity" => next.dexterity = value,
+        "int" | "intelligence" => next.intelligence = value,
         other => {
             notify(
                 state,
@@ -1022,8 +1032,8 @@ fn set_stat(state: &mut WorldState, actor: EntityId, args: &[&str]) {
             );
             return;
         }
-    };
-    skills::set_stats(state, serial, strength, dexterity, intelligence);
+    }
+    skills::set_stats(state, serial, next);
     notify(state, actor, &format!("Set {stat} to {value}."));
 }
 
@@ -1295,12 +1305,14 @@ fn demolish_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
             return;
         }
     };
-    openshard_housing::decay::demolish(state, house);
-    notify(
-        state,
-        actor,
-        "The house comes down. What it held is in the crate.",
-    );
+    match openshard_housing::decay::demolish(state, house) {
+        Ok(_) => notify(
+            state,
+            actor,
+            "The house comes down. What it held is in the crate.",
+        ),
+        Err(error) => notify(state, actor, error.message()),
+    }
 }
 
 /// `.boat <multi id>` — put a ship on the water at your feet.
@@ -1465,7 +1477,7 @@ pub(crate) fn notify(state: &mut WorldState, actor: EntityId, text: &str) {
     state.system_message(actor, text);
 }
 
-/// The height a body put at `(x, y)` on `facet` stands at, if the facet is
+/// The height a body put at `tile` on `facet` stands at, if the facet is
 /// loaded and something there can hold one.
 ///
 /// **The world's answer and not the land's.** This used to be
@@ -1475,8 +1487,7 @@ pub(crate) fn notify(state: &mut WorldState, actor: EntityId, text: &str) {
 /// the 27,052 pier and bridge decks (a median ten units down; see `movement`'s
 /// `arrival_survey`). The ground is still what the question is asked near, so a
 /// `.go` into a building lands on its ground floor rather than climbing it.
-fn ground_z(state: &WorldState, facet: Facet, x: u16, y: u16) -> Option<i8> {
-    let tile = Tile::new(x, y);
+fn ground_z(state: &WorldState, facet: Facet, tile: Tile) -> Option<i8> {
     let near = state
         .map_terrain(facet)
         .and_then(|terrain| terrain.ground_z(tile))?;

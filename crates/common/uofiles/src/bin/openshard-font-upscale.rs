@@ -554,8 +554,8 @@ mod tests {
         let (width, height, rgba) = padded_rgba(&glyph, 1);
         assert_eq!((width, height), (4, 3));
         assert!(rgba.chunks_exact(4).all(|pixel| pixel[..3] == [255, 0, 0]));
-        assert_eq!(rgba[((1 * width + 1) * 4 + 3) as usize], 255);
-        assert_eq!(rgba[((1 * width + 2) * 4 + 3) as usize], 0);
+        assert_eq!(rgba[((width + 1) * 4 + 3) as usize], 255);
+        assert_eq!(rgba[((width + 2) * 4 + 3) as usize], 0);
     }
 
     #[test]

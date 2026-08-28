@@ -114,6 +114,62 @@ impl std::error::Error for ConnectionError {}
 /// so the cap is twice a packet rather than exactly one.
 const MAX_BUFFERED: usize = MAX_PACKET_SIZE * 2;
 
+/// A byte stream whose already-consumed prefix does not move the unread tail.
+///
+/// TCP routinely coalesces many packets into one read. Removing each packet
+/// from the front of a `Vec` would copy the entire remaining read every time,
+/// making draining that read quadratic. The prefix is reclaimed only when the
+/// buffer is empty or when at least half the stored bytes are stale and an append
+/// needs its space, so compaction is amortized across consumed bytes.
+#[derive(Debug)]
+struct FrontBuffer {
+    bytes: Vec<u8>,
+    start: usize,
+}
+
+impl FrontBuffer {
+    const fn new() -> Self {
+        Self {
+            bytes: Vec::new(),
+            start: 0,
+        }
+    }
+
+    fn unread(&self) -> &[u8] {
+        &self.bytes[self.start..]
+    }
+
+    fn len(&self) -> usize {
+        self.bytes.len() - self.start
+    }
+
+    fn extend_from_slice(&mut self, bytes: &[u8]) {
+        let remaining = self.len();
+        let spare = self.bytes.capacity() - self.bytes.len();
+        if self.start >= remaining && spare < bytes.len() {
+            self.bytes.copy_within(self.start.., 0);
+            self.bytes.truncate(remaining);
+            self.start = 0;
+        }
+        self.bytes.extend_from_slice(bytes);
+    }
+
+    fn consume(&mut self, length: usize) {
+        assert!(length <= self.len());
+        self.start += length;
+        if self.start == self.bytes.len() {
+            self.bytes.clear();
+            self.start = 0;
+        }
+    }
+
+    fn take_prefix(&mut self, length: usize) -> Vec<u8> {
+        let prefix = self.unread()[..length].to_vec();
+        self.consume(length);
+        prefix
+    }
+}
+
 /// How the stream is encoded.
 ///
 /// # Which one a socket is, is not negotiated
@@ -156,14 +212,14 @@ pub struct Connection {
     stream: Stream,
     version: ClientVersion,
     /// Bytes received and not yet turned into a packet.
-    inbox: Vec<u8>,
+    inbox: FrontBuffer,
     /// Decompressed bytes waiting to be framed.
     ///
     /// Empty on a [`Stream::Plain`] connection, where the inbox already is the
     /// packet stream. On a compressed one it is the seam between the two
     /// layers: a block that decompressed to two and a half packets leaves the
     /// half here for the next block to complete.
-    decoded: Vec<u8>,
+    decoded: FrontBuffer,
 }
 
 impl Connection {
@@ -178,8 +234,8 @@ impl Connection {
         Self {
             stream,
             version,
-            inbox: Vec::new(),
-            decoded: Vec::new(),
+            inbox: FrontBuffer::new(),
+            decoded: FrontBuffer::new(),
         }
     }
 
@@ -216,10 +272,10 @@ impl Connection {
     }
 
     fn poll_plain(&mut self) -> Result<Option<Event>, ConnectionError> {
-        match frame_server_packet(&self.inbox, self.version)? {
+        match frame_server_packet(self.inbox.unread(), self.version)? {
             Frame::Incomplete { .. } => Ok(None),
             Frame::Complete(length) => {
-                let packet: Vec<u8> = self.inbox.drain(..length).collect();
+                let packet = self.inbox.take_prefix(length);
                 self.interpret(packet).map(Some)
             }
         }
@@ -242,16 +298,16 @@ impl Connection {
     /// character list.
     fn poll_compressed(&mut self) -> Result<Option<Event>, ConnectionError> {
         loop {
-            match frame_server_packet(&self.decoded, self.version)? {
+            match frame_server_packet(self.decoded.unread(), self.version)? {
                 Frame::Complete(length) => {
-                    let packet: Vec<u8> = self.decoded.drain(..length).collect();
+                    let packet = self.decoded.take_prefix(length);
                     return self.interpret(packet).map(Some);
                 }
                 Frame::Incomplete { .. } => {
-                    let Some((block, consumed)) = huffman::decompress_prefix(&self.inbox)? else {
+                    let Some((block, consumed)) = huffman::decompress_prefix(self.inbox.unread())? else {
                         return Ok(None);
                     };
-                    self.inbox.drain(..consumed);
+                    self.inbox.consume(consumed);
                     self.decoded.extend_from_slice(&block);
                 }
             }
@@ -320,6 +376,31 @@ mod tests {
             Some(Event::Packet(ServerPacket::LoginComplete(LoginComplete)))
         );
         assert_eq!(connection.poll().unwrap(), None);
+    }
+
+    #[test]
+    fn a_large_coalesced_read_is_fully_drained_in_both_streams() {
+        const PACKET_COUNT: usize = 1_024;
+
+        let packet = denied().encode(version());
+        for stream in [Stream::Plain, Stream::Compressed] {
+            let mut wire = Vec::new();
+            for _ in 0..PACKET_COUNT {
+                match stream {
+                    Stream::Plain => wire.extend_from_slice(&packet),
+                    Stream::Compressed => wire.extend(huffman::compress(&packet)),
+                }
+            }
+
+            let mut connection = Connection::new(stream, version());
+            connection.receive(&wire);
+
+            for _ in 0..PACKET_COUNT {
+                assert_eq!(connection.poll().unwrap(), Some(Event::Packet(denied())));
+            }
+            assert_eq!(connection.poll().unwrap(), None);
+            assert_eq!(connection.buffered(), 0);
+        }
     }
 
     #[test]

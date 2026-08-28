@@ -715,14 +715,23 @@ impl World {
             let Some(backpack) = items::backpack_of(&self.state, serial) else {
                 continue;
             };
-            items::give(&mut self.state, backpack, items::GOLD_GRAPHIC, Hue(0), beg.gold);
+            let outcome = items::give(&mut self.state, backpack, items::GOLD_GRAPHIC, Hue(0), beg.gold);
+            if !outcome.is_complete() {
+                self.state.system_message(
+                    beg.entity,
+                    &format!(
+                        "Only {} of {} begged gold reached your backpack.",
+                        outcome.given, beg.gold
+                    ),
+                );
+            }
             // ServUO's `Begging` plays the amount-sensitive gold drop sound at
             // the beggar after the coins have reached their pack.
             self.state.play_sound(
                 beg.entity,
                 items::drop_sound(
                     items::GOLD_GRAPHIC,
-                    u16::try_from(beg.gold).unwrap_or(u16::MAX),
+                    u16::try_from(outcome.given).unwrap_or(u16::MAX),
                     openshard_protocol::wire::SoundId(0x0048),
                 ),
             );
@@ -898,6 +907,110 @@ impl World {
             })
     }
 
+    fn spawn_mobile(&mut self, command: Command) {
+        let Command::SpawnMobile {
+            body,
+            hue,
+            hits,
+            notoriety,
+            damage,
+            resistance,
+            swing,
+            sight,
+            aggression,
+            beat,
+            wander,
+            ranged,
+            ranged_kind,
+            position,
+            facet,
+            name,
+            title,
+            shoe,
+            fame,
+            karma,
+            night_home,
+            banker,
+            vendor,
+            healer,
+            equipment,
+            skills,
+            stock,
+            escort_to,
+            quests: offers,
+        } = command
+        else {
+            unreachable!("spawn_mobile is called only for Command::SpawnMobile");
+        };
+
+        // A placed townsperson is skipped if one of its trade already stands
+        // on the tile. Placement is *not* saved as a thing that can be re-run —
+        // the mobiles themselves are — so without this, seeding `populate:` on
+        // a restored shard put a second banker inside the first, and pressing
+        // the button twice did the same. Only titled mobiles: a spawner's
+        // creature has no title, lands on a tile the rng picked, and two of them
+        // sharing one is ordinary.
+        if title
+            .as_deref()
+            .is_some_and(|title| self.townsperson_already_stands(facet, position, title))
+        {
+            return;
+        }
+        let spawned = npc::spawn(
+            &mut self.state,
+            npc::SpawnSpec {
+                body,
+                hue,
+                hits,
+                notoriety,
+                damage,
+                resistance,
+                swing,
+                sight,
+                aggression,
+                beat,
+                wander,
+                ranged,
+                ranged_kind,
+                position,
+                facet,
+                name,
+                title,
+                shoe: npc::ShoeType::from_bits(shoe),
+                fame,
+                karma,
+                night_home,
+                banker,
+                vendor,
+                healer,
+                equipment,
+                skills,
+            },
+        );
+        // Both were a second command keyed by serial, and the serial did not
+        // exist until this returned — which is what the tile-keyed rendezvous
+        // the script pack was working around. See `Command::SpawnMobile`.
+        if let Some(entity) = spawned {
+            if let Some(serial) = self.state.registry.serial_of(entity) {
+                if !stock.is_empty() {
+                    npc::stock(&mut self.state, serial, stock);
+                }
+                let mut offers = offers;
+                if let Some(destination) = escort_to {
+                    quests::make_escortable(&mut self.state, serial, destination);
+                    // An escort *is* a quest: the offer, the log entry and the
+                    // reward all come from one. Without this it would follow
+                    // whoever double-clicked it, with nothing to accept or
+                    // refuse.
+                    offers.push(openshard_state::QuestKey::new("escort"));
+                }
+                if !offers.is_empty() {
+                    quests::bind_giver(&mut self.state, serial, offers);
+                }
+            }
+        }
+    }
+
     fn apply(&mut self, command: Command, now: Instant) {
         match command {
             Command::Authenticated {
@@ -982,105 +1095,7 @@ impl World {
                 position,
                 facet,
             } => items::spawn_container(&mut self.state, graphic, gump, hue, position, facet),
-            Command::SpawnMobile {
-                body,
-                hue,
-                hits,
-                notoriety,
-                damage,
-                resistance,
-                swing,
-                sight,
-                aggression,
-                beat,
-                wander,
-                ranged,
-                ranged_kind,
-                position,
-                facet,
-                name,
-                title,
-                shoe,
-                fame,
-                karma,
-                night_home,
-                banker,
-                vendor,
-                healer,
-                equipment,
-                skills,
-                stock,
-                escort_to,
-                quests: offers,
-            } => {
-                // A placed townsperson is skipped if one of its trade already
-                // stands on the tile. Placement is *not* saved as a thing that can
-                // be re-run — the mobiles themselves are — so without this, seeding
-                // `populate:` on a restored shard put a second banker inside the
-                // first, and pressing the button twice did the same. Only titled
-                // mobiles: a spawner's creature has no title, lands on a tile the
-                // rng picked, and two of them sharing one is ordinary.
-                if title
-                    .as_deref()
-                    .is_some_and(|title| self.townsperson_already_stands(facet, position, title))
-                {
-                    return;
-                }
-                let spawned = npc::spawn(
-                    &mut self.state,
-                    npc::SpawnSpec {
-                        body,
-                        hue,
-                        hits,
-                        notoriety,
-                        damage,
-                        resistance,
-                        swing,
-                        sight,
-                        aggression,
-                        beat,
-                        wander,
-                        ranged,
-                        ranged_kind,
-                        position,
-                        facet,
-                        name,
-                        title,
-                        shoe: npc::ShoeType::from_bits(shoe),
-                        fame,
-                        karma,
-                        night_home,
-                        banker,
-                        vendor,
-                        healer,
-                        equipment,
-                        skills,
-                    },
-                );
-                // Both were a second command keyed by serial, and the serial did
-                // not exist until this returned — which is what the tile-keyed
-                // rendezvous the script pack was working around. See
-                // `Command::SpawnMobile`.
-                if let Some(entity) = spawned {
-                    if let Some(serial) = self.state.registry.serial_of(entity) {
-                        if !stock.is_empty() {
-                            npc::stock(&mut self.state, serial, stock);
-                        }
-                        let mut offers = offers;
-                        if let Some(destination) = escort_to {
-                            quests::make_escortable(&mut self.state, serial, destination);
-                            // An escort *is* a quest: the offer, the log entry and
-                            // the reward all come from one. Without this it would
-                            // follow whoever double-clicked it, with nothing to
-                            // accept or refuse.
-                            offers.push(openshard_state::QuestKey::new("escort"));
-                        }
-                        if !offers.is_empty() {
-                            quests::bind_giver(&mut self.state, serial, offers);
-                        }
-                    }
-                }
-            }
+            command @ Command::SpawnMobile { .. } => self.spawn_mobile(command),
             Command::Damage {
                 serial,
                 amount,
@@ -1122,7 +1137,15 @@ impl World {
                 strength,
                 dexterity,
                 intelligence,
-            } => skills::set_stats(&mut self.state, serial, strength, dexterity, intelligence),
+            } => skills::set_stats(
+                &mut self.state,
+                serial,
+                Stats {
+                    strength,
+                    dexterity,
+                    intelligence,
+                },
+            ),
             Command::SetSkill { serial, skill, value } => {
                 skills::set_skill(&mut self.state, serial, skill, value)
             }

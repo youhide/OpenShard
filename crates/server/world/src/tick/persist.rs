@@ -81,6 +81,18 @@ struct RestoringMobile {
     first_beat: WorldTick,
 }
 
+/// Narrow a live contained-item point to the persistence representation.
+///
+/// A client drop enters this state from unsigned 16-bit wire fields and restore
+/// widens the same stored fields back to [`GumpPoint`]. Internal placements must
+/// preserve that invariant too; failure here is a corrupted component, not a
+/// coordinate whose meaning is "zero".
+fn persisted_container_position(position: GumpPoint) -> (u16, u16) {
+    let x = u16::try_from(position.x).expect("contained-item gump x must fit the persisted u16 field");
+    let y = u16::try_from(position.y).expect("contained-item gump y must fit the persisted u16 field");
+    (x, y)
+}
+
 impl World {
     // -- persistence -------------------------------------------------------
 
@@ -330,10 +342,16 @@ impl World {
                 if held.container != container {
                     continue;
                 }
+                // Container drops arrive as wire `u16`s and restored points
+                // are widened from the same persisted type. An out-of-range
+                // live point therefore means an internal producer corrupted
+                // the component; writing one half as zero would turn that bug
+                // into a plausible, permanently misplaced item.
+                let (x, y) = persisted_container_position(held.position);
                 let location = ItemLocation::Contained {
                     container,
-                    x: u16::try_from(held.position.x).unwrap_or(0),
-                    y: u16::try_from(held.position.y).unwrap_or(0),
+                    x,
+                    y,
                     grid: held.grid.0,
                 };
                 if let Some(record) = Self::item_record(registry, item, Some(owner), location) {
@@ -1943,5 +1961,30 @@ const fn pet_order_from(code: u8) -> PetOrder {
         4 => PetOrder::Attack,
         5 => PetOrder::Stop,
         _ => PetOrder::Follow,
+    }
+}
+
+#[cfg(test)]
+mod persisted_container_position_tests {
+    use super::*;
+
+    #[test]
+    fn preserves_the_entire_persisted_coordinate_domain() {
+        assert_eq!(
+            persisted_container_position(GumpPoint::new(0, 65_535)),
+            (0, 65_535)
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "contained-item gump x must fit the persisted u16 field")]
+    fn rejects_a_coordinate_below_the_persisted_domain() {
+        persisted_container_position(GumpPoint::new(-1, 0));
+    }
+
+    #[test]
+    #[should_panic(expected = "contained-item gump y must fit the persisted u16 field")]
+    fn rejects_a_coordinate_above_the_persisted_domain() {
+        persisted_container_position(GumpPoint::new(0, 65_536));
     }
 }

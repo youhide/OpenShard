@@ -53,7 +53,7 @@ use openshard_map::grid::BlockCoord;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_tiles::{StaticTile, TileFlags};
+use openshard_tiles::{LandTileId, StaticTile, TileFlags};
 use openshard_uofiles::anim::{Anim, AnimFrame, AnimationDirection, AnimationFrameIndex, AnimationGroup};
 use openshard_uofiles::art::{Art, LAND_TILE_SIZE, land_row};
 use openshard_uofiles::color::{Color16, Rgb8};
@@ -71,7 +71,7 @@ fn client_dir() -> Option<PathBuf> {
 ///
 /// Two files rather than one: the textures themselves, and the `tiledata` that
 /// says which of them a land graphic uses.
-fn texmap_atlas(dir: &std::path::Path, wanted: impl IntoIterator<Item = Graphic>) -> TexmapAtlas {
+fn texmap_atlas(dir: &std::path::Path, wanted: impl IntoIterator<Item = LandTileId>) -> TexmapAtlas {
     let texmaps = TexMaps::open(dir).expect("texidx.mul and texmaps.mul");
     let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     TexmapAtlas::build(&texmaps, &tiledata, wanted).expect("a screen of textures fits")
@@ -482,13 +482,17 @@ fn a_lone_sprite_matches_the_art_it_came_from() {
 
     // The first land graphic the client actually ships. Which one it is does not
     // matter; that it is real art with a real shape does.
-    let (graphic, image) = (0..0x4000u16)
-        .map(Graphic)
-        .find_map(|g| art.land(g).expect("reading land art").map(|image| (g, image)))
+    let (tile, image) = (0..0x4000u16)
+        .map(LandTileId)
+        .find_map(|tile| {
+            art.land(tile)
+                .expect("reading land art")
+                .map(|image| (tile, image))
+        })
         .expect("a modern client ships thousands of land tiles");
 
-    let atlas = LandAtlas::build(&art, [graphic]).expect("one graphic fits");
-    let region = atlas.region(graphic).expect("just packed");
+    let atlas = LandAtlas::build(&art, [tile]).expect("one tile fits");
+    let region = atlas.region(tile).expect("just packed");
 
     // Level, and centred so its bounding square starts at the viewport's origin:
     // viewport coordinates are then the sprite's own. A tile whose four corners
@@ -701,17 +705,17 @@ fn a_sloped_tile_is_drawn_from_its_texture_and_a_level_one_from_its_art() {
     let Some((device, queue)) = gpu() else {
         return;
     };
-    const GRAPHIC: Graphic = Graphic(1);
+    const TILE: LandTileId = LandTileId(1);
     let green = Color16(0b0_00000_11111_00000);
     let red = Color16(0b0_11111_00000_00000);
 
     let side = usize::from(LAND_TILE_SIZE);
     let art = Image::new(LAND_TILE_SIZE, LAND_TILE_SIZE, vec![green; side * side]);
     let texture = Image::new(64, 64, vec![red; 64 * 64]);
-    let atlas = LandAtlas::pack([(GRAPHIC, art)]).expect("one sprite fits");
-    let texmaps = TexmapAtlas::pack([(GRAPHIC, texture)]).expect("one texture fits");
-    let region = atlas.region(GRAPHIC).expect("packed");
-    let texmap = texmaps.region(GRAPHIC).expect("packed");
+    let atlas = LandAtlas::pack([(TILE, art)]).expect("one sprite fits");
+    let texmaps = TexmapAtlas::pack([(TILE, texture)]).expect("one texture fits");
+    let region = atlas.region(TILE).expect("packed");
+    let texmap = texmaps.region(TILE).expect("packed");
 
     // Two tiles in one frame, far enough apart not to touch: one level, one
     // over four different corner heights. Same graphic, same regions — only the
@@ -1251,7 +1255,7 @@ fn the_blit_at_zoom_one_is_the_world_image_texel_for_texel() {
     let Some((device, queue)) = gpu() else {
         return;
     };
-    const GRAPHIC: Graphic = Graphic(1);
+    const TILE: LandTileId = LandTileId(1);
     let side = usize::from(LAND_TILE_SIZE);
     let art = Image::new(
         LAND_TILE_SIZE,
@@ -1263,9 +1267,9 @@ fn the_blit_at_zoom_one_is_the_world_image_texel_for_texel() {
             .map(|at| Color16(((at % 31) as u16) << 10 | ((at / 31 % 31) as u16) << 5 | 1))
             .collect(),
     );
-    let atlas = LandAtlas::pack([(GRAPHIC, art)]).expect("one sprite fits");
+    let atlas = LandAtlas::pack([(TILE, art)]).expect("one sprite fits");
     let texmaps = TexmapAtlas::pack([]).expect("nothing always fits");
-    let region = atlas.region(GRAPHIC).expect("packed");
+    let region = atlas.region(TILE).expect("packed");
     let quads: Vec<GroundQuad> = [(40.0, 40.0), (150.0, 96.0)]
         .into_iter()
         .map(|(x, y)| GroundQuad {
@@ -1412,13 +1416,13 @@ fn a_light_brightens_its_own_pool_and_the_ambient_darkens_the_rest() {
     // A flat grey field: one land graphic whose art is a single value, drawn
     // over the whole frame. Mid-grey and not white, so that "brighter" is
     // expressible in both directions.
-    const GRAPHIC: Graphic = Graphic(1);
+    const TILE: LandTileId = LandTileId(1);
     let side = usize::from(LAND_TILE_SIZE);
     let grey = Color16(15 << 10 | 15 << 5 | 15);
     let art = Image::new(LAND_TILE_SIZE, LAND_TILE_SIZE, vec![grey; side * side]);
-    let atlas = LandAtlas::pack([(GRAPHIC, art)]).expect("one sprite fits");
+    let atlas = LandAtlas::pack([(TILE, art)]).expect("one sprite fits");
     let texmaps = TexmapAtlas::pack([]).expect("nothing always fits");
-    let region = atlas.region(GRAPHIC).expect("packed");
+    let region = atlas.region(TILE).expect("packed");
     // The field, as a lattice of tiles: each quad carries a tile of its own in
     // the place channel, because the lighting is computed in tiles and a frame
     // whose every pixel named one tile would be lit as a single flat thing.
@@ -1658,13 +1662,13 @@ fn a_wall_stops_the_light_behind_it() {
     // what the wall's shadow falls on. Drawn as ground rather than as a wall
     // sprite deliberately — what occludes is the *grid*, and a picture of a wall
     // would only make the frame prettier.
-    const GRAPHIC: Graphic = Graphic(1);
+    const TILE: LandTileId = LandTileId(1);
     let side = usize::from(LAND_TILE_SIZE);
     let grey = Color16(15 << 10 | 15 << 5 | 15);
     let art = Image::new(LAND_TILE_SIZE, LAND_TILE_SIZE, vec![grey; side * side]);
-    let atlas = LandAtlas::pack([(GRAPHIC, art)]).expect("one sprite fits");
+    let atlas = LandAtlas::pack([(TILE, art)]).expect("one sprite fits");
     let texmaps = TexmapAtlas::pack([]).expect("nothing always fits");
-    let region = atlas.region(GRAPHIC).expect("packed");
+    let region = atlas.region(TILE).expect("packed");
 
     const ROW: u16 = 100;
     const FIRST: u16 = 100;
@@ -2442,18 +2446,19 @@ fn every_pixel_names_the_tile_it_came_from() {
         return;
     };
     const GRAPHIC: Graphic = Graphic(1);
+    const TILE: LandTileId = LandTileId(1);
     let green = Color16(0b0_00000_11111_00000);
     let red = Color16(0b0_11111_00000_00000);
 
     let side = usize::from(LAND_TILE_SIZE);
     let land = LandAtlas::pack([(
-        GRAPHIC,
+        TILE,
         Image::new(LAND_TILE_SIZE, LAND_TILE_SIZE, vec![green; side * side]),
     )])
     .expect("one sprite fits");
     let texmaps = TexmapAtlas::pack([]).expect("nothing always fits");
     let statics = StaticAtlas::pack([(GRAPHIC, Image::new(20, 20, vec![red; 20 * 20]))]).expect("fits");
-    let region = land.region(GRAPHIC).expect("packed");
+    let region = land.region(TILE).expect("packed");
     let sprite = statics.sprite(GRAPHIC).expect("packed");
 
     // The ground tile fills the middle of the image; the wall stands on the
@@ -2804,18 +2809,18 @@ fn a_ground_pixel_carries_its_own_stance() {
     let Some((device, queue)) = gpu() else {
         return;
     };
-    const GRAPHIC: Graphic = Graphic(1);
+    const TILE: LandTileId = LandTileId(1);
     let green = Color16(0b0_00000_11111_00000);
 
     let side = usize::from(LAND_TILE_SIZE);
     let land = LandAtlas::pack([(
-        GRAPHIC,
+        TILE,
         Image::new(LAND_TILE_SIZE, LAND_TILE_SIZE, vec![green; side * side]),
     )])
     .expect("one sprite fits");
     let texmaps = TexmapAtlas::pack([]).expect("nothing always fits");
     let statics = StaticAtlas::pack([]).expect("nothing always fits");
-    let region = land.region(GRAPHIC).expect("packed");
+    let region = land.region(TILE).expect("packed");
 
     let ground = [GroundQuad {
         x: 64.0,
@@ -4876,18 +4881,19 @@ fn ground_in_front_hides_a_static_behind_it() {
         return;
     };
     const GRAPHIC: Graphic = Graphic(1);
+    const TILE: LandTileId = LandTileId(1);
     let green = Color16(0b0_00000_11111_00000);
     let red = Color16(0b0_11111_00000_00000);
 
     let side = usize::from(LAND_TILE_SIZE);
     let land = LandAtlas::pack([(
-        GRAPHIC,
+        TILE,
         Image::new(LAND_TILE_SIZE, LAND_TILE_SIZE, vec![green; side * side]),
     )])
     .expect("one sprite fits");
     let texmaps = TexmapAtlas::pack([]).expect("nothing always fits");
     let statics = StaticAtlas::pack([(GRAPHIC, Image::new(60, 60, vec![red; 60 * 60]))]).expect("fits");
-    let region = land.region(GRAPHIC).expect("packed");
+    let region = land.region(TILE).expect("packed");
     let sprite = statics.sprite(GRAPHIC).expect("packed");
 
     // Same pixels on screen, and the ground is nearer. A wall standing behind
@@ -4996,18 +5002,19 @@ fn at_one_depth_the_later_pass_wins() {
         return;
     };
     const GRAPHIC: Graphic = Graphic(1);
+    const TILE: LandTileId = LandTileId(1);
     let green = Color16(0b0_00000_11111_00000);
     let red = Color16(0b0_11111_00000_00000);
 
     let side = usize::from(LAND_TILE_SIZE);
     let land = LandAtlas::pack([(
-        GRAPHIC,
+        TILE,
         Image::new(LAND_TILE_SIZE, LAND_TILE_SIZE, vec![green; side * side]),
     )])
     .expect("one sprite fits");
     let texmaps = TexmapAtlas::pack([]).expect("nothing always fits");
     let statics = StaticAtlas::pack([(GRAPHIC, Image::new(60, 60, vec![red; 60 * 60]))]).expect("fits");
-    let region = land.region(GRAPHIC).expect("packed");
+    let region = land.region(TILE).expect("packed");
     let sprite = statics.sprite(GRAPHIC).expect("packed");
 
     // The same depth, to the bit: not "very close", which the test would pass
@@ -5115,7 +5122,7 @@ fn a_mobile_is_drawn_over_the_ground_and_mirrors_with_its_facing() {
     let side = usize::from(LAND_TILE_SIZE);
     let blue = Color16(0b0_00000_00000_11111);
     let land = LandAtlas::pack([(
-        Graphic(1),
+        LandTileId(1),
         Image::new(LAND_TILE_SIZE, LAND_TILE_SIZE, vec![blue; side * side]),
     )])
     .expect("one sprite fits");
@@ -5133,7 +5140,7 @@ fn a_mobile_is_drawn_over_the_ground_and_mirrors_with_its_facing() {
         x: at.x as f32,
         y: at.y as f32,
         corners: [0.0; 4],
-        region: land.region(Graphic(1)).expect("packed"),
+        region: land.region(LandTileId(1)).expect("packed"),
         texmap: None,
         depth: openshard_client_render::depth::Order {
             tile: 200,

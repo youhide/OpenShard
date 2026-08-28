@@ -570,7 +570,7 @@ fn main() {
     // which costs nothing (`isolated_scene.rs`'s own doc: no statics, and
     // this scene never asks it for any) and is simpler than tracking which
     // blocks the bounds above actually touch.
-    const FLOOR_GRAPHIC: Graphic = Graphic(3);
+    const FLOOR_TILE: openshard_tiles::LandTileId = openshard_tiles::LandTileId(3);
     let floor_pixel = openshard_uofiles::color::Color16((20 << 10) | (20 << 5) | 20);
     let floor_image = openshard_uofiles::image::Image::new(
         openshard_uofiles::art::LAND_TILE_SIZE,
@@ -584,12 +584,12 @@ fn main() {
             down: blocks,
         },
         |_x, _y| openshard_map::map::LandCell {
-            tile: openshard_tiles::LandTileId(FLOOR_GRAPHIC.0),
+            tile: FLOOR_TILE,
             z: 0,
         },
     );
 
-    let land = LandAtlas::pack([(FLOOR_GRAPHIC, floor_image)]).expect("one flat tile always fits");
+    let land = LandAtlas::pack([(FLOOR_TILE, floor_image)]).expect("one flat tile always fits");
     let texmaps = TexmapAtlas::pack([]).expect("nothing always fits");
     let ground_quads =
         openshard_client_render::ground::collect(&synthetic_map, &camera, &land, &texmaps, &Cutaway::OPEN);

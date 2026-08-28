@@ -99,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // `stand_surfaces` puts the land surface first when there is one,
             // so the rest are the statics' — the same order its own doc pins.
             let land_surface = usize::from(map.land(x, y).is_some_and(|land| {
-                let flags = tiles.land(land.tile.0).flags;
+                let flags = tiles.land(land.tile).flags;
                 !flags.is_water() && !flags.is_blocking()
             }));
             let bare = map.statics_at(x, y).next().is_none();

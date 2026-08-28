@@ -60,17 +60,32 @@ pub fn complete(state: &mut WorldState, player: EntityId, key: &QuestKey) -> boo
     let Some(player_serial) = state.registry.serial_of(player) else {
         return false;
     };
+    let reward_container = if quest.rewards.is_empty() {
+        None
+    } else {
+        let Some(backpack) = openshard_items::backpack_of(state, player_serial) else {
+            // Before objective items are taken and before the log moves to done:
+            // a mobile serial is not a substitute container. `give` validates
+            // its parent and would panic after the quest had already charged the
+            // player, which turned damaged character state into a false success.
+            state.system_message(player, "You need a backpack to receive this quest's rewards.");
+            return false;
+        };
+        Some(backpack)
+    };
 
     // What has to be handed over, gathered first — and only for the objectives
     // that were actually met. An `all_objectives: false` quest completes on one
     // of its list, and demanding the goods for the others would make a quest the
     // player has finished impossible to hand in.
-    let progress = state
+    let Some(progress) = state
         .registry
         .get::<QuestLog>(player)
         .and_then(|log| log.active_quest(key))
         .map(|entry| entry.progress.clone())
-        .unwrap_or_default();
+    else {
+        return false;
+    };
     let mut wanted: Vec<(Graphic, u16)> = Vec::new();
     for (index, objective) in quest.objectives.iter().enumerate() {
         if progress.get(index).copied().unwrap_or(0) < objective.count {
@@ -95,29 +110,32 @@ pub fn complete(state: &mut WorldState, player: EntityId, key: &QuestKey) -> boo
         openshard_items::take_from_backpack(state, player_serial, graphic, count);
     }
 
-    // Pay. Rewards that will not fit are still paid — `give_to_backpack` merges
-    // or places, and a player with no backpack simply gets nothing, which cannot
-    // happen to a real character.
-    for reward in &quest.rewards {
-        match reward.kind {
-            RewardKind::Gold(amount) => {
-                openshard_items::give(
+    // Pay. Capacity refusal or serial exhaustion is reported as a partial
+    // reward below. A missing backpack was refused before objective items were
+    // taken, so every non-empty reward list has a real container here.
+    let mut rewards_complete = true;
+    if let Some(reward_container) = reward_container {
+        for reward in &quest.rewards {
+            rewards_complete &= match reward.kind {
+                RewardKind::Gold(amount) => openshard_items::give(
                     state,
-                    backpack_or_return(state, player_serial),
+                    reward_container,
                     openshard_items::GOLD_GRAPHIC,
                     Hue(0),
                     amount,
-                );
-            }
-            RewardKind::Item {
-                graphic,
-                hue,
-                amount,
-                stackable,
-            } => {
-                openshard_items::give_to_backpack(state, player_serial, graphic, hue, amount, stackable);
-            }
+                )
+                .is_complete(),
+                RewardKind::Item {
+                    graphic,
+                    hue,
+                    amount,
+                    stackable,
+                } => openshard_items::give_to_backpack(state, player_serial, graphic, hue, amount, stackable),
+            };
         }
+    }
+    if !rewards_complete {
+        state.system_message(player, "Some quest rewards could not be placed in your backpack.");
     }
 
     // And move it out of the log.
@@ -140,14 +158,4 @@ pub fn complete(state: &mut WorldState, player: EntityId, key: &QuestKey) -> boo
         giver,
     });
     true
-}
-
-/// The player's backpack, or their own serial if they somehow have none — the
-/// gold payout needs a container serial and `items::give` ignores one that names
-/// no container, so nothing is created out of thin air either way.
-fn backpack_or_return(
-    state: &WorldState,
-    player: openshard_protocol::serial::Serial,
-) -> openshard_protocol::serial::Serial {
-    openshard_items::backpack_of(state, player).unwrap_or(player)
 }

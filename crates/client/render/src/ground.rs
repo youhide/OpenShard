@@ -7,8 +7,8 @@
 use std::collections::BTreeSet;
 
 use openshard_map::map::{LandCell, WorldMap};
-use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
+use openshard_tiles::LandTileId;
 
 use crate::atlas::{LandAtlas, Region, TexmapAtlas};
 use crate::camera::{Camera, TileBounds};
@@ -123,7 +123,7 @@ impl GroundQuad {
 ///
 /// Called before building the atlas, which is why it is separate from
 /// [`collect`]: the atlas has to exist before a quad can be given a region.
-pub fn visible_graphics(map: &WorldMap, camera: &Camera) -> BTreeSet<Graphic> {
+pub fn visible_graphics(map: &WorldMap, camera: &Camera) -> BTreeSet<LandTileId> {
     let mut seen = BTreeSet::new();
     graphics_in(map, camera.visible_tiles(), &mut seen);
     seen
@@ -141,9 +141,9 @@ pub fn visible_graphics(map: &WorldMap, camera: &Camera) -> BTreeSet<Graphic> {
 ///
 /// Accumulating into `out` rather than returning a set, because the caller has
 /// several bands and one atlas.
-pub fn graphics_in(map: &WorldMap, bounds: TileBounds, out: &mut BTreeSet<Graphic>) {
+pub fn graphics_in(map: &WorldMap, bounds: TileBounds, out: &mut BTreeSet<LandTileId>) {
     for_each_cell_in(map, bounds, |_, _, cell| {
-        out.insert(Graphic(cell.tile.0));
+        out.insert(cell.tile);
     });
 }
 
@@ -256,12 +256,12 @@ pub fn collect_in_with_interior(
                 continue;
             }
             let at = camera.to_screen(Point::new(x, y, 0));
-            let Some(region) = atlas.region(Graphic(cell.tile.0)) else {
+            let Some(region) = atlas.region(cell.tile) else {
                 continue;
             };
             // `None` here is not a failure to find anything: most land graphics have
             // no texture, and the shader draws those from the art.
-            let texmap = texmaps.region(Graphic(cell.tile.0));
+            let texmap = texmaps.region(cell.tile);
             // Height deliberately left at zero: the shader lifts each corner by its
             // own, and folding a representative height in here would count one of
             // them twice.
@@ -452,10 +452,10 @@ mod tests {
     use super::*;
 
     /// The land graphic the fixture map is made of, and which the atlas carries.
-    const GRASS: Graphic = Graphic(3);
+    const GRASS: LandTileId = LandTileId(3);
     /// One the atlas deliberately does not carry — a client that ships no art
     /// for a tile the map names is ordinary, and the frame must survive it.
-    const MISSING: Graphic = Graphic(9);
+    const MISSING: LandTileId = LandTileId(9);
 
     /// A facet small enough to build in a test, rough enough that no two corners
     /// agree by accident, and scattered with tiles the atlas has no art for.
@@ -465,11 +465,11 @@ mod tests {
     /// changed between runs would make every count below a different number.
     fn hillside() -> WorldMap {
         WorldMap::from_blocks(BlockExtent { wide: 8, down: 8 }, |x, y| LandCell {
-            tile: openshard_tiles::LandTileId(if (x + y).is_multiple_of(17) {
-                MISSING.0
+            tile: if (x + y).is_multiple_of(17) {
+                MISSING
             } else {
-                GRASS.0
-            }),
+                GRASS
+            },
             z: (((i32::from(x) * 3 + i32::from(y) * 7) % 41) - 20) as i8,
         })
     }
@@ -523,7 +523,7 @@ mod tests {
         let mut dropped = 0;
         for y in ys {
             for x in xs.clone() {
-                if map.land(x, y).unwrap().tile == openshard_tiles::LandTileId(MISSING.0) {
+                if map.land(x, y).unwrap().tile == MISSING {
                     dropped += 1;
                     continue;
                 }

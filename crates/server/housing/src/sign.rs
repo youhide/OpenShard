@@ -389,8 +389,10 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
                 state.system_message(player, "That is not your house to pull down.");
                 return true;
             }
-            crate::decay::demolish(state, context.house);
-            state.system_message(player, "The house comes down. What it held is in the crate.");
+            match crate::decay::demolish(state, context.house) {
+                Ok(_) => state.system_message(player, "The house comes down. What it held is in the crate."),
+                Err(error) => state.system_message(player, error.message()),
+            }
         }
         other => {
             let Some(index) = row_of(other, context.rows.len()) else {

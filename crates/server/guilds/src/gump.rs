@@ -88,59 +88,86 @@ pub(crate) mod button {
 pub(crate) const FIELD_NAME: u32 = 1;
 pub(crate) const FIELD_ABBREVIATION: u32 = 2;
 
+/// One action column inside an encoded row button.
+///
+/// A raw action is also a `u32`, like a button base and stride. Keeping it
+/// distinct makes exchanging any two terms of the encoding formula a type
+/// error rather than a different, valid-looking [`ButtonId`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct RowAction(u32);
+
 /// What a member's row can ask for. Named rather than numbered at the call
 /// sites, because five columns whose meaning is their position is exactly the
 /// arithmetic the admin menu got wrong.
-pub(crate) const ROSTER_TITLE: u32 = 0;
-pub(crate) const ROSTER_PROMOTE: u32 = 1;
-pub(crate) const ROSTER_DEMOTE: u32 = 2;
-pub(crate) const ROSTER_DISMISS: u32 = 3;
-pub(crate) const ROSTER_LEAD: u32 = 4;
+pub(crate) const ROSTER_TITLE: RowAction = RowAction(0);
+pub(crate) const ROSTER_PROMOTE: RowAction = RowAction(1);
+pub(crate) const ROSTER_DEMOTE: RowAction = RowAction(2);
+pub(crate) const ROSTER_DISMISS: RowAction = RowAction(3);
+pub(crate) const ROSTER_LEAD: RowAction = RowAction(4);
+const ROSTER_ACTIONS: [RowAction; 5] = [
+    ROSTER_TITLE,
+    ROSTER_PROMOTE,
+    ROSTER_DEMOTE,
+    ROSTER_DISMISS,
+    ROSTER_LEAD,
+];
 
 /// And what a guild's row on the diplomacy page can ask for.
-pub(crate) const DIPLOMACY_WAR: u32 = 0;
-pub(crate) const DIPLOMACY_PEACE: u32 = 1;
-pub(crate) const DIPLOMACY_ALLY: u32 = 2;
+pub(crate) const DIPLOMACY_WAR: RowAction = RowAction(0);
+pub(crate) const DIPLOMACY_PEACE: RowAction = RowAction(1);
+pub(crate) const DIPLOMACY_ALLY: RowAction = RowAction(2);
+const DIPLOMACY_ACTIONS: [RowAction; 3] = [DIPLOMACY_WAR, DIPLOMACY_PEACE, DIPLOMACY_ALLY];
 
 /// The field a new alliance's name is typed into.
 pub(crate) const FIELD_ALLIANCE: u32 = 3;
 
-/// A row button is its list's base plus the row index times the number of things
-/// a row can ask for.
+/// The button-number space occupied by one kind of row.
 ///
-/// Both directions have a name — [`row_button`] draws and [`row_of`] reads — so
-/// the arithmetic is written once and neither side re-derives it. That is what
-/// went wrong in the admin menu's hand-written layout, and the note there says so.
-pub(crate) const ROSTER_BASE: u32 = 100;
-pub(crate) const DIPLOMACY_BASE: u32 = 1000;
-/// How many buttons a member's row can draw: set the title, promote, demote,
-/// turn out, hand over the guild.
-pub(crate) const ROSTER_ACTIONS: u32 = 5;
-/// And a guild's row: declare war, offer an alliance, end either.
-pub(crate) const DIPLOMACY_ACTIONS: u32 = 3;
-
-/// The button id for one action on one row.
-///
-/// `actions` is the *stride*, and the two lists no longer share one — a roster
-/// row draws five and a diplomacy row three. It is passed in rather than read
-/// off the base, so that the drawing side and the reading side name the same
-/// number at the same call: a stride that disagreed between them would resolve
-/// "demote row two" to "declare war on row one" without either side being
-/// obviously wrong.
-pub(crate) const fn row_button(base: u32, actions: u32, index: usize, action: u32) -> ButtonId {
-    ButtonId(base + (index as u32) * actions + action)
+/// The base and stride travel as one value so drawing and reply decoding cannot
+/// accidentally pair a roster base with diplomacy's stride.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct RowButtons {
+    base: ButtonId,
+    stride: u32,
 }
 
-/// Which row and which action a button id names, or `None` if it is not one of
-/// this list's.
-pub(crate) fn row_of(base: u32, actions: u32, button: ButtonId, rows: usize) -> Option<(usize, u32)> {
-    let offset = button.0.checked_sub(base)?;
-    let index = (offset / actions) as usize;
-    if index >= rows {
-        return None;
+impl RowButtons {
+    const fn new(base: ButtonId, actions: &[RowAction]) -> Self {
+        assert!(!actions.is_empty(), "a row-button stride cannot be zero");
+        Self {
+            base,
+            stride: actions.len() as u32,
+        }
     }
-    Some((index, offset % actions))
+
+    /// The button id for one action on one row.
+    pub(crate) fn button(self, row: usize, action: RowAction) -> ButtonId {
+        assert!(action.0 < self.stride, "action is outside this row's stride");
+        let row = u32::try_from(row).expect("a row-button index must fit on the wire");
+        let offset = row
+            .checked_mul(self.stride)
+            .and_then(|offset| offset.checked_add(action.0))
+            .and_then(|offset| self.base.0.checked_add(offset))
+            .expect("a row button must fit on the wire");
+        ButtonId(offset)
+    }
+
+    /// Which row and action a button id names, or `None` if it is outside the
+    /// rows the server remembers drawing.
+    pub(crate) fn decode(self, button: ButtonId, rows: usize) -> Option<(usize, RowAction)> {
+        let offset = button.0.checked_sub(self.base.0)?;
+        let row = usize::try_from(offset / self.stride).ok()?;
+        if row >= rows {
+            return None;
+        }
+        Some((row, RowAction(offset % self.stride)))
+    }
 }
+
+/// A member row: title, promote, demote, dismiss, or pass leadership.
+pub(crate) const ROSTER_BUTTONS: RowButtons = RowButtons::new(ButtonId(100), &ROSTER_ACTIONS);
+/// Another guild's row: war, peace, or alliance.
+pub(crate) const DIPLOMACY_BUTTONS: RowButtons = RowButtons::new(ButtonId(1000), &DIPLOMACY_ACTIONS);
 
 /// Draw the guild window for a player, and remember what it drew.
 ///
@@ -330,7 +357,7 @@ fn roster_page(
         // only the title field, because none of the rest applies to you.
         let outranked = own_rank > rank;
         let mut column = 258;
-        let mut cell = |layout: &mut GumpLayout, normal: u32, pressed: u32, action: u32| {
+        let mut cell = |layout: &mut GumpLayout, normal: u32, pressed: u32, action: RowAction| {
             layout.button(
                 column,
                 y,
@@ -338,7 +365,7 @@ fn roster_page(
                 pressed,
                 GumpButton::Reply,
                 0,
-                row_button(ROSTER_BASE, ROSTER_ACTIONS, row, action),
+                ROSTER_BUTTONS.button(row, action),
             );
             column += 30;
             any_buttons = true;
@@ -468,7 +495,7 @@ fn diplomacy_page(
                 4019,
                 GumpButton::Reply,
                 0,
-                row_button(DIPLOMACY_BASE, DIPLOMACY_ACTIONS, row, DIPLOMACY_WAR),
+                DIPLOMACY_BUTTONS.button(row, DIPLOMACY_WAR),
             );
             layout.button(
                 288,
@@ -477,7 +504,7 @@ fn diplomacy_page(
                 4007,
                 GumpButton::Reply,
                 0,
-                row_button(DIPLOMACY_BASE, DIPLOMACY_ACTIONS, row, DIPLOMACY_PEACE),
+                DIPLOMACY_BUTTONS.button(row, DIPLOMACY_PEACE),
             );
         }
         if may_ally {
@@ -488,7 +515,7 @@ fn diplomacy_page(
                 4013,
                 GumpButton::Reply,
                 0,
-                row_button(DIPLOMACY_BASE, DIPLOMACY_ACTIONS, row, DIPLOMACY_ALLY),
+                DIPLOMACY_BUTTONS.button(row, DIPLOMACY_ALLY),
             );
         }
     }
@@ -506,23 +533,19 @@ fn cut_notice(layout: &mut GumpLayout, total: usize, shown: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        DIPLOMACY_ACTIONS, DIPLOMACY_BASE, MAX_ROWS, ROSTER_ACTIONS, ROSTER_BASE, row_button, row_of,
-    };
+    use super::{DIPLOMACY_ACTIONS, DIPLOMACY_BUTTONS, MAX_ROWS, ROSTER_ACTIONS, ROSTER_BUTTONS};
+    use openshard_protocol::gump::ButtonId;
 
     #[test]
     fn a_row_button_reads_back_as_the_row_it_was_drawn_for() {
         for row in 0..8 {
-            for action in 0..ROSTER_ACTIONS {
-                let id = row_button(ROSTER_BASE, ROSTER_ACTIONS, row, action);
-                assert_eq!(row_of(ROSTER_BASE, ROSTER_ACTIONS, id, 8), Some((row, action)));
+            for action in ROSTER_ACTIONS {
+                let id = ROSTER_BUTTONS.button(row, action);
+                assert_eq!(ROSTER_BUTTONS.decode(id, 8), Some((row, action)));
             }
-            for action in 0..DIPLOMACY_ACTIONS {
-                let id = row_button(DIPLOMACY_BASE, DIPLOMACY_ACTIONS, row, action);
-                assert_eq!(
-                    row_of(DIPLOMACY_BASE, DIPLOMACY_ACTIONS, id, 8),
-                    Some((row, action))
-                );
+            for action in DIPLOMACY_ACTIONS {
+                let id = DIPLOMACY_BUTTONS.button(row, action);
+                assert_eq!(DIPLOMACY_BUTTONS.decode(id, 8), Some((row, action)));
             }
         }
     }
@@ -532,22 +555,21 @@ mod tests {
         // The client sends whatever it likes. A row the window never drew has to
         // resolve to nothing rather than to the row arithmetic's opinion.
         assert_eq!(
-            row_of(
-                ROSTER_BASE,
-                ROSTER_ACTIONS,
-                row_button(ROSTER_BASE, ROSTER_ACTIONS, 9, 0),
-                4
-            ),
+            ROSTER_BUTTONS.decode(ROSTER_BUTTONS.button(9, ROSTER_ACTIONS[0]), 4),
             None
         );
+        assert_eq!(ROSTER_BUTTONS.decode(ButtonId(1), 4), None);
+    }
+
+    #[test]
+    fn an_action_at_the_stride_boundary_is_not_a_fallback() {
+        let last = ROSTER_BUTTONS.button(0, ROSTER_ACTIONS[ROSTER_ACTIONS.len() - 1]);
+        let forged = ButtonId(last.0 + 1);
+
         assert_eq!(
-            row_of(
-                ROSTER_BASE,
-                ROSTER_ACTIONS,
-                openshard_protocol::gump::ButtonId(1),
-                4
-            ),
-            None
+            ROSTER_BUTTONS.decode(forged, 1),
+            None,
+            "the next number is row one, not another action on row zero"
         );
     }
 
@@ -557,20 +579,17 @@ mod tests {
     /// a full page of rows at its own stride — rather than against a sample.
     #[test]
     fn a_full_roster_never_reaches_the_diplomacy_numbers() {
-        let last = row_button(ROSTER_BASE, ROSTER_ACTIONS, MAX_ROWS - 1, ROSTER_ACTIONS - 1);
+        let last = ROSTER_BUTTONS.button(MAX_ROWS - 1, ROSTER_ACTIONS[ROSTER_ACTIONS.len() - 1]);
         assert!(
-            last.0 < DIPLOMACY_BASE,
-            "roster buttons run to {}, and diplomacy starts at {DIPLOMACY_BASE}",
-            last.0
+            last.0 < DIPLOMACY_BUTTONS.base.0,
+            "roster buttons run to {}, and diplomacy starts at {}",
+            last.0,
+            DIPLOMACY_BUTTONS.base.0,
         );
         assert!(
-            row_of(
-                ROSTER_BASE,
-                ROSTER_ACTIONS,
-                row_button(DIPLOMACY_BASE, DIPLOMACY_ACTIONS, 0, 0),
-                MAX_ROWS
-            )
-            .is_none(),
+            ROSTER_BUTTONS
+                .decode(DIPLOMACY_BUTTONS.button(0, DIPLOMACY_ACTIONS[0]), MAX_ROWS)
+                .is_none(),
             "and a diplomacy button must not resolve as a member's"
         );
     }

@@ -143,24 +143,20 @@ pub struct PublicGate {
 /// `guarded` flag and nothing else, so the ninth gate ships rather than being
 /// silently dropped to match.
 pub static PUBLIC_MOONGATES: &[PublicGate] = &[
-    gate("Moonglow", Facet(0), 4467, 1283, 5),
-    gate("Britain", Facet(0), 1336, 1997, 5),
-    gate("Jhelom", Facet(0), 1499, 3771, 5),
-    gate("Yew", Facet(0), 771, 752, 5),
-    gate("Minoc", Facet(0), 2701, 692, 5),
-    gate("Trinsic", Facet(0), 1828, 2948, -20),
-    gate("Skara Brae", Facet(0), 643, 2067, 5),
-    gate("Magincia", Facet(0), 3563, 2139, 5),
-    gate("Buccaneer's Den", Facet(0), 2711, 2234, 0),
+    gate("Moonglow", Facet(0), Point::new(4467, 1283, 5)),
+    gate("Britain", Facet(0), Point::new(1336, 1997, 5)),
+    gate("Jhelom", Facet(0), Point::new(1499, 3771, 5)),
+    gate("Yew", Facet(0), Point::new(771, 752, 5)),
+    gate("Minoc", Facet(0), Point::new(2701, 692, 5)),
+    gate("Trinsic", Facet(0), Point::new(1828, 2948, -20)),
+    gate("Skara Brae", Facet(0), Point::new(643, 2067, 5)),
+    gate("Magincia", Facet(0), Point::new(3563, 2139, 5)),
+    gate("Buccaneer's Den", Facet(0), Point::new(2711, 2234, 0)),
 ];
 
 /// One row, kept terse so the nine read at a glance.
-const fn gate(name: &'static str, facet: Facet, x: u16, y: u16, z: i8) -> PublicGate {
-    PublicGate {
-        name,
-        facet,
-        at: Point { x, y, z },
-    }
+const fn gate(name: &'static str, facet: Facet, at: Point) -> PublicGate {
+    PublicGate { name, facet, at }
 }
 
 /// Whether a tile is one of the city moongates.

@@ -425,12 +425,15 @@ fn caster_with_rune(now: Instant) -> (World, ConnectionId, EntityId, Serial) {
 
     let backpack = backpack_serial(&world, connection);
     for reagent in [BLACK_PEARL, BLOOD_MOSS, MANDRAKE_ROOT, SULFUROUS_ASH] {
-        openshard_items::give(
-            &mut world.state,
-            backpack,
-            openshard_protocol::wire::Graphic(reagent),
-            openshard_protocol::wire::Hue(0),
-            50,
+        assert!(
+            openshard_items::give(
+                &mut world.state,
+                backpack,
+                openshard_protocol::wire::Graphic(reagent),
+                openshard_protocol::wire::Hue(0),
+                50,
+            )
+            .is_complete()
         );
     }
     if let Some(book) = openshard_items::give(
@@ -439,7 +442,9 @@ fn caster_with_rune(now: Instant) -> (World, ConnectionId, EntityId, Serial) {
         SPELLBOOK_GRAPHIC,
         openshard_protocol::wire::Hue(0),
         1,
-    ) {
+    )
+    .last
+    {
         world.state.registry.insert(book, Spellbook::full());
     }
     let rune = openshard_items::place_one(
@@ -1081,6 +1086,7 @@ fn give_runebook(world: &mut World, connection: ConnectionId) -> EntityId {
         openshard_protocol::wire::Hue(0),
         1,
     )
+    .last
     .expect("a runebook")
 }
 
@@ -1166,6 +1172,7 @@ fn a_recall_scroll_recharges_a_book_and_the_surplus_stays_on_the_cursor() {
         openshard_protocol::wire::Hue(0),
         3,
     )
+    .last
     .expect("scrolls");
     let scroll_serial = world.state.registry.serial_of(scrolls).unwrap();
 

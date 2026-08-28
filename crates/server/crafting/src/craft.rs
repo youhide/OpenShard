@@ -328,7 +328,15 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         recipe.hue
     };
     let made = recipe.amount.saturating_mul(materials.max_amount).max(1);
-    let item = place(state, crafter, recipe, hue, made);
+    let (item, placed) = place(state, crafter, recipe, hue, made);
+    if placed != made {
+        state.system_message(
+            crafter,
+            &format!("Only {placed} of {made} crafted items could be placed in your pack."),
+        );
+        wear_tool(state, crafter, work.tool);
+        return;
+    }
 
     let marked = outcome.exceptional && recipe.markable && grandmaster(state, crafter, def);
     if let Some(item) = item {
@@ -372,13 +380,22 @@ fn place(
     recipe: &Recipe,
     hue: Hue,
     amount: u16,
-) -> Option<EntityId> {
-    let serial = state.registry.serial_of(crafter)?;
-    let pack = openshard_items::backpack_of(state, serial)?;
+) -> (Option<EntityId>, u16) {
+    let Some(serial) = state.registry.serial_of(crafter) else {
+        return (None, 0);
+    };
+    let Some(pack) = openshard_items::backpack_of(state, serial) else {
+        return (None, 0);
+    };
     if recipe.amount > 1 || amount > 1 {
-        openshard_items::give(state, pack, recipe.graphic, hue, u32::from(amount))
+        let outcome = openshard_items::give(state, pack, recipe.graphic, hue, u32::from(amount));
+        (
+            outcome.last,
+            u16::try_from(outcome.given).expect("give cannot exceed the u16 amount requested"),
+        )
     } else {
-        openshard_items::place_one(state, pack, recipe.graphic, hue, amount)
+        let item = openshard_items::place_one(state, pack, recipe.graphic, hue, amount);
+        (item, u16::from(item.is_some()))
     }
 }
 

@@ -133,22 +133,24 @@ pub fn carve(state: &mut WorldState, carver: EntityId, tool: EntityId, target: O
         return;
     }
 
+    let mut complete = true;
     if yielded.bird {
-        let _ = give(state, corpse_serial, RAW_BIRD, Hue(0), 1);
+        complete &= give(state, corpse_serial, RAW_BIRD, Hue(0), 1).is_complete();
     } else if yielded.ribs != 0 {
-        let _ = give(state, corpse_serial, RAW_RIBS, Hue(0), u32::from(yielded.ribs));
+        complete &= give(state, corpse_serial, RAW_RIBS, Hue(0), u32::from(yielded.ribs)).is_complete();
     }
     if yielded.hides != 0 {
-        let _ = give(state, corpse_serial, HIDES, Hue(0), u32::from(yielded.hides));
+        complete &= give(state, corpse_serial, HIDES, Hue(0), u32::from(yielded.hides)).is_complete();
     }
     if yielded.feathers != 0 {
-        let _ = give(
+        complete &= give(
             state,
             corpse_serial,
             FEATHERS,
             Hue(0),
             u32::from(yielded.feathers),
-        );
+        )
+        .is_complete();
     }
     state.registry.insert(
         target,
@@ -159,7 +161,10 @@ pub fn carve(state: &mut WorldState, carver: EntityId, tool: EntityId, target: O
     );
     state.system_message(
         carver,
-        "You carve the carcass and place the resources in the corpse.",
+        match complete {
+            true => "You carve the carcass and place the resources in the corpse.",
+            false => "You carve the carcass, but some resources could not be placed in the corpse.",
+        },
     );
 }
 

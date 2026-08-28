@@ -52,9 +52,16 @@ impl Channel {
     const ALL: [Self; 4] = [Self::Say, Self::Guild, Self::Alliance, Self::Party];
 
     /// The next one round, wrapping back to [`Say`](Self::Say).
+    ///
+    /// # Panics
+    ///
+    /// Panics if [`ALL`](Self::ALL) omits this channel.
     #[must_use]
     pub(crate) fn next(self) -> Self {
-        let at = Self::ALL.iter().position(|channel| *channel == self).unwrap_or(0);
+        let at = Self::ALL
+            .iter()
+            .position(|channel| *channel == self)
+            .expect("Channel::ALL must contain every channel");
         Self::ALL[(at + 1) % Self::ALL.len()]
     }
 

@@ -237,9 +237,7 @@ fn audit_captured_composite_ids(
     if std::env::var_os("OPENSHARD_COMPOSITE_AUDIT").is_none() {
         return;
     }
-    let Some((ids, _, _, _)) = captured.deferred_textures_for_audit() else {
-        return;
-    };
+    let (ids, _, _, _) = captured.deferred_textures_for_audit();
     let row = ids.width() * 4;
     let stride = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let bytes = u64::from(stride) * u64::from(ids.height());

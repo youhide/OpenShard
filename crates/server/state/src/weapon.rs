@@ -26,7 +26,7 @@
 
 use crate::Skill;
 use openshard_config::CombatEra;
-use openshard_protocol::wire::{Graphic, Layer};
+use openshard_protocol::wire::{Graphic, Layer, SoundId};
 use openshard_protocol::world::RangedRange;
 
 /// The paperdoll layer a one-handed weapon sits on (UO layer 1).
@@ -175,7 +175,7 @@ pub struct WeaponData {
     /// ML (era 4) swing speed, in hundredths of a second (ServUO's `MlSpeed`).
     pub ml_speed: u16,
     /// The sound a whiff makes — ServUO's `DefMissSound` for this weapon class.
-    pub miss_sound: u16,
+    pub miss_sound: SoundId,
     /// Whether Lumberjacking lends this weapon a damage bonus (an axe).
     pub is_axe: bool,
     /// The ammunition this weapon fires, one graphic per shot. `None` for every
@@ -301,52 +301,52 @@ pub const fn weapon_layer(weapon: &WeaponData, tiledata_layer: Layer) -> Layer {
 #[rustfmt::skip]
 static WEAPONS: &[WeaponData] = &[
     // ------------------------  skill kind   spd  min  max  aos speeds     ml  miss   axe
-    w(0x0F61, SWORDS,  SLASHING, 35,  5, 33, 30, 14, 18, 350, 0x23A, false), // Longsword
-    w(0x0F5E, SWORDS,  SLASHING, 45,  5, 29, 33, 13, 17, 325, 0x23A, false), // Broadsword
-    w(0x13FF, SWORDS,  SLASHING, 58,  5, 26, 46, 10, 14, 250, 0x23A, false), // Katana
-    w(0x13B9, SWORDS,  SLASHING, 30,  6, 34, 28, 15, 19, 375, 0x23A, false), // Viking sword
-    w(0x1441, SWORDS,  SLASHING, 45,  6, 28, 44, 10, 14, 250, 0x23A, false), // Cutlass
-    w(0x13B6, SWORDS,  SLASHING, 43,  4, 30, 37, 12, 16, 300, 0x23A, false), // Scimitar
+    w(0x0F61, SWORDS,  SLASHING, 35,  5, 33, 30, 14, 18, 350, SoundId(0x23A), false), // Longsword
+    w(0x0F5E, SWORDS,  SLASHING, 45,  5, 29, 33, 13, 17, 325, SoundId(0x23A), false), // Broadsword
+    w(0x13FF, SWORDS,  SLASHING, 58,  5, 26, 46, 10, 14, 250, SoundId(0x23A), false), // Katana
+    w(0x13B9, SWORDS,  SLASHING, 30,  6, 34, 28, 15, 19, 375, SoundId(0x23A), false), // Viking sword
+    w(0x1441, SWORDS,  SLASHING, 45,  6, 28, 44, 10, 14, 250, SoundId(0x23A), false), // Cutlass
+    w(0x13B6, SWORDS,  SLASHING, 43,  4, 30, 37, 12, 16, 300, SoundId(0x23A), false), // Scimitar
     // -- Knives (BaseKnife; the dagger is the one that pierces) --------------------
-    w(0x0F52, SWORDS,  PIERCING, 55,  3, 15, 56, 10, 12, 200, 0x238, false), // Dagger
-    w(0x13F6, SWORDS,  SLASHING, 40,  2, 14, 49, 10, 13, 225, 0x238, false), // Butcher knife
-    w(0x0EC3, SWORDS,  SLASHING, 40,  2, 13, 46, 10, 14, 250, 0x238, false), // Cleaver
-    w(0x0EC4, SWORDS,  SLASHING, 40,  1, 10, 49, 10, 13, 225, 0x238, false), // Skinning knife
+    w(0x0F52, SWORDS,  PIERCING, 55,  3, 15, 56, 10, 12, 200, SoundId(0x238), false), // Dagger
+    w(0x13F6, SWORDS,  SLASHING, 40,  2, 14, 49, 10, 13, 225, SoundId(0x238), false), // Butcher knife
+    w(0x0EC3, SWORDS,  SLASHING, 40,  2, 13, 46, 10, 14, 250, SoundId(0x238), false), // Cleaver
+    w(0x0EC4, SWORDS,  SLASHING, 40,  1, 10, 49, 10, 13, 225, SoundId(0x238), false), // Skinning knife
     // -- Axes (BaseAxe, Swords skill; the war axe bashes) -------------------------
-    w(0x0F43, SWORDS,  AXE,      40,  2, 17, 41, 13, 16, 275, 0x23A, true ), // Hatchet
-    w(0x0F49, SWORDS,  AXE,      37,  6, 33, 37, 14, 17, 300, 0x23A, true ), // Axe
-    both_hands(w(0x0F47, SWORDS,  AXE,      30,  6, 38, 31, 16, 19, 350, 0x23A, true )), // Battle axe
-    w(0x0F4B, SWORDS,  AXE,      37,  5, 35, 33, 15, 18, 325, 0x23A, true ), // Double axe
-    w(0x0F45, SWORDS,  AXE,      37,  6, 33, 33, 15, 18, 325, 0x23A, true ), // Executioner's axe
-    w(0x13FB, SWORDS,  AXE,      30,  6, 38, 29, 17, 20, 375, 0x23A, true ), // Large battle axe
-    w(0x1443, SWORDS,  AXE,      30,  5, 39, 31, 16, 19, 350, 0x23A, true ), // Two-handed axe
-    w(0x13B0, SWORDS,  BASHING,  40,  9, 27, 33, 12, 16, 300, 0x239, true ), // War axe
-    w(0x0E86, SWORDS,  AXE,      35,  1, 15, 35, 12, 16, 300, 0x23A, true ), // Pickaxe
+    w(0x0F43, SWORDS,  AXE,      40,  2, 17, 41, 13, 16, 275, SoundId(0x23A), true ), // Hatchet
+    w(0x0F49, SWORDS,  AXE,      37,  6, 33, 37, 14, 17, 300, SoundId(0x23A), true ), // Axe
+    both_hands(w(0x0F47, SWORDS,  AXE,      30,  6, 38, 31, 16, 19, 350, SoundId(0x23A), true )), // Battle axe
+    w(0x0F4B, SWORDS,  AXE,      37,  5, 35, 33, 15, 18, 325, SoundId(0x23A), true ), // Double axe
+    w(0x0F45, SWORDS,  AXE,      37,  6, 33, 33, 15, 18, 325, SoundId(0x23A), true ), // Executioner's axe
+    w(0x13FB, SWORDS,  AXE,      30,  6, 38, 29, 17, 20, 375, SoundId(0x23A), true ), // Large battle axe
+    w(0x1443, SWORDS,  AXE,      30,  5, 39, 31, 16, 19, 350, SoundId(0x23A), true ), // Two-handed axe
+    w(0x13B0, SWORDS,  BASHING,  40,  9, 27, 33, 12, 16, 300, SoundId(0x239), true ), // War axe
+    w(0x0E86, SWORDS,  AXE,      35,  1, 15, 35, 12, 16, 300, SoundId(0x23A), true ), // Pickaxe
     // -- Polearms (BasePoleArm, Swords skill) -------------------------------------
-    w(0x0F4D, SWORDS,  POLEARM,  26,  5, 43, 28, 17, 20, 375, 0x238, false), // Bardiche
-    w(0x143E, SWORDS,  POLEARM,  25,  5, 49, 25, 18, 21, 400, 0x238, false), // Halberd
+    w(0x0F4D, SWORDS,  POLEARM,  26,  5, 43, 28, 17, 20, 375, SoundId(0x238), false), // Bardiche
+    w(0x143E, SWORDS,  POLEARM,  25,  5, 49, 25, 18, 21, 400, SoundId(0x238), false), // Halberd
     // -- Maces (BaseBashing) & staves (BaseStaff) ---------------------------------
-    w(0x13B4, MACING,  BASHING,  40,  8, 24, 44, 10, 14, 250, 0x239, false), // Club
-    w(0x0F5C, MACING,  BASHING,  30,  8, 32, 40, 11, 15, 275, 0x239, false), // Mace
-    w(0x143B, MACING,  BASHING,  30, 10, 30, 32, 14, 18, 350, 0x239, false), // Maul
-    w(0x1407, MACING,  BASHING,  32, 10, 30, 26, 16, 20, 400, 0x239, false), // War mace
-    both_hands(w(0x1439, MACING,  BASHING,  31,  8, 36, 28, 17, 20, 375, 0x239, false)), // War hammer
-    one_hand(w(0x143D, MACING,  BASHING,  30,  6, 33, 28, 13, 17, 325, 0x239, false)), // Hammer pick
-    w(0x0E89, MACING,  STAFF,    48,  8, 28, 48, 11, 14, 225, 0x239, false), // Quarter staff
-    w(0x0DF0, MACING,  STAFF,    35,  8, 33, 39, 13, 16, 275, 0x239, false), // Black staff
-    w(0x13F8, MACING,  STAFF,    33, 10, 30, 33, 15, 18, 325, 0x239, false), // Gnarled staff
-    w(0x0E81, MACING,  STAFF,    30,  3, 12, 40, 13, 16, 275, 0x239, false), // Shepherd's crook
+    w(0x13B4, MACING,  BASHING,  40,  8, 24, 44, 10, 14, 250, SoundId(0x239), false), // Club
+    w(0x0F5C, MACING,  BASHING,  30,  8, 32, 40, 11, 15, 275, SoundId(0x239), false), // Mace
+    w(0x143B, MACING,  BASHING,  30, 10, 30, 32, 14, 18, 350, SoundId(0x239), false), // Maul
+    w(0x1407, MACING,  BASHING,  32, 10, 30, 26, 16, 20, 400, SoundId(0x239), false), // War mace
+    both_hands(w(0x1439, MACING,  BASHING,  31,  8, 36, 28, 17, 20, 375, SoundId(0x239), false)), // War hammer
+    one_hand(w(0x143D, MACING,  BASHING,  30,  6, 33, 28, 13, 17, 325, SoundId(0x239), false)), // Hammer pick
+    w(0x0E89, MACING,  STAFF,    48,  8, 28, 48, 11, 14, 225, SoundId(0x239), false), // Quarter staff
+    w(0x0DF0, MACING,  STAFF,    35,  8, 33, 39, 13, 16, 275, SoundId(0x239), false), // Black staff
+    w(0x13F8, MACING,  STAFF,    33, 10, 30, 33, 15, 18, 325, SoundId(0x239), false), // Gnarled staff
+    w(0x0E81, MACING,  STAFF,    30,  3, 12, 40, 13, 16, 275, SoundId(0x239), false), // Shepherd's crook
     // -- Fencing (BaseSpear, and the kryss) ---------------------------------------
-    w(0x1401, FENCING, PIERCING, 53,  3, 28, 53, 10, 12, 200, 0x238, false), // Kryss
-    w(0x1405, FENCING, PIERCING, 45,  4, 32, 43, 10, 14, 250, 0x238, false), // War fork
-    w(0x0F62, FENCING, PIERCING, 46,  2, 36, 42, 13, 16, 275, 0x238, false), // Spear
-    w(0x1403, FENCING, PIERCING, 50,  4, 32, 55, 10, 13, 200, 0x238, false), // Short spear
-    w(0x0E87, FENCING, PIERCING, 45,  4, 16, 43, 12, 15, 250, 0x238, false), // Pitchfork
+    w(0x1401, FENCING, PIERCING, 53,  3, 28, 53, 10, 12, 200, SoundId(0x238), false), // Kryss
+    w(0x1405, FENCING, PIERCING, 45,  4, 32, 43, 10, 14, 250, SoundId(0x238), false), // War fork
+    w(0x0F62, FENCING, PIERCING, 46,  2, 36, 42, 13, 16, 275, SoundId(0x238), false), // Spear
+    w(0x1403, FENCING, PIERCING, 50,  4, 32, 55, 10, 13, 200, SoundId(0x238), false), // Short spear
+    w(0x0E87, FENCING, PIERCING, 45,  4, 16, 43, 12, 15, 250, SoundId(0x238), false), // Pitchfork
     // -- Archery (BaseRanged) -----------------------------------------------------
     // Range is ServUO's `DefMaxRange`: the bow outreaches both crossbows.
-    both_hands(ranged(w(0x13B2, ARCHERY, RANGED,   20,  9, 41, 25, 25, 25, 425, 0x238, false), ARROW, ARROW_EFFECT, 10)), // Bow
-    both_hands(ranged(w(0x0F50, ARCHERY, RANGED,   18,  8, 43, 24, 18, 24, 450, 0x238, false), BOLT, BOLT_EFFECT, 8)), // Crossbow
-    both_hands(ranged(w(0x13FD, ARCHERY, RANGED,   10, 11, 56, 22, 22, 22, 500, 0x238, false), BOLT, BOLT_EFFECT, 8)), // Heavy crossbow
+    both_hands(ranged(w(0x13B2, ARCHERY, RANGED,   20,  9, 41, 25, 25, 25, 425, SoundId(0x238), false), ARROW, ARROW_EFFECT, 10)), // Bow
+    both_hands(ranged(w(0x0F50, ARCHERY, RANGED,   18,  8, 43, 24, 18, 24, 450, SoundId(0x238), false), BOLT, BOLT_EFFECT, 8)), // Crossbow
+    both_hands(ranged(w(0x13FD, ARCHERY, RANGED,   10, 11, 56, 22, 22, 22, 500, SoundId(0x238), false), BOLT, BOLT_EFFECT, 8)), // Heavy crossbow
 ];
 
 /// Arrow — ServUO's `Arrow.cs` (`0x0F3F`), what the bow fires and what a shot
@@ -414,7 +414,7 @@ const fn w(
     aos_min: u16,
     aos_max: u16,
     ml_speed: u16,
-    miss_sound: u16,
+    miss_sound: SoundId,
     is_axe: bool,
 ) -> WeaponData {
     WeaponData {

@@ -18,6 +18,8 @@ use openshard_state::weapon::{LAYER_ONE_HANDED, WeaponData, WeaponSkill, weapon_
 use openshard_state::weapon::{LAYER_TWO_HANDED, WeaponKind};
 use openshard_state::{Skill, WorldState};
 
+use crate::MELEE_MISS_SOUND;
+
 /// The skill ids the combat rolls read (`Skills` is keyed by these `u8`s).
 ///
 /// Off [`openshard_state::Skill`] rather than written out, because five of the
@@ -81,7 +83,7 @@ pub fn equipped_weapon(state: &WorldState, mobile: EntityId) -> Option<WeaponDat
             // base; lacking a better value, mirror the base's, and inherit the
             // graphic's miss sound and axe flag.
             ml_speed: base.map_or(speed, |weapon| weapon.ml_speed),
-            miss_sound: base.map_or(0, |weapon| weapon.miss_sound),
+            miss_sound: base.map_or(MELEE_MISS_SOUND, |weapon| weapon.miss_sound),
             is_axe: base.is_some_and(|weapon| weapon.is_axe),
             hands: base.and_then(|weapon| weapon.hands),
             ammo: base.and_then(|weapon| weapon.ammo),

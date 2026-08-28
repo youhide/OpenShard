@@ -54,7 +54,6 @@ use openshard_client_render::occlusion::{Builder, Part, SolidId};
 use openshard_client_render::place::Stance;
 use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, Target};
 use openshard_map::grid::BlockExtent;
-use openshard_protocol::wire::Graphic;
 use openshard_tiles::{StaticTile, TileFlags};
 
 use oracle::boxes::{BoxSpec, box_mesh, box_owner};
@@ -540,7 +539,7 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, shot: Shot<'_>) -> Rendere
 
     // A floor for a shadow to fall on: one flat synthetic land tile, repeated
     // over the same bounds the occlusion grid covers.
-    const FLOOR: Graphic = Graphic(3);
+    const FLOOR: openshard_tiles::LandTileId = openshard_tiles::LandTileId(3);
     let floor_pixel = openshard_uofiles::color::Color16((20 << 10) | (20 << 5) | 20);
     let floor_image = openshard_uofiles::image::Image::new(
         openshard_uofiles::art::LAND_TILE_SIZE,
@@ -553,10 +552,7 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, shot: Shot<'_>) -> Rendere
             wide: blocks,
             down: blocks,
         },
-        |_x, _y| openshard_map::map::LandCell {
-            tile: openshard_tiles::LandTileId(FLOOR.0),
-            z: 0,
-        },
+        |_x, _y| openshard_map::map::LandCell { tile: FLOOR, z: 0 },
     );
     let land = openshard_client_render::atlas::LandAtlas::pack([(FLOOR, floor_image)])
         .expect("one flat tile always fits");

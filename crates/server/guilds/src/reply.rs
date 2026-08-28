@@ -15,8 +15,7 @@ use openshard_protocol::gump::{GumpAnswer, GumpResponse};
 use openshard_state::{GuildGumpContext, GuildPage, TargetPurpose, WorldState};
 
 use crate::gump::{
-    self, DIPLOMACY_ACTIONS, DIPLOMACY_BASE, FIELD_ABBREVIATION, FIELD_NAME, GUILD_GUMP, ROSTER_ACTIONS,
-    ROSTER_BASE, button, row_of,
+    self, DIPLOMACY_BUTTONS, FIELD_ABBREVIATION, FIELD_NAME, GUILD_GUMP, ROSTER_BUTTONS, RowAction, button,
 };
 use crate::{RankFlags, Refusal};
 
@@ -123,21 +122,25 @@ fn other_button(
     response: &GumpResponse,
     pressed: openshard_protocol::gump::ButtonId,
 ) {
-    if let Some((row, action)) = row_of(ROSTER_BASE, ROSTER_ACTIONS, pressed, context.members.len()) {
+    if let Some((row, action)) = ROSTER_BUTTONS.decode(pressed, context.members.len()) {
         roster_row(state, player, context, response, row, action);
         gump::show(state, player, GuildPage::Roster);
         return;
     }
-    if let Some((row, action)) = row_of(DIPLOMACY_BASE, DIPLOMACY_ACTIONS, pressed, context.guilds.len()) {
+    if let Some((row, action)) = DIPLOMACY_BUTTONS.decode(pressed, context.guilds.len()) {
         let other = context.guilds[row];
         let outcome = match action {
             gump::DIPLOMACY_WAR => crate::declare_war(state, player, other).map(|_| ()),
             gump::DIPLOMACY_PEACE => crate::make_peace(state, player, other),
-            // `DIPLOMACY_ALLY`, and anything the stride could produce that is
-            // not one of the three. The alliance's name comes off the field on
-            // the same page, and is read only when this guild is in none.
-            _ => crate::invite_to_alliance(state, player, other, &field(response, gump::FIELD_ALLIANCE))
-                .map(|_| ()),
+            // The alliance's name comes off the field on the same page, and is
+            // read only when this guild is in none.
+            gump::DIPLOMACY_ALLY => {
+                crate::invite_to_alliance(state, player, other, &field(response, gump::FIELD_ALLIANCE))
+                    .map(|_| ())
+            }
+            // If a future layout widens its stride without teaching the reply
+            // the new action, an invented button remains a no-op.
+            _ => return,
         };
         if let Err(refusal) = outcome {
             refuse(state, player, refusal);
@@ -154,7 +157,7 @@ fn roster_row(
     context: &GuildGumpContext,
     response: &GumpResponse,
     row: usize,
-    action: u32,
+    action: RowAction,
 ) {
     // Through the serial the window drew, so a row naming someone who logged out
     // resolves to nobody rather than to whoever inherited the entity slot.
@@ -169,9 +172,10 @@ fn roster_row(
         gump::ROSTER_PROMOTE => crate::promote(state, player, member).map(|_| ()),
         gump::ROSTER_DEMOTE => crate::demote(state, player, member).map(|_| ()),
         gump::ROSTER_DISMISS => crate::dismiss(state, player, member),
-        // `ROSTER_LEAD`, and anything the stride could produce that is not one
-        // of the five — which nothing draws, and a client is free to send.
-        _ => crate::pass_leadership(state, player, member),
+        gump::ROSTER_LEAD => crate::pass_leadership(state, player, member),
+        // A future stride can add an action without silently turning it into
+        // leadership transfer in an older reply path.
+        _ => return,
     };
     if let Err(refusal) = outcome {
         refuse(state, player, refusal);

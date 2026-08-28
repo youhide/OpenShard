@@ -621,57 +621,66 @@ impl App {
     /// sweep crosses thousands of viewport pixels and repeatedly renews block
     /// ownership at its edges before it takes its diagnostic dump.
     pub(crate) fn advance_lod_sweep(&mut self, elapsed: Duration) {
-        let warmup_is_settled = {
-            let Some(sweep) = self.lod_sweep.as_mut() else {
-                return;
-            };
-            if !sweep.stationary_soak || sweep.stationary_zoomed {
-                true
-            } else if !sweep.stationary_started {
-                // A diagnostic that promises not to move must not inherit the
-                // opening rig's glide towards its first camera target.
-                self.control.unlock();
-                sweep.stationary_started = true;
-                sweep.stationary_warmup_camera = None;
-                sweep.stationary_warmup_elapsed = Duration::ZERO;
-                false
-            } else {
-                let camera = *self.control.camera();
-                if sweep.stationary_warmup_camera == Some(camera) {
-                    sweep.stationary_warmup_elapsed += elapsed;
-                } else {
-                    sweep.stationary_warmup_camera = Some(camera);
-                    sweep.stationary_warmup_elapsed = Duration::ZERO;
-                }
-                sweep.stationary_warmup_elapsed >= Duration::from_secs(1)
-            }
-        };
-        if !warmup_is_settled {
+        if !self.lod_sweep_stationary_warmup_is_settled(elapsed) {
             return;
         }
-        let delayed_zoom_due = {
-            let Some(sweep) = self.lod_sweep.as_mut() else {
-                return;
-            };
-            sweep.elapsed += elapsed;
-            sweep.stationary_soak && !sweep.stationary_zoomed && sweep.elapsed >= Duration::from_secs(3)
+        self.advance_lod_sweep_delayed_zoom(elapsed);
+        self.pan_lod_sweep(elapsed);
+        self.settle_lod_sweep();
+    }
+
+    fn lod_sweep_stationary_warmup_is_settled(&mut self, elapsed: Duration) -> bool {
+        let Some(sweep) = self.lod_sweep.as_mut() else {
+            return false;
         };
-        if delayed_zoom_due {
-            let mut zoom_steps = 0;
-            while zoom_steps < 3 && self.zoom(false) {
-                zoom_steps += 1;
-            }
-            let sweep = self
-                .lod_sweep
-                .as_mut()
-                .expect("the active diagnostic owns its delayed zoom state");
-            sweep.stationary_zoomed = true;
-            tracing::info!(
-                zoom = %self.control.camera().zoom(),
-                zoom_steps,
-                "injected stationary LOD soak completed default-to-max zoom"
-            );
+        if !sweep.stationary_soak || sweep.stationary_zoomed {
+            return true;
         }
+        if !sweep.stationary_started {
+            // A diagnostic that promises not to move must not inherit the
+            // opening rig's glide towards its first camera target.
+            self.control.unlock();
+            sweep.stationary_started = true;
+            sweep.stationary_warmup_camera = None;
+            sweep.stationary_warmup_elapsed = Duration::ZERO;
+            return false;
+        }
+        let camera = *self.control.camera();
+        if sweep.stationary_warmup_camera == Some(camera) {
+            sweep.stationary_warmup_elapsed += elapsed;
+        } else {
+            sweep.stationary_warmup_camera = Some(camera);
+            sweep.stationary_warmup_elapsed = Duration::ZERO;
+        }
+        sweep.stationary_warmup_elapsed >= Duration::from_secs(1)
+    }
+
+    fn advance_lod_sweep_delayed_zoom(&mut self, elapsed: Duration) {
+        let Some(sweep) = self.lod_sweep.as_mut() else {
+            return;
+        };
+        sweep.elapsed += elapsed;
+        let delayed_zoom_due =
+            sweep.stationary_soak && !sweep.stationary_zoomed && sweep.elapsed >= Duration::from_secs(3);
+        if !delayed_zoom_due {
+            return;
+        }
+        let mut zoom_steps = 0;
+        while zoom_steps < 3 && self.zoom(false) {
+            zoom_steps += 1;
+        }
+        self.lod_sweep
+            .as_mut()
+            .expect("the active diagnostic owns its delayed zoom state")
+            .stationary_zoomed = true;
+        tracing::info!(
+            zoom = %self.control.camera().zoom(),
+            zoom_steps,
+            "injected stationary LOD soak completed default-to-max zoom"
+        );
+    }
+
+    fn pan_lod_sweep(&mut self, elapsed: Duration) {
         let Some(sweep) = self.lod_sweep.as_mut() else {
             return;
         };
@@ -688,6 +697,12 @@ impl App {
         } else {
             self.control.pan(0, -pixels);
         }
+    }
+
+    fn settle_lod_sweep(&mut self) {
+        let Some(sweep) = self.lod_sweep.as_mut() else {
+            return;
+        };
         let settle_after = if sweep.atlas_soak || sweep.stationary_soak {
             Duration::from_secs(30)
         } else {

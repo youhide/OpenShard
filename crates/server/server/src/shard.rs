@@ -200,6 +200,58 @@ fn snapshot_channel(unwritten: Unwritten) -> (SnapshotTx, SnapshotRx) {
     )
 }
 
+/// Whether the shutdown sweep reached the task that owns the store.
+///
+/// Shutdown has no later opportunity to save, so its handoff is an outcome the
+/// teardown must carry all the way to its final log line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShutdownSnapshotHandoff {
+    Queued,
+    SaveTaskGone { tick: u64, rows: usize },
+}
+
+fn handoff_shutdown_snapshot(saves: &SnapshotTx, snapshot: Snapshot) -> ShutdownSnapshotHandoff {
+    let tick = snapshot.tick;
+    let rows = snapshot.len();
+    match saves.send(snapshot) {
+        Ok(()) => ShutdownSnapshotHandoff::Queued,
+        Err(_) => ShutdownSnapshotHandoff::SaveTaskGone { tick, rows },
+    }
+}
+
+/// Whether the shard may continue after handing off this tick's snapshots.
+///
+/// A missing task is terminal for the running shard: continuing would accept
+/// play that no future cadence can persist. The tick returns this outcome to
+/// `run_shard`, which closes the shared [`Shutdown`] and enters the ordinary
+/// final-snapshot teardown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TickOutcome {
+    Continue,
+    SaveTaskGone { tick: u64, rows: usize },
+}
+
+fn handoff_tick_snapshot(saves: &SnapshotTx, snapshot: Snapshot) -> TickOutcome {
+    let tick = snapshot.tick;
+    let rows = snapshot.len();
+    match saves.send(snapshot) {
+        Ok(()) => TickOutcome::Continue,
+        Err(_) => TickOutcome::SaveTaskGone { tick, rows },
+    }
+}
+
+/// Raise the one stop word shared by the tick loop and gateway after a failed
+/// periodic handoff, and retain the failure for the loop's diagnostic.
+fn stop_for_failed_tick_handoff(shutdown: &Shutdown, outcome: TickOutcome) -> Option<TickOutcome> {
+    match outcome {
+        TickOutcome::Continue => None,
+        failed @ TickOutcome::SaveTaskGone { .. } => {
+            shutdown.stop();
+            Some(failed)
+        }
+    }
+}
+
 /// Sender half of the save task's failure-signal channel — a save failed and
 /// the tick loop should mark the world for a full resweep. The unit payload
 /// makes it easy to reach for a bare `mpsc::unbounded_channel::<()>()` at a
@@ -331,7 +383,7 @@ struct Shard {
 impl Shard {
     /// Run one tick: advance the world, flush its outbound packets, hand off its
     /// snapshots, and pump the gameplay script.
-    fn tick(&mut self) {
+    fn tick(&mut self) -> TickOutcome {
         self.world.tick(Instant::now());
         // Before anything is sent: what the world did this tick decides which
         // connections are in it, and a refusal means there is nobody left to send
@@ -340,12 +392,16 @@ impl Shard {
             self.sessions.close(connection);
         }
         self.flush_outbound();
-        // Handed off, not awaited. The tick's job here is to stop
-        // holding the only copy.
+        // Handed off, not awaited. A live task owns the slow write; a dead one
+        // ends play, because accepting another tick would create state no save
+        // cadence can ever persist.
         for snapshot in self.world.drain_saves() {
-            let _ = self.saves.send(snapshot);
+            if let outcome @ TickOutcome::SaveTaskGone { .. } = handoff_tick_snapshot(&self.saves, snapshot) {
+                return outcome;
+            }
         }
         self.answer_verbs();
+        TickOutcome::Continue
     }
 
     /// Lay down whatever the tree has for the admin verbs pressed this tick.
@@ -496,8 +552,8 @@ fn report_pace(pace: &mut crate::pace::Pace, window: crate::pace::Window, shutdo
 /// [`Shutdown`] the gateway was built with, so that the door closes and the tick
 /// ends on one word rather than two; what happens after that word is heard is
 /// below the loop — the trades, the last snapshot, and the save task awaited to
-/// the end. **This function returns only once the world is on disk**, which is
-/// what makes it something a caller may wait for.
+/// the end. If that task is gone or cannot accept the final snapshot, shutdown
+/// records the failed save instead of claiming the world reached disk.
 pub async fn run_shard(
     mut events: ServerEventRx,
     config: &Config,
@@ -601,7 +657,18 @@ pub async fn run_shard(
 
             _ = ticker.tick() => {
                 let began = Instant::now();
-                shard.tick();
+                if let Some(TickOutcome::SaveTaskGone { tick, rows }) =
+                    stop_for_failed_tick_handoff(&shutdown, shard.tick())
+                {
+                    error!(
+                        tick,
+                        rows,
+                        "a periodic snapshot could not reach the save task; stopping before more unsavable play"
+                    );
+                    // The gateway holds this same word, so no new connection is
+                    // accepted while the existing controlled shutdown tail runs.
+                    break;
+                }
                 // Measured around the tick rather than inside it: the world is
                 // never handed a wall clock, so replay is untouched and a run
                 // with this measurement produces the same world as one without.
@@ -686,14 +753,35 @@ pub async fn run_shard(
     // stop taken mid-trade costs both parties whatever they had offered.
     world.cancel_all_trades();
     world.take_snapshot();
+    let mut all_snapshots_handed_off = true;
     for snapshot in world.drain_saves() {
-        let _ = saves.send(snapshot);
+        match handoff_shutdown_snapshot(&saves, snapshot) {
+            ShutdownSnapshotHandoff::Queued => {}
+            ShutdownSnapshotHandoff::SaveTaskGone { tick, rows } => {
+                all_snapshots_handed_off = false;
+                error!(
+                    tick,
+                    rows, "a shutdown snapshot could not reach the save task; these rows were not saved"
+                );
+            }
+        }
     }
     drop(saves);
-    if let Err(error) = save_task.await {
-        error!(%error, "the save task did not finish cleanly on shutdown");
+    let save_task_finished = match save_task.await {
+        Ok(()) => true,
+        Err(error) => {
+            error!(%error, "the save task did not finish cleanly on shutdown");
+            false
+        }
+    };
+    if all_snapshots_handed_off && save_task_finished {
+        info!(took = ?stopping.elapsed(), "world saved; shutting down");
+    } else {
+        error!(
+            took = ?stopping.elapsed(),
+            "the world was not fully saved; shutting down"
+        );
     }
-    info!(took = ?stopping.elapsed(), "world saved; shutting down");
 }
 
 /// Whether the relay is about to send this client somewhere it cannot get back
@@ -1205,6 +1293,40 @@ mod tests {
             "a snapshot nobody took is not outstanding work"
         );
         assert_eq!(unwritten.rows(), 0);
+    }
+
+    #[test]
+    fn shutdown_handoff_says_when_the_save_task_is_gone() {
+        let (saves, _snapshots) = snapshot_channel(Unwritten::new());
+        assert_eq!(
+            handoff_shutdown_snapshot(&saves, three_rows(1)),
+            ShutdownSnapshotHandoff::Queued
+        );
+
+        let (saves, snapshots) = snapshot_channel(Unwritten::new());
+        drop(snapshots);
+        assert_eq!(
+            handoff_shutdown_snapshot(&saves, three_rows(2)),
+            ShutdownSnapshotHandoff::SaveTaskGone { tick: 2, rows: 3 }
+        );
+    }
+
+    #[test]
+    fn periodic_handoff_stops_play_when_the_save_task_is_gone() {
+        let unwritten = Unwritten::new();
+        let (saves, snapshots) = snapshot_channel(unwritten.clone());
+        drop(snapshots);
+
+        let outcome = handoff_tick_snapshot(&saves, three_rows(7));
+        assert_eq!(outcome, TickOutcome::SaveTaskGone { tick: 7, rows: 3 });
+        let shutdown = Shutdown::new();
+        assert_eq!(stop_for_failed_tick_handoff(&shutdown, outcome), Some(outcome));
+        assert!(
+            shutdown.is_stopping(),
+            "the gateway and tick loop were not stopped"
+        );
+        assert_eq!(unwritten.writes(), 0, "a rejected handoff is not queued work");
+        assert_eq!(unwritten.rows(), 0, "and leaves no phantom rows for shutdown");
     }
 
     #[test]

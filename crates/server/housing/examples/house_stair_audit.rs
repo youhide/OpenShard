@@ -305,7 +305,7 @@ fn inspect_saved_step(
             let laid = Cover::of_static(tiles.static_tile(component.graphic.0)).based_at(at.z);
             let tile = Tile::new(at.x, at.y);
             if tile == Tile::new(from.x, from.y) || tile == target {
-                relevant_components.push((house_serial, multi, index, component, at, laid.clone()));
+                relevant_components.push((house_serial, multi, index, component, at, laid));
             }
             covers.entry(tile).or_default().extend(laid);
         }
@@ -353,9 +353,11 @@ fn inspect_saved_step(
         let (graphic, at, door, open) = decoration?;
         decoration_count += 1;
         let laid = if door {
-            (!open)
-                .then(|| vec![Cover::door(at.z, openshard_state::DOOR_HEIGHT)])
-                .unwrap_or_default()
+            if open {
+                Vec::new()
+            } else {
+                vec![Cover::door(at.z, openshard_state::DOOR_HEIGHT)]
+            }
         } else {
             Cover::of_static(tiles.static_tile(graphic))
                 .based_at(at.z)
@@ -490,7 +492,7 @@ fn inspect_house(
             .expect("a placed house component fits on the map");
         let cover = Cover::of_static(tiles.static_tile(component.graphic.0)).based_at(at.z);
         if Tile::new(at.x, at.y) == inspect.target {
-            components.push((index, component, at, cover.clone()));
+            components.push((index, component, at, cover));
         }
         let tile = Tile::new(at.x, at.y);
         let mut covers = overlay.at(tile).to_vec();
@@ -524,10 +526,8 @@ fn inspect_house(
         let Ok(y) = u16::try_from(y) else { continue };
         let source = Tile::new(x, y);
         let accepted = (i8::MIN..=i8::MAX)
-            .filter_map(|z| {
-                can_stand(&footing, source, i32::from(z), PLAYER_HEIGHT)
-                    .then(|| (z, step_allowed(&footing, Point::new(x, y, z), direction)))
-            })
+            .filter(|&z| can_stand(&footing, source, i32::from(z), PLAYER_HEIGHT))
+            .map(|z| (z, step_allowed(&footing, Point::new(x, y, z), direction)))
             .collect::<Vec<_>>();
         println!("  {direction:?} from ({x}, {y}): {accepted:?}");
     }

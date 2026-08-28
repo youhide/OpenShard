@@ -2311,7 +2311,7 @@ fn structural_surfaces(terrain: &MapTerrain<'_>, x: u16, y: u16) -> Vec<i32> {
     let tiledata = terrain.tiles();
     let mut surfaces = Vec::new();
     if let Some(land) = map.land(x, y) {
-        let flags = tiledata.land(land.tile.0).flags;
+        let flags = tiledata.land(land.tile).flags;
         if !flags.is_water() && !flags.is_blocking() {
             surfaces.push(i32::from(
                 map.average_land_z(x, y).expect("land was just present"),

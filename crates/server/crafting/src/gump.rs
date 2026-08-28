@@ -53,30 +53,63 @@ const LABEL_HUE: u32 = 0x480;
 /// Rows to a page, in both lists.
 const PER_PAGE: usize = 10;
 
+/// Which operation an encoded craft-window button asks for.
+///
+/// Kept distinct from [`ButtonIndex`]: the wire formula stores both as `u32`,
+/// but exchanging them still produces a valid-looking [`ButtonId`] for a
+/// different operation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct ButtonKind(u32);
+
+/// Which category, recipe, material, or miscellaneous command a button names.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct ButtonIndex(u32);
+
+impl ButtonIndex {
+    /// Turn an in-memory list position into the number the wire formula uses.
+    fn from_position(position: usize) -> Self {
+        Self(u32::try_from(position).expect("a craft-gump list cannot contain 2^32 rows"))
+    }
+
+    /// Narrow a client-supplied index to a category stored in the gump context.
+    fn as_group(self) -> Option<u16> {
+        u16::try_from(self.0).ok()
+    }
+
+    /// Narrow a client-supplied index to a material stored in the gump context.
+    fn as_material(self) -> Option<u8> {
+        u8::try_from(self.0).ok()
+    }
+}
+
 /// ServUO's seven button kinds. The three this slice does not serve are still
 /// decoded, so an unhandled press is a no-op and never a mis-read of another
 /// kind.
 mod kind {
+    use super::ButtonKind;
+
     /// A category on the left.
-    pub const GROUP: u32 = 0;
+    pub const GROUP: ButtonKind = ButtonKind(0);
     /// Make the item on this row.
-    pub const MAKE: u32 = 1;
+    pub const MAKE: ButtonKind = ButtonKind(1);
     /// Show the item's detail page.
-    pub const DETAILS: u32 = 2;
+    pub const DETAILS: ButtonKind = ButtonKind(2);
     /// A material off the axis.
-    pub const RESOURCE: u32 = 5;
+    pub const RESOURCE: ButtonKind = ButtonKind(5);
     /// Everything else, told apart by its index.
-    pub const MISC: u32 = 6;
+    pub const MISC: ButtonKind = ButtonKind(6);
     /// How many kinds there are — the modulus.
     pub const COUNT: u32 = 7;
 }
 
 /// The `MISC` sub-buttons, by index.
 mod misc {
+    use super::ButtonIndex;
+
     /// Open the material list.
-    pub const RESOURCES: u32 = 0;
+    pub const RESOURCES: ButtonIndex = ButtonIndex(0);
     /// Cancel a craft in flight.
-    pub const CANCEL: u32 = 11;
+    pub const CANCEL: ButtonIndex = ButtonIndex(11);
 }
 
 /// The detail page's buttons, which are plain small numbers rather than encoded.
@@ -98,8 +131,8 @@ pub fn owns(gump_id: RawGumpId) -> bool {
 }
 
 /// ServUO's `GetButtonID`.
-const fn button_id(kind: u32, index: u32) -> ButtonId {
-    ButtonId(1 + kind + index * kind::COUNT)
+const fn button_id(kind: ButtonKind, index: ButtonIndex) -> ButtonId {
+    ButtonId(1 + kind.0 + index.0 * kind::COUNT)
 }
 
 /// And its inverse: which kind of button, and which row of it.
@@ -108,9 +141,9 @@ const fn button_id(kind: u32, index: u32) -> ButtonId {
 /// well: the close box is no longer a button id at all — `RawButtonId::
 /// interpret` takes it apart one step earlier — so the `id == 0` guard this
 /// function opened with is gone.
-const fn decode_button(button: ButtonId) -> (u32, u32) {
+const fn decode_button(button: ButtonId) -> (ButtonKind, ButtonIndex) {
     let id = button.0 - 1;
-    (id % kind::COUNT, id / kind::COUNT)
+    (ButtonKind(id % kind::COUNT), ButtonIndex(id / kind::COUNT))
 }
 
 /// Draw the craft window for a player, and remember what they are looking at.
@@ -293,7 +326,7 @@ fn label(layout: &mut GumpLayout, x: i32, y: i32, width: i32, text: Text, argume
 fn groups(layout: &mut GumpLayout, def: &CraftSystemDef) {
     for (i, group) in def.groups.iter().enumerate() {
         let y = 80 + i32::try_from(i).unwrap_or(0) * 20;
-        let index = u32::try_from(i).unwrap_or(0);
+        let index = ButtonIndex::from_position(i);
         layout.button(
             15,
             y,
@@ -336,7 +369,7 @@ fn items(layout: &mut GumpLayout, def: &CraftSystemDef, group: u16) {
             }
         }
         let y = 60 + i32::try_from(row).unwrap_or(0) * 20;
-        let index = u32::try_from(i).unwrap_or(0);
+        let index = ButtonIndex::from_position(i);
         layout.button(
             220,
             y,
@@ -375,7 +408,7 @@ fn resources(layout: &mut GumpLayout, state: &WorldState, player: EntityId, def:
             }
         }
         let y = 60 + i32::try_from(row).unwrap_or(0) * 20;
-        let index = u32::try_from(i).unwrap_or(0);
+        let index = ButtonIndex::from_position(i);
         layout.button(
             220,
             y,
@@ -564,8 +597,13 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
     let (kind, index) = decode_button(pressed);
     match kind {
         kind::GROUP => {
+            // An invented large index selects nothing. Falling back to zero
+            // here would silently turn it into the first real category.
+            let Some(group) = index.as_group() else {
+                return true;
+            };
             let mut next = context;
-            next.group = u16::try_from(index).unwrap_or(0);
+            next.group = group;
             next.page = CraftGumpPage::Items;
             next.notice = None;
             open(state, player, next);
@@ -588,8 +626,11 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
             // inventing one, and quietly selecting iron instead would let it
             // craft with a material it never picked.
             if let Some(axis) = def.sub_res {
-                if usize::try_from(index).is_ok_and(|i| i < axis.entries.len()) {
-                    next.sub_res = u8::try_from(index).unwrap_or(0);
+                if let Some(material) = index
+                    .as_material()
+                    .filter(|material| usize::from(*material) < axis.entries.len())
+                {
+                    next.sub_res = material;
                 }
             }
             next.page = CraftGumpPage::Items;
@@ -617,12 +658,12 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
 }
 
 /// The `index`-th recipe of a category, as the window numbered it.
-fn recipe_in_group(def: &CraftSystemDef, group: u16, index: u32) -> Option<u16> {
+fn recipe_in_group(def: &CraftSystemDef, group: u16, index: ButtonIndex) -> Option<u16> {
     def.recipes
         .iter()
         .enumerate()
         .filter(|(_, recipe)| recipe.group == group)
-        .nth(usize::try_from(index).ok()?)
+        .nth(usize::try_from(index.0).ok()?)
         .and_then(|(at, _)| u16::try_from(at).ok())
 }
 
@@ -653,8 +694,10 @@ mod tests {
         // ServUO's `1 + type + index * 7`, and the decode on the other side has
         // to agree exactly — a scheme of one's own would be a second thing to get
         // wrong for no gain.
-        for kind in 0..kind::COUNT {
-            for index in 0..50 {
+        for raw_kind in 0..kind::COUNT {
+            for raw_index in 0..50 {
+                let kind = ButtonKind(raw_kind);
+                let index = ButtonIndex(raw_index);
                 let id = button_id(kind, index);
                 assert_eq!(decode_button(id), (kind, index));
             }
@@ -671,7 +714,17 @@ mod tests {
             openshard_protocol::gump::RawButtonId(0).interpret(),
             GumpAnswer::Closed
         );
-        assert_eq!(decode_button(button_id(kind::GROUP, 0)), (0, 0));
+        assert_eq!(
+            decode_button(button_id(kind::GROUP, ButtonIndex(0))),
+            (kind::GROUP, ButtonIndex(0))
+        );
+    }
+
+    #[test]
+    fn an_oversized_category_does_not_fall_back_to_the_first_one() {
+        let forged = ButtonIndex(u32::from(u16::MAX) + 1);
+
+        assert_eq!(forged.as_group(), None);
     }
 
     #[test]

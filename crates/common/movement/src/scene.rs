@@ -228,7 +228,7 @@ impl Scene {
     /// overrode the rule and agreed with itself.
     pub fn land_art(&mut self, tile: u16, flags: u64) -> &mut Self {
         self.tiles.set_land_tile(
-            tile,
+            LandTileId(tile),
             openshard_tiles::LandTile {
                 flags: TileFlags::new(flags),
                 ..openshard_tiles::LandTile::default()
