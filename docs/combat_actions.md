@@ -902,6 +902,13 @@ of it belonged to any of them.
   often about somebody else — the monster that stopped, the archer across the
   street — and marking one requires having them under the cursor, which nothing
   reads. A mark that took the hovered body would cost one line and one lookup.
+- **~~The mark went nowhere a reader could reach.~~** *Closed.* `k` stamped the
+  ring and logged `marked the combat log` — a line that names neither what was
+  seen nor where to look — and the record left the process only through the
+  panel's *Save to file*. So the key that exists to spare a hand "F1, then a tab,
+  then a button" had moved those three steps from the stamping to the reading,
+  and a person who pressed it and then closed the window had nothing. `k` now
+  writes `combat-<stamp>.log` itself and the tracing line carries the snapshot.
 
 **From Ф4.4:**
 

@@ -605,7 +605,25 @@ impl ApplicationHandler<()> for App {
                         let me = self.world.me();
                         let seen = self.world.presentation.crowd.preparing(me);
                         self.world.presentation.combat_log.mark(me, String::new(), seen);
-                        tracing::info!("marked the combat log");
+                        // Say what was marked, not that a mark happened. The
+                        // person pressing this key is about to hand somebody the
+                        // terminal, and "marked the combat log" is a line that
+                        // answers none of the question it was pressed about.
+                        tracing::info!(
+                            seen = crate::combat_log::describe(&crate::combat_log::Event::Mark {
+                                note: String::new(),
+                                seen: seen.map(crate::combat_log::Seen::of),
+                            }),
+                            "marked the combat log"
+                        );
+                        // And write the file, here, rather than leaving it in a
+                        // ring that only the panel can read. The key exists so
+                        // that a hand does not have to find F1, then a tab, then
+                        // a button — a mark that still needs those three to be
+                        // *read* has moved the cost rather than removed it, and
+                        // the ring is gone with the process. The panel's own
+                        // button stays for when a note is being typed anyway.
+                        self.save_combat_log();
                         false
                     }
                 };

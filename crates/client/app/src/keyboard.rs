@@ -290,6 +290,11 @@ pub(crate) enum Hotkey {
     /// together with what was drawn over their body at it — and a hand that has
     /// to find F1, then a tab, then a button has let that instant go. The panel
     /// has the same button for when there is time to type a note.
+    ///
+    /// It also **writes the log out**, for the same reason it is a key: a mark
+    /// left in a ring that only the panel can read has moved those three steps
+    /// from the stamping to the reading rather than removed them, and the ring
+    /// dies with the process.
     MarkCombat,
 }
 
