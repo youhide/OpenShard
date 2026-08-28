@@ -17,6 +17,7 @@ use openshard_client_render::impostor::Fringe;
 use openshard_client_render::interiors::{FloorView, ZSliceView};
 use openshard_client_render::occlusion;
 use openshard_protocol::world::{Light, RangedRange};
+use serde::{Deserialize, Serialize};
 
 /// Arm's length, in tiles: the reach the sight overlay starts at.
 ///
@@ -79,7 +80,8 @@ pub(crate) fn invalidate_atlas_coverage(covered: &mut Option<TileBounds>) {
 }
 
 /// What the cursor is allowed to light up.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum HighlightTarget {
     #[default]
     Auto,
@@ -88,7 +90,8 @@ pub enum HighlightTarget {
 }
 
 /// How an item or creature says it is the one under the cursor.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum HighlightStyle {
     Hue,
     #[default]

@@ -212,6 +212,7 @@ thiserror = "2"
 # a minimal failing case rather than one fixed fixture per bug. Dev-only.
 proptest = "1"
 rodio = { version = "0.22", default-features = false, features = ["playback", "mp3", "vorbis", "flac", "wav"] }
+ron = "0.12"
 tokio = { version = "1", features = ["full"] }
 toml = "0.8"
 tracing = "0.1"

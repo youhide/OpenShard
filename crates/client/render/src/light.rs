@@ -1509,7 +1509,7 @@ impl Tuning {
     /// that many tiles, and no `NaN` anywhere.
     ///
     /// The door this type has, and the reason it has one is that its fields
-    /// arrive from a *file* — `client_ui.toml`, hand-editable on purpose. A
+    /// arrive from a *file* — `client_ui.ron`, hand-editable on purpose. A
     /// negative brightness is a flame that darkens what it reaches and a `NaN`
     /// radius is a frame with no lit pixels at all; both are silent, and both are
     /// one typo away. Clamping is stated here, in the crate that owns what these

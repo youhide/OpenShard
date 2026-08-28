@@ -179,7 +179,7 @@ impl std::error::Error for CacheError {
 /// The identity first and the facet second, both in the name: a world names the
 /// base set the shard imported, and a facet says which of that shard's grounds
 /// this is. `dir` is the caller's — the client puts it beside its own state, in
-/// the working directory, which is where `client_ui.toml` lives and for the same
+/// the working directory, which is where `client_ui.ron` lives and for the same
 /// reason: per-checkout, visible, and deleting it is how you start again.
 #[must_use]
 pub fn path_of(dir: &Path, world: WorldId, facet: Facet) -> PathBuf {
