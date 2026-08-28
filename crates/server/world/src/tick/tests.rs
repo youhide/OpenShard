@@ -35,7 +35,7 @@ use openshard_state::components::{
 use openshard_state::sectors::distance;
 use openshard_state::{SettledItemLocation, Skill, StatLock};
 
-pub(super) const START: (u16, u16) = (1363, 1600);
+pub(super) const START: Tile = Tile::new(1363, 1600);
 
 /// A generous upper bound on ticks-per-beat, so a test loop that waits "a few
 /// beats" survives any cadence the defaults settle on.
@@ -837,7 +837,7 @@ fn a_facet_with_free_movement_has_nobody_in_the_way() {
         "facet 1 runs Trammel rules"
     );
 
-    let at = Point::new(START.0, START.1, 0);
+    let at = Point::new(START.x, START.y, 0);
     world.state.move_to(entity, Facet(1), at);
     let onto = Point::new(at.x, at.y + 1, at.z);
     let other = spawn_mobile_at(&mut world, onto, 50, now);
@@ -1020,7 +1020,7 @@ fn a_spawned_item_is_drawn_to_a_player_in_range() {
     let connection = enter(&mut world, now);
     let _ = packets_for(&mut world, connection); // the login burst
 
-    spawn_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    spawn_item_at(&mut world, Point::new(START.x, START.y, 0), now);
 
     let packets = packets_for(&mut world, connection);
     assert!(
@@ -1037,7 +1037,7 @@ fn an_item_out_of_range_is_not_drawn() {
     let _ = packets_for(&mut world, connection);
 
     // Well past the view range.
-    spawn_item_at(&mut world, Point::new(START.0 + 50, START.1, 0), now);
+    spawn_item_at(&mut world, Point::new(START.x + 50, START.y, 0), now);
 
     let packets = packets_for(&mut world, connection);
     assert!(
@@ -1055,12 +1055,12 @@ fn walking_into_range_draws_an_item_and_out_of_range_forgets_it() {
     let connection = enter(&mut world, now);
 
     // Put the player far away and the item back at the start, out of range.
-    teleport(&mut world, connection, Point::new(START.0 + 50, START.1, 0));
-    spawn_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    teleport(&mut world, connection, Point::new(START.x + 50, START.y, 0));
+    spawn_item_at(&mut world, Point::new(START.x, START.y, 0), now);
     let _ = packets_for(&mut world, connection);
 
     // Come into range: the item is drawn.
-    teleport(&mut world, connection, Point::new(START.0, START.1, 0));
+    teleport(&mut world, connection, Point::new(START.x, START.y, 0));
     let arriving = packets_for(&mut world, connection);
     assert!(
         arriving.iter().any(|p| p[0] == 0x1A),
@@ -1068,7 +1068,7 @@ fn walking_into_range_draws_an_item_and_out_of_range_forgets_it() {
     );
 
     // Leave again: the item is taken off the screen with 0x1D.
-    teleport(&mut world, connection, Point::new(START.0 + 50, START.1, 0));
+    teleport(&mut world, connection, Point::new(START.x + 50, START.y, 0));
     let leaving = packets_for(&mut world, connection);
     assert!(
         leaving.iter().any(|p| p[0] == 0x1D),
@@ -1090,7 +1090,7 @@ fn a_stacked_item_keeps_its_amount_when_drawn() {
         hue: openshard_protocol::wire::Hue(0),
         amount: 500,
         stackable: false,
-        position: Point::new(START.0, START.1, 0),
+        position: Point::new(START.x, START.y, 0),
         facet: Facet(0),
     });
     world.tick(now);
@@ -1123,7 +1123,7 @@ fn picking_up_then_dropping_moves_an_item_on_everyone_elses_screen() {
     let mut world = world();
     let picker = enter(&mut world, now);
     let watcher = enter_as(&mut world, ConnectionId::from_raw(2), now);
-    spawn_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    spawn_item_at(&mut world, Point::new(START.x, START.y, 0), now);
     let _ = packets_for(&mut world, picker);
     let _ = packets_for(&mut world, watcher);
     let serial = only_item_serial(&world);
@@ -1142,7 +1142,7 @@ fn picking_up_then_dropping_moves_an_item_on_everyone_elses_screen() {
     world.queue(Command::DropItem {
         connection: picker,
         serial: RawSerial(serial.raw()),
-        destination: DropDestination::Ground(Point::new(START.0, START.1, 0)),
+        destination: DropDestination::Ground(Point::new(START.x, START.y, 0)),
     });
     world.tick(now);
     assert!(
@@ -1165,7 +1165,7 @@ fn picking_up_out_of_reach_is_rejected_and_leaves_the_item() {
     let now = Instant::now();
     let mut world = world();
     let picker = enter(&mut world, now);
-    spawn_item_at(&mut world, Point::new(START.0 + 20, START.1, 0), now);
+    spawn_item_at(&mut world, Point::new(START.x + 20, START.y, 0), now);
     let _ = packets_for(&mut world, picker);
     let serial = only_item_serial(&world);
     let item = world.state.registry.entity_of(serial).unwrap();
@@ -1193,7 +1193,7 @@ fn a_second_lift_recovers_the_item_already_on_the_cursor() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let first = spawn_plain_item_at(&mut world, here, now);
     let second = spawn_plain_item_at(&mut world, here, now);
     let first_item = entity(&world, first);
@@ -1236,7 +1236,7 @@ fn dropping_out_of_reach_bounces_the_item_back_to_where_it_was() {
     let now = Instant::now();
     let mut world = world();
     let picker = enter(&mut world, now);
-    let origin = Point::new(START.0, START.1, 0);
+    let origin = Point::new(START.x, START.y, 0);
     spawn_item_at(&mut world, origin, now);
     let serial = only_item_serial(&world);
     let item = world.state.registry.entity_of(serial).unwrap();
@@ -1253,7 +1253,7 @@ fn dropping_out_of_reach_bounces_the_item_back_to_where_it_was() {
     world.queue(Command::DropItem {
         connection: picker,
         serial: RawSerial(serial.raw()),
-        destination: DropDestination::Ground(Point::new(START.0 + 40, START.1, 0)),
+        destination: DropDestination::Ground(Point::new(START.x + 40, START.y, 0)),
     });
     world.tick(now);
 
@@ -1275,7 +1275,7 @@ fn logging_out_while_holding_an_item_returns_it_to_the_ground() {
     let mut world = world();
     let picker = enter(&mut world, now);
     let watcher = enter_as(&mut world, ConnectionId::from_raw(2), now);
-    let origin = Point::new(START.0, START.1, 0);
+    let origin = Point::new(START.x, START.y, 0);
     spawn_item_at(&mut world, origin, now);
     let serial = only_item_serial(&world);
     let item = world.state.registry.entity_of(serial).unwrap();
@@ -1374,7 +1374,7 @@ fn double_clicking_a_container_opens_it() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let container = spawn_container_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let container = spawn_container_at(&mut world, Point::new(START.x, START.y, 0), now);
     let _ = packets_for(&mut world, player);
 
     world.queue(Command::DoubleClick {
@@ -1397,7 +1397,7 @@ fn walking_onto_a_chair_seats_one_player_and_the_next_step_leaves_it() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let chair_at = Point::new(START.0, START.1 - 1, 0);
+    let chair_at = Point::new(START.x, START.y - 1, 0);
     world.queue(Command::SpawnItem {
         graphic: WOODEN_CHAIR,
         hue: Hue::NONE,
@@ -1446,7 +1446,7 @@ fn walking_onto_a_chair_seats_one_player_and_the_next_step_leaves_it() {
     assert!(!world.registry().has::<openshard_state::Seated>(player_entity));
     assert_eq!(
         world.state.registry.get::<Position>(player_entity),
-        Some(&Position(Point::new(START.0, START.1 - 2, 0))),
+        Some(&Position(Point::new(START.x, START.y - 2, 0))),
         "the first directional request walks out of the seat instead of merely turning"
     );
 }
@@ -1457,8 +1457,8 @@ fn an_occupied_chair_does_not_move_a_second_player() {
     let mut world = world();
     let first = enter(&mut world, now);
     let second = enter(&mut world, now + WALK_INTERVAL);
-    let chair_at = Point::new(START.0 + 1, START.1, 0);
-    teleport(&mut world, second, Point::new(START.0 + 2, START.1, 0));
+    let chair_at = Point::new(START.x + 1, START.y, 0);
+    teleport(&mut world, second, Point::new(START.x + 2, START.y, 0));
     world.queue(Command::SpawnItem {
         graphic: WOODEN_CHAIR,
         hue: Hue::NONE,
@@ -1650,7 +1650,7 @@ fn double_clicking_a_plain_item_fires_the_use_trigger() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let item = spawn_plain_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let item = spawn_plain_item_at(&mut world, Point::new(START.x, START.y, 0), now);
     let player_serial = world
         .registry()
         .serial_of(world.state.players[&player])
@@ -1677,7 +1677,7 @@ fn a_ghost_cannot_use_a_plain_item() {
     let mut world = world();
     let player = enter(&mut world, now);
     let player_serial = serial_of(&world, player);
-    let item = spawn_plain_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let item = spawn_plain_item_at(&mut world, Point::new(START.x, START.y, 0), now);
 
     world.queue(Command::Damage {
         serial: player_serial,
@@ -1716,7 +1716,7 @@ fn the_use_trigger_respects_reach() {
     let mut world = world();
     let player = enter(&mut world, now);
     // Well beyond ITEM_REACH from START.
-    let item = spawn_plain_item_at(&mut world, Point::new(START.0 + 50, START.1, 0), now);
+    let item = spawn_plain_item_at(&mut world, Point::new(START.x + 50, START.y, 0), now);
 
     let mut used: Cursor<crate::ItemUsed> = world.bus().cursor();
     world.queue(Command::DoubleClick {
@@ -1965,7 +1965,7 @@ fn dropping_an_item_into_a_container_puts_it_inside() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let container = spawn_container_at(&mut world, here, now);
     spawn_item_at(&mut world, here, now);
     let item_serial = loose_item_serial(&world);
@@ -2018,7 +2018,7 @@ fn a_full_container_refuses_the_drop_and_bounces_it_back() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let container = spawn_container_at(&mut world, here, now);
     spawn_item_at(&mut world, here, now);
     let item_serial = loose_item_serial(&world);
@@ -2081,7 +2081,7 @@ fn a_full_container_still_takes_what_a_game_master_drops_in() {
         .state
         .registry
         .insert(entity_of_player, openshard_state::components::Staff);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let container = spawn_container_at(&mut world, here, now);
     spawn_item_at(&mut world, here, now);
     let item_serial = loose_item_serial(&world);
@@ -2128,7 +2128,7 @@ fn a_bag_counts_against_the_container_it_goes_into() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let outer = spawn_container_at(&mut world, here, now);
     let inner = spawn_container_at(&mut world, here, now);
     let inner_entity = entity(&world, inner);
@@ -2176,7 +2176,7 @@ fn an_opened_container_lists_what_was_put_in_it() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let container = spawn_container_at(&mut world, here, now);
     spawn_item_at(&mut world, here, now);
     let item_serial = loose_item_serial(&world);
@@ -2221,7 +2221,7 @@ fn picking_an_item_out_of_a_container_holds_it() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let container = spawn_container_at(&mut world, here, now);
     spawn_item_at(&mut world, here, now);
     let item_serial = loose_item_serial(&world);
@@ -2265,7 +2265,7 @@ fn dropping_into_something_that_is_not_a_container_bounces() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     // Plain items, rather than coins: gold is a valid stack target now.
     let target = spawn_plain_item_at(&mut world, here, now);
     let held_serial = spawn_plain_item_at(&mut world, here, now);
@@ -2277,7 +2277,7 @@ fn dropping_into_something_that_is_not_a_container_bounces() {
         amount: 1,
     });
     world.tick(now);
-    let origin = Point::new(START.0, START.1, 0);
+    let origin = Point::new(START.x, START.y, 0);
     let _ = packets_for(&mut world, player);
 
     world.queue(Command::DropItem {
@@ -2317,7 +2317,7 @@ fn a_drop_that_addresses_nothing_bounces_rather_than_swallowing_the_item() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     spawn_item_at(&mut world, here, now);
     let held_serial = loose_item_serial(&world);
     let held_item = entity(&world, held_serial);
@@ -2368,7 +2368,7 @@ fn mentions(packet: &[u8], serial: Serial) -> bool {
 /// it just made — the newest one, by serial, so earlier items in the world do
 /// not confuse it.
 fn take_loose_item(world: &mut World, connection: ConnectionId, now: Instant) -> (Serial, EntityId) {
-    spawn_item_at(world, Point::new(START.0, START.1, 0), now);
+    spawn_item_at(world, Point::new(START.x, START.y, 0), now);
     let (item, serial) = world
         .state
         .registry
@@ -2580,7 +2580,7 @@ fn consuming_a_ground_item_removes_it_and_clears_every_screen() {
     let now = Instant::now();
     let mut world = world();
     let watcher = enter(&mut world, now);
-    let serial = spawn_plain_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let serial = spawn_plain_item_at(&mut world, Point::new(START.x, START.y, 0), now);
     let item = entity(&world, serial);
     let _ = packets_for(&mut world, watcher);
 
@@ -2636,7 +2636,7 @@ fn consuming_a_contained_item_removes_it_from_the_open_gump() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let container = spawn_container_at(&mut world, here, now);
     spawn_item_at(&mut world, here, now);
     let item_serial = loose_item_serial(&world);
@@ -2730,7 +2730,7 @@ fn consuming_part_of_a_stack_leaves_the_rest() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let serial = spawn_gold(&mut world, Point::new(START.0, START.1, 0), 5, now);
+    let serial = spawn_gold(&mut world, Point::new(START.x, START.y, 0), 5, now);
     let item = entity(&world, serial);
     let _ = packets_for(&mut world, player);
 
@@ -2752,7 +2752,7 @@ fn consuming_a_container_takes_its_contents_with_it() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let container = spawn_container_at(&mut world, here, now);
     spawn_item_at(&mut world, here, now);
     let item_serial = loose_item_serial(&world);
@@ -2798,7 +2798,7 @@ fn consuming_a_stray_serial_does_nothing() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let serial = spawn_plain_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let serial = spawn_plain_item_at(&mut world, Point::new(START.x, START.y, 0), now);
     let item = entity(&world, serial);
     let _ = packets_for(&mut world, player);
 
@@ -2886,7 +2886,7 @@ fn you_cannot_equip_onto_something_that_is_not_a_mobile() {
     let mut world = world();
     let player = enter(&mut world, now);
     // A second ground item to (wrongly) equip onto.
-    spawn_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    spawn_item_at(&mut world, Point::new(START.x, START.y, 0), now);
     let target = loose_item_serial(&world);
     let (held, held_item) = take_loose_item(&mut world, player, now);
     let _ = packets_for(&mut world, player);
@@ -2914,7 +2914,7 @@ fn dropping_a_stack_onto_an_identical_one_merges_them() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let pile = spawn_gold(&mut world, here, 100, now);
     let loose = spawn_gold(&mut world, here, 50, now);
     let pile_item = entity(&world, pile);
@@ -2962,7 +2962,7 @@ fn a_single_spawned_gold_coin_stacks_with_a_pile() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let pile = spawn_gold(&mut world, here, 100, now);
     spawn_item_at(&mut world, here, now);
     let coin = world
@@ -3020,7 +3020,7 @@ fn single_arrows_and_bolts_are_stackable_from_spawn() {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let here = Point::new(START.0, START.1, 0);
+        let here = Point::new(START.x, START.y, 0);
         let spawn = |world: &mut World| {
             world.queue(Command::SpawnItem {
                 graphic: Graphic(graphic),
@@ -3088,7 +3088,7 @@ fn merging_past_the_stack_cap_keeps_the_remainder() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let pile = spawn_gold(&mut world, here, 50_000, now);
     let loose = spawn_gold(&mut world, here, 50_000, now);
     let pile_item = entity(&world, pile);
@@ -3178,7 +3178,7 @@ fn a_non_stackable_item_does_not_merge() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     // Two plain (non-stackable) items. Gold is deliberately not used here:
     // even a single coin is currency and must stack.
     let target = spawn_plain_item_at(&mut world, here, now);
@@ -3217,7 +3217,7 @@ fn a_ground_item_decays_after_its_time() {
     let now = Instant::now();
     let mut world = world();
     let watcher = enter(&mut world, now);
-    spawn_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    spawn_item_at(&mut world, Point::new(START.x, START.y, 0), now);
     let serial = loose_item_serial(&world);
     let item = entity(&world, serial);
     let _ = packets_for(&mut world, watcher);
@@ -3256,7 +3256,7 @@ fn gameplay_config_reaches_the_systems() {
         hue: openshard_protocol::wire::Hue(0),
         amount: 1,
         stackable: false,
-        position: Point::new(START.0, START.1, 0),
+        position: Point::new(START.x, START.y, 0),
         facet: Facet(0),
     });
     world.tick(now);
@@ -3280,7 +3280,7 @@ fn zero_item_decay_keeps_ground_items_and_corpses() {
         ..Gameplay::default()
     });
     let watcher = enter(&mut world, now);
-    spawn_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    spawn_item_at(&mut world, Point::new(START.x, START.y, 0), now);
     let item = entity(&world, loose_item_serial(&world));
 
     // A loose item created with cleanup off has no clock at all.
@@ -3316,7 +3316,7 @@ fn a_container_does_not_decay_even_after_being_moved() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let container = spawn_container_at(&mut world, here, now);
     let container_item = entity(&world, container);
     assert!(
@@ -3366,7 +3366,7 @@ fn picking_up_part_of_a_stack_splits_it() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let pile = spawn_gold(&mut world, here, 100, now);
     let pile_item = entity(&world, pile);
     let _ = packets_for(&mut world, player);
@@ -3409,7 +3409,7 @@ fn the_split_portion_keeps_its_serial_and_can_be_dropped() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let pile = spawn_gold(&mut world, here, 100, now);
     let pile_item = entity(&world, pile);
 
@@ -3438,7 +3438,7 @@ fn picking_up_a_whole_stack_does_not_split_it() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let pile = spawn_gold(&mut world, here, 100, now);
     let pile_item = entity(&world, pile);
 
@@ -3508,7 +3508,7 @@ fn dropping_a_stack_onto_an_identical_one_inside_a_container_merges_them() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let (_container, pile) = gold_in_open_container(&mut world, player, here, 100, now);
     let pile_item = entity(&world, pile);
     let loose = spawn_gold(&mut world, here, 50, now);
@@ -3560,7 +3560,7 @@ fn picking_up_part_of_a_stack_from_a_container_splits_it() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let (container, pile) = gold_in_open_container(&mut world, player, here, 100, now);
     let pile_item = entity(&world, pile);
     // Saves from before gold was intrinsically stackable can still be alive in
@@ -3612,7 +3612,7 @@ fn picking_up_a_whole_stack_from_a_container_does_not_split_it() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     let (container, pile) = gold_in_open_container(&mut world, player, here, 100, now);
     let pile_item = entity(&world, pile);
 
@@ -3720,14 +3720,14 @@ fn the_shard_files_what_it_spawns_as_what_it_is() {
     let mut world = world();
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];
-    let at = Point::new(START.0, START.1, 0);
+    let at = Point::new(START.x, START.y, 0);
 
     // Eight hits, five a swing: dead on the second, and what it leaves is the
     // case most worth asserting — a corpse carries a body *graphic* and is not a
     // body.
     let mob = spawn_mobile_at(&mut world, at, 8, now);
-    spawn_item_at(&mut world, Point::new(START.0 + 1, START.1, 0), now);
-    spawn_container_at(&mut world, Point::new(START.0 + 2, START.1, 0), now);
+    spawn_item_at(&mut world, Point::new(START.x + 1, START.y, 0), now);
+    spawn_container_at(&mut world, Point::new(START.x + 2, START.y, 0), now);
     engage(&mut world, connection, mob, now);
     for _ in 0..(2 * WRESTLING_SWING_TICKS) {
         world.tick(now);
@@ -3773,7 +3773,7 @@ fn a_spawned_creature_is_drawn_to_nearby_players() {
     let mut world = world();
     let player = enter(&mut world, now);
     let _ = packets_for(&mut world, player);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 50, now);
 
     assert!(
         packets_for(&mut world, player)
@@ -3788,7 +3788,7 @@ fn damage_lowers_hits_and_updates_the_bar() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 50, now);
     let mob_entity = entity(&world, mob);
     let _ = packets_for(&mut world, player);
 
@@ -3820,7 +3820,7 @@ fn a_creature_dies_at_zero_hits() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 10, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 10, now);
     let mob_entity = entity(&world, mob);
     let _ = packets_for(&mut world, player);
     let mut died: Cursor<MobileDied> = world.bus().cursor();
@@ -3894,7 +3894,7 @@ fn a_player_who_dies_becomes_a_ghost() {
 
     // Die from a real engaged state, so the transition has both halves to
     // settle rather than merely preserving an already-established peace state.
-    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let target = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     engage(&mut world, player, target, now);
     assert!(
         world
@@ -4318,7 +4318,7 @@ fn resurrection_brings_a_ghost_back() {
     // then follow the freshly-armed swing through its visible lead-in and
     // impact. This proves both the session-long combat row and the exact weapon
     // animation survived the transition.
-    let target = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let target = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 50, now);
     let target_entity = entity(&world, target);
     engage(&mut world, player, target, now);
     let opening = packets_for(&mut world, player);
@@ -4440,7 +4440,7 @@ fn a_mob_immediately_forgets_a_player_who_becomes_a_ghost() {
     let player = enter(&mut world, now);
     let player_entity = world.state.players[&player];
     let player_serial = serial_of(&world, player);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     let mob_entity = entity(&world, mob);
     world.state.registry.insert(
         mob_entity,
@@ -4466,7 +4466,7 @@ fn a_mob_cannot_see_or_reacquire_a_ghost() {
     let player = enter(&mut world, now);
     let player_entity = world.state.players[&player];
     let player_serial = serial_of(&world, player);
-    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.0, START.1 + 4, 0), 8, now);
+    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.x, START.y + 4, 0), 8, now);
 
     // `enter_ghost_state` deliberately leaves the restored hit-point value
     // alone; visibility must therefore reject the Ghost marker itself, rather
@@ -4560,7 +4560,7 @@ fn a_ghost_double_clicking_a_healer_is_offered_a_free_resurrection() {
     let player = enter(&mut world, now);
     let entity = world.state.players[&player];
     let serial = serial_of(&world, player);
-    let (healer, healer_serial) = spawn_healer(&mut world, Point::new(START.0, START.1 - 1, 0), now);
+    let (healer, healer_serial) = spawn_healer(&mut world, Point::new(START.x, START.y - 1, 0), now);
 
     world.queue(Command::Damage {
         serial,
@@ -4609,7 +4609,7 @@ fn cancelling_the_healer_gump_leaves_the_ghost_dead() {
     let player = enter(&mut world, now);
     let entity = world.state.players[&player];
     let serial = serial_of(&world, player);
-    let (_, healer_serial) = spawn_healer(&mut world, Point::new(START.0, START.1 - 1, 0), now);
+    let (_, healer_serial) = spawn_healer(&mut world, Point::new(START.x, START.y - 1, 0), now);
 
     world.queue(Command::Damage {
         serial,
@@ -4649,7 +4649,7 @@ fn double_clicking_a_healer_out_of_reach_says_so_instead_of_nothing() {
     let player = enter(&mut world, now);
     let entity = world.state.players[&player];
     let serial = serial_of(&world, player);
-    let (_, healer_serial) = spawn_healer(&mut world, Point::new(START.0, START.1 - 5, 0), now);
+    let (_, healer_serial) = spawn_healer(&mut world, Point::new(START.x, START.y - 5, 0), now);
 
     world.queue(Command::Damage {
         serial,
@@ -4689,7 +4689,7 @@ fn walking_near_a_healer_offers_resurrection_with_no_click_at_all() {
     let player = enter(&mut world, now);
     let entity = world.state.players[&player];
     let serial = serial_of(&world, player);
-    let (healer, _) = spawn_healer(&mut world, Point::new(START.0, START.1 - 3, 0), now);
+    let (healer, _) = spawn_healer(&mut world, Point::new(START.x, START.y - 3, 0), now);
 
     world.queue(Command::Damage {
         serial,
@@ -4827,7 +4827,7 @@ fn war_mode_and_attack_are_confirmed_to_the_client() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 50, now);
     let _ = packets_for(&mut world, player);
 
     world.queue(Command::WarMode {
@@ -4875,7 +4875,7 @@ fn a_player_in_war_mode_retaliates_when_struck_without_a_target() {
     let defender_entity = world.state.players[&defender];
     let defender_serial = serial_of(&world, defender);
     let attacker_serial = serial_of(&world, attacker);
-    teleport(&mut world, attacker, Point::new(START.0 + 1, START.1, 0));
+    teleport(&mut world, attacker, Point::new(START.x + 1, START.y, 0));
     world
         .state
         .registry
@@ -4935,7 +4935,7 @@ fn a_player_in_war_mode_swings_at_an_adjacent_target() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 50, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, player, mob, now);
 
@@ -4956,7 +4956,7 @@ fn a_landed_blow_plays_a_hit_sound() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 50, now);
     engage(&mut world, player, mob, now);
     let opening = packets_for(&mut world, player);
     assert!(
@@ -4999,7 +4999,7 @@ fn a_dying_creature_plays_its_death_throe() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 1, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 1, now);
     engage(&mut world, player, mob, now);
     let _ = packets_for(&mut world, player);
 
@@ -5043,7 +5043,7 @@ fn a_creature_dies_with_its_own_voice() {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0, START.1, 0),
+        position: Point::new(START.x, START.y, 0),
         facet: Facet(0),
         name: None,
         title: None,
@@ -5094,7 +5094,7 @@ fn a_slain_creature_leaves_a_corpse_with_loot() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let spot = Point::new(START.0, START.1, 0);
+    let spot = Point::new(START.x, START.y, 0);
     let mob = spawn_mobile_at(&mut world, spot, 8, now); // dies on the second swing
     engage(&mut world, player, mob, now);
 
@@ -5154,7 +5154,7 @@ fn a_death_tells_the_watchers_which_corpse_the_body_became() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let spot = Point::new(START.0 + 2, START.1, 0);
+    let spot = Point::new(START.x + 2, START.y, 0);
     let mob = spawn_mobile_at(&mut world, spot, 8, now);
     let _ = packets_for(&mut world, player);
     world.queue(Command::Damage {
@@ -5230,7 +5230,7 @@ fn a_corpse_lies_the_way_its_body_was_facing() {
     let now = Instant::now();
     let mut world = world();
     let _player = enter(&mut world, now);
-    let spot = Point::new(START.0 + 2, START.1, 0);
+    let spot = Point::new(START.x + 2, START.y, 0);
     let mob = spawn_mobile_at(&mut world, spot, 8, now);
     let entity = world.registry().entity_of(mob).expect("the creature spawned");
     // Turned west and then killed outright, so the heading under test is the one
@@ -5375,7 +5375,7 @@ fn a_slain_creature_fires_the_loot_hook() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let spot = Point::new(START.0, START.1, 0);
+    let spot = Point::new(START.x, START.y, 0);
     let mob = spawn_mobile_at(&mut world, spot, 8, now);
     let mut corpses: Cursor<CorpseCreated> = world.bus().cursor();
     engage(&mut world, player, mob, now);
@@ -5471,7 +5471,7 @@ fn a_decaying_corpse_takes_its_loot_with_it() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 8, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 8, now);
     engage(&mut world, player, mob, now);
     for _ in 0..(2 * WRESTLING_SWING_TICKS) {
         world.tick(now);
@@ -5514,7 +5514,7 @@ fn cleanup_disabled_does_not_start_a_corpse_decay_clock() {
         ..Gameplay::default()
     });
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 8, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 8, now);
     engage(&mut world, player, mob, now);
     for _ in 0..(2 * WRESTLING_SWING_TICKS) {
         world.tick(now);
@@ -5538,7 +5538,7 @@ fn no_swing_without_war_mode() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 50, now);
     let mob_entity = entity(&world, mob);
 
     // Aim, but stay at peace.
@@ -5563,7 +5563,7 @@ fn no_swing_out_of_reach() {
     let mut world = world();
     let player = enter(&mut world, now);
     // Well outside melee range, but on screen.
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 5, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 5, START.y, 0), 50, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, player, mob, now);
     for _ in 0..(WRESTLING_SWING_TICKS + 1) {
@@ -5640,7 +5640,7 @@ fn a_committed_swing_announces_its_phase_and_the_time_to_the_impact() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     let _ = packets_for(&mut world, player);
     engage(&mut world, player, mob, now);
 
@@ -5658,7 +5658,7 @@ fn a_target_that_dies_mid_swing_ends_its_attackers_action_with_a_reason() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, player, mob, now);
     let _ = packets_for(&mut world, player);
@@ -5689,14 +5689,14 @@ fn a_swing_whose_target_leaves_the_committed_reach_says_so() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, player, mob, now);
     let _ = packets_for(&mut world, player);
 
     world
         .state
-        .teleport(mob_entity, Point::new(START.0 + 5, START.1, 0));
+        .teleport(mob_entity, Point::new(START.x + 5, START.y, 0));
     world.tick(now);
 
     assert_eq!(
@@ -5719,7 +5719,7 @@ fn an_armed_action_that_is_never_released_expires() {
     let mut world = world();
     let player = enter(&mut world, now);
     let player_entity = world.state.players[&player];
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     engage(&mut world, player, mob, now);
     let _ = packets_for(&mut world, player);
 
@@ -5758,7 +5758,7 @@ fn reaching_an_overdue_target_opens_a_full_windup_before_damage() {
     let player = enter(&mut world, now);
     let player_entity = world.state.players[&player];
     world.state.registry.remove::<Skills>(player_entity);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 5, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 5, START.y, 0), 50, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, player, mob, now);
     for _ in 0..=WRESTLING_SWING_TICKS {
@@ -5768,7 +5768,7 @@ fn reaching_an_overdue_target_opens_a_full_windup_before_damage() {
 
     world
         .state
-        .teleport(mob_entity, Point::new(START.0 + 1, START.1, 0));
+        .teleport(mob_entity, Point::new(START.x + 1, START.y, 0));
     world.tick(now);
     let lead = openshard_combat::swing_speed(&world.state, player_entity);
     assert_eq!(lead, WRESTLING_SWING_TICKS);
@@ -5815,7 +5815,7 @@ fn a_forced_critical_multiplies_a_landed_melee_blow_before_defences() {
     world.state.gameplay.critical_chance = 1000;
     world.state.gameplay.critical_damage_percent = 200;
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 50, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, player, mob, now);
     for _ in 0..=WRESTLING_SWING_TICKS {
@@ -5987,7 +5987,7 @@ fn a_natural_blow_beats_a_wielded_weapon() {
     // whatever it happens to hold — the override precedence combat already had.
     let now = Instant::now();
     let mut world = world();
-    let spot = Point::new(START.0, START.1, 0);
+    let spot = Point::new(START.x, START.y, 0);
     let mob = spawn_mobile_full(&mut world, spot, 50, 4, 7, 0, now);
     let mob_entity = entity(&world, mob);
     let serial = world.state.registry.serial_of(mob_entity).unwrap();
@@ -6059,7 +6059,7 @@ fn a_skilled_swing_lands_and_trains_its_weapon_skill() {
     )
     .unwrap();
     // A tough, skill-less dummy so the fight runs long enough to train.
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 1000, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 1000, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, connection, mob, now);
 
@@ -6102,7 +6102,7 @@ fn an_even_unskilled_duel_sometimes_misses() {
         Layer(1),
     )
     .unwrap();
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 2000, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 2000, now);
     openshard_skills::set_skill(&mut world.state, mob, WRESTLING_SKILL.id(), 1000);
     engage(&mut world, connection, mob, now);
     let _ = packets_for(&mut world, connection);
@@ -6150,7 +6150,7 @@ fn tactics_scales_the_blow() {
             Layer(1),
         )
         .unwrap();
-        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 60000, now);
+        let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 60000, now);
         let mob_entity = entity(&world, mob);
         engage(&mut world, connection, mob, now);
         for _ in 0..(10 * WRESTLING_SWING_TICKS) {
@@ -6185,7 +6185,7 @@ fn lumberjacking_lends_an_axe_its_bite() {
             Layer(1),
         )
         .unwrap();
-        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 60000, now);
+        let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 60000, now);
         let mob_entity = entity(&world, mob);
         engage(&mut world, connection, mob, now);
         for _ in 0..(10 * WRESTLING_SWING_TICKS) {
@@ -6227,7 +6227,7 @@ fn a_creature_can_be_given_combat_skills() {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0, START.1, 0),
+        position: Point::new(START.x, START.y, 0),
         facet: Facet(0),
         name: None,
         title: None,
@@ -6287,7 +6287,7 @@ fn a_bow_deals_its_own_damage_band() {
         },
     );
     // A target three tiles off: out of melee reach, inside bow range.
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 4000, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 4000, now);
     engage(&mut world, connection, mob, now);
     let mut damaged: Cursor<MobileDamaged> = world.bus().cursor();
 
@@ -6327,7 +6327,7 @@ fn a_wielded_bow_fights_at_range_with_no_ranged_attack_component() {
         "the fresh backpack takes a pile of arrows"
     );
     // Three tiles off: out of melee reach, inside the bow's ten-tile reach.
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 4000, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 4000, now);
     engage(&mut world, connection, mob, now);
     let mut damaged: Cursor<MobileDamaged> = world.bus().cursor();
 
@@ -6371,7 +6371,7 @@ fn an_archer_with_no_arrows_cannot_fire() {
         Layer(2),
     )
     .unwrap(); // bow, no arrows given
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 4000, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 4000, now);
     engage(&mut world, connection, mob, now);
     let mut damaged: Cursor<MobileDamaged> = world.bus().cursor();
     let _ = packets_for(&mut world, connection); // drain the engage burst
@@ -6407,7 +6407,7 @@ fn dot_sight_names_the_distance_and_the_reach_of_the_weapon_in_hand() {
     let mut world = world();
     let connection = enter(&mut world, now);
     let actor = world.state.players[&connection];
-    let far = Point::new(START.0 + 14, START.1, 0);
+    let far = Point::new(START.x + 14, START.y, 0);
 
     // Bare hands first: arm's length, and everything past the next tile is out
     // of reach however open the ground is.
@@ -6475,7 +6475,7 @@ fn a_drawn_bow_announces_a_shot_for_the_whole_interval() {
     let connection = enter(&mut world, now);
     let player_entity = world.state.players[&connection];
     arm_with_bow(&mut world, connection);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 50, now);
     let _ = packets_for(&mut world, connection);
     // The bow's own pace, not wrestling's: the interval announced has to be the
     // one the shard will actually wait, or the drawing body and the arrow part
@@ -6506,7 +6506,7 @@ fn an_interrupted_draw_costs_the_archer_no_arrow() {
     let player_entity = world.state.players[&connection];
     let serial = world.state.registry.serial_of(player_entity).unwrap();
     arm_with_bow(&mut world, connection);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 50, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, connection, mob, now);
     let _ = packets_for(&mut world, connection);
@@ -6520,7 +6520,7 @@ fn an_interrupted_draw_costs_the_archer_no_arrow() {
     // Out past the bow's reach while the string is still bent.
     world
         .state
-        .teleport(mob_entity, Point::new(START.0 + 15, START.1, 0));
+        .teleport(mob_entity, Point::new(START.x + 15, START.y, 0));
     world.tick(now);
 
     assert_eq!(
@@ -6555,7 +6555,7 @@ fn an_archer_held_out_of_reach_says_so_once_and_says_so_until_it_is_not() {
     let player_entity = world.state.players[&connection];
     let archer = world.state.registry.serial_of(player_entity).unwrap();
     arm_with_bow(&mut world, connection);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 50, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, connection, mob, now);
     let _ = packets_for(&mut world, connection);
@@ -6564,7 +6564,7 @@ fn an_archer_held_out_of_reach_says_so_once_and_says_so_until_it_is_not() {
     // that is Ф1's — and the commit that cannot follow it is this one's.
     world
         .state
-        .teleport(mob_entity, Point::new(START.0 + 20, START.1, 0));
+        .teleport(mob_entity, Point::new(START.x + 20, START.y, 0));
     world.tick(now);
     assert_eq!(
         action_balks(&packets_for(&mut world, connection), archer),
@@ -6586,7 +6586,7 @@ fn an_archer_held_out_of_reach_says_so_once_and_says_so_until_it_is_not() {
     // tick the shot commits.
     world
         .state
-        .teleport(mob_entity, Point::new(START.0 + 3, START.1, 0));
+        .teleport(mob_entity, Point::new(START.x + 3, START.y, 0));
     world.tick(now);
     let packets = packets_for(&mut world, connection);
     assert_eq!(
@@ -6641,7 +6641,7 @@ fn a_drawn_weapon_with_nothing_aimed_at_says_so() {
     );
 
     // Aim at something and it lifts, in the tick the swing commits.
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     let _ = packets_for(&mut world, connection);
     engage(&mut world, connection, mob, now);
     let packets = packets_for(&mut world, connection);
@@ -6881,7 +6881,7 @@ fn a_whole_fight_has_no_tick_the_shard_cannot_account_for() {
         // and tough enough to outlive the run: what is under test is the loop,
         // not the kill.
         let at = if bow { 3 } else { 1 };
-        let mob = spawn_mobile_at(&mut world, Point::new(START.0 + at, START.1, 0), 20_000, now);
+        let mob = spawn_mobile_at(&mut world, Point::new(START.x + at, START.y, 0), 20_000, now);
         engage(&mut world, connection, mob, now);
 
         let timeline = fight_timeline(&mut world, connection, fighter, 600, now, |_, _| {});
@@ -6922,7 +6922,7 @@ fn a_fight_with_everything_that_happens_to_one_still_has_no_blank_tick() {
     let fighter = world.state.players[&connection];
     let serial = world.state.registry.serial_of(fighter).unwrap();
     arm_with_bow(&mut world, connection);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 20_000, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 20_000, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, connection, mob, now);
 
@@ -6936,10 +6936,10 @@ fn a_fight_with_everything_that_happens_to_one_still_has_no_blank_tick() {
             // Out past the bow's reach, and back inside it.
             200 => world
                 .state
-                .teleport(mob_entity, Point::new(START.0 + 25, START.1, 0)),
+                .teleport(mob_entity, Point::new(START.x + 25, START.y, 0)),
             300 => world
                 .state
-                .teleport(mob_entity, Point::new(START.0 + 3, START.1, 0)),
+                .teleport(mob_entity, Point::new(START.x + 3, START.y, 0)),
             // The quiver runs dry, and is refilled.
             // One at a time: the take is all-or-nothing against the amount asked
             // for, so a round number bigger than the quiver takes nothing at all.
@@ -7005,7 +7005,7 @@ fn print_a_bow_fight() {
     let connection = enter(&mut world, now);
     let fighter = world.state.players[&connection];
     arm_with_bow(&mut world, connection);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 20_000, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 20_000, now);
     engage(&mut world, connection, mob, now);
     println!(
         "swing_speed = {} ticks",
@@ -7023,7 +7023,7 @@ fn print_a_bow_fight() {
         .registry
         .serial_of(wire.state.players[&wire_connection])
         .unwrap();
-    let wire_mob = spawn_mobile_at(&mut wire, Point::new(START.0 + 3, START.1, 0), 20_000, now);
+    let wire_mob = spawn_mobile_at(&mut wire, Point::new(START.x + 3, START.y, 0), 20_000, now);
     engage(&mut wire, wire_connection, wire_mob, now);
     let mut announced: Vec<(usize, u32)> = Vec::new();
     for tick in 0..400 {
@@ -7054,7 +7054,7 @@ fn a_fighter_you_walk_up_to_arrives_with_what_it_is_doing() {
     let fighter = world.state.players[&connection];
     let archer = world.state.registry.serial_of(fighter).unwrap();
     arm_with_bow(&mut world, connection);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 20_000, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 20_000, now);
     engage(&mut world, connection, mob, now);
     for _ in 0..40 {
         world.tick(now);
@@ -7091,12 +7091,12 @@ fn a_fighter_you_walk_up_to_arrives_wearing_its_refusal() {
     let fighter = world.state.players[&connection];
     let archer = world.state.registry.serial_of(fighter).unwrap();
     arm_with_bow(&mut world, connection);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 20_000, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 20_000, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, connection, mob, now);
     world
         .state
-        .teleport(mob_entity, Point::new(START.0 + 25, START.1, 0));
+        .teleport(mob_entity, Point::new(START.x + 25, START.y, 0));
     for _ in 0..40 {
         world.tick(now);
     }
@@ -7125,7 +7125,7 @@ fn an_ambusher_is_hidden_from_watchers_and_not_from_itself() {
     let connection = enter(&mut world, now);
     let fighter = world.state.players[&connection];
     arm_with_bow(&mut world, connection);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 20_000, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 20_000, now);
     // Somebody else standing there, whose screen is the other half of the claim.
     let bystander = enter(&mut world, now);
     let archer = world.state.registry.serial_of(fighter).unwrap();
@@ -7186,7 +7186,7 @@ fn a_creature_that_loses_its_quarry_does_not_call_the_quarry_gone() {
     let mut world = world();
     let connection = enter(&mut world, now);
     let player_entity = world.state.players[&connection];
-    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.0 + 1, START.1, 0), 8, now);
+    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.x + 1, START.y, 0), 8, now);
 
     // Let it notice and start swinging.
     for _ in 0..(AI_THINK_TICKS + 1) {
@@ -7242,7 +7242,7 @@ fn a_drawn_bow_is_announced_stage_by_stage_as_it_bends() {
     let player_entity = world.state.players[&connection];
     let archer = world.state.registry.serial_of(player_entity).unwrap();
     arm_with_bow(&mut world, connection);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 50, now);
     engage(&mut world, connection, mob, now);
     let draw = combat::swing_speed(&world.state, player_entity);
     let _ = packets_for(&mut world, connection);
@@ -7279,7 +7279,7 @@ fn a_shot_sways_at_a_run_is_free_at_a_walk_and_is_swayed_only_once() {
     let connection = enter(&mut world, now);
     let player_entity = world.state.players[&connection];
     arm_with_bow(&mut world, connection);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 3, START.y, 0), 50, now);
     engage(&mut world, connection, mob, now);
 
     let accuracy = |world: &World| {
@@ -7367,7 +7367,7 @@ fn a_shard_whose_table_says_a_wound_spoils_a_blow_gets_one() {
     let connection = enter(&mut world, now);
     let player_entity = world.state.players[&connection];
     let player = world.state.registry.serial_of(player_entity).unwrap();
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     engage(&mut world, connection, mob, now);
     let _ = packets_for(&mut world, connection);
     assert!(
@@ -7415,7 +7415,7 @@ fn a_slowed_blow_pushes_its_impact_and_re_announces_the_interval() {
     });
     let connection = enter(&mut world, now);
     let player_entity = world.state.players[&connection];
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     engage(&mut world, connection, mob, now);
     let impact = |world: &World| {
         world
@@ -7514,7 +7514,7 @@ fn a_creatures_notoriety_colours_its_health_bar() {
     let mut world = world();
     let player = enter(&mut world, now);
     let _ = packets_for(&mut world, player);
-    let mob = spawn_mobile_full(&mut world, Point::new(START.0, START.1, 0), 50, 5, 5, 0, now);
+    let mob = spawn_mobile_full(&mut world, Point::new(START.x, START.y, 0), 50, 5, 5, 0, now);
 
     let drawn = packets_for(&mut world, player)
         .into_iter()
@@ -7530,7 +7530,7 @@ fn an_invulnerable_mobile_cannot_be_attacked() {
     let player = enter(&mut world, now);
     let player_entity = world.state.players[&player];
     // Notoriety 7 is invulnerable — a yellow, untouchable townsperson.
-    let mob = spawn_mobile_full(&mut world, Point::new(START.0, START.1, 0), 50, 7, 5, 0, now);
+    let mob = spawn_mobile_full(&mut world, Point::new(START.x, START.y, 0), 50, 7, 5, 0, now);
     let _ = packets_for(&mut world, player);
 
     world.queue(Command::Attack {
@@ -7595,7 +7595,7 @@ fn five_innocent_kills_turn_the_killer_red() {
         // A blue, one-hit victim on the killer's tile.
         let victim = spawn_mobile_full(
             &mut world,
-            Point::new(START.0, START.1, 0),
+            Point::new(START.x, START.y, 0),
             1,
             Notoriety::Innocent.to_bits(),
             0,
@@ -7639,7 +7639,7 @@ fn murder_counts_fade_and_wash_the_killer_blue() {
     for _ in 0..5 {
         let victim = spawn_mobile_full(
             &mut world,
-            Point::new(START.0 + 5, START.1, 0),
+            Point::new(START.x + 5, START.y, 0),
             1,
             Notoriety::Innocent.to_bits(),
             0,
@@ -7695,7 +7695,7 @@ fn an_attributed_spell_kill_is_a_murder_too() {
     for _ in 0..5 {
         let victim = spawn_mobile_full(
             &mut world,
-            Point::new(START.0 + 5, START.1, 0),
+            Point::new(START.x + 5, START.y, 0),
             1,
             Notoriety::Innocent.to_bits(),
             0,
@@ -7730,7 +7730,7 @@ fn unattributed_damage_kills_without_blame() {
     for _ in 0..5 {
         let victim = spawn_mobile_full(
             &mut world,
-            Point::new(START.0 + 5, START.1, 0),
+            Point::new(START.x + 5, START.y, 0),
             1,
             Notoriety::Innocent.to_bits(),
             0,
@@ -7760,7 +7760,7 @@ fn attacking_an_enemy_is_not_a_crime() {
     let player = enter(&mut world, now);
     let player_entity = world.state.players[&player];
     // A plain orange enemy.
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 50, now);
 
     engage(&mut world, player, mob, now);
 
@@ -7805,7 +7805,7 @@ fn resistance_is_by_damage_type() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 100, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 100, now);
     let mob_entity = entity(&world, mob);
     world.state.registry.insert(
         mob_entity,
@@ -7853,7 +7853,7 @@ fn armour_reduces_a_blow() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_full(&mut world, Point::new(START.0, START.1, 0), 50, 5, 5, 50, now);
+    let mob = spawn_mobile_full(&mut world, Point::new(START.x, START.y, 0), 50, 5, 5, 50, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, player, mob, now);
 
@@ -7879,7 +7879,7 @@ fn swing_speed_sets_the_cadence() {
         .state
         .registry
         .insert(player_entity, SwingSpeed { ticks: 5 });
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 100, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 100, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, player, mob, now);
 
@@ -7910,7 +7910,7 @@ fn a_spawned_creature_derives_its_swing_speed() {
     let now = Instant::now();
     let mut world = world();
     enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 50, now);
     let mob_entity = entity(&world, mob);
     assert!(
         world.state.registry.get::<SwingSpeed>(mob_entity).is_none(),
@@ -7954,7 +7954,7 @@ fn killing_the_target_ends_the_attack() {
     let player = enter(&mut world, now);
     let player_entity = world.state.players[&player];
     // Eight hits, five a swing: dead on the second.
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 8, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 8, now);
     let mob_entity = entity(&world, mob);
     engage(&mut world, player, mob, now);
 
@@ -8456,7 +8456,7 @@ fn a_fireball_damages_the_mobile_it_is_aimed_at() {
     let now = Instant::now();
     let mut world = sphere_world();
     let (connection, _) = ready_caster(&mut world, BLACK_PEARL, now);
-    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let target = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
 
     world.queue(Command::RequestCast {
         connection,
@@ -8490,7 +8490,7 @@ fn poison_pulses_damage_then_wears_off() {
     use openshard_state::components::Poisoned;
     let now = Instant::now();
     let mut world = world();
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 50, now);
     let entity = world.registry().entity_of(mob).unwrap();
     let ticks = world.state.ticks;
     combat::apply_poison(
@@ -8523,7 +8523,7 @@ fn cure_clears_poison() {
     use openshard_state::components::Poisoned;
     let now = Instant::now();
     let mut world = world();
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 50, now);
     let entity = world.registry().entity_of(mob).unwrap();
     let ticks = world.state.ticks;
     combat::apply_poison(
@@ -8611,7 +8611,7 @@ fn a_poisoned_creature_comes_back_poisoned() {
     use openshard_state::components::Poisoned;
     let now = Instant::now();
     let mut home = world();
-    let mob = spawn_mobile_at(&mut home, Point::new(START.0, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut home, Point::new(START.x, START.y, 0), 50, now);
     let ticks = home.state.ticks;
     combat::apply_poison(
         &mut home.state,
@@ -8831,8 +8831,8 @@ fn reactive_armor_reflects_a_share_of_a_blow_to_the_attacker() {
     // back at the swinger — read at the one damage door, off the buff's percent.
     let now = Instant::now();
     let mut world = world();
-    let victim = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 100, now);
-    let attacker = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 100, now);
+    let victim = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 100, now);
+    let attacker = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 100, now);
     let victim_entity = entity(&world, victim);
     let attacker_entity = entity(&world, attacker);
     let until = world.state.ticks + 1000;
@@ -8880,8 +8880,8 @@ fn reactive_armor_does_not_ping_pong() {
     // a second time — no infinite bounce.
     let now = Instant::now();
     let mut world = world();
-    let victim = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 100, now);
-    let attacker = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 100, now);
+    let victim = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 100, now);
+    let attacker = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 100, now);
     let victim_entity = entity(&world, victim);
     let attacker_entity = entity(&world, attacker);
     let at = world.state.ticks + 1000;
@@ -8969,7 +8969,7 @@ fn magic_reflection_bounces_a_spell_back_at_the_caster() {
     let now = Instant::now();
     let mut world = sphere_world();
     let (connection, caster) = ready_caster(&mut world, BLACK_PEARL, now);
-    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let target = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     let target_entity = entity(&world, target);
     let until = world.state.ticks + 1000;
     magic::apply_behaviour_buff(
@@ -9194,7 +9194,7 @@ fn fire_field_lays_a_row_and_burns_who_stands_in_it() {
     let now = Instant::now();
     let mut world = field_world();
     let (connection, _caster) = ready_caster(&mut world, BLACK_PEARL, now);
-    let spot = Point::new(START.0 + 3, START.1, 0);
+    let spot = Point::new(START.x + 3, START.y, 0);
     let victim = spawn_mobile_at(&mut world, spot, 50, now);
     let victim_entity = entity(&world, victim);
 
@@ -9239,7 +9239,7 @@ fn poison_field_poisons_who_stands_in_it() {
     let now = Instant::now();
     let mut world = field_world();
     let (connection, _caster) = ready_caster(&mut world, BLACK_PEARL, now);
-    let spot = Point::new(START.0 + 3, START.1, 0);
+    let spot = Point::new(START.x + 3, START.y, 0);
     let victim = spawn_mobile_at(&mut world, spot, 50, now);
     let victim_entity = entity(&world, victim);
 
@@ -9281,7 +9281,7 @@ fn wall_of_stone_blocks_the_way_then_clears() {
     let connection = enter(&mut world, now);
     let caster = world.state.players[&connection];
     // Aim due south: the line of fire runs north–south, so the wall runs east–west.
-    let spot = Point::new(START.0, START.1 + 3, 0);
+    let spot = Point::new(START.x, START.y + 3, 0);
     world.lay_field(caster, FieldKind::Stone, spot);
 
     assert!(
@@ -9327,7 +9327,7 @@ fn a_field_row_lies_perpendicular_to_the_line_of_fire() {
     let connection = enter(&mut world, now); // caster at START
     let caster = world.state.players[&connection];
     // Aim due east: the row should run north–south (vary Y, share X).
-    let spot = Point::new(START.0 + 5, START.1, 0);
+    let spot = Point::new(START.x + 5, START.y, 0);
     world.lay_field(caster, FieldKind::Fire, spot);
 
     let tiles: Vec<Point> = world
@@ -9354,7 +9354,7 @@ fn a_field_tile_is_not_saved() {
     let mut world = world();
     let connection = enter(&mut world, now);
     let caster = world.state.players[&connection];
-    world.lay_field(caster, FieldKind::Fire, Point::new(START.0 + 3, START.1, 0));
+    world.lay_field(caster, FieldKind::Fire, Point::new(START.x + 3, START.y, 0));
 
     world.take_snapshot();
     let snapshot = world.drain_saves().next_back().expect("a snapshot");
@@ -9418,7 +9418,7 @@ fn a_frozen_creature_does_not_step() {
     use openshard_state::components::Frozen;
     let now = Instant::now();
     let mut world = world();
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 5, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 5, START.y, 0), 50, now);
     let entity = entity(&world, mob);
     // Face it south first (turn-as-step), so a further south step would move it.
     world.queue(Command::Step {
@@ -9464,7 +9464,7 @@ fn the_paralyze_spell_freezes_its_target() {
     let now = Instant::now();
     let mut world = field_world(); // reagents off, so the one-reagent caster can cast it
     let (connection, _caster) = ready_caster(&mut world, BLACK_PEARL, now);
-    let victim = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let victim = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     let victim_entity = entity(&world, victim);
 
     world.queue(Command::RequestCast {
@@ -9495,7 +9495,7 @@ fn a_blow_breaks_paralysis() {
     use openshard_state::components::Frozen;
     let now = Instant::now();
     let mut world = world();
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     let entity = entity(&world, mob);
     world.state.registry.insert(
         entity,
@@ -9598,7 +9598,7 @@ fn paralyze_field_freezes_who_stands_in_it() {
     let now = Instant::now();
     let mut world = field_world();
     let (connection, _caster) = ready_caster(&mut world, BLACK_PEARL, now);
-    let spot = Point::new(START.0 + 3, START.1, 0);
+    let spot = Point::new(START.x + 3, START.y, 0);
     let victim = spawn_mobile_at(&mut world, spot, 50, now);
     let victim_entity = entity(&world, victim);
 
@@ -9678,7 +9678,7 @@ fn the_poison_spell_poisons_what_it_is_aimed_at() {
     let now = Instant::now();
     let mut world = sphere_world();
     let (connection, _) = ready_caster(&mut world, NIGHTSHADE, now);
-    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let target = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
 
     world.queue(Command::RequestCast {
         connection,
@@ -9712,7 +9712,7 @@ fn a_resolved_cast_plays_its_sound_and_shows_its_bolt() {
     let now = Instant::now();
     let mut world = sphere_world();
     let (connection, _) = ready_caster(&mut world, BLACK_PEARL, now);
-    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let target = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     let _ = packets_for(&mut world, connection); // drain the setup burst
 
     world.queue(Command::RequestCast {
@@ -9821,7 +9821,7 @@ fn mana_loss_on_fail_off_refunds_a_fizzle() {
     let connection = enter(&mut world, now);
     let entity = world.state.players[&connection];
     let serial = serial_of(&world, connection);
-    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let target = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     // A middling skill, so the roll can plausibly go either way.
     world.queue(Command::SetSkill {
         serial,
@@ -10409,7 +10409,7 @@ fn anatomy_raises_a_cursor_and_reads_the_target() {
     world.tick(now);
 
     // Somebody to look at, one tile away.
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     let _ = packets_for(&mut world, looker);
 
     world.queue(Command::UseSkillButton {
@@ -10432,7 +10432,7 @@ fn anatomy_raises_a_cursor_and_reads_the_target() {
         response: openshard_protocol::target::TargetResponse {
             cursor_id: openshard_protocol::wire::CursorId(serial.raw()),
             object: Some(mob),
-            location: Point::new(START.0 + 1, START.1, 0),
+            location: Point::new(START.x + 1, START.y, 0),
             graphic: None,
             cancelled: false,
         },
@@ -10618,7 +10618,7 @@ fn reagents_are_consumed_on_a_cast_and_a_short_pack_fizzles() {
 
     // A pack with three of one reagent.
     const REAGENT: u16 = 0x0F7A;
-    let pack = spawn_container_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let pack = spawn_container_at(&mut world, Point::new(START.x, START.y, 0), now);
     let container = pack;
     for _ in 0..3 {
         let (item, _) = world
@@ -10704,7 +10704,7 @@ fn consuming_a_reagent_redraws_an_open_pack() {
 
     // A container on the player's tile, one reagent inside.
     const REAGENT: u16 = 0x0F7A;
-    let pack = spawn_container_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let pack = spawn_container_at(&mut world, Point::new(START.x, START.y, 0), now);
     let container = pack;
     let (_, item_serial) = world
         .state
@@ -10935,7 +10935,7 @@ fn an_aggressive_creature_attacks_a_nearby_player() {
     let player = enter(&mut world, now);
     let player_entity = world.state.players[&player];
     // Aggressive, standing on the player's tile.
-    spawn_creature(&mut world, Point::new(START.0, START.1, 0), 10, false, now);
+    spawn_creature(&mut world, Point::new(START.x, START.y, 0), 10, false, now);
 
     // A beat to notice, a swing interval to strike.
     for _ in 0..(AI_THINK_TICKS + WRESTLING_SWING_TICKS + 2) {
@@ -10959,7 +10959,7 @@ fn a_melee_swing_turns_the_attacker_toward_its_target() {
     let mut world = world();
     let attacker = enter(&mut world, now);
     let defender = enter(&mut world, now);
-    teleport(&mut world, defender, Point::new(START.0 + 1, START.1, 0));
+    teleport(&mut world, defender, Point::new(START.x + 1, START.y, 0));
 
     let attacker_entity = world.state.players[&attacker];
     let defender_serial = serial_of(&world, defender);
@@ -11007,7 +11007,7 @@ fn a_hidden_wrestler_arms_an_immediate_target_bound_ambush() {
     let mut world = world();
     let attacker = enter(&mut world, now);
     let defender = enter(&mut world, now);
-    teleport(&mut world, defender, Point::new(START.0 + 1, START.1, 0));
+    teleport(&mut world, defender, Point::new(START.x + 1, START.y, 0));
 
     let attacker_entity = world.state.players[&attacker];
     let defender_serial = serial_of(&world, defender);
@@ -11085,7 +11085,7 @@ fn a_wrestlers_third_consecutive_hit_is_a_combo_and_restores_stamina() {
     let mut world = world();
     let attacker = enter(&mut world, now);
     let defender = enter(&mut world, now);
-    teleport(&mut world, defender, Point::new(START.0 + 1, START.1, 0));
+    teleport(&mut world, defender, Point::new(START.x + 1, START.y, 0));
 
     let attacker_entity = world.state.players[&attacker];
     let defender_entity = world.state.players[&defender];
@@ -11147,7 +11147,7 @@ fn an_aggressive_creature_chases_a_player() {
     let now = Instant::now();
     let mut world = world();
     enter(&mut world, now); // a player at START to be chased
-    let start = Point::new(START.0 + 4, START.1, 0);
+    let start = Point::new(START.x + 4, START.y, 0);
     let mob = spawn_creature(&mut world, start, 10, false, now);
     let mob_entity = entity(&world, mob);
 
@@ -11168,7 +11168,7 @@ fn a_passive_creature_ignores_players() {
     let player = enter(&mut world, now);
     let player_entity = world.state.players[&player];
     // Sight 0, no wander: no brain at all.
-    spawn_creature(&mut world, Point::new(START.0, START.1, 0), 0, false, now);
+    spawn_creature(&mut world, Point::new(START.x, START.y, 0), 0, false, now);
 
     for _ in 0..(WRESTLING_SWING_TICKS + AI_THINK_TICKS + 5) {
         world.tick(now);
@@ -11189,7 +11189,7 @@ fn a_passive_creature_ignores_players() {
 fn a_wandering_creature_drifts() {
     let now = Instant::now();
     let mut world = world();
-    let start = Point::new(START.0, START.1, 0);
+    let start = Point::new(START.x, START.y, 0);
     // Wanders, sees nothing to fight.
     let mob = spawn_creature(&mut world, start, 0, true, now);
     let mob_entity = entity(&world, mob);
@@ -11271,7 +11271,7 @@ fn speech_does_not_carry_out_of_earshot() {
     let speaker = enter(&mut world, now);
     let listener = enter_as(&mut world, ConnectionId::from_raw(2), now);
     // Move the listener well past speech range.
-    teleport(&mut world, listener, Point::new(START.0 + 40, START.1, 0));
+    teleport(&mut world, listener, Point::new(START.x + 40, START.y, 0));
     let _ = packets_for(&mut world, listener);
 
     world.queue(Command::Say {
@@ -11297,7 +11297,7 @@ fn a_whisper_carries_only_to_those_right_beside() {
     let mut world = world();
     let speaker = enter(&mut world, now);
     let listener = enter_as(&mut world, ConnectionId::from_raw(2), now);
-    teleport(&mut world, listener, Point::new(START.0 + 10, START.1, 0));
+    teleport(&mut world, listener, Point::new(START.x + 10, START.y, 0));
     let _ = packets_for(&mut world, listener);
 
     world.queue(Command::Say {
@@ -11323,7 +11323,7 @@ fn a_yell_carries_past_normal_earshot() {
     let mut world = world();
     let speaker = enter(&mut world, now);
     let listener = enter_as(&mut world, ConnectionId::from_raw(2), now);
-    teleport(&mut world, listener, Point::new(START.0 + 25, START.1, 0));
+    teleport(&mut world, listener, Point::new(START.x + 25, START.y, 0));
     let _ = packets_for(&mut world, listener);
 
     // Said normally, it does not reach.
@@ -11618,11 +11618,11 @@ fn a_gm_can_teleport_add_and_set() {
     gm_say(
         &mut world,
         gm,
-        &format!(".go {} {}", START.0 + 5, START.1 + 7),
+        &format!(".go {} {}", START.x + 5, START.y + 7),
         now,
     );
     let Position(at) = *world.registry().get::<Position>(entity).unwrap();
-    assert_eq!((at.x, at.y), (START.0 + 5, START.1 + 7), "the GM moved");
+    assert_eq!((at.x, at.y), (START.x + 5, START.y + 7), "the GM moved");
 
     // Add an item at the GM's feet — the GM's own screen is drawn the 0x1A.
     let _ = packets_for(&mut world, gm);
@@ -11707,10 +11707,10 @@ fn tele_raises_a_cursor_and_the_click_teleports() {
         "a targeting cursor is sent"
     );
     let before = *world.registry().get::<Position>(entity).unwrap();
-    assert_eq!(before.0.x, START.0, "the GM has not moved on raising the cursor");
+    assert_eq!(before.0.x, START.x, "the GM has not moved on raising the cursor");
 
     // The click comes back as a 0x6C response; the GM jumps to the spot.
-    let target = Point::new(START.0 + 9, START.1 + 3, before.0.z);
+    let target = Point::new(START.x + 9, START.y + 3, before.0.z);
     world.queue(Command::TargetResponse {
         connection: gm,
         response: openshard_protocol::target::TargetResponse {
@@ -11740,7 +11740,7 @@ fn a_cancelled_tele_does_not_move() {
         response: openshard_protocol::target::TargetResponse {
             cursor_id: openshard_protocol::wire::CursorId(0),
             object: openshard_protocol::serial::Serial::new(0),
-            location: Point::new(START.0 + 9, START.1 + 3, before.0.z),
+            location: Point::new(START.x + 9, START.y + 3, before.0.z),
             graphic: None,
             cancelled: true,
         },
@@ -11891,7 +11891,7 @@ fn an_admin_can_place_a_catalogue_animal_on_a_targeted_tile() {
     let now = Instant::now();
     let mut world = world();
     let gm = enter_gm(&mut world, now);
-    let at = Point::new(START.0 + 3, START.1 + 2, 0);
+    let at = Point::new(START.x + 3, START.y + 2, 0);
     let _ = packets_for(&mut world, gm);
 
     world.queue(admin_creature_response(gm, 1)); // horse
@@ -11938,12 +11938,12 @@ fn decorate_places_statics_and_clear_removes_them() {
             (
                 openshard_protocol::wire::Graphic(0x07C1),
                 openshard_protocol::wire::Hue(0),
-                Point::new(START.0 + 1, START.1, 0),
+                Point::new(START.x + 1, START.y, 0),
             ),
             (
                 openshard_protocol::wire::Graphic(0x08DA),
                 openshard_protocol::wire::Hue(0),
-                Point::new(START.0 + 2, START.1, 0),
+                Point::new(START.x + 2, START.y, 0),
             ),
         ],
         doors: Vec::new(),
@@ -12101,12 +12101,12 @@ fn decorating_twice_does_not_lay_a_second_britain() {
             (
                 openshard_protocol::wire::Graphic(0x07C1),
                 openshard_protocol::wire::Hue(0),
-                Point::new(START.0 + 1, START.1, 0),
+                Point::new(START.x + 1, START.y, 0),
             ),
             (
                 openshard_protocol::wire::Graphic(0x08DA),
                 openshard_protocol::wire::Hue(0),
-                Point::new(START.0 + 2, START.1, 0),
+                Point::new(START.x + 2, START.y, 0),
             ),
         ],
         doors: vec![DecorDoor {
@@ -12115,14 +12115,14 @@ fn decorating_twice_does_not_lay_a_second_britain() {
             open: openshard_protocol::wire::Graphic(0x06A6),
             offset_x: -1,
             offset_y: 1,
-            position: Point::new(START.0 + 3, START.1, 0),
+            position: Point::new(START.x + 3, START.y, 0),
         }],
         containers: vec![DecorContainer {
             lock: None,
             graphic: openshard_protocol::wire::Graphic(0x0E77),
             gump: openshard_protocol::wire::Graphic(0x003E),
             hue: openshard_protocol::wire::Hue(0),
-            position: Point::new(START.0 + 4, START.1, 0),
+            position: Point::new(START.x + 4, START.y, 0),
         }],
     };
 
@@ -12166,7 +12166,7 @@ fn placing_the_townsfolk_twice_does_not_double_the_town() {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(x, START.1 + 2, 0),
+        position: Point::new(x, START.y + 2, 0),
         facet: Facet(0),
         name: None,
         title: Some(title.to_owned()),
@@ -12191,8 +12191,8 @@ fn placing_the_townsfolk_twice_does_not_double_the_town() {
     };
 
     for command in [
-        blacksmith("the blacksmith", START.0 + 1),
-        blacksmith("the baker", START.0 + 3),
+        blacksmith("the blacksmith", START.x + 1),
+        blacksmith("the baker", START.x + 3),
     ] {
         world.queue(command);
     }
@@ -12205,8 +12205,8 @@ fn placing_the_townsfolk_twice_does_not_double_the_town() {
     // check against where they were *standing*, because a townsperson drifts
     // around its post between beats.
     for command in [
-        blacksmith("the blacksmith", START.0 + 1),
-        blacksmith("the baker", START.0 + 3),
+        blacksmith("the blacksmith", START.x + 1),
+        blacksmith("the baker", START.x + 3),
     ] {
         world.queue(command);
     }
@@ -12229,7 +12229,7 @@ fn a_townsperson_of_another_trade_may_share_a_post() {
     // shipped data does — `build.rs` rejects it — but the guard must not be a
     // blanket "something already stands here", or a future dataset that stacks a
     // guard beside a banker would silently lose one of them.
-    let at = Point::new(START.0 + 1, START.1 + 2, 0);
+    let at = Point::new(START.x + 1, START.y + 2, 0);
     let person = |title: &str| Command::SpawnMobile {
         body: openshard_protocol::wire::Graphic(400),
         hue: openshard_protocol::wire::Hue(0),
@@ -12286,7 +12286,7 @@ fn a_batch_may_repeat_itself_and_both_copies_are_placed() {
     let same = (
         openshard_protocol::wire::Graphic(0x07C1),
         openshard_protocol::wire::Hue(0),
-        Point::new(START.0 + 1, START.1, 0),
+        Point::new(START.x + 1, START.y, 0),
     );
     world.queue(Command::Decorate {
         facet: Facet(0),
@@ -12313,7 +12313,7 @@ fn decoration_cannot_be_picked_up() {
         statics: vec![(
             openshard_protocol::wire::Graphic(0x07C1),
             openshard_protocol::wire::Hue(0),
-            Point::new(START.0, START.1, 0),
+            Point::new(START.x, START.y, 0),
         )],
         doors: Vec::new(),
         containers: Vec::new(),
@@ -12346,7 +12346,7 @@ fn a_door_opens_and_closes_on_double_click() {
     let mut world = world();
     let gm = enter_gm(&mut world, now);
     // A metal door one tile from the GM, well within reach.
-    let at = Point::new(START.0 + 1, START.1, 0);
+    let at = Point::new(START.x + 1, START.y, 0);
     world.queue(Command::Decorate {
         facet: Facet(0),
         statics: Vec::new(),
@@ -12380,7 +12380,7 @@ fn a_door_opens_and_closes_on_double_click() {
     );
     assert_eq!(
         world.registry().get::<Position>(door).unwrap().0,
-        Point::new(START.0, START.1 + 1, 0),
+        Point::new(START.x, START.y + 1, 0),
         "it swung aside by its hinge offset"
     );
     assert!(world.registry().get::<Door>(door).unwrap().is_open);
@@ -12408,7 +12408,7 @@ fn an_open_door_swings_shut_on_its_own() {
     let now = Instant::now();
     let mut world = world();
     let gm = enter_gm(&mut world, now);
-    let at = Point::new(START.0 + 1, START.1, 0);
+    let at = Point::new(START.x + 1, START.y, 0);
     world.queue(Command::Decorate {
         facet: Facet(0),
         statics: Vec::new(),
@@ -12451,8 +12451,8 @@ fn linked_leaves_toggle_and_auto_close_as_one_doorway() {
     let mut world = world();
     let gm = enter_gm(&mut world, now);
     let player = world.state.players[&gm];
-    let first_at = Point::new(START.0 + 1, START.1, 0);
-    let second_at = Point::new(START.0 + 2, START.1, 0);
+    let first_at = Point::new(START.x + 1, START.y, 0);
+    let second_at = Point::new(START.x + 2, START.y, 0);
     world.queue(Command::Decorate {
         facet: Facet(0),
         statics: Vec::new(),
@@ -12540,7 +12540,7 @@ fn linked_leaves_toggle_and_auto_close_as_one_doorway() {
     assert!(world.registry().get::<Door>(first).unwrap().is_open);
     assert!(world.registry().get::<Door>(second).unwrap().is_open);
 
-    teleport(&mut world, gm, Point::new(START.0, START.1, 0));
+    teleport(&mut world, gm, Point::new(START.x, START.y, 0));
     world.tick(later + TICK_INTERVAL);
     assert!(!world.registry().get::<Door>(first).unwrap().is_open);
     assert!(!world.registry().get::<Door>(second).unwrap().is_open);
@@ -12554,8 +12554,8 @@ fn a_diagonal_auto_door_use_keeps_a_linked_double_doorway_open() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let west_at = Point::new(START.0, START.1 - 1, Z_WITHOUT_A_MAP);
-    let east_at = Point::new(START.0 + 1, START.1 - 1, Z_WITHOUT_A_MAP);
+    let west_at = Point::new(START.x, START.y - 1, Z_WITHOUT_A_MAP);
+    let east_at = Point::new(START.x + 1, START.y - 1, Z_WITHOUT_A_MAP);
     world.queue(Command::Decorate {
         facet: Facet(0),
         statics: Vec::new(),
@@ -12620,7 +12620,7 @@ fn a_diagonal_auto_door_use_keeps_a_linked_double_doorway_open() {
     world.state.registry.insert(
         entity,
         Movement(openshard_movement::Walker::new(
-            Point::new(START.0, START.1, Z_WITHOUT_A_MAP),
+            Point::new(START.x, START.y, Z_WITHOUT_A_MAP),
             Facing::walking(Direction::NorthEast),
         )),
     );
@@ -12817,7 +12817,7 @@ fn a_decoration_container_opens_on_double_click() {
             graphic: openshard_protocol::wire::Graphic(0x0E42),
             gump: openshard_protocol::wire::Graphic(0x49),
             hue: openshard_protocol::wire::Hue(0),
-            position: Point::new(START.0 + 1, START.1, 0),
+            position: Point::new(START.x + 1, START.y, 0),
         }],
     });
     world.tick(now);
@@ -12981,8 +12981,8 @@ fn a_spawner_fills_to_its_ceiling_and_clear_empties_it() {
         skills: Vec::new(),
     };
     let area = SpawnArea {
-        x: START.0,
-        y: START.1,
+        x: START.x,
+        y: START.y,
         width: 3,
         height: 3,
         facet: Facet(0),
@@ -13042,7 +13042,7 @@ fn clear_also_removes_placed_npcs_and_their_gear_but_not_players() {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0 + 1, START.1, 0),
+        position: Point::new(START.x + 1, START.y, 0),
         facet: Facet(0),
         name: Some("Mirabel".to_owned()),
         title: None,
@@ -13117,7 +13117,7 @@ fn a_creature_can_be_made_to_speak() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.x, START.y, 0), 50, now);
     let _ = packets_for(&mut world, player);
 
     world.queue(Command::Speak {
@@ -13584,8 +13584,8 @@ fn a_spawner_respawn_timer_survives_a_restart() {
     // the shard restarts.
     let mut home = world();
     let area = SpawnArea {
-        x: START.0,
-        y: START.1,
+        x: START.x,
+        y: START.y,
         width: 1,
         height: 1,
         facet: Facet(0),
@@ -13871,7 +13871,7 @@ fn a_vendor_and_its_priced_stock_survive_a_restart() {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0 + 1, START.1, 0),
+        position: Point::new(START.x + 1, START.y, 0),
         facet: Facet(0),
         name: Some("Mirabel".to_owned()),
         title: None,
@@ -14006,8 +14006,8 @@ fn a_wounded_spawner_creature_survives_a_restart_and_is_counted() {
         skills: Vec::new(),
     };
     let area = SpawnArea {
-        x: START.0,
-        y: START.1,
+        x: START.x,
+        y: START.y,
         width: 2,
         height: 2,
         facet: Facet(0),
@@ -14085,14 +14085,14 @@ fn decoration_and_door_state_survive_a_restart() {
     let now = Instant::now();
     let mut home = world();
     let _gm = enter_gm(&mut home, now);
-    let shut_at = Point::new(START.0 + 2, START.1, 0);
-    let open_at = Point::new(START.0 + 4, START.1, 0);
+    let shut_at = Point::new(START.x + 2, START.y, 0);
+    let open_at = Point::new(START.x + 4, START.y, 0);
     home.queue(Command::Decorate {
         facet: Facet(0),
         statics: vec![(
             openshard_protocol::wire::Graphic(0x07C1),
             openshard_protocol::wire::Hue(0),
-            Point::new(START.0 + 6, START.1, 0),
+            Point::new(START.x + 6, START.y, 0),
         )],
         doors: vec![
             DecorDoor {
@@ -14314,7 +14314,7 @@ fn saying_bank_near_a_banker_opens_the_bank_box() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
-    spawn_banker(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    spawn_banker(&mut world, Point::new(START.x + 1, START.y, 0), now);
     let _ = packets_for(&mut world, connection);
 
     say(&mut world, connection, "bank", now);
@@ -14333,7 +14333,7 @@ fn a_banker_greets_a_nearby_player() {
     // across one beat's span (so a whole facet's townsfolk do not beat in lockstep),
     // so give it that long to come due. The line is one of several, but every one
     // names the visitor.
-    spawn_banker(&mut world, Point::new(START.0 + 2, START.1, 0), now);
+    spawn_banker(&mut world, Point::new(START.x + 2, START.y, 0), now);
     world.drain_outbound().count();
     // One beat and its whole jitter span, off the constants themselves rather
     // than a tick count that only held at one tick rate.
@@ -14408,7 +14408,7 @@ fn a_townsperson_is_dressed_and_named_by_the_core() {
     let smith = spawn_townsperson(
         &mut world,
         "the blacksmith",
-        Point::new(START.0 + 4, START.1, 0),
+        Point::new(START.x + 4, START.y, 0),
         now,
     );
 
@@ -14548,7 +14548,7 @@ fn spawn_creature_with_standing(world: &mut World, fame: i32, karma: i32, now: I
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0 + 1, START.1 + 1, 0),
+        position: Point::new(START.x + 1, START.y + 1, 0),
         facet: Facet(0),
         name: None,
         title: None,
@@ -14781,7 +14781,7 @@ fn a_locked_door_comes_back_locked() {
     let _ = enter(&mut world, now);
     let door = place_lockable_door(
         &mut world,
-        Point::new(START.0 + 5, START.1, 0),
+        Point::new(START.x + 5, START.y, 0),
         openshard_state::KeyValue::new(0xBEEF).expect("non-zero test key"),
         now,
     );
@@ -14811,7 +14811,7 @@ fn a_keyless_lock_is_not_an_unlocked_zero_after_a_restart() {
     let now = Instant::now();
     let mut world = world();
     let _ = enter(&mut world, now);
-    let at = Point::new(START.0 + 6, START.1, 0);
+    let at = Point::new(START.x + 6, START.y, 0);
     world.queue(Command::Decorate {
         facet: Facet(0),
         statics: Vec::new(),
@@ -14867,7 +14867,7 @@ fn a_non_human_townsperson_keeps_its_own_body() {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0 + 7, START.1, 0),
+        position: Point::new(START.x + 7, START.y, 0),
         facet: Facet(0),
         name: None,
         title: Some("the frightened dryad".to_owned()),
@@ -14921,7 +14921,7 @@ fn a_townspersons_hair_cannot_be_lifted_off_its_head() {
     let smith = spawn_townsperson(
         &mut world,
         "the blacksmith",
-        Point::new(START.0 + 1, START.1, 0),
+        Point::new(START.x + 1, START.y, 0),
         now,
     );
     let smith_serial = world.registry().serial_of(smith).unwrap();
@@ -14959,7 +14959,7 @@ fn a_wandering_townsperson_changes_tiles_and_not_only_its_heading() {
     // the time, which is what makes the step land on a new tile.
     let now = Instant::now();
     let mut world = world();
-    let start = Point::new(START.0 + 6, START.1 + 6, 0);
+    let start = Point::new(START.x + 6, START.y + 6, 0);
     let wanderer = spawn_townsperson(&mut world, "the peasant", start, now);
     // A wide home range, so heading back to the post is not what moves it.
     let home = *world
@@ -15209,7 +15209,7 @@ fn a_criminal_is_refused_at_every_door_into_a_shop() {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0 + 1, START.1, 0),
+        position: Point::new(START.x + 1, START.y, 0),
         facet: Facet(0),
         name: None,
         title: Some("the provisioner".to_owned()),
@@ -15302,7 +15302,7 @@ fn spawn_shopkeeper(world: &mut World, now: Instant) -> (EntityId, Serial) {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0 + 1, START.1, 0),
+        position: Point::new(START.x + 1, START.y, 0),
         facet: Facet(0),
         name: None,
         title: Some("the provisioner".to_owned()),
@@ -15477,7 +15477,7 @@ fn a_crowd_of_townsfolk_does_not_beat_in_lockstep() {
         spawn_townsperson(
             &mut world,
             "the peasant",
-            Point::new(START.0 + 20 + i, START.1 + 20, 0),
+            Point::new(START.x + 20 + i, START.y + 20, 0),
             now,
         );
     }
@@ -15499,8 +15499,8 @@ fn a_townsperson_walks_home_at_night_when_the_shard_asks_for_it() {
     // spawn can name a `night_home` — without that field the setting was a flag
     // nothing in the engine could ever satisfy.
     let now = Instant::now();
-    let post = Point::new(START.0 + 4, START.1 + 4, 0);
-    let home = Point::new(START.0 + 12, START.1 + 4, 0);
+    let post = Point::new(START.x + 4, START.y + 4, 0);
+    let home = Point::new(START.x + 12, START.y + 4, 0);
 
     let gameplay = Gameplay {
         npc_schedule: true,
@@ -15580,7 +15580,7 @@ fn a_restored_townsperson_still_knows_its_trade() {
     let smith = spawn_townsperson(
         &mut world,
         "the blacksmith",
-        Point::new(START.0 + 3, START.1, 0),
+        Point::new(START.x + 3, START.y, 0),
         now,
     );
     let name = world.registry().get::<Name>(smith).unwrap().0.clone();
@@ -15632,7 +15632,7 @@ fn restored_townsfolk_do_not_all_beat_on_the_same_tick() {
         spawn_townsperson(
             &mut world,
             "the peasant",
-            Point::new(START.0 + 3, START.1 + i, 0),
+            Point::new(START.x + 3, START.y + i, 0),
             now,
         );
     }
@@ -15676,7 +15676,7 @@ fn single_clicking_a_named_mobile_draws_its_name() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
-    spawn_banker(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    spawn_banker(&mut world, Point::new(START.x + 1, START.y, 0), now);
     let banker = world.registry().query::<Banker>().next().map(|(e, _)| e).unwrap();
     let banker_serial = world.registry().serial_of(banker).unwrap();
     let _ = packets_for(&mut world, connection);
@@ -15726,7 +15726,7 @@ fn single_clicking_an_item_draws_its_tiledata_name() {
     world.state.set_tiles(named(GOLD, "gold coins"));
     let connection = enter(&mut world, now);
     // A stack of three on the player's tile, so it is drawn and clickable.
-    let serial = spawn_gold(&mut world, Point::new(START.0, START.1, 0), 3, now);
+    let serial = spawn_gold(&mut world, Point::new(START.x, START.y, 0), 3, now);
     let _ = packets_for(&mut world, connection);
 
     world.queue(Command::SingleClick { connection, serial });
@@ -15747,7 +15747,7 @@ fn querying_a_stacks_properties_sends_the_amount_cliloc() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
-    let serial = spawn_gold(&mut world, Point::new(START.0, START.1, 0), 3, now);
+    let serial = spawn_gold(&mut world, Point::new(START.x, START.y, 0), 3, now);
     let _ = packets_for(&mut world, connection);
 
     world.queue(Command::QueryProperties {
@@ -15774,7 +15774,7 @@ fn a_drawn_object_carries_a_tooltip_revision() {
     let mut world = world();
     let connection = enter(&mut world, now);
     let _ = packets_for(&mut world, connection);
-    spawn_banker(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    spawn_banker(&mut world, Point::new(START.x + 1, START.y, 0), now);
 
     let packets = packets_for(&mut world, connection);
     assert!(
@@ -15790,7 +15790,7 @@ fn tooltips_off_sends_no_revision() {
     world.state.gameplay.tooltip_mode = openshard_state::TooltipMode::Off;
     let connection = enter(&mut world, now);
     let _ = packets_for(&mut world, connection);
-    spawn_banker(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    spawn_banker(&mut world, Point::new(START.x + 1, START.y, 0), now);
 
     let packets = packets_for(&mut world, connection);
     assert!(
@@ -15811,9 +15811,9 @@ fn tooltips_off_sends_no_revision() {
 fn a_raised_floor() -> Scene {
     // Land id `0` is what a flat scene is paved with, so flagging the id makes
     // the whole square ground nobody stands on — no pass over its cells.
-    let mut scene = Scene::flat_holding(START.0 + 4, START.1 + 4, 0);
+    let mut scene = Scene::flat_holding(START.x + 4, START.y + 4, 0);
     scene.land_art(0, openshard_tiles::TileFlags::BLOCK);
-    scene.floor(START.0, START.1, 0, 7);
+    scene.floor(START.x, START.y, 0, 7);
     scene
 }
 
@@ -15837,7 +15837,7 @@ fn a_spawn_stands_on_the_floor_not_under_it() {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0, START.1, 0),
+        position: Point::new(START.x, START.y, 0),
         facet: Facet(0),
         name: Some("the tailor".to_owned()),
         title: None,
@@ -15889,7 +15889,7 @@ fn an_unnamed_creature_takes_its_body_default_name() {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0 + 1, START.1, 0),
+        position: Point::new(START.x + 1, START.y, 0),
         facet: Facet(0),
         name: None,
         title: None,
@@ -15970,7 +15970,7 @@ fn a_drawn_mobile_carries_its_health_bar() {
     let connection = enter(&mut world, now);
     let _ = packets_for(&mut world, connection);
     // A placid creature (sight 0) so nothing but the draw sends a 0xA1.
-    spawn_creature(&mut world, Point::new(START.0 + 1, START.1, 0), 0, false, now);
+    spawn_creature(&mut world, Point::new(START.x + 1, START.y, 0), 0, false, now);
 
     let packets = packets_for(&mut world, connection);
     assert!(
@@ -15984,7 +15984,7 @@ fn a_context_menu_on_a_container_offers_open() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
-    let container = spawn_container_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let container = spawn_container_at(&mut world, Point::new(START.x, START.y, 0), now);
     let _ = packets_for(&mut world, connection);
 
     world.queue(Command::ContextMenuRequest {
@@ -16008,7 +16008,7 @@ fn selecting_open_on_a_container_opens_it() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
-    let container = spawn_container_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let container = spawn_container_at(&mut world, Point::new(START.x, START.y, 0), now);
     let _ = packets_for(&mut world, connection);
 
     world.queue(Command::ContextMenuSelect {
@@ -16031,7 +16031,7 @@ fn context_menus_off_sends_no_popup() {
     let mut world = world();
     world.state.gameplay.context_menus = false;
     let connection = enter(&mut world, now);
-    let container = spawn_container_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let container = spawn_container_at(&mut world, Point::new(START.x, START.y, 0), now);
     let _ = packets_for(&mut world, connection);
 
     world.queue(Command::ContextMenuRequest {
@@ -16046,7 +16046,7 @@ fn context_menus_off_sends_no_popup() {
     );
 }
 
-/// Flat ground with one wall standing at `(START.0 + 1, START.1)` — the tile
+/// Flat ground with one wall standing at `(START.x + 1, START.y)` — the tile
 /// between somebody at [`START`] and somebody two east of it.
 ///
 /// **A wall is a tile, so it takes a tile to be behind one.** `line_tiles`
@@ -16057,8 +16057,8 @@ fn context_menus_off_sends_no_popup() {
 /// See `docs/map/terrain_seam.md` — the gate it was standing in for cannot fire
 /// at melee range at all.
 fn a_wall_two_tiles_across() -> Scene {
-    let mut scene = Scene::flat_holding(START.0 + 4, START.1 + 4, 0);
-    scene.wall(START.0 + 1, START.1, 0, 20);
+    let mut scene = Scene::flat_holding(START.x + 4, START.y + 4, 0);
+    scene.wall(START.x + 1, START.y, 0, 20);
     scene
 }
 
@@ -16123,7 +16123,7 @@ fn a_vendor_at_the_counter_sells() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
-    let vendor = spawn_stocked_vendor(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    let vendor = spawn_stocked_vendor(&mut world, Point::new(START.x + 1, START.y, 0), now);
     let _ = packets_for(&mut world, connection);
 
     world.queue(Command::DoubleClick {
@@ -16146,7 +16146,7 @@ fn a_vendor_behind_a_wall_will_not_sell() {
     // Well inside the four-tile trade range, with a wall on the one tile the
     // sight line crosses. Two apart rather than adjacent because that is what it
     // takes for anything to be *between* them: a wall is a whole tile.
-    let vendor = spawn_stocked_vendor(&mut world, Point::new(START.0 + 2, START.1, 0), now);
+    let vendor = spawn_stocked_vendor(&mut world, Point::new(START.x + 2, START.y, 0), now);
     stand_on(&mut world, a_wall_two_tiles_across());
     let _ = packets_for(&mut world, connection);
 
@@ -16168,7 +16168,7 @@ fn a_vendor_across_the_street_is_out_of_reach() {
     let mut world = world();
     let connection = enter(&mut world, now);
     // In the open (sight clear), but well beyond the trade range.
-    let vendor = spawn_stocked_vendor(&mut world, Point::new(START.0 + 10, START.1, 0), now);
+    let vendor = spawn_stocked_vendor(&mut world, Point::new(START.x + 10, START.y, 0), now);
     let _ = packets_for(&mut world, connection);
 
     world.queue(Command::DoubleClick {
@@ -16189,7 +16189,7 @@ fn saying_bank_with_no_banker_near_does_nothing() {
     let mut world = world();
     let connection = enter(&mut world, now);
     // A banker, but far out of the 12-tile reach.
-    spawn_banker(&mut world, Point::new(START.0 + 40, START.1, 0), now);
+    spawn_banker(&mut world, Point::new(START.x + 40, START.y, 0), now);
     let _ = packets_for(&mut world, connection);
 
     say(&mut world, connection, "bank", now);
@@ -16313,7 +16313,7 @@ fn a_deleted_character_is_no_longer_on_file_under_its_name() {
     );
     let position = world.registry().get::<Position>(entity).unwrap().0;
     assert_eq!(
-        (position.x, position.y),
+        Tile::new(position.x, position.y),
         START,
         "and the new character stands at the start, not where the deleted one stood"
     );
@@ -16537,7 +16537,7 @@ fn walking_moves_the_position_component_too() {
     let Position(position) = *world.registry().get::<Position>(entity).unwrap();
     let Movement(walker) = *world.registry().get::<Movement>(entity).unwrap();
     assert_eq!(position, walker.position, "the two must not drift apart");
-    assert_eq!(position, Point::new(START.0, START.1 + 1, Z_WITHOUT_A_MAP));
+    assert_eq!(position, Point::new(START.x, START.y + 1, Z_WITHOUT_A_MAP));
 }
 
 #[test]
@@ -16559,8 +16559,8 @@ fn walking_emits_an_event_and_acks() {
 
     let moved: Vec<_> = world.bus().read(&mut moves).copied().collect();
     assert_eq!(moved.len(), 1);
-    assert_eq!(moved[0].from, Point::new(START.0, START.1, Z_WITHOUT_A_MAP));
-    assert_eq!(moved[0].to, Point::new(START.0, START.1 + 1, Z_WITHOUT_A_MAP));
+    assert_eq!(moved[0].from, Point::new(START.x, START.y, Z_WITHOUT_A_MAP));
+    assert_eq!(moved[0].to, Point::new(START.x, START.y + 1, Z_WITHOUT_A_MAP));
 }
 
 #[test]
@@ -16727,7 +16727,7 @@ fn a_disconnect_takes_everything_the_connection_was_in_the_middle_of() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     spawn_item_at(&mut world, here, now);
     let item_serial = loose_item_serial(&world);
     let item = entity(&world, item_serial);
@@ -16805,7 +16805,7 @@ fn a_second_hand_off_keeps_what_the_connection_was_doing() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
-    let here = Point::new(START.0, START.1, 0);
+    let here = Point::new(START.x, START.y, 0);
     spawn_item_at(&mut world, here, now);
     let item_serial = loose_item_serial(&world);
 
@@ -16987,7 +16987,7 @@ fn a_closed_door_blocks_a_walk() {
     let mut world = world();
     let gm = enter_gm(&mut world, now);
     let entity = world.state.players[&gm];
-    place_door(&mut world, Point::new(START.0, START.1 + 1, 0), now);
+    place_door(&mut world, Point::new(START.x, START.y + 1, 0), now);
 
     let mut refused: Cursor<StepRefused> = world.bus().cursor();
     world.queue(Command::Walk {
@@ -17002,7 +17002,7 @@ fn a_closed_door_blocks_a_walk() {
     );
     assert_eq!(
         world.registry().get::<Position>(entity).unwrap().0,
-        Point::new(START.0, START.1, Z_WITHOUT_A_MAP),
+        Point::new(START.x, START.y, Z_WITHOUT_A_MAP),
         "and nobody moved"
     );
 }
@@ -17024,7 +17024,7 @@ fn a_ghost_walks_through_a_shut_door_and_the_living_do_not() {
     let connection = enter(&mut world, now);
     let entity = world.state.players[&connection];
     let serial = serial_of(&world, connection);
-    let doorway = Point::new(START.0, START.1 + 1, Z_WITHOUT_A_MAP);
+    let doorway = Point::new(START.x, START.y + 1, Z_WITHOUT_A_MAP);
     place_door(&mut world, doorway, now);
 
     let mut refused: Cursor<StepRefused> = world.bus().cursor();
@@ -17040,7 +17040,7 @@ fn a_ghost_walks_through_a_shut_door_and_the_living_do_not() {
     );
     assert_eq!(
         world.registry().get::<Position>(entity).unwrap().0,
-        Point::new(START.0, START.1, Z_WITHOUT_A_MAP),
+        Point::new(START.x, START.y, Z_WITHOUT_A_MAP),
     );
 
     world.queue(Command::Damage {
@@ -17084,7 +17084,7 @@ fn a_ghost_cannot_work_a_door() {
     let mut world = world();
     let connection = enter(&mut world, now);
     let serial = serial_of(&world, connection);
-    let (door, door_serial) = place_door(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    let (door, door_serial) = place_door(&mut world, Point::new(START.x + 1, START.y, 0), now);
 
     world.queue(Command::Damage {
         serial,
@@ -17119,7 +17119,7 @@ fn an_opened_door_lets_a_step_through_and_blocks_again_when_it_shuts() {
     let gm = enter_gm(&mut world, now);
     let entity = world.state.players[&gm];
     let serial = world.registry().serial_of(entity).unwrap();
-    let at = Point::new(START.0 + 1, START.1, 0);
+    let at = Point::new(START.x + 1, START.y, 0);
     let (_door, door_serial) = place_door(&mut world, at, now);
 
     // Shut, it refuses the server-authoritative step an NPC would take — the
@@ -17139,7 +17139,7 @@ fn an_opened_door_lets_a_step_through_and_blocks_again_when_it_shuts() {
     );
     assert_eq!(
         world.registry().get::<Position>(entity).unwrap().0,
-        Point::new(START.0, START.1, Z_WITHOUT_A_MAP)
+        Point::new(START.x, START.y, Z_WITHOUT_A_MAP)
     );
 
     // Open, the doorway is a doorway again.
@@ -17160,7 +17160,7 @@ fn an_opened_door_lets_a_step_through_and_blocks_again_when_it_shuts() {
     );
 
     // And when it swings shut on its own, the tile seals behind it.
-    teleport(&mut world, gm, Point::new(START.0, START.1, 0));
+    teleport(&mut world, gm, Point::new(START.x, START.y, 0));
     let close_at = world.registry().query::<Door>().next().unwrap().1.close_at;
     let mut later = now;
     while world.state.ticks < close_at {
@@ -17194,7 +17194,7 @@ fn a_creature_does_not_notice_prey_through_a_shut_door() {
 
     // A shut door directly south of the player, and a hungry creature beyond
     // it: the only sight line runs through the door.
-    let (_door, door_serial) = place_door(&mut world, Point::new(START.0, START.1 + 1, 0), now);
+    let (_door, door_serial) = place_door(&mut world, Point::new(START.x, START.y + 1, 0), now);
     world.queue(Command::SpawnMobile {
         body: openshard_protocol::wire::Graphic(0x0190),
         hue: openshard_protocol::wire::Hue(0),
@@ -17209,7 +17209,7 @@ fn a_creature_does_not_notice_prey_through_a_shut_door() {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0, START.1 + 2, 0),
+        position: Point::new(START.x, START.y + 2, 0),
         facet: Facet(0),
         name: None,
         title: None,
@@ -17335,8 +17335,8 @@ fn an_unreachable_quarry_is_given_up_not_wall_humped() {
     let mut world = world();
     let _gm = enter_gm(&mut world, now);
     // The player fenced in on all eight sides: visible, unreachable.
-    fence_around(&mut world, Point::new(START.0, START.1, 0));
-    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.0, START.1 + 4, 0), 8, now);
+    fence_around(&mut world, Point::new(START.x, START.y, 0));
+    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.x, START.y + 4, 0), 8, now);
 
     // Let it notice, try, and conclude.
     for _ in 0..(AI_THINK_TICKS * 4) {
@@ -17372,7 +17372,7 @@ fn a_chase_rounds_a_wall_of_crates() {
     let now = Instant::now();
     let mut world = world();
     let _gm = enter_gm(&mut world, now);
-    let player_at = Point::new(START.0, START.1, 0);
+    let player_at = Point::new(START.x, START.y, 0);
     // A five-tile wall between quarry and creature, open at both ends.
     for dx in -2i32..=2 {
         let crate_entity = world.state.registry.spawn();
@@ -17383,7 +17383,7 @@ fn a_chase_rounds_a_wall_of_crates() {
             openshard_map::overlay::Cover::blocking(0, openshard_state::DOOR_HEIGHT),
         );
     }
-    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.0, START.1 + 4, 0), 10, now);
+    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.x, START.y + 4, 0), 10, now);
 
     // Enough beats to notice, plan, and walk around either end.
     let mut later = now;
@@ -17560,7 +17560,7 @@ fn a_chase_rounds_a_line_of_bystanders() {
     let now = Instant::now();
     let mut world = world();
     let _gm = enter_gm(&mut world, now);
-    let player_at = Point::new(START.0, START.1, 0);
+    let player_at = Point::new(START.x, START.y, 0);
     // Five people standing shoulder to shoulder between quarry and creature,
     // open at both ends.
     let line: Vec<Point> = (-2i32..=2)
@@ -17569,7 +17569,7 @@ fn a_chase_rounds_a_line_of_bystanders() {
     for at in &line {
         a_bystander_at(&mut world, *at);
     }
-    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.0, START.1 + 4, 0), 10, now);
+    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.x, START.y + 4, 0), 10, now);
 
     let mut later = now;
     let mut walked = Vec::new();
@@ -17613,7 +17613,7 @@ fn first_chase_step_among(blockers: &[Point], bystanders: &[Point]) -> Option<Po
     let now = Instant::now();
     let mut world = world();
     let _gm = enter_gm(&mut world, now);
-    let start = Point::new(START.0 + 2, START.1 + 2, 0);
+    let start = Point::new(START.x + 2, START.y + 2, 0);
     for blocker in blockers {
         let crate_entity = world.state.registry.spawn();
         world.state.facet_state_mut(Facet(0)).block(
@@ -17646,10 +17646,10 @@ fn a_chase_does_not_cut_a_corner() {
     // it used to ask `can_step` — one landing, which has nothing to say about a
     // diagonal's flanks. So a creature walking straight at its quarry cut the
     // corner its own `find_path` refuses to plan through.
-    let cut = Point::new(START.0 + 1, START.1 + 1, 0);
+    let cut = Point::new(START.x + 1, START.y + 1, 0);
     // The crate on the diagonal's northern flank. Its own tile is not on the
     // way anywhere: it is a flank and nothing else.
-    let flank = Point::new(START.0 + 2, START.1 + 1, 0);
+    let flank = Point::new(START.x + 2, START.y + 1, 0);
 
     let stepped = first_chase_step(&[flank]);
     assert_ne!(stepped, Some(cut), "the straight step clipped the crate's corner");
@@ -17678,8 +17678,8 @@ fn a_chase_does_not_cut_a_corner() {
 /// does with the corner rule itself.
 #[test]
 fn a_chase_does_not_cut_a_corner_past_a_bystander() {
-    let cut = Point::new(START.0 + 1, START.1 + 1, 0);
-    let flank = Point::new(START.0 + 2, START.1 + 1, 0);
+    let cut = Point::new(START.x + 1, START.y + 1, 0);
+    let flank = Point::new(START.x + 2, START.y + 1, 0);
 
     let stepped = first_chase_step_among(&[], &[flank]);
     assert_ne!(stepped, Some(cut), "the straight step clipped a person's corner");
@@ -18598,7 +18598,7 @@ fn a_human_chaser_opens_the_door_in_its_way() {
     let now = Instant::now();
     let mut world = world();
     let gm = enter_gm(&mut world, now);
-    let door_at = Point::new(START.0, START.1 + 1, 0);
+    let door_at = Point::new(START.x, START.y + 1, 0);
     let (door, door_serial) = place_door(&mut world, door_at, now);
 
     // Open the door first so the creature can see and acquire its prey.
@@ -18607,7 +18607,7 @@ fn a_human_chaser_opens_the_door_in_its_way() {
         request: UseRequest::Use(RawSerial(door_serial.raw())),
     });
     world.tick(now);
-    let creature = spawn_brained(&mut world, 0x0190, Point::new(START.0, START.1 + 3, 0), 8, now);
+    let creature = spawn_brained(&mut world, 0x0190, Point::new(START.x, START.y + 3, 0), 8, now);
     // Only as far as noticing. Ticking a fixed padded count here let it also walk
     // *through* the doorway before the door was slammed, which left nothing in its
     // way and quietly turned this into a test of standing still.
@@ -18644,7 +18644,7 @@ fn a_human_chaser_opens_the_door_in_its_way() {
     );
     let creature_at = world.registry().get::<Position>(creature).unwrap().0;
     assert!(
-        distance(creature_at, Point::new(START.0, START.1, 0)) <= openshard_combat::MELEE_RANGE,
+        distance(creature_at, Point::new(START.x, START.y, 0)) <= openshard_combat::MELEE_RANGE,
         "and came through the doorway (ended at {creature_at:?})"
     );
 }
@@ -18699,7 +18699,7 @@ fn a_defensive_creature_answers_the_blow() {
     let gm = enter_gm(&mut world, now);
     let player_serial = world.registry().serial_of(world.state.players[&gm]).unwrap();
     // Defensive and blind: it hunts nothing, so only the blow can start this.
-    let creature = spawn_postured(&mut world, Point::new(START.0, START.1 + 2, 0), 0, 1, now);
+    let creature = spawn_postured(&mut world, Point::new(START.x, START.y + 2, 0), 0, 1, now);
     assert!(
         world.registry().get::<Combat>(creature).is_none(),
         "unprovoked, it minds its own business"
@@ -18728,9 +18728,9 @@ fn a_passive_creature_runs_from_its_attacker() {
     let now = Instant::now();
     let mut world = world();
     let gm = enter_gm(&mut world, now);
-    let player_at = Point::new(START.0, START.1, 0);
+    let player_at = Point::new(START.x, START.y, 0);
     let player_serial = world.registry().serial_of(world.state.players[&gm]).unwrap();
-    let start_at = Point::new(START.0, START.1 + 1, 0);
+    let start_at = Point::new(START.x, START.y + 1, 0);
     let creature = spawn_postured(&mut world, start_at, 0, 0, now);
     let creature_serial = world.registry().serial_of(creature).unwrap();
     world.queue(Command::Damage {
@@ -18759,9 +18759,9 @@ fn a_gutted_monster_turns_tail() {
     let now = Instant::now();
     let mut world = world();
     let gm = enter_gm(&mut world, now);
-    let player_at = Point::new(START.0, START.1, 0);
+    let player_at = Point::new(START.x, START.y, 0);
     let player_serial = world.registry().serial_of(world.state.players[&gm]).unwrap();
-    let start_at = Point::new(START.0, START.1 + 1, 0);
+    let start_at = Point::new(START.x, START.y + 1, 0);
     let creature = spawn_postured(&mut world, start_at, 8, 2, now);
     let creature_serial = world.registry().serial_of(creature).unwrap();
     // Cut it to under a fifth of its hits: 50 -> 9.
@@ -18797,8 +18797,8 @@ fn the_chase_pace_is_the_operators_knob() {
         };
         let mut world = World::new(START).with_gameplay(gameplay);
         let _gm = enter_gm(&mut world, now);
-        let player_at = Point::new(START.0, START.1, 0);
-        spawn_brained(&mut world, 0x00D1, Point::new(START.0, START.1 + 7, 0), 10, now);
+        let player_at = Point::new(START.x, START.y, 0);
+        spawn_brained(&mut world, 0x00D1, Point::new(START.x, START.y + 7, 0), 10, now);
         let creature = world
             .state
             .registry
@@ -18876,7 +18876,7 @@ fn a_horse_is_mounted_and_dismounted_by_double_click() {
     let mut world = world();
     let gm = enter_gm(&mut world, now);
     let player = world.state.players[&gm];
-    let (horse, horse_serial) = spawn_horse(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    let (horse, horse_serial) = spawn_horse(&mut world, Point::new(START.x + 1, START.y, 0), now);
 
     world.queue(Command::DoubleClick {
         connection: gm,
@@ -18929,7 +18929,7 @@ fn a_horse_is_mounted_and_dismounted_by_double_click() {
         .expect("back on the ground")
         .0;
     assert!(
-        distance(horse_at, Point::new(START.0, START.1, 0)) <= 1,
+        distance(horse_at, Point::new(START.x, START.y, 0)) <= 1,
         "the horse stands beside its rider"
     );
 }
@@ -19043,7 +19043,7 @@ fn a_paperdoll_request_leaves_the_rider_mounted() {
     let mut world = world();
     let gm = enter_gm(&mut world, now);
     let player = world.state.players[&gm];
-    let (_horse, horse_serial) = spawn_horse(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    let (_horse, horse_serial) = spawn_horse(&mut world, Point::new(START.x + 1, START.y, 0), now);
     world.queue(Command::DoubleClick {
         connection: gm,
         request: UseRequest::Use(RawSerial(horse_serial.raw())),
@@ -19073,7 +19073,7 @@ fn a_ridden_horse_does_not_wander_and_the_ride_survives_logout() {
     let now = Instant::now();
     let mut world = world();
     let gm = enter_gm(&mut world, now);
-    let (horse, horse_serial) = spawn_horse(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    let (horse, horse_serial) = spawn_horse(&mut world, Point::new(START.x + 1, START.y, 0), now);
     world.queue(Command::DoubleClick {
         connection: gm,
         request: UseRequest::Use(RawSerial(horse_serial.raw())),
@@ -19111,7 +19111,7 @@ fn a_mounted_character_logs_back_in_still_mounted() {
     let gm = enter_gm(&mut world, now);
     let player = world.state.players[&gm];
     let char_serial = world.registry().serial_of(player).unwrap();
-    let (_horse, horse_serial) = spawn_horse(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    let (_horse, horse_serial) = spawn_horse(&mut world, Point::new(START.x + 1, START.y, 0), now);
     world.queue(Command::DoubleClick {
         connection: gm,
         request: UseRequest::Use(RawSerial(horse_serial.raw())),
@@ -19213,7 +19213,7 @@ fn a_dismounted_horse_stays_beside_the_rider_through_its_beats() {
     let mut world = world();
     let gm = enter_gm(&mut world, now);
     let player = world.state.players[&gm];
-    let (horse, horse_serial) = spawn_horse(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    let (horse, horse_serial) = spawn_horse(&mut world, Point::new(START.x + 1, START.y, 0), now);
     world.queue(Command::DoubleClick {
         connection: gm,
         request: UseRequest::Use(RawSerial(horse_serial.raw())),
@@ -19222,7 +19222,7 @@ fn a_dismounted_horse_stays_beside_the_rider_through_its_beats() {
     assert!(world.registry().get::<Riding>(player).is_some(), "mounted");
 
     // Ride far from the mounting spot.
-    let far = Point::new(START.0 + 30, START.1, 0);
+    let far = Point::new(START.x + 30, START.y, 0);
     teleport(&mut world, gm, far);
 
     // Dismount there, with a raw self-double-click.
@@ -19278,7 +19278,7 @@ fn a_shop_sells_goods_and_buys_them_back() {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0 + 1, START.1, 0),
+        position: Point::new(START.x + 1, START.y, 0),
         facet: Facet(0),
         name: Some("Mirabel".to_owned()),
         title: None,
@@ -19448,7 +19448,7 @@ fn a_shop_keyword_needs_the_vendor_named_and_an_empty_sell_answers_overhead() {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0 + 1, START.1, 0),
+        position: Point::new(START.x + 1, START.y, 0),
         facet: Facet(0),
         name: Some("Mirabel".to_owned()),
         title: None,
@@ -19597,7 +19597,7 @@ fn a_bought_out_shelf_refills_when_its_hour_is_up() {
         ranged: None,
         ranged_kind: DamageType::Physical,
         wander: false,
-        position: Point::new(START.0 + 1, START.1, 0),
+        position: Point::new(START.x + 1, START.y, 0),
         facet: Facet(0),
         name: Some("Mirabel".to_owned()),
         title: None,
@@ -19759,7 +19759,7 @@ fn a_ranged_creature_volleys_from_a_distance() {
     let gm = enter_gm(&mut world, now);
     let player = world.state.players[&gm];
     let before = world.registry().get::<Hitpoints>(player).unwrap().current;
-    spawn_archer(&mut world, Point::new(START.0, START.1 + 5, 0), now);
+    spawn_archer(&mut world, Point::new(START.x, START.y + 5, 0), now);
 
     let mut later = now;
     for _ in 0..Gameplay::ticks(2) {
@@ -19778,8 +19778,8 @@ fn a_pressed_archer_backs_away() {
     let now = Instant::now();
     let mut world = world();
     let _gm = enter_gm(&mut world, now);
-    let player_at = Point::new(START.0, START.1, 0);
-    let archer = spawn_archer(&mut world, Point::new(START.0, START.1 + 1, 0), now);
+    let player_at = Point::new(START.x, START.y, 0);
+    let archer = spawn_archer(&mut world, Point::new(START.x, START.y + 1, 0), now);
 
     let mut later = now;
     for _ in 0..Gameplay::ticks(2) {
@@ -19802,7 +19802,7 @@ fn no_volley_passes_a_shut_door() {
     // The archer boxed in a ring of crates whose only gap is a doorway: when
     // the door shuts there is no line to shoot down and no way around — and a
     // beast body cannot work the handle.
-    let den = Point::new(START.0, START.1 + 3, 0);
+    let den = Point::new(START.x, START.y + 3, 0);
     for dx in -1i32..=1 {
         for dy in -1i32..=1 {
             if dx == 0 && dy == 0 || (dx == 0 && dy == -1) {
@@ -19921,7 +19921,7 @@ fn lod_off_a_far_creature_still_ambles() {
     let now = Instant::now();
     let mut world = world();
     let _conn = enter(&mut world, now);
-    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.0, START.1 + 60, 0), 5, now);
+    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.x, START.y + 60, 0), 5, now);
     let base = world.state.gameplay.creature_step_ticks.max(1);
     let gap = beat_gap(&mut world, creature, now);
     let want = beat_band(base * 2);
@@ -19939,7 +19939,7 @@ fn lod_a_far_creature_dozes() {
     let now = Instant::now();
     let mut world = lod_world();
     let _conn = enter(&mut world, now);
-    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.0, START.1 + 60, 0), 5, now);
+    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.x, START.y + 60, 0), 5, now);
     let base = world.state.gameplay.creature_step_ticks.max(1);
     let factor = world.state.gameplay.lod_idle_factor;
     let gap = beat_gap(&mut world, creature, now);
@@ -19959,7 +19959,7 @@ fn lod_a_near_creature_thinks_at_full_rate() {
     let mut world = lod_world();
     let _conn = enter(&mut world, now);
     // Well inside `lod_radius` (32) of the player at START.
-    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.0, START.1 + 5, 0), 5, now);
+    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.x, START.y + 5, 0), 5, now);
     let base = world.state.gameplay.creature_step_ticks.max(1);
     let factor = world.state.gameplay.lod_idle_factor;
     let brain = *world.registry().get::<Brain>(creature).unwrap();
@@ -19982,7 +19982,7 @@ fn lod_an_engaged_creature_keeps_simulating() {
     let conn = enter(&mut world, now);
     let player = world.state.players[&conn];
     let target = world.state.registry.serial_of(player).unwrap();
-    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.0, START.1 + 60, 0), 5, now);
+    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.x, START.y + 60, 0), 5, now);
     // Engage it and let it think again this coming tick.
     world.state.registry.insert(
         creature,
@@ -20016,7 +20016,7 @@ fn lod_walking_into_a_sleeping_town_wakes_it() {
     let now = Instant::now();
     let mut world = lod_world();
     let conn = enter(&mut world, now); // player at START
-    let far = Point::new(START.0, START.1 + 300, 0);
+    let far = Point::new(START.x, START.y + 300, 0);
     let npc = spawn_townsperson(&mut world, "the peasant", far, now);
 
     // Let it notice nobody is there and doze.
@@ -20069,8 +20069,8 @@ fn lod_a_spawner_with_no_player_near_stays_dormant_then_wakes() {
     };
     // Far beyond the LOD radius of the player at START.
     let area = SpawnArea {
-        x: START.0,
-        y: START.1 + 300,
+        x: START.x,
+        y: START.y + 300,
         width: 2,
         height: 2,
         facet: Facet(0),
@@ -20114,7 +20114,7 @@ fn double_clicking_an_npc_fires_mobile_used_and_still_opens_the_paperdoll() {
     let now = Instant::now();
     let mut world = world();
     let conn = enter(&mut world, now);
-    let npc = spawn_mobile_at(&mut world, Point::new(START.0, START.1 + 1, 0), 50, now);
+    let npc = spawn_mobile_at(&mut world, Point::new(START.x, START.y + 1, 0), 50, now);
     let mut used: Cursor<crate::MobileUsed> = world.bus().cursor();
     let _ = packets_for(&mut world, conn);
 
@@ -20520,7 +20520,7 @@ fn a_deed_raises_the_house_cursor_and_answering_it_builds() {
         "a deed raised no house cursor, so the player picks a plot blind"
     );
 
-    let at = Point::new(START.0 + 6, START.1 + 6, 0);
+    let at = Point::new(START.x + 6, START.y + 6, 0);
     world.queue(Command::TargetResponse {
         connection,
         response: openshard_protocol::target::TargetResponse {
@@ -20783,7 +20783,7 @@ fn a_deed_for_a_foundation_builds_a_house_with_a_design() {
         "a deed for a foundation raised no cursor"
     );
 
-    let at = Point::new(START.0 + 6, START.1 + 6, 0);
+    let at = Point::new(START.x + 6, START.y + 6, 0);
     world.queue(Command::TargetResponse {
         connection,
         response: openshard_protocol::target::TargetResponse {

@@ -34,6 +34,29 @@ use crate::sectors::SECTOR_SIZE;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct RegionId(pub u16);
 
+/// A facet named more regions than its facet-local id can represent.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TooManyRegions {
+    /// How many regions were supplied.
+    pub found: usize,
+    /// How many distinct ids exist.
+    pub maximum: usize,
+}
+
+impl std::fmt::Display for TooManyRegions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{} regions were supplied, but a facet can identify at most {}",
+            self.found, self.maximum
+        )
+    }
+}
+
+impl std::error::Error for TooManyRegions {}
+
+const MAX_REGIONS: usize = u16::MAX as usize + 1;
+
 /// One box of a region, in tiles, with the height band it applies to.
 ///
 /// A region is a *set* of these — a town is rarely one rectangle, and a dungeon
@@ -226,12 +249,35 @@ impl Regions {
     /// Replace-all rather than add-one, like the decoration and spawner sweeps:
     /// a registration carries the whole set, so registering twice cannot leave a stale
     /// half behind.
+    #[track_caller]
     pub fn set(&mut self, regions: Vec<Region>) {
-        self.regions = regions;
-        for (index, region) in self.regions.iter_mut().enumerate() {
-            region.id = RegionId(u16::try_from(index).unwrap_or(u16::MAX));
+        self.try_set(regions)
+            .expect("an in-tree region set fits the facet-local RegionId");
+    }
+
+    /// Replace every region when each can receive a distinct [`RegionId`].
+    ///
+    /// Refuses the new set before changing the old one. Reusing `u16::MAX` for
+    /// every excess region would make unrelated guarded and travel rules share
+    /// an identity and make the bucket grid point at the wrong area.
+    ///
+    /// # Errors
+    ///
+    /// [`TooManyRegions`] when `regions` has more entries than `RegionId` can
+    /// distinguish.
+    pub fn try_set(&mut self, mut regions: Vec<Region>) -> Result<(), TooManyRegions> {
+        if regions.len() > MAX_REGIONS {
+            return Err(TooManyRegions {
+                found: regions.len(),
+                maximum: MAX_REGIONS,
+            });
         }
+        for (index, region) in regions.iter_mut().enumerate() {
+            region.id = RegionId(u16::try_from(index).expect("the region count was checked above"));
+        }
+        self.regions = regions;
         self.reindex();
+        Ok(())
     }
 
     /// Forget every region.
@@ -292,7 +338,7 @@ impl Regions {
             bucket.clear();
         }
         for index in 0..self.regions.len() {
-            let id = RegionId(u16::try_from(index).unwrap_or(u16::MAX));
+            let id = RegionId(u16::try_from(index).expect("Regions::try_set bounded every stored index"));
             // Collected first: `bucket_of` borrows self immutably.
             let mut buckets = Vec::new();
             for rect in &self.regions[index].rects {
@@ -453,6 +499,35 @@ mod tests {
         assert_eq!(regions.get(RegionId(0)).map(|r| r.name.as_str()), Some("First"));
         assert_eq!(regions.get(RegionId(1)).map(|r| r.name.as_str()), Some("Second"));
         assert_eq!(at(&regions, 25, 25), Some("Second"));
+    }
+
+    #[test]
+    fn too_many_regions_are_refused_without_replacing_the_live_set() {
+        let mut regions = Regions::new(1024, 1024);
+        regions.set(vec![region(
+            0,
+            "Still here",
+            50,
+            vec![RegionRect::new(10, 10, 10, 10)],
+        )]);
+        let excess = vec![region(0, "Excess", 1, Vec::new()); MAX_REGIONS + 1];
+
+        let error = regions
+            .try_set(excess)
+            .expect_err("RegionId cannot name this set");
+        assert_eq!(
+            error,
+            TooManyRegions {
+                found: MAX_REGIONS + 1,
+                maximum: MAX_REGIONS,
+            }
+        );
+        assert_eq!(
+            regions.len(),
+            1,
+            "the rejected set did not partially replace the old one"
+        );
+        assert_eq!(at(&regions, 15, 15), Some("Still here"));
     }
 
     #[test]

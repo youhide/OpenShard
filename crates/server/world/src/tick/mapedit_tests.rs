@@ -69,7 +69,7 @@ fn owned_world(tag: &str) -> (World, PathBuf) {
         base: loaded.base,
         identity: openshard_basemap::identity_of(&path).expect("the base set just written"),
     };
-    let world = World::new((8, 8)).with_facet(
+    let world = World::new(Tile::new(8, 8)).with_facet(
         FACET,
         loaded.snapshot,
         None,

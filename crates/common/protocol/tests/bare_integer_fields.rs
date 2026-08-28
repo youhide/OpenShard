@@ -54,12 +54,12 @@ const ALLOWLIST: &[(&str, &str, &str)] = &[
     // -- geometric components: N1 amendment 2, N2 amendment 2 --------------
     (
         "target.rs",
-        "offset",
-        "MultiTargetRequest: three signed tile deltas, which is a geometry this crate \
-         has no type for — Point is unsigned x/y and this is a displacement, not a place. \
-         Zero in every placement this engine makes; carried because the reference's boats \
-         set it and a field we never write is still one we must not corrupt",
+        "x",
+        "MultiOffset: one signed displacement's own east-west axis; the enclosing type keeps \
+         it distinct from an absolute Point and keeps all three wire fields together",
     ),
+    ("target.rs", "y", "MultiOffset: same"),
+    ("target.rs", "z", "MultiOffset: same"),
     (
         "world.rs",
         "x",

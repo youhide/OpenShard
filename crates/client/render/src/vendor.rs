@@ -33,11 +33,31 @@ const ROW_FONT: Font = Font(9);
 // panels rather than the white used by the old improvised list.
 const ROW_HUE: Hue = Hue(0x0219);
 
+/// A position in the vendor catalogue, never a position in the shorter order
+/// panel drawn beside it.
+///
+/// The renderer produces one from hit-testing and the app uses it to update an
+/// order, so the type crosses that crate boundary with the meaning intact.
+/// [`position`](Self::position) opens it only where a catalogue slice or the
+/// parallel amount list is actually indexed.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
+pub struct CatalogueIndex(usize);
+
+impl CatalogueIndex {
+    pub const fn new(position: usize) -> Self {
+        Self(position)
+    }
+
+    pub const fn position(self) -> usize {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Hit {
-    Row(usize),
+    Row(CatalogueIndex),
     /// A row already present in the order panel; clicking it removes one.
-    Remove(usize),
+    Remove(CatalogueIndex),
     Confirm,
     Clear,
 }
@@ -75,9 +95,9 @@ pub struct Window {
     pub vendor: Serial,
     pub sell: bool,
     pub at: GumpPixel,
-    pub scroll: usize,
+    pub scroll: CatalogueIndex,
     pub rows: usize,
-    selected: Vec<usize>,
+    selected: Vec<CatalogueIndex>,
     pub pictures: Vec<Picture>,
     pub lines: Vec<Line>,
 }
@@ -111,7 +131,9 @@ impl Window {
         }
         if self.catalogue_contains(cursor) && (ROW_TOP..ROW_TOP + self.rows as i32 * ROW_HEIGHT).contains(&y)
         {
-            return Some(Hit::Row(self.scroll + ((y - ROW_TOP) / ROW_HEIGHT) as usize));
+            return Some(Hit::Row(CatalogueIndex::new(
+                self.scroll.position() + ((y - ROW_TOP) / ROW_HEIGHT) as usize,
+            )));
         }
         if (267..447).contains(&x) && (185..297).contains(&y) {
             let selected = ((y - 185) / 28) as usize;
@@ -167,7 +189,7 @@ pub fn buy(
     lines: &[BuyLine],
     items: &[ContainedItem],
     amounts: &[u16],
-    scroll: usize,
+    scroll: CatalogueIndex,
     at: GumpPixel,
     cursor: GumpPixel,
     atlas: &GumpAtlas,
@@ -194,7 +216,7 @@ pub fn sell(
     vendor: Serial,
     lines: &[SellLine],
     amounts: &[u16],
-    scroll: usize,
+    scroll: CatalogueIndex,
     at: GumpPixel,
     cursor: GumpPixel,
     atlas: &GumpAtlas,
@@ -223,17 +245,18 @@ fn window(
     vendor: Serial,
     sell: bool,
     rows: impl Iterator<Item = Row>,
-    scroll: usize,
+    scroll: CatalogueIndex,
     at: GumpPixel,
     cursor: GumpPixel,
     atlas: &GumpAtlas,
 ) -> Window {
     let rows: Vec<Row> = rows.collect();
-    let scroll = scroll.min(rows.len().saturating_sub(VISIBLE_ROWS));
+    let scroll = CatalogueIndex::new(scroll.position().min(rows.len().saturating_sub(VISIBLE_ROWS)));
+    let scroll_position = scroll.position();
     let mut lines = Vec::new();
     lines.extend(
         rows.iter()
-            .skip(scroll)
+            .skip(scroll_position)
             .take(VISIBLE_ROWS)
             .enumerate()
             .flat_map(|(i, row)| {
@@ -259,15 +282,15 @@ fn window(
     // The right-hand panel is the ClassicUO transaction list.  The catalogue
     // stays on the left; only chosen lines travel across, so confirmation is
     // legible before it commits the one packet to the shard.
-    let selected: Vec<usize> = rows
+    let selected: Vec<CatalogueIndex> = rows
         .iter()
         .enumerate()
-        .filter_map(|(index, row)| (row.amount > 0).then_some(index))
+        .filter_map(|(index, row)| (row.amount > 0).then_some(CatalogueIndex::new(index)))
         .collect();
     lines.extend(
         selected
             .iter()
-            .filter_map(|index| rows.get(*index))
+            .filter_map(|index| rows.get(index.position()))
             .take(4)
             .enumerate()
             .flat_map(|(i, row)| {
@@ -330,7 +353,7 @@ fn window(
         sell,
         at,
         scroll,
-        rows: rows.len().saturating_sub(scroll).min(VISIBLE_ROWS),
+        rows: rows.len().saturating_sub(scroll_position).min(VISIBLE_ROWS),
         selected,
         pictures: {
             let (left, right) = if sell {
@@ -347,7 +370,7 @@ fn window(
             ];
             pictures.extend(
                 rows.iter()
-                    .skip(scroll)
+                    .skip(scroll_position)
                     .take(VISIBLE_ROWS)
                     .enumerate()
                     .filter_map(|(i, row)| {
@@ -391,13 +414,19 @@ mod tests {
             }],
             &[],
             &[1],
-            0,
+            CatalogueIndex::new(0),
             GumpPixel::new(10, 20),
             GumpPixel::new(0, 0),
             &GumpAtlas::empty(),
         );
-        assert_eq!(window.hit(GumpPixel::new(50, 90)), Some(Hit::Row(0)));
-        assert_eq!(window.hit(GumpPixel::new(290, 205)), Some(Hit::Remove(0)));
+        assert_eq!(
+            window.hit(GumpPixel::new(50, 90)),
+            Some(Hit::Row(CatalogueIndex::new(0)))
+        );
+        assert_eq!(
+            window.hit(GumpPixel::new(290, 205)),
+            Some(Hit::Remove(CatalogueIndex::new(0)))
+        );
         assert_eq!(window.hit(GumpPixel::new(300, 345)), Some(Hit::Confirm));
         assert_eq!(window.hit(GumpPixel::new(480, 345)), Some(Hit::Clear));
         assert!(window.contains(GumpPixel::new(12, 25)));
@@ -419,7 +448,7 @@ mod tests {
             &lines,
             &[],
             &vec![0; lines.len()],
-            1,
+            CatalogueIndex::new(1),
             GumpPixel::new(10, 20),
             GumpPixel::new(0, 0),
             &GumpAtlas::empty(),
@@ -428,6 +457,9 @@ mod tests {
         assert_eq!(window.rows, VISIBLE_ROWS);
         assert_eq!(window.lines.len(), VISIBLE_ROWS * 2 + 3);
         assert!(window.lines.iter().any(|line| line.text.starts_with("item 1:")));
-        assert_eq!(window.hit(GumpPixel::new(50, 89)), Some(Hit::Row(1)));
+        assert_eq!(
+            window.hit(GumpPixel::new(50, 89)),
+            Some(Hit::Row(CatalogueIndex::new(1)))
+        );
     }
 }

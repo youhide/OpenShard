@@ -48,3 +48,18 @@ pub use record::{
 };
 pub use sqlite::SqliteStore;
 pub use store::{MemoryStore, Store, StoreError};
+
+/// Decode one nullable JSON field whose absence is meaningful item state.
+///
+/// Malformed JSON is not absence: treating it that way would let the next save
+/// persist the invented empty state over the only copy of the original value.
+fn item_json<T: serde::de::DeserializeOwned>(
+    json: Option<String>,
+    field: &'static str,
+) -> Result<Option<T>, StoreError> {
+    json.map(|json| {
+        serde_json::from_str(&json)
+            .map_err(|error| StoreError::Corrupt(format!("invalid item {field}: {error}")))
+    })
+    .transpose()
+}

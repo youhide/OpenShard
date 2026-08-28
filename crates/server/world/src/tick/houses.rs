@@ -20,7 +20,7 @@ use openshard_items as items;
 use openshard_persistence::record::HouseRecord;
 use openshard_protocol::serial::{RawSerial, Serial};
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::target::{MultiTargetRequest, TargetKind};
+use openshard_protocol::target::{MultiOffset, MultiTargetRequest, TargetKind};
 use openshard_protocol::wire::{CursorId, Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{Client, Drawn, House, HouseDeed, HouseDesign, HouseSign, Position};
@@ -310,12 +310,7 @@ impl World {
             }
             let shape = design.as_ref().map(|(_, components)| components.as_slice());
 
-            match openshard_housing::footprint_of(
-                &self.state,
-                at,
-                multi,
-                shape,
-            ) {
+            match openshard_housing::footprint_of(&self.state, at, multi, shape) {
                 Ok(footprint) => {
                     openshard_housing::block(&mut self.state, entity, facet, &footprint);
                 }
@@ -328,26 +323,14 @@ impl World {
             // Classic doors are separate saved decoration, not multi pieces.
             // Decoration was restored before houses, so this adopts the saved
             // leaves and creates only fixtures absent from an older save.
-            openshard_housing::install_doors(
-                &mut self.state,
-                entity,
-                facet,
-                at,
-                multi,
-            );
+            openshard_housing::install_doors(&mut self.state, entity, facet, at, multi);
             // Rebuilt rather than restored, for the module header's reason: the
             // sign's spot is a pure function of the classic house type or a
             // designed foundation's box, and a saved copy would go stale when a
             // design changes.
             // A shard with no client files gets no sign, the same bargain the
             // walls make.
-            openshard_housing::hang_sign_for_design(
-                &mut self.state,
-                entity,
-                facet,
-                at,
-                multi,
-            );
+            openshard_housing::hang_sign_for_design(&mut self.state, entity, facet, at, multi);
             restored += 1;
         }
         if restored > 0 {
@@ -434,7 +417,7 @@ impl World {
                 // click on the grass the player is trying to build on.
                 kind: TargetKind::Location,
                 multi,
-                offset: (0, 0, 0),
+                offset: MultiOffset::default(),
             }),
         );
         self.state

@@ -100,7 +100,7 @@ pub(super) fn meditation(state: &mut WorldState, actor: EntityId) {
     let value = i32::from(crate::skill_value(state, actor, skill)) / 10;
     let missing = i32::from(mana.max.saturating_sub(mana.current));
     let chance = 50 + (value - missing) * 2;
-    let roll = i32::try_from(state.rng.below(100)).unwrap_or(0);
+    let roll = i32::from(crate::roll_u16(&mut state.rng, crate::PERCENT));
     crate::set_skill_delay(state, actor, MEDITATION_DELAY);
     if chance <= roll {
         state.localized_message(actor, NO_FOCUS, "");

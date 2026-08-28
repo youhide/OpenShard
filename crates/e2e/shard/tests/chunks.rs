@@ -517,7 +517,7 @@ async fn a_client_that_kept_the_ground_asks_only_for_what_moved() {
 
     let mut fetch = Fetch::over(
         notice,
-        held,
+        held.into_snapshot(),
         match &reply.changes {
             Changes::These(chunks) => chunks.clone(),
             Changes::Everything => panic!("the shard knows what moved"),

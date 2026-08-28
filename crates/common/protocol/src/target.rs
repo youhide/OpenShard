@@ -37,6 +37,30 @@ pub enum TargetKind {
     Location = 1,
 }
 
+/// A multi's displacement from the tile a targeting cursor is over.
+///
+/// This is deliberately not [`Point`]: a point is an absolute, unsigned map
+/// coordinate, while these three signed words shift the preview the client
+/// draws from that coordinate.  Keeping the offset named prevents the three
+/// same-shaped wire fields from being passed or written in a different order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct MultiOffset {
+    /// East-west displacement, in tiles.
+    pub x: i16,
+    /// North-south displacement, in tiles.
+    pub y: i16,
+    /// Vertical displacement.
+    pub z: i16,
+}
+
+impl MultiOffset {
+    /// A displacement from a multi-target cursor.
+    #[must_use]
+    pub const fn new(x: i16, y: i16, z: i16) -> Self {
+        Self { x, y, z }
+    }
+}
+
 /// `0x6C` — raise a targeting cursor. 19 bytes.
 ///
 /// `cursor_id` is echoed back in the response so the server can match a click to
@@ -92,7 +116,7 @@ pub struct MultiTargetRequest {
     /// the origin is the tile clicked. The field exists because the reference's
     /// boats use it, and a value this engine never sets is still a value it must
     /// not corrupt.
-    pub offset: (i16, i16, i16),
+    pub offset: MultiOffset,
 }
 
 /// How long a `0x99` is for a given client — see [`MultiTargetRequest`].
@@ -116,9 +140,9 @@ impl MultiTargetRequest {
         // reference writes as a `Fill()` before seeking past them.
         out.zeros(11);
         out.u16(self.multi.0);
-        out.u16(self.offset.0 as u16);
-        out.u16(self.offset.1 as u16);
-        out.u16(self.offset.2 as u16);
+        out.u16(self.offset.x as u16);
+        out.u16(self.offset.y as u16);
+        out.u16(self.offset.z as u16);
         if version.supports(Feature::HsPackets) {
             out.zeros(4);
         }
@@ -147,7 +171,7 @@ impl DecodePacket for MultiTargetRequest {
         let _cursor_type = reader.u8()?;
         reader.skip(11)?;
         let multi = MultiId(reader.u16()?);
-        let offset = (reader.u16()? as i16, reader.u16()? as i16, reader.u16()? as i16);
+        let offset = MultiOffset::new(reader.u16()? as i16, reader.u16()? as i16, reader.u16()? as i16);
         Ok(Self {
             cursor_id,
             kind,
@@ -349,7 +373,7 @@ mod tests {
             cursor_id: CursorId(0x0000_002A),
             kind: TargetKind::Location,
             multi: MultiId(0x0064),
-            offset: (0, 0, 0),
+            offset: MultiOffset::default(),
         }
     }
 
@@ -381,13 +405,26 @@ mod tests {
     }
 
     #[test]
+    fn a_multi_offset_keeps_its_axes_in_wire_order() {
+        let bytes = ServerPacket::MultiTarget(MultiTargetRequest {
+            offset: MultiOffset::new(-3, 4, -128),
+            ..a_request()
+        })
+        .encode(version());
+
+        assert_eq!(i16::from_be_bytes([bytes[20], bytes[21]]), -3, "x");
+        assert_eq!(i16::from_be_bytes([bytes[22], bytes[23]]), 4, "y");
+        assert_eq!(i16::from_be_bytes([bytes[24], bytes[25]]), -128, "z");
+    }
+
+    #[test]
     fn a_multi_target_round_trips() {
         for version in [ClientVersion::new(6, 0, 0, 0), ClientVersion::HS] {
             // A non-zero offset, because zero is what every placement sends and a
             // field only ever written as zero is a field whose bytes nobody has
             // checked.
             let sent = MultiTargetRequest {
-                offset: (-3, 4, -128),
+                offset: MultiOffset::new(-3, 4, -128),
                 ..a_request()
             };
             let bytes = ServerPacket::MultiTarget(sent).encode(version);

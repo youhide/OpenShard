@@ -753,6 +753,45 @@ fn encode(mut w: impl Write, g: &NavigationGraph, stamp: &Stamp) -> io::Result<(
 
 fn decode(path: &Path, bytes: &[u8], expected: &Stamp, accept: Accept<'_>) -> Result<Loaded, Error> {
     let mut r = Reader { bytes, at: 0 };
+    let header = decode_header(&mut r, path, expected, accept)?;
+    let payload = decode_payload(&mut r, path, header.width, header.height)?;
+    if r.at != bytes.len() {
+        return Err(corrupt(path, "trailing payload bytes"));
+    }
+    let dead = validate_payload(path, header.width, header.height, &payload)?;
+
+    Ok(Loaded {
+        revision: header.revision,
+        graph: NavigationGraph {
+            width: header.width,
+            height: header.height,
+            regions: payload.regions,
+            walkable: payload.walkable,
+            dead_nodes: dead.nodes,
+            dead_region_nodes: dead.region_nodes,
+            dead_edges: dead.edges,
+            nodes: payload.nodes,
+            region_runs: payload.region_runs,
+            region_nodes: payload.region_nodes,
+            edge_runs: payload.edge_runs,
+            edge_targets: payload.edge_targets,
+            edge_costs: payload.edge_costs,
+        },
+    })
+}
+
+struct DecodedHeader {
+    revision: MapRevision,
+    width: u32,
+    height: u32,
+}
+
+fn decode_header(
+    r: &mut Reader<'_>,
+    path: &Path,
+    expected: &Stamp,
+    accept: Accept<'_>,
+) -> Result<DecodedHeader, Error> {
     if r.take(8)? != MAGIC {
         return Err(incompatible(path, "wrong magic"));
     }
@@ -780,42 +819,70 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp, accept: Accept<'_>) -> Re
             format!("facet {}, expected {}", facet.0, expected.facet.0),
         ));
     }
-    // Alongside the file-metadata check below, not instead of it: mtime and
-    // length answer "are these the same client files", and the revision answers
-    // "is this the same world we published". A world edited in place would keep
-    // every input file's stamp and change only this number.
-    match accept {
-        Accept::Current if revision != expected.revision => {
-            return Err(stale(
-                path,
-                format!(
-                    "built from map revision {}, expected {}",
-                    revision.get(),
-                    expected.revision.get()
-                ),
-            ));
-        }
-        // Behind is what the caller asked to be handed; ahead is a log that lost
-        // records under a graph, and there is no direction to replay that in.
-        Accept::OrBehind { .. } if revision.get() > expected.revision.get() => {
-            return Err(stale(
-                path,
-                format!(
-                    "built from map revision {}, and the world is at {}: an artifact cannot be \
-                     ahead of the world it names",
-                    revision.get(),
-                    expected.revision.get()
-                ),
-            ));
-        }
-        _ => {}
-    }
+    validate_revision(path, revision, expected.revision, accept)?;
     if width == 0 || height == 0 || width > u16::MAX as u32 || height > u16::MAX as u32 {
         return Err(incompatible(
             path,
             format!("invalid map dimensions {width}x{height}"),
         ));
     }
+    let inputs = decode_inputs(r, path)?;
+    let actual = Stamp {
+        facet,
+        revision,
+        routing_version: routing,
+        inputs,
+    };
+    if !stamp_agrees(&actual, expected, accept) {
+        return Err(stale(path, "client-file metadata changed"));
+    }
+    Ok(DecodedHeader {
+        revision,
+        width,
+        height,
+    })
+}
+
+fn validate_revision(
+    path: &Path,
+    revision: MapRevision,
+    expected: MapRevision,
+    accept: Accept<'_>,
+) -> Result<(), Error> {
+    // Alongside the file-metadata check below, not instead of it: mtime and
+    // length answer "are these the same client files", and the revision answers
+    // "is this the same world we published". A world edited in place would keep
+    // every input file's stamp and change only this number.
+    match accept {
+        Accept::Current if revision != expected => {
+            return Err(stale(
+                path,
+                format!(
+                    "built from map revision {}, expected {}",
+                    revision.get(),
+                    expected.get()
+                ),
+            ));
+        }
+        // Behind is what the caller asked to be handed; ahead is a log that lost
+        // records under a graph, and there is no direction to replay that in.
+        Accept::OrBehind { .. } if revision.get() > expected.get() => {
+            return Err(stale(
+                path,
+                format!(
+                    "built from map revision {}, and the world is at {}: an artifact cannot be \
+                     ahead of the world it names",
+                    revision.get(),
+                    expected.get()
+                ),
+            ));
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn decode_inputs(r: &mut Reader<'_>, path: &Path) -> Result<Vec<InputStamp>, Error> {
     let count = r.count()?;
     if count > r.remaining() / 28 {
         return Err(corrupt(path, "input count exceeds the payload"));
@@ -833,14 +900,12 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp, accept: Accept<'_>) -> Re
             modified_ns,
         });
     }
-    let actual = Stamp {
-        facet,
-        revision,
-        routing_version: routing,
-        inputs,
-    };
-    let agrees = match accept {
-        Accept::Current => &actual == expected,
+    Ok(inputs)
+}
+
+fn stamp_agrees(actual: &Stamp, expected: &Stamp, accept: Accept<'_>) -> bool {
+    match accept {
+        Accept::Current => actual == expected,
         // The revision is already decided above, and the log is the input the
         // revision *is*: what is left to check is that the world underneath both
         // is the same one.
@@ -849,10 +914,24 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp, accept: Accept<'_>) -> Re
                 && actual.routing_version == expected.routing_version
                 && inputs_besides(&actual.inputs, log) == inputs_besides(&expected.inputs, log)
         }
-    };
-    if !agrees {
-        return Err(stale(path, "client-file metadata changed"));
     }
+}
+
+struct CollectionCounts {
+    regions: usize,
+    walkable: usize,
+    nodes: usize,
+    region_nodes: usize,
+    edges: usize,
+    cells: usize,
+}
+
+fn decode_collection_counts(
+    r: &mut Reader<'_>,
+    path: &Path,
+    width: u32,
+    height: u32,
+) -> Result<CollectionCounts, Error> {
     let nr = r.count()?;
     let nw = r.count()?;
     let nn = r.count()?;
@@ -879,8 +958,31 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp, accept: Accept<'_>) -> Re
     if nr != expected_regions || nw != cells.div_ceil(8) {
         return Err(corrupt(path, "inconsistent collection lengths"));
     }
-    let mut regions = Vec::with_capacity(nr);
-    for _ in 0..nr {
+    Ok(CollectionCounts {
+        regions: nr,
+        walkable: nw,
+        nodes: nn,
+        region_nodes: nrn,
+        edges: ne,
+        cells,
+    })
+}
+
+struct DecodedPayload {
+    regions: Vec<Region>,
+    walkable: Vec<u8>,
+    nodes: Vec<Node>,
+    region_runs: Vec<Run>,
+    region_nodes: Vec<u32>,
+    edge_runs: Vec<Run>,
+    edge_targets: Vec<u32>,
+    edge_costs: Vec<u16>,
+}
+
+fn decode_payload(r: &mut Reader<'_>, path: &Path, width: u32, height: u32) -> Result<DecodedPayload, Error> {
+    let counts = decode_collection_counts(r, path, width, height)?;
+    let mut regions = Vec::with_capacity(counts.regions);
+    for _ in 0..counts.regions {
         regions.push(Region {
             left: r.u16()?,
             top: r.u16()?,
@@ -888,12 +990,45 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp, accept: Accept<'_>) -> Re
             height: r.u16()?,
         });
     }
-    let walkable = r.take(nw)?.to_vec();
-    if cells % 8 != 0 && walkable.last().is_some_and(|last| last >> (cells % 8) != 0) {
+    let walkable = r.take(counts.walkable)?.to_vec();
+    if counts.cells % 8 != 0
+        && walkable
+            .last()
+            .is_some_and(|last| last >> (counts.cells % 8) != 0)
+    {
         return Err(corrupt(path, "walkability bitset has nonzero padding"));
     }
-    let mut nodes = Vec::with_capacity(nn);
-    for _ in 0..nn {
+    let nodes = decode_nodes(r, path, width, height, &walkable, counts.nodes)?;
+    let region_runs = take_runs(r, counts.regions)?;
+    let region_nodes = take_u32s(r, counts.region_nodes)?;
+    let edge_runs = take_runs(r, counts.nodes)?;
+    let edge_targets = take_u32s(r, counts.edges)?;
+    let mut edge_costs = Vec::with_capacity(counts.edges);
+    for _ in 0..counts.edges {
+        edge_costs.push(r.u16()?);
+    }
+    Ok(DecodedPayload {
+        regions,
+        walkable,
+        nodes,
+        region_runs,
+        region_nodes,
+        edge_runs,
+        edge_targets,
+        edge_costs,
+    })
+}
+
+fn decode_nodes(
+    r: &mut Reader<'_>,
+    path: &Path,
+    width: u32,
+    height: u32,
+    walkable: &[u8],
+    count: usize,
+) -> Result<Vec<Node>, Error> {
+    let mut nodes = Vec::with_capacity(count);
+    for _ in 0..count {
         let x = r.u16()?;
         let y = r.u16()?;
         let z = r.take(1)?[0] as i8;
@@ -908,17 +1043,44 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp, accept: Accept<'_>) -> Re
             point: Point::new(x, y, z),
         });
     }
-    let region_runs = take_runs(&mut r, nr)?;
-    let region_nodes = take_u32s(&mut r, nrn)?;
-    let edge_runs = take_runs(&mut r, nn)?;
-    let edge_targets = take_u32s(&mut r, ne)?;
-    let mut edge_costs = Vec::with_capacity(ne);
-    for _ in 0..ne {
-        edge_costs.push(r.u16()?);
-    }
-    if r.at != bytes.len() {
-        return Err(corrupt(path, "trailing payload bytes"));
-    }
+    Ok(nodes)
+}
+
+struct DeadCounts {
+    nodes: u32,
+    region_nodes: u32,
+    edges: u32,
+}
+
+fn validate_payload(
+    path: &Path,
+    width: u32,
+    height: u32,
+    payload: &DecodedPayload,
+) -> Result<DeadCounts, Error> {
+    let regions_across = (width as usize).div_ceil(32);
+    validate_regions(path, width, height, regions_across, &payload.regions)?;
+    let listed = valid_runs(path, &payload.region_runs, payload.region_nodes.len(), "region")?;
+    let reachable = valid_runs(path, &payload.edge_runs, payload.edge_targets.len(), "edge")?;
+    validate_node_references(path, payload)?;
+    let named = validate_region_membership(path, regions_across, payload)?;
+    Ok(DeadCounts {
+        // What no run points at is garbage a publish left behind, and it is
+        // counted rather than refused: a saved graph is allowed to be one an
+        // edit has already moved. See `NavigationGraph::repack`.
+        nodes: (payload.nodes.len() - named) as u32,
+        region_nodes: (payload.region_nodes.len() - listed) as u32,
+        edges: (payload.edge_targets.len() - reachable) as u32,
+    })
+}
+
+fn validate_regions(
+    path: &Path,
+    width: u32,
+    height: u32,
+    regions_across: usize,
+    regions: &[Region],
+) -> Result<(), Error> {
     for (i, region) in regions.iter().enumerate() {
         let left = (i % regions_across) * 32;
         let top = (i / regions_across) * 32;
@@ -930,51 +1092,47 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp, accept: Accept<'_>) -> Re
             return Err(corrupt(path, format!("region {i} is outside the map")));
         }
     }
-    let listed = valid_runs(path, &region_runs, nrn, "region")?;
-    let reachable = valid_runs(path, &edge_runs, ne, "edge")?;
-    if region_nodes.iter().any(|&node| node as usize >= nn)
-        || edge_targets.iter().any(|&node| node as usize >= nn)
-        || edge_costs.iter().any(|&cost| cost > 1023)
+    Ok(())
+}
+
+fn validate_node_references(path: &Path, payload: &DecodedPayload) -> Result<(), Error> {
+    if payload
+        .region_nodes
+        .iter()
+        .any(|&node| node as usize >= payload.nodes.len())
+        || payload
+            .edge_targets
+            .iter()
+            .any(|&node| node as usize >= payload.nodes.len())
+        || payload.edge_costs.iter().any(|&cost| cost > 1023)
     {
         return Err(corrupt(path, "node index is out of range"));
     }
+    Ok(())
+}
+
+fn validate_region_membership(
+    path: &Path,
+    regions_across: usize,
+    payload: &DecodedPayload,
+) -> Result<usize, Error> {
     // A node stands in exactly one region, and a file that lists one twice is a
     // file whose regions disagree about where a place is.
-    let mut named = vec![false; nn];
-    for (region, run) in region_runs.iter().enumerate() {
-        for &node in &region_nodes[run.base as usize..run.base as usize + run.count as usize] {
+    let mut named = vec![false; payload.nodes.len()];
+    for (region, run) in payload.region_runs.iter().enumerate() {
+        for &node in &payload.region_nodes[run.base as usize..run.base as usize + run.count as usize] {
             if named[node as usize] {
                 return Err(corrupt(path, "a node is listed by two regions"));
             }
             named[node as usize] = true;
-            let point = nodes[node as usize].point;
+            let point = payload.nodes[node as usize].point;
             let actual = usize::from(point.y) / 32 * regions_across + usize::from(point.x) / 32;
             if actual != region {
                 return Err(corrupt(path, "region membership does not match node coordinates"));
             }
         }
     }
-    Ok(Loaded {
-        revision,
-        graph: NavigationGraph {
-            width,
-            height,
-            regions,
-            walkable,
-            // What no run points at is garbage a publish left behind, and it is
-            // counted rather than refused: a saved graph is allowed to be one an
-            // edit has already moved. See `NavigationGraph::repack`.
-            dead_nodes: (nn - named.iter().filter(|listed| **listed).count()) as u32,
-            dead_region_nodes: (nrn - listed) as u32,
-            dead_edges: (ne - reachable) as u32,
-            nodes,
-            region_runs,
-            region_nodes,
-            edge_runs,
-            edge_targets,
-            edge_costs,
-        },
-    })
+    Ok(named.into_iter().filter(|listed| *listed).count())
 }
 
 /// Every input but the patch log, in order.

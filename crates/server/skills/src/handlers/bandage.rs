@@ -187,7 +187,7 @@ pub fn finish_bandages(state: &mut WorldState) -> Vec<BandageFinished> {
             // A resurrection: 80.0 in both, then `(healing - 68) / 50`.
             let able = healing >= RESURRECT_NEEDS && anatomy >= RESURRECT_NEEDS;
             let chance = (i32::from(healing) - 680) * 1000 / 500;
-            if able && chance > i32::try_from(state.rng.below(1000)).unwrap_or(0) {
+            if able && chance > i32::from(crate::roll_u16(&mut state.rng, crate::PER_MILLE)) {
                 state.system_message(healer, RESURRECTED);
                 finished.push(BandageFinished {
                     patient,
@@ -205,7 +205,7 @@ pub fn finish_bandages(state: &mut WorldState) -> Vec<BandageFinished> {
             // A cure: 60.0 in both, then `(healing - 30)/50 - level/10`.
             let able = healing >= CURE_NEEDS && anatomy >= CURE_NEEDS;
             let chance = (i32::from(healing) - 300) * 1000 / 500 - i32::from(level.get()) * 100;
-            if able && chance > i32::try_from(state.rng.below(1000)).unwrap_or(0) {
+            if able && chance > i32::from(crate::roll_u16(&mut state.rng, crate::PER_MILLE)) {
                 state.system_message(healer, CURED);
                 finished.push(BandageFinished {
                     patient,
@@ -224,15 +224,16 @@ pub fn finish_bandages(state: &mut WorldState) -> Vec<BandageFinished> {
         // so Anatomy is worth as much as Healing to a field surgeon.
         let chance = (i32::from(healing) + 100) / 10;
         let took = roll_skill_band(state, healer, skill, crate::SkillBand::new(0, 1000))
-            && chance > i32::try_from(state.rng.below(1000)).unwrap_or(0);
+            && chance > i32::from(crate::roll_u16(&mut state.rng, crate::PER_MILLE));
         if !took {
             state.system_message(healer, BARELY_HELP);
             continue;
         }
         let min = anatomy / 50 + healing / 50 + 3;
         let max = anatomy / 50 + healing / 20 + 10;
-        let span = u32::from(max.saturating_sub(min)) + 1;
-        let healed = min + u16::try_from(state.rng.below(span)).unwrap_or(0);
+        let span = std::num::NonZeroU16::new(max - min + 1)
+            .expect("the maximum bandage healing is at least the minimum");
+        let healed = min + crate::roll_u16(&mut state.rng, span);
         state.system_message(healer, FINISH_BANDAGES);
         finished.push(BandageFinished {
             patient,

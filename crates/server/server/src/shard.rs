@@ -1079,7 +1079,7 @@ mod tests {
         // packet nobody can act on. The queue length is the assertion because
         // "nothing happened" has nothing else to look at; see `World::queued`.
         let mut login = login_server();
-        let mut world = World::new((1363, 1600));
+        let mut world = World::new(openshard_map::grid::Tile::new(1363, 1600));
         let id = ConnectionId::from_raw(1);
         let (mut session, _wire) = at_character_screen(&mut login, Instant::now());
 
@@ -1096,7 +1096,7 @@ mod tests {
         // refuses everything. Nothing changes but the phase — the same session,
         // the same packet.
         let mut login = login_server();
-        let mut world = World::new((1363, 1600));
+        let mut world = World::new(openshard_map::grid::Tile::new(1363, 1600));
         let id = ConnectionId::from_raw(1);
         let (mut session, _wire) = at_character_screen(&mut login, Instant::now());
         session.enter_world();
@@ -1114,7 +1114,7 @@ mod tests {
         // all, silently: the client waits on "logging into shard" and this end
         // says nothing.
         let mut login = login_server();
-        let mut world = World::new((1363, 1600));
+        let mut world = World::new(openshard_map::grid::Tile::new(1363, 1600));
         let (verifier, _verdicts) = Verifier::new();
         let id = ConnectionId::from_raw(1);
         let (mut session, _wire) = at_character_screen(&mut login, Instant::now());

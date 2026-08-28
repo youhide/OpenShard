@@ -667,189 +667,246 @@ impl ServerPacket {
         let id = *packet
             .first()
             .expect("packet is empty: caller skipped framing, which never produces one");
-        let decoded = match id {
-            <LoginDenied as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::LoginDenied)
-                .map_err(ServerDecodeError::LoginDenied)?,
-            <ShardList as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::ShardList)
-                .map_err(ServerDecodeError::ShardList)?,
-            <Relay as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::Relay)
-                .map_err(ServerDecodeError::Relay)?,
-            <CharacterList as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::CharacterList)
-                .map_err(ServerDecodeError::CharacterList)?,
-            <PlayerStart as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::PlayerStart)
-                .map_err(ServerDecodeError::PlayerStart)?,
-            <LoginComplete as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::LoginComplete)
-                .map_err(ServerDecodeError::LoginComplete)?,
-            <LightLevel as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::LightLevel)
-                .map_err(ServerDecodeError::LightLevel)?,
-            <WeatherChange as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::WeatherChange)
-                .map_err(ServerDecodeError::WeatherChange)?,
-            <Remove as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::Remove)
-                .map_err(ServerDecodeError::Remove)?,
-            <PlayerUpdate as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::PlayerUpdate)
-                .map_err(ServerDecodeError::PlayerUpdate)?,
-            <MobileStatus as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::MobileStatus)
-                .map_err(ServerDecodeError::MobileStatus)?,
-            <MobileMove as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::MobileMove)
-                .map_err(ServerDecodeError::MobileMove)?,
-            <MobileIncoming as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::MobileIncoming)
-                .map_err(ServerDecodeError::MobileIncoming)?,
-            <WorldItem as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::WorldItem)
-                .map_err(ServerDecodeError::WorldItem)?,
-            <WalkAck as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::WalkAck)
-                .map_err(ServerDecodeError::WalkAck)?,
-            <WalkReject as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::WalkReject)
-                .map_err(ServerDecodeError::WalkReject)?,
-            <SpokenMessage as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::SpokenMessage)
-                .map_err(ServerDecodeError::SpokenMessage)?,
-            // Shares `0xC1` with nothing — the id is `LocalizedMessage`'s alone
-            // — but had no arm here even though `EncodePacket` for it has stood
-            // since `use_skill_button`'s "cannot be used directly" line: a
-            // client asking for this cliloc read it as `Unknown` and dropped it
-            // silently, which no e2e test had ever sent one over a real socket
-            // to catch.
-            <LocalizedMessage as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::LocalizedMessage)
-                .map_err(ServerDecodeError::LocalizedMessage)?,
-            <UnicodeMessage as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::UnicodeMessage)
-                .map_err(ServerDecodeError::UnicodeMessage)?,
-            <GumpDisplay as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::GumpDisplay)
-                .map_err(ServerDecodeError::GumpDisplay)?,
-            // The whole `0xBF` family, by its subcommand. One arm and a second
-            // dispatch rather than nine arms: the id byte does not say which
-            // packet this is, and every decoder below would otherwise have to be
-            // tried in turn and asked whether the body was its own.
-            0xBF => return decode_extended(packet, version),
-            // The two halves of a tooltip. Both had encoders and neither had an
-            // arm, so every property list this engine has ever sent reached its
-            // own client as an undecoded id and was dropped — the shard's side
-            // has been complete for a long time and nothing on this end asked.
-            <TooltipRevision as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::TooltipRevision)
-                .map_err(ServerDecodeError::TooltipRevision)?,
-            <PropertyListReply as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::PropertyListReply)
-                .map_err(ServerDecodeError::PropertyListReply)?,
-            <OpenContainer as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::OpenContainer)
-                .map_err(ServerDecodeError::OpenContainer)?,
-            <AddToContainer as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::AddToContainer)
-                .map_err(ServerDecodeError::AddToContainer)?,
-            <ContainerContents as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::ContainerContents)
-                .map_err(ServerDecodeError::ContainerContents)?,
-            <OpenPaperdoll as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::OpenPaperdoll)
-                .map_err(ServerDecodeError::OpenPaperdoll)?,
-            <CorpseEquipment as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::CorpseEquipment)
-                .map_err(ServerDecodeError::CorpseEquipment)?,
-            // What a mobile is wearing, one layer at a time. Without this arm a
-            // body was dressed once, by the `0x78` that drew it, and never
-            // again — and a vendor's stock crate, which arrives as nothing but
-            // a `0x2E` on layer `0x1A`, had no way in at all.
-            <EquipUpdate as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::EquipUpdate)
-                .map_err(ServerDecodeError::EquipUpdate)?,
-            // The lift the shard refused. Purely local state depends on it: the
-            // item drawn on the cursor is this client's own projection, and
-            // nothing else ever says to put it back.
-            <DragCancel as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::DragCancel)
-                .map_err(ServerDecodeError::DragCancel)?,
-            // The crosshair. The client enforces what a cursor may pick, so a
-            // client that cannot read the request cannot raise one.
-            <TargetCursor as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::TargetCursor)
-                .map_err(ServerDecodeError::TargetCursor)?,
-            <MultiTargetRequest as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::MultiTarget)
-                .map_err(ServerDecodeError::MultiTarget)?,
-            // The shop's two halves. Each names a different serial — the buy
-            // list names the stock crate, the sell list the vendor — which is
-            // why the window that joins them is keyed on neither by accident;
-            // see `WorldView::apply`'s `0x24` arm.
-            <BuyList as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::BuyList)
-                .map_err(ServerDecodeError::BuyList)?,
-            <SellList as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::SellList)
-                .map_err(ServerDecodeError::SellList)?,
-            // The stance that settled — the answer to the paperdoll's toggle,
-            // and the same five bytes the client asked with. Decoded through
-            // the same type both directions share; there is nothing in the
-            // packet to say which way it was travelling.
-            <WarMode as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::WarMode)
-                .map_err(ServerDecodeError::WarMode)?,
-            <AttackTarget as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::AttackTarget)
-                .map_err(ServerDecodeError::AttackTarget)?,
-            <HealthBar as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::Health)
-                .map_err(ServerDecodeError::Health)?,
-            <PlaySound as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::PlaySound)
-                .map_err(ServerDecodeError::PlaySound)?,
-            // The arrow's flight: combat already sends it when a shot lands,
-            // NPC or player, so this is the client's other half of that packet.
-            <GraphicalEffect as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::Effect)
-                .map_err(ServerDecodeError::Effect)?,
-            <PlayMusic as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::PlayMusic)
-                .map_err(ServerDecodeError::PlayMusic)?,
-            <Animation as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::Animation)
-                .map_err(ServerDecodeError::Animation)?,
-            <NewAnimation as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::NewAnimation)
-                .map_err(ServerDecodeError::NewAnimation)?,
-            <DeathStatus as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::DeathStatus)
-                .map_err(ServerDecodeError::DeathStatus)?,
-            <DeathAnimation as DecodePacket>::ID => decode_server(packet, version)
-                .map(Self::DeathAnimation)
-                .map_err(ServerDecodeError::DeathAnimation)?,
-            // Both `0x3A`s. The id routes them together and the type byte tells
-            // them apart, which is why this is the one arm that decodes into a
-            // decision rather than into a variant — see `SkillsPacket`.
-            <SkillsPacket as DecodePacket>::ID => {
-                match decode_server(packet, version).map_err(ServerDecodeError::Skills)? {
-                    SkillsPacket::WholeList(list) => Self::SkillsFull(list),
-                    SkillsPacket::OneLine(line) => Self::SkillUpdate(line),
-                }
+        // The whole `0xBF` family, by its subcommand. One arm and a second
+        // dispatch rather than nine arms: the id byte does not say which
+        // packet this is, and every decoder below would otherwise have to be
+        // tried in turn and asked whether the body was its own.
+        if id == 0xBF {
+            return decode_extended(packet, version);
+        }
+        for decode_stage in [
+            decode_session_packet,
+            decode_world_packet,
+            decode_interface_packet,
+            decode_feedback_packet,
+        ] {
+            if let Some(decoded) = decode_stage(id, packet, version)? {
+                return Ok(Some(decoded));
             }
-            // "You may go." A client that could not read this would sit on the
-            // paperdoll's Log Out button with nothing happening, which is
-            // exactly what the packet exists to prevent.
-            <LogoutAck as DecodePacket>::ID => decode_server(packet, version)
-                .map(|LogoutAck| Self::LogoutAck(LogoutAck))
-                .map_err(ServerDecodeError::LogoutAck)?,
-            _ => return Ok(None),
-        };
-        Ok(Some(decoded))
+        }
+        Ok(None)
     }
+}
+
+/// Decode the packets that establish or enter a session.
+fn decode_session_packet(
+    id: u8,
+    packet: &[u8],
+    version: ClientVersion,
+) -> Result<Option<ServerPacket>, ServerDecodeError> {
+    let decoded = match id {
+        <LoginDenied as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::LoginDenied)
+            .map_err(ServerDecodeError::LoginDenied)?,
+        <ShardList as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::ShardList)
+            .map_err(ServerDecodeError::ShardList)?,
+        <Relay as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::Relay)
+            .map_err(ServerDecodeError::Relay)?,
+        <CharacterList as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::CharacterList)
+            .map_err(ServerDecodeError::CharacterList)?,
+        <PlayerStart as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::PlayerStart)
+            .map_err(ServerDecodeError::PlayerStart)?,
+        <LoginComplete as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::LoginComplete)
+            .map_err(ServerDecodeError::LoginComplete)?,
+        _ => return Ok(None),
+    };
+    Ok(Some(decoded))
+}
+
+/// Decode updates to the world and the mobiles moving through it.
+fn decode_world_packet(
+    id: u8,
+    packet: &[u8],
+    version: ClientVersion,
+) -> Result<Option<ServerPacket>, ServerDecodeError> {
+    let decoded = match id {
+        <LightLevel as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::LightLevel)
+            .map_err(ServerDecodeError::LightLevel)?,
+        <WeatherChange as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::WeatherChange)
+            .map_err(ServerDecodeError::WeatherChange)?,
+        <Remove as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::Remove)
+            .map_err(ServerDecodeError::Remove)?,
+        <PlayerUpdate as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::PlayerUpdate)
+            .map_err(ServerDecodeError::PlayerUpdate)?,
+        <MobileStatus as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::MobileStatus)
+            .map_err(ServerDecodeError::MobileStatus)?,
+        <MobileMove as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::MobileMove)
+            .map_err(ServerDecodeError::MobileMove)?,
+        <MobileIncoming as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::MobileIncoming)
+            .map_err(ServerDecodeError::MobileIncoming)?,
+        <WorldItem as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::WorldItem)
+            .map_err(ServerDecodeError::WorldItem)?,
+        <WalkAck as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::WalkAck)
+            .map_err(ServerDecodeError::WalkAck)?,
+        <WalkReject as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::WalkReject)
+            .map_err(ServerDecodeError::WalkReject)?,
+        _ => return Ok(None),
+    };
+    Ok(Some(decoded))
+}
+
+/// Decode packets that update a client window, cursor, or object presentation.
+fn decode_interface_packet(
+    id: u8,
+    packet: &[u8],
+    version: ClientVersion,
+) -> Result<Option<ServerPacket>, ServerDecodeError> {
+    let decoded = match id {
+        <SpokenMessage as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::SpokenMessage)
+            .map_err(ServerDecodeError::SpokenMessage)?,
+        // Shares `0xC1` with nothing — the id is `LocalizedMessage`'s alone
+        // — but had no arm here even though `EncodePacket` for it has stood
+        // since `use_skill_button`'s "cannot be used directly" line: a
+        // client asking for this cliloc read it as `Unknown` and dropped it
+        // silently, which no e2e test had ever sent one over a real socket
+        // to catch.
+        <LocalizedMessage as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::LocalizedMessage)
+            .map_err(ServerDecodeError::LocalizedMessage)?,
+        <UnicodeMessage as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::UnicodeMessage)
+            .map_err(ServerDecodeError::UnicodeMessage)?,
+        <GumpDisplay as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::GumpDisplay)
+            .map_err(ServerDecodeError::GumpDisplay)?,
+        // The two halves of a tooltip. Both had encoders and neither had an
+        // arm, so every property list this engine has ever sent reached its
+        // own client as an undecoded id and was dropped — the shard's side
+        // has been complete for a long time and nothing on this end asked.
+        <TooltipRevision as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::TooltipRevision)
+            .map_err(ServerDecodeError::TooltipRevision)?,
+        <PropertyListReply as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::PropertyListReply)
+            .map_err(ServerDecodeError::PropertyListReply)?,
+        <OpenContainer as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::OpenContainer)
+            .map_err(ServerDecodeError::OpenContainer)?,
+        <AddToContainer as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::AddToContainer)
+            .map_err(ServerDecodeError::AddToContainer)?,
+        <ContainerContents as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::ContainerContents)
+            .map_err(ServerDecodeError::ContainerContents)?,
+        <OpenPaperdoll as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::OpenPaperdoll)
+            .map_err(ServerDecodeError::OpenPaperdoll)?,
+        <CorpseEquipment as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::CorpseEquipment)
+            .map_err(ServerDecodeError::CorpseEquipment)?,
+        // What a mobile is wearing, one layer at a time. Without this arm a
+        // body was dressed once, by the `0x78` that drew it, and never
+        // again — and a vendor's stock crate, which arrives as nothing but
+        // a `0x2E` on layer `0x1A`, had no way in at all.
+        <EquipUpdate as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::EquipUpdate)
+            .map_err(ServerDecodeError::EquipUpdate)?,
+        // The lift the shard refused. Purely local state depends on it: the
+        // item drawn on the cursor is this client's own projection, and
+        // nothing else ever says to put it back.
+        <DragCancel as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::DragCancel)
+            .map_err(ServerDecodeError::DragCancel)?,
+        // The crosshair. The client enforces what a cursor may pick, so a
+        // client that cannot read the request cannot raise one.
+        <TargetCursor as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::TargetCursor)
+            .map_err(ServerDecodeError::TargetCursor)?,
+        <MultiTargetRequest as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::MultiTarget)
+            .map_err(ServerDecodeError::MultiTarget)?,
+        // The shop's two halves. Each names a different serial — the buy
+        // list names the stock crate, the sell list the vendor — which is
+        // why the window that joins them is keyed on neither by accident;
+        // see `WorldView::apply`'s `0x24` arm.
+        <BuyList as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::BuyList)
+            .map_err(ServerDecodeError::BuyList)?,
+        <SellList as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::SellList)
+            .map_err(ServerDecodeError::SellList)?,
+        _ => return Ok(None),
+    };
+    Ok(Some(decoded))
+}
+
+/// Decode combat feedback and other immediate state changes shown to a player.
+fn decode_feedback_packet(
+    id: u8,
+    packet: &[u8],
+    version: ClientVersion,
+) -> Result<Option<ServerPacket>, ServerDecodeError> {
+    let decoded = match id {
+        // The stance that settled — the answer to the paperdoll's toggle,
+        // and the same five bytes the client asked with. Decoded through
+        // the same type both directions share; there is nothing in the
+        // packet to say which way it was travelling.
+        <WarMode as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::WarMode)
+            .map_err(ServerDecodeError::WarMode)?,
+        <AttackTarget as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::AttackTarget)
+            .map_err(ServerDecodeError::AttackTarget)?,
+        <HealthBar as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::Health)
+            .map_err(ServerDecodeError::Health)?,
+        <PlaySound as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::PlaySound)
+            .map_err(ServerDecodeError::PlaySound)?,
+        // The arrow's flight: combat already sends it when a shot lands,
+        // NPC or player, so this is the client's other half of that packet.
+        <GraphicalEffect as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::Effect)
+            .map_err(ServerDecodeError::Effect)?,
+        <PlayMusic as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::PlayMusic)
+            .map_err(ServerDecodeError::PlayMusic)?,
+        <Animation as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::Animation)
+            .map_err(ServerDecodeError::Animation)?,
+        <NewAnimation as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::NewAnimation)
+            .map_err(ServerDecodeError::NewAnimation)?,
+        <DeathStatus as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::DeathStatus)
+            .map_err(ServerDecodeError::DeathStatus)?,
+        <DeathAnimation as DecodePacket>::ID => decode_server(packet, version)
+            .map(ServerPacket::DeathAnimation)
+            .map_err(ServerDecodeError::DeathAnimation)?,
+        // Both `0x3A`s. The id routes them together and the type byte tells
+        // them apart, which is why this is the one arm that decodes into a
+        // decision rather than into a variant — see `SkillsPacket`.
+        <SkillsPacket as DecodePacket>::ID => {
+            match decode_server(packet, version).map_err(ServerDecodeError::Skills)? {
+                SkillsPacket::WholeList(list) => ServerPacket::SkillsFull(list),
+                SkillsPacket::OneLine(line) => ServerPacket::SkillUpdate(line),
+            }
+        }
+        // "You may go." A client that could not read this would sit on the
+        // paperdoll's Log Out button with nothing happening, which is
+        // exactly what the packet exists to prevent.
+        <LogoutAck as DecodePacket>::ID => decode_server(packet, version)
+            .map(|LogoutAck| ServerPacket::LogoutAck(LogoutAck))
+            .map_err(ServerDecodeError::LogoutAck)?,
+        _ => return Ok(None),
+    };
+    Ok(Some(decoded))
 }
 
 /// A server packet arrived and its body did not decode.
@@ -1234,7 +1291,7 @@ mod tests {
     use super::*;
     use crate::packet::encode_packet;
     use crate::serial::Serial;
-    use crate::target::TargetKind;
+    use crate::target::{MultiOffset, TargetKind};
     use crate::wire::{AuthKey, CursorId};
 
     fn version() -> ClientVersion {
@@ -1378,7 +1435,7 @@ mod tests {
                 cursor_id: CursorId(2),
                 kind: TargetKind::Location,
                 multi: crate::wire::MultiId(0x0064),
-                offset: (0, 0, 0),
+                offset: MultiOffset::default(),
             }),
             ServerPacket::WarMode(WarMode { war: true }),
             ServerPacket::AttackTarget(AttackTarget { target: Some(serial) }),

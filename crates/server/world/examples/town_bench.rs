@@ -36,7 +36,7 @@ use openshard_protocol::{access::AccessLevel, version::ClientVersion};
 use openshard_world::{Character, Command, Entering, FreshCharacter, Gameplay, TICK_INTERVAL, World};
 
 /// Britain, the same spot the tests use.
-const START: (u16, u16) = (1363, 1600);
+const START: openshard_map::grid::Tile = openshard_map::grid::Tile::new(1363, 1600);
 
 /// The world's current tick budget, to report each measurement as a fraction of.
 const TICK_BUDGET: Duration = TICK_INTERVAL;
@@ -60,7 +60,7 @@ fn populate(gameplay: Gameplay, folk: u32, decor: u32, players: u32) -> World {
             access: AccessLevel::Player,
             character: Character::Fresh(FreshCharacter {
                 facet: Facet(0),
-                start: Some(Point::new(START.0 + side + (i % 4) as u16, START.1 + side, 0)),
+                start: Some(Point::new(START.x + side + (i % 4) as u16, START.y + side, 0)),
                 appearance: None,
                 sheet: None,
             }),
@@ -94,7 +94,7 @@ fn populate(gameplay: Gameplay, folk: u32, decor: u32, players: u32) -> World {
                 ranged: None,
                 ranged_kind: DamageType::Physical,
                 wander: false,
-                position: Point::new(START.0 + gx * 2, START.1 + gy * 2, 0),
+                position: Point::new(START.x + gx * 2, START.y + gy * 2, 0),
                 facet: Facet(0),
                 name: None,
                 title: Some(trades[placed as usize % trades.len()].to_owned()),
@@ -121,7 +121,7 @@ fn populate(gameplay: Gameplay, folk: u32, decor: u32, players: u32) -> World {
     for i in 0..decor {
         let gx = (i % u32::from(side * 2)) as u16;
         let gy = (i / u32::from(side * 2)) as u16;
-        statics.push((Graphic(0x0B4F), Hue(0), Point::new(START.0 + gx, START.1 + gy, 0)));
+        statics.push((Graphic(0x0B4F), Hue(0), Point::new(START.x + gx, START.y + gy, 0)));
     }
     world.queue(Command::Decorate {
         facet: Facet(0),

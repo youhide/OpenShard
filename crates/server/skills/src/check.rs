@@ -258,10 +258,9 @@ fn gain_skill(state: &mut WorldState, entity: EntityId, skill: Skill) {
         // gain either — ServUO reads the same lock for both.
         return;
     }
-    let to_gain = u16::try_from(
-        state.rng.below(u32::from(MAX_GAIN_STEP - MIN_GAIN_STEP + 1)) + u32::from(MIN_GAIN_STEP),
-    )
-    .unwrap_or(MIN_GAIN_STEP);
+    let gain_steps = std::num::NonZeroU16::new(MAX_GAIN_STEP - MIN_GAIN_STEP + 1)
+        .expect("the maximum gain step is at least the minimum");
+    let to_gain = MIN_GAIN_STEP + crate::roll_u16(&mut state.rng, gain_steps);
 
     let player = state.registry.has::<Client>(entity);
     let mut skills = skills;

@@ -49,7 +49,7 @@ async fn shard() -> SocketAddr {
         let accounts =
             DevAccounts::new().with_account(&AccountName::new("admin"), &PlaintextPassword::new("hunter2"));
         let mut login = LoginServer::new(accounts, "OpenShard", advertised);
-        let mut world = World::new((1363, 1600));
+        let mut world = World::new(openshard_map::grid::Tile::new(1363, 1600));
         // The account's one character, on the world's roster — where "which
         // characters exist" lives. Boot does this from the store's rows and the
         // config's names; here there is neither, so it is put on directly.

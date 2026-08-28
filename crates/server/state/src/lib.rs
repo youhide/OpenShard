@@ -93,8 +93,8 @@ pub use region::{Region, RegionFlags, RegionId, RegionRect, Regions};
 pub use rng::Rng;
 pub use runtime::{
     Action, CastStyle, CraftGumpContext, CraftGumpPage, FacetState, FacetUndo, Gameplay, GuildGumpContext,
-    GuildPage, HeldItem, HouseChange, HouseGumpContext, HouseList, HouseStorage, Origin, Outbound,
-    QuestGumpContext, QuestSection, TICKS_PER_SECOND, TargetPurpose, TooltipMode, Trade, TradeSide,
+    GuildPage, HeldItem, HouseChange, HouseGumpContext, HouseGumpRow, HouseList, HouseStorage, Origin,
+    Outbound, QuestGumpContext, QuestSection, TICKS_PER_SECOND, TargetPurpose, TooltipMode, Trade, TradeSide,
     WorldHome, WorldState,
 };
 pub use sectors::{Occupant, SECTOR_SIZE, Sectors, VIEW_RANGE, distance, in_range};

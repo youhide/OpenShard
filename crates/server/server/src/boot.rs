@@ -1,4 +1,5 @@
 use super::*;
+use openshard_map::grid::Tile;
 
 mod gameplay;
 #[allow(unused_imports)] // Kept as boot's crate-visible configuration API.
@@ -73,7 +74,7 @@ pub(crate) fn is_postgres_url(target: &str) -> bool {
 /// other. That drift is silent: the mapless mode is the one tests and a first run
 /// use, so the branch that gets it right is not the branch anyone notices.
 fn configured_world(config: &Config) -> World {
-    let world = World::new((config.world.start.x, config.world.start.y))
+    let world = World::new(Tile::new(config.world.start.x, config.world.start.y))
         .with_gameplay(gameplay_of(config))
         .with_character_screen(character_screen_of(config))
         .with_save_seconds(config.persistence.save_seconds);
@@ -622,7 +623,7 @@ fn missed_chunks(
 /// moment, and there is no sense accepting a client before the world it will
 /// walk in exists.
 pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> {
-    let start = (config.world.start.x, config.world.start.y);
+    let start = Tile::new(config.world.start.x, config.world.start.y);
     let dir = config.world.client_files.trim();
     if dir.is_empty() {
         // `Config::validate` already refuses this, and it is checked again here
@@ -762,11 +763,11 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
         // A start off the map, or in the sea, is worth saying out loud: the shard
         // still runs and every player spawns somewhere useless.
         if facet.0 == 0 {
-            match map.map().land(start.0, start.1) {
-                Some(cell) => info!(x = start.0, y = start.1, z = cell.z, "start position"),
+            match map.map().land(start.x, start.y) {
+                Some(cell) => info!(x = start.x, y = start.y, z = cell.z, "start position"),
                 None => warn!(
-                    x = start.0,
-                    y = start.1,
+                    x = start.x,
+                    y = start.y,
                     "world.start is off the map; characters will spawn in nowhere"
                 ),
             }

@@ -163,11 +163,7 @@ pub(crate) fn draw_gump_windows(
     // leave an invisible window intercepting clicks (and its labels still
     // eligible for the text pass) after gump assets or their GPU pass were
     // unavailable.
-    if resources.gumps.is_some() && window.gump_pass.is_some() {
-        let files = resources
-            .gumps
-            .as_ref()
-            .expect("the gump-assets check above succeeded");
+    if let Some(files) = resources.gumps.as_ref().filter(|_| window.gump_pass.is_some()) {
         let mut pictures = Vec::new();
         // A dialog's art used to be packed here, in a loop over every gump in
         // the *view* — one rung above the windows, so a dialog this client had

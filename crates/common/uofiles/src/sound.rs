@@ -12,6 +12,7 @@
 use std::fmt;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
 
 use openshard_protocol::wire::SoundId;
@@ -19,7 +20,7 @@ use openshard_protocol::wire::SoundId;
 const INDEX_ENTRY: usize = 12;
 const NO_ENTRY: u32 = u32::MAX;
 const LEGACY_HEADER: usize = 40;
-const DEFAULT_RATE: u32 = 22_050;
+const DEFAULT_RATE: NonZeroU32 = NonZeroU32::new(22_050).expect("the classic sample rate is nonzero");
 
 /// One decoded, mono sound effect.
 #[derive(Clone, Debug, PartialEq)]
@@ -27,9 +28,9 @@ pub struct Sound {
     /// Samples in Rodio's normal -1.0 to 1.0 range.
     pub samples: Vec<f32>,
     /// Number of interleaved channels in [`samples`](Self::samples).
-    pub channels: u16,
+    pub channels: NonZeroU16,
     /// Samples per second.
-    pub sample_rate: u32,
+    pub sample_rate: NonZeroU32,
 }
 
 /// An open pair of UO sound files.
@@ -195,7 +196,7 @@ fn decode(sound: SoundId, bytes: &[u8]) -> Result<Sound, SoundError> {
         .map(|wave| (wave.sample_rate, wave.channels, wave.bits_per_sample, wave.data))
         .unwrap_or((
             DEFAULT_RATE,
-            1,
+            NonZeroU16::MIN,
             16,
             bytes.get(LEGACY_HEADER..).unwrap_or_default(),
         ));
@@ -237,14 +238,15 @@ fn wave_data(bytes: &[u8]) -> Option<Wave<'_>> {
         }
         if kind == b"data" {
             let format = format?;
-            return (format.encoding == 1 && format.channels != 0 && format.sample_rate != 0).then_some(
-                Wave {
-                    data: chunk,
-                    channels: format.channels,
-                    sample_rate: format.sample_rate,
-                    bits_per_sample: format.bits_per_sample,
-                },
-            );
+            if format.encoding != 1 {
+                return None;
+            }
+            return Some(Wave {
+                data: chunk,
+                channels: NonZeroU16::new(format.channels)?,
+                sample_rate: NonZeroU32::new(format.sample_rate)?,
+                bits_per_sample: format.bits_per_sample,
+            });
         }
         at = end.checked_add(length % 2)?;
     }
@@ -253,8 +255,8 @@ fn wave_data(bytes: &[u8]) -> Option<Wave<'_>> {
 
 struct Wave<'a> {
     data: &'a [u8],
-    channels: u16,
-    sample_rate: u32,
+    channels: NonZeroU16,
+    sample_rate: NonZeroU32,
     bits_per_sample: u16,
 }
 
@@ -295,8 +297,8 @@ mod tests {
                 .to_vec();
         wave.extend([0, 128, 255]);
         let wave = wave_data(&wave).unwrap();
-        assert_eq!(wave.sample_rate, 22_050);
-        assert_eq!(wave.channels, 1);
+        assert_eq!(wave.sample_rate.get(), 22_050);
+        assert_eq!(wave.channels.get(), 1);
         assert_eq!(wave.bits_per_sample, 8);
         assert_eq!(wave.data, [0, 128, 255]);
     }
@@ -308,7 +310,7 @@ mod tests {
         bytes.extend(0i16.to_le_bytes());
         bytes.extend(i16::MAX.to_le_bytes());
         let sound = decode(SoundId(7), &bytes).unwrap();
-        assert_eq!(sound.channels, 1);
+        assert_eq!(sound.channels.get(), 1);
         assert_eq!(sound.sample_rate, DEFAULT_RATE);
         assert_eq!(sound.samples, [-1.0, 0.0, i16::MAX as f32 / 32768.0]);
     }
@@ -323,8 +325,8 @@ mod tests {
         wave.extend(i16::MAX.to_le_bytes());
 
         let sound = decode(SoundId(7), &wave).unwrap();
-        assert_eq!(sound.channels, 1);
-        assert_eq!(sound.sample_rate, 44_100);
+        assert_eq!(sound.channels.get(), 1);
+        assert_eq!(sound.sample_rate.get(), 44_100);
         assert_eq!(sound.samples, [-1.0, 0.0, i16::MAX as f32 / 32768.0]);
     }
 
@@ -336,8 +338,23 @@ mod tests {
         wave.extend([0, 255, 128, 64]);
 
         let sound = decode(SoundId(7), &wave).unwrap();
-        assert_eq!(sound.channels, 2);
+        assert_eq!(sound.channels.get(), 2);
         assert_eq!(sound.samples, [-1.0, 127.0 / 128.0, 0.0, -0.5]);
+    }
+
+    #[test]
+    fn wave_rejects_zero_audio_dimensions_instead_of_inventing_them() {
+        let valid =
+            b"RIFF\0\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x22\x56\0\0\x22\x56\0\0\x01\0\x08\0data\x01\0\0\0\x80";
+        let mut zero_channels = valid.to_vec();
+        zero_channels[22..24].copy_from_slice(&0u16.to_le_bytes());
+        let mut zero_rate = valid.to_vec();
+        zero_rate[24..28].copy_from_slice(&0u32.to_le_bytes());
+
+        for bytes in [&zero_channels, &zero_rate] {
+            let error = decode(SoundId(7), bytes).expect_err("zero is not valid audio metadata");
+            assert!(error.to_string().contains("invalid RIFF/WAVE header"));
+        }
     }
 
     #[test]
@@ -350,8 +367,8 @@ mod tests {
         };
         // The skeleton's BaseSoundID is 0x048D; an attack is BaseSoundID + 2.
         let sound = archive.sound(SoundId(0x048F)).unwrap().unwrap();
-        assert_eq!(sound.sample_rate, 22_050);
-        assert_eq!(sound.channels, 1);
+        assert_eq!(sound.sample_rate.get(), 22_050);
+        assert_eq!(sound.channels.get(), 1);
         assert_eq!(sound.samples.len(), 15_347);
         assert!(
             sound

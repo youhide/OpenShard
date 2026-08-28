@@ -807,7 +807,7 @@ enum Pending {
     /// difference takes to arrive.
     Asking {
         /// The world as it was kept.
-        held: openshard_map::snapshot::MapSnapshot,
+        held: openshard_client_net::cache::CachedWorld,
     },
     /// Chunks are coming, whether that is the facet or only what moved.
     Fetching(Fetch),
@@ -864,9 +864,9 @@ fn decide(cache: &std::path::Path, notice: WorldNotice) -> Result<Decided, Fetch
 /// [`decide`]'s three answers, before any of them has touched the socket.
 enum Decided {
     /// The kept world is the shard's world. Nothing is asked for at all.
-    Held(openshard_map::snapshot::MapSnapshot),
+    Held(openshard_client_net::cache::CachedWorld),
     /// The kept world is behind: the shard is asked what moved.
-    Asking(openshard_map::snapshot::MapSnapshot),
+    Asking(openshard_client_net::cache::CachedWorld),
     /// There is no world to start from, so the facet is fetched whole.
     Fetching(Fetch),
 }
@@ -879,7 +879,7 @@ enum Decided {
 /// same `Fetch` either way.
 fn what_moved(
     notice: WorldNotice,
-    held: openshard_map::snapshot::MapSnapshot,
+    held: openshard_client_net::cache::CachedWorld,
     reply: &ChangesReply,
 ) -> Result<WhatMoved, FetchError> {
     match &reply.changes {
@@ -910,7 +910,7 @@ fn what_moved(
             );
             Fetch::over(
                 notice,
-                held,
+                held.into_snapshot(),
                 chunks.clone(),
                 openshard_map::snapshot::MapRevision::decoded(reply.revision.0),
             )
@@ -926,7 +926,7 @@ fn what_moved(
 /// file and the two are nothing to do with each other.
 enum WhatMoved {
     /// Nothing did: the world already in hand is the shard's.
-    Nothing(openshard_map::snapshot::MapSnapshot),
+    Nothing(openshard_client_net::cache::CachedWorld),
     /// These chunks are coming — the difference, or the facet.
     These(Fetch),
 }
@@ -1065,11 +1065,12 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                     // before the first packet the window sees, so a cache hit
                     // looks to everything above like a client that opened a
                     // facet on its own disk.
+                    let (held, kept) = held.into_parts();
                     report(Update::Ground {
                         snapshot: Box::new(held),
                         // The file it was just read out of, which is where a
                         // graph baked over it lives too.
-                        kept: openshard_client_net::cache::path_for(cache, notice).ok(),
+                        kept: Some(kept),
                     });
                     None
                 }
@@ -1196,17 +1197,13 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                         };
                         match what_moved(notice, held, reply) {
                             Ok(WhatMoved::Nothing(held)) => {
+                                let (held, kept) = held.into_parts();
                                 report(Update::Ground {
                                     snapshot: Box::new(held),
                                     // Unchanged, so the kept file still is this
                                     // world — and a graph beside it still is a
                                     // graph of it.
-                                    kept: match &ground {
-                                        GroundSource::Fetched { cache } => {
-                                            openshard_client_net::cache::path_for(cache, notice).ok()
-                                        }
-                                        GroundSource::OwnDisk => None,
-                                    },
+                                    kept: Some(kept),
                                 });
                             }
                             Ok(WhatMoved::These(mut fetch)) => {

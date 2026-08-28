@@ -1169,7 +1169,7 @@ impl Default for Desk {
 pub enum DeskError {
     Read(std::path::PathBuf, std::io::Error),
     Write(std::path::PathBuf, std::io::Error),
-    Parse(std::path::PathBuf, ron::error::SpannedError),
+    Parse(std::path::PathBuf, Box<ron::error::SpannedError>),
     ParseLegacy(std::path::PathBuf, toml::de::Error),
     Encode(ron::Error),
 }
@@ -1208,7 +1208,7 @@ impl Desk {
             }
             Err(error) => return Err(DeskError::Read(path.to_path_buf(), error)),
         };
-        ron::from_str(&text).map_err(|error| DeskError::Parse(path.to_path_buf(), error))
+        ron::from_str(&text).map_err(|error| DeskError::Parse(path.to_path_buf(), Box::new(error)))
     }
 
     /// Write it out by atomically replacing the old file after the complete

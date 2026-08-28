@@ -597,7 +597,7 @@ impl World {
         let name = owner
             .as_ref()
             .map_or_else(|| "a corpse".to_owned(), |n| format!("a corpse of {n}"));
-        let story = Corpse::from_death(owner.unwrap_or_else(String::new), killer);
+        let story = Corpse::from_death(owner.unwrap_or_default(), killer);
 
         let Some(corpse) = self.spawn_corpse(at, facet, body, facing, name, story) else {
             self.despawn_creature(entity, serial);
@@ -813,7 +813,7 @@ mod tests {
 
     #[test]
     fn a_skeleton_corpse_has_visible_gold_weapon_and_supplies() {
-        let mut world = World::new((1363, 1600));
+        let mut world = World::new(Tile::new(1363, 1600));
         let (corpse, corpse_serial) = world
             .state
             .registry

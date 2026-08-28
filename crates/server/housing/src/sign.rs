@@ -35,7 +35,7 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_state::components::{Client, House, Name};
 use openshard_state::{
-    HouseChange, HouseGumpContext, HouseList, HouseStorage, Standing, TargetPurpose, WorldState,
+    HouseChange, HouseGumpContext, HouseGumpRow, HouseList, HouseStorage, Standing, TargetPurpose, WorldState,
 };
 
 /// The id the house window answers under.
@@ -303,7 +303,7 @@ fn build(state: &WorldState, player: EntityId, house: EntityId) -> (GumpLayout, 
             let y = ROW_TOP + (nth as i32) * ROW_HEIGHT;
             layout.label(x, y, GUMP_WHITE, name_of(state, who));
             if may_change {
-                context.rows.push((list, who));
+                context.rows.push(HouseGumpRow::new(list, who));
                 let index = context.rows.len() - 1;
                 layout.button(x + 130, y, 4017, 4019, GumpButton::Reply, 0, row_button(index));
             }
@@ -396,7 +396,7 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
             let Some(index) = row_of(other, context.rows.len()) else {
                 return true;
             };
-            let (list, who) = context.rows[index];
+            let HouseGumpRow { list, member: who } = context.rows[index];
             // The list the row was drawn under decides the verb: a co-owner or a
             // friend is taken off, a banned player is let back to the door.
             let change = match list {

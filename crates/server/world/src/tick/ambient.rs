@@ -95,7 +95,8 @@ impl World {
             h if h < 22 => day,
             h => day + (((h - 22) * 60 + minutes) as i64 * (night - day)) / 120,
         };
-        Light(u8::try_from(level.clamp(0, 0x1F)).unwrap_or(LIGHT_DAY.0))
+        let level = level.clamp(0, 0x1F);
+        Light(u8::try_from(level).expect("a clamped light level is in the wire byte's range"))
     }
 
     /// The shard-wide weather at the current part of its simulated day.
@@ -233,5 +234,29 @@ impl World {
         if let Some(row) = self.state.connection_mut(connection) {
             row.last_light = Some(level);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(minute: u64) -> Light {
+        super::super::tests::world()
+            .with_clock_minutes(minute)
+            .daylight_at(0)
+    }
+
+    #[test]
+    fn daylight_changes_at_the_exact_dawn_and_dusk_boundaries() {
+        assert_eq!(at(4 * 60 - 1), LIGHT_NIGHT, "night lasts through 03:59");
+        assert_eq!(at(4 * 60), LIGHT_NIGHT, "the dawn ramp begins at night");
+        assert!(at(6 * 60 - 1) > LIGHT_DAY, "the dawn ramp lasts through 05:59");
+        assert_eq!(at(6 * 60), LIGHT_DAY, "full day begins at 06:00");
+
+        assert_eq!(at(22 * 60 - 1), LIGHT_DAY, "full day lasts through 21:59");
+        assert_eq!(at(22 * 60), LIGHT_DAY, "the dusk ramp begins at day");
+        assert!(at(24 * 60 - 1) < LIGHT_NIGHT, "the dusk ramp lasts through 23:59");
+        assert_eq!(at(24 * 60), LIGHT_NIGHT, "midnight is full night");
     }
 }

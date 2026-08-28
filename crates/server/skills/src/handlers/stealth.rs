@@ -157,7 +157,7 @@ pub(super) fn detect_hidden(state: &mut WorldState, actor: EntityId) {
         // grandmaster searcher does not automatically strip a grandmaster hider.
         let theirs = crate::skill_value(state, target, Skill::Hiding);
         let chance = i32::from(value) * 1000 / 1500 - i32::from(theirs);
-        if chance > i32::try_from(state.rng.below(1000)).unwrap_or(0) {
+        if chance > i32::from(crate::roll_u16(&mut state.rng, crate::PER_MILLE)) {
             state.break_cover(target);
             found = true;
         }
@@ -337,7 +337,7 @@ pub fn snooping(state: &mut WorldState, actor: EntityId, container: EntityId) ->
     // ServUO compares the raw skill against a d100, so a clumsy snoop is spotted
     // even when the peek itself then works.
     if i32::from(crate::skill_value(state, actor, skill) / 10)
-        < i32::try_from(state.rng.below(100)).unwrap_or(0)
+        < i32::from(crate::roll_u16(&mut state.rng, crate::PERCENT))
     {
         let name = state
             .registry

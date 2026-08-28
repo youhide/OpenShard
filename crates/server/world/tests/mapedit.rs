@@ -22,7 +22,7 @@ use openshard_tiles::{LandTileId, TileData};
 use openshard_world::mapedit::{self, CommitError};
 
 const FACET: Facet = Facet(0);
-const START: (u16, u16) = (8, 8);
+const START: openshard_map::grid::Tile = openshard_map::grid::Tile::new(8, 8);
 /// Four blocks square: big enough that the tiles this edits are not on an edge.
 const BLOCKS: u32 = 4;
 
@@ -159,7 +159,7 @@ fn a_wall_of_ground(state: &WorldState, at: (u16, u16), z: i8) -> Patch {
 fn may_step_east(state: &WorldState) -> bool {
     step_allowed(
         &state.footing(FACET, Doors::AsTheyStand),
-        Point::new(START.0, START.1, 0),
+        Point::new(START.x, START.y, 0),
         Direction::East,
     )
     .is_some()
@@ -176,7 +176,7 @@ fn a_committed_patch_changes_what_the_shard_allows_and_survives_a_restart() {
         "flat ground, so the step is legal to begin with"
     );
 
-    let patch = a_wall_of_ground(&state, (START.0 + 1, START.1), 60);
+    let patch = a_wall_of_ground(&state, (START.x + 1, START.y), 60);
     let published =
         mapedit::commit(&mut state, FACET, &patch).expect("the world in hand, and a writable log");
 
@@ -204,7 +204,7 @@ fn a_committed_patch_changes_what_the_shard_allows_and_survives_a_restart() {
 fn the_span_bake_follows_a_live_patch() {
     let (base_set, log) = base_set("bake");
     let mut state = shard(&base_set, true, false);
-    let east = (START.0 + 1, START.1);
+    let east = (START.x + 1, START.y);
     let tiles = TileData::empty();
     let surface = |state: &WorldState| {
         state
@@ -260,7 +260,7 @@ fn a_live_patch_moves_the_coarse_router_with_the_ground() {
         "the shard booted with a graph"
     );
 
-    let patch = a_wall_of_ground(&state, (START.0 + 1, START.1), 60);
+    let patch = a_wall_of_ground(&state, (START.x + 1, START.y), 60);
     mapedit::commit(&mut state, FACET, &patch).expect("the world in hand");
 
     let router = state
@@ -288,7 +288,7 @@ fn a_facet_that_is_not_ours_is_refused_before_it_changes() {
     let (base_set, log) = base_set("install");
     let mut state = shard(&base_set, false, false);
     let before = revision(&state);
-    let patch = a_wall_of_ground(&state, (START.0 + 1, START.1), 60);
+    let patch = a_wall_of_ground(&state, (START.x + 1, START.y), 60);
 
     let refusal = mapedit::commit(&mut state, FACET, &patch).expect_err("no home, no commit");
 
@@ -316,7 +316,7 @@ fn a_world_that_cannot_be_written_down_is_put_back() {
     // *booting*, and the case here is the one that only shows up at the commit.
     std::fs::write(&log, b"not a patch log at all").expect("a writable temp dir");
 
-    let patch = a_wall_of_ground(&state, (START.0 + 1, START.1), 60);
+    let patch = a_wall_of_ground(&state, (START.x + 1, START.y), 60);
     let refusal = mapedit::commit(&mut state, FACET, &patch).expect_err("the log is not one");
 
     assert!(matches!(refusal, CommitError::NotLogged(_)));

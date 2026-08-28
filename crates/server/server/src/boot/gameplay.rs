@@ -1,6 +1,7 @@
 //! Conversion from validated server configuration into runtime gameplay state.
 
 use openshard_config::Config;
+use openshard_map::grid::Tile;
 use openshard_protocol::login::{CharacterListFlags, SupportedFeatures};
 use openshard_world::Gameplay;
 use openshard_world::tick::screen::CharacterScreen;
@@ -91,7 +92,7 @@ pub(crate) fn character_screen_of(config: &Config) -> CharacterScreen {
     CharacterScreen {
         starts: crate::dispatch::start_cities(
             &config.world.facets,
-            (config.world.start.x, config.world.start.y),
+            Tile::new(config.world.start.x, config.world.start.y),
         ),
         flags: character_list_flags_of(config),
         features: supported_features_of(config),

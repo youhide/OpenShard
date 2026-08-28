@@ -20,7 +20,7 @@ use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::target::{TargetCursor, TargetKind};
-use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue, Layer};
+use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue, Layer, SoundId};
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{Client, Drawn, Equipped, Harvesting, Position, Tool};
 use openshard_state::harvest::{
@@ -582,12 +582,18 @@ fn show_backpack_chop_tool(state: &mut WorldState, harvester: EntityId, tool: En
 /// The noise one beat makes, rolled between the definition's on the world's own
 /// generator so a harvest replays.
 fn swing_sound(state: &mut WorldState, harvester: EntityId, def: &'static HarvestDef) {
-    if def.sounds.is_empty() {
+    let Some(sound) = pick_sound(&mut state.rng, def.sounds) else {
         return; // fishing is silent until the catch
-    }
-    let pick = state.rng.below(u32::try_from(def.sounds.len()).unwrap_or(1));
-    let sound = def.sounds[pick as usize % def.sounds.len()];
+    };
     state.play_sound(harvester, sound);
+}
+
+/// Pick from a definition's sound table, or stay silent for an empty one.
+fn pick_sound(rng: &mut openshard_state::Rng, sounds: &[SoundId]) -> Option<SoundId> {
+    let length = u16::try_from(sounds.len()).expect("a shipped harvest sound table fits u16");
+    let bound = std::num::NonZeroU16::new(length)?;
+    let index = usize::from(crate::roll_u16(rng, bound));
+    Some(sounds[index])
 }
 
 /// Whether the harvester is on the same facet and near enough.
@@ -656,4 +662,37 @@ pub fn resolve_harvest_target(
             tile: graphic,
             source: TileSource::Static,
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openshard_state::harvest::definition;
+
+    #[test]
+    fn every_shipped_sound_table_is_a_representable_safe_roll() {
+        let mut rng = openshard_state::Rng::new(7);
+        for ml in [false, true] {
+            for kind in [
+                HarvestKind::Ore,
+                HarvestKind::Sand,
+                HarvestKind::Lumber,
+                HarvestKind::Fish,
+            ] {
+                let sounds = definition(kind, ml).sounds;
+                assert!(u16::try_from(sounds.len()).is_ok(), "{kind:?}, ML={ml}");
+                for _ in 0..1000 {
+                    let picked = pick_sound(&mut rng, sounds);
+                    if sounds.is_empty() {
+                        assert_eq!(picked, None, "{kind:?}, ML={ml}");
+                    } else {
+                        assert!(
+                            picked.is_some_and(|sound| sounds.contains(&sound)),
+                            "{kind:?}, ML={ml}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }

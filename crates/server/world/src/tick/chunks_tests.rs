@@ -94,7 +94,7 @@ fn ground() -> WorldMap {
 /// below is concerned: nothing can be committed to it and it has no identity to
 /// send. [`world_of_ours`] is the other one.
 fn world_with_ground() -> World {
-    World::new((32, 32)).with_map(MapSnapshot::new(Facet(0), ground()))
+    World::new(Tile::new(32, 32)).with_map(MapSnapshot::new(Facet(0), ground()))
 }
 
 /// The same facet, written to a base set in the temp dir and loaded back — a
@@ -119,7 +119,7 @@ fn world_of_ours(tag: &str, base: MapRevision) -> (World, PathBuf) {
         base: loaded.base,
         identity: openshard_basemap::identity_of(&path).expect("the base set just written"),
     };
-    let world = World::new((32, 32)).with_facet(
+    let world = World::new(Tile::new(32, 32)).with_facet(
         Facet(0),
         loaded.snapshot,
         None,

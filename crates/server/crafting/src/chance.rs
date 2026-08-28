@@ -158,7 +158,7 @@ fn interpolate(chance_at_min: u32, floor: i32, max: i32, value: i32) -> u32 {
     // Clamped at the bottom only. A negative chance is a real state (see the
     // module note) and reads the same as zero here, because nothing below one is
     // ever drawn.
-    u32::try_from(chance.clamp(0, 1000)).unwrap_or(0)
+    u32::try_from(chance.clamp(0, 1000)).expect("a clamped per-mille chance fits u32")
 }
 
 /// The exceptional chance: the success chance less the system's offset.
@@ -195,7 +195,7 @@ fn exceptional_curve(eca: Eca, success: u32, main: i32) -> u32 {
             chance - offset
         }
     };
-    u32::try_from(chance.clamp(0, 1000)).unwrap_or(0)
+    u32::try_from(chance.clamp(0, 1000)).expect("a clamped per-mille chance fits u32")
 }
 
 #[cfg(test)]

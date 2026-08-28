@@ -416,9 +416,10 @@ impl Plane {
         let deflated = self.deflated.len();
         [
             self.index,
-            u8::try_from(inflated & 0xFF).unwrap_or(0),
-            u8::try_from(deflated & 0xFF).unwrap_or(0),
-            u8::try_from(((inflated >> 4) & 0xF0) | ((deflated >> 8) & 0x0F)).unwrap_or(0),
+            u8::try_from(inflated & 0xFF).expect("the inflated length is masked to one byte"),
+            u8::try_from(deflated & 0xFF).expect("the deflated length is masked to one byte"),
+            u8::try_from(((inflated >> 4) & 0xF0) | ((deflated >> 8) & 0x0F))
+                .expect("the folded length nibbles fit one byte"),
         ]
     }
 }
@@ -496,8 +497,9 @@ impl DesignDetail<'_> {
                 {
                     used[plane] = true;
                     occupied[plane][offset / 2] = true;
-                    grids[plane][offset] = u8::try_from(tile.graphic.0 >> 8).unwrap_or(0);
-                    grids[plane][offset + 1] = u8::try_from(tile.graphic.0 & 0xFF).unwrap_or(0);
+                    let [high, low] = tile.graphic.0.to_be_bytes();
+                    grids[plane][offset] = high;
+                    grids[plane][offset + 1] = low;
                 }
                 // Either it never fitted, or the plane is too small to hold the
                 // cell the arithmetic named. Both are the stair buffer's job.

@@ -19,7 +19,7 @@ use tracing::{debug, warn};
 
 use openshard_items as items;
 
-use crate::dress::{ShoeType, dress_townsperson};
+use crate::dress::{Appearance, ShoeType, dress_townsperson};
 use crate::live::BEAT_TICKS;
 use crate::names::townsperson_name;
 
@@ -109,6 +109,11 @@ pub struct SpawnSpec {
     pub skills: Vec<(Skill, u16)>,
 }
 
+struct PreparedSpawn {
+    spec: SpawnSpec,
+    dressed: Option<Appearance>,
+}
+
 /// Put a mobile in the world. See `Command::SpawnMobile`.
 ///
 /// The same bundle a player is built from — a body, a position, a facing, a
@@ -117,38 +122,37 @@ pub struct SpawnSpec {
 /// a mobile already treats "has a client" as the question, so a spawned one
 /// falls out of the machinery already there.
 pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
-    let SpawnSpec {
-        body,
-        hue,
-        hits,
-        notoriety,
-        damage,
-        resistance,
-        swing,
-        sight,
-        aggression,
-        beat,
-        wander,
-        ranged,
-        ranged_kind,
-        position,
-        facet,
-        name,
-        title,
-        shoe,
-        fame,
-        karma,
-        night_home,
-        banker,
-        vendor,
-        healer,
-        equipment,
-        skills,
-    } = spec;
-    let facet = if state.facets.contains_key(&facet) {
-        facet
+    let PreparedSpawn { mut spec, dressed } = prepare_spawn(state, spec);
+    let (entity, serial) = match state.registry.spawn_with_serial(SerialKind::Mobile) {
+        Ok(pair) => pair,
+        Err(error) => {
+            warn!(?error, "out of mobile serials; not spawning");
+            return None;
+        }
+    };
+    let facing = Facing::walking(Direction::South);
+    insert_core_components(state, entity, &spec, facing);
+    insert_combat_components(state, entity, &spec);
+    insert_brain(state, entity, &spec);
+    insert_identity_and_services(state, entity, serial, &mut spec, dressed.as_ref());
+    equip_outfit(state, serial, spec.equipment, dressed);
+    finish_spawn(
+        state,
+        entity,
+        serial,
+        spec.body,
+        spec.facet,
+        spec.position,
+        facing,
+    );
+    Some(entity)
+}
+
+fn prepare_spawn(state: &mut WorldState, mut spec: SpawnSpec) -> PreparedSpawn {
+    spec.facet = if state.facets.contains_key(&spec.facet) {
+        spec.facet
     } else {
-        warn!(facet = %facet, "unloaded facet; spawning the mobile on the default");
+        warn!(facet = %spec.facet, "unloaded facet; spawning the mobile on the default");
         state.default_facet
     };
     // Drop the mobile onto the ground, the way a client's spawner does: the
@@ -161,16 +165,16 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
     // creature put on a moored ship's deck or on the first floor of a house
     // somebody built this morning is standing on something the map has never
     // heard of, and the rule that used to answer here read the map alone.
-    let position = match openshard_movement::arrival_z(
-        &state.footing(facet, openshard_map::overlay::Doors::AsTheyStand),
-        Tile::new(position.x, position.y),
-        i32::from(position.z),
+    spec.position = match openshard_movement::arrival_z(
+        &state.footing(spec.facet, openshard_map::overlay::Doors::AsTheyStand),
+        Tile::new(spec.position.x, spec.position.y),
+        i32::from(spec.position.z),
         openshard_movement::PLAYER_HEIGHT,
     )
     .and_then(|z| i8::try_from(z).ok())
     {
-        Some(z) => Point::new(position.x, position.y, z),
-        None => position,
+        Some(z) => Point::new(spec.position.x, spec.position.y, z),
+        None => spec.position,
     };
     // Dress a townsperson before anything is written, because the roll decides the
     // body and the skin too — a woman is a different body graphic, not a flag. A
@@ -185,28 +189,30 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
     // trousers on a dryad (`FrightenedDryad`, body 266) or a gargoyle is nonsense, and
     // rolling a gender would replace the body the pack asked for with a human one —
     // which is exactly what happened to the one non-human quest giver Britannia has.
-    let dressed = title
+    let dressed = spec
+        .title
         .as_ref()
-        .filter(|_| body == crate::dress::BODY_MALE || body == crate::dress::BODY_FEMALE)
-        .map(|_| dress_townsperson(&mut state.rng, shoe, None));
-    let (body, hue) = match &dressed {
-        Some(look) => (look.body, look.hue),
-        None => (body, hue),
-    };
+        .filter(|_| spec.body == crate::dress::BODY_MALE || spec.body == crate::dress::BODY_FEMALE)
+        .map(|_| dress_townsperson(&mut state.rng, spec.shoe, None));
+    if let Some(look) = &dressed {
+        spec.body = look.body;
+        spec.hue = look.hue;
+    }
+    PreparedSpawn { spec, dressed }
+}
 
-    let (entity, serial) = match state.registry.spawn_with_serial(SerialKind::Mobile) {
-        Ok(pair) => pair,
-        Err(error) => {
-            warn!(?error, "out of mobile serials; not spawning");
-            return None;
-        }
-    };
-    let hits = hits.max(1);
-    let facing = Facing::walking(Direction::South);
-    state.registry.insert(entity, Body { id: body, hue });
-    state.registry.insert(entity, Position(position));
+fn insert_core_components(state: &mut WorldState, entity: EntityId, spec: &SpawnSpec, facing: Facing) {
+    let hits = spec.hits.max(1);
+    state.registry.insert(
+        entity,
+        Body {
+            id: spec.body,
+            hue: spec.hue,
+        },
+    );
+    state.registry.insert(entity, Position(spec.position));
     state.registry.insert(entity, Heading(facing));
-    state.registry.insert(entity, facet);
+    state.registry.insert(entity, spec.facet);
     state.registry.insert(
         entity,
         Hitpoints {
@@ -214,21 +220,24 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
             max: hits,
         },
     );
-    state.registry.insert(entity, notoriety);
-    state.registry.insert(entity, MeleeDamage { amount: damage });
+    state.registry.insert(entity, spec.notoriety);
+    state.registry.insert(entity, MeleeDamage { amount: spec.damage });
     // Standing, only when it has any: a rat gives up nothing and a dragon a great deal,
     // and an absent component is the same as zero everywhere that reads it.
-    if fame != 0 {
-        state.registry.insert(entity, Fame(fame));
+    if spec.fame != 0 {
+        state.registry.insert(entity, Fame(spec.fame));
     }
-    if karma != 0 {
-        state.registry.insert(entity, Karma(karma));
+    if spec.karma != 0 {
+        state.registry.insert(entity, Karma(spec.karma));
     }
+}
+
+fn insert_combat_components(state: &mut WorldState, entity: EntityId, spec: &SpawnSpec) {
     // Combat skills, if the pack gave any: a sheet is what turns on the to-hit
     // roll and damage scaling for this creature (see `combat::check_hit`).
-    if !skills.is_empty() {
+    if !spec.skills.is_empty() {
         let mut sheet = Skills::default();
-        for (skill, value) in skills {
+        for &(skill, value) in &spec.skills {
             sheet.set(skill, value);
         }
         state.registry.insert(entity, sheet);
@@ -236,7 +245,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
     state.registry.insert(
         entity,
         Resistance {
-            physical: resistance.get(),
+            physical: spec.resistance.get(),
             fire: 0,
             cold: 0,
             poison: 0,
@@ -246,32 +255,35 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
     // Zero means "derive from dexterity", so a script that does not care about
     // pace names no number and gets the wrestling formula. A non-zero value
     // pins an exact cadence — a special creature that ignores its stats.
-    if swing != 0 {
-        state.registry.insert(entity, SwingSpeed { ticks: swing });
+    if spec.swing != 0 {
+        state.registry.insert(entity, SwingSpeed { ticks: spec.swing });
     }
     // A reach makes it an archer/mage/breather: it kites and volleys.
-    if let Some(range) = ranged {
+    if let Some(range) = spec.ranged {
         state.registry.insert(
             entity,
             RangedAttack {
                 range,
-                kind: ranged_kind,
+                kind: spec.ranged_kind,
             },
         );
     }
+}
+
+fn insert_brain(state: &mut WorldState, entity: EntityId, spec: &SpawnSpec) {
     // A brain only for a creature that needs one — something that hunts or
     // wanders. A pure prop (a shopkeeper standing still) gets none and never
     // enters `think`. `Combat` it earns when it first picks a fight.
     // A brain for anything that hunts, drifts, or must answer or flee a blow —
     // which is everything but the aggressive-but-blind prop (sight 0), the old
     // meaning of "no brain".
-    if sight.0 > 0 || wander || aggression != Aggression::Aggressive {
+    if spec.sight.0 > 0 || spec.wander || spec.aggression != Aggression::Aggressive {
         // Jittered like the townsfolk beat below, and for the same reason: a
         // spawner that fills a region hands every creature in it the same timer,
         // and a pack of wolves that decides, turns and lunges on one tick reads
         // as one animal with six bodies.
-        let interval = if beat > 0 {
-            beat
+        let interval = if spec.beat > 0 {
+            spec.beat
         } else {
             state.gameplay.creature_step_ticks.max(1)
         };
@@ -279,16 +291,25 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
         state.registry.insert(
             entity,
             Brain {
-                sight,
-                wander,
+                sight: spec.sight,
+                wander: spec.wander,
                 next_think: first,
                 guard_until: openshard_state::WorldTick::ZERO,
-                opens_doors: body_opens_doors(body),
-                aggression,
-                beat_ticks: beat,
+                opens_doors: body_opens_doors(spec.body),
+                aggression: spec.aggression,
+                beat_ticks: spec.beat,
             },
         );
     }
+}
+
+fn insert_identity_and_services(
+    state: &mut WorldState,
+    entity: EntityId,
+    serial: Serial,
+    spec: &mut SpawnSpec,
+    dressed: Option<&Appearance>,
+) {
     // A name, in order of authority: what the spawn asked for, then a personal
     // name generated in front of the trade ("Rowena the blacksmith"), then the
     // creature default its body gives it ("a chicken", "a horse") — so an unnamed
@@ -297,30 +318,30 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
     //
     // The generated form is why a whole town no longer answers to "the banker":
     // the pack sends the trade, and the person in front of it is the core's.
-    let name = if let Some(name) = name {
+    let name = if let Some(name) = spec.name.take() {
         Some(name)
-    } else if let Some(title) = &title {
-        let female = dressed.as_ref().is_some_and(|look| look.female);
+    } else if let Some(title) = &spec.title {
+        let female = dressed.is_some_and(|look| look.female);
         Some(townsperson_name(&mut state.rng, title, female))
     } else {
-        creature_name(body).map(str::to_owned)
+        creature_name(spec.body).map(str::to_owned)
     };
     if let Some(name) = name {
         state.registry.insert(entity, Name(name));
     }
-    if vendor {
+    if spec.vendor {
         crate::vendor::make_vendor(state, entity, serial);
     }
-    if banker {
+    if spec.banker {
         state.registry.insert(entity, Banker);
     }
-    if healer {
+    if spec.healer {
         state.registry.insert(entity, Healer);
     }
     // The trade itself, kept on the mobile: it is the key its speech table is
     // looked up by every time someone talks near it, so it cannot live only in the
     // spawn call that placed it — see `MobileRecord::title`.
-    if let Some(title) = title {
+    if let Some(title) = spec.title.take() {
         state.registry.insert(entity, Title(title));
     }
     // Every townsperson gets the base — a home to keep to and the beat that turns
@@ -329,7 +350,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
     // as statues: a name, and no life at all. A declared trade is now enough, and a
     // service still is, so a pack that names neither a trade nor a service is the
     // only way to get a prop — which is what a prop should take.
-    if state.registry.has::<Title>(entity) || banker || vendor || healer {
+    if state.registry.has::<Title>(entity) || spec.banker || spec.vendor || spec.healer {
         // The first beat is jittered across one beat's worth of ticks, the way
         // `register_spawner` jitters a fresh region's first spawn. A `Populate` places
         // seven hundred townsfolk on one tick, and a shared `next_beat` of zero puts
@@ -340,16 +361,24 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
         state.registry.insert(
             entity,
             Npc {
-                home: position,
+                home: spec.position,
                 wander: TOWNSFOLK_WANDER,
                 next_beat: first,
                 next_greet: openshard_state::WorldTick::ZERO,
             },
         );
-        if let Some(at) = night_home {
+        if let Some(at) = spec.night_home {
             state.registry.insert(entity, NightHome(at));
         }
     }
+}
+
+fn equip_outfit(
+    state: &mut WorldState,
+    serial: Serial,
+    equipment: Vec<(Graphic, Layer, Hue)>,
+    dressed: Option<Appearance>,
+) {
     // Dress it before the reveal, so the clothing rides in the `0x78` that
     // draws it — a naked banker is a bug that looks like nudity.
     //
@@ -371,6 +400,17 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
             worn.push(layer);
         }
     }
+}
+
+fn finish_spawn(
+    state: &mut WorldState,
+    entity: EntityId,
+    serial: Serial,
+    body: Graphic,
+    facet: Facet,
+    position: Point,
+    facing: Facing,
+) {
     state
         .registry
         .insert(entity, Movement(Walker::new(position, facing)));
@@ -384,5 +424,4 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
         position,
     });
     debug!(%serial, body = body.0, "mobile spawned");
-    Some(entity)
 }

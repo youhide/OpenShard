@@ -31,7 +31,7 @@ use openshard_world::{Brain, Character, Command, Entering, FreshCharacter, Gamep
 
 /// Britain, the same spot the tests use — a real, walkable patch of the map is
 /// not needed here (dev mode allows every step), only a plausible coordinate.
-const START: (u16, u16) = (1363, 1600);
+const START: openshard_map::grid::Tile = openshard_map::grid::Tile::new(1363, 1600);
 
 /// The world's current tick budget, to report each measurement as a fraction of.
 const TICK_BUDGET: Duration = TICK_INTERVAL;
@@ -72,7 +72,7 @@ fn populate(gameplay: Gameplay, creatures: u32, players: u32) -> (World, u32) {
             access: AccessLevel::Player,
             character: Character::Fresh(FreshCharacter {
                 facet: Facet(0),
-                start: Some(Point::new(START.0 + (i % 4) as u16, START.1, 0)),
+                start: Some(Point::new(START.x + (i % 4) as u16, START.y, 0)),
                 appearance: None,
                 sheet: None,
             }),
@@ -89,10 +89,10 @@ fn populate(gameplay: Gameplay, creatures: u32, players: u32) -> (World, u32) {
             if placed >= creatures {
                 break 'grid;
             }
-            let x = START.0 + (gx as u16).saturating_mul(spacing);
-            let y = START.1 + (gy as u16).saturating_mul(spacing);
+            let x = START.x + (gx as u16).saturating_mul(spacing);
+            let y = START.y + (gy as u16).saturating_mul(spacing);
             // Chebyshev distance from the cluster; within the radius it is awake.
-            if u32::from(x - START.0).max(u32::from(y - START.1)) <= radius {
+            if u32::from(x - START.x).max(u32::from(y - START.y)) <= radius {
                 awake += 1;
             }
             world.queue(Command::SpawnMobile {

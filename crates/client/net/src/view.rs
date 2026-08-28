@@ -3262,7 +3262,7 @@ mod tests {
     /// different colour.
     #[test]
     fn a_house_cursor_carries_its_house_and_a_plain_one_takes_it_away() {
-        use openshard_protocol::target::{MultiTargetRequest, TargetKind};
+        use openshard_protocol::target::{MultiOffset, MultiTargetRequest, TargetKind};
         use openshard_protocol::wire::{CursorId, MultiId};
 
         let mut view = WorldView::entered(start());
@@ -3270,7 +3270,7 @@ mod tests {
             cursor_id: CursorId(7),
             kind: TargetKind::Location,
             multi: MultiId(0x64),
-            offset: (0, 0, 0),
+            offset: MultiOffset::default(),
         }));
         let open = view.target.expect("a cursor is up");
         assert_eq!(open.cursor.cursor_id, CursorId(7));

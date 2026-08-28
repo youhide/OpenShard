@@ -984,9 +984,7 @@ impl SqliteStore {
                             name: row.get(16)?,
                             // Bit-cast back from the i64 the mask was stored as.
                             spellbook: row.get::<_, Option<i64>>(17)?.map(|mask| mask as u64),
-                            corpse: row
-                                .get::<_, Option<String>>(18)?
-                                .and_then(|json| serde_json::from_str(&json).ok()),
+                            corpse: None,
                             poison: row.get::<_, Option<u8>>(19)?.zip(row.get::<_, Option<u16>>(20)?),
                             trap: match (
                                 row.get::<_, Option<u8>>(21)?,
@@ -999,9 +997,10 @@ impl SqliteStore {
                                 _ => None,
                             },
                             uses: row.get(24)?,
-                            crafted: row
-                                .get::<_, Option<bool>>(25)?
-                                .map(|fine| (fine, row.get::<_, Option<String>>(26).ok().flatten())),
+                            crafted: match row.get::<_, Option<bool>>(25)? {
+                                Some(fine) => Some((fine, row.get(26)?)),
+                                None => None,
+                            },
                             // All four or none: a rune half-read is a rune that
                             // points somewhere nobody marked.
                             rune: match (
@@ -1013,22 +1012,18 @@ impl SqliteStore {
                                 (Some(facet), Some(x), Some(y), Some(z)) => Some((facet, x, y, z)),
                                 _ => None,
                             },
-                            runebook: row
-                                .get::<_, Option<String>>(31)?
-                                .and_then(|json| serde_json::from_str(&json).ok()),
+                            runebook: None,
                             // A house serial that will not parse drops the whole
                             // pin: an item claiming to be locked down in nothing
                             // is one nobody could ever release.
-                            locked_down: row.get::<_, Option<u32>>(32)?.and_then(Serial::new).map(|house| {
-                                crate::record::LockdownData {
+                            locked_down: match row.get::<_, Option<u32>>(32)?.and_then(Serial::new) {
+                                Some(house) => Some(crate::record::LockdownData {
                                     house,
-                                    secure: row.get::<_, Option<u8>>(33).ok().flatten(),
-                                }
-                            }),
-                            affixes: row
-                                .get::<_, Option<String>>(34)?
-                                .and_then(|json| serde_json::from_str(&json).ok())
-                                .unwrap_or_default(),
+                                    secure: row.get(33)?,
+                                }),
+                                None => None,
+                            },
+                            affixes: Vec::new(),
                             // A placeholder overwritten below; the location cannot be
                             // built inside `query_map`'s closure return type cleanly.
                             location: ItemLocation::Ground {
@@ -1039,12 +1034,18 @@ impl SqliteStore {
                             },
                         },
                         flat,
+                        row.get::<_, Option<String>>(18)?,
+                        row.get::<_, Option<String>>(31)?,
+                        row.get::<_, Option<String>>(34)?,
                     ))
                 })
                 .map_err(database)?;
             let mut items = Vec::new();
             for row in rows {
-                let (mut record, flat) = row.map_err(database)?;
+                let (mut record, flat, corpse, runebook, affixes) = row.map_err(database)?;
+                record.corpse = crate::item_json(corpse, "corpse")?;
+                record.runebook = crate::item_json(runebook, "runebook")?;
+                record.affixes = crate::item_json(affixes, "affixes")?.unwrap_or_default();
                 // Drop a row whose kind tag is unknown rather than guess a location.
                 if let Some(location) = ItemLocation::inflate(&flat) {
                     record.location = location;
@@ -2096,6 +2097,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_invalid_crafter_name_does_not_drop_the_makers_mark() {
+        // A crafted item's maker is player-earned state: a bad TEXT value must
+        // fail the read rather than make the item's provenance disappear.
+        let store = SqliteStore::open_in_memory().expect("open");
+        let mut item = contained(0x4000_0001, 1, 1);
+        item.crafted = Some((true, Some("Rowena".into())));
+        let mut snap = snapshot(vec![character(1, 100)], vec![]);
+        snap.inventories = vec![crate::record::Inventory {
+            owner: Serial::new(1).unwrap(),
+            items: vec![item],
+        }];
+        store.save(&snap).await.expect("save");
+
+        store
+            .connection
+            .lock()
+            .expect("connection")
+            .execute("UPDATE items SET crafter = X'FF'", [])
+            .expect("corrupt row");
+
+        let error = store.items().await.expect_err("must not drop the maker");
+        assert!(matches!(error, StoreError::Database(_)), "{error}");
+    }
+
+    #[tokio::test]
+    async fn malformed_item_json_is_corruption_not_missing_state() {
+        for field in ["corpse", "runebook", "affixes"] {
+            let store = SqliteStore::open_in_memory().expect("open");
+            let mut snap = snapshot(vec![character(1, 100)], vec![]);
+            snap.inventories = vec![crate::record::Inventory {
+                owner: Serial::new(1).unwrap(),
+                items: vec![contained(0x4000_0001, 1, 1)],
+            }];
+            store.save(&snap).await.expect("save");
+
+            store
+                .connection
+                .lock()
+                .expect("connection")
+                .execute(&format!("UPDATE items SET {field} = ?1"), ["{"])
+                .expect("corrupt row");
+
+            let error = store
+                .items()
+                .await
+                .expect_err("malformed JSON must fail the read");
+            assert!(matches!(error, StoreError::Corrupt(_)), "{field}: {error}");
+            assert!(error.to_string().contains(field), "{field}: {error}");
+        }
+    }
+
+    #[tokio::test]
     async fn custom_item_affixes_survive_a_reopen() {
         // Properties are an item-instance concern: two otherwise identical
         // swords can carry different effects. Keep the whole typed list rather
@@ -2224,6 +2277,35 @@ mod tests {
             assert_eq!(dropped.runebook, Some(book));
         }
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn an_invalid_secure_access_level_does_not_downgrade_to_an_ordinary_lockdown() {
+        // A secure's access level is its permission boundary.  Treat a value that
+        // cannot fit the persisted u8 as a bad row, rather than turning the item
+        // into a plain lockdown that anyone allowed to lift it could open.
+        let store = SqliteStore::open_in_memory().expect("open");
+        let mut item = contained(0x4000_0001, 1, 1);
+        item.locked_down = Some(crate::record::LockdownData {
+            house: Serial::new(0x4000_0002).expect("a valid house serial"),
+            secure: Some(3),
+        });
+        let mut snap = snapshot(vec![character(1, 100)], vec![]);
+        snap.inventories = vec![crate::record::Inventory {
+            owner: Serial::new(1).unwrap(),
+            items: vec![item],
+        }];
+        store.save(&snap).await.expect("save");
+
+        store
+            .connection
+            .lock()
+            .expect("connection")
+            .execute("UPDATE items SET lockdown_secure = 256", [])
+            .expect("corrupt row");
+
+        let error = store.items().await.expect_err("must not drop the access level");
+        assert!(matches!(error, StoreError::Database(_)), "{error}");
     }
 
     #[tokio::test]

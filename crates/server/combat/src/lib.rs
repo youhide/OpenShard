@@ -1613,6 +1613,39 @@ pub const POISON_INTERVAL: u64 = 40;
 /// How many pulses a fresh poison runs before it wears off.
 pub const POISON_PULSES: u8 = 8;
 
+/// One permanent weapon affix that may poison after a landed hit.
+///
+/// An [`ItemAffix::HitPoison`] stores its historic `(level, chance)` fields as
+/// bare integers. Once combat has selected that variant, they become one
+/// outcome: a normalized poison level and the probability of applying it.
+/// Keeping them together prevents the chance for one affix from being paired
+/// with another affix's level while the registry borrow is released for the
+/// RNG roll.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct HitPoisonProc {
+    level: PoisonLevel,
+    chance_per_mille: u16,
+}
+
+impl HitPoisonProc {
+    const ROLL_RANGE: u32 = 1_000;
+
+    /// Promote the persisted affix fields at the point combat gives them
+    /// meaning. `PoisonLevel` keeps old out-of-range save data at lethal.
+    const fn new(level: u8, chance_per_mille: u16) -> Self {
+        Self {
+            level: PoisonLevel::new(level),
+            chance_per_mille,
+        }
+    }
+
+    /// Whether a roll in `0..ROLL_RANGE` applies this affix.
+    const fn lands_on(self, roll: u32) -> bool {
+        self.chance_per_mille >= Self::ROLL_RANGE as u16
+            || (self.chance_per_mille > 0 && roll < self.chance_per_mille as u32)
+    }
+}
+
 /// The damage one pulse of a poison of `level` deals, before poison resistance.
 #[must_use]
 pub const fn poison_damage(level: PoisonLevel) -> u16 {
@@ -1668,7 +1701,7 @@ fn deliver_affix_poison(state: &mut WorldState, attacker: EntityId, target: Seri
     let Some(weapon) = weapons::equipped_weapon_item(state, attacker) else {
         return;
     };
-    let effects: Vec<(u8, u16)> = state
+    let effects: Vec<HitPoisonProc> = state
         .registry
         .get::<ItemAffixes>(weapon)
         .map(|affixes| {
@@ -1679,16 +1712,15 @@ fn deliver_affix_poison(state: &mut WorldState, attacker: EntityId, target: Seri
                     ItemAffix::HitPoison {
                         level,
                         chance_per_mille,
-                    } => Some((level, chance_per_mille)),
+                    } => Some(HitPoisonProc::new(level, chance_per_mille)),
                     _ => None,
                 })
                 .collect()
         })
         .unwrap_or_default();
-    for (level, chance) in effects {
-        let lands = chance >= 1_000 || (chance > 0 && state.rng.below(1_000) < u32::from(chance));
-        if lands {
-            apply_poison(state, target, PoisonLevel::new(level), now);
+    for effect in effects {
+        if effect.lands_on(state.rng.below(HitPoisonProc::ROLL_RANGE)) {
+            apply_poison(state, target, effect.level, now);
         }
     }
 }
@@ -2127,4 +2159,21 @@ fn slayer_bonus_percent(state: &WorldState, attacker: EntityId, defender: Entity
                 .sum()
         })
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hit_poison_proc_keeps_level_and_chance_as_one_outcome() {
+        let lesser = HitPoisonProc::new(0, 250);
+        assert_eq!(lesser.level, PoisonLevel::new(0));
+        assert!(lesser.lands_on(249));
+        assert!(!lesser.lands_on(250));
+
+        let certain_lethal = HitPoisonProc::new(u8::MAX, 1_000);
+        assert_eq!(certain_lethal.level, PoisonLevel::LETHAL);
+        assert!(certain_lethal.lands_on(999));
+    }
 }

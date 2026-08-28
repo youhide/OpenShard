@@ -247,7 +247,7 @@ impl std::fmt::Debug for World {
 
 impl World {
     /// An empty world with no map, spawning at `start`.
-    pub fn new(start: (u16, u16)) -> Self {
+    pub fn new(start: Tile) -> Self {
         // Always at least the default facet, so there is somewhere to stand even
         // with no map loaded — the same no-map mode the shard has always had.
         let mut facets = BTreeMap::new();
@@ -606,7 +606,7 @@ impl World {
         let Some(record) = self.roster.forget(account, name) else {
             return;
         };
-        self.journal.forget_serial(record.serial.raw());
+        self.journal.forget_serial(record.serial);
         // Drop the fast-relogin inventory cache: the character is gone, not
         // coming back this run.
         self.pending_inventories.remove(&record.serial);

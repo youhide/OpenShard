@@ -41,7 +41,7 @@ fn item_beside(world: &mut World, graphic: Graphic, now: Instant) -> Serial {
         hue: Hue(0),
         amount: 1,
         stackable: false,
-        position: Point::new(START.0 + 1, START.1, 0),
+        position: Point::new(START.x + 1, START.y, 0),
         facet: Facet(0),
     });
     world.tick(now);
@@ -78,7 +78,7 @@ fn use_skill_on(
         response: openshard_protocol::target::TargetResponse {
             cursor_id: openshard_protocol::wire::CursorId(cursor_id.raw()),
             object: Some(target),
-            location: Point::new(START.0 + 1, START.1, 0),
+            location: Point::new(START.x + 1, START.y, 0),
             graphic: None,
             cancelled: false,
         },
@@ -219,7 +219,7 @@ fn forensics_says_who_killed_a_body_and_who_has_been_through_it() {
     train(&mut world, looker, Skill::Forensics, 1000);
     world.tick(now);
 
-    let victim = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 10, now);
+    let victim = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 10, now);
     world.queue(Command::Damage {
         serial: victim,
         amount: 100,
@@ -282,7 +282,7 @@ fn taking_something_off_a_corpse_makes_you_a_looter() {
         let entity = world.state.players[&looter];
         world.state.registry.serial_of(entity).unwrap()
     };
-    let victim = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 10, now);
+    let victim = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 10, now);
     world.queue(Command::Damage {
         serial: victim,
         amount: 100,
@@ -331,7 +331,7 @@ fn a_corpses_story_comes_back_after_a_restart() {
         let entity = world.state.players[&player];
         world.state.registry.serial_of(entity).unwrap()
     };
-    let victim = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 10, now);
+    let victim = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 10, now);
     world.queue(Command::Damage {
         serial: victim,
         amount: 100,
@@ -592,7 +592,7 @@ fn answer_cursor(world: &mut World, connection: ConnectionId, target: Serial, no
         response: openshard_protocol::target::TargetResponse {
             cursor_id: openshard_protocol::wire::CursorId(cursor_id.raw()),
             object: Some(target),
-            location: Point::new(START.0 + 1, START.1, 0),
+            location: Point::new(START.x + 1, START.y, 0),
             graphic: None,
             cancelled: false,
         },
@@ -661,7 +661,7 @@ fn poisoning_coats_a_blade_and_the_blade_spends_its_doses() {
         }),
     )
     .unwrap();
-    let victim = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 200, now);
+    let victim = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 200, now);
     world.queue(Command::WarMode {
         connection: player,
         war: true,
@@ -756,7 +756,7 @@ fn begging_takes_coin_from_a_townsperson_and_karma_from_the_beggar() {
     let entity = world.state.players[&beggar];
     train(&mut world, beggar, Skill::Begging, 1000);
     world.tick(now);
-    let townsperson = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let townsperson = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     let _ = packets_for(&mut world, beggar);
 
     let said = use_skill_on(&mut world, beggar, Skill::Begging, townsperson, now);
@@ -800,7 +800,7 @@ fn a_trapped_chest_goes_off_when_it_is_opened_and_remove_trap_takes_it_off() {
         graphic: openshard_protocol::wire::Graphic(0x0E3C),
         gump: openshard_protocol::wire::Graphic(0x003C),
         hue: openshard_protocol::wire::Hue(0),
-        position: Point::new(START.0 + 1, START.1, 0),
+        position: Point::new(START.x + 1, START.y, 0),
         facet: Facet(0),
     });
     world.tick(now);
@@ -964,7 +964,7 @@ fn hiding_takes_you_off_every_screen_and_a_word_puts_you_back() {
 
     // The same session can fight again. Previously Hiding removed `Combat`, so
     // both commands were acknowledged while mutating nothing.
-    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let target = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     world.queue(Command::WarMode {
         connection: hider,
         war: true,
@@ -1039,7 +1039,7 @@ fn detecting_hidden_strips_a_worse_hider_and_not_a_better_one() {
     let seeker = enter(&mut world, now);
     train(&mut world, seeker, Skill::DetectHidden, 1000);
     world.tick(now);
-    let novice = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let novice = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     let novice_entity = world.state.registry.entity_of(novice).unwrap();
     world.state.registry.insert(novice_entity, Hidden);
 
@@ -1096,7 +1096,7 @@ fn peacemaking_calms_a_creature_and_it_stops_swinging() {
     train(&mut world, bard, Skill::Musicianship, 1000);
     world.tick(now);
     let lute = give_instrument(&mut world, bard, Graphic(0x0EB3));
-    let creature = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 20, now);
+    let creature = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 20, now);
     let creature_entity = world.state.registry.entity_of(creature).unwrap();
     let _ = packets_for(&mut world, bard);
 
@@ -1148,7 +1148,7 @@ fn discordance_makes_a_creature_worse_at_everything_at_once() {
     train(&mut world, bard, Skill::Musicianship, 1000);
     world.tick(now);
     give_instrument(&mut world, bard, Graphic(0x0EB3));
-    let creature = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 20, now);
+    let creature = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 20, now);
     let entity = world.state.registry.entity_of(creature).unwrap();
     world.queue(Command::SetSkill {
         serial: creature,
@@ -1275,7 +1275,7 @@ fn a_lockpick_opens_a_lock_it_is_good_enough_for() {
         graphic: openshard_protocol::wire::Graphic(0x0E3C),
         gump: openshard_protocol::wire::Graphic(0x003C),
         hue: openshard_protocol::wire::Hue(0),
-        position: Point::new(START.0 + 1, START.1, 0),
+        position: Point::new(START.x + 1, START.y, 0),
         facet: Facet(0),
     });
     world.tick(now);
@@ -1326,7 +1326,7 @@ fn taming_makes_a_creature_yours_and_it_follows() {
     train(&mut world, tamer, Skill::AnimalTaming, 1000);
     world.tick(now);
     // A horse, two tiles off: rideable, so tamable, and inside the cursor's reach.
-    let horse = spawn_mobile_body(&mut world, 0x00C8, Point::new(START.0 + 2, START.1, 0), now);
+    let horse = spawn_mobile_body(&mut world, 0x00C8, Point::new(START.x + 2, START.y, 0), now);
     let entity = world.state.registry.entity_of(horse).unwrap();
     let _ = packets_for(&mut world, tamer);
 
@@ -1362,7 +1362,7 @@ fn taming_makes_a_creature_yours_and_it_follows() {
 
     // It follows: put it well out of arm's reach and it walks back. Two tiles is
     // *already* close enough (the follow gap), which is why it is moved first.
-    let far = Point::new(START.0 + 7, START.1, 0);
+    let far = Point::new(START.x + 7, START.y, 0);
     world.state.registry.insert(entity, Position(far));
     world.state.place_mobile(Facet(0), entity, far);
     let before = world.state.registry.get::<Position>(entity).unwrap().0;
@@ -1371,8 +1371,8 @@ fn taming_makes_a_creature_yours_and_it_follows() {
     }
     let after = world.state.registry.get::<Position>(entity).unwrap().0;
     assert!(
-        openshard_state::distance(after, Point::new(START.0, START.1, 0))
-            < openshard_state::distance(before, Point::new(START.0, START.1, 0)),
+        openshard_state::distance(after, Point::new(START.x, START.y, 0))
+            < openshard_state::distance(before, Point::new(START.x, START.y, 0)),
         "the pet walked toward its owner: {before:?} → {after:?}"
     );
 }
@@ -1387,7 +1387,7 @@ fn a_pet_hears_all_stay_and_stops() {
     let owner = enter(&mut world, now);
     let player = world.state.players[&owner];
     let serial = world.state.registry.serial_of(player).unwrap();
-    let horse = spawn_mobile_body(&mut world, 0x00C8, Point::new(START.0 + 3, START.1, 0), now);
+    let horse = spawn_mobile_body(&mut world, 0x00C8, Point::new(START.x + 3, START.y, 0), now);
     let pet = world.state.registry.entity_of(horse).unwrap();
     world.state.registry.insert(
         pet,
@@ -1521,7 +1521,7 @@ fn animal_lore_reads_a_pet_and_refuses_a_wild_thing_to_a_novice() {
     let serial = world.state.registry.serial_of(player).unwrap();
     train(&mut world, looker, Skill::AnimalLore, 500);
     world.tick(now);
-    let horse = spawn_mobile_body(&mut world, 0x00C8, Point::new(START.0 + 1, START.1, 0), now);
+    let horse = spawn_mobile_body(&mut world, 0x00C8, Point::new(START.x + 1, START.y, 0), now);
     let entity = world.state.registry.entity_of(horse).unwrap();
     let _ = packets_for(&mut world, looker);
 
@@ -1556,7 +1556,7 @@ fn animal_lore_reads_a_pet_and_refuses_a_wild_thing_to_a_novice() {
         response: openshard_protocol::target::TargetResponse {
             cursor_id: openshard_protocol::wire::CursorId(serial.raw()),
             object: Some(horse),
-            location: Point::new(START.0 + 1, START.1, 0),
+            location: Point::new(START.x + 1, START.y, 0),
             graphic: None,
             cancelled: false,
         },

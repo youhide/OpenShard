@@ -144,10 +144,7 @@ fn component(graphic: u16, dx: i16, dy: i16, dz: i16, drawn: bool) -> Component 
 fn an_imported_design_uses_a_fitting_foundation_without_moving_its_origin() {
     let small = vec![component(1, -3, -3, 0, true), component(1, 3, 3, 0, true)];
     let fitting = vec![component(1, -5, -5, 0, true), component(1, 6, 6, 0, true)];
-    let multis = Multis::of([
-        Multi::new(0x13EC, small),
-        Multi::new(0x13ED, fitting),
-    ]);
+    let multis = Multis::of([Multi::new(0x13EC, small), Multi::new(0x13ED, fitting)]);
     // This export begins in its north-west corner. Its coordinates are its
     // placement contract, rather than an instruction to centre it again.
     let design = vec![component(FLOOR, 0, 0, 0, true), component(FLOOR, 11, 11, 0, true)];
@@ -203,7 +200,7 @@ fn world_with_extra_multi(multi: Multi) -> WorldState {
         Facet(0),
         tiles,
         Multis::of([Multi::new(COTTAGE, cottage()), multi]),
-        (0, 0),
+        openshard_map::grid::Tile::new(0, 0),
         1,
     )
 }
@@ -251,7 +248,14 @@ fn ground_sized(components: Vec<Component>, land: u16, fits: bool, width: u32, h
             &tiles,
         ),
     );
-    WorldState::new(facets, Facet(0), tiles, multis(components), (0, 0), 1)
+    WorldState::new(
+        facets,
+        Facet(0),
+        tiles,
+        multis(components),
+        openshard_map::grid::Tile::new(0, 0),
+        1,
+    )
 }
 
 /// An item on the ground, a container if asked for one.

@@ -49,9 +49,9 @@ const VALORITE: Hue = Hue(0x08AB);
 /// They are declared with no tiledata row on purpose — drawn, in the way of
 /// nothing — because what `find_facilities` matches is the graphic id.
 fn shop(world: &mut World, statics: &[(u16, i8)]) {
-    let mut scene = Scene::flat_holding(START.0 + 4, START.1 + 4, 0);
+    let mut scene = Scene::flat_holding(START.x + 4, START.y + 4, 0);
     for &(graphic, z) in statics {
-        scene.put(START.0, START.1, z, graphic);
+        scene.put(START.x, START.y, z, graphic);
     }
     let (map, tiles) = scene.into_shard(Facet(0));
     world.state.facet_state_mut(Facet(0)).set_map(Some(map), &tiles);
@@ -562,8 +562,8 @@ fn an_exceptional_piece_is_still_exceptional_after_a_restart() {
         Some(owner),
         openshard_persistence::ItemLocation::Ground {
             facet: 0,
-            x: START.0,
-            y: START.1,
+            x: START.x,
+            y: START.y,
             z: 0,
         },
     )
@@ -585,8 +585,8 @@ fn an_exceptional_piece_is_still_exceptional_after_a_restart() {
         Some(owner),
         openshard_persistence::ItemLocation::Ground {
             facet: 0,
-            x: START.0,
-            y: START.1,
+            x: START.x,
+            y: START.y,
             z: 0,
         },
     )

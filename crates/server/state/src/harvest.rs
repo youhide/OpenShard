@@ -16,6 +16,7 @@
 //! [`Banks`], which lives on `FacetState` beside the sector grid.
 
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 
 use openshard_protocol::wire::{ClilocId, Graphic, Hue, SoundId};
 use openshard_protocol::world::Facet;
@@ -343,6 +344,44 @@ pub struct Banks {
     banks: HashMap<(HarvestKind, u16, u16), Bank>,
 }
 
+/// An inclusive gameplay range represented as the bound [`Rng::below`] needs.
+///
+/// `None` from [`RngSpan::inclusive`] means the definition is backwards or its
+/// width cannot fit the generator. Keeping that check separate from drawing
+/// prevents either mistake from silently becoming a one-value range.
+#[derive(Clone, Copy, Debug)]
+struct RngSpan(NonZeroU32);
+
+impl RngSpan {
+    fn inclusive(min: u64, max: u64) -> Option<Self> {
+        let width = max.checked_sub(min)?.checked_add(1)?;
+        Some(Self(NonZeroU32::new(u32::try_from(width).ok()?)?))
+    }
+
+    fn draw(self, rng: &mut Rng) -> u32 {
+        rng.below(self.0.get())
+    }
+}
+
+/// Roll a fresh bank's capacity from its definition.
+fn roll_maximum(def: &HarvestDef, rng: &mut Rng) -> u16 {
+    let span = RngSpan::inclusive(u64::from(def.min_total), u64::from(def.max_total))
+        .expect("a harvest total range is ordered and fits the world's RNG");
+    let offset = u16::try_from(span.draw(rng)).expect("a draw inside a range of u16 totals fits u16");
+    def.min_total
+        .checked_add(offset)
+        .expect("a draw inside the total range does not exceed its maximum")
+}
+
+/// Roll how long a depleted bank waits to repay.
+fn roll_respawn(def: &HarvestDef, rng: &mut Rng) -> u64 {
+    let span = RngSpan::inclusive(def.min_respawn, def.max_respawn)
+        .expect("a harvest respawn range is ordered and fits the world's RNG");
+    def.min_respawn
+        .checked_add(u64::from(span.draw(rng)))
+        .expect("a draw inside the respawn range does not exceed its maximum")
+}
+
 impl Banks {
     /// The bank covering a point for a definition, creating it on first use.
     ///
@@ -360,8 +399,7 @@ impl Banks {
     ) -> &mut Bank {
         let key = (def.kind, x / def.bank_w, y / def.bank_h);
         let bank = self.banks.entry(key).or_insert_with(|| {
-            let span = u32::from(def.max_total - def.min_total) + 1;
-            let maximum = def.min_total + u16::try_from(rng.below(span)).unwrap_or(0);
+            let maximum = roll_maximum(def, rng);
             Bank {
                 maximum,
                 current: maximum,
@@ -404,8 +442,7 @@ impl Bank {
     /// clock it started with rather than pushing it back on every swing.
     pub fn consume(&mut self, def: &HarvestDef, amount: u16, now: WorldTick, rng: &mut Rng) {
         if self.current == self.maximum {
-            let span = u32::try_from(def.max_respawn - def.min_respawn).unwrap_or(0) + 1;
-            self.next_respawn = now + def.min_respawn + u64::from(rng.below(span));
+            self.next_respawn = now + roll_respawn(def, rng);
         }
         self.current = self.current.saturating_sub(amount);
     }
@@ -790,6 +827,41 @@ include!(concat!(env!("OUT_DIR"), "/harvest_tiles.rs"));
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shipped_bank_ranges_are_valid_rng_spans() {
+        for def in DEFINITIONS_ML.iter().chain(DEFINITIONS_PRE_ML) {
+            assert!(
+                RngSpan::inclusive(u64::from(def.min_total), u64::from(def.max_total)).is_some(),
+                "{:?} has an invalid total range",
+                def.kind
+            );
+            assert!(
+                RngSpan::inclusive(def.min_respawn, def.max_respawn).is_some(),
+                "{:?} has an invalid respawn range",
+                def.kind
+            );
+        }
+
+        assert!(
+            RngSpan::inclusive(5, 4).is_none(),
+            "a backwards range is not a roll"
+        );
+        assert!(
+            RngSpan::inclusive(0, u64::from(u32::MAX)).is_none(),
+            "an inclusive width of 2^32 cannot be represented by Rng::below"
+        );
+    }
+
+    #[test]
+    fn bank_rolls_stay_inside_both_inclusive_bounds() {
+        let def = definition(HarvestKind::Ore, true);
+        let mut rng = Rng::new(7);
+        for _ in 0..1000 {
+            assert!((def.min_total..=def.max_total).contains(&roll_maximum(def, &mut rng)));
+            assert!((def.min_respawn..=def.max_respawn).contains(&roll_respawn(def, &mut rng)));
+        }
+    }
 
     #[test]
     fn the_tile_tables_hold_the_tiles_they_are_named_for() {

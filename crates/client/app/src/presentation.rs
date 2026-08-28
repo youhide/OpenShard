@@ -1737,14 +1737,16 @@ impl App {
             let item = drawn_items.get(index.what.position())?;
             self.window.as_ref().and_then(|window| {
                 items::grab_at(
-                    item,
-                    &camera,
-                    &self.resources.tiledata,
-                    &self.world.presentation.tile_animations,
+                    items::GrabAt {
+                        item,
+                        camera: &camera,
+                        tiledata: &self.resources.tiledata,
+                        animations: &self.world.presentation.tile_animations,
+                        cutaway: &cutaway,
+                        cursor,
+                        gump_scale: self.gump_scale(),
+                    },
                     &window.atlases.statics,
-                    &cutaway,
-                    cursor,
-                    self.gump_scale(),
                 )
             })
         });
@@ -1976,13 +1978,15 @@ impl App {
             (Some(shell), Some(window)) => {
                 let (request, output) = shell.run(
                     window,
-                    &hud,
-                    camera,
-                    &self.world,
-                    &self.resources.art,
-                    &self.resources.tiledata,
-                    &mut self.map_editor,
-                    authority,
+                    crate::shell::ShellFrame {
+                        hud: &hud,
+                        camera,
+                        world: &self.world,
+                        art: &self.resources.art,
+                        tiledata: &self.resources.tiledata,
+                        map_editor: &mut self.map_editor,
+                        authority,
+                    },
                 );
                 let viewport = shell.viewport();
                 Some((request, output, viewport))

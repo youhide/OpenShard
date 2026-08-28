@@ -96,7 +96,8 @@ pub fn refresh_obtain(state: &mut WorldState, contents: &Contents) {
                     continue;
                 };
                 let held = openshard_items::carried_amount_with(state, contents, serial, graphic);
-                let held = u16::try_from(held.min(u32::from(objective.count))).unwrap_or(0);
+                let held = u16::try_from(held.min(u32::from(objective.count)))
+                    .expect("carried progress is capped by the u16 objective count");
                 let Some(slot) = quest.progress.get_mut(index) else {
                     continue;
                 };

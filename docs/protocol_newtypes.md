@@ -161,6 +161,7 @@ and the two are kept in step by hand.
 |---|---|
 | `world::Point::{x, y, z}` | components of one geometric quantity — [N1 amendment 2](#amendments-forced-by-n1-the-rest-of-worldrs) |
 | `world::MapSize::{width, height}` | same |
+| `target::MultiOffset::{x, y, z}` | components of one signed displacement; the enclosing type keeps it distinct from an absolute `Point` and keeps the three wire fields together |
 | `gump::GumpPoint::{x, y}` | the same argument in gump-space pixels, signed for the layout language's negative offsets — [N8 amendment 1](#amendments-forced-by-n8-the-sweep) |
 | `mobile::Vitals::{current, max}` | components of one bar — [N2 amendment 2](#amendments-forced-by-n2-mobilers) |
 | `mobile::MobileStatus::{strength, dexterity, intelligence, gold, armor, weight, max_weight, stat_cap, followers, followers_max}` | the status bar's quantities — [N2 amendment 3](#amendments-forced-by-n2-mobilers) |
@@ -182,7 +183,7 @@ and the two are kept in step by hand.
 | `gump::InvalidSwitchId::id` | the rejected value, carried on the error for its `Display` impl — [N8 amendment 3](#amendments-forced-by-n8-the-sweep) |
 | `context::InvalidContextMenuIndex::tag` | same | 
 | `wire::InvalidCharacterSlot::slot` | same |
-| `design::DesignTile::{dx, dy, dz}` | a signed tile displacement from a house's origin — `target.rs::offset`'s geometry, at `i8` because the wire's stair buffer gives each offset one byte |
+| `design::DesignTile::{dx, dy, dz}` | a signed tile displacement from a house's origin — `target::MultiOffset`'s geometry, at `i8` because the wire's stair buffer gives each offset one byte |
 | `design::DesignBounds::{x_min, y_min}` | the corner the grid planes are indexed from, in that same displacement space: subtracted from one and added back to the other |
 
 `containers::ContainedItem::{x, y}` came *off* this list in N5: they are one

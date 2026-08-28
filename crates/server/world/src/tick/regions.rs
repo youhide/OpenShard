@@ -62,7 +62,10 @@ impl World {
             }
         }
         let count = regions.len();
-        self.state.facet_state_mut(facet).regions.set(regions);
+        if let Err(error) = self.state.facet_state_mut(facet).regions.try_set(regions) {
+            warn!(facet = %facet, %error, "regions were not registered");
+            return;
+        }
         self.forget_remembered_regions();
         info!(facet = %facet, count, "regions registered");
     }
@@ -170,7 +173,10 @@ impl World {
             // is what keeps an id meaning the same thing after a restart.
             regions.sort_by_key(|region| region.id);
             let count = regions.len();
-            self.state.facet_state_mut(facet).regions.set(regions);
+            if let Err(error) = self.state.facet_state_mut(facet).regions.try_set(regions) {
+                warn!(facet = %facet, %error, "saved regions were not restored");
+                continue;
+            }
             info!(facet = %facet, count, "regions restored");
         }
     }

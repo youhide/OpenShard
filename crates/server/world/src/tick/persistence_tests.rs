@@ -104,7 +104,7 @@ fn entering_the_world_is_worth_saving() {
     let snapshot = only_snapshot(&mut world).expect("a new character is a change");
     assert_eq!(snapshot.characters.len(), 1);
     assert_eq!(snapshot.characters[0].name, "Lord British");
-    assert_eq!(snapshot.characters[0].x, START.0);
+    assert_eq!(snapshot.characters[0].x, START.x);
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn walking_marks_the_character_without_anyone_remembering_to() {
     assert_eq!(snapshot.characters.len(), 1);
     assert_eq!(
         snapshot.characters[0].y,
-        START.1 - 1,
+        START.y - 1,
         "the snapshot must hold where the step went, not where it started"
     );
 }
@@ -209,7 +209,7 @@ fn turning_is_worth_saving_too() {
     world.tick(now + WALK_INTERVAL);
 
     let snapshot = only_snapshot(&mut world).expect("a turn is a change");
-    assert_eq!(snapshot.characters[0].x, START.0, "a turn moves nobody");
+    assert_eq!(snapshot.characters[0].x, START.x, "a turn moves nobody");
     assert_eq!(
         snapshot.characters[0].facing,
         Facing::walking(Direction::East).to_bits()
@@ -236,7 +236,7 @@ fn logging_out_saves_where_the_player_actually_stopped() {
     assert_eq!(snapshot.characters.len(), 1);
     assert_eq!(
         snapshot.characters[0].y,
-        START.1 - 2,
+        START.y - 2,
         "two steps north is where the player stopped"
     );
 }
@@ -470,7 +470,7 @@ fn a_failed_save_is_retried_with_fresh_data_and_not_the_old_snapshot() {
 
     world.take_snapshot();
     let first = only_snapshot(&mut world).expect("a change");
-    assert_eq!(first.characters[0].y, START.1);
+    assert_eq!(first.characters[0].y, START.y);
     assert_eq!(world.unsaved(), 0, "the journal was drained");
 
     // The store said no.
@@ -483,7 +483,7 @@ fn a_failed_save_is_retried_with_fresh_data_and_not_the_old_snapshot() {
     let retry = only_snapshot(&mut world).expect("swept");
     assert_eq!(
         retry.characters[0].y,
-        START.1 - 1,
+        START.y - 1,
         "the retry must write where the character is now, not where it was"
     );
 }
@@ -817,7 +817,7 @@ fn a_house_survives_a_restart_with_its_walls() {
     let player = world.state.players[&connection];
     let owner = world.state.registry.serial_of(player).expect("a serial");
 
-    let at = Point::new(START.0 + 5, START.1 + 5, 0);
+    let at = Point::new(START.x + 5, START.y + 5, 0);
     let house = openshard_housing::place(
         &mut world.state,
         player,
@@ -895,8 +895,8 @@ fn a_houses_access_lists_survive_a_restart() {
         vec![HouseRecord {
             serial,
             multi: 0x64,
-            x: START.0 + 5,
-            y: START.1 + 5,
+            x: START.x + 5,
+            y: START.y + 5,
             z: 0,
             facet: 0,
             owner,
@@ -960,8 +960,8 @@ fn a_house_restored_without_client_files_stands_but_stops_nobody() {
         vec![HouseRecord {
             serial,
             multi: 0x64,
-            x: START.0 + 5,
-            y: START.1 + 5,
+            x: START.x + 5,
+            y: START.y + 5,
             z: 0,
             facet: 0,
             owner,
@@ -993,7 +993,7 @@ fn a_house_restored_without_client_files_stands_but_stops_nobody() {
             .state
             .facet_state(Facet(0))
             .obstructions()
-            .holds_anything(START.0 + 4, START.1 + 5),
+            .holds_anything(START.x + 4, START.y + 5),
         "a shard with no multi table invented a wall"
     );
 }
@@ -1020,8 +1020,8 @@ fn a_house_and_its_sign_are_not_also_ground_items() {
         vec![HouseRecord {
             serial,
             multi: 0x64,
-            x: START.0 + 5,
-            y: START.1 + 5,
+            x: START.x + 5,
+            y: START.y + 5,
             z: 0,
             facet: 0,
             owner,
@@ -1071,7 +1071,7 @@ fn a_designed_house_restores_its_own_walls_with_no_client_files() {
     let mut world = World::new(START);
     let serial = Serial::new(0x4000_00CC).expect("an item serial");
     let owner = Serial::new(0x0000_0001).expect("a mobile serial");
-    let at = (START.0 + 5, START.1 + 5);
+    let at = (START.x + 5, START.y + 5);
 
     // One wall, one tile east of the origin. `flags` non-zero is "drawn" — the
     // reader normalises both multi formats' opposite senses before a design is
@@ -1127,7 +1127,7 @@ fn a_restored_imported_design_recreates_its_door_and_sign() {
     let mut world = World::new(START);
     let serial = Serial::new(0x4000_00CE).expect("an item serial");
     let owner = Serial::new(0x0000_0001).expect("a mobile serial");
-    let at = Point::new(START.0 + 5, START.1 + 5, 0);
+    let at = Point::new(START.x + 5, START.y + 5, 0);
     let components = vec![
         HouseDesignRecord {
             house: serial,
@@ -1233,8 +1233,8 @@ fn a_classic_house_writes_no_design_rows() {
         vec![HouseRecord {
             serial,
             multi: 0x64,
-            x: START.0 + 5,
-            y: START.1 + 5,
+            x: START.x + 5,
+            y: START.y + 5,
             z: 0,
             facet: 0,
             owner,
@@ -1308,9 +1308,9 @@ fn a_boat_survives_a_restart_with_its_deck() {
         // the whole sea — no per-tile pass over a facet-sized square.
         const WATER: u16 = 0;
         const JETTY: u16 = 1;
-        let mut scene = Scene::flat_holding(START.0 + 8, START.1 + 8, 0);
+        let mut scene = Scene::flat_holding(START.x + 8, START.y + 8, 0);
         scene.land_art(WATER, TileFlags::WATER);
-        scene.land(START.0, START.1, JETTY);
+        scene.land(START.x, START.y, JETTY);
         scene.art(HULL, super::tests::WALL_FLAGS, 10);
         scene.art(DECK, TileFlags::PLATFORM, 3);
         scene
@@ -1326,7 +1326,7 @@ fn a_boat_survives_a_restart_with_its_deck() {
     let player = world.state.players[&connection];
     let owner = world.state.registry.serial_of(player).expect("a serial");
 
-    let at = Point::new(START.0 + 5, START.1 + 5, 0);
+    let at = Point::new(START.x + 5, START.y + 5, 0);
     let boat = openshard_boats::place(
         &mut world.state,
         player,

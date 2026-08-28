@@ -98,7 +98,7 @@ fn walking_out_of_range_removes_the_mobile() {
     teleport(
         &mut world,
         BOB,
-        Point::new(START.0 + VIEW_RANGE as u16 + 5, START.1, Z_WITHOUT_A_MAP),
+        Point::new(START.x + VIEW_RANGE as u16 + 5, START.y, Z_WITHOUT_A_MAP),
     );
 
     let to_alice = packets_for(&mut world, ALICE);
@@ -115,11 +115,11 @@ fn walking_back_into_range_draws_it_again() {
     enter_as(&mut world, ALICE, now);
     enter_as(&mut world, BOB, now);
 
-    let far = Point::new(START.0 + VIEW_RANGE as u16 + 5, START.1, Z_WITHOUT_A_MAP);
+    let far = Point::new(START.x + VIEW_RANGE as u16 + 5, START.y, Z_WITHOUT_A_MAP);
     teleport(&mut world, BOB, far);
     let _ = world.drain_outbound().count();
 
-    teleport(&mut world, BOB, Point::new(START.0, START.1, Z_WITHOUT_A_MAP));
+    teleport(&mut world, BOB, Point::new(START.x, START.y, Z_WITHOUT_A_MAP));
     let to_alice = packets_for(&mut world, ALICE);
     assert!(
         to_alice.iter().any(|p| p[0] == 0x78),
@@ -136,7 +136,7 @@ fn removal_is_sent_once_not_every_tick() {
     enter_as(&mut world, ALICE, now);
     enter_as(&mut world, BOB, now);
 
-    let far = Point::new(START.0 + VIEW_RANGE as u16 + 5, START.1, Z_WITHOUT_A_MAP);
+    let far = Point::new(START.x + VIEW_RANGE as u16 + 5, START.y, Z_WITHOUT_A_MAP);
     teleport(&mut world, BOB, far);
     let _ = world.drain_outbound().count();
 

@@ -174,7 +174,14 @@ fn a_sea() -> WorldState {
             &tiles,
         ),
     );
-    WorldState::new(facets, Facet(0), tiles, multis(), (0, 0), 1)
+    WorldState::new(
+        facets,
+        Facet(0),
+        tiles,
+        multis(),
+        openshard_map::grid::Tile::new(0, 0),
+        1,
+    )
 }
 
 fn a_captain(state: &mut WorldState) -> (EntityId, Serial) {

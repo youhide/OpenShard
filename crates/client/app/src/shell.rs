@@ -521,17 +521,16 @@ impl Shell {
     /// from the viewport this leaves *before* the world is drawn into it: a
     /// frame that laid out its UI after drawing the world would size the world
     /// from the previous frame's panels.
-    pub fn run(
-        &mut self,
-        window: &Window,
-        hud: &Hud,
-        camera: Camera,
-        world: &WorldState,
-        art: &openshard_uofiles::art::Art,
-        tiledata: &openshard_tiles::TileData,
-        map_editor: &mut crate::editor_mode::MapEditor,
-        authority: openshard_protocol::access::AccessLevel,
-    ) -> (Request, egui::FullOutput) {
+    pub fn run(&mut self, window: &Window, frame: ShellFrame<'_>) -> (Request, egui::FullOutput) {
+        let ShellFrame {
+            hud,
+            camera,
+            world,
+            art,
+            tiledata,
+            map_editor,
+            authority,
+        } = frame;
         let input = self.state.take_egui_input(window);
         let mut request = Request::default();
         // What the panels leave behind, taken from the root `Ui` *after* they
@@ -542,15 +541,19 @@ impl Shell {
         let output = self.context.run_ui(input, |ui| {
             request = layout(
                 ui,
-                hud,
-                camera,
-                world,
-                art,
-                tiledata,
-                &mut self.item_catalogue,
-                map_editor,
-                authority,
-                desk,
+                LayoutFrame {
+                    shell: ShellFrame {
+                        hud,
+                        camera,
+                        world,
+                        art,
+                        tiledata,
+                        map_editor: &mut *map_editor,
+                        authority,
+                    },
+                    item_catalogue: &mut self.item_catalogue,
+                    desk,
+                },
             );
             // **No party invitation here any more.** It was an `egui::Window`
             // with a Join and a Decline on it, drawn over the gump layer with
@@ -751,6 +754,30 @@ impl Shell {
     }
 }
 
+/// The world-side inputs used to lay out one shell frame.
+pub struct ShellFrame<'a> {
+    /// Read-only facts assembled for the HUD.
+    pub hud: &'a Hud,
+    /// The camera whose viewport the shell may resize.
+    pub camera: Camera,
+    /// The client's current projection of the world.
+    pub world: &'a WorldState,
+    /// Installed static art used by catalogue panels.
+    pub art: &'a openshard_uofiles::art::Art,
+    /// Installed tile metadata used by catalogue panels.
+    pub tiledata: &'a openshard_tiles::TileData,
+    /// Mutable map-editor session shown by staff panels.
+    pub map_editor: &'a mut crate::editor_mode::MapEditor,
+    /// Authority granted by the connected shard.
+    pub authority: openshard_protocol::access::AccessLevel,
+}
+
+struct LayoutFrame<'a> {
+    shell: ShellFrame<'a>,
+    item_catalogue: &'a mut ItemArtCatalogue,
+    desk: &'a mut Desk,
+}
+
 /// The panels, and the server's own dialogs.
 ///
 /// Deliberately absent: the paperdoll, containers, and the speech line and
@@ -759,18 +786,21 @@ impl Shell {
 /// than egui's. Building the paperdoll and containers here would decide M4
 /// without arguing it; the speech line already had that argument, in the
 /// commit that moved it off this file.
-fn layout(
-    root: &mut egui::Ui,
-    hud: &Hud,
-    camera: Camera,
-    world: &WorldState,
-    art: &openshard_uofiles::art::Art,
-    tiledata: &openshard_tiles::TileData,
-    item_catalogue: &mut ItemArtCatalogue,
-    map_editor: &mut crate::editor_mode::MapEditor,
-    authority: openshard_protocol::access::AccessLevel,
-    desk: &mut Desk,
-) -> Request {
+fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
+    let LayoutFrame {
+        shell:
+            ShellFrame {
+                hud,
+                camera,
+                world,
+                art,
+                tiledata,
+                map_editor,
+                authority,
+            },
+        item_catalogue,
+        desk,
+    } = frame;
     let mut request = Request::default();
     let staff = authority.allows(openshard_commands::StaffCommand::AUTHORITY);
     // egui 0.35 hands the frame a root `Ui`: panels are shown inside it and
@@ -966,13 +996,15 @@ fn layout(
                 Tab::Light => light_panel(ui, hud, &mut desk.light, &mut request),
                 Tab::Chat => chat_panel(
                     ui,
-                    &mut desk.chat,
-                    &mut desk.fonts,
-                    &mut desk.font_face,
-                    &mut desk.override_all_fonts,
-                    &mut desk.bitmap_font,
-                    hud.ttf_active,
-                    hud.ttf_available,
+                    ChatPanel {
+                        chat: &mut desk.chat,
+                        fonts: &mut desk.fonts,
+                        face: &mut desk.font_face,
+                        override_all_fonts: &mut desk.override_all_fonts,
+                        bitmap_font: &mut desk.bitmap_font,
+                        ttf_active: hud.ttf_active,
+                        ttf_available: hud.ttf_available,
+                    },
                 ),
                 Tab::Audio => audio_panel(ui, &mut desk.audio, &mut request),
                 Tab::Windows => windows_panel(ui, &mut desk.window_scale),
@@ -1737,16 +1769,26 @@ fn audio_panel(ui: &mut egui::Ui, audio: &mut crate::desk::Audio, request: &mut 
 /// The same four role controls apply whichever face is active. A TrueType face
 /// rasterizes at the selected pixel size; `fonts.mul` uses the corresponding
 /// fractional scale of its baked glyphs. See `docs/text_sizes.md`.
-fn chat_panel(
-    ui: &mut egui::Ui,
-    chat: &mut crate::desk::Chat,
-    fonts: &mut crate::desk::FontSizes,
-    face: &mut crate::desk::FontFace,
-    override_all_fonts: &mut bool,
-    bitmap_font: &mut crate::desk::BitmapFont,
+struct ChatPanel<'a> {
+    chat: &'a mut crate::desk::Chat,
+    fonts: &'a mut crate::desk::FontSizes,
+    face: &'a mut crate::desk::FontFace,
+    override_all_fonts: &'a mut bool,
+    bitmap_font: &'a mut crate::desk::BitmapFont,
     ttf_active: bool,
     ttf_available: bool,
-) {
+}
+
+fn chat_panel(ui: &mut egui::Ui, settings: ChatPanel<'_>) {
+    let ChatPanel {
+        chat,
+        fonts,
+        face,
+        override_all_fonts,
+        bitmap_font,
+        ttf_active,
+        ttf_available,
+    } = settings;
     use crate::desk::{BitmapFont, FontFace};
     use openshard_client_render::atlas::TextSize;
 

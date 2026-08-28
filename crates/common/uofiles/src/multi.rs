@@ -66,7 +66,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use openshard_protocol::wire::Graphic;
+use openshard_protocol::wire::{Graphic, MultiId};
 use openshard_protocol::world::Point;
 
 /// How many multi ids a client's index can name.
@@ -498,8 +498,9 @@ impl Multis {
     /// that has been told about one already holds the id, so both spellings reach
     /// the same row.
     #[must_use]
-    pub fn for_graphic(&self, graphic: u16) -> Option<&Multi> {
-        self.get(graphic & MAX_MULTI_ID)
+    pub fn for_graphic(&self, graphic: Graphic) -> Option<&Multi> {
+        let id = MultiId::from_graphic(graphic);
+        self.get(id.0 & MAX_MULTI_ID)
     }
 
     /// Every multi, in id order.
@@ -722,9 +723,9 @@ mod tests {
     fn a_graphic_and_an_id_name_the_same_multi() {
         let mut multis = Multis::default();
         multis.multis.insert(0x64, Multi::new(0x64, Vec::new()));
-        assert!(multis.for_graphic(0x4064).is_some());
-        assert!(multis.for_graphic(0x0064).is_some());
-        assert!(multis.for_graphic(0x4065).is_none());
+        assert!(multis.for_graphic(Graphic(0x4064)).is_some());
+        assert!(multis.for_graphic(Graphic(0x0064)).is_some());
+        assert!(multis.for_graphic(Graphic(0x4065)).is_none());
     }
 
     /// The UOP's flag enum folds onto the `.mul`'s convention, so nothing

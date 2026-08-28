@@ -62,13 +62,13 @@ const REACH: u16 = 48;
 /// [`TileFlags::WATER`](openshard_tiles::TileFlags::WATER) row would
 /// pull the player who is already standing on it under.
 fn ground(world: &mut World, land: u16, static_at: Option<(u16, i8)>) {
-    let mut scene = Scene::flat_holding(START.0 + REACH, START.1 + REACH, 0);
+    let mut scene = Scene::flat_holding(START.x + REACH, START.y + REACH, 0);
     scene.land_everywhere(land);
     if let Some((graphic, z)) = static_at {
         // A tree: tall and impassable, which is what a static the client can
         // claim to be chopping actually is.
         scene.art(graphic, WALL_FLAGS, 20);
-        scene.put(START.0 + 1, START.1, z, graphic);
+        scene.put(START.x + 1, START.y, z, graphic);
     }
     let (map, tiles) = scene.into_shard(Facet(0));
     world.state.facet_state_mut(Facet(0)).set_map(Some(map), &tiles);
@@ -149,7 +149,7 @@ fn swing_at(
         response: openshard_protocol::target::TargetResponse {
             cursor_id: openshard_protocol::wire::CursorId(cursor_id),
             object: openshard_protocol::serial::Serial::new(0),
-            location: Point::new(START.0 + dx, START.1, 0),
+            location: Point::new(START.x + dx, START.y, 0),
             graphic: (graphic != 0).then_some(Graphic(graphic)),
             cancelled: false,
         },
@@ -234,8 +234,8 @@ fn a_pickaxe_swung_at_a_mountain_yields_ore_and_empties_the_vein() {
     // Felucca pays double, so the vein is two down, not one.
     let bank_left = world.state.facet_state_mut(Facet(0)).banks.get(
         before,
-        START.0 + 1,
-        START.1,
+        START.x + 1,
+        START.y,
         Facet(0),
         openshard_state::WorldTick::ZERO,
         &mut Rng::new(1),
@@ -341,8 +341,8 @@ fn a_vein_runs_dry_and_says_so() {
         let banks = &mut world.state.facet_state_mut(Facet(0)).banks;
         let bank = banks.get(
             def,
-            START.0 + 1,
-            START.1,
+            START.x + 1,
+            START.y,
             Facet(0),
             openshard_state::WorldTick::ZERO,
             &mut rng,
@@ -390,7 +390,7 @@ fn walking_away_mid_swing_is_a_different_sentence_from_starting_too_far_off() {
     swing_at(&mut world, player, pick, 1, 0, now);
     let entity = world.state.players[&player];
     assert!(world.state.registry.has::<Harvesting>(entity));
-    let far = Point::new(START.0 + 40, START.1, 0);
+    let far = Point::new(START.x + 40, START.y, 0);
     crate::gm::teleport_to(&mut world.state, entity, far);
     let _ = packets_for(&mut world, player);
     finish_swing(&mut world, player, now);
@@ -654,7 +654,7 @@ fn a_client_cannot_name_a_static_that_is_not_there() {
     let _player = enter(&mut world, now);
     // Grass, and *no* static standing on it.
     ground(&mut world, GRASS, None);
-    let at = Point::new(START.0 + 1, START.1, 0);
+    let at = Point::new(START.x + 1, START.y, 0);
     assert!(
         skills::resolve_harvest_target(&world.state, Facet(0), at, Graphic(TREE)).is_none(),
         "a tree the map does not have should resolve to nothing"
@@ -665,7 +665,7 @@ fn a_client_cannot_name_a_static_that_is_not_there() {
     assert_eq!(resolved.source, TileSource::Static);
     assert_eq!(resolved.tile, Graphic(TREE));
     // And a claim at the wrong height is refused too — ServUO matches id *and* z.
-    let wrong_z = Point::new(START.0 + 1, START.1, 40);
+    let wrong_z = Point::new(START.x + 1, START.y, 40);
     assert!(skills::resolve_harvest_target(&world.state, Facet(0), wrong_z, Graphic(TREE)).is_none());
     // Bare ground reads its tile from the map, because the client sends none.
     let land = skills::resolve_harvest_target(&world.state, Facet(0), at, Graphic(0)).expect("the ground");
@@ -778,8 +778,8 @@ fn a_full_pack_loses_the_ore_and_tells_the_miner() {
     // is the shape of bug that empties a shard quietly.
     let bank = world.state.facet_state_mut(Facet(0)).banks.get(
         before,
-        START.0 + 1,
-        START.1,
+        START.x + 1,
+        START.y,
         Facet(0),
         openshard_state::WorldTick::ZERO,
         &mut Rng::new(1),

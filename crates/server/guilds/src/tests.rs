@@ -47,7 +47,7 @@ fn world() -> WorldState {
         // A shard with no client files: an empty tiledata, not a missing one.
         openshard_tiles::TileData::empty(),
         openshard_uofiles::multi::Multis::default(),
-        (0, 0),
+        openshard_map::grid::Tile::new(0, 0),
         1,
     )
 }

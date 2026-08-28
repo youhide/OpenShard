@@ -66,7 +66,7 @@ fn silk_gather() -> QuestDef {
 
 /// Put a quest giver on the map beside the start, bound to `keys`.
 fn place_giver(world: &mut World, keys: &[&str], now: Instant) -> Serial {
-    let at = Point::new(START.0 + 1, START.1, 0);
+    let at = Point::new(START.x + 1, START.y, 0);
     let serial = spawn_mobile_at(world, at, 100, now);
     let entity = world.state.registry.entity_of(serial).unwrap();
     world.state.registry.insert(
@@ -82,7 +82,7 @@ fn place_giver(world: &mut World, keys: &[&str], now: Instant) -> Serial {
 /// who gets credit into the dead mobile. The death tick consumes the same event
 /// as the quest listener, so the victim must be a real, separate entity.
 fn slay_rat(world: &mut World, killer: EntityId, now: Instant) {
-    let serial = spawn_mobile_at(world, Point::new(START.0 + 10, START.1, 0), 1, now);
+    let serial = spawn_mobile_at(world, Point::new(START.x + 10, START.y, 0), 1, now);
     let entity = world.state.registry.entity_of(serial).expect("the rat spawned");
     let killer = world
         .state
@@ -714,7 +714,7 @@ fn a_restore_announces_the_post_an_npc_belongs_to_not_where_it_wandered() {
     // `BaseVendor`, and it is the townsfolk — the ones with an `Npc` beat and a
     // post to keep to — that a routine walks off at dusk.
     let entity =
-        super::tests::spawn_townsperson(&mut world, "the healer", Point::new(START.0 + 1, START.1, 0), now);
+        super::tests::spawn_townsperson(&mut world, "the healer", Point::new(START.x + 1, START.y, 0), now);
     world.state.registry.insert(
         entity,
         QuestGiver {
@@ -1081,7 +1081,7 @@ fn register_towns(world: &mut World, now: Instant) {
         id: RegionId(0),
         name: "Britain".to_owned(),
         priority: 50,
-        rects: vec![RegionRect::new(START.0 - 20, START.1 - 20, 40, 40)],
+        rects: vec![RegionRect::new(START.x - 20, START.y - 20, 40, 40)],
         flags: RegionFlags::none(),
         music: None,
         light: None,
@@ -1090,7 +1090,7 @@ fn register_towns(world: &mut World, now: Instant) {
         id: RegionId(0),
         name: "Minoc".to_owned(),
         priority: 50,
-        rects: vec![RegionRect::new(START.0 + 200, START.1 + 200, 40, 40)],
+        rects: vec![RegionRect::new(START.x + 200, START.y + 200, 40, 40)],
         flags: RegionFlags::none(),
         music: None,
         light: None,
@@ -1129,7 +1129,7 @@ fn an_escort_pays_on_reaching_its_destination() {
 
     // Put both of them inside the destination region and let the pass look.
     let player = world.state.players[&connection];
-    let inside = Point::new(START.0 + 210, START.1 + 210, 0);
+    let inside = Point::new(START.x + 210, START.y + 210, 0);
     teleport_to(&mut world, player, inside);
     let npc = world.state.registry.entity_of(giver).unwrap();
     teleport_to(&mut world, npc, inside);
@@ -1211,7 +1211,7 @@ fn deliver_quest() -> QuestDef {
 
 /// Place a plain named NPC — a delivery destination, which gives no quests.
 fn place_named(world: &mut World, name: &str, now: Instant) -> Serial {
-    let at = Point::new(START.0 + 2, START.1, 0);
+    let at = Point::new(START.x + 2, START.y, 0);
     let serial = spawn_mobile_at(world, at, 100, now);
     let entity = world.state.registry.entity_of(serial).unwrap();
     world
@@ -1256,7 +1256,7 @@ fn an_escorted_traveller_walks_after_its_escorter() {
 
     // Walk the player a few tiles off and let the escort beat run.
     let player = world.state.players[&connection];
-    let away = Point::new(START.0 + 6, START.1, 0);
+    let away = Point::new(START.x + 6, START.y, 0);
     teleport_to(&mut world, player, away);
     let npc = world.state.registry.entity_of(giver).unwrap();
     let before = position_of(&world, npc);

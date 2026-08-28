@@ -23,6 +23,34 @@ use openshard_entities::{EntityId, Registry};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::PoisonLevel;
 
+/// An inclusive fresh-use range in the form the world's generator consumes.
+#[derive(Clone, Copy, Debug)]
+struct UsesRange {
+    min: u16,
+    width: std::num::NonZeroU32,
+}
+
+impl UsesRange {
+    fn inclusive(min: u16, max: u16) -> Option<Self> {
+        let width = u32::from(max).checked_sub(u32::from(min))?.checked_add(1)?;
+        Some(Self {
+            min,
+            width: std::num::NonZeroU32::new(width)?,
+        })
+    }
+
+    fn roll(self, rng: &mut openshard_state::Rng) -> u16 {
+        let uses = u32::from(self.min) + rng.below(self.width.get());
+        u16::try_from(uses).expect("a draw inside an inclusive u16 use range fits u16")
+    }
+}
+
+fn fresh_uses(rng: &mut openshard_state::Rng, min: u16, max: u16) -> u16 {
+    UsesRange::inclusive(min, max)
+        .expect("a fresh item's use range is ordered")
+        .roll(rng)
+}
+
 /// Give a freshly made item whatever its graphic implies.
 ///
 /// Called from every place an item is created from a graphic — a vendor's shelf, a
@@ -32,8 +60,7 @@ pub fn apply_core_defaults(state: &mut WorldState, item: EntityId, graphic: Grap
     if instrument_data(graphic).is_some() {
         // Rolled between ServUO's two bounds on the world's own generator, so a
         // shelf of lutes replays and no two are identical.
-        let span = u32::from(INSTRUMENT_MAX_USES - INSTRUMENT_MIN_USES) + 1;
-        let uses_left = INSTRUMENT_MIN_USES + u16::try_from(state.rng.below(span)).unwrap_or(0);
+        let uses_left = fresh_uses(&mut state.rng, INSTRUMENT_MIN_USES, INSTRUMENT_MAX_USES);
         state.registry.insert(item, Instrument { uses_left });
         return;
     }
@@ -41,8 +68,7 @@ pub fn apply_core_defaults(state: &mut WorldState, item: EntityId, graphic: Grap
         // A pickaxe off the shelf holds a fixed number of swings, rolled the same
         // way — without it a bought pick has no `Tool` at all and the first swing
         // never wears it down.
-        let span = u32::from(data.max_uses - data.min_uses) + 1;
-        let uses_left = data.min_uses + u16::try_from(state.rng.below(span)).unwrap_or(0);
+        let uses_left = fresh_uses(&mut state.rng, data.min_uses, data.max_uses);
         state.registry.insert(item, Tool { uses_left });
         return;
     }
@@ -51,8 +77,7 @@ pub fn apply_core_defaults(state: &mut WorldState, item: EntityId, graphic: Grap
         // are separate because a pickaxe and a saw answer different questions —
         // which ground, which trade — and one of them ends up on `Skill` either
         // way, so merging them would only hide the difference.
-        let span = u32::from(data.max_uses - data.min_uses) + 1;
-        let uses_left = data.min_uses + u16::try_from(state.rng.below(span)).unwrap_or(0);
+        let uses_left = fresh_uses(&mut state.rng, data.min_uses, data.max_uses);
         state.registry.insert(item, Tool { uses_left });
         return;
     }
@@ -131,5 +156,35 @@ fn poison_level_of(state: &WorldState, item: EntityId) -> u8 {
         4
     } else {
         1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shipped_fresh_use_ranges_are_ordered_and_bound_every_draw() {
+        let harvest = tool_data(Graphic(0x0E86)).expect("a pickaxe");
+        let craft = craft_tool(Graphic(0x0F9D)).expect("a sewing kit");
+        let ranges = [
+            (INSTRUMENT_MIN_USES, INSTRUMENT_MAX_USES),
+            (harvest.min_uses, harvest.max_uses),
+            (craft.min_uses, craft.max_uses),
+        ];
+        let mut rng = openshard_state::Rng::new(7);
+        for (min, max) in ranges {
+            let range = UsesRange::inclusive(min, max).expect("a shipped range");
+            for _ in 0..1000 {
+                assert!((min..=max).contains(&range.roll(&mut rng)));
+            }
+        }
+
+        assert!(
+            UsesRange::inclusive(2, 1).is_none(),
+            "a reversed range is not a roll"
+        );
+        let whole = UsesRange::inclusive(u16::MIN, u16::MAX).expect("the full u16 range fits u32");
+        assert_eq!(whole.width.get(), u32::from(u16::MAX) + 1);
     }
 }

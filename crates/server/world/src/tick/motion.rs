@@ -1,5 +1,17 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+struct PlayerWalk {
+    connection: ConnectionId,
+    entity: EntityId,
+    serial: Serial,
+    facet: Facet,
+    from: Point,
+    request: WalkRequest,
+    mounted: bool,
+    leaving_seat: bool,
+}
+
 impl World {
     /// The body a step from `from` toward `direction` would walk into, when the
     /// thing refusing that step is a body at all.
@@ -48,45 +60,13 @@ impl World {
         let Some(serial) = self.state.registry.serial_of(entity) else {
             return;
         };
-        // Paralysis refuses the walk before anything else — so it does not even
-        // break a cast the player cannot then follow with a step.
-        if let Some(&openshard_state::components::Frozen { until }) =
-            self.state
-                .registry
-                .get::<openshard_state::components::Frozen>(entity)
-        {
-            if self.state.ticks < until {
-                if let Some(Movement(walker)) = self.state.registry.get::<Movement>(entity).copied() {
-                    self.state.send_packet(
-                        connection,
-                        &ServerPacket::WalkReject(WalkReject {
-                            sequence: request.sequence.interpret(),
-                            position: walker.position,
-                            facing: walker.facing,
-                        }),
-                    );
-                }
-                self.notify_self(entity, "You are frozen and cannot move.");
-                return;
-            }
-        }
-        // What the step costs in stamina, and whether there is any left to pay
-        // with. Checked before the walk is attempted, like ServUO's movement
-        // event, so a refusal costs the sequence nothing.
-        if let Some(refusal) = self.spend_step_stamina(entity, request.facing.running) {
-            if let Some(Movement(walker)) = self.state.registry.get::<Movement>(entity).copied() {
-                self.state.send_packet(
-                    connection,
-                    &ServerPacket::WalkReject(WalkReject {
-                        sequence: request.sequence.interpret(),
-                        position: walker.position,
-                        facing: walker.facing,
-                    }),
-                );
-            }
-            self.notify_self(entity, refusal);
+        if self.frozen_refuses_walk(connection, entity, request) {
             return;
         }
+        if self.stamina_refuses_walk(connection, entity, request) {
+            return;
+        }
+
         // A step breaks a spell mid-cast: the ServUO style roots the caster, so
         // stepping is choosing the walk over the spell. (The Sphere style never
         // sets `Casting`, so this is a no-op there.)
@@ -114,7 +94,6 @@ impl World {
         }
 
         let facet = self.state.facet_of(entity);
-        let was = walker.position;
         // A horse is the fastest a player legitimately moves, and the pace budget has
         // to know: charging a mounted runner the on-foot rate spends credit twice as
         // fast as it earns and rubber-bands a long gallop.
@@ -122,6 +101,87 @@ impl World {
             .state
             .registry
             .has::<openshard_state::components::Riding>(entity);
+        let walked = PlayerWalk {
+            connection,
+            entity,
+            serial,
+            facet,
+            from: walker.position,
+            request,
+            mounted,
+            leaving_seat,
+        };
+        let (walker, outcome) = self.request_player_walk(walked, walker, now);
+        self.state.registry.insert(entity, Movement(walker));
+        self.finish_player_walk(walked, walker, outcome);
+    }
+
+    /// Paralysis refuses the walk before anything else — so it does not even
+    /// break a cast the player cannot then follow with a step.
+    fn frozen_refuses_walk(
+        &mut self,
+        connection: ConnectionId,
+        entity: EntityId,
+        request: WalkRequest,
+    ) -> bool {
+        let frozen = self
+            .state
+            .registry
+            .get::<openshard_state::components::Frozen>(entity)
+            .is_some_and(|frozen| self.state.ticks < frozen.until);
+        if !frozen {
+            return false;
+        }
+        self.reject_walk_at_current_position(connection, entity, request);
+        self.notify_self(entity, "You are frozen and cannot move.");
+        true
+    }
+
+    /// Charge the prospective step before asking the walk state machine.
+    /// A refusal here costs the sequence nothing.
+    fn stamina_refuses_walk(
+        &mut self,
+        connection: ConnectionId,
+        entity: EntityId,
+        request: WalkRequest,
+    ) -> bool {
+        let Some(refusal) = self.spend_step_stamina(entity, request.facing.running) else {
+            return false;
+        };
+        self.reject_walk_at_current_position(connection, entity, request);
+        self.notify_self(entity, refusal);
+        true
+    }
+
+    fn reject_walk_at_current_position(
+        &mut self,
+        connection: ConnectionId,
+        entity: EntityId,
+        request: WalkRequest,
+    ) {
+        let Some(Movement(walker)) = self.state.registry.get::<Movement>(entity).copied() else {
+            return;
+        };
+        self.send_walk_reject(connection, request, walker);
+    }
+
+    fn send_walk_reject(&mut self, connection: ConnectionId, request: WalkRequest, walker: Walker) {
+        self.state.send_packet(
+            connection,
+            &ServerPacket::WalkReject(WalkReject {
+                sequence: request.sequence.interpret(),
+                position: walker.position,
+                facing: walker.facing,
+            }),
+        );
+    }
+
+    fn request_player_walk(
+        &mut self,
+        walked: PlayerWalk,
+        mut walker: Walker,
+        now: Instant,
+    ) -> (Walker, Walk) {
         // Kept so the shove below can put the walker back the way it found it.
         // `request` writes into its own copy — the position it accepts, the
         // sequence it resets, the pace credit it spends — and none of that has
@@ -145,14 +205,16 @@ impl World {
         // rather than about the step: **a ghost walks through a shut leaf**, and
         // asked once here so the shove's re-ask below cannot answer differently.
         // See `WorldState::walking_doors`.
-        let doors = self.state.walking_doors(entity);
+        let doors = self.state.walking_doors(walked.entity);
         let mut outcome = {
-            let crowd = self.state.crowd_near(facet, entity, walker.position, 1);
+            let crowd = self
+                .state
+                .crowd_near(walked.facet, walked.entity, walker.position, 1);
             let footing = self
                 .state
-                .footing(facet, doors)
+                .footing(walked.facet, doors)
                 .among(openshard_movement::Bodies::standing(&crowd));
-            walker.request(request, &footing, now, mounted)
+            walker.request(walked.request, &footing, now, walked.mounted)
         };
         // **A body in the way is not a wall.** A rested player shoves past for
         // ten stamina and a line — ServUO's `Mobile.CheckShove`, and the mirror
@@ -163,8 +225,13 @@ impl World {
         // something turns out to be a person: `shove_target` returns `None` for
         // ground, which is every refusal that is not this one.
         if outcome == Walk::Refused(openshard_movement::Refusal::Blocked) {
-            if let Some(shoved) = self.shove_target(facet, before.position, request.facing.direction, doors) {
-                if self.state.shove(entity, shoved) {
+            if let Some(shoved) = self.shove_target(
+                walked.facet,
+                before.position,
+                walked.request.facing.direction,
+                doors,
+            ) {
+                if self.state.shove(walked.entity, shoved) {
                     // The step is re-asked with **nobody** in the way, and that
                     // is ServUO's `m_Pushing`, not a shortcut: the flag is set
                     // once per `Move` and cleared once per `Move`, so walking
@@ -172,113 +239,114 @@ impl World {
                     // two. Here one step is one `Move`, so one paid shove
                     // clears the whole crowd for the length of it.
                     walker = before;
-                    let footing = self.state.footing(facet, doors);
-                    outcome = walker.request(request, &footing, now, mounted);
+                    let footing = self.state.footing(walked.facet, doors);
+                    outcome = walker.request(walked.request, &footing, now, walked.mounted);
                 }
             }
         }
-        self.state.registry.insert(entity, Movement(walker));
+        (walker, outcome)
+    }
 
+    fn finish_player_walk(&mut self, walked: PlayerWalk, walker: Walker, outcome: Walk) {
         match outcome {
             Walk::Moved { position, facing } => {
-                if leaving_seat {
-                    self.state.registry.remove::<openshard_state::Seated>(entity);
-                }
-                // A step breaks concentration — ServUO's `Mobile.Move` ends with
-                // `DisruptiveAction`, and a trance is over the moment you walk out
-                // of it. A *turn* is not a step and does not. Hiding is spent one
-                // step at a time instead of broken outright, which is what Stealth
-                // buys; running or riding gives you away whatever your budget.
-                self.state.disrupt(entity);
-                self.state
-                    .step_while_hidden(entity, request.facing.running, mounted);
-                self.state.registry.insert(entity, Position(position));
-                items::occupy_chair(&mut self.state, entity);
-                self.state.registry.insert(entity, Heading(facing));
-                if !mounted {
-                    combat::record_wrestling_step(&mut self.state, entity);
-                }
-                // And what the step does to a blow or a draw already under way —
-                // `docs/combat_actions.md`'s D5. Pushed from here, with the pace
-                // and the mount in hand, because they are facts of *this* step:
-                // reading `Heading` in a later pass would find the run bit still
-                // set and sway a fighter who ran once for ever.
-                combat::stepped(&mut self.state, entity, request.facing.running, mounted);
-                // The index is a second copy of the position; this is the line
-                // that keeps it honest.
-                self.state.place_mobile(facet, entity, position);
-                self.state.send_packet(
-                    connection,
-                    &ServerPacket::WalkAck(WalkAck {
-                        sequence: request.sequence.interpret(),
-                        notoriety: Notoriety::Innocent,
-                    }),
-                );
-                self.state.bus.send(MobileMoved {
-                    entity,
-                    serial,
-                    from: was,
-                    to: position,
-                    facing,
-                });
-                self.state.refresh_around(entity);
-                // A ghost that just walked into a healer's reach is offered a
-                // free resurrection — ServUO's `BaseHealer.OnMovement`.
-                self.offer_resurrection_nearby(entity);
+                self.finish_moved_player(walked, position, facing);
             }
             Walk::Turned { facing } => {
-                self.state.registry.insert(entity, Heading(facing));
-                self.state.send_packet(
-                    connection,
-                    &ServerPacket::WalkAck(WalkAck {
-                        sequence: request.sequence.interpret(),
-                        notoriety: Notoriety::Innocent,
-                    }),
-                );
-                self.state.bus.send(MobileTurned {
-                    entity,
-                    serial,
-                    facing,
-                });
-                // A turn moves nobody, but it changes what everyone watching
-                // draws — the client animates a facing it is told about.
-                self.state.broadcast_move(entity);
+                self.finish_turned_player(walked, facing);
             }
             Walk::Refused(refusal) => {
-                // `Walk` says which of the four it was now. It used to say only
-                // "no", and this arm guessed: out of sequence when the walker
-                // was fresh with a non-zero sequence, and `Blocked` otherwise —
-                // which quietly meant `RefusedReason::TooFast` was a variant
-                // nothing ever sent, so a speedhack and a wall were one number
-                // in the metrics.
-                //
-                // The map is not one-to-one, and the pair that collapses is the
-                // honest half of the old guess: a step off the edge of the
-                // coordinate space is a step with nowhere to land, which from
-                // the outside is what `Blocked` means.
-                let reason = match refusal {
-                    openshard_movement::Refusal::OutOfSequence => RefusedReason::OutOfSequence,
-                    openshard_movement::Refusal::TooFast => RefusedReason::TooFast,
-                    openshard_movement::Refusal::OffTheMap | openshard_movement::Refusal::Blocked => {
-                        RefusedReason::Blocked
-                    }
-                };
-                self.state.send_packet(
-                    connection,
-                    &ServerPacket::WalkReject(WalkReject {
-                        sequence: request.sequence.interpret(),
-                        position: walker.position,
-                        facing: walker.facing,
-                    }),
-                );
-                self.state.bus.send(StepRefused {
-                    entity,
-                    serial,
-                    reason,
-                });
-                debug!(%serial, ?reason, "step refused");
+                self.finish_refused_player(walked, walker, refusal);
             }
         }
+    }
+
+    fn finish_moved_player(&mut self, walked: PlayerWalk, position: Point, facing: Facing) {
+        if walked.leaving_seat {
+            self.state
+                .registry
+                .remove::<openshard_state::Seated>(walked.entity);
+        }
+        // A step breaks concentration — ServUO's `Mobile.Move` ends with
+        // `DisruptiveAction`, and a trance is over the moment you walk out
+        // of it. A *turn* is not a step and does not. Hiding is spent one
+        // step at a time instead of broken outright, which is what Stealth
+        // buys; running or riding gives you away whatever your budget.
+        self.state.disrupt(walked.entity);
+        self.state
+            .step_while_hidden(walked.entity, walked.request.facing.running, walked.mounted);
+        self.state.registry.insert(walked.entity, Position(position));
+        items::occupy_chair(&mut self.state, walked.entity);
+        self.state.registry.insert(walked.entity, Heading(facing));
+        if !walked.mounted {
+            combat::record_wrestling_step(&mut self.state, walked.entity);
+        }
+        // Facts of *this* step are pushed into combat before the later passes.
+        combat::stepped(
+            &mut self.state,
+            walked.entity,
+            walked.request.facing.running,
+            walked.mounted,
+        );
+        // The index is a second copy of the position; this keeps it honest.
+        self.state.place_mobile(walked.facet, walked.entity, position);
+        self.send_walk_ack(walked.connection, walked.request);
+        self.state.bus.send(MobileMoved {
+            entity: walked.entity,
+            serial: walked.serial,
+            from: walked.from,
+            to: position,
+            facing,
+        });
+        self.state.refresh_around(walked.entity);
+        // A ghost entering a healer's reach gets an offer after observers refresh.
+        self.offer_resurrection_nearby(walked.entity);
+    }
+
+    fn finish_turned_player(&mut self, walked: PlayerWalk, facing: Facing) {
+        self.state.registry.insert(walked.entity, Heading(facing));
+        self.send_walk_ack(walked.connection, walked.request);
+        self.state.bus.send(MobileTurned {
+            entity: walked.entity,
+            serial: walked.serial,
+            facing,
+        });
+        // A turn moves nobody, but it changes what everyone watching draws.
+        self.state.broadcast_move(walked.entity);
+    }
+
+    fn send_walk_ack(&mut self, connection: ConnectionId, request: WalkRequest) {
+        self.state.send_packet(
+            connection,
+            &ServerPacket::WalkAck(WalkAck {
+                sequence: request.sequence.interpret(),
+                notoriety: Notoriety::Innocent,
+            }),
+        );
+    }
+
+    fn finish_refused_player(
+        &mut self,
+        walked: PlayerWalk,
+        walker: Walker,
+        refusal: openshard_movement::Refusal,
+    ) {
+        // The map is not one-to-one: stepping off the coordinate space and
+        // walking into an obstacle are both `Blocked` to observers.
+        let reason = match refusal {
+            openshard_movement::Refusal::OutOfSequence => RefusedReason::OutOfSequence,
+            openshard_movement::Refusal::TooFast => RefusedReason::TooFast,
+            openshard_movement::Refusal::OffTheMap | openshard_movement::Refusal::Blocked => {
+                RefusedReason::Blocked
+            }
+        };
+        self.send_walk_reject(walked.connection, walked.request, walker);
+        self.state.bus.send(StepRefused {
+            entity: walked.entity,
+            serial: walked.serial,
+            reason,
+        });
+        debug!(serial = %walked.serial, ?reason, "step refused");
     }
 
     /// Move a mobile one step by server decree. See [`Command::Step`].

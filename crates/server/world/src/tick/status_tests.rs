@@ -680,7 +680,7 @@ fn a_vendor_takes_the_bank_when_the_pack_is_short() {
     let player = world.state.players[&connection];
     let bank = worn_container_on(&world, connection, items::BANK_LAYER);
     put_in(&mut world, bank, GOLD, 500);
-    let vendor = super::tests::spawn_stocked_vendor(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    let vendor = super::tests::spawn_stocked_vendor(&mut world, Point::new(START.x + 1, START.y, 0), now);
     let stock = stock_line_serial(&world, vendor);
     let _ = packets_for(&mut world, connection);
 
@@ -719,7 +719,7 @@ fn with_bank_payment_off_a_banked_fortune_buys_nothing() {
     let player = world.state.players[&connection];
     let bank = worn_container_on(&world, connection, items::BANK_LAYER);
     put_in(&mut world, bank, GOLD, 500);
-    let vendor = super::tests::spawn_stocked_vendor(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    let vendor = super::tests::spawn_stocked_vendor(&mut world, Point::new(START.x + 1, START.y, 0), now);
     let stock = stock_line_serial(&world, vendor);
 
     world.queue(Command::Buy {

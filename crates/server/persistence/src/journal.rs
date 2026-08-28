@@ -271,7 +271,7 @@ impl Journal {
         // in the same save window as it moved gets written back by its own
         // gravestone.
         self.dirty.remove(&entity);
-        self.forget_serial(serial.raw());
+        self.forget_serial(serial);
     }
 
     /// Mark a bare serial deleted, with no entity behind it.
@@ -280,8 +280,8 @@ impl Journal {
     /// live entity to pass [`forget`](Self::forget), only the serial from its
     /// saved record. The next snapshot carries it in `removed`, and the store
     /// drops the character row and its inventory.
-    pub fn forget_serial(&mut self, serial: u32) {
-        self.removed.insert(serial);
+    pub fn forget_serial(&mut self, serial: Serial) {
+        self.removed.insert(serial.raw());
     }
 
     /// Whether a save would write nothing.
@@ -458,6 +458,19 @@ mod tests {
         let snapshot = journal.drain(1, |_| None).expect("a deletion is a change");
         assert_eq!(snapshot.len(), 1);
         assert!(!snapshot.is_empty());
+    }
+
+    #[test]
+    fn a_serial_without_a_live_entity_is_still_deleted() {
+        // Character selection deletes a saved, logged-out character. There is
+        // no entity to forget, but the valid domain serial must still reach the
+        // storage-shaped snapshot as its raw database key.
+        let serial = Serial::new(42).expect("a mobile serial");
+        let mut journal = Journal::new();
+        journal.forget_serial(serial);
+
+        let snapshot = journal.drain(1, |_| None).expect("a deletion is a change");
+        assert_eq!(snapshot.removed, vec![serial.raw()]);
     }
 
     #[test]

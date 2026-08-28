@@ -81,11 +81,10 @@ pub fn foundation_for_design(multis: &Multis, components: &[Component]) -> Optio
             let foundation = bounds(multis.components(id))?;
             let foundation_width = foundation.max_x.abs_diff(foundation.min_x) + 1;
             let foundation_height = foundation.max_y.abs_diff(foundation.min_y) + 1;
-            (foundation_width >= width && foundation_height >= height)
-                .then_some((
-                    MultiId(id),
-                    usize::from(foundation_width) * usize::from(foundation_height),
-                ))
+            (foundation_width >= width && foundation_height >= height).then_some((
+                MultiId(id),
+                usize::from(foundation_width) * usize::from(foundation_height),
+            ))
         })
         .min_by_key(|(id, area)| (*area, id.0))
         .map(|(id, _)| id)
@@ -100,7 +99,10 @@ pub fn foundation_for_design(multis: &Multis, components: &[Component]) -> Optio
 /// for offsets beyond the foundation's compact plane, so preserving the origin
 /// does not truncate the picture.
 #[must_use]
-pub fn fit_design_to_foundation(multis: &Multis, components: Vec<Component>) -> Option<(MultiId, Vec<Component>)> {
+pub fn fit_design_to_foundation(
+    multis: &Multis,
+    components: Vec<Component>,
+) -> Option<(MultiId, Vec<Component>)> {
     let multi = foundation_for_design(multis, &components)?;
     Some((multi, components))
 }

@@ -24,7 +24,7 @@ fn town(name: &str, flags: RegionFlags) -> Region {
         name: name.to_owned(),
         priority: 50,
         // A generous box around START, so a step in any direction stays inside.
-        rects: vec![RegionRect::new(START.0 - 20, START.1 - 20, 40, 40)],
+        rects: vec![RegionRect::new(START.x - 20, START.y - 20, 40, 40)],
         flags,
         music: Some(BRITAIN_MUSIC),
         light: None,
@@ -53,7 +53,7 @@ fn walking_into_a_town_is_one_crossing_and_standing_still_is_none() {
     let mut world = world();
     let now = Instant::now();
     // A tiny region beside the start, so the character begins outside it.
-    let inside = Point::new(START.0 + 5, START.1, 0);
+    let inside = Point::new(START.x + 5, START.y, 0);
     let player = enter(&mut world, now);
     register(
         &mut world,
@@ -102,7 +102,7 @@ fn leaving_a_town_reports_the_region_it_left() {
     world.tick(now);
     let mut crossings = world.state.bus.cursor::<crate::events::RegionChanged>();
 
-    teleport(&mut world, player, Point::new(START.0 + 100, START.1, 0));
+    teleport(&mut world, player, Point::new(START.x + 100, START.y, 0));
     world.tick(now);
 
     let left: Vec<_> = world.state.bus.read(&mut crossings).cloned().collect();
@@ -129,7 +129,7 @@ fn a_region_plays_its_music_once() {
     // Stepping about inside must not restart it: re-sending 0x6D plays the track
     // from the top, so a player pacing a town line would hear the first bar over
     // and over.
-    teleport(&mut world, player, Point::new(START.0 + 2, START.1 + 2, 0));
+    teleport(&mut world, player, Point::new(START.x + 2, START.y + 2, 0));
     world.tick(now);
     assert!(
         packets_of(&mut world, player, 0x6D).is_empty(),
@@ -170,7 +170,7 @@ fn a_dungeon_is_dark_at_noon_and_night_sight_beats_both() {
             id: RegionId(0),
             name: "Covetous".to_owned(),
             priority: 50,
-            rects: vec![RegionRect::new(START.0 - 20, START.1 - 20, 40, 40)],
+            rects: vec![RegionRect::new(START.x - 20, START.y - 20, 40, 40)],
             flags: RegionFlags::none(),
             music: None,
             light: Some(DUNGEON_LIGHT),
@@ -391,7 +391,7 @@ fn staff_are_never_guard_candidates() {
 fn a_murderer_walking_into_town_is_hunted_without_a_call() {
     let mut world = world();
     let now = Instant::now();
-    let outside = Point::new(START.0 + 100, START.1, 0);
+    let outside = Point::new(START.x + 100, START.y, 0);
     let killer = enter(&mut world, now);
     register(
         &mut world,
@@ -417,7 +417,7 @@ fn a_murderer_walking_into_town_is_hunted_without_a_call() {
         "the woods are nobody's jurisdiction"
     );
 
-    teleport(&mut world, killer, Point::new(START.0, START.1, 0));
+    teleport(&mut world, killer, Point::new(START.x, START.y, 0));
     world.tick(now);
 
     assert_eq!(
@@ -497,7 +497,7 @@ fn a_no_teleport_region_refuses_both_ways() {
     let mut world = world();
     let now = Instant::now();
     let player = enter(&mut world, now);
-    let barred = Point::new(START.0 + 60, START.1, 0);
+    let barred = Point::new(START.x + 60, START.y, 0);
     register(
         &mut world,
         vec![Region {
@@ -523,13 +523,13 @@ fn a_no_teleport_region_refuses_both_ways() {
     assert!(!world.state.may_teleport(entity, barred));
     // Out is refused too — a jail one can cast out of is not a jail.
     teleport(&mut world, player, barred);
-    assert!(!world.state.may_teleport(entity, Point::new(START.0, START.1, 0)));
+    assert!(!world.state.may_teleport(entity, Point::new(START.x, START.y, 0)));
     // And ordinary ground is open in both directions.
-    teleport(&mut world, player, Point::new(START.0, START.1, 0));
+    teleport(&mut world, player, Point::new(START.x, START.y, 0));
     assert!(
         world
             .state
-            .may_teleport(entity, Point::new(START.0 + 1, START.1, 0))
+            .may_teleport(entity, Point::new(START.x + 1, START.y, 0))
     );
 }
 
@@ -538,7 +538,7 @@ fn staff_teleport_where_players_may_not() {
     let mut world = world();
     let now = Instant::now();
     let gm = enter_gm(&mut world, now);
-    let barred = Point::new(START.0 + 60, START.1, 0);
+    let barred = Point::new(START.x + 60, START.y, 0);
     register(
         &mut world,
         vec![Region {
@@ -619,7 +619,7 @@ fn regions_and_the_clock_survive_a_restart() {
     restored.restore_regions(saved);
     let britain = restored
         .state
-        .region_at(Facet(0), Point::new(START.0, START.1, 0))
+        .region_at(Facet(0), Point::new(START.x, START.y, 0))
         .expect("Britain came back");
     assert_eq!(britain.name, "Britain");
     assert!(britain.flags.guarded, "and it is still guarded");
@@ -653,7 +653,7 @@ fn registering_again_replaces_the_set() {
 
     let here = world
         .state
-        .region_at(Facet(0), Point::new(START.0, START.1, 0))
+        .region_at(Facet(0), Point::new(START.x, START.y, 0))
         .expect("somewhere");
     assert_eq!(here.name, "Trinsic");
     assert_eq!(

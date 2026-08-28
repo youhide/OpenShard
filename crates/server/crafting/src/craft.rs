@@ -45,6 +45,30 @@ const ALREADY_BUSY: ClilocId = ClilocId(500_119);
 /// The base skill a maker's mark wants: grandmaster, in tenths.
 const MARK_AT: u16 = 1000;
 
+/// An inclusive craft-beat range, stored as the non-zero bound the RNG needs.
+#[derive(Clone, Copy, Debug)]
+struct BeatRange {
+    min: u8,
+    width: std::num::NonZeroU16,
+}
+
+impl BeatRange {
+    fn inclusive(min: u8, max: u8) -> Option<Self> {
+        let width = u16::from(max).checked_sub(u16::from(min))?.checked_add(1)?;
+        Some(Self {
+            min,
+            width: std::num::NonZeroU16::new(width)?,
+        })
+    }
+
+    fn roll(self, rng: &mut openshard_state::Rng) -> u8 {
+        let beat = u16::from(self.min)
+            + u16::try_from(rng.below(u32::from(self.width.get())))
+                .expect("a draw below a u16 beat width fits u16");
+        u8::try_from(beat).expect("a draw inside an inclusive u8 beat range fits u8")
+    }
+}
+
 /// Somebody made something.
 ///
 /// Emitted after the item is in the pack, so a pack reading this is reacting and
@@ -182,8 +206,9 @@ pub fn begin(
     // ServUO rolls the number of beats between the system's two bounds; both are
     // one nearly everywhere, which is what makes a craft take a moment rather
     // than an instant without ever making the player wait.
-    let span = u32::from(def.max_beats.saturating_sub(def.min_beats)) + 1;
-    let beats = def.min_beats + u8::try_from(state.rng.below(span)).unwrap_or(0);
+    let beats = BeatRange::inclusive(def.min_beats, def.max_beats)
+        .expect("a shipped craft system's beat range is ordered")
+        .roll(&mut state.rng);
     state.registry.insert(
         crafter,
         Crafting {
@@ -401,4 +426,28 @@ pub fn tool_system(graphic: Graphic) -> Option<SystemId> {
         .iter()
         .position(|def| def.skill == tool.skill)
         .and_then(SystemId::from_index)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_craft_system_has_a_bounded_representable_beat_roll() {
+        let mut rng = openshard_state::Rng::new(7);
+        for (index, def) in SYSTEMS.iter().enumerate() {
+            let range = BeatRange::inclusive(def.min_beats, def.max_beats)
+                .unwrap_or_else(|| panic!("craft system {index} has a reversed beat range"));
+            for _ in 0..1000 {
+                assert!((def.min_beats..=def.max_beats).contains(&range.roll(&mut rng)));
+            }
+        }
+
+        assert!(
+            BeatRange::inclusive(2, 1).is_none(),
+            "a reversed range is not a roll"
+        );
+        let whole = BeatRange::inclusive(u8::MIN, u8::MAX).expect("the full u8 range fits u16");
+        assert_eq!(whole.width.get(), u16::from(u8::MAX) + 1);
+    }
 }

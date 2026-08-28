@@ -926,34 +926,37 @@ impl PgStore {
             )
             .await
             .map_err(database)?;
-        Ok(rows
-            .iter()
-            .filter_map(|row| {
-                // A row this engine did not write is skipped rather than refused,
-                // the sqlite reader's reasoning: a corrupt house is a missing
-                // house, and a shard that will not boot over one bad row is worse.
-                let serial = Serial::new(row.get::<_, i32>(0).cast_unsigned())?;
-                let owner = Serial::new(row.get::<_, i32>(6).cast_unsigned())?;
-                Some(crate::record::HouseRecord {
-                    serial,
-                    multi: row.get::<_, i32>(1).cast_unsigned() as u16,
-                    x: row.get::<_, i32>(2).cast_unsigned() as u16,
-                    y: row.get::<_, i32>(3).cast_unsigned() as u16,
-                    z: row.get::<_, i16>(4) as i8,
-                    facet: row.get::<_, i16>(5) as u8,
-                    owner,
-                    // A list that will not parse reads as empty. A house whose
-                    // friends are unreadable is a house nobody but the owner can
-                    // enter, which is recoverable; refusing the whole read is a
-                    // shard that will not boot.
-                    co_owners: serde_json::from_str(row.get::<_, &str>(7)).unwrap_or_default(),
-                    friends: serde_json::from_str(row.get::<_, &str>(8)).unwrap_or_default(),
-                    bans: serde_json::from_str(row.get::<_, &str>(9)).unwrap_or_default(),
-                    lockdowns: row.get::<_, i32>(10).cast_unsigned(),
-                    age: row.get::<_, i64>(11).cast_unsigned(),
-                })
-            })
-            .collect())
+        let mut houses = Vec::new();
+        for row in &rows {
+            // A row this engine did not write is skipped rather than refused,
+            // the sqlite reader's reasoning: a corrupt house is a missing
+            // house, and a shard that will not boot over one bad row is worse.
+            let Some(serial) = Serial::new(row.get::<_, i32>(0).cast_unsigned()) else {
+                continue;
+            };
+            let Some(owner) = Serial::new(row.get::<_, i32>(6).cast_unsigned()) else {
+                continue;
+            };
+            houses.push(crate::record::HouseRecord {
+                serial,
+                multi: row.get::<_, i32>(1).cast_unsigned() as u16,
+                x: row.get::<_, i32>(2).cast_unsigned() as u16,
+                y: row.get::<_, i32>(3).cast_unsigned() as u16,
+                z: row.get::<_, i16>(4) as i8,
+                facet: row.get::<_, i16>(5) as u8,
+                owner,
+                // The three lists make up one house's permission boundary. A
+                // malformed ban list must not become empty and let its members
+                // back in; surface corruption before a subsequent save can
+                // persist that loss.
+                co_owners: access_list(row.get(7), "co_owners")?,
+                friends: access_list(row.get(8), "friends")?,
+                bans: access_list(row.get(9), "bans")?,
+                lockdowns: row.get::<_, i32>(10).cast_unsigned(),
+                age: row.get::<_, i64>(11).cast_unsigned(),
+            });
+        }
+        Ok(houses)
     }
 
     pub(crate) async fn world(&self) -> Result<Option<WorldRecord>, StoreError> {
@@ -1051,7 +1054,7 @@ fn character_from_row(row: &Row) -> Result<CharacterRecord, StoreError> {
         dead: row.get::<_, bool>(15),
         fame: row.get::<_, i32>(16),
         karma: row.get::<_, i32>(17),
-        murders: u16::try_from(row.get::<_, i32>(18)).unwrap_or(0),
+        murders: u16::try_from(row.get::<_, i32>(18)).map_err(|_| corrupt("murders"))?,
         quests: serde_json::from_str(row.get::<_, &str>(19))
             .map_err(|e| StoreError::Corrupt(e.to_string()))?,
         done_quests: serde_json::from_str(row.get::<_, &str>(20))
@@ -1060,7 +1063,7 @@ fn character_from_row(row: &Row) -> Result<CharacterRecord, StoreError> {
             .map_err(|e| StoreError::Corrupt(e.to_string()))?,
         guild: row.get::<_, Option<i32>>(22).map(i32::cast_unsigned),
         guild_title: row.get::<_, String>(23),
-        guild_rank: u8::try_from(row.get::<_, i32>(24)).unwrap_or(0),
+        guild_rank: u8::try_from(row.get::<_, i32>(24)).map_err(|_| corrupt("guild_rank"))?,
         guild_candidate: row.get::<_, Option<i32>>(25).map(i32::cast_unsigned),
     })
 }
@@ -1260,27 +1263,23 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
             name: row.get(16),
             // Bit-cast back from the i64 the mask was stored as.
             spellbook: row.get::<_, Option<i64>>(17).map(|mask| mask as u64),
-            corpse: row
-                .get::<_, Option<String>>(18)
-                .and_then(|json| serde_json::from_str(&json).ok()),
-            poison: row
-                .get::<_, Option<i32>>(19)
-                .zip(row.get::<_, Option<i32>>(20))
-                .map(|(level, charges)| {
-                    (
-                        u8::try_from(level).unwrap_or(0),
-                        u16::try_from(charges).unwrap_or(0),
-                    )
-                }),
+            corpse: crate::item_json(row.get(18), "corpse")?,
+            poison: match (row.get::<_, Option<i32>>(19), row.get::<_, Option<i32>>(20)) {
+                (Some(level), Some(charges)) => Some((
+                    u8::try_from(level).map_err(|_| corrupt("poison_level"))?,
+                    u16::try_from(charges).map_err(|_| corrupt("poison_charges"))?,
+                )),
+                _ => None,
+            },
             trap: match (
                 row.get::<_, Option<i32>>(21),
                 row.get::<_, Option<i32>>(22),
                 row.get::<_, Option<i32>>(23),
             ) {
                 (Some(kind), Some(power), Some(level)) => Some(crate::record::TrapRecord {
-                    kind: u8::try_from(kind).unwrap_or(0),
-                    power: u16::try_from(power).unwrap_or(0),
-                    level: u8::try_from(level).unwrap_or(0),
+                    kind: u8::try_from(kind).map_err(|_| corrupt("trap_kind"))?,
+                    power: u16::try_from(power).map_err(|_| corrupt("trap_power"))?,
+                    level: u8::try_from(level).map_err(|_| corrupt("trap_level"))?,
                 }),
                 _ => None,
             },
@@ -1307,9 +1306,7 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
                 )),
                 _ => None,
             },
-            runebook: row
-                .get::<_, Option<String>>(31)
-                .and_then(|json| serde_json::from_str(&json).ok()),
+            runebook: crate::item_json(row.get(31), "runebook")?,
             // A house serial that will not parse drops the whole pin — the
             // sqlite reader's reasoning: an item claiming to be locked down in
             // nothing is one nobody could ever release.
@@ -1321,10 +1318,7 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
                     house,
                     secure: row.get::<_, Option<i16>>(33).and_then(|n| u8::try_from(n).ok()),
                 }),
-            affixes: row
-                .get::<_, Option<String>>(34)
-                .and_then(|json| serde_json::from_str(&json).ok())
-                .unwrap_or_default(),
+            affixes: crate::item_json(row.get(34), "affixes")?.unwrap_or_default(),
             location,
         }))
     }
@@ -1356,6 +1350,15 @@ fn corrupt(field: &str) -> StoreError {
     ))
 }
 
+/// Parse one of a house's three persisted access lists.
+///
+/// An absent member list is represented by an empty JSON array, not malformed
+/// JSON. Treating corruption as that empty list would silently revoke trust or,
+/// for bans, grant access before the next save makes the loss permanent.
+fn access_list(json: &str, field: &str) -> Result<Vec<u32>, StoreError> {
+    serde_json::from_str(json).map_err(|error| StoreError::Corrupt(format!("invalid house {field}: {error}")))
+}
+
 /// Turn a `tokio_postgres` error into the store's error. The database says what
 /// went wrong; whether that is fatal is the shard's call, not this crate's.
 fn database(error: tokio_postgres::Error) -> StoreError {
@@ -1366,6 +1369,14 @@ fn database(error: tokio_postgres::Error) -> StoreError {
 mod tests {
     use super::*;
     use crate::record::StatLockRecord;
+
+    #[test]
+    fn a_malformed_house_ban_list_is_corrupt_not_an_empty_list() {
+        // Losing bans grants house access. This stays a unit test so it covers
+        // the decoding contract even in checkouts without PostgreSQL configured.
+        let error = access_list("[42", "bans").expect_err("malformed JSON must fail");
+        assert!(matches!(error, StoreError::Corrupt(_)), "{error}");
+    }
 
     // These tests need a real PostgreSQL. They read a connection URL from
     // `OPENSHARD_POSTGRES` and skip when it is unset, the same bargain the

@@ -68,18 +68,45 @@ pub(crate) mod button {
 /// The first button id a quest row in the log uses. ServUO's `ButtonOffset`.
 const ROW_OFFSET: u32 = 11;
 
+/// A position in [`QuestLog::active`], never an objective index or an
+/// arbitrary gump button number.
+///
+/// It crosses the layout/reply boundary encoded as a [`ButtonId`], so keeping
+/// the position named on both sides is what makes [`row_button`] and
+/// [`row_of`] one conversion rather than two casts that merely happen to
+/// agree.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct QuestLogIndex(usize);
+
+impl QuestLogIndex {
+    pub(crate) const fn new(position: usize) -> Self {
+        Self(position)
+    }
+
+    pub(crate) const fn position(self) -> usize {
+        self.0
+    }
+}
+
 /// The button id the log gives the row at `index`.
 ///
 /// The rows are the one part of this window whose ids are computed rather than
 /// named, so the encoding gets both directions with names — [`row_of`] is the
 /// inverse the reply reads, and neither side re-derives the arithmetic.
-pub(crate) const fn row_button(index: u32) -> ButtonId {
-    ButtonId(ROW_OFFSET + index)
+pub(crate) fn row_button(index: QuestLogIndex) -> ButtonId {
+    let Some(id) = u32::try_from(index.position())
+        .ok()
+        .and_then(|index| ROW_OFFSET.checked_add(index))
+    else {
+        panic!("a quest-log index must fit in the gump button-id space");
+    };
+    ButtonId(id)
 }
 
 /// Which log row a button id names, or `None` for a button that is not a row.
-pub(crate) const fn row_of(button: ButtonId) -> Option<u32> {
-    button.0.checked_sub(ROW_OFFSET)
+pub(crate) fn row_of(button: ButtonId) -> Option<QuestLogIndex> {
+    let position = button.0.checked_sub(ROW_OFFSET)?;
+    usize::try_from(position).ok().map(QuestLogIndex)
 }
 
 /// The sounds a quest plays, from `BaseQuest`. All four are per-player: they are
@@ -272,7 +299,7 @@ fn section_main(layout: &mut GumpLayout, state: &WorldState, player: EntityId) {
             0x26B1,
             GumpButton::Reply,
             0,
-            row_button(index as u32),
+            row_button(QuestLogIndex::new(index)),
         );
         offset += 21;
     }
@@ -694,6 +721,21 @@ pub(crate) fn log_context(key: &QuestKey, section: QuestSection, giver: Option<S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quest_log_index_round_trips_through_its_button_id() {
+        for position in [0, 1, crate::QUEST_LIMIT - 1] {
+            let index = QuestLogIndex::new(position);
+            assert_eq!(row_of(row_button(index)), Some(index));
+        }
+        assert_eq!(row_of(button::NEXT_PAGE), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "a quest-log index must fit in the gump button-id space")]
+    fn quest_log_index_does_not_silently_truncate_to_a_button_id() {
+        let _ = row_button(QuestLogIndex::new(usize::MAX));
+    }
 
     #[test]
     fn seconds_drop_the_units_they_do_not_need() {

@@ -69,6 +69,18 @@ pub struct RestoredItems {
     mobile_owners: HashSet<Serial>,
 }
 
+struct RestoringMobile {
+    record: MobileRecord,
+    entity: EntityId,
+    serial: Serial,
+    facet: Facet,
+    position: Point,
+    facing: Facing,
+    boot_ticks: WorldTick,
+    first_think: WorldTick,
+    first_beat: WorldTick,
+}
+
 impl World {
     // -- persistence -------------------------------------------------------
 
@@ -1462,239 +1474,276 @@ impl World {
         // this count is the only thing that would say it had happened.
         let mut equipped = 0usize;
         for record in records {
-            let serial = record.serial;
-            let entity = self.state.registry.spawn();
-            if self.state.registry.bind_serial(entity, serial).is_err() {
-                self.state.registry.despawn(entity);
+            let Some(mut mobile) = self.prepare_mobile_restore(record) else {
                 continue;
-            }
-            let facet = if self.state.facets.contains_key(&Facet(record.facet)) {
-                Facet(record.facet)
-            } else {
-                self.state.default_facet
             };
-            let position = Point::new(record.x, record.y, record.z);
-            let facing = Facing::from_bits(record.facing);
-            // Read before the registry is borrowed: a saved timer counts from the
-            // tick the world came back at.
-            let boot_ticks = self.state.ticks;
-            let brain_interval = if record.beat > 0 {
-                record.beat
-            } else {
-                self.state.gameplay.creature_step_ticks.max(1)
-            };
-            // And the beats, for the same borrow reason. A beat is *not* saved —
-            // it is a pacing detail, not world state — so it has to be re-rolled
-            // here, and re-rolling it to zero is what put every restored mobile on
-            // one tick. That mattered more than it looks: `spawn` jitters the first
-            // beat, but a shard is populated once and restored on every boot
-            // afterwards, so the jitter ran exactly once in a shard's life and the
-            // save undid it. See `npc::first_beat`.
-            let first_think = openshard_npc::first_beat(&mut self.state.rng, boot_ticks, brain_interval);
-            let first_beat =
-                openshard_npc::first_beat(&mut self.state.rng, boot_ticks, openshard_npc::BEAT_TICKS);
-            let registry = &mut self.state.registry;
-            registry.insert(
-                entity,
-                Body {
-                    id: Graphic(record.body),
-                    hue: openshard_protocol::wire::Hue(record.hue),
-                },
-            );
-            registry.insert(entity, Position(position));
-            registry.insert(entity, Heading(facing));
-            registry.insert(entity, facet);
-            registry.insert(
-                entity,
-                Hitpoints {
-                    current: record.hits_current.max(1),
-                    max: record.hits_max.max(1),
-                },
-            );
-            registry.insert(entity, record.notoriety);
-            registry.insert(
-                entity,
-                MeleeDamage {
-                    amount: record.damage,
-                },
-            );
-            registry.insert(
-                entity,
-                Resistance {
-                    physical: record.resistance.get(),
-                    fire: 0,
-                    cold: 0,
-                    poison: 0,
-                    energy: 0,
-                },
-            );
-            if record.swing != 0 {
-                registry.insert(entity, SwingSpeed { ticks: record.swing });
-            }
-            if let Some(range) = record.ranged {
-                registry.insert(
-                    entity,
-                    RangedAttack {
-                        range,
-                        kind: record.ranged_kind,
-                    },
-                );
-            }
-            // The same brain rule `spawn` applies: anything that hunts, drifts,
-            // or must answer or flee a blow.
-            let aggression = record.aggression;
-            if record.sight.0 > 0 || record.wander || aggression != Aggression::Aggressive {
-                registry.insert(
-                    entity,
-                    Brain {
-                        sight: record.sight,
-                        wander: record.wander,
-                        next_think: first_think,
-                        guard_until: WorldTick::ZERO,
-                        opens_doors: body_opens_doors(Graphic(record.body)),
-                        aggression,
-                        beat_ticks: record.beat,
-                    },
-                );
-            }
-            if let Some(name) = record.name {
-                registry.insert(entity, Name(name));
-            }
-            if record.banker {
-                registry.insert(entity, Banker);
-            }
-            if record.vendor {
-                registry.insert(entity, Vendor);
-            }
-            if record.healer {
-                registry.insert(entity, Healer);
-            }
-            if record.scarecrow {
-                registry.insert(entity, openshard_state::components::Scarecrow);
-            }
-            // The trade, without which a restored NPC is a mute statue: every
-            // keyword it answers is looked up by this string.
-            if let Some(title) = record.title {
-                registry.insert(entity, Title(title));
-            }
-            if let Some(pet) = &record.pet {
-                registry.insert(
-                    entity,
-                    Pet {
-                        owner: pet.owner,
-                        slots: pet.slots,
-                        order: pet_order_from(pet.order),
-                        order_target: pet.order_target,
-                    },
-                );
-            }
-            if let Some((x, y, z)) = record.night_home {
-                registry.insert(entity, NightHome(Point::new(x, y, z)));
-            }
-            if let Some(shelf) = record.restock {
-                registry.insert(
-                    entity,
-                    Restock {
-                        at: boot_ticks + shelf.in_seconds * TICKS_PER_SECOND,
-                        lines: shelf
-                            .lines
-                            .into_iter()
-                            .map(|(graphic, hue, amount, price, name)| StockRecord {
-                                graphic: Graphic(graphic),
-                                hue: Hue(hue),
-                                amount: Amount(amount),
-                                price: Price(price),
-                                name,
-                            })
-                            .collect(),
-                    },
-                );
-            }
-            if let Some((x, y, z)) = record.npc_home {
-                registry.insert(
-                    entity,
-                    Npc {
-                        home: Point::new(x, y, z),
-                        wander: record.npc_wander,
-                        next_beat: first_beat,
-                        // Eligible to greet at once, which is not the same as
-                        // greeting at once: `attend` rolls for it, and the beats
-                        // above no longer arrive together anyway.
-                        next_greet: WorldTick::ZERO,
-                    },
-                );
-            }
-            // Re-tie it to the region that maintains it, so the region counts it
-            // and does not spawn over it.
-            if let Some(region) = record.spawned_by {
-                registry.insert(entity, SpawnedBy(region));
-            }
-            registry.insert(entity, Movement(Walker::new(position, facing)));
-            // A wounded creature comes back wounded; a poisoned one comes back
-            // poisoned. Its pulses resume at boot's tick.
-            let now = self.state.ticks;
-            Self::apply_effects(&mut self.state.registry, entity, &record.effects, now);
-            // Its combat skills come back too, so a restored monster still rolls to
-            // hit and scales damage rather than reverting to a skill-less brawler.
-            if !record.skills.is_empty() {
-                let mut sheet = Skills::default();
-                for (id, value) in &record.skills {
-                    if let Some(skill) = openshard_state::skill::Skill::from_id(*id) {
-                        sheet.set(skill, *value);
-                    }
-                }
-                self.state.registry.insert(entity, sheet);
-            }
-            self.state.place_mobile(facet, entity, position);
-            // Whether it gives quests, and whether it can be escorted. This is
-            // the binding that used to live only in the script's memory and so
-            // was lost at every restart.
-            if !record.quest_giver.is_empty() {
-                self.state.registry.insert(
-                    entity,
-                    QuestGiver {
-                        keys: record.quest_giver.iter().cloned().map(QuestKey::new).collect(),
-                    },
-                );
-            }
-            if let Some(destination) = record.escort_destination.clone() {
-                self.state.registry.insert(
-                    entity,
-                    Escortable {
-                        destination,
-                        // Nobody is leading it at boot: an escort in progress ends
-                        // with the session it was walked in, the way a cast in
-                        // flight or a swing timer does.
-                        escorter: None,
-                        last_seen: WorldTick::ZERO,
-                    },
-                );
-            }
-            // Its gear and stock were filed by `restore_items` under this serial.
-            if self.restore_inventory(record.serial) {
+            self.restore_mobile_core(&mobile);
+            self.restore_mobile_combat(&mobile);
+            self.restore_mobile_identity(&mut mobile);
+            self.restore_mobile_schedule(&mut mobile);
+            self.restore_mobile_live_state(&mobile);
+            self.restore_mobile_bindings(&mobile);
+            if self.finish_mobile_restore(mobile) {
                 equipped += 1;
             }
-            // And say it is back. Not a `MobileSpawned` — see `MobileRestored` for
-            // why the two must not be one event — but not silence either, or every
-            // rule bound to this NPC by whoever placed it stays unbound for the
-            // rest of the shard's life.
-            self.state.bus.send(crate::events::MobileRestored {
-                entity,
-                serial,
-                body: Graphic(record.body),
-                at: position,
-                // Its post, which is what a pack keys a binding on — see the
-                // event's own doc. `position` is wherever it had wandered to when
-                // the save was taken, and with a daily routine that is somewhere
-                // else entirely for a third of the day.
-                home: record.npc_home.map_or(position, |(x, y, z)| Point::new(x, y, z)),
-            });
         }
         // `equipped` counts the mobiles that found gear; the token counts the
         // gear that was filed for one. They are equal on a healthy boot, and the
         // difference is inventories nobody came for.
         let unclaimed = items.mobile_owners.len().saturating_sub(equipped);
         debug!(equipped, unclaimed, "mobiles restored");
+    }
+
+    fn prepare_mobile_restore(&mut self, record: MobileRecord) -> Option<RestoringMobile> {
+        let serial = record.serial;
+        let entity = self.state.registry.spawn();
+        if self.state.registry.bind_serial(entity, serial).is_err() {
+            self.state.registry.despawn(entity);
+            return None;
+        }
+        let facet = if self.state.facets.contains_key(&Facet(record.facet)) {
+            Facet(record.facet)
+        } else {
+            self.state.default_facet
+        };
+        let position = Point::new(record.x, record.y, record.z);
+        let facing = Facing::from_bits(record.facing);
+        // A saved timer counts from the tick the world came back at. Both first
+        // beats are rolled before any registry borrow, in their original order.
+        let boot_ticks = self.state.ticks;
+        let brain_interval = if record.beat > 0 {
+            record.beat
+        } else {
+            self.state.gameplay.creature_step_ticks.max(1)
+        };
+        let first_think = openshard_npc::first_beat(&mut self.state.rng, boot_ticks, brain_interval);
+        let first_beat =
+            openshard_npc::first_beat(&mut self.state.rng, boot_ticks, openshard_npc::BEAT_TICKS);
+        Some(RestoringMobile {
+            record,
+            entity,
+            serial,
+            facet,
+            position,
+            facing,
+            boot_ticks,
+            first_think,
+            first_beat,
+        })
+    }
+
+    fn restore_mobile_core(&mut self, mobile: &RestoringMobile) {
+        let record = &mobile.record;
+        let registry = &mut self.state.registry;
+        registry.insert(
+            mobile.entity,
+            Body {
+                id: Graphic(record.body),
+                hue: openshard_protocol::wire::Hue(record.hue),
+            },
+        );
+        registry.insert(mobile.entity, Position(mobile.position));
+        registry.insert(mobile.entity, Heading(mobile.facing));
+        registry.insert(mobile.entity, mobile.facet);
+        registry.insert(
+            mobile.entity,
+            Hitpoints {
+                current: record.hits_current.max(1),
+                max: record.hits_max.max(1),
+            },
+        );
+        registry.insert(mobile.entity, record.notoriety);
+        registry.insert(
+            mobile.entity,
+            MeleeDamage {
+                amount: record.damage,
+            },
+        );
+    }
+
+    fn restore_mobile_combat(&mut self, mobile: &RestoringMobile) {
+        let record = &mobile.record;
+        let registry = &mut self.state.registry;
+        registry.insert(
+            mobile.entity,
+            Resistance {
+                physical: record.resistance.get(),
+                fire: 0,
+                cold: 0,
+                poison: 0,
+                energy: 0,
+            },
+        );
+        if record.swing != 0 {
+            registry.insert(mobile.entity, SwingSpeed { ticks: record.swing });
+        }
+        if let Some(range) = record.ranged {
+            registry.insert(
+                mobile.entity,
+                RangedAttack {
+                    range,
+                    kind: record.ranged_kind,
+                },
+            );
+        }
+        // The same brain rule `spawn` applies: anything that hunts, drifts,
+        // or must answer or flee a blow.
+        let aggression = record.aggression;
+        if record.sight.0 > 0 || record.wander || aggression != Aggression::Aggressive {
+            registry.insert(
+                mobile.entity,
+                Brain {
+                    sight: record.sight,
+                    wander: record.wander,
+                    next_think: mobile.first_think,
+                    guard_until: WorldTick::ZERO,
+                    opens_doors: body_opens_doors(Graphic(record.body)),
+                    aggression,
+                    beat_ticks: record.beat,
+                },
+            );
+        }
+    }
+
+    fn restore_mobile_identity(&mut self, mobile: &mut RestoringMobile) {
+        let record = &mut mobile.record;
+        let registry = &mut self.state.registry;
+        if let Some(name) = record.name.take() {
+            registry.insert(mobile.entity, Name(name));
+        }
+        if record.banker {
+            registry.insert(mobile.entity, Banker);
+        }
+        if record.vendor {
+            registry.insert(mobile.entity, Vendor);
+        }
+        if record.healer {
+            registry.insert(mobile.entity, Healer);
+        }
+        if record.scarecrow {
+            registry.insert(mobile.entity, openshard_state::components::Scarecrow);
+        }
+        // The trade, without which a restored NPC is a mute statue.
+        if let Some(title) = record.title.take() {
+            registry.insert(mobile.entity, Title(title));
+        }
+        if let Some(pet) = &record.pet {
+            registry.insert(
+                mobile.entity,
+                Pet {
+                    owner: pet.owner,
+                    slots: pet.slots,
+                    order: pet_order_from(pet.order),
+                    order_target: pet.order_target,
+                },
+            );
+        }
+        if let Some((x, y, z)) = record.night_home {
+            registry.insert(mobile.entity, NightHome(Point::new(x, y, z)));
+        }
+    }
+
+    fn restore_mobile_schedule(&mut self, mobile: &mut RestoringMobile) {
+        let record = &mut mobile.record;
+        let registry = &mut self.state.registry;
+        if let Some(shelf) = record.restock.take() {
+            registry.insert(
+                mobile.entity,
+                Restock {
+                    at: mobile.boot_ticks + shelf.in_seconds * TICKS_PER_SECOND,
+                    lines: shelf
+                        .lines
+                        .into_iter()
+                        .map(|(graphic, hue, amount, price, name)| StockRecord {
+                            graphic: Graphic(graphic),
+                            hue: Hue(hue),
+                            amount: Amount(amount),
+                            price: Price(price),
+                            name,
+                        })
+                        .collect(),
+                },
+            );
+        }
+        if let Some((x, y, z)) = record.npc_home {
+            registry.insert(
+                mobile.entity,
+                Npc {
+                    home: Point::new(x, y, z),
+                    wander: record.npc_wander,
+                    next_beat: mobile.first_beat,
+                    // Eligible to greet at once; `attend` still rolls for it.
+                    next_greet: WorldTick::ZERO,
+                },
+            );
+        }
+        // Re-tie it to the region that maintains it, so it is counted.
+        if let Some(region) = record.spawned_by {
+            registry.insert(mobile.entity, SpawnedBy(region));
+        }
+        registry.insert(
+            mobile.entity,
+            Movement(Walker::new(mobile.position, mobile.facing)),
+        );
+    }
+
+    fn restore_mobile_live_state(&mut self, mobile: &RestoringMobile) {
+        let record = &mobile.record;
+        // A wounded creature comes back wounded; timed effects resume at boot.
+        let now = self.state.ticks;
+        Self::apply_effects(&mut self.state.registry, mobile.entity, &record.effects, now);
+        if !record.skills.is_empty() {
+            let mut sheet = Skills::default();
+            for (id, value) in &record.skills {
+                if let Some(skill) = openshard_state::skill::Skill::from_id(*id) {
+                    sheet.set(skill, *value);
+                }
+            }
+            self.state.registry.insert(mobile.entity, sheet);
+        }
+        self.state
+            .place_mobile(mobile.facet, mobile.entity, mobile.position);
+    }
+
+    fn restore_mobile_bindings(&mut self, mobile: &RestoringMobile) {
+        let record = &mobile.record;
+        if !record.quest_giver.is_empty() {
+            self.state.registry.insert(
+                mobile.entity,
+                QuestGiver {
+                    keys: record.quest_giver.iter().cloned().map(QuestKey::new).collect(),
+                },
+            );
+        }
+        if let Some(destination) = record.escort_destination.clone() {
+            self.state.registry.insert(
+                mobile.entity,
+                Escortable {
+                    destination,
+                    // An escort in progress ends with the session it ran in.
+                    escorter: None,
+                    last_seen: WorldTick::ZERO,
+                },
+            );
+        }
+    }
+
+    fn finish_mobile_restore(&mut self, mobile: RestoringMobile) -> bool {
+        // Gear was filed by `restore_items` under this serial.
+        let equipped = self.restore_inventory(mobile.serial);
+        // Restored is deliberately distinct from a fresh `MobileSpawned`.
+        self.state.bus.send(crate::events::MobileRestored {
+            entity: mobile.entity,
+            serial: mobile.serial,
+            body: Graphic(mobile.record.body),
+            at: mobile.position,
+            // A pack binds to the post, not wherever the NPC wandered to.
+            home: mobile
+                .record
+                .npc_home
+                .map_or(mobile.position, |(x, y, z)| Point::new(x, y, z)),
+        });
+        equipped
     }
 
     /// Re-lay the saved decoration at boot: statics, doors (their open/shut state

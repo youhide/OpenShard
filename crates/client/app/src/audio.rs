@@ -297,11 +297,7 @@ impl NativeAudio {
         if left == 0.0 && right == 0.0 {
             return;
         }
-        let source = rodio::buffer::SamplesBuffer::new(
-            std::num::NonZeroU16::new(sound.channels).unwrap_or(std::num::NonZeroU16::MIN),
-            std::num::NonZeroU32::new(sound.sample_rate).unwrap_or(std::num::NonZeroU32::MIN),
-            sound.samples,
-        );
+        let source = rodio::buffer::SamplesBuffer::new(sound.channels, sound.sample_rate, sound.samples);
         // Rodio's `Spatial` uses inverse-square attenuation.  Its coordinates
         // were tile coordinates here, so an effect ten tiles away was 1/100 as
         // loud and most sounds seemed absent.  ClassicUO instead fades linearly

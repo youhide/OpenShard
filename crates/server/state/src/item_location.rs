@@ -567,7 +567,7 @@ mod tests {
             Facet(0),
             tiles,
             openshard_uofiles::multi::Multis::default(),
-            (0, 0),
+            openshard_map::grid::Tile::new(0, 0),
             1,
         )
     }

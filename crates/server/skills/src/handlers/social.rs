@@ -106,7 +106,7 @@ pub(super) fn begging(state: &mut WorldState, actor: EntityId, target: EntityId)
     // `0.5 - karma/8570` in per-mille: a beggar of ill repute is turned away, and
     // one of good standing hardly ever is. Rolled on the world's generator.
     let bad_chance = BAD_KARMA_BASE - karma / BAD_KARMA_DIVISOR;
-    if karma < 0 && bad_chance > i32::try_from(state.rng.below(1000)).unwrap_or(0) {
+    if karma < 0 && bad_chance > i32::from(crate::roll_u16(&mut state.rng, crate::PER_MILLE)) {
         state.private_overhead_cliloc(actor, target, NOT_TRUSTWORTHY, "");
         return;
     }

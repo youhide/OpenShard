@@ -19,6 +19,8 @@ mod check;
 mod handlers;
 mod stats;
 
+use std::num::NonZeroU16;
+
 pub use button::{DEFAULT_SKILL_DELAY_TICKS, SkillRequested, set_skill_delay, use_skill_button};
 pub use check::{SkillBand, gain_chance, roll_skill_band, roll_skill_chance, skill_value};
 pub use handlers::{
@@ -35,6 +37,20 @@ use openshard_protocol::serial::Serial;
 use openshard_state::WorldState;
 use openshard_state::components::{Hitpoints, Mana, Skills, Stamina, Stats};
 use openshard_state::skill::Skill;
+
+/// The two ordinary dice used by skill handlers.
+const PER_MILLE: NonZeroU16 = NonZeroU16::new(1000).expect("one thousand is nonzero");
+const PERCENT: NonZeroU16 = NonZeroU16::new(100).expect("one hundred is nonzero");
+
+/// Draw a value whose type is already narrow enough for signed skill formulae.
+///
+/// [`openshard_state::Rng::below`] returns a `u32` for general-purpose bounds,
+/// but these handlers roll below a `u16` bound. The bound in the type proves
+/// both that the draw is well formed and that converting its result cannot
+/// fail; callers therefore do not need a made-up value for an impossible error.
+fn roll_u16(rng: &mut openshard_state::Rng, bound: NonZeroU16) -> u16 {
+    u16::try_from(rng.below(u32::from(bound.get()))).expect("Rng::below returned a value below a u16 bound")
+}
 
 /// A trained skill value, represented in tenths (`755` means `75.5`).
 ///
@@ -289,7 +305,7 @@ pub fn use_skill(state: &mut WorldState, serial: Serial, skill: u8, min_skill: i
 
 #[cfg(test)]
 mod tests {
-    use super::SkillValue;
+    use super::{PER_MILLE, PERCENT, SkillValue, roll_u16};
 
     #[test]
     fn skill_value_keeps_fixed_point_tenths_explicit() {
@@ -297,5 +313,16 @@ mod tests {
 
         assert_eq!(value.raw(), 755);
         assert!(value > SkillValue::new(754));
+    }
+
+    #[test]
+    fn narrow_roll_stays_below_its_typed_bound() {
+        let mut rng = openshard_state::Rng::new(7);
+        for bound in [PERCENT, PER_MILLE, std::num::NonZeroU16::MAX] {
+            for _ in 0..1000 {
+                assert!(roll_u16(&mut rng, bound) < bound.get());
+            }
+        }
+        assert_eq!(roll_u16(&mut rng, std::num::NonZeroU16::MIN), 0);
     }
 }

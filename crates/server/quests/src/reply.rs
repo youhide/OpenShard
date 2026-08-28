@@ -155,7 +155,7 @@ fn open_row(state: &mut WorldState, player: EntityId, pressed: ButtonId) {
     let Some(entry) = state
         .registry
         .get::<QuestLog>(player)
-        .and_then(|log| log.active.get(index as usize))
+        .and_then(|log| log.active.get(index.position()))
     else {
         return;
     };

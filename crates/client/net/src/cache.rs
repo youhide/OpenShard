@@ -308,6 +308,46 @@ pub fn path_for(dir: &Path, notice: WorldNotice) -> Result<PathBuf, CacheError> 
     Ok(path_of(dir, world, notice.facet))
 }
 
+/// A world successfully read from this cache, together with the file that owns it.
+///
+/// The path is not optional: [`read`] cannot open a world the shard did not
+/// name, and computes this path before it touches the filesystem. Keeping the
+/// two facts in one value lets callers name derived artifacts beside the exact
+/// base set they read without repeating that fallible lookup.
+#[derive(Debug)]
+pub struct CachedWorld {
+    snapshot: MapSnapshot,
+    path: PathBuf,
+}
+
+impl CachedWorld {
+    /// The file this snapshot was read from.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Consume the cache entry into its snapshot and owning path.
+    #[must_use]
+    pub fn into_parts(self) -> (MapSnapshot, PathBuf) {
+        (self.snapshot, self.path)
+    }
+
+    /// Consume the cache entry when only its snapshot remains relevant.
+    #[must_use]
+    pub fn into_snapshot(self) -> MapSnapshot {
+        self.snapshot
+    }
+}
+
+impl std::ops::Deref for CachedWorld {
+    type Target = MapSnapshot;
+
+    fn deref(&self) -> &Self::Target {
+        &self.snapshot
+    }
+}
+
 /// The world kept for `notice`, if there is one and it is that world.
 ///
 /// What comes back is at the revision the file recorded, which is the whole
@@ -322,7 +362,7 @@ pub fn path_for(dir: &Path, notice: WorldNotice) -> Result<PathBuf, CacheError> 
 /// # Errors
 ///
 /// [`CacheError`], every variant of which means "fetch the facet instead".
-pub fn read(dir: &Path, notice: WorldNotice) -> Result<MapSnapshot, CacheError> {
+pub fn read(dir: &Path, notice: WorldNotice) -> Result<CachedWorld, CacheError> {
     let path = path_for(dir, notice)?;
     if !path.exists() {
         return Err(CacheError::Missing { path });
@@ -347,7 +387,7 @@ pub fn read(dir: &Path, notice: WorldNotice) -> Result<MapSnapshot, CacheError> 
         });
     }
     used(&path);
-    Ok(held)
+    Ok(CachedWorld { snapshot: held, path })
 }
 
 /// Say that this world is one somebody still plays on.
@@ -516,6 +556,11 @@ mod tests {
         assert!(written.swept.is_empty(), "the first world lets go of nothing");
 
         let back = read(&dir, notice()).expect("the file just written");
+        assert_eq!(
+            back.path(),
+            written.path,
+            "a successful read carries the exact path it proved usable"
+        );
         assert_eq!(back.revision(), MapRevision::decoded(4));
         assert_eq!(back.facet(), FACET);
         for y in 0..u16::try_from(BLOCKS * 8).unwrap() {

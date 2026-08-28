@@ -395,7 +395,7 @@ mod tests {
         // both with one value, and could therefore never be wrong about the
         // second in a way anyone could see.
         let now = Instant::now();
-        let mut world = World::new((1363, 1600));
+        let mut world = World::new(openshard_map::grid::Tile::new(1363, 1600));
         let mut phases = PhaseSync::new(&world);
         let mut sessions = Sessions::new();
         let id = ConnectionId::from_raw(1);
@@ -431,7 +431,7 @@ mod tests {
         // saying why. A second `Enter` on one connection is the reachable one of
         // the three.
         let now = Instant::now();
-        let mut world = World::new((1363, 1600));
+        let mut world = World::new(openshard_map::grid::Tile::new(1363, 1600));
         let mut phases = PhaseSync::new(&world);
         let mut sessions = Sessions::new();
         let id = ConnectionId::from_raw(1);
@@ -464,7 +464,7 @@ mod tests {
         // what a delete asks is the world's own question since S5, so this side
         // only has to stop claiming the connection may act.
         let now = Instant::now();
-        let mut world = World::new((1363, 1600));
+        let mut world = World::new(openshard_map::grid::Tile::new(1363, 1600));
         let mut phases = PhaseSync::new(&world);
         let mut sessions = Sessions::new();
         let id = ConnectionId::from_raw(1);
@@ -494,7 +494,7 @@ mod tests {
         // said it was leaving. No real client sends anything there — it is waiting
         // to close — which is exactly why nothing caught it.
         let now = Instant::now();
-        let mut world = World::new((1363, 1600));
+        let mut world = World::new(openshard_map::grid::Tile::new(1363, 1600));
         let mut phases = PhaseSync::new(&world);
         let mut sessions = Sessions::new();
         let id = ConnectionId::from_raw(1);
@@ -538,7 +538,7 @@ mod tests {
         // keeps the connection on the screen, and a phase moved optimistically
         // would strand it in `Entering` with no character behind it.
         let now = Instant::now();
-        let mut world = World::new((1363, 1600));
+        let mut world = World::new(openshard_map::grid::Tile::new(1363, 1600));
         let mut phases = PhaseSync::new(&world);
         let mut sessions = Sessions::new();
         let id = ConnectionId::from_raw(1);

@@ -30,7 +30,7 @@ const ILSHENAR: (u32, u32) = (2304, 1600);
 
 /// Where a traveller lands, inside every facet these tests register.
 fn arrival() -> Point {
-    Point::new(START.0, START.1, 0)
+    Point::new(START.x, START.y, 0)
 }
 
 #[test]
@@ -286,7 +286,7 @@ fn the_same_region_id_on_two_facets_is_still_a_crossing() {
         id: RegionId(0),
         name: name.to_owned(),
         priority: 50,
-        rects: vec![RegionRect::new(START.0 - 20, START.1 - 20, 40, 40)],
+        rects: vec![RegionRect::new(START.x - 20, START.y - 20, 40, 40)],
         flags: RegionFlags::none(),
         music: None,
         light: None,
@@ -497,7 +497,7 @@ fn marking_a_rune_writes_where_you_stand_and_recalling_takes_you_back() {
     // Walk away, then come back by rune.
     world
         .state
-        .teleport(caster, Point::new(START.0 + 40, START.1 + 40, 0));
+        .teleport(caster, Point::new(START.x + 40, START.y + 40, 0));
     world.tick(now);
     assert_ne!(world.registry().get::<Position>(caster).unwrap().0, marked_at);
 
@@ -559,13 +559,13 @@ fn a_rune_on_the_floor_cannot_be_marked_but_can_be_recalled_from() {
         rune,
         RuneMark {
             facet: Facet(0),
-            destination: Point::new(START.0 + 5, START.1 + 5, 0),
+            destination: Point::new(START.x + 5, START.y + 5, 0),
         },
     );
     cast_at(&mut world, connection, RECALL, rune_serial, now);
     assert_eq!(
         world.registry().get::<Position>(caster).unwrap().0,
-        Point::new(START.0 + 5, START.1 + 5, 0),
+        Point::new(START.x + 5, START.y + 5, 0),
         "recall does not ask whose pack the rune is in"
     );
 }
@@ -604,9 +604,9 @@ fn a_recall_onto_a_moored_deck_is_allowed_and_the_open_sea_is_not() {
     // Open water everywhere but the tile the caster is standing on. The hull is
     // a wall and the deck is a platform three tall: which is which is the
     // tiledata's answer here, exactly as it is on a real install.
-    let mut scene = Scene::flat_holding(START.0 + 8, START.1 + 8, 0);
+    let mut scene = Scene::flat_holding(START.x + 8, START.y + 8, 0);
     scene.land_art(WATER, TileFlags::WATER);
-    scene.land(START.0, START.1, JETTY);
+    scene.land(START.x, START.y, JETTY);
     scene.art(HULL, super::tests::WALL_FLAGS, 10);
     scene.art(DECK, TileFlags::PLATFORM, 3);
     let (map, tiles) = scene.into_shard(Facet(0));
@@ -629,7 +629,7 @@ fn a_recall_onto_a_moored_deck_is_allowed_and_the_open_sea_is_not() {
     // The rune points at where the deck will be. Written rather than cast,
     // because Mark writes the caster's own position and the caster cannot be
     // standing on a ship that has not been launched.
-    let berth = Point::new(START.0 + 3, START.1, 0);
+    let berth = Point::new(START.x + 3, START.y, 0);
     let deck = Point::new(berth.x, berth.y, 3);
     let rune = world.state.registry.entity_of(rune_serial).unwrap();
     world.state.registry.insert(
@@ -674,7 +674,7 @@ fn a_no_recall_region_bars_arriving_and_marking_but_not_leaving() {
     // Getting this backwards makes every dungeon a one-way trap.
     let now = Instant::now();
     let (mut world, connection, caster, rune_serial) = caster_with_rune(now);
-    let inside = Point::new(START.0 + 3, START.1 + 3, 0);
+    let inside = Point::new(START.x + 3, START.y + 3, 0);
     world.queue(Command::RegisterRegions {
         facet: Facet(0),
         regions: vec![Region {
@@ -712,7 +712,7 @@ fn a_no_recall_region_bars_arriving_and_marking_but_not_leaving() {
             destination: inside,
         },
     );
-    world.state.teleport(caster, Point::new(START.0, START.1, 0));
+    world.state.teleport(caster, Point::new(START.x, START.y, 0));
     cast_at(&mut world, connection, RECALL, rune_serial, now);
     assert_ne!(
         world.registry().get::<Position>(caster).unwrap().0,
@@ -721,7 +721,7 @@ fn a_no_recall_region_bars_arriving_and_marking_but_not_leaving() {
     );
 
     // But standing in it, you may still leave: `RecallFrom` is permissive.
-    let out = Point::new(START.0 + 20, START.1, 0);
+    let out = Point::new(START.x + 20, START.y, 0);
     world.state.teleport(caster, inside);
     world.state.registry.insert(
         rune,
@@ -746,7 +746,7 @@ fn a_rune_marked_on_another_facet_is_a_walk_unless_the_shard_says_otherwise() {
     let now = Instant::now();
     let (mut world, connection, caster, rune_serial) = caster_with_rune(now);
     let rune = world.state.registry.entity_of(rune_serial).unwrap();
-    let far = Point::new(START.0, START.1, 0);
+    let far = Point::new(START.x, START.y, 0);
     world.state.registry.insert(
         rune,
         RuneMark {
@@ -778,7 +778,7 @@ fn a_criminal_cannot_recall_away_and_it_costs_them_nothing_to_find_out() {
         rune,
         RuneMark {
             facet: Facet(0),
-            destination: Point::new(START.0 + 9, START.1, 0),
+            destination: Point::new(START.x + 9, START.y, 0),
         },
     );
     world.state.registry.insert(
@@ -816,7 +816,7 @@ fn a_gate_opens_at_both_ends_and_each_leads_to_the_other() {
     let now = Instant::now();
     let (mut world, connection, caster, rune_serial) = caster_with_rune(now);
     let here = world.registry().get::<Position>(caster).unwrap().0;
-    let there = Point::new(START.0 + 15, START.1 + 15, 0);
+    let there = Point::new(START.x + 15, START.y + 15, 0);
     let rune = world.state.registry.entity_of(rune_serial).unwrap();
     world.state.registry.insert(
         rune,
@@ -850,7 +850,7 @@ fn walking_into_a_gate_takes_you_through_it() {
     // compass is diagonal on screen, so guessing the offset is how a test ends up
     // asserting about a tile nobody walked onto.
     let onto = openshard_movement::step_from(from, Direction::North).expect("a tile north");
-    let far = Point::new(START.0 + 30, START.1, 0);
+    let far = Point::new(START.x + 30, START.y, 0);
     world.spawn_gate(
         Facet(0),
         onto,
@@ -888,14 +888,14 @@ fn a_gate_closes_on_its_own_and_leaves_nothing_behind() {
     // sector grid and leaves an invisible gate that still works.
     let now = Instant::now();
     let mut world = world();
-    let at = Point::new(START.0 + 2, START.1, 0);
+    let at = Point::new(START.x + 2, START.y, 0);
     let gate = world
         .spawn_gate(
             Facet(0),
             at,
             Moongate {
                 facet: Facet(0),
-                destination: Point::new(START.0 + 9, START.1, 0),
+                destination: Point::new(START.x + 9, START.y, 0),
                 expires_at: Some(openshard_state::WorldTick::from_raw(3)),
             },
         )
@@ -928,10 +928,10 @@ fn a_gate_is_not_swept_into_the_save() {
     let _ = enter(&mut world, now);
     world.spawn_gate(
         Facet(0),
-        Point::new(START.0 + 2, START.1, 0),
+        Point::new(START.x + 2, START.y, 0),
         Moongate {
             facet: Facet(0),
-            destination: Point::new(START.0 + 9, START.1, 0),
+            destination: Point::new(START.x + 9, START.y, 0),
             expires_at: Some(openshard_state::WorldTick::from_raw(9_999)),
         },
     );
@@ -954,7 +954,7 @@ fn two_gates_never_stand_on_one_tile() {
     // other looking broken.
     let now = Instant::now();
     let (mut world, connection, caster, rune_serial) = caster_with_rune(now);
-    let there = Point::new(START.0 + 15, START.1 + 15, 0);
+    let there = Point::new(START.x + 15, START.y + 15, 0);
     let rune = world.state.registry.entity_of(rune_serial).unwrap();
     world.state.registry.insert(
         rune,
@@ -1199,7 +1199,7 @@ fn a_charge_takes_you_there_for_free_and_is_spent() {
     let now = Instant::now();
     let (mut world, connection, caster, _) = caster_with_rune(now);
     let book = give_runebook(&mut world, connection);
-    let there = Point::new(START.0 + 12, START.1, 0);
+    let there = Point::new(START.x + 12, START.y, 0);
     let mut owned = world
         .registry()
         .get::<openshard_state::components::Runebook>(book)
@@ -1314,7 +1314,7 @@ fn a_plain_teleport_resets_the_walk_sequence_too() {
     // A teleport on the very same facet — no `move_to`, no facet argument.
     world
         .state
-        .teleport(player, Point::new(START.0 + 6, START.1 + 6, 0));
+        .teleport(player, Point::new(START.x + 6, START.y + 6, 0));
 
     assert!(
         world

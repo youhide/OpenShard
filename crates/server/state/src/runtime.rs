@@ -1140,7 +1140,7 @@ pub struct WorldState {
     /// only way to send a mobile exactly once is to know what was sent before.
     pub seen: HashMap<EntityId, HashSet<EntityId>>,
     /// Where new characters appear. The height comes from the map.
-    pub start: (u16, u16),
+    pub start: Tile,
     /// The generator behind every roll — a swing landing, a skill gaining. Part
     /// of the state so replay is exact; advanced only inside the tick.
     pub rng: Rng,
@@ -1291,8 +1291,8 @@ pub struct GuildGumpContext {
 pub struct HouseGumpContext {
     /// Which house's sign was clicked.
     pub house: EntityId,
-    /// Everyone the window drew, in row order, with which list they were on.
-    pub rows: Vec<(HouseList, Serial)>,
+    /// Everyone the window drew, in row order.
+    pub rows: Vec<HouseGumpRow>,
 }
 
 /// One of a house's three lists of people.
@@ -1304,6 +1304,27 @@ pub enum HouseList {
     Friends,
     /// The banned, who may do neither.
     Bans,
+}
+
+/// One person row a house sign drew, and the list it came from.
+///
+/// A reply identifies only a row index. This preserves both pieces of server
+/// memory needed to turn that index back into an authority-checked list change:
+/// the person to change and whether removal means dropping or unbanning them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct HouseGumpRow {
+    /// The list whose column drew this person.
+    pub list: HouseList,
+    /// The person named by this row.
+    pub member: Serial,
+}
+
+impl HouseGumpRow {
+    /// A row shown under `list` for `member`.
+    #[must_use]
+    pub const fn new(list: HouseList, member: Serial) -> Self {
+        Self { list, member }
+    }
 }
 
 /// Which part of the craft window a player is looking at.
@@ -1529,7 +1550,7 @@ impl WorldState {
         default_facet: Facet,
         tiles: openshard_tiles::TileData,
         multis: openshard_uofiles::multi::Multis,
-        start: (u16, u16),
+        start: Tile,
         seed: u64,
     ) -> Self {
         Self {
@@ -1991,8 +2012,7 @@ impl WorldState {
     /// ground says so more usefully than seating it at zero.
     #[must_use]
     pub fn start_position(&self, facet: Facet) -> Point {
-        let (x, y) = self.start;
-        let tile = Tile::new(x, y);
+        let tile = self.start;
         let ground = self
             .map_terrain(facet)
             .and_then(|terrain| terrain.ground_z(tile))
@@ -2000,7 +2020,7 @@ impl WorldState {
         // A facet the shard did not load has no ground to ask about — and
         // `footing` would panic rather than say so.
         if !self.facets.contains_key(&facet) {
-            return Point::new(x, y, ground);
+            return Point::new(tile.x, tile.y, ground);
         }
         let z = openshard_movement::arrival_z(
             &self.footing(facet, Doors::AsTheyStand),
@@ -2010,7 +2030,7 @@ impl WorldState {
         )
         .and_then(|z| i8::try_from(z).ok())
         .unwrap_or(ground);
-        Point::new(x, y, z)
+        Point::new(tile.x, tile.y, z)
     }
 
     /// What the map alone says about `facet`, and `None` where it has no map.
@@ -3316,13 +3336,20 @@ impl WorldState {
         };
         self.seen.entry(watcher).or_default().insert(other);
         self.outbox.push(Outbound { connection, packet });
+        self.send_visible_health(connection, other, version);
+        self.send_visible_metadata(connection, other, version);
+        self.send_visible_combat_state(connection, other, version);
+    }
+
+    /// Send the health bar that accompanies a newly drawn mobile.
+    fn send_visible_health(&mut self, connection: ConnectionId, entity: EntityId, version: ClientVersion) {
         // The health bar rides along with the draw. There is no "what is its
         // health" packet the client can count on us answering — it opens the bar
         // from what it was last told — so a mobile whose bar is never sent shows an
         // empty frame until the first blow moves it. Send the scaled bar on sight
         // and it reads full from the moment you see it, like every other client.
-        if let Some(&Hitpoints { current, max }) = self.registry.get::<Hitpoints>(other) {
-            if let Some(serial) = self.registry.serial_of(other) {
+        if let Some(&Hitpoints { current, max }) = self.registry.get::<Hitpoints>(entity) {
+            if let Some(serial) = self.registry.serial_of(entity) {
                 let bar = ServerPacket::Health(HealthBar::scaled(serial, max, current));
                 self.outbox.push(Outbound {
                     connection,
@@ -3330,9 +3357,13 @@ impl WorldState {
                 });
             }
         }
+    }
+
+    /// Send the tooltip and custom-house packets that follow a newly drawn item.
+    fn send_visible_metadata(&mut self, connection: ConnectionId, entity: EntityId, version: ClientVersion) {
         // AoS tooltip: the drawn thing's property revision rides along, so the
         // client knows its cached tooltip is stale and can ask for a fresh one.
-        if let Some(tooltip) = self.tooltip_packet(other, version) {
+        if let Some(tooltip) = self.tooltip_packet(entity, version) {
             self.outbox.push(Outbound {
                 connection,
                 packet: tooltip,
@@ -3340,7 +3371,7 @@ impl WorldState {
         }
         // And a designed house's picture revision. It follows the foundation
         // item so the client knows which multi supplies the D8 grid bounds.
-        if let Some(design) = self.design_revision_packet(other, version) {
+        if let Some(design) = self.design_revision_packet(entity, version) {
             self.outbox.push(Outbound {
                 connection,
                 packet: design,
@@ -3353,10 +3384,19 @@ impl WorldState {
         // the protocol's volunteered-design flag; a 0xBF/0x1E answer below is
         // still marked as a response.
         if version.supports(Feature::CustomMulti) {
-            if let Some(packet) = self.design_detail_packet(other, false) {
+            if let Some(packet) = self.design_detail_packet(entity, false) {
                 self.outbox.push(Outbound { connection, packet });
             }
         }
+    }
+
+    /// Send standing combat markers a new watcher could not have seen happen.
+    fn send_visible_combat_state(
+        &mut self,
+        connection: ConnectionId,
+        entity: EntityId,
+        version: ClientVersion,
+    ) {
         // And what this body is doing about fighting, for the health bar's own
         // reason two blocks up: a fighter's action and its refusal both cross
         // the wire as *edges*, so a client that was not watching when the edge
@@ -3364,7 +3404,7 @@ impl WorldState {
         // wall, or to a swordsman half way through a stroke, drew a body
         // standing still with nothing over its head until its next transition —
         // which for a standing refusal can be never.
-        for packet in self.combat_state_packets(other, version) {
+        for packet in self.combat_state_packets(entity, version) {
             self.outbox.push(Outbound { connection, packet });
         }
     }
@@ -4681,6 +4721,15 @@ mod tests {
     use openshard_uofiles::multi::{Component, Multi};
 
     #[test]
+    fn a_house_gump_row_remembers_both_the_member_and_its_list() {
+        let member = openshard_protocol::serial::Serial::new(0x0000_002A).expect("a mobile serial");
+        let row = HouseGumpRow::new(HouseList::Bans, member);
+
+        assert_eq!(row.list, HouseList::Bans);
+        assert_eq!(row.member, member);
+    }
+
+    #[test]
     fn a_custom_house_stays_visible_when_its_design_reaches_the_view() {
         let origin = Point::new(120, 100, 0);
         let design = [Component {
@@ -4860,9 +4909,17 @@ mod tests {
             Facet(0),
             tiles,
             openshard_uofiles::multi::Multis::default(),
-            (0, 0),
+            Tile::new(0, 0),
             1,
         )
+    }
+
+    #[test]
+    fn the_start_stays_a_tile_until_its_height_is_derived() {
+        let state = a_shard();
+
+        assert_eq!(state.start, Tile::new(0, 0));
+        assert_eq!(state.start_position(Facet(0)), Point::new(0, 0, 0));
     }
 
     /// Put a mobile at `at`: the [`Body`] that makes it one, the [`Position`]
@@ -5103,7 +5160,7 @@ mod tests {
             Facet(0),
             TileData::empty(),
             openshard_uofiles::multi::Multis::default(),
-            (0, 0),
+            Tile::new(0, 0),
             1,
         );
 

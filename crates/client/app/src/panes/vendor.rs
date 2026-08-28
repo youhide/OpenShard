@@ -50,7 +50,7 @@ pub struct VendorPane {
     /// always was: the catalogue can restock between two notches, and a offset
     /// clamped against yesterday's row count would be clamped against a number
     /// nothing on the screen still has.
-    scroll: usize,
+    scroll: vendor::CatalogueIndex,
     /// How many of each row the player has chosen, in the row order the
     /// catalogue supplied.
     ///
@@ -129,7 +129,8 @@ impl<'a> Stall<'a> {
     /// many the player is carrying. Zero for a row the other half of the
     /// catalogue has no entry for, which makes the next click on it choose
     /// nothing — the same answer the shard would give.
-    fn limit(&self, row: usize) -> u16 {
+    fn limit(&self, row: vendor::CatalogueIndex) -> u16 {
+        let row = row.position();
         match self {
             Self::Buy { stock, .. } => stock.get(row).map_or(0, |item| item.amount.0),
             Self::Sell { lines } => lines.get(row).map_or(0, |line| line.amount.0),
@@ -167,7 +168,7 @@ impl VendorPane {
     pub const fn new(vendor: Serial) -> Self {
         Self {
             vendor,
-            scroll: 0,
+            scroll: vendor::CatalogueIndex::new(0),
             amounts: Vec::new(),
             tint: None,
         }
@@ -205,11 +206,12 @@ impl VendorPane {
     /// is why a pane answers two questions instead of one `bool`.
     fn wheel(&mut self, notches: f32, rows: usize) -> Response {
         let was = self.scroll;
-        self.scroll = if notches > 0.0 {
-            self.scroll.saturating_sub(1)
+        let position = self.scroll.position();
+        self.scroll = vendor::CatalogueIndex::new(if notches > 0.0 {
+            position.saturating_sub(1)
         } else {
-            (self.scroll + 1).min(rows.saturating_sub(vendor::VISIBLE_ROWS))
-        };
+            (position + 1).min(rows.saturating_sub(vendor::VISIBLE_ROWS))
+        });
         if self.scroll == was {
             Response::consumed()
         } else {
@@ -240,7 +242,8 @@ impl VendorPane {
     /// A click and not a spinner: the reference client's own catalogue counts up
     /// by one per press and wraps at what is available, which is the only
     /// gesture a row has.
-    fn choose(&mut self, row: usize, limit: u16) {
+    fn choose(&mut self, row: vendor::CatalogueIndex, limit: u16) {
+        let row = row.position();
         if self.amounts.len() <= row {
             self.amounts.resize(row + 1, 0);
         }
@@ -252,8 +255,8 @@ impl VendorPane {
     }
 
     /// One fewer of a row already in the order panel.
-    fn take_back(&mut self, row: usize) {
-        if let Some(amount) = self.amounts.get_mut(row) {
+    fn take_back(&mut self, row: vendor::CatalogueIndex) {
+        if let Some(amount) = self.amounts.get_mut(row.position()) {
             *amount = amount.saturating_sub(1);
         }
     }
@@ -410,6 +413,10 @@ mod tests {
         VendorPane::new(Serial::new(0x0000_002A).unwrap())
     }
 
+    const fn catalogue(position: usize) -> vendor::CatalogueIndex {
+        vendor::CatalogueIndex::new(position)
+    }
+
     /// A catalogue of `rows` lines the shard is willing to buy, in a world with
     /// nothing else in it.
     fn shop(rows: usize) -> WorldView {
@@ -479,7 +486,7 @@ mod tests {
             assert!(answer.taken, "notch {step} is the window's");
             assert!(answer.redraw, "notch {step} moved the list");
         }
-        assert_eq!(pane.scroll, 5);
+        assert_eq!(pane.scroll, catalogue(5));
 
         let laid_out = pane
             .layout(&files.ctx(&view, None, cursor, true).frame)
@@ -491,7 +498,7 @@ mod tests {
             "the notch is still the window's at the last row — the camera never hears it"
         );
         assert!(!answer.redraw, "and there is nothing new to draw");
-        assert_eq!(pane.scroll, 5);
+        assert_eq!(pane.scroll, catalogue(5));
     }
 
     /// The gate in front of the rule, asserted the same way: a notch offered to
@@ -514,7 +521,7 @@ mod tests {
         let answer = pane.handle(Input::Wheel(-1.0), &ctx);
         assert!(!answer.taken, "a covered window does not answer a notch");
         assert!(!answer.redraw);
-        assert_eq!(pane.scroll, 0, "and its list did not move");
+        assert_eq!(pane.scroll, catalogue(0), "and its list did not move");
     }
 
     /// A window that has never been drawn has no pixels the player can have
@@ -548,12 +555,12 @@ mod tests {
             assert!(answer.taken, "notch {step} is the window's");
             assert!(answer.redraw, "notch {step} moved the list");
         }
-        assert_eq!(pane.scroll, 5);
+        assert_eq!(pane.scroll, catalogue(5));
 
         let answer = pane.wheel(-1.0, 9);
         assert!(answer.taken, "the notch is still the window's at the last row");
         assert!(!answer.redraw, "and there is nothing new to draw");
-        assert_eq!(pane.scroll, 5);
+        assert_eq!(pane.scroll, catalogue(5));
     }
 
     /// The top is the other end of the same rule.
@@ -563,11 +570,11 @@ mod tests {
         let answer = pane.wheel(1.0, 9);
         assert!(answer.taken, "already at the top, and still the window's");
         assert!(!answer.redraw);
-        assert_eq!(pane.scroll, 0);
+        assert_eq!(pane.scroll, catalogue(0));
 
         assert!(pane.wheel(-1.0, 9).redraw);
         assert!(pane.wheel(1.0, 9).redraw);
-        assert_eq!(pane.scroll, 0);
+        assert_eq!(pane.scroll, catalogue(0));
     }
 
     /// **The Backlog's decision, as an assertion.** A notch over a button or a
@@ -582,7 +589,7 @@ mod tests {
         let answer = pane.wheel_over_window(-1.0, false, 9);
         assert!(answer.taken, "the whole frame is the window's, not only the list");
         assert!(!answer.redraw, "there is no list here for it to move");
-        assert_eq!(pane.scroll, 0, "the catalogue itself did not move");
+        assert_eq!(pane.scroll, catalogue(0), "the catalogue itself did not move");
     }
 
     /// The same notch over the catalogue's own viewport still scrolls, so the
@@ -593,7 +600,7 @@ mod tests {
         let answer = pane.wheel_over_window(-1.0, true, 9);
         assert!(answer.taken);
         assert!(answer.redraw);
-        assert_eq!(pane.scroll, 1);
+        assert_eq!(pane.scroll, catalogue(1));
     }
 
     /// A catalogue that fits in its viewport has no scrolling to do, and the
@@ -604,7 +611,7 @@ mod tests {
         let answer = pane.wheel(-1.0, vendor::VISIBLE_ROWS);
         assert!(answer.taken);
         assert!(!answer.redraw);
-        assert_eq!(pane.scroll, 0);
+        assert_eq!(pane.scroll, catalogue(0));
     }
 
     /// Choosing counts up by one and wraps at what is available, and it does so
@@ -612,11 +619,11 @@ mod tests {
     #[test]
     fn a_row_counts_up_to_its_limit_and_then_back_to_none() {
         let mut pane = pane();
-        pane.choose(2, 2);
+        pane.choose(catalogue(2), 2);
         assert_eq!(pane.amounts, vec![0, 0, 1], "the rows before it are untouched");
-        pane.choose(2, 2);
+        pane.choose(catalogue(2), 2);
         assert_eq!(pane.amounts[2], 2);
-        pane.choose(2, 2);
+        pane.choose(catalogue(2), 2);
         assert_eq!(pane.amounts[2], 0, "the whole of it was chosen, so none of it is");
     }
 
@@ -625,7 +632,7 @@ mod tests {
     #[test]
     fn a_row_with_no_stock_chooses_nothing() {
         let mut pane = pane();
-        pane.choose(0, 0);
+        pane.choose(catalogue(0), 0);
         assert_eq!(pane.amounts, vec![0]);
     }
 
@@ -634,14 +641,14 @@ mod tests {
     #[test]
     fn taking_back_stops_at_none() {
         let mut pane = pane();
-        pane.choose(0, 5);
-        pane.choose(0, 5);
-        pane.take_back(0);
+        pane.choose(catalogue(0), 5);
+        pane.choose(catalogue(0), 5);
+        pane.take_back(catalogue(0));
         assert_eq!(pane.amounts[0], 1);
-        pane.take_back(0);
-        pane.take_back(0);
+        pane.take_back(catalogue(0));
+        pane.take_back(catalogue(0));
         assert_eq!(pane.amounts[0], 0);
-        pane.take_back(7);
+        pane.take_back(catalogue(7));
         assert_eq!(
             pane.amounts,
             vec![0],

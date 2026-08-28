@@ -396,25 +396,42 @@ fn place<'a>(
 /// transformed by camera zoom and the preview by interface scale. Mapping the
 /// picked real pixel through both keeps its art texel under the pointer after a
 /// lift.
+#[derive(Debug)]
+pub struct GrabAt<'a> {
+    /// The ground item whose drawn sprite was picked.
+    pub item: &'a GroundItem,
+    /// The camera that placed the sprite in the viewport.
+    pub camera: &'a Camera,
+    /// Static metadata used by the ordinary item placement path.
+    pub tiledata: &'a TileData,
+    /// The animation frame used for the picked picture.
+    pub animations: &'a StaticAnimations,
+    /// The active storey cutaway.
+    pub cutaway: &'a Cutaway,
+    /// The pointer in real surface pixels.
+    pub cursor: RealPixel,
+    /// Interface magnification used by the cursor preview.
+    pub gump_scale: f32,
+}
+
+/// Map a picked ground sprite into the cursor preview's gump pixels.
 #[must_use]
-pub fn grab_at<'a>(
-    item: &GroundItem,
-    camera: &Camera,
-    tiledata: &TileData,
-    animations: &StaticAnimations,
-    atlas: impl Into<StaticArt<'a>>,
-    cutaway: &Cutaway,
-    cursor: RealPixel,
-    gump_scale: f32,
-) -> Option<GumpPixel> {
+pub fn grab_at<'a>(picked: GrabAt<'_>, atlas: impl Into<StaticArt<'a>>) -> Option<GumpPixel> {
     // Use the drawing path's placement: a pile's displayed graphic and an
     // animated item's current frame must not drift from the picture picked.
-    let placed = place(item, camera, tiledata, animations, atlas, cutaway)?;
-    let top_left = camera.to_viewport_exact(placed.at);
-    let scale = gump_scale.max(f32::MIN_POSITIVE);
+    let placed = place(
+        picked.item,
+        picked.camera,
+        picked.tiledata,
+        picked.animations,
+        atlas,
+        picked.cutaway,
+    )?;
+    let top_left = picked.camera.to_viewport_exact(placed.at);
+    let scale = picked.gump_scale.max(f32::MIN_POSITIVE);
     Some(GumpPixel::new(
-        ((cursor.x as f32 - top_left.x) / scale).round() as i32,
-        ((cursor.y as f32 - top_left.y) / scale).round() as i32,
+        ((picked.cursor.x as f32 - top_left.x) / scale).round() as i32,
+        ((picked.cursor.y as f32 - top_left.y) / scale).round() as i32,
     ))
 }
 
@@ -694,14 +711,16 @@ mod tests {
         let top_left = camera.to_viewport_exact(stand_on(&camera, item.at, &sprite));
 
         let grab = grab_at(
-            &item,
-            &camera,
-            &TileData::empty(),
-            &StaticAnimations::default(),
+            GrabAt {
+                item: &item,
+                camera: &camera,
+                tiledata: &TileData::empty(),
+                animations: &StaticAnimations::default(),
+                cutaway: &Cutaway::OPEN,
+                cursor: RealPixel::new(top_left.x.round() as i32 + 24, top_left.y.round() as i32 + 18),
+                gump_scale: 2.0,
+            },
             &atlas,
-            &Cutaway::OPEN,
-            RealPixel::new(top_left.x.round() as i32 + 24, top_left.y.round() as i32 + 18),
-            2.0,
         )
         .expect("drawn art has a placement");
 
