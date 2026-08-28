@@ -52,6 +52,9 @@ pub enum ItemGraphViolation {
     ContainedProjection(EntityId),
     /// `Equipped` does not project the canonical paperdoll edge exactly.
     EquippedProjection(EntityId),
+    /// A worn item is missing from its mobile's [`Worn`] index — the one way
+    /// that index can be *wrong* rather than merely out of date.
+    UnindexedOutfit(EntityId),
     /// A held edge and the connection's cursor row disagree.
     CursorProjection(EntityId),
     /// A connection cursor names an item whose canonical edge says otherwise.
@@ -62,6 +65,33 @@ pub enum ItemGraphViolation {
 #[must_use]
 pub fn item_location(state: &WorldState, item: EntityId) -> Option<ItemLocation> {
     state.registry.get::<ItemLocation>(item).copied()
+}
+
+/// What a mobile is wearing, kept on the *mobile* so that asking costs the size
+/// of one outfit rather than the size of the world.
+///
+/// # It is a hint, and the item is still the authority
+///
+/// This is a second statement of a fact the `Equipped` column already holds, and
+/// the usual objection to that is exactly right: two representations of one
+/// thing drift apart. What makes it safe here is that the drift can only ever go
+/// **one way**, and that way is harmless.
+///
+/// * An entry can become *stale* — `Registry::despawn` drops an item's
+///   components without passing through this module, and there are twenty such
+///   call sites. So every read re-asks the item itself
+///   ([`equipped_items`]) and ignores anything whose `Equipped` no longer names
+///   this mobile. A stale entry costs one lookup and is dropped the next time
+///   the outfit is touched.
+/// * An entry cannot become *missing*, which is the failure that would be a
+///   real bug: `Equipped` is written in exactly one place — [`apply_projection`]
+///   — and that place maintains this beside it. [`audit_item_graph`] asserts the
+///   pair anyway, because "exactly one place" is a claim, and a claim gets
+///   checked.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Worn {
+    /// Candidate items. Not authoritative — see the type's own documentation.
+    pub items: Vec<EntityId>,
 }
 
 /// Items whose canonical parent is `container`.
@@ -83,16 +113,50 @@ pub fn contained_items(
 }
 
 /// Items canonically worn by `mobile`.
+///
+/// # Why this reads the projection and not the canonical column
+///
+/// The answer is the same either way — [`audit_item_graph`] refuses any world
+/// where `Equipped` and the canonical edge disagree, and
+/// [`apply_projection`] is the only place either is written — but the *cost* is
+/// not, and this is a hot path in a way its shape does not admit.
+///
+/// `query::<ItemLocation>()` walks **every located item in the world**: a
+/// restored Felucca is 15,194 items and 26,477 decorations, and every one of
+/// them was being examined to find the six things one mobile has on. That is
+/// paid per call, and `combat::equipped_weapon_item` makes two of them per
+/// mobile per tick — so the cost was the world's item count times its mobile
+/// count, every tick, and on a shard with 10,959 mobiles it was **80% of the
+/// whole tick** (measured with `perf` on `openshard-e2e-shard`'s `tick_pace`).
+/// The tick ran at 6.9 of its declared 40 per second, which made every duration
+/// the shard announces — a bow's 1600ms among them — about five times shorter
+/// than the one it delivered.
+///
+/// `Equipped` is the column that answers this question: only worn items are in
+/// it. That is what the projection is *for*, and reading the canonical column
+/// instead was the migration note in this module's header being followed past
+/// the point where it says anything useful.
+///
+/// Reading the `Equipped` column instead of the canonical one was the first half
+/// of the fix and was not enough: that column holds every dressed body in the
+/// world, so the scan merely shrank from 41,671 rows to the ~55,000 garments of
+/// 10,959 mobiles. The answer is [`Worn`] — the outfit, kept on the mobile — and
+/// what is walked here is now one body's clothes.
 pub fn equipped_items(state: &WorldState, mobile: Serial) -> impl Iterator<Item = (EntityId, Equipped)> + '_ {
-    state
+    // The item's own `Equipped` is re-read for every candidate, and that is the
+    // whole reason the index may be stale without being wrong. See [`Worn`].
+    let worn: &[EntityId] = state
         .registry
-        .query::<ItemLocation>()
-        .filter_map(move |(item, location)| match *location {
-            ItemLocation::Settled(SettledItemLocation::Equipped(equipped)) if equipped.mobile == mobile => {
-                Some((item, equipped))
-            }
-            _ => None,
-        })
+        .entity_of(mobile)
+        .and_then(|entity| state.registry.get::<Worn>(entity))
+        .map_or(&[], |worn| worn.items.as_slice());
+    worn.iter().copied().filter_map(move |item| {
+        state
+            .registry
+            .get::<Equipped>(item)
+            .filter(|equipped| equipped.mobile == mobile)
+            .map(|equipped| (item, *equipped))
+    })
 }
 
 /// Put a newly-created item into the ownership graph.
@@ -212,6 +276,19 @@ pub fn audit_item_graph(state: &WorldState) -> Vec<ItemGraphViolation> {
                 if state.registry.get::<Equipped>(item) != Some(&equipped) || has_position || has_contained {
                     violations.push(ItemGraphViolation::EquippedProjection(item));
                 }
+                // The outfit index may hold *more* than is worn — a despawn drops
+                // an item's components without passing through this module — but
+                // never less. A worn item its own mobile does not list is the one
+                // failure that would make `equipped_items` answer wrongly instead
+                // of merely slowly, so it is the half that is checked.
+                let listed = state
+                    .registry
+                    .entity_of(equipped.mobile)
+                    .and_then(|mobile| state.registry.get::<Worn>(mobile))
+                    .is_some_and(|worn| worn.items.contains(&item));
+                if !listed {
+                    violations.push(ItemGraphViolation::UnindexedOutfit(item));
+                }
             }
             ItemLocation::Held { connection, origin } => {
                 let cursor_matches = state
@@ -262,6 +339,12 @@ fn apply_projection(
     state.registry.remove::<Position>(item);
     state.registry.remove::<crate::components::Contained>(item);
     state.registry.remove::<Equipped>(item);
+    // The outfit index follows the projection it indexes, in the same breath and
+    // in the same function, which is what makes "an entry cannot go missing" a
+    // property of the code rather than a hope. See [`Worn`].
+    if let Some(ItemLocation::Settled(SettledItemLocation::Equipped(equipped))) = previous {
+        unwear(state, equipped.mobile, item);
+    }
 
     match location {
         ItemLocation::Settled(SettledItemLocation::Ground { facet, position }) => {
@@ -273,6 +356,7 @@ fn apply_projection(
         }
         ItemLocation::Settled(SettledItemLocation::Equipped(equipped)) => {
             state.registry.insert(item, equipped);
+            wear(state, equipped.mobile, item);
         }
         ItemLocation::Held { connection, origin } => {
             state
@@ -285,6 +369,47 @@ fn apply_projection(
             });
         }
     }
+}
+
+/// Put `item` into `mobile`'s outfit index, pruning whatever has fallen out of
+/// it since the last time anybody looked.
+///
+/// The prune rides here rather than on the read for two reasons: a read takes
+/// `&WorldState` and cannot write, and a list is only ever added to at the
+/// moment somebody puts something on — so the one place a mobile's outfit grows
+/// is also the one place it is worth paying to tidy. Without it a body that is
+/// dressed and stripped by a spawner all day would accumulate dead ids forever.
+fn wear(state: &mut WorldState, mobile: Serial, item: EntityId) {
+    let Some(entity) = state.registry.entity_of(mobile) else {
+        // A mobile that does not resolve wears nothing anybody can ask about:
+        // `equipped_items` looks this same serial up and finds the same nothing.
+        return;
+    };
+    let mut items: Vec<EntityId> = match state.registry.get::<Worn>(entity) {
+        Some(worn) => worn.items.clone(),
+        None => Vec::new(),
+    };
+    items.retain(|&candidate| {
+        candidate != item
+            && state
+                .registry
+                .get::<Equipped>(candidate)
+                .is_some_and(|equipped| equipped.mobile == mobile)
+    });
+    items.push(item);
+    state.registry.insert(entity, Worn { items });
+}
+
+/// Take `item` out of `mobile`'s outfit index.
+fn unwear(state: &mut WorldState, mobile: Serial, item: EntityId) {
+    let Some(entity) = state.registry.entity_of(mobile) else {
+        return;
+    };
+    let Some(worn) = state.registry.get::<Worn>(entity) else {
+        return;
+    };
+    let items: Vec<EntityId> = worn.items.iter().copied().filter(|&worn| worn != item).collect();
+    state.registry.insert(entity, Worn { items });
 }
 
 /// Translate the drag protocol's remembered origin into the canonical settled

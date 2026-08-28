@@ -54,3 +54,7 @@ openshard-uofiles.workspace = true
 # dev-dependency because the reading end is a test's, not the playground's.
 openshard-persistence.workspace = true
 tokio = { workspace = true, features = ["full", "test-util"] }
+# For `examples/tick_pace.rs` alone: the thing that example measures is a
+# `tracing` line the shard emits, so it needs somebody listening. Nothing in the
+# library or the tests installs a subscriber, and none of them should.
+tracing-subscriber.workspace = true

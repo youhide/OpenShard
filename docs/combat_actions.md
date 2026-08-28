@@ -872,7 +872,19 @@ index of armed squares, and that index is a design rather than a variant.
 Found while building Ф1, Ф2, Ф3, Ф4 and the five half-phases after them, and none
 of it belonged to any of them.
 
-**From Ф4.6 — the first stall a recorded log was pointed at:**
+**From Ф4.6 — the first stall a recorded log was pointed at.** *The cause is
+found and fixed; what follows is kept because the road to it is the part worth
+re-reading.* A bow announced 1600ms and delivered 6500ms, and **nothing in
+combat was wrong**: `equipped_items` — *"what is this mobile wearing"* — walked
+every located item in the world, and `combat::equipped_weapon_item` asked it
+twice per mobile per tick. On a restored Felucca (10,959 mobiles, 15,194 items,
+26,477 decorations) that was 80% of the tick, which ran at **6.9 of its declared
+40 per second**, which made every duration the shard announces about five times
+shorter than the one it delivered. The outfit now lives on the mobile
+(`state::item_location::Worn`) and the tick keeps 39.7. Walking stalled for the
+same reason and by the same amount; so did everything else the shard drives.
+
+
 
 - 🚩 **The shard announces tick-milliseconds and the tick is not 25ms.** A bow
   fight in the playground, read off `combat-1787895032.log`, says the same thing
@@ -916,10 +928,33 @@ of it belonged to any of them.
       to run and was not given. In the playground — a debug build sharing a
       process with a renderer — the expectation is the second, and that makes it
       a *deployment* answer rather than a combat one.
-  - What is still open is the fix, and it needs the numbers first: a faster
-    shard, a wire that carries wall-clock milliseconds, or an announcement that
-    admits the shard's real rate are three different decisions, and nobody could
-    take any of them while the rate was a number nobody had.
+  - **What it found, once it existed.** An empty shard held 40.01/s; the same
+    shard on the operator's real map held 39.99/s; the *playground* held 6.5/s
+    with `busy_share` 0.97. The renderer was innocent — the same 6.9/s reproduced
+    **headless, with no client and no window at all**, as soon as the world was
+    restored from a real database instead of an empty one. That is what
+    `openshard-e2e-shard`'s `tick_pace` example is for, and why it copies the
+    operator's database rather than pointing at a fresh one: an empty world is
+    not what a shard is slow on, and measuring one is how three of these runs
+    said "sound" about a shard that was not.
+  - The three decisions that were open — a faster shard, a wire carrying
+    wall-clock milliseconds, or an announcement admitting the real rate — are
+    closed by the first: **the shard was not supposed to be slow**, and once the
+    scan was gone the announcement was true again. Nobody could have picked
+    between them while the rate was a number nobody had.
+- **`contained_items` is the same defect, unfixed.** It sits ten lines above
+  `equipped_items` and has the identical shape: a walk over every located item in
+  the world to find the contents of one container. Nothing in the tick's hot path
+  calls it today — which is the only reason it is a backlog line and not the same
+  emergency — but `Worn`'s argument applies to it word for word, and the day
+  something asks it per mobile per tick it will cost exactly what this did.
+- **The outfit index is checked in one direction only.** `audit_item_graph`
+  refuses a worn item its mobile does not list; it does not refuse a mobile that
+  lists something it is not wearing, because a `Registry::despawn` at any of
+  twenty call sites produces exactly that and it is harmless by construction —
+  the read re-asks the item. What is unproven is the *cost* of that slack: a body
+  dressed and stripped in a loop prunes on every `wear`, but nothing measures how
+  long a list gets in between.
 - **A mark that was pressed for is not in the log it was pressed into.** The
   session that produced the file above pressed `k` and the saved log holds no
   `MARK` line, with 40 entries against a capacity of 4000 — so nothing was

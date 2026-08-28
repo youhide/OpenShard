@@ -425,22 +425,6 @@ impl Shard {
     }
 }
 
-/// Drive login and the world until the shard is stopped or the gateway goes.
-///
-/// One task owns both. That is not a limitation: the world is deliberately
-/// single-threaded — a deterministic tick is the whole point — and login is a
-/// state machine that does no work worth parallelising. Async lives in the
-/// gateway's tasks, on the far side of the channel.
-///
-/// # Stopping
-///
-/// `reins` is what the caller keeps of this shard, and both halves of it are the
-/// caller's deliberately — see [`Reins`]. The stop inside it is the same
-/// [`Shutdown`] the gateway was built with, so that the door closes and the tick
-/// ends on one word rather than two; what happens after that word is heard is
-/// below the loop — the trades, the last snapshot, and the save task awaited to
-/// the end. **This function returns only once the world is on disk**, which is
-/// what makes it something a caller may wait for.
 /// Say what a closed window found, when it found something new.
 ///
 /// # Why the line reads the way it does
@@ -479,6 +463,22 @@ fn report_pace(pace: &mut crate::pace::Pace, window: crate::pace::Window) {
     }
 }
 
+/// Drive login and the world until the shard is stopped or the gateway goes.
+///
+/// One task owns both. That is not a limitation: the world is deliberately
+/// single-threaded — a deterministic tick is the whole point — and login is a
+/// state machine that does no work worth parallelising. Async lives in the
+/// gateway's tasks, on the far side of the channel.
+///
+/// # Stopping
+///
+/// `reins` is what the caller keeps of this shard, and both halves of it are the
+/// caller's deliberately — see [`Reins`]. The stop inside it is the same
+/// [`Shutdown`] the gateway was built with, so that the door closes and the tick
+/// ends on one word rather than two; what happens after that word is heard is
+/// below the loop — the trades, the last snapshot, and the save task awaited to
+/// the end. **This function returns only once the world is on disk**, which is
+/// what makes it something a caller may wait for.
 pub async fn run_shard(
     mut events: ServerEventRx,
     config: &Config,
