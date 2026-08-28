@@ -23,17 +23,30 @@
 //! no bearing on it. See `docs/text_sizes.md`.
 
 use std::path::Path;
+use std::time::Duration;
 
 use openshard_client_render::atlas::TextSize;
+use openshard_client_render::follow::Rig;
 use openshard_client_render::light;
+use openshard_client_render::solid::Cut;
+use openshard_client_render::{frame, interiors};
 use openshard_protocol::speech::Font;
+use openshard_protocol::world::RangedRange;
 use serde::{Deserialize, Serialize};
+
+use crate::crowd::Ease;
+use crate::graphics::{GraphicsSettings, HighlightStyle, HighlightTarget, MELEE_SIGHT_REACH};
 
 /// Where the state lives: beside `openshard.toml`, in the working directory.
 ///
 /// The same place the operator's own config is, for the same reason — it is
 /// per-checkout, visible, and deleting it is how you get the defaults back.
-pub const PATH: &str = "client_ui.toml";
+pub const PATH: &str = "client_ui.ron";
+
+/// The format written by clients before persistent F1 settings existed.
+///
+/// It is read only as a one-way migration; all later writes use [`PATH`].
+const LEGACY_PATH: &str = "client_ui.toml";
 
 /// Which page of the dev window is in front.
 ///
@@ -66,6 +79,8 @@ pub enum Tab {
     Windows,
     /// Staff-only tools for creating test items in the character's backpack.
     Admin,
+    /// What this client has been told about fighting, with the gaps visible.
+    Combat,
 }
 
 impl Tab {
@@ -73,8 +88,9 @@ impl Tab {
     ///
     /// One list, so the bar and anything that iterates the pages cannot come to
     /// disagree about which tabs exist.
-    pub const ALL: [Tab; 10] = [
+    pub const ALL: [Tab; 11] = [
         Tab::Admin,
+        Tab::Combat,
         Tab::Camera,
         Tab::Rig,
         Tab::Frames,
@@ -99,6 +115,7 @@ impl Tab {
             Tab::Audio => "Audio",
             Tab::Windows => "Windows",
             Tab::Admin => "Admin",
+            Tab::Combat => "Combat",
         }
     }
 }
@@ -361,7 +378,7 @@ impl<'de> Deserialize<'de> for WindowScale {
 /// TrueType face, and the matching fractional scale for `fonts.mul`.
 ///
 /// **Sizes, not scales** — `docs/text_sizes.md`, whose whole subject this is.
-/// The number in `client_ui.toml` is what reaches the rasterizer: eleven means
+/// The number in `client_ui.ron` is what reaches the rasterizer: eleven means
 /// eleven pixels tall, and a dense display multiplies it *before* the glyph is
 /// drawn rather than stretching the glyph afterwards. `fontdue` shades an
 /// outline analytically at whatever height it is asked for, so a fractional
@@ -425,7 +442,7 @@ impl FontFace {
 /// Kept separate from the wire [`Font`]: a packet may carry any `u16` and is
 /// validated by the asset atlas at draw time, while this is a player setting
 /// with exactly ten meaningful choices.  The manual serde implementation
-/// makes a hand-edited `client_ui.toml` stay inside that table.
+/// makes a hand-edited `client_ui.ron` stay inside that table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BitmapFont(u16);
 
@@ -703,6 +720,314 @@ pub struct Desk {
     pub admin_item: AdminItem,
     /// Where the full item-art browser was left in F1.
     pub admin_catalogue: AdminCatalogue,
+    /// What F1's combat recorder page was left showing.
+    pub combat_recorder: CombatRecorder,
+    /// The F1 controls whose live state belongs to the app rather than to an
+    /// egui widget. `None` is a RON file written before this set existed;
+    /// keeping that distinct lets its first launch retain the command-line
+    /// diagnostic defaults.
+    pub f1: Option<F1Settings>,
+}
+
+/// Persistent controls from F1 that are applied outside the HUD itself.
+///
+/// The shell owns text fields, sliders and layout directly, but the World,
+/// Tile and Rig pages post requests to the application.  Keeping their stable
+/// values here makes the configuration complete without serializing transient
+/// diagnostics such as a frame dump, a navigation bake, a replay or a
+/// hand-authored collision prism.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct F1Settings {
+    pub draw_land: bool,
+    pub draw_statics: bool,
+    pub draw_items: bool,
+    pub draw_houses: bool,
+    pub draw_mobiles: bool,
+    pub cutaway_disabled: bool,
+    pub body_overlap_transparency_disabled: bool,
+    pub time_of_day: bool,
+    pub night: bool,
+    pub show_terrain: bool,
+    pub show_sight: bool,
+    pub sight_reach: u8,
+    pub show_interiors: bool,
+    pub buildings: bool,
+    pub z_slice: bool,
+    pub z_slice_manual: Option<(i8, i8)>,
+    pub floor_manual: Option<i8>,
+    pub show_occluders: bool,
+    pub show_solids: bool,
+    pub solids_only: bool,
+    pub solids_opaque: bool,
+    pub solids_everything: bool,
+    pub highlight: HighlightTarget,
+    pub highlight_style: HighlightStyle,
+    pub rig_plane_tau: f32,
+    pub rig_lift_tau: f32,
+    /// The finite threshold kept even while [`Self::rig_never_cut`] is on, so
+    /// toggling the checkbox restores the last useful value.
+    pub rig_lift_cut: f32,
+    /// The rig's meaningful infinite cut: never cut the lift.
+    pub rig_never_cut: bool,
+    pub body_ease_tau: f32,
+    pub scope_seconds: f32,
+}
+
+impl Default for F1Settings {
+    fn default() -> Self {
+        let rig = Rig::HARD;
+        Self {
+            draw_land: true,
+            draw_statics: true,
+            draw_items: true,
+            draw_houses: true,
+            draw_mobiles: true,
+            cutaway_disabled: false,
+            body_overlap_transparency_disabled: false,
+            time_of_day: true,
+            night: false,
+            show_terrain: false,
+            show_sight: false,
+            sight_reach: MELEE_SIGHT_REACH.get(),
+            show_interiors: false,
+            buildings: false,
+            z_slice: false,
+            z_slice_manual: None,
+            floor_manual: None,
+            show_occluders: false,
+            show_solids: false,
+            solids_only: false,
+            solids_opaque: false,
+            solids_everything: false,
+            highlight: HighlightTarget::default(),
+            highlight_style: HighlightStyle::default(),
+            rig_plane_tau: rig.plane_tau,
+            rig_lift_tau: rig.lift_tau,
+            rig_lift_cut: rig.lift_cut,
+            rig_never_cut: !rig.lift_cut.is_finite(),
+            body_ease_tau: crate::STARTUP_EASE.tau,
+            scope_seconds: crate::SCOPE_SPAN.as_secs_f32(),
+        }
+    }
+}
+
+impl F1Settings {
+    /// Clamp hand-edited values at the persistence boundary before they reach
+    /// the renderer. The limits deliberately mirror the F1 widgets.
+    fn finite(value: f32, default: f32, minimum: f32, maximum: f32) -> f32 {
+        if value.is_finite() {
+            value.clamp(minimum, maximum)
+        } else {
+            default
+        }
+    }
+
+    pub fn rig(self) -> Rig {
+        let defaults = Self::default();
+        Rig {
+            plane_tau: Self::finite(self.rig_plane_tau, defaults.rig_plane_tau, 0.0, 0.5),
+            lift_tau: Self::finite(self.rig_lift_tau, defaults.rig_lift_tau, 0.0, 0.5),
+            lift_cut: match self.rig_never_cut {
+                true => f32::INFINITY,
+                false => Self::finite(self.rig_lift_cut, 0.0, 0.0, 256.0),
+            },
+        }
+    }
+
+    pub fn ease(self) -> Ease {
+        Ease {
+            tau: Self::finite(self.body_ease_tau, crate::STARTUP_EASE.tau, 0.0, 0.5),
+        }
+    }
+
+    pub fn scope_span(self) -> Duration {
+        Duration::from_secs_f32(Self::finite(
+            self.scope_seconds,
+            crate::SCOPE_SPAN.as_secs_f32(),
+            0.5,
+            20.0,
+        ))
+    }
+
+    /// Apply the settings that are owned by the graphics subsystem.
+    pub fn apply_to_graphics(self, graphics: &mut GraphicsSettings) {
+        graphics.drawing = frame::Draw {
+            land: self.draw_land,
+            statics: self.draw_statics,
+            items: self.draw_items,
+            houses: self.draw_houses,
+            mobiles: self.draw_mobiles,
+        };
+        graphics.cutaway_disabled = self.cutaway_disabled;
+        graphics.body_overlap_transparency_disabled = self.body_overlap_transparency_disabled;
+        graphics.time_of_day = self.time_of_day;
+        graphics.night = self.night;
+        graphics.show_terrain = self.show_terrain;
+        graphics.show_sight = self.show_sight;
+        graphics.sight_reach = RangedRange::new(self.sight_reach).unwrap_or(MELEE_SIGHT_REACH);
+        graphics.show_interiors = self.show_interiors;
+        graphics.buildings = self.buildings;
+        graphics.z_slice = self.z_slice;
+        graphics.z_slice_view = self
+            .z_slice_manual
+            .map_or(interiors::ZSliceView::Auto, |(lower, upper)| {
+                interiors::ZSliceView::Manual { lower, upper }
+            });
+        graphics.floor_view = self.floor_manual.map_or(interiors::FloorView::Auto, |relative| {
+            interiors::FloorView::Manual { relative }
+        });
+        graphics.show_occluders = self.show_occluders;
+        graphics.show_solids = self.show_solids;
+        graphics.solids_only = self.solids_only;
+        graphics.solids_opaque = self.solids_opaque;
+        graphics.solids_everything = self.solids_everything;
+        graphics.highlight = self.highlight;
+        graphics.highlight_style = self.highlight_style;
+    }
+
+    /// Capture exactly the user-facing state, deliberately excluding caches,
+    /// counters and the current player's height.
+    pub fn from_runtime(graphics: &GraphicsSettings, rig: Rig, ease: Ease, scope_span: Duration) -> Self {
+        Self {
+            draw_land: graphics.drawing.land,
+            draw_statics: graphics.drawing.statics,
+            draw_items: graphics.drawing.items,
+            draw_houses: graphics.drawing.houses,
+            draw_mobiles: graphics.drawing.mobiles,
+            cutaway_disabled: graphics.cutaway_disabled,
+            body_overlap_transparency_disabled: graphics.body_overlap_transparency_disabled,
+            time_of_day: graphics.time_of_day,
+            night: graphics.night,
+            show_terrain: graphics.show_terrain,
+            show_sight: graphics.show_sight,
+            sight_reach: graphics.sight_reach.get(),
+            show_interiors: graphics.show_interiors,
+            buildings: graphics.buildings,
+            z_slice: graphics.z_slice,
+            z_slice_manual: match graphics.z_slice_view {
+                interiors::ZSliceView::Auto => None,
+                interiors::ZSliceView::Manual { lower, upper } => Some((lower, upper)),
+            },
+            floor_manual: match graphics.floor_view {
+                interiors::FloorView::Auto => None,
+                interiors::FloorView::Manual { relative } => Some(relative),
+            },
+            show_occluders: graphics.show_occluders,
+            show_solids: graphics.show_solids,
+            solids_only: graphics.solids_only,
+            solids_opaque: graphics.solids_opaque,
+            solids_everything: graphics.solids_everything,
+            highlight: graphics.highlight,
+            highlight_style: graphics.highlight_style,
+            rig_plane_tau: rig.plane_tau,
+            rig_lift_tau: rig.lift_tau,
+            rig_lift_cut: if rig.lift_cut.is_finite() {
+                rig.lift_cut
+            } else {
+                0.0
+            },
+            rig_never_cut: !rig.lift_cut.is_finite(),
+            body_ease_tau: ease.tau,
+            scope_seconds: scope_span.as_secs_f32(),
+        }
+    }
+
+    /// Fold a just-drawn F1 request into the shutdown snapshot.
+    ///
+    /// Requests intentionally apply on the next frame. A user may change a
+    /// checkbox and close the client before that frame happens, however, and
+    /// persisting the previous value in that case is indistinguishable from
+    /// losing their setting. This updates only durable preferences; actions
+    /// such as item creation, map editing and frame capture remain unspent.
+    pub fn apply_pending_request(&mut self, request: &crate::shell::Request) {
+        if let Some(rig) = request.rig {
+            self.rig_plane_tau = rig.plane_tau;
+            self.rig_lift_tau = rig.lift_tau;
+            self.rig_lift_cut = if rig.lift_cut.is_finite() {
+                rig.lift_cut
+            } else {
+                0.0
+            };
+            self.rig_never_cut = !rig.lift_cut.is_finite();
+        }
+        if let Some(ease) = request.ease {
+            self.body_ease_tau = ease.tau;
+        }
+        if let Some(span) = request.scope_span {
+            self.scope_seconds = span.as_secs_f32();
+        }
+        if let Some(draw) = request.draw {
+            self.draw_land = draw.land;
+            self.draw_statics = draw.statics;
+            self.draw_items = draw.items;
+            self.draw_houses = draw.houses;
+            self.draw_mobiles = draw.mobiles;
+        }
+        if let Some(value) = request.cutaway_disabled {
+            self.cutaway_disabled = value;
+        }
+        if let Some(value) = request.body_overlap_transparency_disabled {
+            self.body_overlap_transparency_disabled = value;
+        }
+        if let Some(value) = request.time_of_day {
+            self.time_of_day = value;
+        }
+        if let Some(value) = request.night {
+            self.night = value;
+        }
+        if let Some(value) = request.show_terrain {
+            self.show_terrain = value;
+        }
+        if let Some(value) = request.show_sight {
+            self.show_sight = value;
+        }
+        if let Some(value) = request.sight_reach {
+            self.sight_reach = value.get();
+        }
+        if let Some(value) = request.show_interiors {
+            self.show_interiors = value;
+        }
+        if let Some(value) = request.buildings {
+            self.buildings = value;
+        }
+        if let Some(value) = request.z_slice {
+            self.z_slice = value;
+        }
+        if let Some(value) = request.z_slice_view {
+            self.z_slice_manual = match value {
+                interiors::ZSliceView::Auto => None,
+                interiors::ZSliceView::Manual { lower, upper } => Some((lower, upper)),
+            };
+        }
+        if let Some(value) = request.floor_view {
+            self.floor_manual = match value {
+                interiors::FloorView::Auto => None,
+                interiors::FloorView::Manual { relative } => Some(relative),
+            };
+        }
+        if let Some(value) = request.show_occluders {
+            self.show_occluders = value;
+        }
+        if let Some(value) = request.show_solids {
+            self.show_solids = value;
+        }
+        if let Some(value) = request.solids_only {
+            self.solids_only = value;
+        }
+        if let Some(value) = request.solids_opaque {
+            self.solids_opaque = value;
+        }
+        if let Some(value) = request.solid_cut {
+            self.solids_everything = matches!(value, Cut::Nothing);
+        }
+        if let Some(value) = request.highlight {
+            self.highlight = value;
+        }
+        if let Some(value) = request.highlight_style {
+            self.highlight_style = value;
+        }
+    }
 }
 
 /// The two everyday movement conveniences.
@@ -736,6 +1061,36 @@ pub struct AdminItem {
     pub hue: String,
     pub amount: String,
     pub stackable: bool,
+}
+
+/// What the combat recorder's page was left showing.
+///
+/// Kept beside the rest of the F1 state for its reason: somebody who has narrowed
+/// the log to their own body and is chasing one defect across several launches
+/// should not have to narrow it again each time. The *note* is remembered too —
+/// a person marking the same stall over and over is typing the same word.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CombatRecorder {
+    /// What the next mark will say.
+    pub note: String,
+    /// Show only this client's own body, rather than everyone in sight.
+    pub only_me: bool,
+    /// How many of the newest lines the page draws. The log keeps far more; this
+    /// is what fits on a screen without turning the panel into the whole file.
+    pub shown: usize,
+}
+
+impl Default for CombatRecorder {
+    /// Narrowed to your own body and the last few dozen lines, because that is
+    /// what somebody who has just seen their own character stop is looking at.
+    fn default() -> Self {
+        Self {
+            note: String::new(),
+            only_me: true,
+            shown: 60,
+        }
+    }
 }
 
 /// The query and page of F1's installed-client item-art browser.
@@ -802,6 +1157,8 @@ impl Default for Desk {
             movement: Movement::default(),
             admin_item: AdminItem::default(),
             admin_catalogue: AdminCatalogue::default(),
+            combat_recorder: CombatRecorder::default(),
+            f1: None,
         }
     }
 }
@@ -812,8 +1169,9 @@ impl Default for Desk {
 pub enum DeskError {
     Read(std::path::PathBuf, std::io::Error),
     Write(std::path::PathBuf, std::io::Error),
-    Parse(std::path::PathBuf, toml::de::Error),
-    Encode(toml::ser::Error),
+    Parse(std::path::PathBuf, ron::error::SpannedError),
+    ParseLegacy(std::path::PathBuf, toml::de::Error),
+    Encode(ron::Error),
 }
 
 impl std::fmt::Display for DeskError {
@@ -822,6 +1180,9 @@ impl std::fmt::Display for DeskError {
             DeskError::Read(path, error) => write!(f, "reading {}: {error}", path.display()),
             DeskError::Write(path, error) => write!(f, "writing {}: {error}", path.display()),
             DeskError::Parse(path, error) => write!(f, "parsing {}: {error}", path.display()),
+            DeskError::ParseLegacy(path, error) => {
+                write!(f, "parsing legacy {}: {error}", path.display())
+            }
             DeskError::Encode(error) => write!(f, "encoding the UI state: {error}"),
         }
     }
@@ -833,24 +1194,79 @@ impl Desk {
     /// Read the file, or the defaults if there is no file yet.
     ///
     /// A missing file is not an error: it is the first run, and it is the state
-    /// a player gets by deleting the file. Anything else — unreadable, or
-    /// present and not TOML — *is* one, and is handed back rather than swallowed,
-    /// so the caller can say so before carrying on with the defaults. Silently
-    /// defaulting on a parse error is how a typo eats a layout every launch and
-    /// nobody finds out.
+    /// a player gets by deleting the file. When the RON file has not been
+    /// created yet, the old TOML file is imported once. Anything else —
+    /// unreadable, or present and malformed — is handed back rather than
+    /// swallowed, so the caller can say so before carrying on with the
+    /// defaults. Silently defaulting on a parse error is how a typo eats a
+    /// layout every launch and nobody finds out.
     pub fn load(path: &Path) -> Result<Self, DeskError> {
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Self::load_legacy(path);
+            }
             Err(error) => return Err(DeskError::Read(path.to_path_buf(), error)),
         };
-        toml::from_str(&text).map_err(|error| DeskError::Parse(path.to_path_buf(), error))
+        ron::from_str(&text).map_err(|error| DeskError::Parse(path.to_path_buf(), error))
     }
 
-    /// Write it out.
+    /// Write it out by atomically replacing the old file after the complete
+    /// replacement has reached the filesystem. A partial write can therefore
+    /// never turn the next launch into a reset of every F1 choice.
     pub fn save(&self, path: &Path) -> Result<(), DeskError> {
-        let text = toml::to_string_pretty(self).map_err(DeskError::Encode)?;
-        std::fs::write(path, text).map_err(|error| DeskError::Write(path.to_path_buf(), error))
+        let text =
+            ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::new()).map_err(DeskError::Encode)?;
+        let mut temporary = None;
+        for attempt in 0..100 {
+            let candidate = path.with_extension(format!("ron-writing-{}-{attempt}", std::process::id()));
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&candidate)
+            {
+                Ok(mut file) => {
+                    use std::io::Write;
+                    if let Err(error) = file.write_all(text.as_bytes()).and_then(|()| file.sync_all()) {
+                        let _ = std::fs::remove_file(&candidate);
+                        return Err(DeskError::Write(candidate, error));
+                    }
+                    temporary = Some(candidate);
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(DeskError::Write(candidate, error)),
+            }
+        }
+        let temporary = temporary.ok_or_else(|| {
+            DeskError::Write(
+                path.to_path_buf(),
+                std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "could not reserve a temporary UI-state file",
+                ),
+            )
+        })?;
+        if let Err(error) = std::fs::rename(&temporary, path) {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(DeskError::Write(path.to_path_buf(), error));
+        }
+        Ok(())
+    }
+
+    fn load_legacy(path: &Path) -> Result<Self, DeskError> {
+        // `Desk::load` is also useful to tests and tools with arbitrary names;
+        // only the canonical RON filename asks for a sibling migration.
+        if path.file_name().is_none_or(|name| name != PATH) {
+            return Ok(Self::default());
+        }
+        let legacy = path.with_file_name(LEGACY_PATH);
+        let text = match std::fs::read_to_string(&legacy) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(error) => return Err(DeskError::Read(legacy, error)),
+        };
+        toml::from_str(&text).map_err(|error| DeskError::ParseLegacy(legacy, error))
     }
 
     /// Whether a saved frame still names somewhere a window can be seen.
@@ -882,7 +1298,7 @@ mod tests {
 
     #[test]
     fn a_missing_file_is_the_defaults_and_not_an_error() {
-        let desk = Desk::load(Path::new("/nonexistent/openshard/client_ui.toml")).unwrap();
+        let desk = Desk::load(Path::new("/nonexistent/openshard/client_ui.ron")).unwrap();
         assert_eq!(desk.tab, Tab::Camera);
         assert!(desk.open);
         assert!(desk.window.is_none());
@@ -894,7 +1310,7 @@ mod tests {
     fn what_is_written_is_what_comes_back() {
         let dir = std::env::temp_dir().join("openshard-desk-roundtrip");
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("client_ui.toml");
+        let path = dir.join("client_ui.ron");
         let desk = Desk {
             tab: Tab::Frames,
             open: false,
@@ -956,6 +1372,23 @@ mod tests {
                 query: "0x0f52".to_owned(),
                 category: AdminItemCategory::Weapons,
             },
+            combat_recorder: CombatRecorder {
+                note: "he stops here".to_owned(),
+                only_me: false,
+                shown: 120,
+            },
+            f1: Some(F1Settings {
+                show_terrain: true,
+                sight_reach: 10,
+                z_slice: true,
+                z_slice_manual: Some((-5, 22)),
+                floor_manual: Some(-1),
+                rig_plane_tau: 0.2,
+                rig_never_cut: true,
+                body_ease_tau: 0.1,
+                scope_seconds: 12.0,
+                ..F1Settings::default()
+            }),
         };
         desk.save(&path).unwrap();
         let back = Desk::load(&path).unwrap();
@@ -975,7 +1408,54 @@ mod tests {
         assert_eq!(back.admin_catalogue, desk.admin_catalogue);
         assert_eq!(back.movement.auto_open_doors, desk.movement.auto_open_doors);
         assert_eq!(back.admin_item, desk.admin_item);
+        assert_eq!(back.combat_recorder, desk.combat_recorder);
+        assert_eq!(back.f1, desk.f1);
         std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn old_ui_files_keep_their_startup_diagnostics_until_the_first_save() {
+        let desk: Desk = ron::from_str("(tab: world)").unwrap();
+        assert_eq!(desk.f1, None);
+    }
+
+    #[test]
+    fn a_legacy_toml_file_is_imported_then_replaced_by_ron() {
+        let dir = std::env::temp_dir().join(format!("openshard-desk-migration-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ron = dir.join(PATH);
+        let legacy = dir.join(LEGACY_PATH);
+        let _ = std::fs::remove_file(&ron);
+        let _ = std::fs::remove_file(&legacy);
+        std::fs::write(&legacy, "zoom = 1.25\n[movement]\nalways_run = false\n").unwrap();
+
+        let desk = Desk::load(&ron).unwrap();
+        assert_eq!(desk.zoom.hud_scale_factor(), 1.25);
+        assert!(!desk.movement.always_run);
+        assert!(!ron.exists());
+
+        desk.save(&ron).unwrap();
+        assert!(ron.exists());
+        assert_eq!(Desk::load(&ron).unwrap().movement.always_run, false);
+        std::fs::remove_file(&ron).unwrap();
+        std::fs::remove_file(&legacy).unwrap();
+    }
+
+    #[test]
+    fn hand_edited_f1_numbers_are_safe_to_apply() {
+        let settings: F1Settings = ron::from_str(
+            "(rig_plane_tau: NaN, rig_lift_tau: 9, rig_lift_cut: -1, body_ease_tau: NaN, scope_seconds: 100, sight_reach: 0)",
+        )
+        .unwrap();
+        assert_eq!(settings.rig().plane_tau, F1Settings::default().rig_plane_tau);
+        assert_eq!(settings.rig().lift_tau, 0.5);
+        assert_eq!(settings.rig().lift_cut, 0.0);
+        assert_eq!(settings.ease().tau, crate::STARTUP_EASE.tau);
+        assert_eq!(settings.scope_span(), Duration::from_secs(20));
+        assert_eq!(
+            RangedRange::new(settings.sight_reach).unwrap_or(MELEE_SIGHT_REACH),
+            MELEE_SIGHT_REACH
+        );
     }
 
     /// The file's own defaults are the renderer's own, field for field.
@@ -1000,7 +1480,7 @@ mod tests {
 
     #[test]
     fn a_hand_edited_bitmap_font_stays_inside_fonts_mul() {
-        let desk: Desk = toml::from_str("override_all_fonts = true\nbitmap_font = 999").unwrap();
+        let desk: Desk = ron::from_str("(override_all_fonts: true, bitmap_font: 999)").unwrap();
         assert!(desk.override_all_fonts);
         assert_eq!(desk.bitmap_font.index(), BitmapFont::COUNT - 1);
     }
@@ -1010,8 +1490,7 @@ mod tests {
     /// ray count of nothing cannot reach the walk.
     #[test]
     fn a_hand_edited_light_is_clamped_on_the_way_out() {
-        let desk: Desk =
-            toml::from_str("[light]\nbrightness = -3.0\nshadow_rays = 0\nreach = 1e9\n").unwrap();
+        let desk: Desk = ron::from_str("(light: (brightness: -3.0, shadow_rays: 0, reach: 1e9))").unwrap();
         let tuning = desk.light.tuning();
         assert_eq!(tuning.brightness, 0.0);
         assert_eq!(tuning.shadow_rays, light::ShadowRays::new(1));
@@ -1025,11 +1504,11 @@ mod tests {
     /// what the hand-written `Deserialize` is for.
     #[test]
     fn a_hand_edited_zoom_is_clamped_on_the_way_in() {
-        let desk: Desk = toml::from_str("zoom = 400.0").unwrap();
+        let desk: Desk = ron::from_str("(zoom: 400.0)").unwrap();
         assert_eq!(desk.zoom.hud_scale_factor(), Zoom::MAX);
-        let desk: Desk = toml::from_str("zoom = 0.0").unwrap();
+        let desk: Desk = ron::from_str("(zoom: 0.0)").unwrap();
         assert_eq!(desk.zoom.hud_scale_factor(), Zoom::MIN);
-        let desk: Desk = toml::from_str("zoom = nan").unwrap();
+        let desk: Desk = ron::from_str("(zoom: NaN)").unwrap();
         assert_eq!(desk.zoom.hud_scale_factor(), 1.0);
     }
 
@@ -1039,18 +1518,18 @@ mod tests {
     /// unusable is exactly the one a hand-edited file must not be able to set.
     #[test]
     fn a_hand_edited_window_scale_is_clamped_on_the_way_in() {
-        let desk: Desk = toml::from_str("window_scale = 400.0").unwrap();
+        let desk: Desk = ron::from_str("(window_scale: 400.0)").unwrap();
         assert_eq!(desk.window_scale.factor(), WindowScale::MAX);
-        let desk: Desk = toml::from_str("window_scale = 0.0").unwrap();
+        let desk: Desk = ron::from_str("(window_scale: 0.0)").unwrap();
         assert_eq!(desk.window_scale.factor(), WindowScale::MIN);
         // Neither a crash nor a window with no pixels: `f32::clamp` panics on a
         // NaN, and drawing at one would leave nothing on screen to fix it with.
-        let desk: Desk = toml::from_str("window_scale = nan").unwrap();
+        let desk: Desk = ron::from_str("(window_scale: NaN)").unwrap();
         assert_eq!(desk.window_scale.factor(), WindowScale::MIN);
         // A fraction inside the range is kept as written — this is the knob's
         // whole point, and a rounding here would be the type quietly refusing
         // what the slider offers.
-        let desk: Desk = toml::from_str("window_scale = 1.5").unwrap();
+        let desk: Desk = ron::from_str("(window_scale: 1.5)").unwrap();
         assert_eq!(desk.window_scale.factor(), 1.5);
     }
 
@@ -1059,7 +1538,7 @@ mod tests {
     /// where and how big they were.
     #[test]
     fn a_file_without_a_window_scale_draws_at_the_arts_own_size() {
-        let desk: Desk = toml::from_str("zoom = 1.0").unwrap();
+        let desk: Desk = ron::from_str("(zoom: 1.0)").unwrap();
         assert_eq!(desk.window_scale.factor(), 1.0);
     }
 
@@ -1071,11 +1550,11 @@ mod tests {
     /// comparison that answers `false` to everything.
     #[test]
     fn a_hand_edited_font_size_is_clamped_on_the_way_in() {
-        let desk: Desk = toml::from_str("[fonts]\nspeech = 400.0").unwrap();
+        let desk: Desk = ron::from_str("(fonts: (speech: 400.0))").unwrap();
         assert_eq!(desk.fonts.speech.pixels(), TextSize::MAX);
-        let desk: Desk = toml::from_str("[fonts]\nspeech = 0.0").unwrap();
+        let desk: Desk = ron::from_str("(fonts: (speech: 0.0))").unwrap();
         assert_eq!(desk.fonts.speech.pixels(), TextSize::MIN);
-        let desk: Desk = toml::from_str("[fonts]\nspeech = nan").unwrap();
+        let desk: Desk = ron::from_str("(fonts: (speech: NaN))").unwrap();
         assert_eq!(desk.fonts.speech.pixels(), TextSize::MIN);
     }
 
@@ -1086,10 +1565,10 @@ mod tests {
     /// the way. See `docs/text_sizes.md`.
     #[test]
     fn a_font_size_is_pixels_and_survives_a_round_trip() {
-        let desk: Desk = toml::from_str("[fonts]\nstack_count = 13.5").unwrap();
+        let desk: Desk = ron::from_str("(fonts: (stack_count: 13.5))").unwrap();
         assert_eq!(desk.fonts.stack_count.pixels(), 13.5);
-        let written = toml::to_string(&desk).unwrap();
-        assert!(written.contains("stack_count = 13.5"), "{written}");
+        let written = ron::to_string(&desk).unwrap();
+        assert!(written.contains("stack_count:13.5"), "{written}");
     }
 
     #[test]
@@ -1113,7 +1592,7 @@ mod tests {
     /// nothing to migrate it *to* — see `docs/text_sizes.md`'s P2.
     #[test]
     fn old_per_face_scales_are_ignored_and_the_rest_of_the_file_survives() {
-        let desk: Desk = toml::from_str("zoom = 1.25\n[chat]\nttf_scale = 2.0\nscale = 3").unwrap();
+        let desk: Desk = ron::from_str("(zoom: 1.25, chat: (ttf_scale: 2.0, scale: 3))").unwrap();
         assert_eq!(desk.fonts, FontSizes::default());
         assert_eq!(desk.zoom.hud_scale_factor(), 1.25);
     }
@@ -1122,7 +1601,7 @@ mod tests {
     /// the layout to the one line it is missing.
     #[test]
     fn an_older_file_keeps_what_it_does_have() {
-        let desk: Desk = toml::from_str("tab = \"world\"").unwrap();
+        let desk: Desk = ron::from_str("(tab: world)").unwrap();
         assert_eq!(desk.tab, Tab::World);
         assert!(desk.open);
         assert_eq!(desk.zoom, Zoom::default());

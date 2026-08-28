@@ -283,6 +283,13 @@ pub struct PresentationWorld {
     /// Animation and glide history, which belongs to presentation rather than
     /// authoritative state.
     pub crowd: Crowd,
+    /// Everything this client has been told about fighting, with the gaps in
+    /// between visible — the recorder behind *"there was a stall right here"*.
+    ///
+    /// Beside the crowd and aged with it on purpose: a timestamp in the log and
+    /// the fill of a bar have to be the same clock, or a gap read out of one
+    /// says nothing about the other. See [`combat_log`](crate::combat_log).
+    pub combat_log: crate::combat_log::CombatLog,
     /// Arrows and bolts in flight, aged and culled the way [`damage_numbers`]
     /// are — a `0x70` is an event, not a fact to keep past its own flight.
     ///
@@ -378,6 +385,7 @@ impl PresentationWorld {
     /// silently discard that span from static and flame animation.
     pub(crate) fn advance(&mut self, elapsed: Duration) {
         self.crowd.advance(elapsed);
+        self.combat_log.advance(elapsed);
         self.tile_animations.advance(elapsed);
         self.flame_clock += elapsed;
         for number in &mut self.damage_numbers {
@@ -1387,6 +1395,7 @@ mod tests {
             effects: Vec::new(),
             health_estimates: BTreeMap::new(),
             crowd: Crowd::default(),
+            combat_log: crate::combat_log::CombatLog::default(),
         };
         let update_interval = Duration::from_millis(750);
         let mut last_advance = Instant::now();

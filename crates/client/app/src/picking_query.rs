@@ -1032,6 +1032,22 @@ impl App {
                 }
             }
         }
+        // The combat recorder's three buttons. The mark is taken *here* rather
+        // than inside the panel because the snapshot it carries is the app's:
+        // what was drawn over the body is `Crowd::preparing`, and a panel that
+        // built its own answer would be recording a second opinion about the
+        // very thing under dispute.
+        if let Some(note) = request.mark_combat {
+            let me = self.world.me();
+            let seen = self.world.presentation.crowd.preparing(me);
+            self.world.presentation.combat_log.mark(me, note, seen);
+        }
+        if request.save_combat_log {
+            self.save_combat_log();
+        }
+        if request.clear_combat_log {
+            self.world.presentation.combat_log.clear();
+        }
         // The rebake button. A client with no facet open has nothing to bake a
         // graph *of*, and that is the state the button is disabled in anyway —
         // this is the second net, because a facet is the worker's own argument.

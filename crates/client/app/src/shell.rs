@@ -195,6 +195,16 @@ pub struct Request {
     pub create_item: Option<AdminItemRequest>,
     /// Raise a server-side target cursor for this animal catalogue entry.
     pub place_creature: Option<u16>,
+    /// Stamp a mark into the combat recorder, saying this.
+    ///
+    /// Edge-triggered like [`frame_dump`](Self::frame_dump): a mark is a thing
+    /// that *happens* at an instant, and a `String` that stayed set would stamp
+    /// one on every frame after.
+    pub mark_combat: Option<String>,
+    /// Write the combat recorder out to a file beside the client.
+    pub save_combat_log: bool,
+    /// Throw away what the combat recorder has kept.
+    pub clear_combat_log: bool,
     /// Type this staff command for the player, prefix and all (`.dummy`).
     ///
     /// A button, and the same sentence a person could have typed: the shard has
@@ -975,6 +985,7 @@ fn layout(
                     item_catalogue,
                     &mut request,
                 ),
+                Tab::Combat => combat_recorder_panel(ui, &mut desk.combat_recorder, world, &mut request),
             });
     });
     desk.open = open;
@@ -992,6 +1003,100 @@ fn layout(
     }
 
     request
+}
+
+/// **What this client was told about fighting, and when.**
+///
+/// The page behind *"there was a stall right here"*. Everything the shard says
+/// about a fight crosses the wire as an edge — an action begins, a stage
+/// changes, an outcome lands, a refusal starts or lifts — so a stall is the
+/// *absence* of an edge, and an absence cannot be looked at directly. What can
+/// be looked at is the **gap** between two edges, which is why that column is in
+/// front of every line rather than left to be subtracted by eye.
+///
+/// The mark is the other half. A person notices a stall and then reaches for the
+/// panel, by which time what was on screen is gone; a mark stamps the moment
+/// *and* a snapshot of what was drawn over the body at it, which is the one
+/// thing no later reading can recover.
+fn combat_recorder_panel(
+    ui: &mut egui::Ui,
+    page: &mut crate::desk::CombatRecorder,
+    world: &WorldState,
+    request: &mut Request,
+) {
+    let me = world.me();
+    ui.heading("Combat recorder");
+    ui.label(
+        "Every combat packet this client received, with the time between them. A stall is a gap: \
+         the shard names every refusal it makes, so once a line has a reason, what is left to find \
+         is how long nothing was said.",
+    );
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label("Note");
+        ui.add(
+            egui::TextEdit::singleline(&mut page.note)
+                .hint_text("what looked wrong")
+                .desired_width(220.0),
+        );
+        if ui.button("Mark here").clicked() {
+            request.mark_combat = Some(page.note.clone());
+        }
+    });
+    ui.label(
+        egui::RichText::new(
+            "A mark records what was drawn over your body at that instant — the bar, the stage, \
+             the last outcome and whatever is holding you up — because that is gone by the time \
+             anybody reads the log.",
+        )
+        .small(),
+    );
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut page.only_me, "Only my body");
+        ui.add(
+            egui::DragValue::new(&mut page.shown)
+                .range(10..=400)
+                .prefix("show ")
+                .suffix(" lines"),
+        );
+        if ui.button("Save to file").clicked() {
+            request.save_combat_log = true;
+        }
+        if ui.button("Clear").clicked() {
+            request.clear_combat_log = true;
+        }
+    });
+    ui.add_space(6.0);
+    let log = &world.presentation.combat_log;
+    let only = page.only_me.then_some(me).flatten();
+    ui.label(format!(
+        "{} entries kept; this client's clock is at {:.1}s.",
+        log.len(),
+        log.now().as_secs_f32()
+    ));
+    ui.separator();
+    // Newest at the bottom, which is the direction a log is read in, and the gap
+    // in front rather than behind: what a reader is scanning for is the row that
+    // *followed* a long silence.
+    let text = log.to_text(only);
+    let lines: Vec<&str> = text.lines().collect();
+    let tail = lines.len().saturating_sub(page.shown);
+    egui::ScrollArea::vertical()
+        .max_height(320.0)
+        .stick_to_bottom(true)
+        .id_salt("combat recorder log")
+        .show(ui, |ui| {
+            for line in &lines[tail..] {
+                // Monospaced, because the gap column only reads as a column if
+                // the digits line up.
+                let mut text = egui::RichText::new(*line).monospace().small();
+                if line.contains("MARK") {
+                    text = text.color(ui.visuals().warn_fg_color);
+                }
+                ui.label(text);
+            }
+        });
 }
 
 /// The compact F1 workflow for making arbitrary test items.  The shard remains

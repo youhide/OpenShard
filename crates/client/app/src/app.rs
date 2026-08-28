@@ -522,6 +522,40 @@ impl App {
         tracing::info!(into = %into.display(), "armed GPU frame dump");
     }
 
+    /// Write the combat recorder out beside the frame dumps.
+    ///
+    /// Beside them rather than somewhere of its own, because it is the same kind
+    /// of thing and the same person goes looking for it: a diagnostic artefact
+    /// this run produced, under
+    /// [`frame_dump_root`](crate::presentation::frame_dump_root) and therefore
+    /// under `OPENSHARD_FRAME_DUMP_DIR` when an operator has said where such
+    /// things go.
+    ///
+    /// Unfiltered on purpose. The panel narrows to one body because that is what
+    /// a person reads; a file is what gets handed to somebody else, and a log of
+    /// one fighter cannot answer a question about what the fighter's *opponent*
+    /// was doing at the same instant.
+    pub(crate) fn save_combat_log(&mut self) {
+        let root = crate::presentation::frame_dump_root();
+        if let Err(error) = std::fs::create_dir_all(&root) {
+            tracing::warn!(into = %root.display(), %error, "cannot write the combat log");
+            return;
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        let path = root.join(format!("combat-{stamp}.log"));
+        let text = self.world.presentation.combat_log.to_text(None);
+        match std::fs::write(&path, text) {
+            Ok(()) => tracing::info!(
+                into = %path.display(),
+                entries = self.world.presentation.combat_log.len(),
+                "wrote the combat log"
+            ),
+            Err(error) => tracing::warn!(into = %path.display(), %error, "cannot write the combat log"),
+        }
+    }
+
     /// Begin an injected presentation scenario after the window and GPU exist.
     pub(crate) fn begin_opening_scenario(&mut self) {
         match self.scenario.take() {

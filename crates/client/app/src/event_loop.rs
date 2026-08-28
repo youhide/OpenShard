@@ -597,6 +597,17 @@ impl ApplicationHandler<()> for App {
                         self.request_frame_dump();
                         true
                     }
+                    keyboard::Hotkey::MarkCombat => {
+                        // The snapshot is taken *here*, at the keystroke, and
+                        // that is the whole value of the key: a mark stamped a
+                        // second later, after a hand has found a panel, records
+                        // a screen that has moved on from the one it is about.
+                        let me = self.world.me();
+                        let seen = self.world.presentation.crowd.preparing(me);
+                        self.world.presentation.combat_log.mark(me, String::new(), seen);
+                        tracing::info!("marked the combat log");
+                        false
+                    }
                 };
                 if changed {
                     self.ask_redraw();
@@ -989,6 +1000,18 @@ impl ApplicationHandler<()> for App {
         if let Some(shell) = self.shell.as_ref() {
             self.desk = shell.desk();
         }
+        // F1 has two homes: the shell owns its layout and direct controls,
+        // while the app owns the World, Tile and Rig settings it applies from
+        // requests. Capture the latter at the same shutdown boundary so the
+        // next session is a faithful continuation of this one.
+        let mut f1 = desk::F1Settings::from_runtime(
+            &self.graphics,
+            self.control.rig(),
+            self.world.presentation.crowd.ease(),
+            self.scope.span(),
+        );
+        f1.apply_pending_request(&self.pending);
+        self.desk.f1 = Some(f1);
         if let Some(screen) = self.window.as_ref() {
             let size = screen.window.inner_size();
             // A window whose position the platform will not report — Wayland

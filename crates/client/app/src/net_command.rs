@@ -489,6 +489,70 @@ impl App {
         );
     }
 
+    /// Write one update into the combat recorder, if it is about fighting.
+    ///
+    /// Everything about a fight crosses the wire as an **edge** — an action
+    /// begins, a stage changes, an outcome lands, a refusal starts or lifts —
+    /// and a stall is the *absence* of an edge. So the record is kept with the
+    /// time each edge arrived, and the gap between two of them is the only place
+    /// a stall can live once every edge has a name. See
+    /// [`combat_log`](crate::combat_log).
+    ///
+    /// Animation packets are in it too, and they are not decoration: half of
+    /// *"he just stands there"* is a bar that says one thing and a body that is
+    /// doing another, and no record made of one of the two can show that.
+    fn record_combat(&mut self, update: &link::Update) {
+        use crate::combat_log::Event;
+        let log = &mut self.world.presentation.combat_log;
+        match update {
+            link::Update::CombatActionPhase(phase) => log.record(
+                Some(phase.actor),
+                Event::Committed {
+                    kind: phase.kind,
+                    phase: phase.phase,
+                },
+            ),
+            link::Update::CombatActionStage(stage) => {
+                log.record(Some(stage.actor), Event::Staged { stage: stage.stage });
+            }
+            link::Update::CombatActionEnded(ended) => {
+                log.record(
+                    Some(ended.actor),
+                    Event::Ended {
+                        outcome: ended.outcome,
+                    },
+                );
+            }
+            link::Update::CombatActionBalked(balked) => {
+                log.record(Some(balked.actor), Event::Balked { balk: balked.balk });
+            }
+            link::Update::SwingTiming(timing) => log.record(
+                Some(timing.serial),
+                Event::Timed {
+                    millis: timing.duration.millis(),
+                },
+            ),
+            link::Update::Animation(animation) => log.record(
+                Some(animation.serial),
+                Event::Animated {
+                    group: animation.action,
+                },
+            ),
+            link::Update::NewAnimation(animation) => log.record(
+                Some(animation.serial),
+                Event::Animated {
+                    group: animation.action,
+                },
+            ),
+            // The arrow. `from` is the shooter where the shard named one, which
+            // it does for every projectile combat emits.
+            link::Update::Effect(effect) => {
+                log.record(effect.from, Event::Flight { art: effect.art });
+            }
+            _ => {}
+        }
+    }
+
     /// Reduce one cross-thread update at the event-loop boundary.
     pub(crate) fn on_update(&mut self, update: link::Update) -> bool {
         let now = Instant::now();
@@ -587,6 +651,12 @@ impl App {
             link::Update::NavigationLost { why } => ("navigation lost", why.clone()),
             link::Update::Lost(_) => ("lost", String::new()),
         };
+        // Everything the shard says about a fight, written down with the time it
+        // arrived. Before the `match` and not inside the arms, so that adding an
+        // arm cannot quietly leave an edge out of the record — this is the one
+        // place all four combat packets are in view at once, and a recorder that
+        // is missing an edge is worse than none: the gap it shows is its own.
+        self.record_combat(&update);
         match update {
             link::Update::World { view } => {
                 // The walk restarts with the world. A `0x1B` is a fresh

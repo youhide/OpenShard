@@ -283,6 +283,14 @@ pub(crate) enum Hotkey {
     /// the instant a person is looking at, and anything that had to be switched
     /// on beforehand would dump a different one.
     FrameDump,
+    /// Stamp a mark into the combat recorder: *"it stalled here"*.
+    ///
+    /// A key for [`FrameDump`](Self::FrameDump)'s reason, and more so. What a
+    /// mark records is the instant a person decided nothing was happening,
+    /// together with what was drawn over their body at it — and a hand that has
+    /// to find F1, then a tab, then a button has let that instant go. The panel
+    /// has the same button for when there is time to type a note.
+    MarkCombat,
 }
 
 impl Hotkey {
@@ -292,7 +300,7 @@ impl Hotkey {
     /// The list exists so that "no two actions share a key" is a test rather
     /// than a thing somebody notices — see [`Self::key`], which is also the
     /// question a bindings window asks.
-    pub(crate) const ALL: [Self; 23] = [
+    pub(crate) const ALL: [Self; 24] = [
         Self::Speak,
         Self::DevWindow,
         Self::Relock,
@@ -316,6 +324,7 @@ impl Hotkey {
         Self::LightView,
         Self::Fringe,
         Self::FrameDump,
+        Self::MarkCombat,
     ];
 
     /// Which key this is on today.
@@ -345,6 +354,10 @@ impl Hotkey {
             Self::LightView => KeyCode::F11,
             Self::Fringe => KeyCode::F2,
             Self::FrameDump => KeyCode::F12,
+            // Every function key is taken, and this one wants to be reachable
+            // without looking: `k` for mark, and letters are free while the
+            // speech line is shut (it opens on Enter).
+            Self::MarkCombat => KeyCode::KeyK,
         }
     }
 

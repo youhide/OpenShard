@@ -57,6 +57,7 @@ mod app;
 mod audio;
 mod chat;
 mod clutter;
+mod combat_log;
 mod crowd;
 mod desk;
 mod diagnostics;
@@ -840,7 +841,7 @@ pub fn run<D: Dial + Send + 'static>(
     //
     // Under the second one the connection is also told where this client keeps
     // the ground it is given — the working directory, which is where
-    // `client_ui.toml` already lives and for that file's reason: per-checkout,
+    // `client_ui.ron` already lives and for that file's reason: per-checkout,
     // visible, and deleting it is how a person asks for the whole facet again.
     // See `openshard_client_net::cache`.
     let ground_source = match world {
@@ -1031,6 +1032,10 @@ pub fn run<D: Dial + Send + 'static>(
     };
     desk.audio = desk.audio.clamped();
     let movement = desk.movement;
+    // `None` is an older UI file. Its first launch keeps the command-line
+    // diagnostics exactly as before; once this client closes it writes a full
+    // F1 snapshot and subsequent launches restore it.
+    let f1 = desk.f1;
     let mut app = App {
         audio: audio::Audio::open(dir, desk.audio.effects, desk.audio.music),
         // Built before `resources` moves `tiledata` and `map` into it: this
@@ -1077,9 +1082,10 @@ pub fn run<D: Dial + Send + 'static>(
                 crowd: {
                     // The body's ease, which is not the camera's — see `STARTUP_EASE`.
                     let mut crowd = Crowd::default();
-                    crowd.set_ease(STARTUP_EASE);
+                    crowd.set_ease(f1.map_or(STARTUP_EASE, desk::F1Settings::ease));
                     crowd
                 },
+                combat_log: combat_log::CombatLog::default(),
             },
             // Nobody is in the way of a world nobody has described yet. The
             // first `entered` fills this, beside the clutter — see
@@ -1122,64 +1128,74 @@ pub fn run<D: Dial + Send + 'static>(
             skill_groups,
             radar_colors,
         },
-        graphics: graphics::GraphicsSettings {
-            cutaway_disabled: std::env::var_os("OPENSHARD_DISABLE_CUTAWAY").is_some(),
-            body_overlap_transparency_disabled: std::env::var_os(
-                "OPENSHARD_DISABLE_BODY_OVERLAP_TRANSPARENCY",
-            )
-            .is_some(),
-            // The ordinary local lighting switch is still F10.
-            night: false,
-            // The shard's light level is used unless F1 asks for a fixed day.
-            time_of_day: true,
-            daylight: graphics::Daylight::new(),
-            // The fringe as the environment asks for it, which is
-            // `Fringe::Clamp` when it asks for nothing — F2 cycles from
-            // wherever that leaves it.
-            fringe: openshard_client_render::impostor::Fringe::from_env(),
-            sunlit: false,
-            // And the sky field off with it: while the point lights are the
-            // subject, the ambient holds still. See `GraphicsSettings::sky_field`.
-            sky_field: false,
-            // And a torch in hand for when it is not daylight: see
-            // `GraphicsSettings::lantern`.
-            lantern: true,
-            light_view: View::Lit,
-            // The whole world. A client that started with anything ticked off
-            // would be a client showing a picture nobody asked for.
-            drawing: frame::Draw::EVERYTHING,
-            frame_dump: None,
-            frame_dumps: 0,
-            show_terrain: false,
-            // The sight overlay is a debugging picture, and off until somebody
-            // asks for it: see `GraphicsSettings::show_sight`.
-            show_sight: false,
-            // Arm's length, which is the shard's `MELEE_REACH` and the reach of
-            // every fighter holding no bow. A person shooting one turns it up:
-            // see `GraphicsSettings::sight_reach` for why this is a knob at all.
-            sight_reach: graphics::MELEE_SIGHT_REACH,
-            show_interiors: false,
-            buildings: false,
-            z_slice: false,
-            z_slice_view: openshard_client_render::interiors::ZSliceView::Auto,
-            floor_view: openshard_client_render::interiors::FloorView::Auto,
-            show_occluders: false,
-            show_solids: solids,
-            solids_only: false,
-            solids_opaque: false,
-            solids_everything: false,
-            solids_held: 0,
-            solids_drawn: 0,
-            occlusion_bake: occlusion::bake::Bake::new(),
-            // The item under the cursor, ringed and lit, and the ground
-            // otherwise: see `graphics::HighlightTarget` and `graphics::HighlightStyle`.
-            highlight: graphics::HighlightTarget::default(),
-            highlight_style: graphics::HighlightStyle::default(),
-            covered: None,
+        graphics: {
+            let mut graphics = graphics::GraphicsSettings {
+                cutaway_disabled: std::env::var_os("OPENSHARD_DISABLE_CUTAWAY").is_some(),
+                body_overlap_transparency_disabled: std::env::var_os(
+                    "OPENSHARD_DISABLE_BODY_OVERLAP_TRANSPARENCY",
+                )
+                .is_some(),
+                // The ordinary local lighting switch is still F10.
+                night: false,
+                // The shard's light level is used unless F1 asks for a fixed day.
+                time_of_day: true,
+                daylight: graphics::Daylight::new(),
+                // The fringe as the environment asks for it, which is
+                // `Fringe::Clamp` when it asks for nothing — F2 cycles from
+                // wherever that leaves it.
+                fringe: openshard_client_render::impostor::Fringe::from_env(),
+                sunlit: false,
+                // And the sky field off with it: while the point lights are the
+                // subject, the ambient holds still. See `GraphicsSettings::sky_field`.
+                sky_field: false,
+                // And a torch in hand for when it is not daylight: see
+                // `GraphicsSettings::lantern`.
+                lantern: true,
+                light_view: View::Lit,
+                // The whole world. A client that started with anything ticked off
+                // would be a client showing a picture nobody asked for.
+                drawing: frame::Draw::EVERYTHING,
+                frame_dump: None,
+                frame_dumps: 0,
+                show_terrain: false,
+                // The sight overlay is a debugging picture, and off until somebody
+                // asks for it: see `GraphicsSettings::show_sight`.
+                show_sight: false,
+                // Arm's length, which is the shard's `MELEE_REACH` and the reach of
+                // every fighter holding no bow. A person shooting one turns it up:
+                // see `GraphicsSettings::sight_reach` for why this is a knob at all.
+                sight_reach: graphics::MELEE_SIGHT_REACH,
+                show_interiors: false,
+                buildings: false,
+                z_slice: false,
+                z_slice_view: openshard_client_render::interiors::ZSliceView::Auto,
+                floor_view: openshard_client_render::interiors::FloorView::Auto,
+                show_occluders: false,
+                show_solids: solids,
+                solids_only: false,
+                solids_opaque: false,
+                solids_everything: false,
+                solids_held: 0,
+                solids_drawn: 0,
+                occlusion_bake: occlusion::bake::Bake::new(),
+                // The item under the cursor, ringed and lit, and the ground
+                // otherwise: see `graphics::HighlightTarget` and `graphics::HighlightStyle`.
+                highlight: graphics::HighlightTarget::default(),
+                highlight_style: graphics::HighlightStyle::default(),
+                covered: None,
+            };
+            if let Some(f1) = f1 {
+                f1.apply_to_graphics(&mut graphics);
+            }
+            graphics
         },
         // The device's own limit replaces WebGL2's floor once there is a device
         // to ask; the floor is the smallest thing this has to run on.
-        control: Control::new(Camera::new(start, 1024, 768), 2048, STARTUP_RIG),
+        control: Control::new(
+            Camera::new(start, 1024, 768),
+            2048,
+            f1.map_or(STARTUP_RIG, desk::F1Settings::rig),
+        ),
         zoom_limit_reported: false,
         shell: None,
         // What the last run left, already read above so audio starts with the
@@ -1279,7 +1295,7 @@ pub fn run<D: Dial + Send + 'static>(
         },
         tooltips: tooltips::Tooltips::default(),
         chat: Chat::default(),
-        scope: Scope::new(SCOPE_SPAN),
+        scope: Scope::new(f1.map_or(SCOPE_SPAN, desk::F1Settings::scope_span)),
         frames: frames::Frames::new(FRAMES_SPAN),
         repacks: 0,
         // Nothing unless the environment asked, and nothing this reads again:
