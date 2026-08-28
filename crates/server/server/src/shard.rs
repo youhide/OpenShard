@@ -441,6 +441,44 @@ impl Shard {
 /// below the loop — the trades, the last snapshot, and the save task awaited to
 /// the end. **This function returns only once the world is on disk**, which is
 /// what makes it something a caller may wait for.
+/// Say what a closed window found, when it found something new.
+///
+/// # Why the line reads the way it does
+///
+/// The number an operator needs is not "the shard is busy" — it is *how far the
+/// wire's arithmetic is now from the truth*, because every duration the shard
+/// announces is a tick count converted at the declared rate. A shard at a
+/// quarter of its rate tells a client a bow lands in 1600ms and lands it in
+/// 6500ms, and no packet in the protocol carries anything that would let the
+/// client notice. So the rate is named against the rate that was published, and
+/// `busy` is beside it because that is what separates a tick this shard cannot
+/// finish from a tick this shard was never given the chance to run.
+///
+/// Announcement lives here rather than in [`crate::pace`] so that the
+/// measurement stays a measurement: `Pace` can be driven by a test with no
+/// subscriber attached, and nothing it reports depends on having one.
+fn report_pace(pace: &mut crate::pace::Pace, window: crate::pace::Window) {
+    match pace.verdict(window) {
+        Some(crate::pace::Verdict::FellBehind(window)) => warn!(
+            observed_ticks_per_second = window.observed_rate(),
+            declared_ticks_per_second = openshard_state::TICKS_PER_SECOND,
+            behind_ticks_per_second = window.behind_ticks(),
+            busy_share = window.busy_share(),
+            worst_tick_ms = window.worst.as_secs_f32() * 1000.0,
+            "the tick is slower than the rate every announced duration is denominated in; \
+             clients are being told intervals this shard will not keep"
+        ),
+        Some(crate::pace::Verdict::CaughtUp(window)) => info!(
+            observed_ticks_per_second = window.observed_rate(),
+            declared_ticks_per_second = openshard_state::TICKS_PER_SECOND,
+            busy_share = window.busy_share(),
+            worst_tick_ms = window.worst.as_secs_f32() * 1000.0,
+            "the tick is keeping its declared rate"
+        ),
+        None => {}
+    }
+}
+
 pub async fn run_shard(
     mut events: ServerEventRx,
     config: &Config,
@@ -524,7 +562,14 @@ pub async fn run_shard(
     let mut ticker = tokio::time::interval(TICK_INTERVAL);
     // A tick that ran late must not try to catch up by running several in a row:
     // that turns a hiccup into a stall, and a fixed timestep into a variable one.
+    //
+    // The cost of that choice is that an overrun becomes a **slower clock**
+    // rather than a visible burst, and the shard goes on announcing durations
+    // denominated in the rate it is no longer keeping. `pace` below is what makes
+    // the slower clock sayable; see `crate::pace` for why the wall clock may be
+    // read here and nowhere inside the tick.
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut pace = crate::pace::Pace::new();
     let mut key_sweep = tokio::time::interval(KEY_SWEEP);
     key_sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -535,7 +580,16 @@ pub async fn run_shard(
             // world would stop simulating under exactly the load that needs it.
             biased;
 
-            _ = ticker.tick() => shard.tick(),
+            _ = ticker.tick() => {
+                let began = Instant::now();
+                shard.tick();
+                // Measured around the tick rather than inside it: the world is
+                // never handed a wall clock, so replay is untouched and a run
+                // with this measurement produces the same world as one without.
+                if let Some(window) = pace.record(began, began.elapsed()) {
+                    report_pace(&mut pace, window);
+                }
+            }
 
             // Before `events`: a store that is failing is worth hearing about
             // ahead of the next packet, and there is never a queue of these.

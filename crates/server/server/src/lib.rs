@@ -77,6 +77,7 @@ pub mod stop;
 
 mod content;
 mod dispatch;
+mod pace;
 mod session;
 #[cfg(test)]
 mod testing;

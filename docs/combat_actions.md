@@ -896,11 +896,30 @@ of it belonged to any of them.
     collecting. Ф4.5 verified the interval **tick by tick**, and a tick-by-tick
     oracle is blind to this by construction: it is the one defect that lives
     entirely in the conversion between the two clocks.
-  - The instrument comes before the fix: the shard measures how long its own tick
-    took and says so when the answer is not the one it published. Whether the
-    right answer after that is a faster shard, a wire that carries wall-clock
-    milliseconds, or an announcement that admits the shard's real rate is a
-    decision nobody can take while the rate is a number nobody has.
+  - **The instrument is built** (`crates/server/server/src/pace.rs`). The driving
+    loop measures the span between two tick *starts* — the span the wire's
+    arithmetic is denominated in, not the duration of the body — over one
+    second's worth of them, and announces the result on its **edges**: one line
+    when the shard stops keeping its declared rate and one when it starts again,
+    because a level restated every second buries a log and one stated once hides
+    the recovery. It reads the wall clock from *outside*
+    `World::tick`, which is what keeps `style.md` § Randomness and time intact:
+    the world is never handed a clock, nothing branches on the measurement, and a
+    run with it produces the same world as a run without.
+    - The verdict has **no tunable margin**. A window is behind when it took
+      longer than its budget by at least one whole tick — the unit being counted
+      is the unit the comparison is made in, so it is a quantum and not a fudge
+      constant tuned against one machine.
+    - `busy_share` is the field that says *whose* fault it is, and it is the
+      reason the line is worth reading rather than merely worth having: near 1.0
+      is a tick this shard cannot finish, near 0.0 is a tick this shard was ready
+      to run and was not given. In the playground — a debug build sharing a
+      process with a renderer — the expectation is the second, and that makes it
+      a *deployment* answer rather than a combat one.
+  - What is still open is the fix, and it needs the numbers first: a faster
+    shard, a wire that carries wall-clock milliseconds, or an announcement that
+    admits the shard's real rate are three different decisions, and nobody could
+    take any of them while the rate was a number nobody had.
 - **A mark that was pressed for is not in the log it was pressed into.** The
   session that produced the file above pressed `k` and the saved log holds no
   `MARK` line, with 40 entries against a capacity of 4000 — so nothing was
