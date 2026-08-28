@@ -277,6 +277,56 @@ guards = true
 # [gameplay.action_rules.breath]
 # blinded = "break"
 
+# How long each kind of action takes, as a PERCENTAGE of what the weapon's own
+# row and the swing formula above come to. 100 is the formula's answer, 50 is
+# twice as fast, 200 is half.
+#
+# A percentage and not an interval, because dexterity and the weapon still have
+# to matter: a shard that wrote `shot = 1600ms` would have made every bow, every
+# archer and every point of dexterity the same speed. This scales that answer.
+#
+# The shipped shot is 64 rather than 100, and it is the one row that is not the
+# formula's own: the pre-AoS speed column puts a bow at default dexterity at two
+# and a half seconds between arrows, which reads on screen as a body standing
+# about between shots, and no integer in that column lands on a rounder number.
+# 64 is what makes it 1.6 seconds. Every other bow and every other archer scales
+# with it.
+#
+# A scripted SwingSpeed on one creature is NOT scaled by this — it is already the
+# last word about that creature's pace.
+#
+# [gameplay.action_speed]
+# swing = 100
+# shot = 64
+# breath = 100
+
+# How a running action's interval divides into the stretches a watcher is told
+# about, as percentages — docs/combat_actions.md's D12. The RELEASE is whatever
+# is left over, so these must not add up past 100.
+#
+# Two and not three: there is no `aim` share, and that is a decision rather than
+# an omission. Aiming is HOLDING, and an action running through an interval holds
+# nothing — its impact is coming whether or not anybody waits for it. Given a
+# share, what it drew was a bow already bent with nothing happening, which is a
+# delay with no cause. `Aim` is the stretch an ARMED action sits in, and nothing
+# in this table can produce one.
+#
+# The rows below are the ones the shard already runs — a blow is mostly its
+# wind-up, a bow is mostly its draw, a breath is mostly the filling of the lungs.
+# A row you write is the WHOLE row, as with action_rules above.
+#
+# [gameplay.action_stages.swing]
+# ready = 15
+# load = 65
+#
+# [gameplay.action_stages.shot]
+# ready = 10
+# load = 70
+#
+# [gameplay.action_stages.breath]
+# ready = 20
+# load = 60
+
 # Development accounts, in plaintext, until there is a database.
 #
 # `access` is what a staff command is gated on, and it ships absent — so this

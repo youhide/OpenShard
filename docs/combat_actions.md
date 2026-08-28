@@ -415,6 +415,20 @@ invention D6 keeps the client out of. So the server walks the stages and
 announces each transition, and **a stage never goes backwards**: a `Slow` lowers
 the fraction elapsed, and a fighter who has drawn a bow has not un-drawn it.
 
+> **Amended at Ф4.5, in the one place playing it found wrong: `Aim` is not a
+> share of the interval.** Three shares and a remainder made *aiming* a stretch
+> of a released action — and a released action is not aiming at anything, its
+> impact is coming whether or not somebody waits for it. Given a third of the
+> interval, what it drew was a bow already bent with nothing happening: a delay
+> with no cause, and it was reported as exactly that. **Aiming is holding**, and
+> the only thing on this shard that holds is a `Phase::Armed`. So the shares are
+> two and a remainder (`ready`, `load`, and the release), the walk returns
+> `Ready → Load → Release` and can no longer return `Aim` at all, and `Aim` is
+> entered in exactly one place: the sustain pass, for an armed action, which is
+> Ф7's. Everything else about D12 stands — the boundaries are still the shard's,
+> still an operator setting, still announced rather than derived. There is one
+> fewer of them, and the one that left was the one no fighter was doing.
+
 ## The wire
 
 **Four packets now, and the two later ones were found by playing rather than by
@@ -445,7 +459,10 @@ supposed to read intent.
   written as `0`, because that is already the filler an outcome that is not an
   interruption writes. Sent on the edge in both directions and never in between.
 - **`CombatActionStage`** — subcommand `+ 19`, D12's. Actor and which of the four
-  stretches it just entered. Deliberately not folded into `CombatActionPhase`,
+  stretches it just entered — three of which a released action can be in, the
+  fourth (`Aim`) reserved for an armed one; see D12's amendment. The byte carries
+  all four and always has, so nothing on the wire changed when the share table
+  lost one. Deliberately not folded into `CombatActionPhase`,
   which carries the interval a bar is measured against: a stage changes *inside*
   that interval, and re-sending the phase to say so would restart the client's
   clock and reset the very bar the stage annotates.
@@ -462,10 +479,13 @@ needs, and a bar that could only fill was never going to draw it.
 
 Ф1–Ф4 are the foundation and are ordered by what a player can see. Ф5–Ф7 each
 spend one axis of the model, and every one of them is a phase rather than a
-feature only because Ф1 separated the axes. Ф4.1 is between them and was not
-planned: it is what the first person to *play* the finished picture found
-missing, and both halves of it are D1 finally applied at the end it was never
-applied to.
+feature only because Ф1 separated the axes. Ф4.1 to Ф4.5 are between them and
+none of them was planned: they are what the people who *played* the finished
+picture kept finding, one report at a time. Read in order they are a single
+argument — the shard must speak (Ф4.1), truthfully (Ф4.2), on every tick
+(Ф4.3), to a screen that was not watching (Ф4.4) — and Ф4.5 is where the
+question stops being about the shard at all: it says everything correctly, and
+the *picture* was posing.
 
 **Ф1 — the object. ✅ Built.** `CombatAction`, the four verbs, and both new
 packets. Only `Phase::Releasing` is reachable — nothing arms yet — but the phase
@@ -744,6 +764,80 @@ anyway.
   a full bar is a blow that is due — until the ending arrives, with `RUNNING_GRACE`
   behind it as what the timeout was always described as: a bound on a leak.
 
+**Ф4.5 — the fight measured, and the picture that lied. ✅ Built.** The report
+came back a fourth time, and this time with a different shape: *"there is a
+problem in the loop itself, and we need better debuggability"*. So the loop was
+**measured** before it was touched — and the measurement is the finding. A bow
+fight run through Ф4.3's oracle announces 2500ms, waits 2500ms, opens the next
+gesture on the tick the last one lands, and drifts by nothing across four
+hundred ticks. *Done when:* the thing a person can see is the thing the shard is
+doing, and when it is not, the disagreement is on a screen and in a file rather
+than in an argument.
+
+- **The animation was posing, not playing, and the arithmetic is the whole
+  finding.** `staged_swing_frame` entered an "anticipation" frame after one
+  ordinary cadence, **held that single frame** until the last few frames' worth
+  of time was left, then flicked the rest through at 80ms each. On the 2500ms
+  draw a bow actually had that is 2020ms frozen and 400ms of the entire shot —
+  not *sometimes*, every shot. The bar beside it was filling honestly, so the
+  screen also contradicted itself: a body that had not moved, under a bar at
+  sixty percent. The art is spread evenly over the shard's interval now. The
+  defect the staging was written for — a slow weapon finishing its visible swing
+  in half a second and then idling invisibly — is the opposite end of the same
+  axis, and spreading closes it too.
+- **`ActionStage::Aim` leaves the share table, because aiming is *holding* and a
+  released action holds nothing.** D12 gave it a share of the interval between
+  the draw and the loose, and what that draws is a bow already bent with nothing
+  happening: a delay with no cause, and it was read as one. Holding is what an
+  armed action does, and Ф7's overwatch is the only thing that will ever do it,
+  so `Aim` is now entered in exactly one place — `advance_stage`, for a
+  `Phase::Armed` — and a released action walks `Ready → Load → Release`. This
+  amends D12 rather than repealing it: the boundaries are still the shard's and
+  still cross the wire; there is one fewer of them.
+- **A spoiled action costs a whole fresh interval.** `commit_actions` pins
+  `next_swing` to the impact it is promising, so an action cut at nine tenths of
+  its draw left the schedule nine tenths of the way through — and the
+  replacement committed on the next tick took the *leftover* as its whole
+  interval: an arrow out of a body that had not moved. `spoil` is the one door
+  for that now, and it makes true the sentence Ф1's backlog already claimed.
+  Naming the opponent you are already fighting is likewise no longer a change of
+  mind: a second attack packet used to throw away a bow at four fifths of its
+  draw and say `Abandoned`, which is exactly the event the report named.
+- **`gameplay.action_speed` is the third table keyed by kind**, beside the rules
+  and the stages, and it is a percentage of what the weapon row and the era
+  formula produce rather than an interval of its own — dexterity and the weapon
+  still have to matter. The shipped shot runs at 64% because the pre-AoS column
+  puts a bow at two and a half seconds and no integer in it lands on a rounder
+  number; 1.6s is what an archer was asked to feel like.
+- **Every fighter turns to what it is about to hit, shot included** — and the
+  real defect was underneath. Ф2 exempted a shot because turning a kiting archer
+  costs it the step it was going to escape with, which is true about the brain
+  and was the wrong place to fix it: `tick::motion::step` applied **turn-as-step
+  to a decreed step**. That rule exists so a client's walk and the server's
+  answer stay in step over a lossy sequence, and a mobile the shard moves itself
+  is speaking no such protocol. It turns and moves in one beat now, the way
+  `BaseAI.DoMove` does.
+- **`.dummy` — a scarecrow, and it is a testing primitive rather than content.**
+  Chasing a report against a live creature means the mob, its brain, the sight
+  line and the operator are all moving at once and no two runs are the same run.
+  It is built out of *omissions*: sight zero, no wander and the aggressive
+  disposition is exactly what `npc::spawn` builds **no brain** from, so nothing
+  thinks for it and `ai::retaliate` skips it. Grey, so practising on one flags
+  nobody. The marker component is the one thing that is not an omission, and it
+  is saved — a mobile recognised by what it lacks is one something else will
+  eventually resemble.
+- **The client records the fight it was shown.** `combat_log`: every combat
+  packet with the gap since the previous one in a fixed column, plus a **mark**
+  (`k`, or the Combat tab in F1) that stamps the instant together with a snapshot
+  of what was drawn over the marked body at it. That snapshot is the point — a
+  person notices a stall and *then* reaches for the panel, by which time the
+  screen has moved on. Animation packets are in the record beside the phase
+  packets, because half of *"he just stands there"* is a bar saying one thing and
+  a body doing another, and a record made of one of the two cannot show it.
+- **`print_a_bow_fight`** is the shard-side half: `#[ignore]`d, run by name, and
+  it prints the cadence in ticks. It proves nothing and is not meant to — it is
+  what you run before arguing about frames.
+
 **Ф5 — the fight costs something.** D9: an opening stamina cost at the commit, a
 per-tick `Drain` while sustaining, the owed fatigue spent at the impact, `Winded`
 as a condition the table can read, and the regeneration pulse excluding anyone
@@ -775,8 +869,39 @@ index of armed squares, and that index is a design rather than a variant.
 
 ## Backlog
 
-Found while building Ф1, Ф2, Ф3, Ф4 and the four half-phases after them, and none
+Found while building Ф1, Ф2, Ф3, Ф4 and the five half-phases after them, and none
 of it belonged to any of them.
+
+**From Ф4.5:**
+
+- **A kiting archer is turned every commit, and nobody has watched one since.**
+  The turn-as-step fix gives the brain its beat back and the test that measures
+  it is green again, but *"a creature that must face its mark to shoot"* is a new
+  constraint on every ranged brain and it has been checked against exactly one
+  scene. The archer, the mage and whatever breathes fire all read that rule now.
+- **`gameplay.action_speed.shot` is `64` and that is a number, not a decision.**
+  It was chosen to make one weapon at one dexterity come to 1.6 seconds. Every
+  other bow and every other archer scales with it, which is the right *shape*,
+  but nobody has fought at either end of that range. The honest end state is
+  probably a corrected `old_speed` column for archery rather than a percentage
+  over the whole kind — that is a weapon-table question and belongs with Ф6.
+- **The recorder has no server half, and the two clocks cannot be lined up.** The
+  wire carries no tick number, so a client can say *when it learned* something
+  and never *when the shard decided* it. A shard running behind its tick rate and
+  a packet delivered late are the same picture from here. Putting a tick on the
+  phase packet is one field and would make the two logs diffable; whether that is
+  worth a wire change before anybody has actually been confused by it is the open
+  question.
+- **Nothing tests that the recorder sees every combat edge.** `record_combat` is
+  a `match` with a `_ => {}` arm, which is exactly the shape that goes quietly
+  out of date: a fifth combat packet would be missing from the record and the
+  gap it left would look like the defect. It wants the same treatment
+  `StaffCommand` has — an exhaustive match over a closed list — and `link::Update`
+  is not that list today.
+- **The mark's snapshot is of *your own* body only.** The interesting report is
+  often about somebody else — the monster that stopped, the archer across the
+  street — and marking one requires having them under the cursor, which nothing
+  reads. A mark that took the hovered body would cost one line and one lookup.
 
 **From Ф4.4:**
 

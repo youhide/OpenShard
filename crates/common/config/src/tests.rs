@@ -300,6 +300,69 @@ fn the_shipped_account_has_no_authority_and_the_file_says_so() {
     );
 }
 
+/// **The commented rows in `default.toml` are the table the shard actually
+/// runs.**
+///
+/// They are written as *"uncommenting this changes nothing"*, and that sentence
+/// is either true or it is the worst kind of documentation: an operator who
+/// uncomments a block to edit one number, and thereby silently changes three
+/// others, has been lied to by the file they were reading. The claim is the same
+/// one `action_stages`'s and `action_rules`'s own unit tests make about the two
+/// vocabularies in code — this is the third copy, in the operator's file, and it
+/// is the copy nobody would notice going stale.
+///
+/// Only the combat tables, and only the blocks that claim to be the shipped
+/// ones: uncommenting is done by lifting every `# ` line that follows a
+/// `# [gameplay.action_speed]` or `# [gameplay.action_stages.…]` header, which is
+/// exactly the gesture a person makes with a block-comment key.
+#[test]
+fn the_commented_combat_tables_in_the_shipped_file_are_the_shipped_tables() {
+    let mut uncommented = String::new();
+    let mut inside = false;
+    for line in DEFAULT_TOML.lines() {
+        let Some(bare) = line.strip_prefix("# ").map(str::trim_end) else {
+            // A blank line ends a block, the way it does for a person reading.
+            inside = false;
+            continue;
+        };
+        if bare.starts_with("[gameplay.action_speed]") || bare.starts_with("[gameplay.action_stages.") {
+            inside = true;
+        }
+        if inside {
+            uncommented.push_str(bare);
+            uncommented.push('\n');
+        }
+    }
+    assert!(
+        uncommented.contains("[gameplay.action_speed]")
+            && uncommented.contains("[gameplay.action_stages.shot]"),
+        "default.toml no longer shows the combat pacing tables an operator would look for:\n{uncommented}"
+    );
+    // Only the two tables, because the lifted block is not a whole file — it has
+    // no `[server]` and is not meant to. The field types are the real ones, so
+    // this is still the shard's own parser reading the operator's own rows.
+    #[derive(serde::Deserialize)]
+    struct JustTheTables {
+        gameplay: JustTheGameplay,
+    }
+    #[derive(serde::Deserialize)]
+    struct JustTheGameplay {
+        action_speed: crate::ActionSpeedsConfig,
+        action_stages: crate::ActionStagesConfig,
+    }
+    let parsed: JustTheTables = toml::from_str(&uncommented).expect("the commented rows must parse");
+    assert_eq!(
+        parsed.gameplay.action_speed,
+        crate::ActionSpeedsConfig::shipped(),
+        "the action_speed rows in default.toml are not the ones the shard runs"
+    );
+    assert_eq!(
+        parsed.gameplay.action_stages,
+        crate::ActionStagesConfig::shipped(),
+        "the action_stages rows in default.toml are not the ones the shard runs"
+    );
+}
+
 #[test]
 fn a_config_round_trips_through_toml() {
     let original = config(MINIMAL);
