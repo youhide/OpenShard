@@ -607,103 +607,134 @@ fn component_labels(footing: &Footing<'_>, local: &RegionPlaces) -> Vec<u16> {
     if cells == 0 {
         return labels;
     }
-    // Out-degree is bounded by the eight directions and in-degree is not: two
-    // places of one neighbouring column can land on the same place — which is
-    // exactly what a stair does, and what a fixed eight-slot array here used to
-    // make an out-of-bounds panic.
-    let mut outgoing = vec![[NO_NEIGHBOR; Direction::ALL.len()]; cells];
-    let mut outgoing_len = vec![0_u8; cells];
 
-    for from_index in 0..cells {
-        // The whole expansion at once. Eight `step_allowed` calls would resolve
-        // the place being stepped off eight times over and each cardinal
-        // neighbour twice — the same waste `find_path` stopped paying in N3, on
-        // the pass that walks every place of the facet.
-        for next in steps_out_of(footing, local.points[from_index])
-            .into_iter()
-            .flatten()
-        {
-            let Some(next_index) = local.slot(next) else {
-                continue;
-            };
-            let out_at = usize::from(outgoing_len[from_index]);
-            outgoing[from_index][out_at] = next_index as u32;
-            outgoing_len[from_index] += 1;
-        }
-    }
-
-    // The same edges the other way round, counting-sorted into one run per place
-    // rather than a vector per place: Kosaraju's second pass walks them and a
-    // region has a thousand of them.
-    let mut incoming_offsets = vec![0_u32; cells + 1];
-    for from_index in 0..cells {
-        for &to in &outgoing[from_index][..usize::from(outgoing_len[from_index])] {
-            incoming_offsets[to as usize + 1] += 1;
-        }
-    }
-    for index in 0..cells {
-        incoming_offsets[index + 1] += incoming_offsets[index];
-    }
-    let mut filled = incoming_offsets.clone();
-    let mut incoming = vec![0_u32; incoming_offsets[cells] as usize];
-    for from_index in 0..cells {
-        for &to in &outgoing[from_index][..usize::from(outgoing_len[from_index])] {
-            incoming[filled[to as usize] as usize] = from_index as u32;
-            filled[to as usize] += 1;
-        }
-    }
-
-    // Kosaraju's algorithm keeps directed height transitions honest — and since
-    // N4 there are some: a ledge a body steps off and cannot climb back onto is
-    // an edge one way and no edge the other.
-    let mut seen = vec![false; cells];
-    let mut finish = Vec::with_capacity(cells);
-    for root in 0..cells {
-        if seen[root] {
-            continue;
-        }
-        seen[root] = true;
-        let mut stack = vec![(root, 0_u8)];
-        while let Some((at, next)) = stack.last_mut() {
-            if usize::from(*next) < usize::from(outgoing_len[*at]) {
-                let neighbor = outgoing[*at][usize::from(*next)] as usize;
-                *next += 1;
-                if !seen[neighbor] {
-                    seen[neighbor] = true;
-                    stack.push((neighbor, 0));
-                }
-            } else {
-                finish.push(*at);
-                stack.pop();
-            }
-        }
-    }
-
+    let edges = RegionEdges::of(footing, local);
     let mut component = NO_COMPONENT;
-    for root in finish.into_iter().rev() {
+    for root in edges.finishing_order().into_iter().rev() {
         if labels[root] != NO_COMPONENT {
             continue;
         }
         component = component
             .checked_add(1)
             .expect("a region has at most one component per standing place");
-        let mut stack = vec![root];
-        while let Some(at) = stack.pop() {
-            let label = &mut labels[at];
-            if *label != NO_COMPONENT {
+        label_component(&edges, &mut labels, root, component);
+    }
+    labels
+}
+
+/// The directed step graph of one region and its transpose.
+struct RegionEdges {
+    // Out-degree is bounded by the eight directions and in-degree is not: two
+    // places of one neighbouring column can land on the same place — which is
+    // exactly what a stair does, and what a fixed eight-slot array here used to
+    // make an out-of-bounds panic.
+    outgoing: Vec<[u32; Direction::ALL.len()]>,
+    outgoing_len: Vec<u8>,
+    // Counting-sorted into one run per destination. Kosaraju's second pass
+    // walks these, and a region has thousands of places.
+    incoming_offsets: Vec<u32>,
+    incoming: Vec<u32>,
+}
+
+impl RegionEdges {
+    fn of(footing: &Footing<'_>, local: &RegionPlaces) -> Self {
+        let cells = local.len();
+        let mut outgoing = vec![[NO_NEIGHBOR; Direction::ALL.len()]; cells];
+        let mut outgoing_len = vec![0_u8; cells];
+
+        for from_index in 0..cells {
+            // The whole expansion at once. Eight `step_allowed` calls would resolve
+            // the place being stepped off eight times over and each cardinal
+            // neighbour twice — the same waste `find_path` stopped paying in N3, on
+            // the pass that walks every place of the facet.
+            for next in steps_out_of(footing, local.points[from_index])
+                .into_iter()
+                .flatten()
+            {
+                let Some(next_index) = local.slot(next) else {
+                    continue;
+                };
+                let out_at = usize::from(outgoing_len[from_index]);
+                outgoing[from_index][out_at] = next_index as u32;
+                outgoing_len[from_index] += 1;
+            }
+        }
+
+        let mut incoming_offsets = vec![0_u32; cells + 1];
+        for from_index in 0..cells {
+            for &to in &outgoing[from_index][..usize::from(outgoing_len[from_index])] {
+                incoming_offsets[to as usize + 1] += 1;
+            }
+        }
+        for index in 0..cells {
+            incoming_offsets[index + 1] += incoming_offsets[index];
+        }
+        let mut filled = incoming_offsets.clone();
+        let mut incoming = vec![0_u32; incoming_offsets[cells] as usize];
+        for from_index in 0..cells {
+            for &to in &outgoing[from_index][..usize::from(outgoing_len[from_index])] {
+                incoming[filled[to as usize] as usize] = from_index as u32;
+                filled[to as usize] += 1;
+            }
+        }
+
+        Self {
+            outgoing,
+            outgoing_len,
+            incoming_offsets,
+            incoming,
+        }
+    }
+
+    /// Nodes in the order Kosaraju's first pass finishes them.
+    fn finishing_order(&self) -> Vec<usize> {
+        let cells = self.outgoing.len();
+        let mut seen = vec![false; cells];
+        let mut finish = Vec::with_capacity(cells);
+        for root in 0..cells {
+            if seen[root] {
                 continue;
             }
-            *label = component;
-            let run = incoming_offsets[at] as usize..incoming_offsets[at + 1] as usize;
-            for &neighbor in &incoming[run] {
-                let neighbor = neighbor as usize;
-                if labels[neighbor] == NO_COMPONENT {
-                    stack.push(neighbor);
+            seen[root] = true;
+            let mut stack = vec![(root, 0_u8)];
+            while let Some((at, next)) = stack.last_mut() {
+                if usize::from(*next) < usize::from(self.outgoing_len[*at]) {
+                    let neighbor = self.outgoing[*at][usize::from(*next)] as usize;
+                    *next += 1;
+                    if !seen[neighbor] {
+                        seen[neighbor] = true;
+                        stack.push((neighbor, 0));
+                    }
+                } else {
+                    finish.push(*at);
+                    stack.pop();
                 }
             }
         }
+        finish
     }
-    labels
+
+    fn incoming(&self, at: usize) -> &[u32] {
+        let run = self.incoming_offsets[at] as usize..self.incoming_offsets[at + 1] as usize;
+        &self.incoming[run]
+    }
+}
+
+fn label_component(edges: &RegionEdges, labels: &mut [u16], root: usize, component: u16) {
+    let mut stack = vec![root];
+    while let Some(at) = stack.pop() {
+        let label = &mut labels[at];
+        if *label != NO_COMPONENT {
+            continue;
+        }
+        *label = component;
+        for &neighbor in edges.incoming(at) {
+            let neighbor = neighbor as usize;
+            if labels[neighbor] == NO_COMPONENT {
+                stack.push(neighbor);
+            }
+        }
+    }
 }
 
 impl NavigationGraph {

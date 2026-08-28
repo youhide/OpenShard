@@ -39,24 +39,26 @@ pub struct MobileSpoke {
 }
 
 /// How far speech in `mode` carries, in tiles. A whisper is heard only right up
-/// close, a yell two screens off, everything else across the screen — the
-/// operator's three `distance_*` ranges, chosen by the mode the client sent.
+/// close, a yell two screens off, and recognised ordinary speech, emotes and
+/// labels across the screen — the operator's three `distance_*` ranges, chosen
+/// by the mode the client sent.
 ///
-/// # Two modes have no range at all
+/// # Modes with no range at all
 ///
 /// [`Guild`](TalkMode::Guild) and [`Alliance`](TalkMode::Alliance) pick their
 /// listeners by membership, not by distance, and are routed before anything here
-/// is asked — see `World::say`. They are named anyway, and answered **zero**,
-/// because the `_` arm they used to fall into would have given a guild line the
-/// ordinary talk range: if that routing ever fails to happen, the failure should
-/// be a line nobody hears rather than a private one shouted down the street.
+/// is asked — see `World::say`. They are named anyway, and answered **zero**.
+/// [`Other`](TalkMode::Other) is an unrecognised byte supplied by the client, so
+/// it fails closed the same way rather than becoming ordinary speech by default.
+/// If routing or decoding fails, the failure should stay on the speaker's tile
+/// rather than a private or unknown mode being shouted down the street.
 #[must_use]
 pub const fn speech_range(mode: TalkMode, gameplay: &Gameplay) -> u32 {
     match mode {
+        TalkMode::Regular | TalkMode::Emote | TalkMode::Label => gameplay.distance_talk,
         TalkMode::Whisper => gameplay.distance_whisper,
         TalkMode::Yell => gameplay.distance_yell,
-        TalkMode::Guild | TalkMode::Alliance => 0,
-        _ => gameplay.distance_talk,
+        TalkMode::Guild | TalkMode::Alliance | TalkMode::Other(_) => 0,
     }
 }
 
@@ -137,4 +139,36 @@ pub fn speak(state: &mut WorldState, entity: EntityId, mode: TalkMode, hue: Hue,
         serial,
         text: text.to_owned(),
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gameplay() -> Gameplay {
+        Gameplay {
+            distance_whisper: 2,
+            distance_talk: 18,
+            distance_yell: 36,
+            ..Gameplay::default()
+        }
+    }
+
+    #[test]
+    fn only_recognised_local_speech_gets_an_audible_range() {
+        let gameplay = gameplay();
+        for mode in [TalkMode::Regular, TalkMode::Emote, TalkMode::Label] {
+            assert_eq!(speech_range(mode, &gameplay), 18);
+        }
+        assert_eq!(speech_range(TalkMode::Whisper, &gameplay), 2);
+        assert_eq!(speech_range(TalkMode::Yell, &gameplay), 36);
+    }
+
+    #[test]
+    fn routed_and_unknown_modes_fail_closed_instead_of_becoming_regular_speech() {
+        let gameplay = gameplay();
+        for mode in [TalkMode::Guild, TalkMode::Alliance, TalkMode::Other(0x7f)] {
+            assert_eq!(speech_range(mode, &gameplay), 0);
+        }
+    }
 }

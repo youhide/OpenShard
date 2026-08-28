@@ -101,21 +101,7 @@ pub(super) fn begin_heal(
         .registry
         .get::<Stats>(healer)
         .map_or(100, |stats| stats.dexterity);
-    let seconds = if healer == patient {
-        // `9.4 + 0.6 * ((120 - dex) / 10)`, in tenths of a second so the fraction
-        // is exact.
-        94 + 6 * (120i32 - i32::from(dex)).max(0) / 10
-    } else {
-        let base = if dex >= 100 {
-            30
-        } else if dex >= 40 {
-            40
-        } else {
-            50
-        };
-        base + if dead { 50 } else { 0 }
-    };
-    let ticks = u64::try_from(seconds).unwrap_or(50) * TICKS_PER_SECOND / 10;
+    let ticks = bandage_ticks(dex, healer == patient, dead);
     state.registry.insert(
         healer,
         Bandaging {
@@ -127,6 +113,26 @@ pub(super) fn begin_heal(
     // The bandage is spent at the *start*, as ServUO consumes it when the work
     // begins — walking away does not get it back.
     Some(BandageStarted { bandage })
+}
+
+/// Convert the pre-AoS bandage delay directly from tenths of a second to ticks.
+/// Every intermediate is unsigned by construction, so an impossible negative
+/// duration cannot silently turn into the former five-second fallback.
+fn bandage_ticks(dex: u16, self_heal: bool, dead: bool) -> u64 {
+    let tenths = if self_heal {
+        // `9.4 + 0.6 * ((120 - dex) / 10)`.
+        94 + 6 * u64::from(120u16.saturating_sub(dex)) / 10
+    } else {
+        let base = if dex >= 100 {
+            30
+        } else if dex >= 40 {
+            40
+        } else {
+            50
+        };
+        base + if dead { 50 } else { 0 }
+    };
+    tenths * TICKS_PER_SECOND / 10
 }
 
 /// A bandage was used up starting a heal. `items` removes it; this crate only says
@@ -305,4 +311,18 @@ pub(super) fn pick_lock(
 pub struct LockpickBroke {
     /// The pick that broke.
     pub pick: EntityId,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bandage_ticks;
+    use openshard_state::TICKS_PER_SECOND;
+
+    #[test]
+    fn bandage_delays_are_total_and_keep_the_pre_aos_boundaries() {
+        assert_eq!(bandage_ticks(120, true, false), 94 * TICKS_PER_SECOND / 10);
+        assert_eq!(bandage_ticks(u16::MAX, true, false), 94 * TICKS_PER_SECOND / 10);
+        assert_eq!(bandage_ticks(100, false, false), 3 * TICKS_PER_SECOND);
+        assert_eq!(bandage_ticks(39, false, true), 10 * TICKS_PER_SECOND);
+    }
 }

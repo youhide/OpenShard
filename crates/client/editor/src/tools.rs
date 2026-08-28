@@ -217,7 +217,7 @@ impl Default for HeightStrength {
     }
 }
 
-/// Absolute height used by the flatten tool.
+/// Absolute height selected by an editor tool.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct TargetHeight(pub i8);
 
@@ -228,7 +228,7 @@ pub enum StaticHeight {
     #[default]
     OnGround,
     /// Use an explicitly picked base height.
-    Fixed(i8),
+    Fixed(TargetHeight),
 }
 
 /// The non-coordinate part of a static placement click.
@@ -381,7 +381,7 @@ impl<'map> Gesture<'map> {
         }
         let z = match placement.height {
             StaticHeight::OnGround => self.current_land(at).z,
-            StaticHeight::Fixed(z) => z,
+            StaticHeight::Fixed(target) => target.0,
         };
         let item = StaticItem {
             tile: placement.tile,
@@ -622,6 +622,41 @@ mod tests {
     }
 
     #[test]
+    fn flatten_and_fixed_static_share_one_absolute_height_type() {
+        let map = flat(4);
+        let mut gesture = Gesture::new(&map);
+        let target = TargetHeight(-7);
+        gesture
+            .apply(Tool::Flatten(target), Brush::default(), TilePoint::new(1, 1))
+            .unwrap();
+        gesture
+            .apply(
+                Tool::PlaceStatic(StaticPlacement {
+                    tile: Graphic(20),
+                    height: StaticHeight::Fixed(target),
+                    hue: Hue::NONE,
+                }),
+                Brush::default(),
+                TilePoint::new(2, 2),
+            )
+            .unwrap();
+
+        assert!(matches!(
+            gesture.ops()[0],
+            PatchOp::SetLand {
+                now: LandCell { z: -7, .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            gesture.ops()[1],
+            PatchOp::AddStatic {
+                item: StaticItem { z: -7, .. }
+            }
+        ));
+    }
+
+    #[test]
     fn static_point_tools_reject_off_map_and_missing_ordinals() {
         let map = flat(0);
         let mut gesture = Gesture::new(&map);
@@ -630,7 +665,7 @@ mod tests {
             gesture.apply(
                 Tool::PlaceStatic(StaticPlacement {
                     tile: Graphic(1),
-                    height: StaticHeight::Fixed(2),
+                    height: StaticHeight::Fixed(TargetHeight(2)),
                     hue: Hue::NONE,
                 }),
                 Brush::default(),

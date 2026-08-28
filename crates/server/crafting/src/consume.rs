@@ -77,7 +77,12 @@ pub fn check(
     // amount of Strength teaches a smith what to do with valorite.
     let mut res_hue = Hue(0);
     let mut axis_hue = None;
-    if let Some(axis) = system.sub_res {
+    // The selected material belongs only to recipes whose primary resource
+    // comes from the axis. A fletcher who has oak selected still makes ordinary
+    // arrows from shafts and feathers, and does not need the skill to work oak
+    // merely to assemble ammunition.
+    let uses_axis = recipe.resources.iter().any(|res| res.from_axis);
+    if let Some(axis) = system.sub_res.filter(|_| uses_axis) {
         let entry = axis.entries.get(sub_res).or_else(|| axis.entries.first());
         if let Some(entry) = entry {
             if i32::from(skill_value(state, crafter, system.skill)) < entry.req_skill {

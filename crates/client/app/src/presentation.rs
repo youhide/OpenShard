@@ -1174,10 +1174,12 @@ fn audit_lod_map_equivalence(
         // This is the exact cache identity that the world pass was allowed to
         // restore. Keeping its ground proof turns a field report into a
         // reproducible producer owner, rather than merely a screen position.
-        let key = CompositeKey {
-            block: *block,
-            tier: CompositeTier::from_lod(pass.requested_lod).unwrap_or(CompositeTier::Lod1),
-            revision: pass.composite_revision,
+        let Some(key) = composite_key_for_lod(*block, pass.requested_lod, pass.composite_revision) else {
+            tracing::error!(
+                ?block,
+                "LOD0 oracle found missing ground coverage without a composite to quarantine"
+            );
+            continue;
         };
         let ground = window.composites.get(key).map(|texture| texture.ground());
         window.composites.reject_block(
@@ -1226,6 +1228,23 @@ fn audit_lod_map_equivalence(
             pass.full_ground_quads,
         )
     }
+}
+
+/// The cache identity owned by a requested LOD, if that LOD uses the cache.
+///
+/// LOD0 has no composite texture. In particular, a diagnostic failure while
+/// direct rendering is active must not be attributed to an arbitrary LOD1
+/// entry merely to manufacture a key.
+fn composite_key_for_lod(
+    block: BlockCoord,
+    lod: BlockLod,
+    revision: ImmutableRevision,
+) -> Option<CompositeKey> {
+    Some(CompositeKey {
+        block,
+        tier: CompositeTier::from_lod(lod)?,
+        revision,
+    })
 }
 
 /// The effective LOD condition of the exact world pass captured by F12.
@@ -3141,6 +3160,22 @@ mod tests {
         assert_eq!(visible_composite_lod(BlockLod::Lod0), BlockLod::Lod0);
         assert_eq!(visible_composite_lod(BlockLod::Lod1), BlockLod::Lod1);
         assert_eq!(visible_composite_lod(BlockLod::Lod2), BlockLod::Lod1);
+    }
+
+    #[test]
+    fn lod0_failure_does_not_manufacture_a_composite_quarantine_key() {
+        let block = BlockCoord { x: 3, y: 5 };
+        let revision = ImmutableRevision(7);
+
+        assert_eq!(composite_key_for_lod(block, BlockLod::Lod0, revision), None);
+        assert_eq!(
+            composite_key_for_lod(block, BlockLod::Lod1, revision),
+            Some(CompositeKey {
+                block,
+                tier: CompositeTier::Lod1,
+                revision,
+            })
+        );
     }
 
     #[test]

@@ -390,6 +390,54 @@ impl ClientGatewayServer {
 /// while somebody is watching.
 const DRAIN_ON_STOP: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// Which side ended a connection and therefore whether queued output is still
+/// entitled to a bounded drain.
+enum SessionEnding {
+    Reader(Option<String>),
+    Writer,
+    Shutdown,
+}
+
+impl SessionEnding {
+    fn reason(self) -> Option<String> {
+        match self {
+            Self::Reader(reason) => reason,
+            Self::Writer | Self::Shutdown => None,
+        }
+    }
+}
+
+/// Empty one connection's outbox into its write half, then close that half.
+///
+/// The shutdown is explicit rather than left to a drop. An `OwnedWriteHalf`
+/// closes its direction when dropped and `tokio::io::split`'s half does not, so
+/// a generic stream otherwise behaves differently from a socket at teardown.
+async fn write_loop<W: AsyncWrite + Unpin>(mut writer: W, mut outbox: OutboxRx) {
+    while let Some(bytes) = outbox.recv().await {
+        if writer.write_all(&bytes).await.is_err() {
+            break;
+        }
+    }
+    let _ = writer.shutdown().await;
+}
+
+/// Finish the write half according to why the session ended.
+///
+/// A shard stop is the only ending where already queued output is worth waiting
+/// for: the shutdown notice is a decision the world made while it was still the
+/// authority. The wait is bounded so a wedged world cannot prevent shutdown.
+async fn finish_writes(id: ConnectionId, writes: &mut tokio::task::JoinHandle<()>, ending: &SessionEnding) {
+    if matches!(ending, SessionEnding::Shutdown)
+        && tokio::time::timeout(DRAIN_ON_STOP, &mut *writes).await.is_err()
+    {
+        warn!(%id, ?DRAIN_ON_STOP, "the outbox did not drain before the deadline; hanging up anyway");
+    }
+    // The reader ended while the writer was waiting, the writer already ended,
+    // or the bounded drain finished. Abort is harmless for a completed task and
+    // makes every unfinished case close immediately.
+    writes.abort();
+}
+
 /// Drive one connection until it closes.
 ///
 /// Generic over the stream, and not for the sake of a test double: an
@@ -406,8 +454,8 @@ async fn client_session_serve<S>(
 where
     S: AsyncRead + AsyncWrite + Send + 'static,
 {
-    let (mut client_tcp_reader, mut client_tcp_writer) = tokio::io::split(stream);
-    let (to_client_tx, mut to_client_rx) = outbox_channel();
+    let (mut client_tcp_reader, client_tcp_writer) = tokio::io::split(stream);
+    let (to_client_tx, to_client_rx) = outbox_channel();
     let (control_tx, control_rx) = version_channel();
 
     if events
@@ -422,24 +470,7 @@ where
         return Ok(()); // The world server is gone; nothing to serve.
     }
 
-    // server -> client loop. It ends on one of two things: the outbox being
-    // dropped — which is how the server hangs up, there being no other "close" —
-    // or a write failing, which means the client already has.
-    //
-    // The `shutdown` at the end is the hang-up itself, and it is written out
-    // rather than left to a drop. An `OwnedWriteHalf` closes its direction when
-    // it is dropped and `tokio::io::split`'s half does not, so the client's zero
-    // read — which the whole teardown chain below hangs on — would have arrived
-    // for a socket and never for anything else. One line, and it means the same
-    // thing for every stream.
-    let mut writes = tokio::spawn(async move {
-        while let Some(bytes) = to_client_rx.recv().await {
-            if client_tcp_writer.write_all(&bytes).await.is_err() {
-                break;
-            }
-        }
-        let _ = client_tcp_writer.shutdown().await;
-    });
+    let mut writes = tokio::spawn(write_loop(client_tcp_writer, to_client_rx));
 
     // client -> server loop, raced against the write half ending.
     //
@@ -467,45 +498,21 @@ where
     // that had exited — and it sees it while the shard is still saving rather
     // than at whatever later moment the runtime happened to be torn down.
     //
-    // `None` is the right reason in all three cases: this end decided, and that
-    // is a clean close.
-    let mut stopping = false;
-    let reason = tokio::select! {
-        reason = read_loop(id, &mut client_tcp_reader, &events, control_rx) => reason,
-        _ = &mut writes => None,
+    // `None` is the right reason for writer/shutdown endings: this end decided,
+    // and that is a clean close.
+    let ending = tokio::select! {
+        reason = read_loop(id, &mut client_tcp_reader, &events, control_rx) => SessionEnding::Reader(reason),
+        _ = &mut writes => SessionEnding::Writer,
         () = shutdown.requested() => {
             debug!(%id, "the shard is stopping; draining the outbox, then hanging up");
-            stopping = true;
-            None
+            SessionEnding::Shutdown
         }
     };
-
-    // A stop is the one ending where the two halves are not symmetric, and where
-    // what is already queued is worth waiting for.
-    //
-    // Reading has stopped above and does not resume: a packet read now is work
-    // queued for a tick that will not run, and worse than useless, because it can
-    // still mutate the session it passes through on the way. What is in the
-    // *outbox*, though, is something the world decided to say while it was still
-    // the authority — the shutdown notice among it — and the client is entitled
-    // to it. So the write task is awaited rather than aborted.
-    //
-    // Bounded, because it cannot depend on the world being well. The write task
-    // ends when every `OutboxTx` has been dropped, which is the tick letting go
-    // of its sessions, which is precisely the thing that might be broken. The
-    // deadline turns "the shard did not stop" into "the shard stopped rudely".
-    if stopping && tokio::time::timeout(DRAIN_ON_STOP, &mut writes).await.is_err() {
-        warn!(%id, ?DRAIN_ON_STOP, "the outbox did not drain before the deadline; hanging up anyway");
-    }
-
-    // Either the read loop ended and the write task is still waiting on an outbox
-    // nobody will send to again, or the race above already resolved the other way.
-    // Aborting covers both, and dropping the reader with it takes the socket down.
-    // Aborting a task that has already finished does nothing, which is what makes
-    // this one line right after a drain that succeeded as well as one that timed
-    // out.
-    writes.abort();
-    let _ = events.send(ServerEvent::Disconnected { id, reason });
+    finish_writes(id, &mut writes, &ending).await;
+    let _ = events.send(ServerEvent::Disconnected {
+        id,
+        reason: ending.reason(),
+    });
     Ok(())
 }
 
@@ -605,6 +612,25 @@ mod tests {
         let address = server.local_address().unwrap();
         tokio::spawn(server.run());
         (address, events)
+    }
+
+    #[tokio::test]
+    async fn the_writer_drains_the_outbox_in_order_and_closes_its_half() {
+        let (server, mut client) = tokio::io::duplex(64);
+        let (outbox, receiver) = outbox_channel();
+        let writer = tokio::spawn(write_loop(server, receiver));
+
+        outbox.send(vec![1, 2, 3]).unwrap();
+        outbox.send(vec![4, 5]).unwrap();
+        drop(outbox);
+
+        let mut received = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut received))
+            .await
+            .expect("the writer closed its half")
+            .expect("the in-memory stream read");
+        writer.await.expect("the writer task finished");
+        assert_eq!(received, [1, 2, 3, 4, 5]);
     }
 
     #[tokio::test]

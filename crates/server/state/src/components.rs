@@ -2687,6 +2687,28 @@ pub struct Stamina {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Movement(pub Walker);
 
+/// The presentation window of a mobile's most recently accepted step.
+///
+/// The authoritative grid position changes as soon as a step is accepted, but
+/// clients are still drawing the body between the two tiles for one
+/// [`openshard_movement::step_hold`]. Keeping that deadline lets systems tell a
+/// body in that crossing from one merely carrying the `running` bit in its last
+/// [`Facing`]. It is runtime history, not persisted state; an expired value is
+/// simply the true record of the last step.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct LastStep {
+    /// The first tick on which the crossing has finished.
+    pub finishes_at: WorldTick,
+}
+
+impl LastStep {
+    /// Whether the client is still drawing this crossing.
+    #[must_use]
+    pub const fn in_progress(self, now: WorldTick) -> bool {
+        now < self.finishes_at
+    }
+}
+
 /// A player currently occupying a chair.
 ///
 /// The client recognizes the seated pose from the chair graphic and the

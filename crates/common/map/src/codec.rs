@@ -287,6 +287,31 @@ pub fn encode(chunk: &Chunk) -> Vec<u8> {
 ///
 /// [`DecodeError`], one variant per way a blob fails to be a chunk.
 pub fn decode(bytes: &[u8]) -> Result<Chunk, DecodeError> {
+    let header = decode_header(bytes)?;
+    let body = chunk_body(bytes, &header)?;
+    let land = decode_land(body.land);
+    let counts = decode_counts(body.counts, header.statics)?;
+    let items = decode_statics(body.statics, &counts, &header)?;
+
+    Ok(Chunk::from_parts(
+        header.key,
+        header.revision,
+        header.extent,
+        land,
+        &counts,
+        items,
+    ))
+}
+
+/// The fields that describe every run in a chunk body.
+struct ChunkHeader {
+    key: ChunkKey,
+    revision: MapRevision,
+    extent: BlockExtent,
+    statics: u32,
+}
+
+fn decode_header(bytes: &[u8]) -> Result<ChunkHeader, DecodeError> {
     if bytes.len() < HEADER_BYTES || bytes[..4] != MAGIC {
         return Err(DecodeError::NotAChunk);
     }
@@ -312,10 +337,25 @@ pub fn decode(bytes: &[u8]) -> Result<Chunk, DecodeError> {
         wide: u32::from(wide),
         down: u32::from(down),
     };
-    let blocks = extent.count() as usize;
-
     let statics = u32::from_le_bytes(bytes[20..24].try_into().expect("four bytes"));
-    let wanted = encoded_len(blocks, statics as usize);
+
+    Ok(ChunkHeader {
+        key,
+        revision,
+        extent,
+        statics,
+    })
+}
+
+struct ChunkBody<'a> {
+    land: &'a [u8],
+    counts: &'a [u8],
+    statics: &'a [u8],
+}
+
+fn chunk_body<'a>(bytes: &'a [u8], header: &ChunkHeader) -> Result<ChunkBody<'a>, DecodeError> {
+    let blocks = header.extent.count() as usize;
+    let wanted = encoded_len(blocks, header.statics as usize);
     if bytes.len() < wanted {
         return Err(DecodeError::Truncated {
             wanted,
@@ -332,16 +372,25 @@ pub fn decode(bytes: &[u8]) -> Result<Chunk, DecodeError> {
     let land_from = HEADER_BYTES;
     let counts_from = land_from + blocks * CELLS_PER_BLOCK * CELL_BYTES;
     let statics_from = counts_from + blocks * COUNT_BYTES;
+    Ok(ChunkBody {
+        land: &bytes[land_from..counts_from],
+        counts: &bytes[counts_from..statics_from],
+        statics: &bytes[statics_from..],
+    })
+}
 
-    let land: Vec<LandCell> = bytes[land_from..counts_from]
+fn decode_land(bytes: &[u8]) -> Vec<LandCell> {
+    bytes
         .chunks_exact(CELL_BYTES)
         .map(|cell| LandCell {
             tile: LandTileId(u16::from_le_bytes([cell[0], cell[1]])),
             z: cell[2] as i8,
         })
-        .collect();
+        .collect()
+}
 
-    let counts: Vec<u32> = bytes[counts_from..statics_from]
+fn decode_counts(bytes: &[u8], statics: u32) -> Result<Vec<u32>, DecodeError> {
+    let counts: Vec<u32> = bytes
         .chunks_exact(COUNT_BYTES)
         .map(|count| u32::from_le_bytes([count[0], count[1], count[2], count[3]]))
         .collect();
@@ -354,16 +403,23 @@ pub fn decode(bytes: &[u8]) -> Result<Chunk, DecodeError> {
             found: total,
         });
     }
+    Ok(counts)
+}
 
+fn decode_statics(
+    bytes: &[u8],
+    counts: &[u32],
+    header: &ChunkHeader,
+) -> Result<Vec<StaticItem>, DecodeError> {
     // Which block each static is in is where it sits in the counts, and its
     // world coordinate is that block's origin plus the packed position. This is
     // the one place the two halves meet, and it is the inverse of what `encode`
     // dropped.
-    let origin = key.at.block_origin();
-    let mut items = Vec::with_capacity(statics as usize);
-    let mut records = bytes[statics_from..].chunks_exact(STATIC_BYTES);
-    for (local, count) in extent.blocks().zip(&counts) {
-        let block = extent.coord_of(local).expect("a block of this extent");
+    let origin = header.key.at.block_origin();
+    let mut items = Vec::with_capacity(header.statics as usize);
+    let mut records = bytes.chunks_exact(STATIC_BYTES);
+    for (local, count) in header.extent.blocks().zip(counts) {
+        let block = header.extent.coord_of(local).expect("a block of this extent");
         let (block_x, block_y) = crate::grid::BlockCoord {
             x: origin.x + block.x,
             y: origin.y + block.y,
@@ -386,8 +442,7 @@ pub fn decode(bytes: &[u8]) -> Result<Chunk, DecodeError> {
             });
         }
     }
-
-    Ok(Chunk::from_parts(key, revision, extent, land, &counts, items))
+    Ok(items)
 }
 
 /// A static's position inside its block, `y` in the high three bits.

@@ -9,7 +9,7 @@
 //!
 //! **The recipes are core data, like [`openshard_magic`]'s spells and
 //! [`openshard_state::weapon`]'s speeds.** A bare shard has to be able to forge,
-//! so the eight hundred rows live in [`defs`] rather than in a pack, generated
+//! so the 492 shipped rows live in [`defs`] rather than in a pack, generated
 //! once from ServUO by `tools/gen-craft-tables` and ordinary source from then on.
 //! What a pack customises, it customises off [`ItemCrafted`] — the split skills,
 //! magic and loot already use.

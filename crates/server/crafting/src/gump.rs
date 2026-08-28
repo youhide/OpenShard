@@ -53,6 +53,24 @@ const LABEL_HUE: u32 = 0x480;
 /// Rows to a page, in both lists.
 const PER_PAGE: usize = 10;
 
+/// The vertical coordinate of one row, refusing a list too large for the gump
+/// coordinate space instead of drawing its tail over the first row.
+fn row_y(first: i32, row: usize) -> i32 {
+    i32::try_from(row)
+        .ok()
+        .and_then(|row| row.checked_mul(20))
+        .and_then(|offset| first.checked_add(offset))
+        .expect("a craft-gump row fits its i32 coordinate space")
+}
+
+/// The one-based gump page containing a list position.
+fn page_of(position: usize) -> u32 {
+    u32::try_from(position / PER_PAGE)
+        .ok()
+        .and_then(|page| page.checked_add(1))
+        .expect("a craft-gump list fits its u32 page space")
+}
+
 /// Which operation an encoded craft-window button asks for.
 ///
 /// Kept distinct from [`ButtonIndex`]: the wire formula stores both as `u32`,
@@ -325,7 +343,7 @@ fn label(layout: &mut GumpLayout, x: i32, y: i32, width: i32, text: Text, argume
 /// The left-hand column of categories.
 fn groups(layout: &mut GumpLayout, def: &CraftSystemDef) {
     for (i, group) in def.groups.iter().enumerate() {
-        let y = 80 + i32::try_from(i).unwrap_or(0) * 20;
+        let y = row_y(80, i);
         let index = ButtonIndex::from_position(i);
         layout.button(
             15,
@@ -354,7 +372,7 @@ fn items(layout: &mut GumpLayout, def: &CraftSystemDef, group: u16) {
         .collect();
     for (i, (_, recipe)) in rows.iter().enumerate() {
         let row = i % PER_PAGE;
-        let page = u32::try_from(i / PER_PAGE).unwrap_or(0) + 1;
+        let page = page_of(i);
         if row == 0 {
             if i > 0 {
                 layout.button(370, 260, 4005, 4007, GumpButton::Page, page, ButtonId::UNUSED);
@@ -368,7 +386,7 @@ fn items(layout: &mut GumpLayout, def: &CraftSystemDef, group: u16) {
                 // PREV PAGE
             }
         }
-        let y = 60 + i32::try_from(row).unwrap_or(0) * 20;
+        let y = row_y(60, row);
         let index = ButtonIndex::from_position(i);
         layout.button(
             220,
@@ -397,7 +415,7 @@ fn resources(layout: &mut GumpLayout, state: &WorldState, player: EntityId, def:
     let Some(axis) = def.sub_res else { return };
     for (i, entry) in axis.entries.iter().enumerate() {
         let row = i % PER_PAGE;
-        let page = u32::try_from(i / PER_PAGE).unwrap_or(0) + 1;
+        let page = page_of(i);
         if row == 0 {
             if i > 0 {
                 layout.button(485, 290, 4005, 4007, GumpButton::Page, page, ButtonId::UNUSED);
@@ -407,7 +425,7 @@ fn resources(layout: &mut GumpLayout, state: &WorldState, player: EntityId, def:
                 layout.button(455, 290, 4014, 4015, GumpButton::Page, page - 1, ButtonId::UNUSED);
             }
         }
-        let y = 60 + i32::try_from(row).unwrap_or(0) * 20;
+        let y = row_y(60, row);
         let index = ButtonIndex::from_position(i);
         layout.button(
             220,
@@ -480,7 +498,7 @@ fn details(state: &WorldState, player: EntityId, def: &CraftSystemDef, recipe: &
 
     // One row per required skill, at the value it starts to be possible.
     for (i, want) in recipe.skills.iter().enumerate() {
-        let y = 132 + i32::try_from(i).unwrap_or(0) * 20;
+        let y = row_y(132, i);
         layout.html_localized_colored(170, y, 200, 18, skill_label(want.skill), LABEL, false, false);
         layout.label(430, y, LABEL_HUE, tenths(want.min.max(0)));
     }
@@ -494,9 +512,9 @@ fn details(state: &WorldState, player: EntityId, def: &CraftSystemDef, recipe: &
     }
 
     // Four material rows at most, which is ServUO's own limit and more than any
-    // recipe in the five tables uses.
+    // recipe in the shipped tables uses.
     for (i, res) in recipe.resources.iter().take(4).enumerate() {
-        let y = 219 + i32::try_from(i).unwrap_or(0) * 20;
+        let y = row_y(219, i);
         let hue = axis_hue(def, res, 0);
         let name = axis_name(def, res, 0).unwrap_or(res.name);
         label(&mut layout, 170, y, 220, name, "");
@@ -572,22 +590,8 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
         return true;
     };
 
-    // The detail page's buttons are plain small numbers, not encoded ones, so it
-    // is dispatched on its own before the list's decode.
     if let CraftGumpPage::Details(recipe) = context.page {
-        match answer {
-            GumpAnswer::Pressed(detail::MAKE) => {
-                make(state, player, context, recipe);
-            }
-            // `detail::BACK` *is* the close box (see the constant), so this arm
-            // is both, exactly as ServUO's `OnResponse` reads it.
-            GumpAnswer::Closed => {
-                let mut back = context;
-                back.page = CraftGumpPage::Items;
-                open(state, player, back);
-            }
-            GumpAnswer::Pressed(_) => {}
-        }
+        handle_details(state, player, context, recipe, answer);
         return true;
     }
 
@@ -595,12 +599,47 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
         return true; // EXIT, or the close box — the same id on this page
     };
     let (kind, index) = decode_button(pressed);
+    handle_list_button(state, player, context, def, kind, index);
+    true
+}
+
+/// Dispatch the detail page, whose small plain button ids are intentionally
+/// different from the encoded ids used by every list page.
+fn handle_details(
+    state: &mut WorldState,
+    player: EntityId,
+    context: CraftGumpContext,
+    recipe: u16,
+    answer: GumpAnswer,
+) {
+    match answer {
+        GumpAnswer::Pressed(detail::MAKE) => make(state, player, context, recipe),
+        // `detail::BACK` *is* the close box (see the constant), so this arm is
+        // both, exactly as ServUO's `OnResponse` reads it.
+        GumpAnswer::Closed => {
+            let mut back = context;
+            back.page = CraftGumpPage::Items;
+            open(state, player, back);
+        }
+        GumpAnswer::Pressed(_) => {}
+    }
+}
+
+/// Apply one decoded list-page command to the context taken by [`handle`].
+fn handle_list_button(
+    state: &mut WorldState,
+    player: EntityId,
+    context: CraftGumpContext,
+    def: &CraftSystemDef,
+    kind: ButtonKind,
+    index: ButtonIndex,
+) {
     match kind {
         kind::GROUP => {
             // An invented large index selects nothing. Falling back to zero
             // here would silently turn it into the first real category.
             let Some(group) = index.as_group() else {
-                return true;
+                return;
             };
             let mut next = context;
             next.group = group;
@@ -654,7 +693,6 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
         },
         _ => {}
     }
-    true
 }
 
 /// The `index`-th recipe of a category, as the window numbered it.
@@ -735,5 +773,14 @@ mod tests {
         assert_eq!(percent(1000), "100.0%");
         assert_eq!(percent(0), "0.0%");
         assert_eq!(percent(455), "45.5%");
+    }
+
+    #[test]
+    fn rows_and_pages_keep_their_positions() {
+        assert_eq!(row_y(60, 0), 60);
+        assert_eq!(row_y(60, 9), 240);
+        assert_eq!(page_of(0), 1);
+        assert_eq!(page_of(9), 1);
+        assert_eq!(page_of(10), 2);
     }
 }

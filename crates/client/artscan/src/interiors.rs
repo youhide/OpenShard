@@ -8,7 +8,7 @@ use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use openshard_client_render::interiors::BuildingMap;
 use openshard_map::snapshot::MapRevision;
@@ -177,11 +177,10 @@ pub fn stamp_of(
     let mut inputs = Vec::with_capacity(inputs_at.len());
     for (name, path) in inputs_at {
         let metadata = fs::metadata(&path).map_err(|source| io_error(path.clone(), source))?;
-        let modified_ns = metadata
+        let modified = metadata
             .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map_or(0, |time| time.as_nanos());
+            .map_err(|source| io_error(path.clone(), source))?;
+        let modified_ns = nanos_since_epoch(&path, modified)?;
         inputs.push(InputStamp {
             name,
             bytes: metadata.len(),
@@ -194,6 +193,22 @@ pub fn stamp_of(
         topology_version: TOPOLOGY_VERSION,
         inputs,
     })
+}
+
+/// A timestamp the artifact stamp can compare without inventing an epoch.
+fn nanos_since_epoch(path: &Path, modified: SystemTime) -> Result<u128, Error> {
+    modified
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .map_err(|source| {
+            incompatible(
+                path,
+                format!(
+                    "input modification time precedes the Unix epoch by {:?}",
+                    source.duration()
+                ),
+            )
+        })
 }
 
 /// Read the wall catalogue, the facet and the tile data, then calculate a whole
@@ -478,6 +493,24 @@ fn stale(path: &Path, reason: impl Into<String>) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unrepresentable_input_time_is_not_an_epoch_fallback() {
+        let path = Path::new("art-table.ron");
+        let before_epoch = UNIX_EPOCH
+            .checked_sub(std::time::Duration::from_nanos(1))
+            .expect("the system clock represents one instant before the epoch");
+        let refusal = nanos_since_epoch(path, before_epoch);
+        assert!(
+            matches!(
+                &refusal,
+                Err(Error::Incompatible { path: found, reason })
+                    if found == path && reason.contains("precedes the Unix epoch")
+            ),
+            "an unknown mtime must not collide with the epoch: {refusal:?}"
+        );
+        assert_eq!(nanos_since_epoch(path, UNIX_EPOCH).unwrap(), 0);
+    }
 
     #[test]
     fn a_baked_building_map_round_trips_with_its_stamp() {

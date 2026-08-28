@@ -458,6 +458,20 @@ fn mint(manifest: &[(u64, u32)]) -> WorldId {
     WorldId(fnv1a64(&bytes))
 }
 
+/// The fields a reader needs after the fixed header has been validated.
+struct BaseHeader {
+    facet: Facet,
+    revision: MapRevision,
+    extent: BlockExtent,
+    count: usize,
+}
+
+/// The two per-chunk tables between the fixed header and the chunk blobs.
+struct BaseIndex {
+    offsets: Vec<u64>,
+    manifest: Vec<(u64, InflatedLength)>,
+}
+
 /// Read a base set back into the facet it was written from.
 ///
 /// The facet arrives at the revision the file recorded, not at a fresh one:
@@ -474,6 +488,20 @@ pub fn read(path: impl AsRef<Path>) -> Result<MapSnapshot, BaseError> {
         source,
     })?;
 
+    let header = parse_header(path, &bytes)?;
+    let index = parse_index(path, &bytes, header.count)?;
+    let chunks = decode_chunks(path, &bytes, &index)?;
+    let map =
+        chunk::assemble(header.facet, header.extent, &chunks).map_err(|source| BaseError::Assembly {
+            path: path.to_owned(),
+            source,
+        })?;
+    Ok(MapSnapshot::restored(header.facet, header.revision, map))
+}
+
+/// Validate and decode the fixed header, including its internally redundant
+/// chunk count.
+fn parse_header(path: &Path, bytes: &[u8]) -> Result<BaseHeader, BaseError> {
     if bytes.len() < HEADER_BYTES || bytes[..4] != MAGIC {
         return Err(BaseError::NotABaseSet {
             path: path.to_owned(),
@@ -505,6 +533,17 @@ pub fn read(path: impl AsRef<Path>) -> Result<MapSnapshot, BaseError> {
         });
     }
 
+    Ok(BaseHeader {
+        facet,
+        revision,
+        extent,
+        count,
+    })
+}
+
+/// Read both per-chunk tables and prove every blob range is inside the file
+/// before any range is sliced.
+fn parse_index(path: &Path, bytes: &[u8], count: usize) -> Result<BaseIndex, BaseError> {
     let manifest_at = HEADER_BYTES + (count + 1) * ENTRY_BYTES;
     let table_end = manifest_at + count * MANIFEST_BYTES;
     if bytes.len() < table_end {
@@ -543,10 +582,19 @@ pub fn read(path: impl AsRef<Path>) -> Result<MapSnapshot, BaseError> {
         }
     }
 
+    Ok(BaseIndex {
+        offsets: table,
+        manifest,
+    })
+}
+
+/// Inflate, authenticate and decode every chunk named by a validated index.
+fn decode_chunks(path: &Path, bytes: &[u8], index: &BaseIndex) -> Result<Vec<Chunk>, BaseError> {
+    let count = index.manifest.len();
     let mut chunks = Vec::with_capacity(count);
     for at in 0..count {
-        let blob = &bytes[table[at] as usize..table[at + 1] as usize];
-        let (wanted, inflated) = manifest[at];
+        let blob = &bytes[index.offsets[at] as usize..index.offsets[at + 1] as usize];
+        let (wanted, inflated) = index.manifest[at];
         let Some(record) = openshard_protocol::chunks::inflate(blob, inflated) else {
             return Err(BaseError::NotDeflated {
                 path: path.to_owned(),
@@ -570,12 +618,7 @@ pub fn read(path: impl AsRef<Path>) -> Result<MapSnapshot, BaseError> {
             source,
         })?);
     }
-
-    let map = chunk::assemble(facet, extent, &chunks).map_err(|source| BaseError::Assembly {
-        path: path.to_owned(),
-        source,
-    })?;
-    Ok(MapSnapshot::restored(facet, revision, map))
+    Ok(chunks)
 }
 
 /// Which world a base set *is*, by the identity in its header.

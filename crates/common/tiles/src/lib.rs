@@ -450,10 +450,14 @@ impl TileData {
 /// left raw, `"bolt%s% of cloth"` reaches the client verbatim. Inside a block a
 /// `/` splits the plural form (before it) from the singular (after it), so
 /// `%s%` adds an "s" when plural and nothing when singular, and `%ves/f%` gives
-/// "…ves" / "…f". Text outside a block is always kept. Ported from Sphere's
-/// `CItemBase::GetNamePluralize`.
+/// "…ves" / "…f". Text outside a block is always kept. A malformed name with
+/// an unmatched `%` is kept verbatim rather than losing everything after the
+/// unmatched marker. Ported from Sphere's `CItemBase::GetNamePluralize`.
 #[must_use]
 pub fn pluralize_name(name: &str, plural: bool) -> String {
+    if !name.matches('%').count().is_multiple_of(2) {
+        return name.to_owned();
+    }
     let mut out = String::with_capacity(name.len());
     let mut inside = false;
     // Within a block, the part before a `/` is the plural form. A block with no
@@ -525,6 +529,16 @@ mod tests {
         assert_eq!(pluralize_name("loa%ves/f%", false), "loaf");
         // A name with no markers is untouched either way.
         assert_eq!(pluralize_name("a torch", true), "a torch");
+    }
+
+    #[test]
+    fn an_unmatched_plural_marker_does_not_erase_the_name() {
+        assert_eq!(pluralize_name("odd%name", false), "odd%name");
+        assert_eq!(
+            pluralize_name("bolt%s% beside odd%marker", true),
+            "bolt%s% beside odd%marker",
+            "a malformed tail must not make an earlier valid-looking block partially rewrite the name"
+        );
     }
 
     #[test]

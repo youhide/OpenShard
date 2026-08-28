@@ -126,22 +126,30 @@ impl<E> Events<E> {
         }
     }
 
-    /// Read everything `cursor` has not seen, advancing it.
+    /// Read everything `cursor` has not seen, advancing it as each event is
+    /// yielded.
     ///
     /// Each reader owns its cursor, so consuming events here does not hide them
-    /// from anyone else — three systems can each read every `PlayerMove`.
-    pub fn read<'a>(&'a self, cursor: &mut Cursor<E>) -> impl Iterator<Item = &'a E> + 'a {
-        let from = cursor.next;
-        cursor.next = self.next_sequence;
+    /// from anyone else — three systems can each read every `PlayerMove`. If a
+    /// caller stops the iterator early, the next read resumes at the first event
+    /// it did not consume.
+    pub fn read<'a>(&'a self, cursor: &'a mut Cursor<E>) -> impl Iterator<Item = &'a E> + 'a {
+        let from = cursor.next.clamp(self.older_start, self.next_sequence);
+        cursor.next = from;
 
         // `saturating_sub` handles a cursor left behind by `update`: if `from`
         // predates the buffer, the skip clamps to 0 and the reader gets what
         // survives rather than panicking.
         let skip_older = from.saturating_sub(self.older_start) as usize;
         let skip_newer = from.saturating_sub(self.newer_start) as usize;
-        let older = self.older.get(skip_older.min(self.older.len())..).unwrap_or(&[]);
-        let newer = self.newer.get(skip_newer.min(self.newer.len())..).unwrap_or(&[]);
-        older.iter().chain(newer.iter())
+        let older = &self.older[skip_older.min(self.older.len())..];
+        let newer = &self.newer[skip_newer.min(self.newer.len())..];
+        let mut unread = older.iter().chain(newer.iter());
+        std::iter::from_fn(move || {
+            let event = unread.next()?;
+            cursor.next += 1;
+            Some(event)
+        })
     }
 
     /// Everything currently buffered, oldest first, without touching a cursor.
@@ -221,6 +229,23 @@ mod tests {
         events.send(Ping(2));
         assert_eq!(drain(&events, &mut cursor), vec![1, 2]);
         assert_eq!(drain(&events, &mut cursor), Vec::<u32>::new(), "no re-reads");
+    }
+
+    #[test]
+    fn stopping_an_iterator_does_not_skip_the_unconsumed_events() {
+        let mut events = Events::new();
+        let mut cursor = events.cursor();
+        events.extend([Ping(1), Ping(2), Ping(3)]);
+
+        {
+            let mut first = events.read(&mut cursor);
+            assert_eq!(first.next(), Some(&Ping(1)));
+        }
+        assert_eq!(
+            drain(&events, &mut cursor),
+            vec![2, 3],
+            "dropping a lazy iterator must not mark its untouched tail as read"
+        );
     }
 
     #[test]

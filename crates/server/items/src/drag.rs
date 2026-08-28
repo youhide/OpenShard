@@ -31,6 +31,18 @@ struct LiftableItem {
     location: ItemLocation,
 }
 
+/// The art of an item that already passed the lift gate.
+///
+/// [`liftable_item`] refuses every entity without [`Drawn`] before it can become
+/// held, so absence here is a broken cursor invariant rather than graphic zero.
+fn held_graphic(state: &WorldState, item: EntityId) -> Graphic {
+    state
+        .registry
+        .get::<Drawn>(item)
+        .expect("an item on a cursor must have art")
+        .id
+}
+
 /// Lift an item onto a client's cursor. See `Command::PickUpItem`.
 pub fn pick_up(state: &mut WorldState, connection: ConnectionId, serial: RawSerial, amount: u16) {
     let Some(&player) = state.players.get(&connection) else {
@@ -357,11 +369,8 @@ pub fn drop_item(
         return;
     }
 
+    let graphic = held_graphic(state, held.entity);
     place_on_ground(state, held.entity, position, state.facet_of(player));
-    let graphic = state
-        .registry
-        .get::<Drawn>(held.entity)
-        .map_or(Graphic(0), |drawn| drawn.id);
     state.play_sound_to(
         player,
         drop_sound(graphic, amount_of(state, held.entity), SoundId(0x0042)),
@@ -437,12 +446,9 @@ pub fn drop_into_container(
         position: at,
         grid: GridSlot(grid),
     };
+    let graphic = held_graphic(state, held.entity);
     relocate_item(state, held.entity, ItemLocation::contained(contained))
         .expect("an accepted container drop has one valid parent");
-    let graphic = state
-        .registry
-        .get::<Drawn>(held.entity)
-        .map_or(Graphic(0), |drawn| drawn.id);
     state.play_sound_to(
         player,
         drop_sound(graphic, amount_of(state, held.entity), SoundId(0x0048)),
@@ -718,4 +724,30 @@ fn note_looter(state: &mut WorldState, container: Serial, taker: EntityId) {
 /// Send a `0x27`, cancelling whatever drag the client thinks it has.
 pub fn reject_drag(state: &mut WorldState, connection: ConnectionId, reason: DragCancelReason) {
     state.send_packet(connection, &ServerPacket::DragCancel(DragCancel { reason }));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    fn world() -> WorldState {
+        WorldState::new(
+            BTreeMap::new(),
+            Facet(0),
+            openshard_tiles::TileData::empty(),
+            Default::default(),
+            openshard_map::grid::Tile::new(0, 0),
+            1,
+        )
+    }
+
+    #[test]
+    #[should_panic(expected = "an item on a cursor must have art")]
+    fn a_held_entity_without_art_is_not_silently_treated_as_graphic_zero() {
+        let mut state = world();
+        let entity = state.registry.spawn();
+        held_graphic(&state, entity);
+    }
 }

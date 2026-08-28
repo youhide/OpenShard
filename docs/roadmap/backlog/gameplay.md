@@ -108,7 +108,7 @@ them too, so it is `openshard_protocol::mounts` and there is no
   express "these four bodies share a sound but not a name".
 
 - ~~**The recipe invariants are tested, not enforced.**~~ **Done**
-  ([`unenforced.md`](../../unenforced.md) S2). The five headers joined the data as
+  ([`unenforced.md`](../../unenforced.md) S2). The headers joined the data as
   `crafting/data/craft_systems.json`, so `build.rs` has both halves and checks
   them: a recipe whose group index is out of range, or that does not lead with
   its system's main skill, is now a build failure naming the row. The two
@@ -120,16 +120,14 @@ them too, so it is `openshard_protocol::mounts` and there is no
   clilocs the craft tables generate, none is `0` — whatever `generate.cjs` did
   when this was written, the data it produces today has no missing
   `TextDefinition` in it. The other half of the entry was real and is now fixed:
-  `CraftSystemDef::needs_message` is an `Option<ClilocId>`, `None` on the four
-  systems that need no workshop. Recorded rather than deleted because the entry
+  `CraftSystemDef::needs_message` is an `Option<ClilocId>`, `None` on systems
+  that need no workshop. Recorded rather than deleted because the entry
   sent a session looking for something that was not there: **check a backlog
   claim against the code before planning around it.**
 - ~~**`Recipe::amount` has a column and no data.**~~ **Decided: the column
-  stays**, with the reason in its doc. Every one of the 485 rows is 1, but
-  `craft::complete` already multiplies by it and the recipes that would use it
-  are `DefBowFletching`'s arrows and bolts — porting that table is adding data,
-  whereas dropping the field would mean the port had to put it back *and* touch
-  the craft path to do it.
+  stays**, with the reason in its doc. Every shipped row is 1; batch recipes such
+  as shafts, arrows and bolts use `use_all_res`, while `amount` remains the
+  multiplier available to custom recipes.
 - **Three files are still over the 2k line.** `world/src/tick/tests.rs` is
   12,964 — by a wide margin the largest file in the repository, and the split
   mechanics in `architecture.md` are written for exactly this;

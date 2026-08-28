@@ -85,36 +85,8 @@ impl Parallel {
     ///   standing on it.
     pub fn measure(map: impl Fn(Vec3) -> (f64, f64), about: Vec3, span: f64, tolerance: f64) -> Self {
         assert!(span > 0.0, "a measurement span of {span} probes one point twice");
-        let axis_step = |axis: Axis| match axis {
-            Axis::X => Vec3::new(span, 0.0, 0.0),
-            Axis::Y => Vec3::new(0.0, span, 0.0),
-            Axis::Z => Vec3::new(0.0, 0.0, span),
-        };
-        let mut columns = [(0.0, 0.0); 3];
-        for (axis, column) in Axis::ALL.into_iter().zip(columns.iter_mut()) {
-            let step = axis_step(axis);
-            let ahead = map(about + step);
-            let behind = map(about - step);
-            *column = (
-                (ahead.0 - behind.0) / (2.0 * span),
-                (ahead.1 - behind.1) / (2.0 * span),
-            );
-        }
-        let centre = map(about);
-        let origin = (
-            centre.0
-                - Axis::ALL
-                    .into_iter()
-                    .zip(columns.iter())
-                    .map(|(a, c)| c.0 * about.axis(a))
-                    .sum::<f64>(),
-            centre.1
-                - Axis::ALL
-                    .into_iter()
-                    .zip(columns.iter())
-                    .map(|(a, c)| c.1 * about.axis(a))
-                    .sum::<f64>(),
-        );
+        let columns = measure_columns(&map, about, span);
+        let origin = recover_origin(&map, about, &columns);
         let recovered = Self {
             columns,
             origin,
@@ -122,56 +94,9 @@ impl Parallel {
             // which does not read it.
             direction: Vec3::new(0.0, 0.0, -1.0),
         };
-
-        // The check the doc promises. Deliberately awkward offsets: not on an
-        // axis, not a multiple of `span`, both signs, and one far enough out
-        // that a projection with any curvature in it has somewhere to curve.
-        // A probe on the measurement points themselves would pass by
-        // construction and say nothing.
-        for offset in [
-            Vec3::new(0.37, -1.25, 2.5),
-            Vec3::new(-3.1, 0.8, -1.75),
-            Vec3::new(11.0, 13.0, -7.0),
-            Vec3::new(-0.05, -0.05, 0.05),
-        ] {
-            let at = about + offset * span;
-            let (want, got) = (map(at), recovered.pixel_of(at));
-            let off = ((want.0 - got.0).powi(2) + (want.1 - got.1).powi(2)).sqrt();
-            assert!(
-                off <= tolerance,
-                "the projection is not affine: {at:?} lands at {want:?}, but the map recovered from \
-                 three axis probes says {got:?} — {off} pixels out, tolerance {tolerance}"
-            );
-        }
-
-        // The ray direction is the null space of the 2x3 matrix: the one
-        // direction whose pixel offset is zero on both rows. For a 2x3 that is
-        // exactly the cross product of the two rows, with no linear solve.
-        let rows = (
-            Vec3::new(columns[0].0, columns[1].0, columns[2].0),
-            Vec3::new(columns[0].1, columns[1].1, columns[2].1),
-        );
-        let kernel = rows.0.cross(rows.1);
-        assert!(
-            kernel.length() > 1e-9 * rows.0.length() * rows.1.length(),
-            "the projection has rank below two — it collapses the world onto a line, so a pixel \
-             names a plane of world points and not a ray"
-        );
-        assert!(
-            kernel.z.abs() > 1e-9 * kernel.length(),
-            "the recovered view direction is horizontal, so there is no upper end of it to put the \
-             viewer at; this module cannot tell which way a side-on camera faces"
-        );
-        // Oriented so the viewer is above: looking into the scene is looking
-        // down. The kernel comes out of a cross product with an arbitrary sign,
-        // and this is the only place a fact about the renderer is written down
-        // rather than measured.
-        let direction = match kernel.z > 0.0 {
-            true => -kernel.normalized(),
-            false => kernel.normalized(),
-        };
+        verify_affine(&map, about, span, tolerance, &recovered);
         Self {
-            direction,
+            direction: recover_direction(&columns),
             ..recovered
         }
     }
@@ -233,6 +158,102 @@ impl Parallel {
     }
 }
 
+/// Measure the two pixel components contributed by a step on each world axis.
+fn measure_columns(map: &impl Fn(Vec3) -> (f64, f64), about: Vec3, span: f64) -> [(f64, f64); 3] {
+    let axis_step = |axis: Axis| match axis {
+        Axis::X => Vec3::new(span, 0.0, 0.0),
+        Axis::Y => Vec3::new(0.0, span, 0.0),
+        Axis::Z => Vec3::new(0.0, 0.0, span),
+    };
+    let mut columns = [(0.0, 0.0); 3];
+    for (axis, column) in Axis::ALL.into_iter().zip(columns.iter_mut()) {
+        let step = axis_step(axis);
+        let ahead = map(about + step);
+        let behind = map(about - step);
+        *column = (
+            (ahead.0 - behind.0) / (2.0 * span),
+            (ahead.1 - behind.1) / (2.0 * span),
+        );
+    }
+    columns
+}
+
+/// Recover where the measured affine projection sends the world origin.
+fn recover_origin(map: &impl Fn(Vec3) -> (f64, f64), about: Vec3, columns: &[(f64, f64); 3]) -> (f64, f64) {
+    let centre = map(about);
+    (
+        centre.0
+            - Axis::ALL
+                .into_iter()
+                .zip(columns.iter())
+                .map(|(axis, column)| column.0 * about.axis(axis))
+                .sum::<f64>(),
+        centre.1
+            - Axis::ALL
+                .into_iter()
+                .zip(columns.iter())
+                .map(|(axis, column)| column.1 * about.axis(axis))
+                .sum::<f64>(),
+    )
+}
+
+/// Check the recovered map at points that did not participate in measuring it.
+fn verify_affine(
+    map: &impl Fn(Vec3) -> (f64, f64),
+    about: Vec3,
+    span: f64,
+    tolerance: f64,
+    recovered: &Parallel,
+) {
+    // Deliberately awkward offsets: not on an axis, not a multiple of `span`,
+    // both signs, and one far enough out that a projection with any curvature
+    // in it has somewhere to curve. A measurement point would pass by
+    // construction and say nothing.
+    for offset in [
+        Vec3::new(0.37, -1.25, 2.5),
+        Vec3::new(-3.1, 0.8, -1.75),
+        Vec3::new(11.0, 13.0, -7.0),
+        Vec3::new(-0.05, -0.05, 0.05),
+    ] {
+        let at = about + offset * span;
+        let (want, got) = (map(at), recovered.pixel_of(at));
+        let off = ((want.0 - got.0).powi(2) + (want.1 - got.1).powi(2)).sqrt();
+        assert!(
+            off <= tolerance,
+            "the projection is not affine: {at:?} lands at {want:?}, but the map recovered from \
+             three axis probes says {got:?} — {off} pixels out, tolerance {tolerance}"
+        );
+    }
+}
+
+/// Recover and orient the null space shared by every pixel's world ray.
+fn recover_direction(columns: &[(f64, f64); 3]) -> Vec3 {
+    // For a 2x3 matrix the null direction is exactly the cross product of its
+    // two rows, with no linear solve.
+    let rows = (
+        Vec3::new(columns[0].0, columns[1].0, columns[2].0),
+        Vec3::new(columns[0].1, columns[1].1, columns[2].1),
+    );
+    let kernel = rows.0.cross(rows.1);
+    assert!(
+        kernel.length() > 1e-9 * rows.0.length() * rows.1.length(),
+        "the projection has rank below two — it collapses the world onto a line, so a pixel \
+         names a plane of world points and not a ray"
+    );
+    assert!(
+        kernel.z.abs() > 1e-9 * kernel.length(),
+        "the recovered view direction is horizontal, so there is no upper end of it to put the \
+         viewer at; this module cannot tell which way a side-on camera faces"
+    );
+    // Oriented so the viewer is above: looking into the scene is looking down.
+    // This is the only fact about the renderer written down rather than
+    // measured.
+    match kernel.z > 0.0 {
+        true => -kernel.normalized(),
+        false => kernel.normalized(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Parallel;
@@ -276,6 +297,18 @@ mod tests {
                 "{at:?}: measured {got:?}, real {want:?}"
             );
         }
+    }
+
+    #[test]
+    fn affine_recovery_is_independent_of_where_its_phases_are_measured() {
+        let near = measured();
+        let elsewhere = Parallel::measure(openshard_like, Vec3::new(-20.0, 350.0, 40.0), 17.0, 1e-6);
+        let sample = Vec3::new(47.25, 91.5, -3.0);
+        let (near_pixel, elsewhere_pixel) = (near.pixel_of(sample), elsewhere.pixel_of(sample));
+
+        assert!((near_pixel.0 - elsewhere_pixel.0).abs() < 1e-9);
+        assert!((near_pixel.1 - elsewhere_pixel.1).abs() < 1e-9);
+        assert!((near.direction() - elsewhere.direction()).length() < 1e-12);
     }
 
     #[test]

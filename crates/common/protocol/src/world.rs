@@ -423,16 +423,23 @@ impl CreateCharacter {
     }
 
     /// Encode the packet. The `0xF8` (four-skill) form is written when four
-    /// skills are present, the classic `0x00` form otherwise. Mostly for tests.
+    /// skills are present, the classic `0x00` form when three are present.
+    /// Mostly for tests.
+    ///
+    /// # Panics
+    ///
+    /// If `skills` contains any number other than the three or four entries the
+    /// two wire forms can represent.
     pub fn encode(&self) -> Vec<u8> {
-        let high_seas = self.skills.len() >= 4;
-        let capacity = if high_seas { 106 } else { 104 };
+        let (id, capacity) = match self.skills.len() {
+            3 => (Self::ID_CLASSIC, 104),
+            4 => (Self::ID_HIGH_SEAS, 106),
+            count => {
+                panic!("a create-character packet has {count} skills; its wire forms require exactly 3 or 4")
+            }
+        };
         let mut writer = PacketWriter::with_capacity(capacity);
-        writer.u8(if high_seas {
-            Self::ID_HIGH_SEAS
-        } else {
-            Self::ID_CLASSIC
-        });
+        writer.u8(id);
         writer.zeros(9); // pattern1, pattern2, kuoc
         writer.fixed_string(&self.name.0, CHARACTER_NAME_LENGTH);
         writer.zeros(2);
@@ -445,9 +452,7 @@ impl CreateCharacter {
         writer.u8(self.dexterity.0);
         writer.u8(self.intelligence.0);
 
-        let count = if high_seas { 4 } else { 3 };
-        for index in 0..count {
-            let choice = self.skills.get(index).copied().unwrap_or_default();
+        for choice in &self.skills {
             writer.u8(choice.skill.0);
             writer.u8(choice.value.0);
         }
@@ -1879,6 +1884,18 @@ mod tests {
             Some(PacketLength::Fixed(104))
         );
         assert_eq!(CreateCharacter::decode(&bytes).unwrap(), create);
+    }
+
+    #[test]
+    fn create_character_refuses_skill_counts_its_wire_cannot_represent() {
+        for count in [2, 5] {
+            let mut create = sample_create(false);
+            create.skills.resize(count, SkillChoice::default());
+            assert!(
+                std::panic::catch_unwind(|| create.encode()).is_err(),
+                "{count} skills must not be padded or truncated"
+            );
+        }
     }
 
     #[test]

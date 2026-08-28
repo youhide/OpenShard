@@ -11,7 +11,7 @@
 //! "fast exact path" would be two implementations again, and the one that gets
 //! compared against the renderer would be the one nobody looks at.
 
-use crate::camera::Parallel;
+use crate::camera::{Parallel, Ray};
 use crate::light::{Light, LightIdx};
 use crate::rng::Stream;
 use crate::scene::{SURFACE_BIAS, Scene, Surface};
@@ -305,12 +305,7 @@ pub fn render(
         settings.brdf != Brdf::Flat || settings.bounces == 0,
         "a bounce off a surface with no normal is not a thing this crate can mean — see Brdf::Flat"
     );
-    let exact = settings.bounces == 0
-        && lights.iter().all(|light| {
-            light
-                .exact_in_samples()
-                .is_some_and(|needed| needed <= settings.samples)
-        });
+    let exact = is_exact(lights, settings);
     let mut pixels = Vec::with_capacity(size.pixel_count());
     let mut visibility = vec![Visibility::default(); size.pixel_count() * lights.len()];
     // One scratch buffer for the whole frame rather than one allocation a
@@ -322,48 +317,18 @@ pub fn render(
     for y in 0..size.height {
         for x in 0..size.width {
             let index = (y * size.width + x) as usize;
-            let mut stream = Stream::new(settings.seed, index as u64);
             let ray = camera.ray((f64::from(x) + 0.5, f64::from(y) + 0.5));
-            let Some(first) = scene.hit(ray.at, ray.direction, f64::NEG_INFINITY) else {
-                pixels.push(Pixel {
-                    seen: None,
-                    radiance: settings.sky,
-                });
-                continue;
-            };
-            for counter in &mut tally {
-                *counter = Tally::default();
-            }
-            let mut total = [0.0; 3];
-            for _ in 0..settings.samples {
-                let path = walk(scene, lights, settings, first, &mut stream, &mut tally);
-                for (channel, value) in total.iter_mut().zip(path) {
-                    *channel += value;
-                }
-            }
-            let samples = f64::from(settings.samples);
-            for (light_index, light) in lights.iter().enumerate() {
-                let counted = tally[light_index];
-                visibility[index * lights.len() + light_index] = Visibility {
-                    reached: match counted.considered {
-                        0 => 0.0,
-                        considered => f64::from(counted.reached) / f64::from(considered),
-                    },
-                    // Asked of the emitter's own centre, and so a statement
-                    // about the falloff alone: a sphere half in reach is a
-                    // shape this flag cannot describe and must not pretend to.
-                    within_reach: light.falloff.at((light.at - first.at).length()).is_some(),
-                    faces_light: counted.facing > 0,
-                };
-            }
-            pixels.push(Pixel {
-                seen: Some(Seen {
-                    surface: first.surface,
-                    at: first.at,
-                    normal: first.normal,
-                }),
-                radiance: [total[0] / samples, total[1] / samples, total[2] / samples],
-            });
+            let first_visibility = index * lights.len();
+            let pixel_visibility = &mut visibility[first_visibility..first_visibility + lights.len()];
+            pixels.push(render_pixel(
+                scene,
+                lights,
+                settings,
+                ray,
+                index as u64,
+                &mut tally,
+                pixel_visibility,
+            ));
         }
     }
     Image {
@@ -372,6 +337,73 @@ pub fn render(
         lights: lights.len(),
         visibility,
         exact,
+    }
+}
+
+/// Whether this render has no sampling variance at all.
+fn is_exact(lights: &[Light], settings: &Settings) -> bool {
+    settings.bounces == 0
+        && lights.iter().all(|light| {
+            light
+                .exact_in_samples()
+                .is_some_and(|needed| needed <= settings.samples)
+        })
+}
+
+/// Trace and average one camera ray, filling its per-light visibility beside it.
+fn render_pixel(
+    scene: &Scene,
+    lights: &[Light],
+    settings: &Settings,
+    ray: Ray,
+    sequence: u64,
+    tally: &mut [Tally],
+    visibility: &mut [Visibility],
+) -> Pixel {
+    let Some(first) = scene.hit(ray.at, ray.direction, f64::NEG_INFINITY) else {
+        visibility.fill(Visibility::default());
+        return Pixel {
+            seen: None,
+            radiance: settings.sky,
+        };
+    };
+
+    tally.fill(Tally::default());
+    let mut stream = Stream::new(settings.seed, sequence);
+    let mut total = [0.0; 3];
+    for _ in 0..settings.samples {
+        let path = walk(scene, lights, settings, first, &mut stream, tally);
+        for (channel, value) in total.iter_mut().zip(path) {
+            *channel += value;
+        }
+    }
+    record_visibility(lights, first, tally, visibility);
+
+    let samples = f64::from(settings.samples);
+    Pixel {
+        seen: Some(Seen {
+            surface: first.surface,
+            at: first.at,
+            normal: first.normal,
+        }),
+        radiance: [total[0] / samples, total[1] / samples, total[2] / samples],
+    }
+}
+
+/// Turn one pixel's shadow-ray counts into the public visibility answer.
+fn record_visibility(lights: &[Light], first: crate::scene::Hit, tally: &[Tally], into: &mut [Visibility]) {
+    for ((answer, light), counted) in into.iter_mut().zip(lights).zip(tally) {
+        *answer = Visibility {
+            reached: match counted.considered {
+                0 => 0.0,
+                considered => f64::from(counted.reached) / f64::from(considered),
+            },
+            // Asked of the emitter's own centre, and so a statement about the
+            // falloff alone: a sphere half in reach is a shape this flag cannot
+            // describe and must not pretend to.
+            within_reach: light.falloff.at((light.at - first.at).length()).is_some(),
+            faces_light: counted.facing > 0,
+        };
     }
 }
 
@@ -515,7 +547,7 @@ fn cosine_hemisphere(normal: Vec3, stream: &mut Stream) -> Vec3 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Brdf, ImagePixel, ImageSize, Settings, cosine_hemisphere, render};
+    use super::{Brdf, ImagePixel, ImageSize, Settings, Visibility, cosine_hemisphere, render};
     use crate::aabb::Aabb;
     use crate::camera::Parallel;
     use crate::light::{Emitter, Falloff, Light, LightIdx};
@@ -619,6 +651,37 @@ mod tests {
             ),
             "a bounce is an estimate whatever the emitter is"
         );
+    }
+
+    #[test]
+    fn a_camera_ray_that_misses_keeps_sky_and_no_light_visibility() {
+        let sky = [0.2, 0.4, 0.8];
+        let light = torch(TORCH, Emitter::Point);
+        let image = render(
+            &Scene::default(),
+            &top_down(),
+            &[light],
+            &Settings {
+                sky,
+                ..Settings::degenerate()
+            },
+            ImageSize::new(2, 1),
+        );
+
+        assert!(
+            image
+                .pixels
+                .iter()
+                .all(|pixel| pixel.seen.is_none() && pixel.radiance == sky),
+            "a miss sees the environment and invents no surface",
+        );
+        for x in 0..2 {
+            assert_eq!(
+                image.visibility(ImagePixel::new(x, 0), LightIdx::new(0)),
+                Visibility::default(),
+                "a light has no visibility answer without a receiving surface",
+            );
+        }
     }
 
     #[test]

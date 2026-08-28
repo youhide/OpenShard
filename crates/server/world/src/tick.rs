@@ -62,8 +62,8 @@ use tracing::{debug, info, warn};
 
 use openshard_state::components::{
     Access, Account, Amount, Body, Brain, Client, Combat, Contained, Container, DamageType, Decoration, Door,
-    Drawn, Equipped, Ghost, Heading, Healer, Hitpoints, Mana, MeleeDamage, Movement, Name, Position,
-    Resistance, Ridden, Riding, SpawnedBy, Spellbook, Stackable, Stamina, Stats, Vendor,
+    Drawn, Equipped, Ghost, Heading, Healer, Hitpoints, LastStep, Mana, MeleeDamage, Movement, Name,
+    Position, Resistance, Ridden, Riding, SpawnedBy, Spellbook, Stackable, Stamina, Stats, Vendor,
 };
 use openshard_state::facet_rules::FacetRules;
 use openshard_state::rng::Rng;
@@ -1011,6 +1011,148 @@ impl World {
         }
     }
 
+    fn clicked_entities(&self, connection: ConnectionId, serial: Serial) -> Option<(EntityId, EntityId)> {
+        Some((
+            *self.state.players.get(&connection)?,
+            self.state.registry.entity_of(serial)?,
+        ))
+    }
+
+    fn handle_double_click(&mut self, connection: ConnectionId, request: UseRequest) {
+        match request {
+            // Bit 31 is the client's *paperdoll request* — the login-time
+            // paperdoll open, the paperdoll macro — and it is only that:
+            // ServUO's `UseReq` routes it straight to `OnPaperdollRequest`,
+            // never to `Use`. Treating both alike was the bug where relogging
+            // mounted dismounted you a breath later: the client's paperdoll-open
+            // read as a self-double-click. `DoubleClick::interpret` is what
+            // takes the two apart, and it did so before this command was queued.
+            UseRequest::Paperdoll(raw) => {
+                debug!(serial = format!("0x{:08X}", raw.0), "paperdoll request");
+                if let Some(serial) = raw.validate() {
+                    items::paperdoll_request(&mut self.state, connection, serial);
+                }
+            }
+            UseRequest::Use(raw) => self.handle_item_use(connection, raw),
+        }
+    }
+
+    fn handle_item_use(&mut self, connection: ConnectionId, raw: RawSerial) {
+        debug!(serial = format!("0x{:08X}", raw.0), "double-click");
+        // A click on nothing is silence: `0`, `0xFFFFFFFF` and anything
+        // past the item pool address no object, and the client is owed
+        // no answer for asking.
+        let Some(serial) = raw.validate() else {
+            return;
+        };
+
+        // ServUO asks `CheckAlive` before it dispatches a use, so
+        // every new double-click begins closed to the dead. This
+        // shard has one deliberate exception: its healer click is
+        // an extra resurrection path (ServUO offers on movement).
+        if let Some((player, target)) = self.clicked_entities(connection, serial) {
+            if self.state.registry.has::<Ghost>(player) {
+                if self.state.registry.has::<Healer>(target) {
+                    self.click_healer(player, target);
+                } else {
+                    self.state.system_message(player, items::DEAD_HANDS);
+                }
+                return;
+            }
+        }
+
+        self.notify_mobile_use(connection, serial);
+        let snoop_refused = self.snooping_refused(connection, serial);
+        let engine_window = self.open_engine_window(connection, serial);
+        if !engine_window && !snoop_refused && !npc::open_shop(&mut self.state, connection, serial) {
+            self.use_ordinary_item(connection, serial);
+        }
+    }
+
+    fn notify_mobile_use(&mut self, connection: ConnectionId, serial: Serial) {
+        // Every double-clicked mobile reaches the rules layered over it,
+        // whatever the engine itself then does with the click.
+        items::mobile_used(&mut self.state, connection, serial);
+        if let Some((player, target)) = self.clicked_entities(connection, serial) {
+            quests::talk_to(&mut self.state, player, target);
+        }
+        if let Some((player, target)) = self.clicked_entities(connection, serial) {
+            self.click_healer(player, target);
+        }
+        // A trapped chest goes off before it opens — and then opens anyway.
+        if let Some((player, target)) = self.clicked_entities(connection, serial) {
+            self.spring_trap(player, target);
+        }
+    }
+
+    fn snooping_refused(&mut self, connection: ConnectionId, serial: Serial) -> bool {
+        let Some((player, target)) = self.clicked_entities(connection, serial) else {
+            return false;
+        };
+        if !self.state.registry.has::<Container>(target)
+            || !matches!(
+                openshard_state::item_location(&self.state, target),
+                Some(LiveItemLocation::Settled(
+                    openshard_state::SettledItemLocation::Contained(_)
+                ))
+            )
+        {
+            return false;
+        }
+        // A failed peek keeps the gump shut, and every peek costs karma.
+        !skills::snooping(&mut self.state, player, target)
+    }
+
+    fn open_engine_window(&mut self, connection: ConnectionId, serial: Serial) -> bool {
+        let Some((player, target)) = self.clicked_entities(connection, serial) else {
+            return false;
+        };
+        // Gates and runebooks own engine windows; neither may fall through as
+        // a bare `ItemUsed` event.
+        self.click_gate(player, target) || self.click_runebook(player, target)
+    }
+
+    fn use_ordinary_item(&mut self, connection: ConnectionId, serial: Serial) {
+        // `App::open_door_ahead` sends a use for every shut leaf a diagonal has
+        // to pass. Do not toggle a linked doorway shut on the second request in
+        // that automatic batch.
+        let already_opened = self.opened_door_leaves.contains(&(connection, serial));
+        let opened = match self.state.registry.entity_of(serial) {
+            Some(door) => self
+                .state
+                .registry
+                .get::<Door>(door)
+                .filter(|door| !door.is_open)
+                .map(|door| (serial, door.link)),
+            None => None,
+        };
+        let equipped_weapon = if !already_opened {
+            let equipped_weapon = items::double_click(&mut self.state, connection, serial);
+            if let Some((leaf, Some(link))) = opened.filter(|_| {
+                self.state
+                    .registry
+                    .entity_of(serial)
+                    .and_then(|door| self.state.registry.get::<Door>(door))
+                    .is_some_and(|door| door.is_open)
+            }) {
+                self.opened_door_leaves.insert((connection, leaf));
+                self.opened_door_leaves.insert((connection, link));
+            }
+            equipped_weapon
+        } else {
+            false
+        };
+
+        // Core item skills and shipped item behaviours run only after the pack
+        // has seen the ordinary `ItemUsed` event.
+        if !equipped_weapon {
+            if let Some((player, item)) = self.clicked_entities(connection, serial) {
+                self.use_item_skill(player, item);
+                self.use_shipped_item(player, item);
+            }
+        }
+    }
+
     fn apply(&mut self, command: Command, now: Instant) {
         match command {
             Command::Authenticated {
@@ -1202,183 +1344,7 @@ impl World {
                     );
                 }
             }
-            // Bit 31 is the client's *paperdoll request* — the login-time
-            // paperdoll open, the paperdoll macro — and it is only that:
-            // ServUO's `UseReq` routes it straight to `OnPaperdollRequest`,
-            // never to `Use`. Treating both alike was the bug where relogging
-            // mounted dismounted you a breath later: the client's paperdoll-open
-            // read as a self-double-click. `DoubleClick::interpret` is what
-            // takes the two apart, and it did so before this command was queued.
-            Command::DoubleClick {
-                connection,
-                request: UseRequest::Paperdoll(raw),
-            } => {
-                debug!(serial = format!("0x{:08X}", raw.0), "paperdoll request");
-                if let Some(serial) = raw.validate() {
-                    items::paperdoll_request(&mut self.state, connection, serial);
-                }
-            }
-            Command::DoubleClick {
-                connection,
-                request: UseRequest::Use(raw),
-            } => {
-                debug!(serial = format!("0x{:08X}", raw.0), "double-click");
-                // A click on nothing is silence: `0`, `0xFFFFFFFF` and anything
-                // past the item pool address no object, and the client is owed
-                // no answer for asking.
-                if let Some(serial) = raw.validate() {
-                    // ServUO asks `CheckAlive` before it dispatches a use, so
-                    // every new double-click begins closed to the dead. This
-                    // shard has one deliberate exception: its healer click is
-                    // an extra resurrection path (ServUO offers on movement).
-                    if let (Some(&player), Some(target)) = (
-                        self.state.players.get(&connection),
-                        self.state.registry.entity_of(serial),
-                    ) {
-                        if self.state.registry.has::<Ghost>(player) {
-                            if self.state.registry.has::<Healer>(target) {
-                                self.click_healer(player, target);
-                            } else {
-                                self.state.system_message(player, items::DEAD_HANDS);
-                            }
-                            return;
-                        }
-                    }
-                    // Every double-clicked mobile reaches the rules layered over
-                    // it, whatever the engine itself then does with the click.
-                    // This used to fire only where the click fell through to the
-                    // paperdoll, which made "vendor" and "quest giver" mutually
-                    // exclusive — in ServUO a quest giver (`MondainQuester`) *is*
-                    // a `BaseVendor`, so a shop that swallowed the click swallowed
-                    // the quest with it.
-                    items::mobile_used(&mut self.state, connection, serial);
-                    // And, if it gives quests, it talks about them — offer,
-                    // nudge or turn-in. Before the shop, because in ServUO a
-                    // quest giver is a vendor and both have to work.
-                    if let (Some(&player), Some(target)) = (
-                        self.state.players.get(&connection),
-                        self.state.registry.entity_of(serial),
-                    ) {
-                        quests::talk_to(&mut self.state, player, target);
-                    }
-                    // And, if it is a healer and the clicker a ghost, it offers
-                    // a free resurrection — ServUO's `BaseHealer.OnDoubleClick`.
-                    if let (Some(&player), Some(target)) = (
-                        self.state.players.get(&connection),
-                        self.state.registry.entity_of(serial),
-                    ) {
-                        self.click_healer(player, target);
-                    }
-                    // A trapped chest goes off before it opens — and then opens
-                    // anyway, which is ServUO's `ExecuteTrap`: a trap hurts, it
-                    // does not bar the lid.
-                    if let (Some(&player), Some(target)) = (
-                        self.state.players.get(&connection),
-                        self.state.registry.entity_of(serial),
-                    ) {
-                        self.spring_trap(player, target);
-                    }
-                    // A container inside somebody else's pack is a snoop, not an
-                    // open: Snooping is one of the skills with no button, because
-                    // the action that uses it is an ordinary double-click. A failed
-                    // peek keeps the gump shut, and every peek costs karma.
-                    let snoop_refused = match (
-                        self.state.players.get(&connection).copied(),
-                        self.state.registry.entity_of(serial),
-                    ) {
-                        (Some(player), Some(target))
-                            if self.state.registry.has::<Container>(target)
-                                && matches!(
-                                    openshard_state::item_location(&self.state, target),
-                                    Some(LiveItemLocation::Settled(
-                                        openshard_state::SettledItemLocation::Contained(_)
-                                    ))
-                                ) =>
-                        {
-                            !skills::snooping(&mut self.state, player, target)
-                        }
-                        _ => false,
-                    };
-                    // Two things the engine owns a window for, caught before the
-                    // ordinary item dispatch: a gate is stepped through rather
-                    // than opened, and a runebook draws a list. Neither is a
-                    // door, a container or a mobile, so left to fall through
-                    // both would reach the pack as a bare `ItemUsed`.
-                    let engine_window = match (
-                        self.state.players.get(&connection).copied(),
-                        self.state.registry.entity_of(serial),
-                    ) {
-                        (Some(player), Some(target)) => {
-                            // A runebook is checked beside the gate for the same
-                            // reason: its window is the engine's, and left to
-                            // fall through it would reach the pack as a bare
-                            // `ItemUsed` on a book nobody could open.
-                            self.click_gate(player, target) || self.click_runebook(player, target)
-                        }
-                        _ => false,
-                    };
-                    // Then the interaction: a vendor's shop first, if the click
-                    // was a shopkeeper in range; anything else is the ordinary
-                    // use rule.
-                    if !engine_window
-                        && !snoop_refused
-                        && !npc::open_shop(&mut self.state, connection, serial)
-                    {
-                        // `App::open_door_ahead` sends a use for every shut
-                        // leaf a diagonal has to pass. A generated double
-                        // doorway links its two leaves, and the first use has
-                        // already swung both; accepting the second as an
-                        // ordinary toggle would shut them again immediately,
-                        // before the following walk is read. Remember the
-                        // leaves opened earlier in this tick, which is exactly
-                        // the lifetime of that automatic batch. A later click
-                        // is deliberate and remains the normal close action.
-                        let already_opened = self.opened_door_leaves.contains(&(connection, serial));
-                        let opened = match self.state.registry.entity_of(serial) {
-                            Some(door) => self
-                                .state
-                                .registry
-                                .get::<Door>(door)
-                                .filter(|door| !door.is_open)
-                                .map(|door| (serial, door.link)),
-                            None => None,
-                        };
-                        let equipped_weapon = if !already_opened {
-                            let equipped_weapon = items::double_click(&mut self.state, connection, serial);
-                            if let Some((leaf, Some(link))) = opened.filter(|_| {
-                                self.state
-                                    .registry
-                                    .entity_of(serial)
-                                    .and_then(|door| self.state.registry.get::<Door>(door))
-                                    .is_some_and(|door| door.is_open)
-                            }) {
-                                self.opened_door_leaves.insert((connection, leaf));
-                                self.opened_door_leaves.insert((connection, link));
-                            }
-                            equipped_weapon
-                        } else {
-                            false
-                        };
-                        // And the core's own answer for an item a skill knows what
-                        // to do with — an instrument struck up, and the bandage and
-                        // lockpick to come. Run *after* `double_click`, so the pack
-                        // has already had the `ItemUsed` event: default in core,
-                        // customise in the pack, in that order.
-                        if !equipped_weapon {
-                            if let (Some(&player), Some(item)) = (
-                                self.state.players.get(&connection),
-                                self.state.registry.entity_of(serial),
-                            ) {
-                                self.use_item_skill(player, item);
-                                // And the shard's own two item behaviours, last of
-                                // all: the engine has answered, and a configured pack
-                                // has had its `ItemUsed`.
-                                self.use_shipped_item(player, item);
-                            }
-                        }
-                    }
-                }
-            }
+            Command::DoubleClick { connection, request } => self.handle_double_click(connection, request),
             Command::SingleClick { connection, serial } => self.single_click(connection, serial),
             Command::QueryProperties { connection, serials } => self.query_properties(connection, &serials),
             Command::ContextMenuRequest { connection, serial } => {

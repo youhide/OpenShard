@@ -1,4 +1,4 @@
-//! The five trades: their recipe lists, and the headers that name them.
+//! The six trades: their recipe lists, and the headers that name them.
 //!
 //! Each `Def*.cs` in ServUO is a recipe table plus a short header of overrides —
 //! the main skill, the chance floor, the exceptional curve, the sound, and what
@@ -18,6 +18,7 @@
 pub mod alchemy;
 pub mod blacksmithy;
 pub mod carpentry;
+pub mod fletching;
 pub mod tailoring;
 pub mod tinkering;
 
@@ -53,7 +54,7 @@ mod tests {
 
     #[test]
     fn every_tool_on_the_shelf_opens_a_system() {
-        // The vendors already stock all five trades' tools. A graphic in the tool
+        // The vendors already stock every trade's tools. A graphic in the tool
         // table with no system behind it is a tool that answers a double-click
         // with nothing at all, which is what every one of these was before this
         // slice.
@@ -115,6 +116,20 @@ mod tests {
         assert_eq!(axis.entries.len(), ores.len());
         for (entry, ore) in axis.entries.iter().zip(ores) {
             assert_eq!(entry.hue, ore.hue);
+        }
+    }
+
+    #[test]
+    fn every_craftable_ranged_weapon_has_combat_rules() {
+        // DefBowFletching also contains expansion bows and fukiya darts, but a
+        // recipe must not ship before its output can actually attack. Group two
+        // is the weapon page; the material and ammunition pages are not weapons.
+        for recipe in fletching::RECIPES.iter().filter(|recipe| recipe.group == 2) {
+            assert!(
+                openshard_state::weapon::weapon_data(recipe.graphic).is_some(),
+                "fletching recipe {:#06X} has no combat row",
+                recipe.graphic.0
+            );
         }
     }
 }

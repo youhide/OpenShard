@@ -20,3 +20,6 @@ openshard-map.workspace = true
 openshard-movement.workspace = true
 openshard-protocol.workspace = true
 openshard-state.workspace = true
+
+[dev-dependencies]
+openshard-tiles.workspace = true

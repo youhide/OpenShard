@@ -569,7 +569,6 @@ fn remember(
 pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction> {
     let &Position(pos) = state.registry.get::<Position>(creature)?;
     let brain = *state.registry.get::<Brain>(creature)?;
-    let Brain { sight, wander, .. } = brain;
     let facet = state.facet_of(creature);
 
     // Standing watch after a chase that found no way through: hold still until
@@ -588,93 +587,133 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction
         return None;
     }
 
+    match fight_phase(state, creature, pos, facet, brain) {
+        FightPhase::NoFight => {}
+        FightPhase::Decided(direction) => return direction,
+    }
+    if acquire_phase(state, creature, pos, facet, brain) {
+        return None;
+    }
+    wander_phase(state, creature, brain)
+}
+
+/// Whether the fight half of a beat had nothing to do, or made the beat's
+/// decision. `Decided(None)` is deliberately distinct from `NoFight`: standing
+/// to strike or shoot must not fall through into acquiring prey or wandering.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FightPhase {
+    NoFight,
+    Decided(Option<Direction>),
+}
+
+/// Follow, fight or abandon the creature's current target.
+fn fight_phase(
+    state: &mut WorldState,
+    creature: EntityId,
+    pos: Point,
+    facet: Facet,
+    brain: Brain,
+) -> FightPhase {
     // Keep after a target that is still alive and in sight — close in if out of
     // reach, and leave the hitting to `swings`.
-    if let Some(target_serial) = state
+    let Some(target_serial) = state
         .registry
         .get::<Combat>(creature)
         .and_then(|combat| combat.target())
-    {
-        if let Some(target_pos) = foe_in_sight(state, creature, target_serial, pos, facet, chase_limit(sight))
-        {
-            if should_flee(state, creature, brain) {
-                state.registry.remove::<Route>(creature);
-                return flee_step(state, creature, facet, pos, target_pos);
-            }
-            // A ranged fighter kites: back off from a foe at its heels, stand
-            // and shoot inside its reach (`combat::commit_actions` does the
-            // shooting, and deliberately does not turn a shooter toward its
-            // mark — a step in a direction the mobile is not facing turns
-            // instead of moving, so re-aiming it every nock would pin it here),
-            // and only close in when out of range or out of sight line.
-            if let Some(&RangedAttack { range, .. }) = state.registry.get::<RangedAttack>(creature) {
-                let gap = distance(pos, target_pos);
-                if gap <= KITE_GAP {
-                    state.registry.remove::<Route>(creature);
-                    return kite_step(state, creature, facet, pos, target_pos);
-                }
-                let clear = openshard_movement::sight_clear(
-                    &state.footing(facet, Doors::AsTheyStand),
-                    pos,
-                    target_pos,
-                );
-                if gap <= u32::from(range.get()) && clear {
-                    return None; // in reach, sight line clear: stand and loose
-                }
-            }
-            if in_range(pos, target_pos, combat::MELEE_RANGE) {
-                // Arrived; the route served.
-                state.registry.remove::<Route>(creature);
-                return None;
-            }
-            return chase_step(state, creature, facet, pos, target_pos, brain);
+    else {
+        return FightPhase::NoFight;
+    };
+    if let Some(target_pos) = foe_in_sight(
+        state,
+        creature,
+        target_serial,
+        pos,
+        facet,
+        chase_limit(brain.sight),
+    ) {
+        if should_flee(state, creature, brain) {
+            state.registry.remove::<Route>(creature);
+            return FightPhase::Decided(flee_step(state, creature, facet, pos, target_pos));
         }
-        // Out of sight, or too far to keep after: the creature drops the fight
-        // rather than aiming at a memory. `disengage` and not `clear_target`,
-        // for two reasons that are one. The quarry is *not* gone — it is very
-        // often standing in plain view behind a fence — so what ends the swing
-        // is the creature abandoning it, and that is the word every watcher
-        // gets. And a creature's combat state exists only while it is fighting:
-        // left behind as a targetless war stance, it would stand there flagged
-        // as a fighter with nothing to fight for the rest of its life.
-        state.disengage(creature);
-        state.registry.remove::<Route>(creature);
+        // A ranged fighter kites: back off from a foe at its heels, stand
+        // and shoot inside its reach (`combat::commit_actions` does the
+        // shooting, and deliberately does not turn a shooter toward its
+        // mark — a step in a direction the mobile is not facing turns
+        // instead of moving, so re-aiming it every nock would pin it here),
+        // and only close in when out of range or out of sight line.
+        if let Some(&RangedAttack { range, .. }) = state.registry.get::<RangedAttack>(creature) {
+            let gap = distance(pos, target_pos);
+            if gap <= KITE_GAP {
+                state.registry.remove::<Route>(creature);
+                return FightPhase::Decided(kite_step(state, creature, facet, pos, target_pos));
+            }
+            let clear =
+                openshard_movement::sight_clear(&state.footing(facet, Doors::AsTheyStand), pos, target_pos);
+            if gap <= u32::from(range.get()) && clear {
+                return FightPhase::Decided(None); // in reach: stand and loose
+            }
+        }
+        if in_range(pos, target_pos, combat::MELEE_RANGE) {
+            // Arrived; the route served.
+            state.registry.remove::<Route>(creature);
+            return FightPhase::Decided(None);
+        }
+        return FightPhase::Decided(chase_step(state, creature, facet, pos, target_pos, brain));
     }
+    // Out of sight, or too far to keep after: the creature drops the fight
+    // rather than aiming at a memory. `disengage` and not `clear_target`,
+    // for two reasons that are one. The quarry is *not* gone — it is very
+    // often standing in plain view behind a fence — so what ends the swing
+    // is the creature abandoning it, and that is the word every watcher
+    // gets. And a creature's combat state exists only while it is fighting:
+    // left behind as a targetless war stance, it would stand there flagged
+    // as a fighter with nothing to fight for the rest of its life.
+    state.disengage(creature);
+    state.registry.remove::<Route>(creature);
+    FightPhase::NoFight
+}
 
+/// Acquire visible prey when this brain starts fights. Returns whether the
+/// transition consumed this beat.
+fn acquire_phase(state: &mut WorldState, creature: EntityId, pos: Point, facet: Facet, brain: Brain) -> bool {
     // Nothing to fight: look for prey — only a creature that starts fights
-    // hunts; the defensive and the passive wait to be wronged — or wander.
-    if sight.0 > 0 && brain.aggression == Aggression::Aggressive {
-        if let Some(prey) = nearest_player_in_sight(state, creature, pos, facet, sight) {
-            let next_swing = state.ticks + combat::swing_speed(state, creature);
-            state
-                .registry
-                .insert(creature, Combat::creature_engaged(prey, next_swing));
-            // A growl on the aggro transition — the creature announces itself the
-            // moment it notices prey, and only a creature growls (a human does not).
-            let growl = combat::anger_sound(state, creature);
-            if let Some(growl) = growl {
-                state.play_sound(creature, growl);
-            }
-            return None;
-        }
+    // hunts; the defensive and the passive wait to be wronged.
+    if brain.sight.0 == 0 || brain.aggression != Aggression::Aggressive {
+        return false;
     }
-    if wander && state.rng.below(8) < WANDER_IN_EIGHT {
-        // Walk on in the way it already faces, so it actually drifts rather than
-        // spinning: a step in a new direction only *turns* (turn-as-step), so
-        // picking a random heading every beat would never move. A quarter of the
-        // time it does turn, to a new heading, and drifts off that way.
-        let facing = state
-            .registry
-            .get::<Heading>(creature)
-            .map_or(Direction::South, |h| h.0.direction);
-        let dir = if state.rng.below(4) == 0 {
-            Direction::from_bits(state.rng.below(8) as u8)
-        } else {
-            facing
-        };
-        return Some(dir);
+    let Some(prey) = nearest_player_in_sight(state, creature, pos, facet, brain.sight) else {
+        return false;
+    };
+    let next_swing = state.ticks + combat::swing_speed(state, creature);
+    state
+        .registry
+        .insert(creature, Combat::creature_engaged(prey, next_swing));
+    // A growl on the aggro transition — the creature announces itself the
+    // moment it notices prey, and only a creature growls (a human does not).
+    if let Some(growl) = combat::anger_sound(state, creature) {
+        state.play_sound(creature, growl);
     }
-    None
+    true
+}
+
+/// Wander, if this is the beat on which the idle creature drifts.
+fn wander_phase(state: &mut WorldState, creature: EntityId, brain: Brain) -> Option<Direction> {
+    if !brain.wander || state.rng.below(8) >= WANDER_IN_EIGHT {
+        return None;
+    }
+    // Walk on in the way it already faces, so it actually drifts rather than
+    // spinning: a step in a new direction only *turns* (turn-as-step), so
+    // picking a random heading every beat would never move. A quarter of the
+    // time it does turn, to a new heading, and drifts off that way.
+    let facing = state
+        .registry
+        .get::<Heading>(creature)
+        .map_or(Direction::South, |h| h.0.direction);
+    if state.rng.below(4) == 0 {
+        Some(Direction::from_bits(state.rng.below(8) as u8))
+    } else {
+        Some(facing)
+    }
 }
 
 /// How far a chase follows before it is abandoned — wider than the sight that
@@ -1101,5 +1140,62 @@ pub fn pet_beat(state: &mut WorldState, pet: EntityId) -> Option<Direction> {
             }
             step_body_toward(state, pet, facet, at, owner_at, doors, Goal::Moving)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use openshard_protocol::serial::SerialKind;
+
+    use super::*;
+
+    fn world() -> WorldState {
+        WorldState::new(
+            BTreeMap::new(),
+            Facet(0),
+            openshard_tiles::TileData::empty(),
+            Default::default(),
+            openshard_map::grid::Tile::new(0, 0),
+            1,
+        )
+    }
+
+    fn mobile(state: &mut WorldState, at: Point) -> (EntityId, Serial) {
+        let (entity, serial) = state
+            .registry
+            .spawn_with_serial(SerialKind::Mobile)
+            .expect("a test mobile serial");
+        state.registry.insert(entity, Position(at));
+        state.registry.insert(entity, Facet(0));
+        state.registry.insert(entity, Hitpoints { current: 10, max: 10 });
+        (entity, serial)
+    }
+
+    #[test]
+    fn standing_to_fight_is_not_the_same_as_having_no_fight() {
+        let mut state = world();
+        let at = Point::new(10, 10, 0);
+        let (creature, _) = mobile(&mut state, at);
+        let brain = Brain {
+            sight: Sight(12),
+            ..Brain::default()
+        };
+
+        assert_eq!(
+            fight_phase(&mut state, creature, at, Facet(0), brain),
+            FightPhase::NoFight
+        );
+
+        let (_, target) = mobile(&mut state, Point::new(10, 11, 0));
+        state
+            .registry
+            .insert(creature, Combat::creature_engaged(target, WorldTick::ZERO));
+
+        assert_eq!(
+            fight_phase(&mut state, creature, at, Facet(0), brain),
+            FightPhase::Decided(None)
+        );
     }
 }

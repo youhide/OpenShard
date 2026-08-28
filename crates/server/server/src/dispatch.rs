@@ -286,11 +286,17 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
 /// a facet with no terrain would spawn the player in nowhere. If that leaves it
 /// empty — a shard that loaded no facet carrying a starting city — one city at
 /// the configured start is kept, because the client refuses an empty list and
-/// says so: "No city found. Something wrong with the received cities."
+/// says so: "No city found. Something wrong with the received cities." A shard
+/// that names no facets at all is refused: inventing facet 0 would advertise a
+/// spawn in a world the server did not load.
 ///
 /// The description cliloc is left 0: a client older than 7.0.13.0 ignores the
 /// field, and a newer one shows the city and inn names either way.
-pub(crate) fn start_cities(facets: &[u8], start: Tile) -> Vec<StartLocation> {
+pub(crate) fn start_cities(facets: &[u8], start: Tile) -> Result<Vec<StartLocation>, &'static str> {
+    let &fallback_facet = facets
+        .first()
+        .ok_or("world.facets is empty; at least one facet must be loaded")?;
+
     fn city(area: &str, name: &str, position: Point) -> StartLocation {
         StartLocation {
             area: area.to_owned(),
@@ -321,11 +327,11 @@ pub(crate) fn start_cities(facets: &[u8], start: Tile) -> Vec<StartLocation> {
             area: "Britannia".to_owned(),
             name: "Britain".to_owned(),
             position: Point::new(start.x, start.y, 0),
-            map: Facet(facets.first().copied().unwrap_or(0)),
+            map: Facet(fallback_facet),
             description_cliloc: ClilocId(0),
         });
     }
-    cities
+    Ok(cities)
 }
 
 #[cfg(test)]
@@ -360,7 +366,7 @@ mod tests {
     fn a_facet_zero_shard_offers_the_classic_towns() {
         // Facet 0 loaded — the normal case — offers the nine classic Felucca
         // cities, every one of them on map 0 with a real, non-origin position.
-        let cities = start_cities(&[0], Tile::new(1363, 1600));
+        let cities = start_cities(&[0], Tile::new(1363, 1600)).expect("facet 0 is loaded");
         assert_eq!(cities.len(), 9, "the nine classic starting cities");
         assert!(
             cities.iter().any(|city| city.area == "Britain"),
@@ -389,7 +395,7 @@ mod tests {
         // screen. No classic city lives on a non-zero facet, so a shard that
         // loaded only facet 1 keeps a single fallback at the configured start —
         // on a facet it actually loaded, not facet 0 it did not.
-        let cities = start_cities(&[1], Tile::new(1363, 1600));
+        let cities = start_cities(&[1], Tile::new(1363, 1600)).expect("facet 1 is loaded");
         assert_eq!(cities.len(), 1, "never empty");
         assert_eq!(cities[0].position, Point::new(1363, 1600, 0));
         assert_eq!(cities[0].map, Facet(1), "on a loaded facet");
@@ -401,9 +407,17 @@ mod tests {
         // a raw index into exactly this list, so the Nth city is the one picked
         // by clicking the Nth entry. If this order ever shifts, spawns land in
         // the wrong town silently.
-        let cities = start_cities(&[0], Tile::new(1363, 1600));
+        let cities = start_cities(&[0], Tile::new(1363, 1600)).expect("facet 0 is loaded");
         assert_eq!(cities[0].area, "Yew");
         assert_eq!(cities[2].area, "Britain");
         assert_eq!(cities[8].area, "Vesper");
+    }
+
+    #[test]
+    fn a_shard_without_any_facet_is_refused_instead_of_inventing_facet_zero() {
+        assert_eq!(
+            start_cities(&[], Tile::new(1363, 1600)),
+            Err("world.facets is empty; at least one facet must be loaded")
+        );
     }
 }

@@ -479,10 +479,10 @@ fn a_hatchet_asks_what_to_use_it_on_instead_of_where_to_dig() {
                 && packet[0] == 0xBF
                 && packet[3..5] == (openshard_protocol::access::OPENSHARD_SUBCOMMANDS + 13).to_be_bytes()
                 && packet[13..15] == 13_u16.to_be_bytes()
-                && packet[17..21] == 4_800_u32.to_be_bytes()
-                && packet[21..23] == 3_u16.to_be_bytes()
+                && packet[17..21] == 9_600_u32.to_be_bytes()
+                && packet[21..23] == 6_u16.to_be_bytes()
         }),
-        "the hatchet cursor should carry an immediate, 4.8-second chop preview"
+        "the hatchet cursor should carry an immediate, 9.6-second chop preview"
     );
     let messages: Vec<_> = packets
         .iter()
@@ -523,16 +523,16 @@ fn a_hatchet_chops_a_tree_static() {
             .get::<Harvesting>(entity)
             .expect("chopping")
             .beats_left,
-        3,
-        "lumberjacking lasts three full beats rather than ending after one swing"
+        6,
+        "lumberjacking lasts six full beats rather than requiring two targets"
     );
-    for _ in 0..definition(HarvestKind::Lumber, true).beat_ticks * 2 {
+    for _ in 0..definition(HarvestKind::Lumber, true).beat_ticks * 5 {
         now += TICK_INTERVAL;
         world.tick(now);
     }
     assert!(
         world.state.registry.has::<Harvesting>(entity),
-        "the third complete chop is still owed"
+        "the sixth complete chop is still owed"
     );
     assert_eq!(
         carried(&world, player, LOG_GRAPHIC),
@@ -540,7 +540,11 @@ fn a_hatchet_chops_a_tree_static() {
         "logs arrive after the final whole stroke, not while chopping is looping"
     );
     finish_swing(&mut world, player, now);
-    assert!(carried(&world, player, LOG_GRAPHIC) > 0, "no logs in the pack");
+    assert_eq!(
+        carried(&world, player, LOG_GRAPHIC),
+        u32::from(definition(HarvestKind::Lumber, true).consumed_felucca),
+        "one long Felucca chop should replace two old ten-log payouts"
+    );
     assert!(
         world
             .state

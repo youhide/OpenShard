@@ -148,12 +148,12 @@ follows.
       Two things ride along, because they are in the same rows and the same
       commit is the cheapest place for them:
 
-      - `CraftSystemDef::needs_message` is `ClilocId(0)` on four systems of five
-        (`defs/mod.rs`) — D2's zero. `Option<ClilocId>`.
-      - `Recipe::amount` has a column and no data: all 485 rows are 1. Leave the
+      - At the time, `CraftSystemDef::needs_message` was `ClilocId(0)` on four
+        systems of five (`defs/mod.rs`) — D2's zero. `Option<ClilocId>`.
+      - `Recipe::amount` has a column and no data: every shipped row is 1. Leave the
         column and say so in the doc, or drop it — but decide, and record which,
-        rather than carrying a field nothing sets. The stacking recipes that
-        would use it (`DefBowFletching`'s arrows and bolts) are not ported.
+        rather than carrying a field nothing sets. Batch recipes use
+        `use_all_res`; `amount` is the per-paid-set multiplier.
 
       **Note before starting:** the roadmap entry for this also claims
       `Text::Cliloc(0)` appears in the generated tables as a null. It does not —

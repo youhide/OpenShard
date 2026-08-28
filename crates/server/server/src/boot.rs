@@ -73,15 +73,15 @@ pub(crate) fn is_postgres_url(target: &str) -> bool {
 /// a knob added to `[world]` cannot be wired into one branch and forgotten in the
 /// other. That drift is silent: the mapless mode is the one tests and a first run
 /// use, so the branch that gets it right is not the branch anyone notices.
-fn configured_world(config: &Config) -> World {
+fn configured_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> {
     let world = World::new(Tile::new(config.world.start.x, config.world.start.y))
         .with_gameplay(gameplay_of(config))
-        .with_character_screen(character_screen_of(config))
+        .with_character_screen(character_screen_of(config)?)
         .with_save_seconds(config.persistence.save_seconds);
     // Only when the operator pinned one. There is no `u64` that means "no seed", so
     // an absent `world.seed` has to leave the world's own default in place rather
     // than pass a stand-in through.
-    match config.world.seed {
+    Ok(match config.world.seed {
         Some(seed) => {
             info!(
                 seed,
@@ -90,7 +90,7 @@ fn configured_world(config: &Config) -> World {
             world.with_seed(seed)
         }
         None => world,
-    }
+    })
 }
 
 /// Everything a shard needs before its first tick that has to be read off a
@@ -643,7 +643,7 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
             "world.client_files is empty: running with no map. Every step will be allowed — \
              players walk through walls and across water. Set it to a client install."
         );
-        return Ok(configured_world(config));
+        return configured_world(config);
     }
 
     let dir = Path::new(dir);
@@ -685,7 +685,7 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
         }
     };
 
-    let mut world = configured_world(config).with_tiles(tiles, multis);
+    let mut world = configured_world(config)?.with_tiles(tiles, multis);
     match openshard_housing::template::load_directory(&dir.join("openshard-houses")) {
         Ok(templates) => {
             if !templates.is_empty() {

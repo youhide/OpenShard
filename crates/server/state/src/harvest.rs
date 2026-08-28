@@ -578,23 +578,27 @@ const SAND: HarvestDef = HarvestDef {
 const LUMBER_ML: HarvestDef = HarvestDef {
     kind: HarvestKind::Lumber,
     skill: Skill::Lumberjacking,
-    bank_w: 4,
-    bank_h: 3,
+    // A tree owns its own stock. Nearby trunks must not make one another empty:
+    // the click names a particular static, so depletion follows that tile.
+    bank_w: 1,
+    bank_h: 1,
     min_total: 20,
     max_total: 45,
     min_respawn: 20 * MINUTE,
     max_respawn: 30 * MINUTE,
     tiles: TileSet::List(TREE_TILES),
     max_range: 2,
-    consumed: 10,
-    consumed_felucca: 20,
+    // One deliberately long chopping job replaces two of the old short jobs.
+    // Throughput stays the same, while the player targets the tree half as often.
+    consumed: 20,
+    consumed_felucca: 40,
     place_at_feet: false,
     action: HarvestAction::Chop,
     sounds: &[SoundId(0x13E)],
-    // Three 1.6-second beats give the chop three uninterrupted full cycles
-    // before the logs arrive. Each impact sound falls 0.9 seconds into its
-    // own cycle, matching the reference's per-effect sound timer.
-    beats: 3,
+    // Six 1.6-second beats give the chop six uninterrupted full cycles before
+    // the larger bundle of logs arrives. Each impact sound falls 0.9 seconds
+    // into its own cycle, matching the reference's per-effect sound timer.
+    beats: 6,
     beat_ticks: BEAT_TICKS,
     sound_ticks: SOUND_TICKS,
     messages: HarvestMessages {
@@ -1029,6 +1033,37 @@ mod tests {
         assert_eq!(banks.len(), 1);
         // And the next block along is its own.
         banks.get(def, 24, 16, Facet(0), WorldTick::ZERO, &mut rng);
+        assert_eq!(banks.len(), 2);
+    }
+
+    #[test]
+    fn every_tree_has_its_own_depleting_stock() {
+        let def = definition(HarvestKind::Lumber, true);
+        assert_eq!((def.bank_w, def.bank_h), (1, 1));
+
+        let mut rng = Rng::new(7);
+        let mut banks = Banks::default();
+        let full = banks
+            .get(def, 16, 16, Facet(0), WorldTick::ZERO, &mut rng)
+            .maximum;
+        banks
+            .get(def, 16, 16, Facet(0), WorldTick::ZERO, &mut rng)
+            .consume(def, full, WorldTick::ZERO, &mut rng);
+
+        assert_eq!(
+            banks
+                .get(def, 16, 16, Facet(0), WorldTick::ZERO, &mut rng)
+                .current,
+            0,
+            "the chopped tree should stay empty until its respawn"
+        );
+        assert!(
+            banks
+                .get(def, 17, 16, Facet(0), WorldTick::ZERO, &mut rng)
+                .current
+                > 0,
+            "the tree next door should keep its own stock"
+        );
         assert_eq!(banks.len(), 2);
     }
 

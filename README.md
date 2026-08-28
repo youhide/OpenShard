@@ -105,7 +105,7 @@ crates/
     items         containers, drag/drop, stacking, decay, doors, mounts
     skills        checks, the gain curve
     magic         the 64-spell table, casting, typed damage, timed buffs
-    crafting      the five craft systems, 485 recipes, smelting
+    crafting      six craft systems, 492 recipes, smelting
     ai            creature brains: LOS aggro, chase, kite, flee, give up
     npc           townsfolk: bankers, vendors, creature spawning
     quests        quest model, objectives, the gump

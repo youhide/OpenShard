@@ -450,6 +450,111 @@ pub fn war_mode(state: &mut WorldState, connection: ConnectionId, war: bool) {
     }
 }
 
+/// The target-bound timing and wrestling opener decisions for one new aim.
+#[derive(Clone, Copy, Debug)]
+struct AttackPlan {
+    target: EntityId,
+    serial: Serial,
+    now: WorldTick,
+    next: WorldTick,
+    renewing: bool,
+    ambush: bool,
+    intercept: bool,
+}
+
+impl AttackPlan {
+    fn of(state: &WorldState, player: EntityId, serial: Serial, target: EntityId) -> Self {
+        let now = state.ticks;
+        let unarmed = is_wrestling(state, player);
+        let previous_target = state
+            .registry
+            .get::<Combat>(player)
+            .and_then(|combat| combat.target());
+        let ambush = unarmed
+            && state.registry.has::<Hidden>(player)
+            && state
+                .registry
+                .get::<WrestlingAmbushCooldown>(player)
+                .is_none_or(|cooldown| now >= cooldown.until);
+        let intercept = unarmed
+            && !ambush
+            && previous_target != Some(serial)
+            && state
+                .registry
+                .get::<WrestlingStride>(player)
+                .is_some_and(|stride| stride.steps >= WRESTLING_INTERCEPT_STEPS && now <= stride.expires_at)
+            && state
+                .registry
+                .get::<WrestlingInterceptCooldown>(player)
+                .is_none_or(|cooldown| now >= cooldown.until);
+        let renewing = previous_target == Some(serial) && state.registry.has::<CombatAction>(player);
+        let next = if renewing {
+            state
+                .registry
+                .get::<Combat>(player)
+                .and_then(|combat| combat.next_swing())
+                .expect("a running combat action has a scheduled next swing")
+        } else {
+            let pace = swing_speed(state, player);
+            if ambush {
+                now
+            } else if intercept {
+                now + (pace / 2).max(1)
+            } else {
+                now + pace
+            }
+        };
+        Self {
+            target,
+            serial,
+            now,
+            next,
+            renewing,
+            ambush,
+            intercept,
+        }
+    }
+
+    /// Apply the side effects that begin only after `Combat::aim` accepts the
+    /// plan. Keeping them after that gate prevents a refused aim consuming an
+    /// opener or abandoning the action already in flight.
+    fn begin(self, state: &mut WorldState, player: EntityId) {
+        if !self.renewing {
+            state.end_combat_action(
+                player,
+                CombatActionOutcome::Interrupted(InterruptReason::Abandoned),
+            );
+        }
+        if melee_reachable(state, player, self.target) {
+            state.face_toward(player, self.target);
+        }
+        if self.ambush {
+            state.registry.insert(
+                player,
+                WrestlingOpener {
+                    target: self.serial,
+                    expires_at: self.now + WRESTLING_OPENER_TICKS,
+                },
+            );
+            state.registry.insert(
+                player,
+                WrestlingAmbushCooldown {
+                    until: self.now + WRESTLING_AMBUSH_COOLDOWN_TICKS,
+                },
+            );
+        }
+        if self.intercept {
+            state.registry.remove::<WrestlingStride>(player);
+            state.registry.insert(
+                player,
+                WrestlingInterceptCooldown {
+                    until: self.now + WRESTLING_INTERCEPT_COOLDOWN_TICKS,
+                },
+            );
+        }
+    }
+}
+
 /// Set a player's attack target. The blow itself is not struck here — this only
 /// aims; [`commit_actions`] turns "in war mode, in reach, recovery up" into a
 /// blow or a shot that is on its way.
@@ -490,32 +595,6 @@ pub fn attack(state: &mut WorldState, connection: ConnectionId, target: Option<S
         );
         return;
     };
-    // Wrestling owns the first contact rather than the whole exchange.  An
-    // ambush from cover wins it outright; recent footwork halves the usual wait.
-    // Both are target-bound and cooldown-gated before the mutable Combat borrow.
-    let now = state.ticks;
-    let unarmed = is_wrestling(state, player);
-    let previous_target = state
-        .registry
-        .get::<Combat>(player)
-        .and_then(|combat| combat.target());
-    let ambush = unarmed
-        && state.registry.has::<Hidden>(player)
-        && state
-            .registry
-            .get::<WrestlingAmbushCooldown>(player)
-            .is_none_or(|cooldown| now >= cooldown.until);
-    let intercept = unarmed
-        && !ambush
-        && previous_target != Some(serial)
-        && state
-            .registry
-            .get::<WrestlingStride>(player)
-            .is_some_and(|stride| stride.steps >= WRESTLING_INTERCEPT_STEPS && now <= stride.expires_at)
-        && state
-            .registry
-            .get::<WrestlingInterceptCooldown>(player)
-            .is_none_or(|cooldown| now >= cooldown.until);
     // **Naming the opponent you are already fighting is not a change of mind.**
     // Everything below rewrites the schedule and abandons whatever was mid-swing,
     // which is right for a new target and destructive for the same one: a second
@@ -525,29 +604,11 @@ pub fn attack(state: &mut WorldState, connection: ConnectionId, target: Option<S
     // crossed the wire was `Abandoned`. It was reported as exactly that. Nothing
     // here has anything to add for a fight already in progress, so it says so and
     // stops.
-    let renewing = previous_target == Some(serial) && state.registry.has::<CombatAction>(player);
-    let next = if renewing {
-        // Left exactly where it was: the running action owns this schedule and
-        // `commit_actions` pinned it to the impact being promised.
-        state
-            .registry
-            .get::<Combat>(player)
-            .and_then(|combat| combat.next_swing())
-            .unwrap_or(now)
-    } else {
-        let pace = swing_speed(state, player);
-        if ambush {
-            now
-        } else if intercept {
-            now + (pace / 2).max(1)
-        } else {
-            now + pace
-        }
-    };
+    let plan = AttackPlan::of(state, player, serial, target_entity);
     let aimed = state
         .registry
         .get_mut::<Combat>(player)
-        .is_some_and(|combat| combat.aim(serial, next));
+        .is_some_and(|combat| combat.aim(serial, plan.next));
     if !aimed {
         state.send_packet(
             connection,
@@ -555,43 +616,7 @@ pub fn attack(state: &mut WorldState, connection: ConnectionId, target: Option<S
         );
         return;
     }
-    // A new aim abandons whatever was being swung at the old one: an action is
-    // committed to a target, and does not follow a change of mind. Face a
-    // reachable target immediately; `commit_actions` starts the gesture this
-    // tick and tells the client how long it lasts before impact.
-    if !renewing {
-        state.end_combat_action(
-            player,
-            CombatActionOutcome::Interrupted(InterruptReason::Abandoned),
-        );
-    }
-    if melee_reachable(state, player, target_entity) {
-        state.face_toward(player, target_entity);
-    }
-    if ambush {
-        state.registry.insert(
-            player,
-            WrestlingOpener {
-                target: serial,
-                expires_at: now + WRESTLING_OPENER_TICKS,
-            },
-        );
-        state.registry.insert(
-            player,
-            WrestlingAmbushCooldown {
-                until: now + WRESTLING_AMBUSH_COOLDOWN_TICKS,
-            },
-        );
-    }
-    if intercept {
-        state.registry.remove::<WrestlingStride>(player);
-        state.registry.insert(
-            player,
-            WrestlingInterceptCooldown {
-                until: now + WRESTLING_INTERCEPT_COOLDOWN_TICKS,
-            },
-        );
-    }
+    plan.begin(state, player);
     // Raising a hand against someone blue or green is a crime — it turns the
     // attacker grey. (Flagged on the attack, not the landed blow: close enough,
     // and it is the intent a town guard would act on.)
@@ -2131,6 +2156,41 @@ fn get_bonus(value: f64, scalar: f64, threshold: f64, offset: f64) -> f64 {
     bonus / 100.0
 }
 
+/// Apply the era's skill formula to one raw weapon blow. A mobile without a
+/// skill sheet deliberately keeps its natural damage unchanged.
+fn skill_scaled_damage(state: &WorldState, attacker: EntityId, base: f64, aos_family: bool) -> f64 {
+    if !state.registry.has::<Skills>(attacker) {
+        return base;
+    }
+    let tactics = f64::from(skill_value(state, attacker, weapons::TACTICS_SKILL)) / 10.0;
+    let anatomy = f64::from(skill_value(state, attacker, weapons::ANATOMY_SKILL)) / 10.0;
+    let strength = f64::from(state.registry.get::<Stats>(attacker).map_or(0, |s| s.strength));
+    // Lumberjacking lends an axe a bonus, nothing else.
+    let lumber = if weapons::equipped_weapon(state, attacker).is_some_and(|weapon| weapon.is_axe) {
+        f64::from(skill_value(state, attacker, weapons::LUMBERJACKING_SKILL)) / 10.0
+    } else {
+        0.0
+    };
+
+    if aos_family {
+        let bonus = get_bonus(strength, 0.30, 100.0, 5.0)
+            + get_bonus(anatomy, 0.50, 100.0, 5.0)
+            + get_bonus(tactics, 0.625, 100.0, 6.25)
+            + get_bonus(lumber, 0.20, 100.0, 10.0);
+        return base + base * bonus;
+    }
+
+    // Tactics is its own multiplier about the 50-point parity. Strength,
+    // Anatomy and axe Lumberjacking make up a second multiplier.
+    let damage = base + base * ((tactics - 50.0) / 100.0);
+    let mut modifiers = (strength / 5.0) / 100.0 + (anatomy / 5.0) / 100.0;
+    if anatomy >= 100.0 {
+        modifiers += 0.1;
+    }
+    modifiers += ((lumber / 5.0) / 100.0).min(0.2);
+    damage + damage * modifiers
+}
+
 /// The blow after the attacker's skills scale it — Tactics, Strength and Anatomy,
 /// ServUO's `ScaleDamage`. Gated on a `Skills` sheet, the same boundary as
 /// [`check_hit`]: a creature or untrained mobile deals its raw weapon/natural blow
@@ -2148,41 +2208,7 @@ struct Blow {
 fn scaled_blow(state: &mut WorldState, attacker: EntityId, defender: EntityId) -> Blow {
     let base = f64::from(melee_blow(state, attacker));
     let era = state.gameplay.combat_era;
-    // Skill scaling — a trained fighter only; a creature/untrained mobile deals raw.
-    let scaled = if state.registry.has::<Skills>(attacker) {
-        let tactics = f64::from(skill_value(state, attacker, weapons::TACTICS_SKILL)) / 10.0;
-        let anatomy = f64::from(skill_value(state, attacker, weapons::ANATOMY_SKILL)) / 10.0;
-        let strength = f64::from(state.registry.get::<Stats>(attacker).map_or(0, |s| s.strength));
-        // Lumberjacking lends an axe a bonus, nothing else.
-        let is_axe = weapons::equipped_weapon(state, attacker).is_some_and(|weapon| weapon.is_axe);
-        let lumber = if is_axe {
-            f64::from(skill_value(state, attacker, weapons::LUMBERJACKING_SKILL)) / 10.0
-        } else {
-            0.0
-        };
-        if era.value() >= 2 {
-            // The AoS family (AoS, SE, ML) shares the AoS damage-bonus formula.
-            let bonus = get_bonus(strength, 0.30, 100.0, 5.0)
-                + get_bonus(anatomy, 0.50, 100.0, 5.0)
-                + get_bonus(tactics, 0.625, 100.0, 6.25)
-                + get_bonus(lumber, 0.20, 100.0, 10.0);
-            base + base * bonus
-        } else {
-            // Tactics is its own multiplier about the 50-point parity, then Strength
-            // (1%/5), Anatomy (1%/5, +10% at GM) and axe Lumberjacking (1%/5, capped
-            // 20%) sum into a second.
-            let mut damage = base + base * ((tactics - 50.0) / 100.0);
-            let mut modifiers = (strength / 5.0) / 100.0 + (anatomy / 5.0) / 100.0;
-            if anatomy >= 100.0 {
-                modifiers += 0.1;
-            }
-            modifiers += ((lumber / 5.0) / 100.0).min(0.2);
-            damage += damage * modifiers;
-            damage
-        }
-    } else {
-        base
-    };
+    let scaled = skill_scaled_damage(state, attacker, base, era.value() >= 2);
     // Criticals are a shard-specific rule, deliberately applied before every
     // defence below: armour, resistances and the pre-AoS PvP split still matter.
     // The roll is made only after a hit has landed, and consumes the world's

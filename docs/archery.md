@@ -72,14 +72,11 @@ so this could not be one shared constant). `None` on every melee row: a melee
 weapon has no ammo concept at all, which is exactly the case `Option` is for, not
 "unknown."
 
-**D5 — Sourcing arrows is loot + vendor stock, not a Fletching port.**
-`Skill::Fletching` has zero recipes — `crafting/src/recipe.rs` says so outright,
-naming `DefBowFletching` as simply not ported. Porting it (shafts, feathers, a
-fletcher's tool, bow/arrow/bolt recipes) is a crafting-content project, not a
-combat-loop gap. Arrows were already in the orc's loot table (`world/data/loot.json`)
-before this work started; the bowyer's shelf (`world/data/townsfolk.json`) already
-sold bows and crossbows but not their ammunition, so arrows and bolts were added to
-it. The Fletching port is backlog, not built here.
+**D5 — Ammo began as loot + vendor stock; Fletching landed later.** The archery
+slice deliberately did not widen into crafting. The later Fletching port added
+the material chain, fletcher's tools and recipes for arrows, bolts and the three
+classic ranged weapons. Loot and bowyer stock remain alternative sources rather
+than special prerequisites for ranged combat.
 
 **D6 — The flying arrow is client state, not view state.** Same rule P3 gave `0x6E`
 in `docs/combat.md`: it is an event, not a fact to keep redrawing from. It does not
@@ -120,8 +117,9 @@ centred on its flight path without adding a rotation field to all world sprites.
 
 ## What this does not cover
 
-- **Fletching.** No recipes exist for bows, arrows or bolts. A shard's only sources
-  today are loot, vendor stock, and whatever an operator's own scripts add.
+- **Expansion ranged weapons and fukiya darts.** They remain outside the craft
+  table until combat has gameplay rows for them; otherwise crafting would create
+  decorative props that cannot attack.
 - **`HuedEffect`/`0xC0`** stays undecoded. Nothing sends it yet, and archery has no
   need of a tinted effect.
 - **A visible ammo count or "out of arrows" icon.** The system message is the only

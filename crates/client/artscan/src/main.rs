@@ -83,7 +83,7 @@ fn run(cli: &Cli) -> Result<(), ScanError> {
     // precedence rule, so this is one merge over two tables rather than two code
     // paths that have to agree.
     let mut keep = vec![artscan::overrides()];
-    if let Some(beside) = artscan::authored_beside(&out) {
+    if let Some(beside) = artscan::authored_beside(&out)? {
         keep.push(beside);
     }
     let kept: usize = keep.iter().map(ArtTable::authored).sum();

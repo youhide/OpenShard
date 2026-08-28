@@ -125,10 +125,25 @@ impl EntityAllocator {
         self.alive[slot] = false;
         self.live_count -= 1;
         // Bump the generation so the stale handle can never match again.
-        // Skipping zero keeps the NonZeroU32 niche and the `from_bits` contract.
-        let next = self.generations[slot].get().wrapping_add(1);
-        self.generations[slot] = NonZeroU32::new(next).unwrap_or(FIRST_GENERATION);
-        self.free.push(EntitySlot::new(entity.index()));
+        // A slot that has used the last generation is retired instead of
+        // wrapping to the first and making its oldest stale handle live again.
+        if self.advance_generation(slot) {
+            self.free.push(EntitySlot::new(entity.index()));
+        }
+        true
+    }
+
+    /// Advance a slot to an identity it has never had, or retire it when all
+    /// non-zero generations have been used.
+    fn advance_generation(&mut self, slot: usize) -> bool {
+        let Some(next) = self.generations[slot]
+            .get()
+            .checked_add(1)
+            .and_then(NonZeroU32::new)
+        else {
+            return false;
+        };
+        self.generations[slot] = next;
         true
     }
 
@@ -154,10 +169,14 @@ impl EntityAllocator {
     pub(crate) fn clear(&mut self) {
         self.free.clear();
         for slot in 0..self.generations.len() {
-            if self.alive[slot] {
-                let next = self.generations[slot].get().wrapping_add(1);
-                self.generations[slot] = NonZeroU32::new(next).unwrap_or(FIRST_GENERATION);
-                self.alive[slot] = false;
+            let reusable = if self.alive[slot] {
+                self.advance_generation(slot)
+            } else {
+                self.generations[slot].get() != u32::MAX
+            };
+            self.alive[slot] = false;
+            if !reusable {
+                continue;
             }
             self.free.push(EntitySlot::new(slot as u32));
         }
@@ -193,6 +212,22 @@ mod tests {
         assert_ne!(a.generation(), b.generation(), "generation must advance");
         assert!(alloc.contains(b));
         assert!(!alloc.contains(a), "stale handle must stay dead");
+    }
+
+    #[test]
+    fn a_slot_with_no_unused_generation_is_retired() {
+        let mut alloc = EntityAllocator::default();
+        let first = alloc.alloc();
+        let slot = first.index() as usize;
+        let last_generation = NonZeroU32::new(u32::MAX).unwrap();
+        alloc.generations[slot] = last_generation;
+        let last = EntityId::new(first.index(), last_generation);
+
+        assert!(alloc.free(last));
+        alloc.clear();
+        let replacement = alloc.alloc();
+        assert_ne!(replacement.index(), last.index());
+        assert!(!alloc.contains(last));
     }
 
     #[test]

@@ -19,6 +19,11 @@ use crate::occlusion::OwnerId;
 use crate::place::Place;
 use crate::sprite::SpriteQuad;
 
+/// Height of a projectile's flight above the feet named by a mobile's world
+/// point. Moving-effect packets carry the actors' standing `z`, so using it
+/// verbatim makes an arrow leave and enter at ankle height.
+const FLIGHT_Z_OFFSET: f64 = 8.0;
+
 /// One frame's snapshot of an in-flight effect. The clock that turns elapsed
 /// time into `progress` is presentation state's own — this is only ever asked
 /// to draw the instant it is given.
@@ -54,8 +59,7 @@ pub fn collect<'a>(
 
 fn quad_for(effect: &FlyingArrow, camera: &Camera, atlas: StaticArt<'_>, base: i32) -> Option<SpriteQuad> {
     let sprite = atlas.paged_sprite(effect.art)?;
-    let from = WorldSpot::centre(effect.from);
-    let to = WorldSpot::centre(effect.to);
+    let (from, to) = flight_endpoints(effect);
     let t = f64::from(effect.progress.clamp(0.0, 1.0));
     let spot = WorldSpot {
         x: from.x + (to.x - from.x) * t,
@@ -108,6 +112,14 @@ fn quad_for(effect: &FlyingArrow, camera: &Camera, atlas: StaticArt<'_>, base: i
     )
 }
 
+fn flight_endpoints(effect: &FlyingArrow) -> (WorldSpot, WorldSpot) {
+    let mut from = WorldSpot::centre(effect.from);
+    let mut to = WorldSpot::centre(effect.to);
+    from.z += FLIGHT_Z_OFFSET;
+    to.z += FLIGHT_Z_OFFSET;
+    (from, to)
+}
+
 /// Clockwise screen-space rotation that turns this art's left-facing resting
 /// direction toward the shot. `project_exact` is deliberately used rather
 /// than world `x`/`y`: one tile east and one tile south have different
@@ -138,6 +150,20 @@ fn rotated_bounds(width: f32, height: f32, radians_clockwise: f32) -> Vec2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flight_is_raised_from_the_actors_feet() {
+        let effect = FlyingArrow {
+            art: Graphic(0x0F42),
+            from: Point::new(10, 20, 3),
+            to: Point::new(15, 24, 7),
+            progress: 0.5,
+        };
+
+        let (from, to) = flight_endpoints(&effect);
+        assert_eq!(from.z, 3.0 + FLIGHT_Z_OFFSET);
+        assert_eq!(to.z, 7.0 + FLIGHT_Z_OFFSET);
+    }
 
     #[test]
     fn flight_angle_uses_the_isometric_screen_vector() {

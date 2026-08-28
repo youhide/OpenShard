@@ -1388,6 +1388,26 @@ fn double_clicking_a_container_opens_it() {
     assert!(packets.iter().any(|p| p[0] == 0x3C), "the contents follow");
 }
 
+#[test]
+fn double_clicking_an_invalid_serial_is_silent() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let _ = packets_for(&mut world, player);
+    let mut item_used: Cursor<crate::ItemUsed> = world.bus().cursor();
+    let mut mobile_used: Cursor<crate::MobileUsed> = world.bus().cursor();
+
+    world.queue(Command::DoubleClick {
+        connection: player,
+        request: UseRequest::Use(RawSerial(0)),
+    });
+    world.tick(now);
+
+    assert_eq!(world.bus().read(&mut item_used).count(), 0);
+    assert_eq!(world.bus().read(&mut mobile_used).count(), 0);
+    assert!(packets_for(&mut world, player).is_empty());
+}
+
 /// A regular wooden chair — one of the four graphics players can craft and the
 /// client recognizes as a sitting surface.
 const WOODEN_CHAIR: Graphic = Graphic(0x0B57);

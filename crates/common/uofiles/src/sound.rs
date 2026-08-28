@@ -184,7 +184,7 @@ impl SoundArchive {
 }
 
 fn decode(sound: SoundId, bytes: &[u8]) -> Result<Sound, SoundError> {
-    let wave = if bytes.get(0..4) == Some(b"RIFF") && bytes.get(8..12) == Some(b"WAVE") {
+    let wave = if bytes.get(0..4) == Some(b"RIFF") {
         Some(wave_data(bytes).ok_or_else(|| SoundError::Malformed {
             sound,
             detail: "invalid RIFF/WAVE header".to_owned(),
@@ -355,6 +355,16 @@ mod tests {
             let error = decode(SoundId(7), bytes).expect_err("zero is not valid audio metadata");
             assert!(error.to_string().contains("invalid RIFF/WAVE header"));
         }
+    }
+
+    #[test]
+    fn a_malformed_riff_is_not_reinterpreted_as_legacy_pcm() {
+        let mut bytes = vec![0; LEGACY_HEADER + 2];
+        bytes[..4].copy_from_slice(b"RIFF");
+        bytes[8..12].copy_from_slice(b"NOPE");
+
+        let error = decode(SoundId(7), &bytes).expect_err("RIFF commits the entry to that format");
+        assert!(error.to_string().contains("invalid RIFF/WAVE header"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! What a craft *system* is: a skill, a chance floor, a beat, and a workshop.
 //!
-//! ServUO's `CraftSystem` — the abstract base each `Def*.cs` fills in. The five
+//! ServUO's `CraftSystem` — the abstract base each `Def*.cs` fills in. The
 //! constants at the top of `DefBlacksmithy` (`base(1, 1, 1.25)`, `GetChanceAtMin`,
 //! `ECA`, `CanCraft`, `PlayCraftEffect`) are the whole of it, and they are what
 //! this struct holds.
@@ -114,7 +114,7 @@ impl Needs {
 
 /// One craft system — a skill, its recipes, and the rules they are made under.
 ///
-/// The five that exist are in [`crate::defs`]; a system is named by its index
+/// The systems that exist are in [`crate::defs`]; a system is named by its index
 /// there ([`SystemId`]) so a [`Crafting`](openshard_state::components::Crafting)
 /// component can hold one without borrowing.
 #[derive(Clone, Copy, Debug)]
@@ -125,7 +125,8 @@ pub struct CraftSystemDef {
     pub title: Text,
     /// The chance of success at the bottom of a recipe's band, in per-mille.
     /// ServUO's `GetChanceAtMin`: zero for a smith (a recipe you have only just
-    /// qualified for always fails at first), five hundred for a tailor.
+    /// qualified for always fails at first), five hundred for a tailor or
+    /// fletcher.
     pub chance_at_min: u32,
     /// How the exceptional chance falls out of the success chance.
     pub eca: Eca,
@@ -146,7 +147,7 @@ pub struct CraftSystemDef {
     /// The cliloc said when [`needs`](Self::needs) is not met — "You must be near
     /// an anvil and a forge to smith items."
     ///
-    /// `None` for a system that demands no workshop, which is four of the five:
+    /// `None` for a system that demands no workshop, which is five of the six:
     /// there is no message because the branch that would say it cannot be
     /// reached. Not `ClilocId(0)` — zero is a number the client would look up,
     /// so "absent" and "message zero" would be the same bits.

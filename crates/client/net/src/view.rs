@@ -737,6 +737,54 @@ impl WorldView {
         changed
     }
 
+    /// Forget every projection of one serial after `0x1D` removes it.
+    ///
+    /// Mobiles, ground items, container contents and equipment all share that
+    /// packet, and objects with their own client-side state take it with them:
+    /// windows, spellbooks, vendor lists, paperdolls, tooltips and house
+    /// designs. Keeping the sweep in one operation makes adding a new
+    /// serial-keyed projection a change to the removal invariant, rather than
+    /// one more branch in the packet reducer.
+    fn forget(&mut self, serial: Serial) -> bool {
+        let had_mobile = self.mobiles.remove(&serial).is_some();
+        let had_item = self.items.remove(&serial).is_some();
+        let had_worn = self.remove_from_equipment(serial);
+        let was_held = self.remove_from_containers(serial, None);
+
+        // A container or body that is itself removed takes its windows and
+        // secondary views with it.
+        let had_window = self.containers.remove(&serial).is_some();
+        self.contents.remove(&serial);
+        let had_corpse_equipment = self.corpse_equipment.remove(&serial).is_some();
+        let mut was_on_corpse = false;
+        for equipment in self.corpse_equipment.values_mut() {
+            let before = equipment.len();
+            equipment.retain(|worn| worn.item != serial);
+            was_on_corpse |= equipment.len() != before;
+        }
+        let had_spellbook = self.spellbooks.remove(&serial).is_some();
+        let had_vendor = self.vendor_buys.remove(&serial).is_some()
+            || self.vendor_sells.remove(&serial).is_some()
+            || self.pending_vendor_buys.remove(&serial).is_some()
+            || self.vendor_stock.remove(&serial).is_some();
+        let had_paperdoll = self.paperdolls.remove(&serial).is_some();
+        let had_tooltip = self.tooltips.remove(&serial).is_some();
+        let had_design = self.designs.remove(&serial).is_some();
+
+        had_mobile
+            || had_item
+            || had_worn
+            || was_held
+            || had_window
+            || had_corpse_equipment
+            || was_on_corpse
+            || had_spellbook
+            || had_vendor
+            || had_paperdoll
+            || had_tooltip
+            || had_design
+    }
+
     /// The world as the entry packet described it: nobody else on screen yet.
     #[must_use]
     pub fn entered(start: PlayerStart) -> Self {
@@ -1548,57 +1596,7 @@ impl WorldView {
             // is a saddle that stops existing) and both left the item drawn on
             // the body for ever. Riding was where it showed: the horse landed
             // beside its rider and the rider stayed in the saddle.
-            ServerPacket::Remove(remove) => {
-                let had_mobile = self.mobiles.remove(&remove.serial).is_some();
-                let had_item = self.items.remove(&remove.serial).is_some();
-                let had_worn = self.remove_from_equipment(remove.serial);
-                let mut was_held = false;
-                for held in self.contents.values_mut() {
-                    let before = held.len();
-                    held.retain(|item| item.serial != remove.serial);
-                    was_held |= held.len() != before;
-                }
-                // A container that is itself removed takes its window with it.
-                let had_window = self.containers.remove(&remove.serial).is_some();
-                self.contents.remove(&remove.serial);
-                let had_corpse_equipment = self.corpse_equipment.remove(&remove.serial).is_some();
-                for equipment in self.corpse_equipment.values_mut() {
-                    equipment.retain(|worn| worn.item != remove.serial);
-                }
-                // A spellbook may be held by that container or lie on the
-                // ground; either way a removed book cannot keep its spell
-                // page open, and a reused serial must not inherit its mask.
-                let had_spellbook = self.spellbooks.remove(&remove.serial).is_some();
-                let had_vendor = self.vendor_buys.remove(&remove.serial).is_some()
-                    || self.vendor_sells.remove(&remove.serial).is_some()
-                    || self.pending_vendor_buys.remove(&remove.serial).is_some()
-                    || self.vendor_stock.remove(&remove.serial).is_some();
-                // And so does a mobile: a body that walked out of range cannot
-                // be looked at any more, and the window over it would keep
-                // drawing the equipment as it stood when the body left. The
-                // reference does exactly this, in `Mobile.Destroy` — and only
-                // for a mobile that is not the player, which needs no guard
-                // here because a `0x1D` never names our own serial.
-                let had_paperdoll = self.paperdolls.remove(&remove.serial).is_some();
-                // And its tooltip. A hover cannot land on something that is not
-                // drawn, so the entry has no reader left — and keeping it would
-                // hand a stale name back if the serial were reused.
-                let had_tooltip = self.tooltips.remove(&remove.serial).is_some();
-                // And its design revision. A house that has come down cannot be
-                // asked about, and a reused serial must not inherit its picture.
-                let had_design = self.designs.remove(&remove.serial).is_some();
-                had_mobile
-                    || had_item
-                    || had_worn
-                    || was_held
-                    || had_window
-                    || had_corpse_equipment
-                    || had_spellbook
-                    || had_vendor
-                    || had_paperdoll
-                    || had_tooltip
-                    || had_design
-            }
+            ServerPacket::Remove(remove) => self.forget(remove.serial),
             // The roster, whole. Not merged: the shard re-sends the entire list
             // on every change rather than sending deltas, so replacing is the
             // faithful reading — and an accumulated roster would keep anybody
@@ -2523,6 +2521,23 @@ mod tests {
             !view.apply(&ServerPacket::CorpseEquipment(packet)),
             "the same layer mapping is a settled fact"
         );
+    }
+
+    #[test]
+    fn removing_a_corpses_worn_item_reports_the_change() {
+        let mut view = WorldView::entered(start());
+        let corpse = Serial::new(0x4000_002A).unwrap();
+        let shirt = Serial::new(0x4000_002B).unwrap();
+        view.apply(&ServerPacket::CorpseEquipment(CorpseEquipment {
+            corpse,
+            items: vec![CorpseEquipmentItem {
+                layer: openshard_protocol::wire::Layer::TORSO,
+                item: shirt,
+            }],
+        }));
+
+        assert!(view.apply(&ServerPacket::Remove(Remove { serial: shirt })));
+        assert!(view.corpse_equipment[&corpse].is_empty());
     }
 
     #[test]

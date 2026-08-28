@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "The five trades' headers: each Def*.cs in ServUO is a recipe table plus a",
+    "The trades' headers: each Def*.cs in ServUO is a recipe table plus a",
     "short header of overrides, and this is the headers. The tables are the",
     "other files in this directory, one per `trade` named below.",
     "",
@@ -53,12 +53,21 @@
     },
     {
       "trade": "alchemy",
-      "note": "The only one of the five that takes the *default* exceptional curve — it overrides no `ECA` at all — which is why a flat sixty points appears here and nowhere else.",
+      "note": "The only shipped system that takes the default exceptional curve — it overrides no ECA at all — which is why a flat sixty points appears here and nowhere else.",
       "skill": "Alchemy",
       "title": 1044001,
       "chance_at_min": 0,
       "eca": "ChanceMinusSixty",
       "craft_sound": "0x0242"
+    },
+    {
+      "trade": "fletching",
+      "note": "Bowcraft uses ServUO's fifty-percent floor and exceptional curve; it needs no workshop, only a carried fletcher's tool.",
+      "skill": "Fletching",
+      "title": 1044006,
+      "chance_at_min": 500,
+      "eca": "FiftyPercentChanceMinusTenPercent",
+      "craft_sound": "0x0055"
     }
   ]
 }

@@ -233,10 +233,20 @@ impl DevAccounts {
     }
 
     /// The authority an authenticated account's characters play with.
+    ///
+    /// `account` must be one this store returned from [`Self::credential`]. An
+    /// absent entry is an authentication/store invariant violation, not an
+    /// ordinary player: defaulting it would let a phantom account proceed into
+    /// the game while hiding the broken hand-off.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `account` is not in this store.
     pub fn access_level(&self, account: &AccountName) -> AccessLevel {
         self.accounts
             .get(&account.normalized())
-            .map_or(AccessLevel::Player, |entry| entry.access)
+            .expect("an authenticated account must remain in the account store")
+            .access
     }
 }
 
@@ -485,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn access_defaults_to_player_and_is_grantable() {
+    fn access_is_player_by_default_and_is_grantable() {
         let store = DevAccounts::new()
             .with_account(&AccountName::new("admin"), &PlaintextPassword::new("p"))
             .with_access(&AccountName::new("admin"), AccessLevel::GameMaster)
@@ -503,11 +513,12 @@ mod tests {
             store.access_level(&AccountName::new("plain")),
             AccessLevel::Player
         );
-        assert_eq!(
-            store.access_level(&AccountName::new("nobody")),
-            AccessLevel::Player,
-            "unknown is a player, not an error"
-        );
+    }
+
+    #[test]
+    #[should_panic(expected = "an authenticated account must remain in the account store")]
+    fn an_unknown_account_cannot_silently_enter_as_a_player() {
+        DevAccounts::new().access_level(&AccountName::new("nobody"));
     }
 
     #[test]

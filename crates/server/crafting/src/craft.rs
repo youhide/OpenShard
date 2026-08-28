@@ -322,10 +322,12 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         train_per_item(state, crafter, recipe, materials.max_amount);
     }
 
-    let hue = if recipe.hue == Hue(0) {
+    let hue = if recipe.hue != Hue(0) {
+        recipe.hue
+    } else if recipe.retain_color {
         materials.res_hue
     } else {
-        recipe.hue
+        Hue(0)
     };
     let made = recipe.amount.saturating_mul(materials.max_amount).max(1);
     let (item, placed) = place(state, crafter, recipe, hue, made);
@@ -387,7 +389,7 @@ fn place(
     let Some(pack) = openshard_items::backpack_of(state, serial) else {
         return (None, 0);
     };
-    if recipe.amount > 1 || amount > 1 {
+    if recipe.use_all_res || recipe.amount > 1 || amount > 1 {
         let outcome = openshard_items::give(state, pack, recipe.graphic, hue, u32::from(amount));
         (
             outcome.last,

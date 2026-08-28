@@ -334,6 +334,36 @@ fn modern_action(kind: BodyKind, animation_type: u16, sub_action: u16) -> Option
     }
 }
 
+/// Turn an on-foot human attack into the corresponding mounted action.
+///
+/// Both animation packets ultimately reach [`Crowd::play`]: `0xE2` first maps
+/// its weapon sub-action through [`modern_action`], while `0x6E` already names
+/// the on-foot group directly.  Applying the saddle rule at that common seam
+/// keeps both protocol paths identical and also covers harvest previews, which
+/// carry the same mining/chopping/fishing attack groups without an `0xE2`.
+///
+/// The frame counts belong to the mounted art, not to the group it replaces.
+/// In the classic human table the generic attack, bow and slap-horse groups
+/// have five frames; the mounted crossbow has seven.
+fn action_on_mount(
+    kind: BodyKind,
+    mounted: bool,
+    action: u16,
+    frames: AnimationFrameCount,
+) -> (u16, AnimationFrameCount) {
+    if !mounted || !matches!(kind, BodyKind::Human) {
+        return (action, frames);
+    }
+
+    match action {
+        18 => (27, AnimationFrameCount(5)),     // OnmountAttackBow
+        19 => (28, AnimationFrameCount(7)),     // OnmountAttackCrossbow
+        31 => (29, AnimationFrameCount(5)),     // OnmountSlapHorse (unarmed)
+        9..=14 => (26, AnimationFrameCount(5)), // OnmountAttack
+        _ => (action, frames),
+    }
+}
+
 /// One mobile's history: where it was, what it is playing, and since when.
 #[derive(Clone, Copy, Debug)]
 struct Tracked {
@@ -1404,7 +1434,13 @@ impl Crowd {
         let Some(tracked) = self.tracked.get_mut(&Some(animation.serial)) else {
             return;
         };
-        let Ok(group) = u8::try_from(animation.action) else {
+        let (action, frame_count) = action_on_mount(
+            BodyKind::of(tracked.body),
+            tracked.mounted,
+            animation.action,
+            animation.frame_count,
+        );
+        let Ok(group) = u8::try_from(action) else {
             return;
         };
         let death = AnimationGroup(group) == BodyKind::of(tracked.body).dying();
@@ -1420,7 +1456,7 @@ impl Crowd {
                     // Network time must never re-time a swing already on screen.
                     // It may add a whole stroke, but the promised 1.6-second tempo
                     // stays immutable.
-                    action.frames = animation.frame_count;
+                    action.frames = frame_count;
                     action.forward = animation.forward;
                     action.repeat = animation.repeat;
                     action.delay = Duration::from_millis(if animation.delay == 0 {
@@ -1440,7 +1476,7 @@ impl Crowd {
         }
         tracked.action = Some(ActionAnimation {
             death,
-            frames: animation.frame_count,
+            frames: frame_count,
             repeats: animation.repeat_count,
             forward: animation.forward,
             repeat: animation.repeat,
@@ -1630,7 +1666,13 @@ impl Crowd {
         let Some(tracked) = self.tracked.get_mut(&Some(preview.serial)) else {
             return;
         };
-        let Ok(group) = u8::try_from(preview.action) else {
+        let (action, frame_count) = action_on_mount(
+            BodyKind::of(tracked.body),
+            tracked.mounted,
+            preview.action,
+            preview.frame_count,
+        );
+        let Ok(group) = u8::try_from(action) else {
             return;
         };
         if tracked.action.is_some_and(|action| action.death) {
@@ -1638,7 +1680,7 @@ impl Crowd {
         }
         tracked.action = Some(ActionAnimation {
             death: false,
-            frames: preview.frame_count,
+            frames: frame_count,
             repeats: preview.cycles.max(1),
             forward: true,
             repeat: false,
@@ -2340,6 +2382,182 @@ mod tests {
         ] {
             assert_eq!(modern_action(BodyKind::Human, 0, sub_action), Some(expected));
         }
+    }
+
+    /// Mounted attacks occupy their own block in the human animation table.
+    /// The modern packet still carries the same weapon sub-action as it does on
+    /// foot, so the saddle state has to replace both the group and its length.
+    #[test]
+    fn every_modern_human_attack_uses_its_mounted_group() {
+        for (sub_action, expected_group, expected_frames) in [
+            (0, 29, 5), // unarmed / slap horse
+            (1, 27, 5), // bow
+            (2, 28, 7), // crossbow
+            (3, 26, 5), // one-handed bash
+            (4, 26, 5), // one-handed slash
+            (5, 26, 5), // one-handed pierce
+            (6, 26, 5), // two-handed bash
+            (7, 26, 5), // two-handed slash
+            (8, 26, 5), // two-handed pierce
+        ] {
+            let who = serial(1);
+            let mobile = who.expect("a serial");
+            let mut crowd = Crowd::default();
+            crowd.see(
+                who,
+                Point::new(10, 10, 0),
+                Graphic(PLAYER),
+                Facing::walking(Direction::South),
+                Hue::NONE,
+                false,
+                true,
+            );
+            crowd.play_new(NewAnimation {
+                serial: mobile,
+                animation_type: 0,
+                action: sub_action,
+                delay: 0,
+            });
+
+            assert_eq!(
+                crowd.group_for(who),
+                Some(AnimationGroup(expected_group)),
+                "mounted sub-action {sub_action} selected the on-foot group"
+            );
+            crowd.advance(Duration::from_millis(80));
+            assert_eq!(
+                crowd.frame_for(who, AnimationFrameCount(expected_frames)),
+                1,
+                "mounted group {expected_group} did not advance"
+            );
+            crowd.advance(Duration::from_millis(80 * u64::from(expected_frames - 1)));
+            assert_eq!(
+                crowd.group_for(who),
+                Some(AnimationGroup(25)),
+                "mounted group {expected_group} did not settle back into the saddle"
+            );
+        }
+    }
+
+    /// A classic `0x6E` names the on-foot group instead of the weapon
+    /// sub-action. It must reach the same mounted art as `0xE2`, including the
+    /// mounted group's own frame count.
+    #[test]
+    fn classic_human_attacks_are_mounted_too() {
+        for (on_foot, on_foot_frames, expected_group, expected_frames) in [
+            (18_u16, 7_u16, 27_u8, 5_u16), // bow
+            (19, 7, 28, 7),                // crossbow
+            (9, 7, 26, 5),                 // melee
+            (31, 7, 29, 5),                // unarmed
+        ] {
+            let who = serial(1);
+            let mobile = who.expect("a serial");
+            let mut crowd = Crowd::default();
+            crowd.see(
+                who,
+                Point::new(10, 10, 0),
+                Graphic(PLAYER),
+                Facing::walking(Direction::South),
+                Hue::NONE,
+                false,
+                true,
+            );
+            crowd.play(Animation {
+                serial: mobile,
+                action: on_foot,
+                frame_count: AnimationFrameCount(on_foot_frames),
+                repeat_count: 1,
+                forward: true,
+                repeat: false,
+                delay: 0,
+            });
+
+            assert_eq!(crowd.group_for(who), Some(AnimationGroup(expected_group)));
+            crowd.advance(Duration::from_millis(80 * u64::from(expected_frames)));
+            assert_eq!(
+                crowd.group_for(who),
+                Some(AnimationGroup(25)),
+                "the mounted frame count must own the action's lifetime"
+            );
+        }
+    }
+
+    #[test]
+    fn a_timed_mounted_bow_draw_uses_all_of_the_mounted_art() {
+        let who = serial(1);
+        let mobile = who.expect("a serial");
+        let mut crowd = Crowd::default();
+        crowd.see(
+            who,
+            Point::new(10, 10, 0),
+            Graphic(PLAYER),
+            Facing::walking(Direction::South),
+            Hue::NONE,
+            false,
+            true,
+        );
+        crowd.time_swing(SwingTiming {
+            serial: mobile,
+            duration: openshard_protocol::feedback::SwingDuration(1_600),
+        });
+        crowd.play_new(NewAnimation {
+            serial: mobile,
+            animation_type: 0,
+            action: 1,
+            delay: 0,
+        });
+
+        assert_eq!(crowd.group_for(who), Some(AnimationGroup(27)));
+        for frame in 0..5_u16 {
+            assert_eq!(
+                crowd.frame_for(who, AnimationFrameCount(5)),
+                frame,
+                "mounted bow frame {frame} starts at {}ms",
+                u64::from(frame) * 320
+            );
+            crowd.advance(Duration::from_millis(320));
+        }
+        assert_eq!(
+            crowd.group_for(who),
+            Some(AnimationGroup(25)),
+            "the completed bow draw returns to the mounted stand"
+        );
+    }
+
+    #[test]
+    fn a_mounted_harvest_preview_keeps_the_worker_in_the_saddle() {
+        let who = serial(1);
+        let mobile = who.expect("a serial");
+        let mut crowd = Crowd::default();
+        crowd.see(
+            who,
+            Point::new(10, 10, 0),
+            Graphic(PLAYER),
+            Facing::walking(Direction::South),
+            Hue::NONE,
+            false,
+            true,
+        );
+        crowd.preview_harvest(HarvestPreview {
+            cursor_id: openshard_protocol::wire::CursorId(mobile.raw()),
+            serial: mobile,
+            action: 13,
+            frame_count: AnimationFrameCount(6),
+            duration: openshard_protocol::feedback::SwingDuration(1_600),
+            cycles: 1,
+        });
+
+        assert_eq!(
+            crowd.group_for(who),
+            Some(AnimationGroup(26)),
+            "a mounted tool swing uses the generic mounted attack"
+        );
+        crowd.advance(Duration::from_millis(320));
+        assert_eq!(
+            crowd.frame_for(who, AnimationFrameCount(5)),
+            1,
+            "the five mounted frames are spread across the preview interval"
+        );
     }
 
     /// A cancelled telegraph used to run out its promised duration over an empty

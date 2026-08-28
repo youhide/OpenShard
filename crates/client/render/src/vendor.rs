@@ -150,18 +150,22 @@ impl Window {
     /// The action plate at a cursor position, if any.  This is separate from
     /// [`hit`](Self::hit) because drawing needs the same answer for hover.
     pub fn action_at(&self, cursor: GumpPixel) -> Option<Action> {
-        let x = cursor.x - self.at.x;
-        let y = cursor.y - self.at.y;
-        // ClassicUO leaves these controls as bitmap art with transparent hit
-        // boxes.  Use the full visible button plates, not a narrow 34-pixel
-        // slice, so their label and bevel are both clickable.
-        if (267..440).contains(&x) && (306..365).contains(&y) {
-            Some(Action::Confirm)
-        } else if (440..530).contains(&x) && (306..365).contains(&y) {
-            Some(Action::Clear)
-        } else {
-            None
-        }
+        action_at(self.at, cursor)
+    }
+}
+
+fn action_at(at: GumpPixel, cursor: GumpPixel) -> Option<Action> {
+    let x = cursor.x - at.x;
+    let y = cursor.y - at.y;
+    // ClassicUO leaves these controls as bitmap art with transparent hit
+    // boxes.  Use the full visible button plates, not a narrow 34-pixel
+    // slice, so their label and bevel are both clickable.
+    if (267..440).contains(&x) && (306..365).contains(&y) {
+        Some(Action::Confirm)
+    } else if (440..530).contains(&x) && (306..365).contains(&y) {
+        Some(Action::Clear)
+    } else {
+        None
     }
 }
 
@@ -253,66 +257,82 @@ fn window(
     let rows: Vec<Row> = rows.collect();
     let scroll = CatalogueIndex::new(scroll.position().min(rows.len().saturating_sub(VISIBLE_ROWS)));
     let scroll_position = scroll.position();
-    let mut lines = Vec::new();
-    lines.extend(
-        rows.iter()
-            .skip(scroll_position)
-            .take(VISIBLE_ROWS)
-            .enumerate()
-            .flat_map(|(i, row)| {
-                let y = ROW_TOP + i as i32 * ROW_HEIGHT;
-                [
-                    Line {
-                        at: at.offset(GumpPixel::new(92, y + 15)),
-                        text: format!("{}: {} gp", row.name, row.price),
-                        font: ROW_FONT,
-                        hue: ROW_HUE,
-                        clip: Some((108, ROW_HEIGHT)),
-                    },
-                    Line {
-                        at: at.offset(GumpPixel::new(200, y + 15)),
-                        text: row.quantity.clone(),
-                        font: ROW_FONT,
-                        hue: ROW_HUE,
-                        clip: Some((35, ROW_HEIGHT)),
-                    },
-                ]
-            }),
-    );
+    let mut lines = catalogue_lines(&rows, scroll_position, at);
     // The right-hand panel is the ClassicUO transaction list.  The catalogue
     // stays on the left; only chosen lines travel across, so confirmation is
     // legible before it commits the one packet to the shard.
+    let (selected, order_lines) = order_panel(&rows, at, action_at(at, cursor));
+    lines.extend(order_lines);
+    Window {
+        vendor,
+        sell,
+        at,
+        scroll,
+        rows: rows.len().saturating_sub(scroll_position).min(VISIBLE_ROWS),
+        selected,
+        pictures: pictures(&rows, scroll_position, sell, at, atlas),
+        lines,
+    }
+}
+
+fn catalogue_lines(rows: &[Row], scroll: usize, at: GumpPixel) -> Vec<Line> {
+    rows.iter()
+        .skip(scroll)
+        .take(VISIBLE_ROWS)
+        .enumerate()
+        .flat_map(|(i, row)| {
+            let y = ROW_TOP + i as i32 * ROW_HEIGHT;
+            [
+                Line {
+                    at: at.offset(GumpPixel::new(92, y + 15)),
+                    text: format!("{}: {} gp", row.name, row.price),
+                    font: ROW_FONT,
+                    hue: ROW_HUE,
+                    clip: Some((108, ROW_HEIGHT)),
+                },
+                Line {
+                    at: at.offset(GumpPixel::new(200, y + 15)),
+                    text: row.quantity.clone(),
+                    font: ROW_FONT,
+                    hue: ROW_HUE,
+                    clip: Some((35, ROW_HEIGHT)),
+                },
+            ]
+        })
+        .collect()
+}
+
+fn order_panel(rows: &[Row], at: GumpPixel, hover: Option<Action>) -> (Vec<CatalogueIndex>, Vec<Line>) {
     let selected: Vec<CatalogueIndex> = rows
         .iter()
         .enumerate()
         .filter_map(|(index, row)| (row.amount > 0).then_some(CatalogueIndex::new(index)))
         .collect();
-    lines.extend(
-        selected
-            .iter()
-            .filter_map(|index| rows.get(index.position()))
-            .take(4)
-            .enumerate()
-            .flat_map(|(i, row)| {
-                let y = 185 + i as i32 * 28;
-                [
-                    Line {
-                        at: at.offset(GumpPixel::new(277, y)),
-                        text: row.amount.to_string(),
-                        font: ROW_FONT,
-                        hue: ROW_HUE,
-                        clip: Some((22, 22)),
-                    },
-                    Line {
-                        at: at.offset(GumpPixel::new(302, y)),
-                        text: row.name.clone(),
-                        font: ROW_FONT,
-                        hue: ROW_HUE,
-                        clip: Some((145, 22)),
-                    },
-                ]
-            }),
-    );
+    let mut lines: Vec<Line> = selected
+        .iter()
+        .filter_map(|index| rows.get(index.position()))
+        .take(4)
+        .enumerate()
+        .flat_map(|(i, row)| {
+            let y = 185 + i as i32 * 28;
+            [
+                Line {
+                    at: at.offset(GumpPixel::new(277, y)),
+                    text: row.amount.to_string(),
+                    font: ROW_FONT,
+                    hue: ROW_HUE,
+                    clip: Some((22, 22)),
+                },
+                Line {
+                    at: at.offset(GumpPixel::new(302, y)),
+                    text: row.name.clone(),
+                    font: ROW_FONT,
+                    hue: ROW_HUE,
+                    clip: Some((145, 22)),
+                },
+            ]
+        })
+        .collect();
     let total: u32 = rows
         .iter()
         .map(|row| row.price.saturating_mul(u32::from(row.amount)))
@@ -324,17 +344,6 @@ fn window(
         hue: ROW_HUE,
         clip: Some((135, 22)),
     });
-    let hover = Window {
-        vendor,
-        sell,
-        at,
-        scroll,
-        rows: 0,
-        selected: Vec::new(),
-        pictures: Vec::new(),
-        lines: Vec::new(),
-    }
-    .action_at(cursor);
     for (action, x, text) in [(Action::Confirm, 302, "ACCEPT"), (Action::Clear, 456, "CLEAR")] {
         lines.push(Line {
             at: at.offset(GumpPixel::new(x, 328)),
@@ -348,57 +357,50 @@ fn window(
             clip: Some((80, 22)),
         });
     }
-    Window {
-        vendor,
-        sell,
-        at,
-        scroll,
-        rows: rows.len().saturating_sub(scroll_position).min(VISIBLE_ROWS),
-        selected,
-        pictures: {
-            let (left, right) = if sell {
-                (SELL_LEFT, SELL_RIGHT)
-            } else {
-                (BUY_LEFT, BUY_RIGHT)
-            };
-            let mut pictures = vec![
-                Picture::plain(GumpArt::Gump(openshard_protocol::wire::Graphic(left)), at),
-                Picture::plain(
-                    GumpArt::Gump(openshard_protocol::wire::Graphic(right)),
-                    at.offset(RIGHT_AT),
-                ),
-            ];
-            pictures.extend(
-                rows.iter()
-                    .skip(scroll_position)
-                    .take(VISIBLE_ROWS)
-                    .enumerate()
-                    .filter_map(|(i, row)| {
-                        row.graphic.map(|graphic| {
-                            let cell_at = at.offset(GumpPixel::new(37, ROW_TOP + i as i32 * ROW_HEIGHT));
-                            let (width, height) = atlas
-                                .sprite(GumpArt::Item(graphic))
-                                .map_or((ICON_CELL_WIDTH, ROW_HEIGHT), |sprite| {
-                                    (i32::from(sprite.width), i32::from(sprite.height))
-                                });
-                            let icon_at = cell_at.offset(GumpPixel::new(
-                                (ICON_CELL_WIDTH - width) / 2,
-                                (ROW_HEIGHT - height) / 2,
-                            ));
-                            Picture::plain(GumpArt::Item(graphic), icon_at)
-                                .hued(row.hue)
-                                .inside(gump::Scissor {
-                                    at: cell_at,
-                                    width: ICON_CELL_WIDTH,
-                                    height: ROW_HEIGHT,
-                                })
+    (selected, lines)
+}
+
+fn pictures(rows: &[Row], scroll: usize, sell: bool, at: GumpPixel, atlas: &GumpAtlas) -> Vec<Picture> {
+    let (left, right) = if sell {
+        (SELL_LEFT, SELL_RIGHT)
+    } else {
+        (BUY_LEFT, BUY_RIGHT)
+    };
+    let mut pictures = vec![
+        Picture::plain(GumpArt::Gump(openshard_protocol::wire::Graphic(left)), at),
+        Picture::plain(
+            GumpArt::Gump(openshard_protocol::wire::Graphic(right)),
+            at.offset(RIGHT_AT),
+        ),
+    ];
+    pictures.extend(
+        rows.iter()
+            .skip(scroll)
+            .take(VISIBLE_ROWS)
+            .enumerate()
+            .filter_map(|(i, row)| {
+                row.graphic.map(|graphic| {
+                    let cell_at = at.offset(GumpPixel::new(37, ROW_TOP + i as i32 * ROW_HEIGHT));
+                    let (width, height) = atlas
+                        .sprite(GumpArt::Item(graphic))
+                        .map_or((ICON_CELL_WIDTH, ROW_HEIGHT), |sprite| {
+                            (i32::from(sprite.width), i32::from(sprite.height))
+                        });
+                    let icon_at = cell_at.offset(GumpPixel::new(
+                        (ICON_CELL_WIDTH - width) / 2,
+                        (ROW_HEIGHT - height) / 2,
+                    ));
+                    Picture::plain(GumpArt::Item(graphic), icon_at)
+                        .hued(row.hue)
+                        .inside(gump::Scissor {
+                            at: cell_at,
+                            width: ICON_CELL_WIDTH,
+                            height: ROW_HEIGHT,
                         })
-                    }),
-            );
-            pictures
-        },
-        lines,
-    }
+                })
+            }),
+    );
+    pictures
 }
 
 #[cfg(test)]
@@ -461,5 +463,34 @@ mod tests {
             window.hit(GumpPixel::new(50, 89)),
             Some(Hit::Row(CatalogueIndex::new(1)))
         );
+    }
+
+    #[test]
+    fn the_order_panel_contains_only_chosen_rows_and_their_total() {
+        let window = buy(
+            Serial::new(42).unwrap(),
+            &[
+                BuyLine {
+                    price: 5,
+                    name: "apple".into(),
+                },
+                BuyLine {
+                    price: 7,
+                    name: "pear".into(),
+                },
+            ],
+            &[],
+            &[2, 0],
+            CatalogueIndex::new(0),
+            GumpPixel::new(10, 20),
+            GumpPixel::new(0, 0),
+            &GumpAtlas::empty(),
+        );
+
+        assert_eq!(window.selected, vec![CatalogueIndex::new(0)]);
+        assert!(window.lines.iter().any(|line| line.text == "2"));
+        assert!(window.lines.iter().any(|line| line.text == "apple"));
+        assert!(!window.lines.iter().any(|line| line.text == "pear"));
+        assert!(window.lines.iter().any(|line| line.text == "TOTAL: 10 gp"));
     }
 }

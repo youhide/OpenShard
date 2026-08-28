@@ -97,7 +97,7 @@ impl EventBus {
     ///
     /// Yields nothing if no `E` has ever been sent — an unused event type is an
     /// empty read, not an error, so a system can read events no one emits yet.
-    pub fn read<'a, E: Event>(&'a self, cursor: &mut Cursor<E>) -> impl Iterator<Item = &'a E> {
+    pub fn read<'a, E: Event>(&'a self, cursor: &'a mut Cursor<E>) -> impl Iterator<Item = &'a E> {
         self.queue::<E>()
             .map(|queue| queue.read(cursor))
             .into_iter()

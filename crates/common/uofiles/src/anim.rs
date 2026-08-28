@@ -371,14 +371,10 @@ impl BodyKind {
     /// reached — the mount itself keeps playing its ordinary
     /// [`standing`](Self::standing).
     ///
-    /// # What is deliberately not here
-    ///
     /// `26`-`29` (`OnmountAttack`/`OnmountAttackBow`/`OnmountAttackCrossbow`/
-    /// `OnmountSlapHorse`) are the mounted combat poses, and choosing among
-    /// them needs the same equipped-weapon fact
-    /// [`standing_at_war`](Self::standing_at_war) is already missing — see its
-    /// own note. A mounted fight plays this stand and the ordinary swing
-    /// action over it until that fact exists.
+    /// `OnmountSlapHorse`) are the mounted combat poses. They are selected in
+    /// `client/app` where the action packet's weapon motion and the tracked
+    /// saddle state are both available; this type owns only the stance.
     pub const fn standing_mounted(self) -> Option<AnimationGroup> {
         match self {
             Self::Monster | Self::Animal => None,

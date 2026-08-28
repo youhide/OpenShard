@@ -163,15 +163,23 @@ impl MultiFormat {
     /// and the ambiguous file is the one where the choice costs nothing to get
     /// wrong in one direction and everything in the other: reading 16-byte data as
     /// 12-byte shifts every component after the first.
+    ///
+    /// `None` means at least one live entry cannot be divided into components in
+    /// either layout. Guessing there would silently discard the entry's trailing
+    /// bytes when the reader computes its component count.
     #[must_use]
-    pub fn detect(lengths: impl IntoIterator<Item = u32>) -> Self {
+    pub fn detect(lengths: impl IntoIterator<Item = u32>) -> Option<Self> {
         let mut old = true;
         let mut new = true;
         for length in lengths {
             old &= (length as usize).is_multiple_of(COMPONENT_OLD);
             new &= (length as usize).is_multiple_of(COMPONENT_NEW);
         }
-        if new || !old { Self::HighSeas } else { Self::Legacy }
+        match (old, new) {
+            (_, true) => Some(Self::HighSeas),
+            (true, false) => Some(Self::Legacy),
+            (false, false) => None,
+        }
     }
 }
 
@@ -394,7 +402,16 @@ impl Multis {
                 ))
             })
             .collect();
-        let format = MultiFormat::detect(entries.iter().map(|&(_, _, length)| length as u32));
+        let format =
+            MultiFormat::detect(entries.iter().map(|&(_, _, length)| length as u32)).ok_or_else(|| {
+                MultiError::Malformed {
+                    path: index_path,
+                    detail: format!(
+                        "an entry length fits neither {COMPONENT_OLD}-byte legacy nor \
+                     {COMPONENT_NEW}-byte High Seas components"
+                    ),
+                }
+            })?;
 
         let mut multis = BTreeMap::new();
         for (id, lookup, length) in entries {
@@ -665,13 +682,23 @@ mod tests {
     /// answer rather than a preference.
     #[test]
     fn a_length_that_only_divides_by_sixteen_settles_the_layout() {
-        assert_eq!(MultiFormat::detect([608, 2368, 400]), MultiFormat::HighSeas);
-        assert_eq!(MultiFormat::detect([12, 36, 60]), MultiFormat::Legacy);
+        assert_eq!(MultiFormat::detect([608, 2368, 400]), Some(MultiFormat::HighSeas));
+        assert_eq!(MultiFormat::detect([12, 36, 60]), Some(MultiFormat::Legacy));
         // Divisible by both, which is the case the doc says resolves to the
         // modern layout rather than to an error.
-        assert_eq!(MultiFormat::detect([48, 96]), MultiFormat::HighSeas);
+        assert_eq!(MultiFormat::detect([48, 96]), Some(MultiFormat::HighSeas));
         // And an empty install is not evidence for the old one.
-        assert_eq!(MultiFormat::detect([]), MultiFormat::HighSeas);
+        assert_eq!(MultiFormat::detect([]), Some(MultiFormat::HighSeas));
+    }
+
+    #[test]
+    fn a_length_that_fits_neither_layout_is_not_guessed() {
+        assert_eq!(MultiFormat::detect([13]), None);
+        assert_eq!(
+            MultiFormat::detect([12, 16]),
+            None,
+            "entries cannot mix legacy and High Seas component widths"
+        );
     }
 
     fn component(graphic: u16, dx: i16, dy: i16, flags: u64) -> Component {

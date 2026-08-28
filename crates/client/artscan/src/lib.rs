@@ -136,17 +136,29 @@ pub fn measure(art: &Art, stamp: Stamp, keep: &[ArtTable]) -> ArtTable {
     table
 }
 
-/// The authored rows already beside an install, if there is a readable table
-/// there.
+/// The authored rows already beside an install, or `None` when no table has
+/// been written there yet.
 ///
-/// Deliberately forgiving: a table from another format version, or one a hand
-/// edit has broken, yields nothing rather than stopping the run. What is being
-/// rescued is a person's overrides, and a run that refused to re-derive because
-/// the *derived* half of the file was stale would be refusing to do the one thing
-/// it was asked for.
-pub fn authored_beside(path: &Path) -> Option<ArtTable> {
-    let text = std::fs::read_to_string(path).ok()?;
-    ArtTable::parse(&text).ok()
+/// An existing unreadable or malformed table is an error: it may contain the
+/// only copy of a person's overrides, so treating it like an absent file would
+/// let the next [`save`] silently overwrite those edits.
+pub fn authored_beside(path: &Path) -> Result<Option<ArtTable>, ScanError> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(ScanError::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    ArtTable::parse(&text)
+        .map(Some)
+        .map_err(|source| ScanError::Table {
+            path: path.to_path_buf(),
+            source,
+        })
 }
 
 /// Write a table where the client will look for it.
@@ -265,6 +277,14 @@ pub enum ScanError {
         /// What the filesystem said.
         source: std::io::Error,
     },
+    /// An existing table could not be parsed safely enough to preserve its
+    /// authored rows.
+    Table {
+        /// Which table.
+        path: PathBuf,
+        /// Which line, and what was wanted on it.
+        source: TableError,
+    },
     /// The client's art would not open.
     Art(openshard_uofiles::art::ArtError),
 }
@@ -273,6 +293,7 @@ impl std::fmt::Display for ScanError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
+            Self::Table { path, source } => write!(f, "{}: {source}", path.display()),
             Self::Art(source) => write!(f, "opening {ART_FILE}: {source}"),
         }
     }
@@ -306,6 +327,38 @@ mod tests {
             "an unmarked row in the shipped sheet would be a derived answer nobody derived, and \
              `adopt_authored` would drop it silently",
         );
+    }
+
+    /// Absence is harmless, but a broken existing table may hold the only copy
+    /// of somebody's authored rows and must not be silently overwritten.
+    #[test]
+    fn a_broken_existing_table_is_not_treated_as_absent() {
+        let dir = std::env::temp_dir().join(format!(
+            "openshard-artscan-broken-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after the epoch")
+                .as_nanos(),
+        ));
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        let path = dir.join(TABLE_FILE);
+
+        assert!(
+            authored_beside(&path)
+                .expect("an absent table is not an error")
+                .is_none(),
+        );
+        std::fs::write(&path, "not an art table\n").expect("writing a broken table");
+
+        let error = authored_beside(&path).expect_err("a broken table must stop the overwrite");
+        assert!(
+            matches!(error, ScanError::Table { path: failed, .. } if failed == path),
+            "the parse error identifies the table that must be preserved",
+        );
+
+        std::fs::remove_file(&path).expect("cleaning up the table");
+        std::fs::remove_dir(&dir).expect("cleaning up the temp dir");
     }
 
     /// A table from a different install is not loaded, whichever half differs.

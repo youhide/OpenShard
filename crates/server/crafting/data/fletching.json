@@ -1,0 +1,93 @@
+{
+  "groups": [1044457, 1044565, 1044566],
+  "sub_res": {
+    "graphic": "0x1BD7",
+    "name": 1072643,
+    "entries": [
+      { "hue": "0x0000", "name": 1072643, "req_skill": 0, "message": 1072652 },
+      { "hue": "0x07DA", "name": 1072644, "req_skill": 650, "message": 1072652 },
+      { "hue": "0x04A7", "name": 1072645, "req_skill": 750, "message": 1072652 },
+      { "hue": "0x04A8", "name": 1072646, "req_skill": 850, "message": 1072652 },
+      { "hue": "0x04A9", "name": 1072647, "req_skill": 950, "message": 1072652 },
+      { "hue": "0x04AA", "name": 1072648, "req_skill": 950, "message": 1072652 },
+      { "hue": "0x047F", "name": 1072649, "req_skill": 950, "message": 1072652 }
+    ]
+  },
+  "recipes": [
+    {
+      "graphic": "0x0DE1",
+      "name": 1023553,
+      "group": 0,
+      "retain_color": false,
+      "skills": [{ "skill": "Fletching", "min": 0, "max": 0 }],
+      "resources": [
+        { "graphic": "0x1BD7", "amount": 1, "name": 1044041, "message": 1044351, "from_axis": true }
+      ]
+    },
+    {
+      "graphic": "0x1BD4",
+      "name": 1027124,
+      "group": 0,
+      "retain_color": false,
+      "use_all_res": true,
+      "skills": [{ "skill": "Fletching", "min": 0, "max": 400 }],
+      "resources": [
+        { "graphic": "0x1BD7", "amount": 1, "name": 1044041, "message": 1044351, "from_axis": true }
+      ]
+    },
+    {
+      "graphic": "0x0F3F",
+      "name": 1023903,
+      "group": 1,
+      "retain_color": false,
+      "use_all_res": true,
+      "skills": [{ "skill": "Fletching", "min": 0, "max": 400 }],
+      "resources": [
+        { "graphic": "0x1BD4", "amount": 1, "name": 1044560, "message": 1044561 },
+        { "graphic": "0x1BD1", "amount": 1, "name": 1044562, "message": 1044563 }
+      ]
+    },
+    {
+      "graphic": "0x1BFB",
+      "name": 1027163,
+      "group": 1,
+      "retain_color": false,
+      "use_all_res": true,
+      "skills": [{ "skill": "Fletching", "min": 0, "max": 400 }],
+      "resources": [
+        { "graphic": "0x1BD4", "amount": 1, "name": 1044560, "message": 1044561 },
+        { "graphic": "0x1BD1", "amount": 1, "name": 1044562, "message": 1044563 }
+      ]
+    },
+    {
+      "graphic": "0x13B2",
+      "name": 1025042,
+      "group": 2,
+      "markable": true,
+      "skills": [{ "skill": "Fletching", "min": 300, "max": 700 }],
+      "resources": [
+        { "graphic": "0x1BD7", "amount": 7, "name": 1044041, "message": 1044351, "from_axis": true }
+      ]
+    },
+    {
+      "graphic": "0x0F50",
+      "name": 1023919,
+      "group": 2,
+      "markable": true,
+      "skills": [{ "skill": "Fletching", "min": 600, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x1BD7", "amount": 7, "name": 1044041, "message": 1044351, "from_axis": true }
+      ]
+    },
+    {
+      "graphic": "0x13FD",
+      "name": 1025117,
+      "group": 2,
+      "markable": true,
+      "skills": [{ "skill": "Fletching", "min": 800, "max": 1200 }],
+      "resources": [
+        { "graphic": "0x1BD7", "amount": 10, "name": 1044041, "message": 1044351, "from_axis": true }
+      ]
+    }
+  ]
+}

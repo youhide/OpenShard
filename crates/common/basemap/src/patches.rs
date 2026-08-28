@@ -258,18 +258,24 @@ pub fn read(path: &Path, facet: Facet, base: MapRevision) -> Result<Vec<Patch>, 
         }
     };
 
-    if bytes.len() < HEADER_BYTES || bytes[..4] != MAGIC {
+    check_header(path, &bytes, facet, base)?;
+    read_records(path, &bytes[HEADER_BYTES..])
+}
+
+/// Check that a header belongs to the base set beside the log.
+fn check_header(path: &Path, header: &[u8], facet: Facet, base: MapRevision) -> Result<(), LogError> {
+    if header.len() < HEADER_BYTES || header[..4] != MAGIC {
         return Err(LogError::NotALog {
             path: path.to_owned(),
         });
     }
-    if bytes[4] != VERSION {
+    if header[4] != VERSION {
         return Err(LogError::Version {
             path: path.to_owned(),
-            found: bytes[4],
+            found: header[4],
         });
     }
-    let found = Facet(bytes[5]);
+    let found = Facet(header[5]);
     if found != facet {
         return Err(LogError::WrongFacet {
             path: path.to_owned(),
@@ -277,7 +283,7 @@ pub fn read(path: &Path, facet: Facet, base: MapRevision) -> Result<Vec<Patch>, 
             found,
         });
     }
-    let over = MapRevision::decoded(u64::from_le_bytes(bytes[6..14].try_into().expect("eight bytes")));
+    let over = MapRevision::decoded(u64::from_le_bytes(header[6..14].try_into().expect("eight bytes")));
     if over != base {
         return Err(LogError::WrongBase {
             path: path.to_owned(),
@@ -285,9 +291,13 @@ pub fn read(path: &Path, facet: Facet, base: MapRevision) -> Result<Vec<Patch>, 
             found: over,
         });
     }
+    Ok(())
+}
 
+/// Decode each length-and-checksum frame after a validated header.
+fn read_records(path: &Path, bytes: &[u8]) -> Result<Vec<Patch>, LogError> {
     let mut patches = Vec::new();
-    let mut read = HEADER_BYTES;
+    let mut read = 0;
     while read < bytes.len() {
         let at = patches.len();
         let frame = bytes
@@ -381,34 +391,7 @@ pub fn append(path: &Path, facet: Facet, base: MapRevision, patch: &Patch) -> Re
 fn read_header(path: &Path, facet: Facet, base: MapRevision) -> Result<(), LogError> {
     let mut header = [0u8; HEADER_BYTES];
     read_exact(path, &mut header)?;
-    if header[..4] != MAGIC {
-        return Err(LogError::NotALog {
-            path: path.to_owned(),
-        });
-    }
-    if header[4] != VERSION {
-        return Err(LogError::Version {
-            path: path.to_owned(),
-            found: header[4],
-        });
-    }
-    let found = Facet(header[5]);
-    if found != facet {
-        return Err(LogError::WrongFacet {
-            path: path.to_owned(),
-            wanted: facet,
-            found,
-        });
-    }
-    let over = MapRevision::decoded(u64::from_le_bytes(header[6..14].try_into().expect("eight bytes")));
-    if over != base {
-        return Err(LogError::WrongBase {
-            path: path.to_owned(),
-            wanted: base,
-            found: over,
-        });
-    }
-    Ok(())
+    check_header(path, &header, facet, base)
 }
 
 /// The first bytes of a file, or the error of a file too short to have them.

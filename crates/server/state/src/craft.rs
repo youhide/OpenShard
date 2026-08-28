@@ -3,7 +3,7 @@
 //! The craft half of [`crate::harvest::tool_data`], and here for the same reason
 //! [`crate::weapon`] is: **two crates read it.** `items` reads it where an item is
 //! made, to give a fresh sewing kit the uses that make it a tool rather than a
-//! prop; `crafting` reads it on a double-click, to know which of the five gumps to
+//! prop; `crafting` reads it on a double-click, to know which trade gump to
 //! open. Data keyed by graphic, default in core.
 //!
 //! A tool is named by the *skill* it drives rather than by a craft system, because
@@ -61,6 +61,8 @@ pub fn craft_tool(graphic: Graphic) -> Option<CraftToolData> {
         0x1EB8 | 0x1EB9 => Skill::Tinkering,
         // Alchemy: a mortar and pestle.
         0x0E9B => Skill::Alchemy,
+        // Bowcraft/Fletching: both facings of fletcher's tools.
+        0x1022 | 0x1023 => Skill::Fletching,
         _ => return None,
     };
     Some(CraftToolData {
@@ -85,6 +87,7 @@ mod tests {
             (0x1034, 0x1035), // saw
             (0x1028, 0x1029), // dovetail saw
             (0x1EB8, 0x1EB9), // tinker's tools
+            (0x1022, 0x1023), // fletcher's tools
         ] {
             let (a, b) = (Graphic(a), Graphic(b));
             assert_eq!(craft_tool(a), craft_tool(b), "{:#06X} and {:#06X}", a.0, b.0);

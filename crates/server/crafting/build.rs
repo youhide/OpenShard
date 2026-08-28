@@ -1,7 +1,7 @@
 //! Turns `data/*.json` into the `&'static` tables `defs` publishes: one recipe
 //! list per trade, and the `SYSTEMS` header table that names them.
 //!
-//! The five trades are 485 recipes of pure data, generated once from ServUO and
+//! The six trades are 492 recipes of pure data, generated once from ServUO and
 //! edited as data ever since. Written out as Rust source they were sixteen
 //! thousand lines — a `Recipe` literal is thirteen fields, eleven of which are
 //! the default in almost every row, and each one dragged two named `const`s
@@ -96,9 +96,12 @@ struct Row {
     /// How many come out.
     #[serde(default = "one")]
     amount: u16,
-    /// A fixed hue for the result; zero means it takes the material's.
+    /// A fixed hue for the result; zero defers to `retain_color`.
     #[serde(default = "zero")]
     hue: String,
+    /// Whether a zero-hued result inherits the chosen material's hue.
+    #[serde(default = "yes")]
+    retain_color: bool,
     /// Consume every material in the pack and make as many as it can.
     #[serde(default)]
     use_all_res: bool,
@@ -179,7 +182,7 @@ struct NeedsRow {
     water: bool,
 }
 
-/// `data/craft_systems.json`: the five trade headers, which used to be a
+/// `data/craft_systems.json`: the trade headers, which used to be a
 /// hand-written `SYSTEMS` in `defs/mod.rs`. They are here because the two
 /// invariants below are properties of a *recipe row* checked against its
 /// *system's* header, and a build script that can only see one half can check
@@ -241,7 +244,7 @@ fn one() -> u16 {
     1
 }
 
-/// `base(1, 1, 1.25)` — the delay all five of them pass up.
+/// `base(1, 1, 1.25)` — the delay all shipped systems pass up.
 fn default_delay_ms() -> u64 {
     1250
 }
@@ -249,6 +252,11 @@ fn default_delay_ms() -> u64 {
 /// Likewise for the beat count, which is 1 everywhere so far.
 fn one_beat() -> u8 {
     1
+}
+
+/// Most craftable items retain the hue of their material.
+fn yes() -> bool {
+    true
 }
 
 /// Likewise for a hue nobody wrote down.
@@ -269,7 +277,7 @@ fn hex(field: &str, raw: &str) -> String {
 
 impl NeedsRow {
     /// The Rust expression, short where nothing is wanted — which is every one of
-    /// the 485 recipe rows. Only a *system* asks for a workshop today
+    /// the 492 recipe rows. Only a *system* asks for a workshop today
     /// (blacksmithy's forge and anvil); the per-recipe half is carried because
     /// ServUO's ovens, mills and water are per-recipe and the trades that use
     /// them are not ported.
@@ -328,6 +336,7 @@ fn generate(table: &Table) -> String {
         out.push_str("        ],\n");
         writeln!(out, "        amount: {},", row.amount).unwrap();
         writeln!(out, "        hue: Hue({}),", hex("hue", &row.hue)).unwrap();
+        writeln!(out, "        retain_color: {},", row.retain_color).unwrap();
         writeln!(out, "        use_all_res: {},", row.use_all_res).unwrap();
         writeln!(out, "        min_skill_offset: {},", row.min_skill_offset).unwrap();
         writeln!(out, "        markable: {},", row.markable).unwrap();
@@ -388,7 +397,7 @@ fn check(row: &SystemRow, table: &Table) {
         );
         // Leads with, not merely names: `chance` finds the main skill wherever it
         // sits, but `Recipe::skills` documents the first as the one the success
-        // chance is interpolated over, and all 485 rows obey it today.
+        // chance is interpolated over, and all shipped rows obey it today.
         let leads = recipe.skills.first().is_some_and(|want| want.skill == row.skill);
         assert!(
             leads,
@@ -484,8 +493,8 @@ fn generate_systems(systems: &Systems, tables: &BTreeMap<String, Table>) -> Stri
         );
     }
 
-    // One per *distinct* delay, not per system: five copies of the same
-    // assertion say nothing five times.
+    // One per *distinct* delay, not per system: copies of the same assertion say
+    // nothing several times.
     let delays: BTreeSet<u64> = systems.systems.iter().map(|row| row.delay_ms).collect();
     for ms in delays {
         writeln!(

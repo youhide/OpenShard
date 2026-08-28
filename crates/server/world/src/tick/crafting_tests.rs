@@ -26,6 +26,16 @@ use openshard_state::{CraftGumpContext, CraftGumpPage, Skill};
 const TONGS: Graphic = Graphic(0x0FBB);
 /// A sewing kit — a trade that needs no workshop, which is the contrast.
 const SEWING_KIT: Graphic = Graphic(0x0F9D);
+/// Fletcher's tools, sold by every bowyer.
+const FLETCHER_TOOLS: Graphic = Graphic(0x1022);
+/// A regular wooden board.
+const BOARD: Graphic = Graphic(0x1BD7);
+/// One wooden shaft.
+const SHAFT: Graphic = Graphic(0x1BD4);
+/// A bird's feather.
+const FEATHER: Graphic = Graphic(0x1BD1);
+/// The ammunition a bow consumes.
+const ARROW: Graphic = Graphic(0x0F3F);
 /// An anvil's static id, ServUO's `4015`.
 const ANVIL: Graphic = Graphic(4015);
 /// A forge's, `4017`.
@@ -34,6 +44,8 @@ const FORGE: Graphic = Graphic(4017);
 const INGOT: Graphic = openshard_crafting::INGOT_GRAPHIC;
 /// Valorite's hue — the top of the metal axis.
 const VALORITE: Hue = Hue(0x08AB);
+/// Oak's material hue, the second wood on the fletching axis.
+const OAK: Hue = Hue(0x07DA);
 
 /// Stand the player in a shop with these statics under foot.
 ///
@@ -424,6 +436,164 @@ fn a_tailor_needs_no_workshop_at_all() {
 }
 
 #[test]
+fn a_fletcher_turns_boards_and_feathers_into_every_affordable_arrow() {
+    // Both steps are batch crafts: all boards become shafts first, then the
+    // smaller of the shaft and feather piles decides the ammunition result.
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    shop(&mut world, &[]);
+    let tool = give(&mut world, connection, FLETCHER_TOOLS, Hue(0), 1);
+    give(&mut world, connection, BOARD, OAK, 12);
+    give(&mut world, connection, FEATHER, Hue(0), 8);
+    train(&mut world, connection, Skill::Fletching, 1000);
+    now += TICK_INTERVAL;
+    world.tick(now);
+
+    let system = openshard_crafting::SYSTEMS
+        .iter()
+        .position(|def| def.skill == Skill::Fletching)
+        .expect("fletching is a craft system");
+    let def = &openshard_crafting::SYSTEMS[system];
+    let shaft_recipe = def
+        .recipes
+        .iter()
+        .position(|recipe| recipe.graphic == SHAFT)
+        .expect("the fletching table makes shafts");
+    let arrow_recipe = def
+        .recipes
+        .iter()
+        .position(|recipe| recipe.graphic == ARROW)
+        .expect("the fletching table makes arrows");
+    let uses_before = world.state.registry.get::<Tool>(tool).unwrap().uses_left;
+    let player = world.state.players[&connection];
+
+    assert!(
+        openshard_crafting::begin(
+            &mut world.state,
+            player,
+            tool,
+            SystemId::from_index(system).unwrap(),
+            u16::try_from(shaft_recipe).unwrap(),
+            1,
+        ),
+        "shaft-making starts without a workshop"
+    );
+    now = finish(&mut world, connection, now);
+    assert_eq!(carried(&world, connection, SHAFT, Hue(0)), 12);
+
+    assert!(
+        openshard_crafting::begin(
+            &mut world.state,
+            player,
+            tool,
+            SystemId::from_index(system).unwrap(),
+            u16::try_from(arrow_recipe).unwrap(),
+            1,
+        ),
+        "arrow-making starts without a workshop"
+    );
+    finish(&mut world, connection, now);
+
+    assert_eq!(carried(&world, connection, ARROW, Hue(0)), 8);
+    assert_eq!(carried(&world, connection, BOARD, OAK), 0);
+    assert_eq!(carried(&world, connection, SHAFT, Hue(0)), 4);
+    assert_eq!(carried(&world, connection, FEATHER, Hue(0)), 0);
+    assert_eq!(
+        world.state.registry.get::<Tool>(tool).unwrap().uses_left,
+        uses_before - 2,
+        "each batch costs one tool use"
+    );
+}
+
+#[test]
+fn one_crafted_arrow_joins_the_stack_already_in_the_pack() {
+    // `use_all_res` is what identifies a stacking recipe even when only one set
+    // of inputs is present. Without it the one-arrow case takes the discrete-item
+    // path and leaves an unstackable duplicate beside the existing pile.
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let tool = give(&mut world, connection, FLETCHER_TOOLS, Hue(0), 1);
+    give(&mut world, connection, ARROW, Hue(0), 5);
+    give(&mut world, connection, SHAFT, Hue(0), 1);
+    give(&mut world, connection, FEATHER, Hue(0), 1);
+    // Enough to guarantee an arrow, but not enough to work the selected oak.
+    // The wood axis must not gate a recipe made only from shafts and feathers.
+    train(&mut world, connection, Skill::Fletching, 400);
+    now += TICK_INTERVAL;
+    world.tick(now);
+
+    let system = openshard_crafting::SYSTEMS
+        .iter()
+        .position(|def| def.skill == Skill::Fletching)
+        .unwrap();
+    let recipe = openshard_crafting::SYSTEMS[system]
+        .recipes
+        .iter()
+        .position(|recipe| recipe.graphic == ARROW)
+        .unwrap();
+    let player = world.state.players[&connection];
+    assert!(openshard_crafting::begin(
+        &mut world.state,
+        player,
+        tool,
+        SystemId::from_index(system).unwrap(),
+        u16::try_from(recipe).unwrap(),
+        1,
+    ));
+    finish(&mut world, connection, now);
+
+    let owner = world.state.registry.serial_of(player).unwrap();
+    let pack = items::backpack_of(&world.state, owner).unwrap();
+    let arrow_piles = openshard_state::contained_items(&world.state, pack)
+        .filter(|(item, _)| {
+            world
+                .state
+                .registry
+                .get::<Drawn>(*item)
+                .is_some_and(|drawn| drawn.id == ARROW)
+        })
+        .count();
+    assert_eq!(carried(&world, connection, ARROW, Hue(0)), 6);
+    assert_eq!(arrow_piles, 1, "the crafted arrow merged onto the pile");
+}
+
+#[test]
+fn double_clicking_fletchers_tools_opens_the_fletching_window() {
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let tool = give(&mut world, connection, FLETCHER_TOOLS, Hue(0), 1);
+    now += TICK_INTERVAL;
+    world.tick(now);
+    let _ = packets_for(&mut world, connection);
+
+    let serial = world.state.registry.serial_of(tool).unwrap();
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(serial.raw())),
+    });
+    now += TICK_INTERVAL;
+    world.tick(now);
+
+    let player = world.state.players[&connection];
+    let context = world
+        .state
+        .row_of(player)
+        .and_then(|row| row.craft_gump)
+        .expect("the server remembers the fletching window");
+    let def = openshard_crafting::system(SystemId::new(context.system)).unwrap();
+    assert_eq!(def.skill, Skill::Fletching);
+    assert!(
+        packets_for(&mut world, connection)
+            .iter()
+            .any(|packet| packet[0] == 0xB0),
+        "the client receives the craft gump"
+    );
+}
+
+#[test]
 fn ore_becomes_ingots_at_a_forge_and_nowhere_else() {
     // The step without which the whole of blacksmithy is unreachable from mining:
     // a miner is paid in ore and every recipe eats ingots.
@@ -640,7 +810,7 @@ fn double_clicking_the_tongs_is_what_opens_the_window() {
     // The whole way in. There is no craft packet: the client sends an ordinary
     // use, and everything after that is a gump — so a tool that answers a
     // double-click with nothing is a trade nobody can reach, which is what all
-    // five of these were before this slice.
+    // these were before this slice.
     let mut now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
@@ -702,7 +872,7 @@ fn a_tool_off_the_shelf_has_uses_in_it() {
     let mut now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
-    for graphic in [TONGS, SEWING_KIT] {
+    for graphic in [TONGS, SEWING_KIT, FLETCHER_TOOLS] {
         let tool = give(&mut world, connection, graphic, Hue(0), 1);
         let uses = world
             .state

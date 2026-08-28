@@ -1372,6 +1372,11 @@ pub enum ConfigError {
         /// The chance given, in per-mille.
         chance: u16,
     },
+    /// `gameplay.stat_gain_chance` names more than every eligible skill gain.
+    StatGainChanceTooHigh {
+        /// The chance given, in per-mille.
+        chance: u32,
+    },
     /// A `gameplay.action_rules` row slows an action by so much that it would
     /// never land.
     SlowPercentTooHigh {
@@ -1503,6 +1508,10 @@ impl fmt::Display for ConfigError {
             Self::CriticalChanceTooHigh { chance } => write!(
                 f,
                 "gameplay.critical_chance is {chance}; it must be at most 1000 per-mille"
+            ),
+            Self::StatGainChanceTooHigh { chance } => write!(
+                f,
+                "gameplay.stat_gain_chance is {chance}; it must be at most 1000 per-mille"
             ),
             Self::SlowPercentTooHigh { kind, percent } => write!(
                 f,
@@ -1684,6 +1693,13 @@ fn validate_combat(gameplay: &GameplayConfig) -> Result<(), ConfigError> {
     if gameplay.critical_chance > 1000 {
         return Err(ConfigError::CriticalChanceTooHigh {
             chance: gameplay.critical_chance,
+        });
+    }
+    // The roll has exactly 1000 outcomes; a larger threshold would silently
+    // behave exactly like 100%, hiding the operator's invalid percentage.
+    if gameplay.stat_gain_chance > 1000 {
+        return Err(ConfigError::StatGainChanceTooHigh {
+            chance: gameplay.stat_gain_chance,
         });
     }
     validate_action_effects(gameplay)?;

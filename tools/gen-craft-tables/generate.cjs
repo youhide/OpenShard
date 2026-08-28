@@ -38,7 +38,7 @@ const OUT = path.join(__dirname, '..', '..', 'crates', 'server', 'crafting', 'da
 const SUPPORTED_EXPANSIONS = new Set(['AOS', 'SE', 'ML', 'LBR', 'UOR', 'T2A', 'None']);
 const UNSUPPORTED_EXPANSIONS = ['SA', 'HS', 'TOL', 'EJ'];
 
-// The five tables this slice ports, and the constants each `Def*.cs` header
+// The tables this slice ports, and the constants each `Def*.cs` header
 // carries that are not in its recipe list.
 const SYSTEMS = [
   { file: 'DefBlacksmithy', module: 'blacksmithy', skill: 'Blacksmith' },
@@ -46,6 +46,18 @@ const SYSTEMS = [
   { file: 'DefCarpentry', module: 'carpentry', skill: 'Carpentry' },
   { file: 'DefTinkering', module: 'tinkering', skill: 'Tinkering' },
   { file: 'DefAlchemy', module: 'alchemy', skill: 'Alchemy' },
+  {
+    file: 'DefBowFletching',
+    module: 'fletching',
+    skill: 'Fletching',
+    // The combat table currently knows the three classic ranged weapons. Keep
+    // the material chain and those weapons; darts and expansion bows would be
+    // craftable props until their combat rows are ported.
+    types: new Set(['Kindling', 'Shaft', 'Arrow', 'Bolt', 'Bow', 'Crossbow', 'HeavyCrossbow']),
+    // ServUO's colored-item table includes BaseWeapon, not these resources.
+    // Special wood therefore colors a bow but still makes ordinary shafts.
+    plainTypes: new Set(['Kindling', 'Shaft', 'Arrow', 'Bolt']),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -366,6 +378,7 @@ function parseSystem(spec) {
           resources: [],
           amount: 1,
           hue: 0,
+          retainColor: !spec.plainTypes?.has(type[1]),
           useAllRes: false,
           minSkillOffset: 0,
           markable: markable(type[1]),
@@ -514,6 +527,9 @@ function parseSystem(spec) {
 
   const kept = [];
   for (const recipe of recipes) {
+    if (spec.types && !spec.types.has(recipe.type)) {
+      recipe.drop = recipe.drop || 'no gameplay row';
+    }
     if (recipe.drop) {
       dropped.push(`${spec.file}: ${recipe.type} — ${recipe.drop}`);
       continue;
@@ -636,6 +652,7 @@ function emit(parsed) {
     // `amount` is 1 for everything this tool produces; the field exists for the
     // rows a shard edits by hand afterwards.
     if (recipe.hue) row.push(`      "hue": "${hex(recipe.hue)}",`);
+    if (!recipe.retainColor) row.push('      "retain_color": false,');
     if (recipe.useAllRes) row.push('      "use_all_res": true,');
     if (recipe.minSkillOffset) row.push(`      "min_skill_offset": ${recipe.minSkillOffset},`);
     if (recipe.markable) row.push('      "markable": true,');

@@ -549,6 +549,16 @@ fn an_impossible_critical_chance_is_refused() {
 }
 
 #[test]
+fn an_impossible_stat_gain_chance_is_refused() {
+    let mut config = config(MINIMAL);
+    config.gameplay.stat_gain_chance = 1001;
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::StatGainChanceTooHigh { chance: 1001 })
+    ));
+}
+
+#[test]
 fn a_critical_cannot_be_weaker_than_a_normal_hit() {
     let mut config = config(MINIMAL);
     config.gameplay.critical_damage_percent = 99;

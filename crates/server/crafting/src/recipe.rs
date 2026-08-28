@@ -66,20 +66,22 @@ pub struct Recipe {
     pub skills: &'static [CraftSkillReq],
     /// What it eats.
     pub resources: &'static [CraftRes],
-    /// How many come out. More than one only for the things that stack — arrows,
-    /// bolts, boards.
+    /// How many come out of one paid unit of a recipe.
     ///
-    /// **Every one of the 485 rows is 1 today**, and the column is kept rather
-    /// than dropped: [`craft`](crate::craft) multiplies by it and the recipes
-    /// that would use it are ServUO's `DefBowFletching`, which is not ported.
-    /// Porting fletching is adding a table, not widening a struct — dropping the
-    /// field would mean the port had to put it back and touch the craft path to
-    /// do it.
+    /// **Every shipped row is 1 today**, including fletching: arrows, bolts,
+    /// shafts and boards use [`use_all_res`](Self::use_all_res) to make one item
+    /// per affordable set of inputs. The column stays because a custom recipe
+    /// can make several items from each paid set without widening the craft
+    /// path.
     pub amount: u16,
-    /// A fixed hue for the result — ServUO's `SetItemHue`. Zero means the result
-    /// takes the hue of the material it was made from, which is what makes a
-    /// valorite blade valorite-coloured.
+    /// A fixed hue for the result — ServUO's `SetItemHue`. Zero defers to
+    /// [`retain_color`](Self::retain_color), which is what makes a valorite blade
+    /// valorite-coloured while special wood still produces ordinary shafts.
     pub hue: Hue,
+    /// Whether a result with no fixed [`hue`](Self::hue) inherits the material
+    /// hue. Weapons do; resources such as shafts and kindling deliberately do
+    /// not, even when made from one of the special woods.
+    pub retain_color: bool,
     /// Whether the craft consumes every material in the pack and makes as many as
     /// it can — ServUO's `SetUseAllRes`, which is how a hundred logs become a
     /// hundred boards in one click.
