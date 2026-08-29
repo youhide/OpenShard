@@ -637,6 +637,21 @@ fn label_colored(
     }
 }
 
+/// One compact table-cell label.  Unlike a bare `{ text }`, its string branch
+/// has a real right edge: the client's fixed-size form font can never paint a
+/// long recipe name over the detail button in the next column.
+fn table_label(layout: &mut GumpLayout, x: i32, y: i32, width: i32, text: Text, argument: &str) {
+    match text {
+        Text::Cliloc(cliloc) if argument.is_empty() => {
+            layout.html_localized_colored(x, y, width, 18, cliloc, LABEL, false, false);
+        }
+        Text::Cliloc(cliloc) => {
+            layout.html_localized_args(x, y, width, 18, cliloc, argument, LABEL, false, false);
+        }
+        Text::Str(line) => layout.cropped_label(x, y - 3, width, 18, LABEL_HUE, line),
+    }
+}
+
 /// The left-hand column of categories.
 fn groups(layout: &mut GumpLayout, def: &CraftSystemDef, selected: u16) {
     for (i, group) in def.groups.iter().enumerate() {
@@ -702,8 +717,11 @@ fn items(layout: &mut GumpLayout, def: &CraftSystemDef, group: u16, can_make: bo
         } else {
             layout.label(230, y + 3, LABEL_HUE, "VIEW");
         }
-        layout.item(270, y - 3, recipe.graphic, recipe.hue);
-        label(layout, 310, y + 3, 270, recipe.name, "");
+        // A cell rather than a naked `tilepic`: a recipe's art may be a tiny
+        // ingot or a wide piece of furniture, and neither should shove the
+        // name column sideways or spill into the next row.
+        layout.fitted_item(270, y + 1, 28, 18, recipe.graphic, recipe.hue);
+        table_label(layout, 304, y + 3, 276, recipe.name, "");
         layout.button(
             625,
             y,
@@ -743,8 +761,8 @@ fn resources(layout: &mut GumpLayout, state: &WorldState, player: EntityId, def:
             button_id(kind::RESOURCE, index),
         );
         let held = carried(state, player, axis.graphic, entry.hue);
-        layout.item(270, y - 3, axis.graphic, entry.hue);
-        label(layout, 310, y + 3, 220, entry.name, &held.to_string());
+        layout.fitted_item(270, y + 1, 28, 18, axis.graphic, entry.hue);
+        table_label(layout, 304, y + 3, 226, entry.name, &held.to_string());
         layout.label(555, y + 3, LABEL_HUE, held.to_string());
     }
 }

@@ -175,6 +175,23 @@ pub enum Element {
         /// Its hue, or `None` for the plain `tilepic` form.
         hue: Option<u32>,
     },
+    /// `{ tilepicfit }` — an OpenShard item cell. The item's decoded art is
+    /// proportionally fitted and centred in this rectangle rather than drawn
+    /// at its natural dimensions.
+    ItemFitted {
+        /// Where the cell starts.
+        x: i32,
+        /// Where the cell starts.
+        y: i32,
+        /// How wide the cell is.
+        width: i32,
+        /// How tall the cell is.
+        height: i32,
+        /// Which world-art graphic the cell shows.
+        graphic: u32,
+        /// Its hue, or `None` when the element carried no hue.
+        hue: Option<u32>,
+    },
     /// `{ textentry }` — a field the player types into, answered in the `0xB1`.
     TextEntry {
         /// Where the field starts.
@@ -426,6 +443,17 @@ fn element(body: &str) -> Element {
             },
             _ => unknown(),
         },
+        "tilepicfit" => match (at(0), at(1), at(2), at(3), at(4), at(5)) {
+            (Some(x), Some(y), Some(width), Some(height), Some(graphic), Some(hue)) => Element::ItemFitted {
+                x: x as i32,
+                y: y as i32,
+                width: width as i32,
+                height: height as i32,
+                graphic: graphic as u32,
+                hue: (hue != 0).then_some(hue as u32),
+            },
+            _ => unknown(),
+        },
         "textentry" => match (at(0), at(1), at(2), at(3), at(4), at(5), at(6)) {
             (Some(x), Some(y), Some(width), Some(height), Some(hue), Some(id), Some(line)) if line >= 0 => {
                 Element::TextEntry {
@@ -487,6 +515,7 @@ mod tests {
         layout.cropped_label(66, 56, 200, 20, 1153, "Populate");
         layout.item(50, 50, Graphic(0x0EED), Hue::NONE);
         layout.item(50, 70, Graphic(0x0EED), Hue(33));
+        layout.fitted_item(80, 50, 24, 18, Graphic(0x0EED), Hue::NONE);
         layout.text_entry(60, 60, 100, 20, 1153, 3, "name");
 
         let (string, _) = layout.finish();
@@ -586,6 +615,14 @@ mod tests {
                     y: 70,
                     graphic: 0x0EED,
                     hue: Some(33),
+                },
+                Element::ItemFitted {
+                    x: 80,
+                    y: 50,
+                    width: 24,
+                    height: 18,
+                    graphic: 0x0EED,
+                    hue: None,
                 },
                 Element::TextEntry {
                     x: 60,

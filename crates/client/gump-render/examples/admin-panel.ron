@@ -1,0 +1,16 @@
+// A small staff panel.  Render with:
+// cargo run -p openshard-gump-render -- examples/admin-panel.ron --client "$OPENSHARD_CLIENT"
+(
+    width: 360,
+    height: 270,
+    background: (r: 64, g: 0, b: 96),
+    elements: [
+        Resize(gump: 5054, x: 0, y: 0, width: 360, height: 270),
+        Label(x: 106, y: 15, text: "Shard administration"),
+        Gump(gump: 4005, x: 30, y: 56),
+        Label(x: 66, y: 58, text: "Populate Felucca"),
+        Gump(gump: 4005, x: 30, y: 88),
+        Label(x: 66, y: 90, text: "Wipe spawners"),
+        Item(graphic: 0x0E75, x: 250, y: 150),
+    ],
+)

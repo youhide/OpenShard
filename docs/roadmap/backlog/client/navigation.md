@@ -117,7 +117,7 @@ whether or not the terrain overlay is switched on (`App::route_shown`,
     front.
 - **The client's flat plan gives up well before the coarse one does, and the
   fallback only runs past 8 tiles.** That same 68-step route costs ~1,600 node
-  expansions and `PLAN_BUDGET` is 600, so the flat search exits on budget and
+  expansions and `PLAN_BUDGET` is 700, so the flat search exits on budget and
   `Readings::path` falls through to `find_long_path`, which answers it — but only
   because the goal was 20 tiles away. A storey reached by a staircase *inside*
   `COARSE_MIN_DISTANCE` (8 tiles) has no fallback at all: the flat search is the
@@ -125,6 +125,19 @@ whether or not the terrain overlay is switched on (`App::route_shown`,
   hitting it yet; the fix, when something does, is to let the corridor answer a
   short query whose flat search exited on `Budget` rather than on `Exhausted` —
   the two failures are already told apart in `SearchExit` for exactly this.
+- **A placed multi-house has no navigation graph of its own.** The coarse graph
+  is baked from the static map, while a house's floors and stairs arrive in the
+  live overlay; consequently an endpoint on an upper storey cannot join the
+  coarse graph. The five-storey tower still fits the 700-node local cap (645
+  places from its fifth floor to the street), but larger designs turn a simple
+  descent into a budget refusal. Build a revisioned per-house storey graph when
+  the house is placed or redesigned: nodes are standable `(x, y, z)` surfaces,
+  edges are the production step rule's legal transitions, and exterior nodes
+  join the static graph at the house's entrances. Keep doors, items and mobiles
+  out of that bake and validate every refined edge against the live `Footing`,
+  as the existing coarse route does. This is a dynamic navigation graph rather
+  than a polygon mesh: UO movement and overlapping storeys are already defined
+  on tile-height places.
 - **The preview replans per frame while a destination is live** — the walk plans
   at most once a step, and drawing from its stored route would blink the line out
   on every mouse-move (see `App::route_shown`). Bounded by `PLAN_BUDGET` and paid

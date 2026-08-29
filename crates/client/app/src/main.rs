@@ -115,16 +115,12 @@ struct Cli {
     #[arg(long, env = "OPENSHARD_CHARACTER")]
     character: Option<String>,
 
-    /// Draw overhead speech through this TrueType or OpenType face instead of
-    /// `fonts.mul`.
+    /// Override the bundled TrueType interface face with this TrueType or
+    /// OpenType face.
     ///
-    /// `fonts.mul` is CP1251 and therefore covers Cyrillic, but cannot cover
-    /// Unicode generally or offer another typeface. A shard that needs those
-    /// chooses this `.ttf`/`.otf` on the local machine. Nothing is bundled — see
-    /// `openshard_uofiles::ttf_font`'s doc for why. Unset draws the classic
-    /// client's own bitmap faces, unchanged; there is no mixing the two within
-    /// one line — see `openshard_client_render::text::collect_ttf`'s doc for
-    /// why.
+    /// The bundled Noto Sans face covers the ordinary Unicode UI. A shard may
+    /// name another `.ttf`/`.otf` for its own typography. Switch to the classic
+    /// face in F1 when the original `fonts.mul` look is wanted.
     #[arg(long, env = "OPENSHARD_TTF_FONT", value_name = "FILE")]
     ttf_font: Option<PathBuf>,
 

@@ -4,10 +4,8 @@
 //! table: they cover Latin and Cyrillic, but not Unicode generally. This
 //! rasterizes whichever TrueType face an operator points a shard at for the
 //! scripts or typography that table cannot provide — see [`TtfFont::open`].
-//! Nothing is bundled: a face is copyrighted the same way a client's own files
-//! are (see the crate doc's "no client files" rule), so this reads one from a
-//! path the same way [`crate::font::AsciiFonts`] reads `fonts.mul` from a
-//! client install, rather than embedding one.
+//! This reader does not choose where a face comes from: an application may
+//! embed an openly licensed default or load an operator-selected file.
 //!
 //! # One face, not ten
 //!
@@ -149,24 +147,28 @@ impl fmt::Debug for TtfFont {
 }
 
 impl TtfFont {
-    /// Read and parse a TrueType or OpenType face from `path`.
+    /// Parse an already-owned or static TrueType/OpenType face.
     ///
-    /// Nothing is bundled with the engine — see the module doc — so this is
-    /// the only way to one: an operator names a `.ttf`/`.otf` on their own
-    /// machine, the same shape as `--client`/`OPENSHARD_CLIENT` naming a
-    /// client install.
+    /// Useful to an application that embeds an openly licensed fallback. The
+    /// underlying rasterizer owns the parsed face, so a static byte slice does
+    /// not tie this value to an application resource's lifetime.
+    pub fn from_bytes(bytes: impl std::ops::Deref<Target = [u8]>) -> Result<Self, String> {
+        Font::from_bytes(bytes, FontSettings::default())
+            .map(|font| Self { font })
+            .map_err(str::to_owned)
+    }
+
+    /// Read and parse a TrueType or OpenType face from `path`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, TtfFontError> {
         let path = path.as_ref();
         let bytes = std::fs::read(path).map_err(|source| TtfFontError::Read {
             path: path.to_owned(),
             source,
         })?;
-        let font =
-            Font::from_bytes(bytes, FontSettings::default()).map_err(|reason| TtfFontError::Parse {
-                path: path.to_owned(),
-                reason: reason.to_owned(),
-            })?;
-        Ok(Self { font })
+        Self::from_bytes(bytes).map_err(|reason| TtfFontError::Parse {
+            path: path.to_owned(),
+            reason,
+        })
     }
 
     /// Rasterize one character at `pixel_height`.

@@ -215,11 +215,11 @@ pub struct Resources {
     /// the same tolerance a missing gump art or a missing font glyph gets —
     /// see `gump::Dialogs::lines`.
     pub cliloc: Option<Cliloc>,
-    /// The operator-supplied TrueType face, when `run` was asked to draw
-    /// through one instead — `None` is the ordinary, `fonts.mul`-only run. Held
+    /// The bundled TrueType face, or the operator-supplied replacement. Held
     /// here rather than only on `Screen` because it does not depend on a
     /// window existing: it is what `Screen::ttf_atlas` is grown from, every
-    /// frame `App::draw` sees new characters in what is being said.
+    /// frame `App::draw` sees new characters in what is being said. `None` is
+    /// retained for test and degraded-resource fixtures.
     pub ttf_font: Option<TtfFont>,
     /// The animations, open but not read: `anim.mul` is 195MB and frames come
     /// out of it a body at a time. `&mut` because reading one seeks the file.

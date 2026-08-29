@@ -121,7 +121,7 @@ fn draw_world_text(
         let atlas = window
             .ttf_atlas
             .as_mut()
-            .expect("create_window builds ttf_atlas whenever ttf_font is set");
+            .expect("create_window builds ttf_atlas whenever a TrueType face is active");
         if let Err(error) = atlas.add_or_reset(
             font,
             speech_size,
@@ -2001,6 +2001,7 @@ impl App {
                         world: &self.world,
                         art: &self.resources.art,
                         tiledata: &self.resources.tiledata,
+                        hue_ramp: &self.resources.hue_ramp,
                         skill_names: &self.resources.skill_names,
                         map_editor: &mut self.map_editor,
                         authority,

@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Кузнечное дело — interactive skin prototype</title>
+<style>
+  @font-face { font-family: NotoCraft; src: url('../../crates/client/app/assets/NotoSans-Regular.ttf'); }
+  :root { color-scheme: dark; background: #0e0a06; font-family: NotoCraft, sans-serif; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at 50% 0, #332114, #0e0a06 66%); }
+  main { width: min(100%, 1280px); padding: 16px; box-sizing: border-box; }
+  canvas { display: block; width: 100%; height: auto; border-radius: 6px; box-shadow: 0 20px 70px #000; image-rendering: pixelated; }
+  p { margin: 10px 4px 0; color: #cdb384; font-size: 14px; text-align: center; }
+</style>
+<main>
+  <canvas id="craft" width="1024" height="640" aria-label="Интерактивный прототип кузнечного дела"></canvas>
+  <p>Выберите рецепт, прокрутите список колесом или кликом по дорожке, затем нажмите «Создать».</p>
+</main>
+<script>
+  'use strict';
+
+  const canvas = document.querySelector('#craft');
+  const ctx = canvas.getContext('2d');
+  const sheet = new Image();
+  sheet.src = '../../assets/ui/crafting/blacksmith-skin-kit-v2.png';
+
+  const recipes = [
+    { name: 'Длинный меч', description: 'Надёжный клинок для ближнего боя.', materials: [['Железный слиток', 12, 8], ['Кожаная обмотка', 0, 1], ['Уголь', 5, 2], ['Ремонтный набор', 3, 1]] },
+    { name: 'Боевой топор', description: 'Тяжёлое оружие с широким лезвием.', materials: [['Железный слиток', 7, 6], ['Древесина ясеня', 3, 1], ['Уголь', 5, 2], ['Ремонтный набор', 3, 1]] },
+    { name: 'Круглый щит', description: 'Прочный щит для передней линии.', materials: [['Железный слиток', 12, 4], ['Кожа', 1, 2], ['Древесина', 6, 3], ['Заклёпки', 7, 6]] },
+    { name: 'Кольчуга', description: 'Гибкая броня из плетёных колец.', materials: [['Железный слиток', 3, 16], ['Кожаная обмотка', 4, 2], ['Уголь', 5, 5], ['Ремонтный набор', 3, 1]] },
+    { name: 'Железный кинжал', description: 'Короткий клинок для быстрой руки.', materials: [['Железный слиток', 12, 3], ['Кожаная обмотка', 0, 1], ['Уголь', 5, 1], ['Ремонтный набор', 3, 1]] },
+    { name: 'Кузнечный молот', description: 'Инструмент для точной работы.', materials: [['Железный слиток', 12, 5], ['Древесина', 6, 2], ['Уголь', 5, 1], ['Ремонтный набор', 3, 1]] },
+    { name: 'Стальные сапоги', description: 'Тяжёлая защита для похода.', materials: [['Железный слиток', 12, 9], ['Кожа', 1, 1], ['Уголь', 5, 3], ['Заклёпки', 7, 4]] },
+    { name: 'Боевой шлем', description: 'Закрывает голову от прямого удара.', materials: [['Железный слиток', 12, 7], ['Кожаная обмотка', 4, 1], ['Уголь', 5, 3], ['Ремонтный набор', 3, 1]] },
+  ];
+  const state = { selected: 0, scroll: 0, materialToggles: new Set(), notice: '' };
+  const list = { x: 36, y: 142, width: 184, height: 276, row: 56 };
+  const track = { x: 220, y: 142, width: 84, height: 385 };
+
+  const rect = (sx, sy, width, height) => ({ sx, sy, width, height });
+  const art = {
+    header: rect(312, 118, 364, 86), darkPanel: rect(894, 62, 290, 266), parchment: rect(884, 353, 300, 285),
+    selected: rect(347, 688, 298, 100), darkRow: rect(60, 690, 286, 97), lightRow: rect(652, 687, 258, 103),
+    missingRow: rect(910, 687, 275, 103), track: rect(121, 827, 84, 385), thumb: rect(347, 852, 85, 208),
+    empty: rect(568, 891, 98, 96), checked: rect(771, 887, 105, 98), disabled: rect(543, 1070, 319, 116), action: rect(875, 1068, 332, 121),
+  };
+
+  function drawCrop(source, x, y, width = source.width, height = source.height) {
+    ctx.drawImage(sheet, source.sx, source.sy, source.width, source.height, x, y, width, height);
+  }
+
+  function nine(source, x, y, width, height, inset = 12) {
+    const centerW = source.width - inset * 2;
+    const centerH = source.height - inset * 2;
+    const targetW = width - inset * 2;
+    const targetH = height - inset * 2;
+    const piece = (sx, sy, sw, sh, dx, dy, dw, dh) => ctx.drawImage(sheet, sx, sy, sw, sh, dx, dy, dw, dh);
+    piece(source.sx, source.sy, inset, inset, x, y, inset, inset);
+    piece(source.sx + inset, source.sy, centerW, inset, x + inset, y, targetW, inset);
+    piece(source.sx + source.width - inset, source.sy, inset, inset, x + width - inset, y, inset, inset);
+    piece(source.sx, source.sy + inset, inset, centerH, x, y + inset, inset, targetH);
+    piece(source.sx + inset, source.sy + inset, centerW, centerH, x + inset, y + inset, targetW, targetH);
+    piece(source.sx + source.width - inset, source.sy + inset, inset, centerH, x + width - inset, y + inset, inset, targetH);
+    piece(source.sx, source.sy + source.height - inset, inset, inset, x, y + height - inset, inset, inset);
+    piece(source.sx + inset, source.sy + source.height - inset, centerW, inset, x + inset, y + height - inset, targetW, inset);
+    piece(source.sx + source.width - inset, source.sy + source.height - inset, inset, inset, x + width - inset, y + height - inset, inset, inset);
+  }
+
+  function text(value, x, y, size, colour, align = 'left') {
+    ctx.font = `${size}px NotoCraft, sans-serif`;
+    ctx.textAlign = align;
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = colour;
+    ctx.fillText(value, x, y);
+  }
+
+  function clamp(value, low, high) { return Math.max(low, Math.min(high, value)); }
+  function maxScroll() { return Math.max(0, recipes.length - Math.floor(list.height / list.row)); }
+  function allAvailable(recipe) { return recipe.materials.every(([, have, need]) => have >= need); }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#0e0a06'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    nine(art.header, 20, 12, 984, 54, 13);
+    nine(art.darkPanel, 20, 76, 300, 545, 13);
+    nine(art.parchment, 334, 76, 670, 545, 13);
+    text('КУЗНЕЧНОЕ ДЕЛО', 512, 19, 28, '#e0b869', 'center');
+    text('КУЗНЕЦ', 54, 94, 20, '#e8c170');
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(list.x, list.y, list.width, list.height); ctx.clip();
+    recipes.forEach((recipe, index) => {
+      const y = list.y + (index - state.scroll) * list.row;
+      if (y + list.row <= list.y || y >= list.y + list.height) return;
+      nine(index === state.selected ? art.selected : art.darkRow, list.x, y, list.width, 52, 10);
+      text(recipe.name, list.x + 18, y + 15, 16, index === state.selected ? '#ffe49c' : '#d0b37a');
+    });
+    ctx.restore();
+
+    drawCrop(art.track, track.x, track.y);
+    const thumbTravel = 178;
+    const thumbY = track.y + 65 + (maxScroll() ? state.scroll / maxScroll() * thumbTravel : 0);
+    drawCrop(art.thumb, track.x, thumbY, 85, 208);
+
+    const recipe = recipes[state.selected];
+    text(recipe.name, 370, 108, 30, '#372516');
+    text(recipe.description, 370, 158, 17, '#594026');
+    text('Требуемые материалы', 370, 212, 16, '#584025');
+    recipe.materials.forEach(([name, have, need], index) => {
+      const y = 260 + index * 62;
+      const forced = state.materialToggles.has(index);
+      const okay = !forced && have >= need;
+      nine(okay ? art.lightRow : art.missingRow, 360, y, 610, 56, 10);
+      text(name, 388, y + 16, 18, okay ? '#3e2f1d' : '#6b271f');
+      text(`${have} / ${need}`, 830, y + 16, 18, okay ? '#1c5b2b' : '#97261d', 'right');
+      drawCrop(okay ? art.checked : art.empty, 914, y + 4, 40, 40);
+    });
+    const canCreate = allAvailable(recipe) && state.materialToggles.size === 0;
+    nine(canCreate ? art.action : art.disabled, 748, 544, 224, 58, 12);
+    nine(canCreate ? art.action : art.disabled, 506, 544, 224, 58, 12);
+    text('Создать', 618, 559, 19, canCreate ? '#ffce66' : '#a49785', 'center');
+    text('Создать всё', 860, 559, 19, canCreate ? '#ffce66' : '#a49785', 'center');
+    if (state.notice) text(state.notice, 670, 512, 15, '#8d512d', 'center');
+  }
+
+  function local(event) {
+    const bounds = canvas.getBoundingClientRect();
+    return { x: (event.clientX - bounds.left) * canvas.width / bounds.width, y: (event.clientY - bounds.top) * canvas.height / bounds.height };
+  }
+  function inside(point, box) { return point.x >= box.x && point.x < box.x + box.width && point.y >= box.y && point.y < box.y + box.height; }
+  function click(event) {
+    const point = local(event);
+    if (inside(point, list)) {
+      const row = Math.floor((point.y - list.y) / list.row) + state.scroll;
+      if (recipes[row]) { state.selected = row; state.materialToggles.clear(); state.notice = ''; }
+    } else if (inside(point, track)) {
+      state.scroll = clamp(Math.round((point.y - track.y - 65) / 178 * maxScroll()), 0, maxScroll());
+    } else if (point.x >= 890 && point.x < 970 && point.y >= 260 && point.y < 508) {
+      const index = Math.floor((point.y - 260) / 62);
+      state.materialToggles.has(index) ? state.materialToggles.delete(index) : state.materialToggles.add(index);
+    } else if (point.y >= 544 && point.y < 602 && point.x >= 506 && point.x < 972) {
+      state.notice = allAvailable(recipes[state.selected]) && state.materialToggles.size === 0 ? 'Заказ отправлен кузнецу.' : 'Не хватает материалов.';
+    }
+    draw();
+  }
+  canvas.addEventListener('click', click);
+  canvas.addEventListener('wheel', event => {
+    const point = local(event);
+    if (!inside(point, list)) return;
+    event.preventDefault();
+    state.scroll = clamp(state.scroll + Math.sign(event.deltaY), 0, maxScroll());
+    draw();
+  }, { passive: false });
+  canvas.addEventListener('mousemove', event => {
+    const point = local(event);
+    canvas.style.cursor = inside(point, list) || inside(point, track) || (point.y >= 260 && point.y < 508 && point.x >= 890) || (point.y >= 544 && point.x >= 506) ? 'pointer' : 'default';
+  });
+  sheet.addEventListener('load', () => { ctx.imageSmoothingEnabled = false; draw(); });
+  sheet.addEventListener('error', () => { text('Не удалось загрузить skin atlas.', 512, 300, 22, '#d5986f', 'center'); });
+</script>
+</html>

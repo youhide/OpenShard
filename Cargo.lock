@@ -2790,6 +2790,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "openshard-gump-render"
+version = "0.0.1"
+dependencies = [
+ "clap",
+ "fontdue",
+ "openshard-client-render",
+ "openshard-protocol",
+ "openshard-uofiles",
+ "png",
+ "ron",
+ "serde",
+]
+
+[[package]]
 name = "openshard-housing"
 version = "0.0.1"
 dependencies = [

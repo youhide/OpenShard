@@ -332,7 +332,7 @@ fn drawn_layers<'a>(mobile: &'a Mobile) -> impl Iterator<Item = &'a EquipmentLay
         .filter_map(move |layer| mobile.equipment.iter().find(|item| item.layer == layer))
 }
 
-/// Which of a mounted rider's three groups the horse under them is drawn from
+/// Which mounted rider pose the horse under them is drawn from
 /// — [`mount_of`]'s bridge between the rider's own group numbering and the
 /// mount's completely different one, since nothing else here ever needs to
 /// name a stance apart from the group number that plays it.
@@ -344,7 +344,7 @@ enum MountedStance {
 
 /// The rider's mount, as a second body to draw beneath them — `None` for a
 /// mobile that either is not drawn from one of [`BodyKind::Human`]'s mounted
-/// groups or, despite that, carries no `Layer::MOUNT` item (a status the wire
+/// poses or, despite that, carries no `Layer::MOUNT` item (a status the wire
 /// disagreed with itself about, no worse handled than any other absent frame).
 ///
 /// A mount is never a picture riding the wearer's own frame the way a hat is
@@ -379,6 +379,11 @@ fn mount_of(mobile: &Mobile) -> Option<(Graphic, Hue, AnimationGroup)> {
         MountedStance::Walking
     } else if Some(mobile.group) == human.running_mounted() {
         MountedStance::Running
+    // The four mounted attacks are seated poses too. The rider plays its
+    // weapon animation while the mount remains at rest beneath it; rejecting
+    // these groups makes the horse vanish for the whole attack.
+    } else if matches!(mobile.group.0, 26..=29) {
+        MountedStance::Standing
     } else {
         return None;
     };
@@ -1457,6 +1462,70 @@ mod tests {
             None,
         );
         assert_eq!(quads.len(), 2, "the horse and its rider, nothing else drawn");
+    }
+
+    /// Mounted weapon groups are seated poses, not a dismount. They therefore
+    /// keep the mount in the packed and drawn scene for the whole attack.
+    #[test]
+    fn a_mounted_bow_draws_the_horse_beneath_the_archer() {
+        let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
+        let atlas = AnimAtlas::pack([
+            (
+                FrameKey::new(
+                    AnimationKey::new(Graphic(400), AnimationGroup(27), AnimationDirection(0)),
+                    AnimationFrameIndex(0),
+                ),
+                AnimFrame {
+                    center_x: 12,
+                    center_y: -3,
+                    image: Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
+                },
+            ),
+            (
+                FrameKey::new(
+                    AnimationKey::new(Graphic(200), AnimationGroup(2), AnimationDirection(0)),
+                    AnimationFrameIndex(0),
+                ),
+                AnimFrame {
+                    center_x: 22,
+                    center_y: 0,
+                    image: Image::new(44, 44, vec![Color16(0x7C00); 44 * 44]),
+                },
+            ),
+        ])
+        .expect("both frames fit");
+        let mobile = Mobile {
+            group: AnimationGroup(27), // PeopleAnimationGroup.OnmountAttackBow.
+            equipment: vec![EquipmentLayer {
+                graphic: AnimId(200),
+                hue: Hue::NONE,
+                layer: Layer::MOUNT,
+            }]
+            .into(),
+            ..body_at(100, Direction::SouthEast)
+        };
+
+        assert_eq!(
+            needed_animations(std::slice::from_ref(&mobile), &no_equip()),
+            vec![
+                AnimationKey::new(Graphic(200), AnimationGroup(2), AnimationDirection(0)),
+                AnimationKey::new(Graphic(400), AnimationGroup(27), AnimationDirection(0)),
+            ],
+            "the standing horse is packed with the mounted bow pose",
+        );
+        assert_eq!(
+            collect(
+                std::slice::from_ref(&mobile),
+                &camera,
+                &atlas,
+                &Cutaway::OPEN,
+                &no_equip(),
+                None,
+            )
+            .len(),
+            2,
+            "the horse remains behind the archer throughout the bow pose",
+        );
     }
 
     /// A rider whose group has not caught up with a dropped saddle — the one

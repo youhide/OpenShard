@@ -1,0 +1,22 @@
+[package]
+name = "openshard-gump-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Renders declarative Ultima Online gump scenes to PNG for design review."
+
+[dependencies]
+clap.workspace = true
+fontdue.workspace = true
+openshard-client-render.workspace = true
+openshard-protocol.workspace = true
+openshard-uofiles.workspace = true
+png.workspace = true
+ron.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

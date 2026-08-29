@@ -402,6 +402,11 @@ pub struct FontSizes {
     /// row, a sheet's column.
     #[serde(with = "text_size")]
     pub window: TextSize,
+    /// Captions in server-supplied forms (`0xB0` gumps).  Unlike a window
+    /// caption this stays at one real size while the form's artwork is
+    /// magnified, so a legacy layout does not overflow its fields.
+    #[serde(with = "text_size")]
+    pub form: TextSize,
     /// The shard's hover text.
     #[serde(with = "text_size")]
     pub tooltip: TextSize,
@@ -493,7 +498,8 @@ impl<'de> Deserialize<'de> for BitmapFont {
 }
 
 impl Default for FontSizes {
-    /// Sixteen for a voice, fourteen for a window, eleven for a count.
+    /// Sixteen for a voice, fourteen for a window, thirteen for a form and
+    /// eleven for a count.
     ///
     /// Sixteen is where the client's one baked TrueType height used to sit, chosen to land
     /// near `fonts.mul`'s own faces (roughly 8 to 14 pixels tall) with a line
@@ -504,6 +510,7 @@ impl Default for FontSizes {
         Self {
             speech: TextSize::new(16.0),
             window: TextSize::new(14.0),
+            form: TextSize::new(13.0),
             tooltip: TextSize::new(14.0),
             stack_count: TextSize::new(11.0),
         }
@@ -516,6 +523,7 @@ impl FontSizes {
     // while the other roles were drawn at their native size.
     const BITMAP_SPEECH_REFERENCE: f32 = 8.0;
     const BITMAP_WINDOW_REFERENCE: f32 = 14.0;
+    const BITMAP_FORM_REFERENCE: f32 = 14.0;
     const BITMAP_TOOLTIP_REFERENCE: f32 = 14.0;
     const BITMAP_STACK_COUNT_REFERENCE: f32 = 11.0;
 
@@ -525,6 +533,10 @@ impl FontSizes {
 
     pub(crate) fn bitmap_window_scale(self) -> f32 {
         self.window.pixels() / Self::BITMAP_WINDOW_REFERENCE
+    }
+
+    pub(crate) fn bitmap_form_scale(self) -> f32 {
+        self.form.pixels() / Self::BITMAP_FORM_REFERENCE
     }
 
     pub(crate) fn bitmap_tooltip_scale(self) -> f32 {
@@ -1414,6 +1426,7 @@ mod tests {
             fonts: FontSizes {
                 speech: TextSize::new(18.5),
                 window: TextSize::new(13.0),
+                form: TextSize::new(12.0),
                 tooltip: TextSize::new(12.5),
                 stack_count: TextSize::new(9.5),
             },
@@ -1691,11 +1704,13 @@ mod tests {
         let fonts = FontSizes {
             speech: TextSize::new(12.0),
             window: TextSize::new(17.5),
+            form: TextSize::new(14.0),
             tooltip: TextSize::new(10.5),
             stack_count: TextSize::new(13.75),
         };
         assert_eq!(fonts.bitmap_speech_scale(), 1.5);
         assert_eq!(fonts.bitmap_window_scale(), 1.25);
+        assert_eq!(fonts.bitmap_form_scale(), 1.0);
         assert_eq!(fonts.bitmap_tooltip_scale(), 0.75);
         assert_eq!(fonts.bitmap_stack_count_scale(), 1.25);
     }

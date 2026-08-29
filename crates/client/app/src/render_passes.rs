@@ -437,6 +437,11 @@ pub(crate) fn draw_gump_windows(
                 openshard_client_render::text::GumpLabel<'_>,
                 Option<gump_art::Scissor>,
             )> = Vec::new();
+            // A server gump was authored for a fixed text face.  Its art and
+            // coordinates follow the desk's window scale, but a TrueType
+            // caption keeps the dedicated form size: stretching it again is
+            // what made dense legacy layouts run out of their fields.
+            let form = matches!(subject, WindowSubject::Dialog(_));
             match (subject, drawn) {
                 // A shop's arm and a status frame's, now that a dialog's
                 // captions are resolved by the pane that laid it out: this pass
@@ -586,12 +591,21 @@ pub(crate) fn draw_gump_windows(
                         at,
                         magnify,
                         density: frame.scale,
-                        size: if count { fonts.stack_count } else { fonts.window },
+                        size: if count {
+                            fonts.stack_count
+                        } else if form {
+                            fonts.form
+                        } else {
+                            fonts.window
+                        },
                         bitmap_scale: if count {
                             fonts.bitmap_stack_count_scale()
+                        } else if form {
+                            fonts.bitmap_form_scale()
                         } else {
                             fonts.bitmap_window_scale()
                         },
+                        font_magnify: if form { 1.0 } else { magnify },
                         bitmap_font_override,
                     },
                     ttf_active.then_some(resources.ttf_font.as_ref()).flatten(),
@@ -658,6 +672,7 @@ pub(crate) fn draw_gump_windows(
                         density: frame.scale,
                         size: fonts.stack_count,
                         bitmap_scale: fonts.bitmap_stack_count_scale(),
+                        font_magnify: magnify,
                         bitmap_font_override,
                     },
                     ttf_active.then_some(resources.ttf_font.as_ref()).flatten(),
@@ -715,6 +730,7 @@ pub(crate) fn draw_gump_windows(
                     density: frame.scale,
                     size: fonts.tooltip,
                     bitmap_scale: fonts.bitmap_tooltip_scale(),
+                    font_magnify: 1.0,
                     bitmap_font_override,
                 },
                 ttf_active.then_some(resources.ttf_font.as_ref()).flatten(),
@@ -746,6 +762,9 @@ struct WindowText<'a> {
     at: gump_art::GumpPixel,
     /// How much bigger than its art the window draws — `desk::WindowScale`.
     magnify: f32,
+    /// The factor applied to the TrueType raster size.  A server form keeps
+    /// this at one while its coordinates still use `magnify` above.
+    font_magnify: f32,
     /// The display's own density, which the gump pass would otherwise apply in
     /// its shader.
     density: f32,
@@ -821,6 +840,20 @@ fn window_text(
                     quad.rect.height *= text.bitmap_scale;
                 }
             }
+            // `gump::place` below must still magnify the label's anchor with
+            // the form, but a fixed-size form face must not inherit that same
+            // enlargement.  Shrink the glyph offsets and dimensions in local
+            // space first; placement restores the anchor's scale and leaves
+            // the glyph itself at `font_magnify`.
+            let relative_scale = text.font_magnify / text.magnify;
+            if relative_scale != 1.0 {
+                for quad in &mut line {
+                    quad.rect.x = label.at.x as f32 + (quad.rect.x - label.at.x as f32) * relative_scale;
+                    quad.rect.y = label.at.y as f32 + (quad.rect.y - label.at.y as f32) * relative_scale;
+                    quad.rect.width *= relative_scale;
+                    quad.rect.height *= relative_scale;
+                }
+            }
             quads.extend(line);
         }
         gump_art::place(&mut quads, text.at, text.magnify);
@@ -841,7 +874,7 @@ fn window_text(
     let (Some(font), Some(atlas)) = (font, window.ttf_atlas.as_mut()) else {
         unreachable!("the bitmap branch returned unless both TrueType resources exist")
     };
-    let size = text.size.scaled(text.magnify * text.density);
+    let size = text.size.scaled(text.font_magnify * text.density);
     if let Err(error) = atlas.add_or_reset(
         font,
         size,

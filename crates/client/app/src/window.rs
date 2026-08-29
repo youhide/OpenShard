@@ -728,7 +728,8 @@ pub(crate) struct Screen {
     /// glyph atlas it is bound to is the whole of `fonts.mul` and does not go
     /// stale the way a camera-scoped atlas does.
     pub(crate) text_pass: SpriteRenderer,
-    /// The TrueType glyphs asked for so far, when `App::ttf_font` is set.
+    /// The TrueType glyphs asked for so far, when the bundled or replacement
+    /// face is active.
     /// Grown a line at a time — see [`App::draw`] — the way [`Screen::atlases`]
     /// grows as the camera walks, because a face with all of Unicode to answer
     /// for has no "whole file" to pack up front the way `fonts.mul` does.
@@ -828,7 +829,7 @@ impl Screen {
     /// upload — not because the texture was already current, but because the
     /// first caller's `take_dirty` already took the only answer there was.
     /// No-op with nothing dirty, or with no `ttf_atlas` at all — the
-    /// offline-map-viewer and no-`--ttf-font` cases both take this path
+    /// offline-map-viewer and degraded-resource cases both take this path
     /// harmlessly every frame.
     pub(crate) fn upload_ttf_dirty(&mut self) {
         let Some(atlas) = self.ttf_atlas.as_mut() else {

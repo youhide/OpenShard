@@ -557,6 +557,13 @@ pub struct Picture {
     /// which is what keeps a border's pixels its own size in a window of any
     /// width.
     pub tiled: Option<(i32, i32)>,
+    /// The exact size this one picture occupies, or `None` for its native
+    /// sprite dimensions.
+    ///
+    /// This is deliberately separate from [`Self::tiled`]: tiling preserves
+    /// the source pixels for frames and backgrounds, while this resamples one
+    /// icon to fit a control.  A picture cannot be both.
+    pub scaled: Option<(i32, i32)>,
     /// The box outside which this picture is neither drawn nor picked, or `None`
     /// to let it stand wherever it was placed.
     ///
@@ -577,6 +584,7 @@ impl Picture {
             hue: Hue::NONE,
             opacity: u8::MAX,
             tiled: None,
+            scaled: None,
             scissor: None,
         }
     }
@@ -603,8 +611,79 @@ impl Picture {
     pub const fn tiled(self, width: i32, height: i32) -> Self {
         Self {
             tiled: Some((width, height)),
+            scaled: None,
             ..self
         }
+    }
+
+    /// The same picture, resampled once to `width` by `height`.
+    ///
+    /// Intended for item icons in controls.  Frames and other gump art should
+    /// use [`Self::tiled`] or their native size so their borders remain crisp.
+    pub const fn scaled(self, width: i32, height: i32) -> Self {
+        Self {
+            tiled: None,
+            scaled: Some((width, height)),
+            ..self
+        }
+    }
+}
+
+/// One rectangular item control, in a window's local gump pixels.
+///
+/// Unlike a layout-language `{ tilepic }`, an `ItemCell` owns a finite box.
+/// Its icon is fitted by its *actual decoded dimensions*, then centred in the
+/// remaining inner box.  The returned [`Picture`] carries that same final
+/// rectangle into both [`collect`] and [`pick`], so transparent padding or an
+/// unusually wide item cannot make what is visible differ from what is
+/// clickable.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ItemCell {
+    /// Top-left corner of the cell.
+    pub at: GumpPixel,
+    /// Outer dimensions of the cell.
+    pub width: i32,
+    pub height: i32,
+    /// Empty space left around the fitted icon on every edge.
+    pub padding: i32,
+}
+
+impl ItemCell {
+    /// A cell with no inner margin.
+    pub const fn new(at: GumpPixel, width: i32, height: i32) -> Self {
+        Self {
+            at,
+            width,
+            height,
+            padding: 0,
+        }
+    }
+
+    /// Leave `padding` gump pixels clear on all sides of the icon.
+    pub const fn padded(self, padding: i32) -> Self {
+        Self { padding, ..self }
+    }
+
+    /// Fit and centre `graphic` in this cell, or return `None` when the cell
+    /// has no drawable interior or that item is not present in `atlas`.
+    pub fn picture(self, atlas: &GumpAtlas, graphic: Graphic) -> Option<Picture> {
+        let sprite = atlas.sprite(GumpArt::Item(graphic))?;
+        let (art_width, art_height) = (i32::from(sprite.width), i32::from(sprite.height));
+        let padding = self.padding.max(0);
+        let (inner_width, inner_height) = (self.width - 2 * padding, self.height - 2 * padding);
+        if art_width <= 0 || art_height <= 0 || inner_width <= 0 || inner_height <= 0 {
+            return None;
+        }
+        let factor = (inner_width as f32 / art_width as f32).min(inner_height as f32 / art_height as f32);
+        let (width, height) = (
+            ((art_width as f32 * factor).floor() as i32).max(1),
+            ((art_height as f32 * factor).floor() as i32).max(1),
+        );
+        let at = self.at.offset(GumpPixel::new(
+            padding + (inner_width - width) / 2,
+            padding + (inner_height - height) / 2,
+        ));
+        Some(Picture::plain(GumpArt::Item(graphic), at).scaled(width, height))
     }
 }
 
@@ -628,11 +707,44 @@ pub fn collect(pictures: &[Picture], atlas: &GumpAtlas) -> Vec<SpriteQuad> {
         if art_width <= 0 || art_height <= 0 {
             continue;
         }
-        let (width, height) = picture.tiled.unwrap_or((art_width, art_height));
+        let (width, height) = picture
+            .tiled
+            .or(picture.scaled)
+            .unwrap_or((art_width, art_height));
         if width <= 0 || height <= 0 {
             continue;
         }
         let hue = u32::from(picture.hue.0);
+        // A fitted icon is one resampled quad.  Tiling intentionally remains
+        // the only path that repeats source pixels.
+        if picture.scaled.is_some() {
+            let rect = Rect {
+                x: picture.at.x as f32,
+                y: picture.at.y as f32,
+                width: width as f32,
+                height: height as f32,
+            };
+            let cut = match picture.scissor {
+                Some(scissor) => scissor.crop(rect, sprite.region),
+                None => Some((rect, sprite.region)),
+            };
+            if let Some((rect, region)) = cut {
+                quads.push(
+                    SpriteQuad {
+                        rect,
+                        region,
+                        depth: 0.0,
+                        hue,
+                        place: crate::place::Place::NOWHERE,
+                        twin: 0,
+                        owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
+                        volumes: crate::impostor::Range::default(),
+                    }
+                    .with_opacity(picture.opacity),
+                );
+            }
+            continue;
+        }
         let mut y = 0;
         while y < height {
             let rows = (height - y).min(art_height);
@@ -851,16 +963,20 @@ pub fn pick(pictures: &[Picture], cursor: GumpPixel, atlas: &GumpAtlas) -> Optio
         if art_width <= 0 || art_height <= 0 {
             return None;
         }
-        let (width, height) = picture.tiled.unwrap_or((art_width, art_height));
+        let (width, height) = picture
+            .tiled
+            .or(picture.scaled)
+            .unwrap_or((art_width, art_height));
         let (x, y) = (cursor.x - picture.at.x, cursor.y - picture.at.y);
         if x < 0 || y < 0 || x >= width || y >= height {
             return None;
         }
+        let (pixel_x, pixel_y) = match picture.scaled {
+            Some(_) => ((x * art_width / width) as u16, (y * art_height / height) as u16),
+            None => ((x % art_width) as u16, (y % art_height) as u16),
+        };
         atlas
-            .opaque_at(
-                picture.graphic,
-                GumpArtPixel::new((x % art_width) as u16, (y % art_height) as u16),
-            )
+            .opaque_at(picture.graphic, GumpArtPixel::new(pixel_x, pixel_y))
             .then_some(PictureIndex::new(index))
     })
 }
@@ -970,7 +1086,7 @@ pub fn art_of(elements: &[Element]) -> BTreeSet<GumpArt> {
             }
             // `{ tilepic }` is the one element whose picture is not a gump at
             // all — see `GumpArt`.
-            Element::Item { graphic, .. } => {
+            Element::Item { graphic, .. } | Element::ItemFitted { graphic, .. } => {
                 wanted.insert(GumpArt::Item(Graphic(*graphic as u16)));
             }
             _ => {}
@@ -1286,6 +1402,20 @@ pub fn window(
                 )
                 .hued(Hue(hue.unwrap_or(0) as u16)),
             ),
+            Element::ItemFitted {
+                x,
+                y,
+                width,
+                height,
+                graphic,
+                hue,
+            } => {
+                if let Some(picture) = ItemCell::new(at.offset(GumpPixel::new(*x, *y)), *width, *height)
+                    .picture(atlas, Graphic(*graphic as u16))
+                {
+                    drawn.pictures.push(picture.hued(Hue(hue.unwrap_or(0) as u16)));
+                }
+            }
             Element::Label { x, y, hue, line } => drawn.captions.push(Caption {
                 at: at.offset(GumpPixel::new(*x, *y)),
                 hue: text_hue(*hue),
@@ -1806,6 +1936,37 @@ mod tests {
                 .map(|(graphic, image)| (GumpArt::Gump(graphic), image)),
         )
         .expect("a handful of small blocks fit an atlas 2048 on a side")
+    }
+
+    #[test]
+    fn an_item_cell_fits_and_centres_the_decoded_icon() {
+        let atlas = GumpAtlas::pack([(GumpArt::Item(Graphic(7)), block(20, 10))]).expect("fits");
+        let picture = ItemCell::new(GumpPixel::new(100, 200), 40, 40)
+            .padded(4)
+            .picture(&atlas, Graphic(7))
+            .expect("packed item produces a picture");
+
+        // The 20×10 icon fills the padded 32px width, remains proportional,
+        // and is centred vertically in the same 32×32 inner box.
+        assert_eq!(picture.at, GumpPixel::new(104, 212));
+        assert_eq!(picture.scaled, Some((32, 16)));
+
+        let quads = collect(&[picture], &atlas);
+        assert_eq!(quads.len(), 1);
+        assert_eq!(
+            quads[0].rect,
+            Rect {
+                x: 104.0,
+                y: 212.0,
+                width: 32.0,
+                height: 16.0,
+            }
+        );
+        assert_eq!(
+            pick(&[picture], GumpPixel::new(135, 223), &atlas),
+            Some(PictureIndex::new(0))
+        );
+        assert_eq!(pick(&[picture], GumpPixel::new(136, 223), &atlas), None);
     }
 
     /// A picture with a transparent middle — a frame, as far as picking is

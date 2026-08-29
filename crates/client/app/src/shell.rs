@@ -528,6 +528,7 @@ impl Shell {
             world,
             art,
             tiledata,
+            hue_ramp,
             skill_names,
             map_editor,
             authority,
@@ -549,6 +550,7 @@ impl Shell {
                         world,
                         art,
                         tiledata,
+                        hue_ramp,
                         skill_names,
                         map_editor: &mut *map_editor,
                         authority,
@@ -768,6 +770,8 @@ pub struct ShellFrame<'a> {
     pub art: &'a openshard_uofiles::art::Art,
     /// Installed tile metadata used by catalogue panels.
     pub tiledata: &'a openshard_tiles::TileData,
+    /// The installed hue ramps, used by the staff dye palette and its preview.
+    pub hue_ramp: &'a openshard_client_render::hue::HueRamp,
     /// Installed skill names used by the staff skill tester.
     pub skill_names: &'a openshard_uofiles::skills::Skills,
     /// Mutable map-editor session shown by staff panels.
@@ -799,6 +803,7 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
                 world,
                 art,
                 tiledata,
+                hue_ramp,
                 skill_names,
                 map_editor,
                 authority,
@@ -1020,6 +1025,7 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
                     &mut desk.admin_catalogue,
                     art,
                     tiledata,
+                    hue_ramp,
                     skill_names,
                     world,
                     item_catalogue,
@@ -1148,6 +1154,7 @@ fn admin_items_panel(
     catalogue: &mut crate::desk::AdminCatalogue,
     art: &openshard_uofiles::art::Art,
     tiledata: &openshard_tiles::TileData,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
     skill_names: &openshard_uofiles::skills::Skills,
     world: &WorldState,
     item_catalogue: &mut ItemArtCatalogue,
@@ -1156,21 +1163,33 @@ fn admin_items_panel(
     ui.heading("Administrator catalogue");
     admin_skills_panel(ui, skill, skill_names, world, request);
     ui.separator();
-    ui.label("Quick access: click an item to put it in your backpack.");
-    catalogue_grid(ui, ITEMS, |entry| {
-        request.create_item = Some(AdminItemRequest {
-            graphic: entry.graphic,
-            hue: 0,
-            amount: entry.amount,
-            stackable: entry.stackable,
+    let selected_hue = admin_hue_panel(ui, item, art, hue_ramp, item_catalogue);
+    ui.separator();
+    ui.add_enabled_ui(selected_hue.is_some(), |ui| {
+        ui.label("Quick access: click an item to put it in your backpack.");
+        catalogue_grid(ui, ITEMS, |entry| {
+            request.create_item = Some(AdminItemRequest {
+                graphic: entry.graphic,
+                hue: selected_hue.expect("enabled only with a valid hue"),
+                amount: entry.amount,
+                stackable: entry.stackable,
+            });
         });
     });
     ui.add_space(10.0);
     ui.heading("All item art");
-    ui.label(
-        "Actual sprites from the installed client. Click a sprite to create that graphic in your backpack.",
-    );
-    item_art_catalogue(ui, catalogue, art, tiledata, item_catalogue, request);
+    ui.label("Actual sprites from the installed client. Click a sprite to create it in the selected hue.");
+    ui.add_enabled_ui(selected_hue.is_some(), |ui| {
+        item_art_catalogue(
+            ui,
+            catalogue,
+            art,
+            tiledata,
+            item_catalogue,
+            selected_hue.expect("enabled only with a valid hue"),
+            request,
+        );
+    });
     ui.add_space(10.0);
     ui.heading("Animals");
     ui.label("Click an animal, then choose its place on the map.");
@@ -1192,16 +1211,13 @@ fn admin_items_panel(
     });
     ui.add_space(10.0);
     ui.collapsing("Custom item", |ui| {
-        ui.label("Graphic and hue accept decimal or 0x hexadecimal values.");
+        ui.label("Graphic and amount accept decimal or 0x hexadecimal values. Hue is set above.");
         egui::Grid::new("admin item fields")
             .num_columns(2)
             .spacing([12.0, 8.0])
             .show(ui, |ui| {
                 ui.label("Graphic");
                 ui.add(egui::TextEdit::singleline(&mut item.graphic).hint_text("0x0eed"));
-                ui.end_row();
-                ui.label("Hue");
-                ui.add(egui::TextEdit::singleline(&mut item.hue).hint_text("0"));
                 ui.end_row();
                 ui.label("Amount");
                 ui.add(egui::TextEdit::singleline(&mut item.amount).hint_text("1"));
@@ -1211,7 +1227,9 @@ fn admin_items_panel(
                 ui.end_row();
             });
 
-        let parsed = parse_admin_item(item);
+        let parsed = selected_hue
+            .ok_or("Hue is required and must name a colour in this client's palette.")
+            .and_then(|_| parse_admin_item(item));
         ui.add_space(8.0);
         match parsed {
             Ok(created) => {
@@ -1480,12 +1498,165 @@ fn catalogue_grid<T: CatalogueEntry>(ui: &mut egui::Ui, entries: &[T], mut selec
     });
 }
 
+/// The staff dye control shared by every way the administrator can create an
+/// item. `Hue(0)` is a useful explicit choice too: it means the item's original
+/// art, not the first colour in `hues.mul`.
+fn admin_hue_panel(
+    ui: &mut egui::Ui,
+    item: &mut crate::desk::AdminItem,
+    art: &openshard_uofiles::art::Art,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    browser: &mut ItemArtCatalogue,
+) -> Option<u16> {
+    ui.heading("Item colour");
+    ui.label("Hue is required for every item created from this page; use 0 for the original colour.");
+    let maximum_hue = u16::try_from(hue_ramp.height()).unwrap_or(u16::MAX);
+    let mut hue = parse_u16(&item.hue)
+        .filter(|hue| *hue <= maximum_hue)
+        .unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.strong("Hue *");
+        ui.add(egui::DragValue::new(&mut hue).range(0..=maximum_hue).speed(1));
+    });
+    item.hue = hue.to_string();
+    let selected_hue = hue;
+
+    ui.horizontal(|ui| {
+        ui.label("Test robe");
+        let texture = dyed_robe_texture(ui.ctx(), art, hue_ramp, browser, hue);
+        match texture {
+            Some(texture) => {
+                ui.add(egui::Image::from_texture(texture).max_size(egui::vec2(96.0, 112.0)));
+            }
+            None => {
+                ui.label("Robe art is unavailable in this client.");
+            }
+        }
+        ui.small(format!("Hue {hue:#06x}"));
+    });
+
+    ui.add_space(4.0);
+    ui.label("Palette — click a swatch to choose its hue.");
+    if ui.button("Original colour (hue 0)").clicked() {
+        item.hue = "0".to_owned();
+    }
+    const COLUMNS: usize = 12;
+    let hue_count = hue_ramp.height() as usize;
+    let rows = hue_count.div_ceil(COLUMNS);
+    egui::ScrollArea::vertical()
+        .id_salt("admin-hue-palette")
+        .max_height(240.0)
+        .show_rows(ui, 25.0, rows, |ui, visible_rows| {
+            for row in visible_rows {
+                ui.horizontal(|ui| {
+                    for column in 0..COLUMNS {
+                        let index = row * COLUMNS + column;
+                        if index >= hue_count {
+                            break;
+                        }
+                        let hue = u16::try_from(index + 1).expect("a wire hue fits in u16");
+                        let colour = hue_ramp_colour(hue_ramp, hue, 16)
+                            .expect("the palette only asks for installed hues");
+                        let response = ui.add_sized(
+                            [48.0, 21.0],
+                            egui::Button::new(format!("{hue:04X}"))
+                                .fill(colour)
+                                .selected(hue == selected_hue),
+                        );
+                        if response.clicked() {
+                            item.hue = format!("0x{hue:04X}");
+                        }
+                        response.on_hover_text(format!("Hue {hue:#06x}"));
+                    }
+                });
+            }
+        });
+
+    Some(selected_hue)
+}
+
+fn hue_ramp_colour(
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    hue: u16,
+    rung: usize,
+) -> Option<egui::Color32> {
+    let row = usize::from(hue & 0x3FFF).checked_sub(1)?;
+    let at = (row * 32 + rung.min(31)) * 4;
+    let pixels = hue_ramp.pixels();
+    Some(egui::Color32::from_rgb(
+        *pixels.get(at)?,
+        *pixels.get(at + 1)?,
+        *pixels.get(at + 2)?,
+    ))
+}
+
+/// Decode the same hue rule as the item shader on one static-art sprite, so
+/// the F1 preview is useful before a staff member puts the item in a backpack.
+fn dyed_robe_texture<'a>(
+    context: &egui::Context,
+    art: &openshard_uofiles::art::Art,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    browser: &'a mut ItemArtCatalogue,
+    hue: u16,
+) -> Option<&'a egui::TextureHandle> {
+    if browser
+        .dyed_robe
+        .as_ref()
+        .is_some_and(|(cached, _)| *cached == hue)
+    {
+        return browser.dyed_robe.as_ref().map(|(_, texture)| texture);
+    }
+    let image = art.static_art(Graphic(0x1F03)).ok().flatten()?;
+    let size = [usize::from(image.width()), usize::from(image.height())];
+    let pixels = image
+        .pixels()
+        .iter()
+        .map(|pixel| preview_pixel(*pixel, hue_ramp, hue))
+        .collect();
+    let image = egui::ColorImage::new(size, pixels);
+    match &mut browser.dyed_robe {
+        Some((cached, texture)) => {
+            texture.set(image, egui::TextureOptions::NEAREST);
+            *cached = hue;
+        }
+        None => {
+            browser.dyed_robe = Some((
+                hue,
+                context.load_texture("admin-dyed-test-robe", image, egui::TextureOptions::NEAREST),
+            ));
+        }
+    }
+    browser.dyed_robe.as_ref().map(|(_, texture)| texture)
+}
+
+fn preview_pixel(
+    pixel: openshard_uofiles::color::Color16,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    hue: u16,
+) -> egui::Color32 {
+    if pixel.is_transparent() {
+        return egui::Color32::TRANSPARENT;
+    }
+    let rgb = pixel.rgb8();
+    let partial = hue & 0x8000 != 0;
+    if !partial || (rgb.red == rgb.green && rgb.green == rgb.blue) {
+        if let Some(dyed) = hue_ramp_colour(hue_ramp, hue, usize::from(pixel.red())) {
+            return dyed;
+        }
+    }
+    egui::Color32::from_rgb(rgb.red, rgb.green, rgb.blue)
+}
+
 /// Lazily decoded thumbnails and the filtered list behind the F1 item browser.
 /// The list contains only ids; art is still decoded only for rows egui makes
 /// visible in the scroll area.
 #[derive(Default)]
 struct ItemArtCatalogue {
     textures: BTreeMap<u16, Option<egui::TextureHandle>>,
+    /// One recoloured robe, renewed only when the staff member picks another
+    /// hue. This is a deliberately small preview cache, unlike the browser's
+    /// thumbnails which follow the visible art rows.
+    dyed_robe: Option<(u16, egui::TextureHandle)>,
     matching: Vec<u16>,
     key: Option<(String, crate::desk::AdminItemCategory)>,
 }
@@ -1496,6 +1667,7 @@ fn item_art_catalogue(
     art: &openshard_uofiles::art::Art,
     tiledata: &openshard_tiles::TileData,
     browser: &mut ItemArtCatalogue,
+    hue: u16,
     request: &mut Request,
 ) {
     ui.horizontal(|ui| {
@@ -1573,7 +1745,7 @@ fn item_art_catalogue(
                         if let Some(amount) = amount {
                             request.create_item = Some(AdminItemRequest {
                                 graphic: id,
-                                hue: 0,
+                                hue,
                                 amount,
                                 stackable: catalogue.stackable,
                             });
@@ -1927,7 +2099,7 @@ fn chat_panel(ui: &mut egui::Ui, settings: ChatPanel<'_>) {
     });
     if !ttf_available {
         ui.label(
-            egui::RichText::new("Start with --ttf-font to make a TrueType face available.")
+            egui::RichText::new("The bundled TrueType face was unavailable in this runtime.")
                 .small()
                 .weak(),
         );
@@ -1976,12 +2148,14 @@ fn chat_panel(ui: &mut egui::Ui, settings: ChatPanel<'_>) {
     };
     row(ui, "speech", &mut fonts.speech);
     row(ui, "window", &mut fonts.window);
+    row(ui, "form", &mut fonts.form);
     row(ui, "tooltip", &mut fonts.tooltip);
     row(ui, "count", &mut fonts.stack_count);
     ui.label(
         egui::RichText::new(
             "`speech` is a line over a head and the box below; `window` is this \
-             client's own window captions; `tooltip` is hover text; `count` is \
+             client's own window captions; `form` is server gump text and remains \
+             a fixed real size; `tooltip` is hover text; `count` is \
              the number written on a pile. TrueType is rasterized at these real \
              pixel sizes; bitmap glyphs use the same per-role fractional scale.",
         )

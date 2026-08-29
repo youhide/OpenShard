@@ -716,6 +716,23 @@ impl GumpLayout {
         }
     }
 
+    /// An OpenShard item cell: the decoded item art is proportionally fitted
+    /// and centred inside this rectangle by our client. Classic clients do
+    /// not know this extension and simply leave its cell empty.
+    pub fn fitted_item(&mut self, x: i32, y: i32, width: i32, height: i32, graphic: Graphic, hue: Hue) {
+        self.element(
+            "tilepicfit",
+            &[
+                i64::from(x),
+                i64::from(y),
+                i64::from(width),
+                i64::from(height),
+                i64::from(graphic.0),
+                i64::from(hue.0),
+            ],
+        );
+    }
+
     /// A text field the player types into; its contents come back in the `0xB1`
     /// under `entry_id`.
     pub fn text_entry(

@@ -84,10 +84,9 @@ rasterized again, so it scales its finished quads by the matching fractional
 role factor. `speech`, `window`, `tooltip`, and `stack_count` therefore remain
 useful after switching to the classic face as well as after switching to TTF.
 
-**D6 — With a face loaded, windows and tooltips draw through it too.** They are
-`fonts.mul` today whatever `--ttf-font` says, which is the last place a size
-cannot be asked for. `fonts.mul` remains the whole picture when no face is
-loaded.
+**D6 — Windows and tooltips draw through the selected TrueType face too.** The
+client bundles Noto Sans for the default Unicode UI, and `--ttf-font` may
+replace it. `fonts.mul` remains available through the Classic face setting.
 
 **D7 — A line height is measured ink/metrics, never its nominal request.** A
 bitmap face uses the visible height of its actual `M` glyph plus two pixels of

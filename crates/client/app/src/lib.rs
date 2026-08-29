@@ -478,13 +478,9 @@ pub(crate) fn scaled_gump_quads(labels: &[GumpLabel<'_>], atlas: &FontAtlas, sca
 /// `crates/e2e/playground` hand over a shard in this same process. Nothing in
 /// this crate knows what a socket is any more; `client/net` does not either.
 ///
-/// `ttf_font`, given, switches every line drawn through [`text::collect`] to
-/// [`text::collect_ttf`] instead, and `fonts.mul` off entirely — see that
-/// function's doc for why it is the whole line or none of it. `None` is the
-/// classic client's own bitmap faces, unchanged; `Some` names a TrueType or
-/// OpenType face on disk for a shard whose players type in a script
-/// `fonts.mul` never shipped, Cyrillic today — nothing is bundled with the
-/// engine, see [`openshard_uofiles::ttf_font`]'s doc for why.
+/// The bundled Noto Sans face draws text through [`text::collect_ttf`] by
+/// default; F1 can select the original bitmap faces instead. `ttf_font`, when
+/// supplied, replaces that default with the named TrueType/OpenType face.
 ///
 /// This is a `-> ExitCode` and not a `-> Result`, because every failure here is
 /// terminal for a *window*: no client files, no window system, no GPU. There is
@@ -495,6 +491,10 @@ pub(crate) fn scaled_gump_quads(labels: &[GumpLabel<'_>], atlas: &FontAtlas, sca
 ///
 /// It must be called on the main thread: `winit` says so on macOS and iOS, and
 /// the event loop it builds is what enforces it.
+/// The default interface face: Noto Sans Regular, distributed under
+/// Apache-2.0. The accompanying license is `assets/LICENSE-NotoSans.txt`.
+const DEFAULT_TTF_FONT: &[u8] = include_bytes!("../assets/NotoSans-Regular.ttf");
+
 pub fn run<D: Dial + Send + 'static>(
     dir: &Path,
     world: WorldSource<'_>,
@@ -724,10 +724,9 @@ pub fn run<D: Dial + Send + 'static>(
         }
     };
     checkpoint("interface resources opened");
-    // Read and parsed once, only when asked for: a shard that never sets
-    // `ttf_font` has no reason to hold a second face in memory beside
-    // `fonts.mul`'s, and one that does is naming a file on this operator's
-    // machine — nothing here is bundled with the engine.
+    // Parsed once: an operator may replace the bundled, Apache-2.0 Noto Sans
+    // face with a shard-specific file, but every ordinary run has legible
+    // Unicode text without a launch flag.
     let ttf_font = match ttf_font {
         Some(path) => match TtfFont::open(&path) {
             Ok(font) => Some(font),
@@ -736,7 +735,10 @@ pub fn run<D: Dial + Send + 'static>(
                 return ExitCode::FAILURE;
             }
         },
-        None => None,
+        None => Some(
+            TtfFont::from_bytes(DEFAULT_TTF_FONT)
+                .expect("the checked-in Noto Sans face is a valid TrueType font"),
+        ),
     };
     if let Some(world) = &world {
         eprintln!(

@@ -425,7 +425,7 @@ impl App {
         self.shell.as_ref().map_or(self.desk.fonts, shell::Shell::fonts)
     }
 
-    /// Whether this frame uses the optional TrueType face.
+    /// Whether this frame uses the bundled or operator-selected TrueType face.
     ///
     /// The loaded face stays resident whichever choice F1 makes, so changing
     /// between it and `fonts.mul` neither reparses a file nor invalidates the
@@ -438,7 +438,7 @@ impl App {
         face.uses_ttf(self.resources.ttf_font.is_some())
     }
 
-    /// The player's optional classic-face override for this frame.
+    /// The player's classic-face override for this frame.
     ///
     /// A configured TrueType face is already one face for every role, so the
     /// bitmap override has meaning only on the `fonts.mul` path.  Read through

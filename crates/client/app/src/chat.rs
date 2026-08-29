@@ -756,7 +756,8 @@ impl crate::app::App {
             return false;
         };
         let scale = self.gump_scale();
-        // `ttf_atlas` is `Some` exactly when a face was supplied at startup;
+        // `ttf_atlas` is `Some` exactly when the bundled or replacement face
+        // was loaded at startup;
         // F1 still chooses whether this frame draws through it or the classic
         // bitmap atlas.
         let truetype = self.ttf_active();
@@ -965,7 +966,7 @@ pub(crate) fn draw_chat_and_speech(
         let atlas = window
             .ttf_atlas
             .as_mut()
-            .expect("create_window builds ttf_atlas whenever ttf_font is set");
+            .expect("create_window builds ttf_atlas whenever a TrueType face is active");
         // Every channel's name and not only the one showing: the button is as
         // wide as the widest of the four (see [`channel_width`]), so all four
         // have to be measurable — and a glyph the atlas has not packed measures
