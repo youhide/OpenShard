@@ -35,3 +35,10 @@ The checked-in proof scenes are:
 
 Both compose the exact same kit, including an independently positioned scroll
 thumb and distinct empty/checked checkboxes.
+
+## Reserved item-slot art
+
+`item-slot-frames-v1.png` is a standalone normal/hover ornamental slot frame,
+kept for a later skin pass. The current interactive prototype deliberately
+uses a plain egui-style rectangle instead, so item readability and hover
+behaviour can be reviewed without committing to decorative chrome.

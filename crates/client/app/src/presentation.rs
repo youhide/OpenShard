@@ -48,6 +48,7 @@ use openshard_map::map::WorldMap;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 use openshard_protocol::world::Point;
+use openshard_uofiles::anim::{AnimationGroup, BodyDef, BodyKind};
 
 use crate::app::App;
 use crate::chat::draw_chat_and_speech;
@@ -1280,6 +1281,28 @@ struct PreparedFrame {
     facts: FrameFacts,
 }
 
+/// Translate the common motion groups when a `Body.def` redirect crosses one
+/// of the three animation-family boundaries.  The wire body still owns the
+/// presentation clock, but the redirected body owns the group numbering in
+/// `anim.mul`.
+fn redirected_group(group: AnimationGroup, from: BodyKind, to: BodyKind) -> AnimationGroup {
+    if group == from.standing() {
+        to.standing()
+    } else if group == from.walking() {
+        to.walking()
+    } else if group == from.dying() {
+        to.dying()
+    } else if from.running().is_some_and(|running| group == running) {
+        to.running().unwrap_or(to.walking())
+    } else {
+        // Combat and spell poses are family-specific too, but they need the
+        // action's semantic kind to translate safely.  Retaining its numeric
+        // group is preferable to inventing a different attack; the ordinary
+        // stand, walk, run and corpse paths above cover every passive mobile.
+        group
+    }
+}
+
 impl App {
     /// Everyone to draw, each beside the serial their clock is keyed by.
     ///
@@ -1295,13 +1318,15 @@ impl App {
     /// frame, so the body simply vanishes — and stays vanished for as long as it
     /// stands still, there being no further packet to correct the list with.
     pub(crate) fn drawn_mobiles(&self) -> Vec<(Who, Mobile)> {
-        Self::everyone_drawn(
+        let mut mobiles = Self::everyone_drawn(
             &self.world.presentation.crowd,
             self.world.me(),
             &self.world.presentation.player,
             &self.world.presentation.others,
             &self.world.presentation.corpses,
-        )
+        );
+        Self::apply_body_def(&mut mobiles, &self.resources.body_def);
+        mobiles
     }
 
     /// [`App::drawn_mobiles`] over the four fields it reads, so a test can build
@@ -1321,6 +1346,26 @@ impl App {
         mobiles.extend_from_slice(corpses);
         Self::advance_groups(crowd, &mut mobiles);
         mobiles
+    }
+
+    /// Apply the client install's visual-body redirects before these mobiles
+    /// name animation-atlas keys.  `Body.def` may cross animation families:
+    /// its grey wolf redirect is monster body 25 to animal body 225, where
+    /// stand, walk and death have different group numbers.
+    fn apply_body_def(mobiles: &mut [(Who, Mobile)], body_def: &BodyDef) {
+        for (_, mobile) in mobiles {
+            let appearance = body_def.appearance(mobile.body);
+            if appearance.body == mobile.body {
+                continue;
+            }
+            let from = BodyKind::of(mobile.body);
+            let to = BodyKind::of(appearance.body);
+            mobile.group = redirected_group(mobile.group, from, to);
+            mobile.body = appearance.body;
+            if appearance.hue != Hue::NONE {
+                mobile.hue = appearance.hue;
+            }
+        }
     }
 
     /// Refresh each body's animation group from the crowd's clock.
@@ -2002,6 +2047,7 @@ impl App {
                         art: &self.resources.art,
                         tiledata: &self.resources.tiledata,
                         hue_ramp: &self.resources.hue_ramp,
+                        cliloc: self.resources.cliloc.as_ref(),
                         skill_names: &self.resources.skill_names,
                         map_editor: &mut self.map_editor,
                         authority,

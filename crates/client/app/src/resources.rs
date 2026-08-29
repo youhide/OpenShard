@@ -16,7 +16,7 @@ use openshard_map::map::WorldMap;
 use openshard_movement::NavigationGraph;
 use openshard_movement::ground::Ground;
 use openshard_tiles::TileData;
-use openshard_uofiles::anim::Anim;
+use openshard_uofiles::anim::{Anim, BodyDef};
 use openshard_uofiles::art::Art;
 use openshard_uofiles::cliloc::Cliloc;
 use openshard_uofiles::equipconv::EquipConv;
@@ -224,6 +224,11 @@ pub struct Resources {
     /// The animations, open but not read: `anim.mul` is 195MB and frames come
     /// out of it a body at a time. `&mut` because reading one seeks the file.
     pub anim: Anim,
+    /// Visual body redirects from the install's optional `Body.def`.
+    ///
+    /// Applied to the render snapshot before it asks the animation atlas for
+    /// frames, so a grey wolf's wire body 25 reaches the file as body 225.
+    pub body_def: BodyDef,
     /// What a worn item's own graphic resolves to for drawing — see
     /// [`EquipConv`]. Read once at startup like [`Resources::hue_ramp`]: unlike
     /// `anim`, the whole table is small enough to hold rather than seek into.

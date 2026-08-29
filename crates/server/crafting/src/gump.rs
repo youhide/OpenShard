@@ -20,12 +20,16 @@
 
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
+use openshard_protocol::craft::{
+    CraftCatalogue, CraftCatalogueComponent, CraftCatalogueRow, CraftWeaponKind, CraftWeaponProperties,
+};
 use openshard_protocol::gump::{
     ButtonId, CloseGump, GumpAnswer, GumpButton, GumpDisplay, GumpId, GumpKey, GumpLayout, GumpPoint,
     GumpResponse, RawGumpId,
 };
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_state::components::{Client, Position, Tool};
+use openshard_state::weapon::{WeaponKind, weapon_data};
 use openshard_state::{CraftGumpContext, CraftGumpPage, WorldState};
 
 use crate::chance::chance;
@@ -58,6 +62,12 @@ const SELECTED_LABEL: u32 = 0x35;
 /// Rows to a page, in both lists.  Ten keeps every trade a short click away,
 /// while the wider new list gives each row room for its item art and name.
 const PER_PAGE: usize = 10;
+
+/// Flat RGB555 colours for client-drawn UI primitives. They deliberately do
+/// not reference UO gump art: a table cell should stay a table cell under every
+/// art pack.
+const RECT_FILL: u16 = 0x1084;
+const RECT_STROKE: u16 = 0x35AD;
 
 /// The vertical coordinate of one row, refusing a list too large for the gump
 /// coordinate space instead of drawing its tail over the first row.
@@ -136,10 +146,6 @@ mod misc {
     /// open while a player walks, so this makes its workbench panel an explicit
     /// fresh reading rather than a stale promise from when it was opened.
     pub const REFRESH: ButtonIndex = ButtonIndex(1);
-    /// The preceding slice of the flattened, tool-free catalogue.
-    pub const CATALOGUE_PREV: ButtonIndex = ButtonIndex(2);
-    /// The following slice of the flattened, tool-free catalogue.
-    pub const CATALOGUE_NEXT: ButtonIndex = ButtonIndex(3);
     /// Cancel a craft in flight.
     pub const CANCEL: ButtonIndex = ButtonIndex(11);
 }
@@ -194,7 +200,7 @@ pub fn open(state: &mut WorldState, player: EntityId, context: CraftGumpContext)
         return;
     };
     let layout = match context.page {
-        CraftGumpPage::Catalogue => catalogue(state, player, context.group),
+        CraftGumpPage::Catalogue => catalogue(),
         CraftGumpPage::Details(recipe) => match def.recipes.get(usize::from(recipe)) {
             Some(recipe) => details(state, player, def, recipe, &context),
             None => return,
@@ -211,6 +217,12 @@ pub fn open(state: &mut WorldState, player: EntityId, context: CraftGumpContext)
             button: ButtonId::CLOSE_BOX,
         }),
     );
+    if context.page == CraftGumpPage::Catalogue {
+        state.send_packet(
+            connection,
+            &ServerPacket::CraftCatalogue(catalogue_data(state, player)),
+        );
+    }
     state.send_packet(
         connection,
         &ServerPacket::GumpDisplay(GumpDisplay {
@@ -372,12 +384,12 @@ fn main(
 ///
 /// A detail button carries the flattened index, which is resolved back to the
 /// owning trade on reply.
-fn catalogue(state: &WorldState, player: EntityId, page: u16) -> GumpLayout {
+fn catalogue() -> GumpLayout {
     let mut layout = GumpLayout::new();
     layout.page(0);
     layout.background(0, 0, 720, 410, 5054);
     layout.image_tiled(10, 10, 700, 24, 2624);
-    layout.image_tiled(10, 39, 700, 310, 2624);
+    flat_box(&mut layout, 10, 39, 700, 310, RECT_STROKE);
     layout.image_tiled(10, 354, 700, 46, 2624);
     layout.alpha_region(10, 10, 700, 390);
     layout.label(20, 14, LABEL_HUE, "CRAFT CATALOGUE");
@@ -387,74 +399,92 @@ fn catalogue(state: &WorldState, player: EntityId, page: u16) -> GumpLayout {
         LABEL_HUE,
         "ALL RECIPES · GREEN = SKILL, MATERIALS AND WORKSHOP READY",
     );
-    let total = catalogue_recipes().count();
-    let page_count = total.div_ceil(PER_PAGE);
-    let page = usize::from(page).min(page_count.saturating_sub(1));
-    let first = page * PER_PAGE;
-    for (row, (system, recipe)) in catalogue_recipes().skip(first).take(PER_PAGE).enumerate() {
-        let y = row_y(76, row);
-        let ready = catalogue_ready(state, player, system, recipe);
-        layout.button(
-            25,
-            y,
-            4005,
-            4007,
-            GumpButton::Reply,
-            0,
-            button_id(kind::DETAILS, ButtonIndex::from_position(first + row)),
-        );
-        layout.item(65, y - 3, recipe.graphic, recipe.hue);
-        label(&mut layout, 105, y + 3, 310, recipe.name, "");
-        if let Some(requirement) = recipe.skills.first() {
-            layout.html_localized_colored(
-                425,
-                y + 3,
-                140,
-                18,
-                skill_label(requirement.skill),
-                LABEL,
-                false,
-                false,
-            );
-            if recipe.skills.len() > 1 {
-                layout.label(550, y + 3, LABEL_HUE, format!("+{}", recipe.skills.len() - 1));
-            }
-        }
-        layout.label(
-            585,
-            y + 3,
-            if ready { 0x59 } else { 0x21 },
-            if ready { "READY" } else { "MISSING" },
-        );
-    }
-    if page > 0 {
-        layout.button(
-            20,
-            325,
-            4014,
-            4015,
-            GumpButton::Reply,
-            0,
-            button_id(kind::MISC, misc::CATALOGUE_PREV),
-        );
-        layout.label(55, 328, LABEL_HUE, "PREV");
-    }
-    if page + 1 < page_count {
-        layout.button(
-            555,
-            325,
-            4005,
-            4007,
-            GumpButton::Reply,
-            0,
-            button_id(kind::MISC, misc::CATALOGUE_NEXT),
-        );
-        layout.label(590, 328, LABEL_HUE, "NEXT");
-    }
-    layout.label(300, 328, LABEL_HUE, format!("PAGE {} / {page_count}", page + 1));
+    layout.label(55, 57, LABEL_HUE, "COMPONENTS");
+    layout.label(210, 57, LABEL_HUE, "RESULT");
+    layout.label(270, 57, LABEL_HUE, "RECIPE");
     layout.button(575, 370, 4017, 4019, GumpButton::Reply, 0, ButtonId::CLOSE_BOX);
     layout.html_localized_colored(610, 373, 80, 18, ClilocId(1_011_441), LABEL, false, false); // EXIT
     layout
+}
+
+/// The complete catalogue's data, sent once in a compact OpenShard packet.
+/// There are deliberately no coordinates here: the client's `ScrollTable`
+/// virtualizes rows, clips them and keeps the scroll position locally.
+fn catalogue_data(state: &WorldState, player: EntityId) -> CraftCatalogue {
+    CraftCatalogue {
+        gump_id: CRAFT_GUMP,
+        rows: catalogue_recipes()
+            .enumerate()
+            .map(|(index, (system, recipe))| CraftCatalogueRow {
+                button: button_id(kind::DETAILS, ButtonIndex::from_position(index)).0,
+                result: recipe.graphic,
+                result_hue: recipe.hue,
+                name: text_cliloc(recipe.name),
+                skill: recipe
+                    .skills
+                    .first()
+                    .map_or(ClilocId(0), |requirement| skill_label(requirement.skill)),
+                skill_min: recipe
+                    .skills
+                    .first()
+                    .map(|requirement| requirement.min - recipe.min_skill_offset)
+                    .unwrap_or_default()
+                    .clamp(0, i32::from(u16::MAX)) as u16,
+                ready: catalogue_ready(state, player, system, recipe),
+                weapon: weapon_data(recipe.graphic).map(|weapon| CraftWeaponProperties {
+                    combat_skill: skill_label(weapon.skill.skill()),
+                    kind: craft_weapon_kind(weapon.kind),
+                    damage_min: weapon.aos_min,
+                    damage_max: weapon.aos_max,
+                    speed_centis: weapon.ml_speed,
+                    range: weapon.range.map(|range| range.get()),
+                }),
+                components: recipe
+                    .resources
+                    .iter()
+                    .map(|resource| CraftCatalogueComponent {
+                        graphic: resource.graphic,
+                        hue: axis_hue(system, resource, 0),
+                        name: text_cliloc(resource.name),
+                        amount: resource.amount,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+const fn craft_weapon_kind(kind: WeaponKind) -> CraftWeaponKind {
+    match kind {
+        WeaponKind::Slashing => CraftWeaponKind::Slashing,
+        WeaponKind::Piercing => CraftWeaponKind::Piercing,
+        WeaponKind::Bashing => CraftWeaponKind::Bashing,
+        WeaponKind::Axe => CraftWeaponKind::Axe,
+        WeaponKind::Polearm => CraftWeaponKind::Polearm,
+        WeaponKind::Staff => CraftWeaponKind::Staff,
+        WeaponKind::Ranged => CraftWeaponKind::Ranged,
+    }
+}
+
+fn text_cliloc(text: Text) -> ClilocId {
+    match text {
+        Text::Cliloc(id) => id,
+        Text::Str(_) => ClilocId(0),
+    }
+}
+
+/// One flat egui-style frame: opaque fill with a one-pixel outline.
+///
+/// It is intentionally built from the reusable `{ rect }` primitive instead
+/// of classic gump art.  Those old nine-slice pictures have ornamental corners
+/// whose fixed size exceeds a compact item cell and was the source of the
+/// earlier off-centre catalogue layout.
+fn flat_box(layout: &mut GumpLayout, x: i32, y: i32, width: i32, height: i32, stroke: u16) {
+    layout.rect(x, y, width, height, RECT_FILL);
+    layout.rect(x, y, width, 1, stroke);
+    layout.rect(x, y + height - 1, width, 1, stroke);
+    layout.rect(x, y, 1, height, stroke);
+    layout.rect(x + width - 1, y, 1, height, stroke);
 }
 
 /// All recipes in the same stable order the catalogue assigned their button
@@ -934,22 +964,6 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
             next.system = system.raw();
             next.page = CraftGumpPage::Details(recipe);
             open(state, player, next);
-        } else if kind == kind::MISC {
-            let mut next = context;
-            match index {
-                misc::CATALOGUE_PREV => {
-                    next.group = next.group.saturating_sub(1);
-                    open(state, player, next);
-                }
-                misc::CATALOGUE_NEXT => {
-                    let pages = catalogue_recipes().count().div_ceil(PER_PAGE);
-                    if usize::from(next.group) + 1 < pages {
-                        next.group += 1;
-                        open(state, player, next);
-                    }
-                }
-                _ => {}
-            }
         }
         return true;
     }
@@ -1155,5 +1169,15 @@ mod tests {
         assert_eq!(page_of(0), 1);
         assert_eq!(page_of(9), 1);
         assert_eq!(page_of(10), 2);
+    }
+
+    #[test]
+    fn a_catalogue_gump_is_only_the_shell_for_the_client_table() {
+        let shell = catalogue();
+        let (layout, lines) = shell.finish();
+
+        assert!(layout.contains("{ rect 10 39 700 310 4228 }"));
+        assert!(lines.iter().any(|line| line == "COMPONENTS"));
+        assert!(!layout.contains("tilepicfit"));
     }
 }

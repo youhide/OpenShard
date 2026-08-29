@@ -446,6 +446,23 @@ fn the_snapshot_arrives_on_the_cadence_and_not_before() {
 }
 
 #[test]
+fn the_next_periodic_save_is_known_before_its_tick_starts() {
+    let mut world = World::new(START).with_save_every(4);
+    let now = Instant::now();
+
+    assert!(!world.periodic_save_due_next_tick(), "tick 1 is not a save tick");
+    world.tick(now);
+    assert!(!world.periodic_save_due_next_tick(), "nor is tick 2");
+    world.tick(now + WALK_INTERVAL);
+    assert!(!world.periodic_save_due_next_tick(), "nor is tick 3");
+    world.tick(now + WALK_INTERVAL * 2);
+    assert!(
+        world.periodic_save_due_next_tick(),
+        "tick 4 can be announced before it starts"
+    );
+}
+
+#[test]
 fn thirty_steps_in_one_save_window_are_one_row() {
     // What the dirty set buys: a save proportional to activity, not to how
     // chatty the activity was.

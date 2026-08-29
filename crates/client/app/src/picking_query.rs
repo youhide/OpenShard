@@ -914,6 +914,13 @@ impl App {
     /// *asked* for — it is what the layout left over, which `Shell` holds between
     /// frames — and it is applied beside this call rather than through it.
     pub(crate) fn apply(&mut self, request: shell::Request) {
+        // The egui catalogue is only a different presentation of the craft
+        // gump. Its rows keep the gump's button ids, and this common answer
+        // path closes the local shell in the same atomic step as every native
+        // dialog reply.
+        if let Some(reply) = request.craft_reply {
+            self.answer_gump(reply);
+        }
         // **No amount answer here any more.** The picker was an `egui::Window`,
         // so what it decided arrived a frame late through this struct and had
         // to be translated out of the shell's vocabulary on the way. It is a

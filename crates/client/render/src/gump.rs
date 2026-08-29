@@ -243,6 +243,10 @@ pub enum GumpArt {
     Gump(Graphic),
     /// A static from `art.mul` — an item's icon.
     Item(Graphic),
+    /// One generated RGB555 texel, scaled into a flat UI primitive.  Unlike
+    /// `Gump`, this does not come from an installed client, which makes it the
+    /// stable building block for tables and egui-style borders.
+    Solid(Color16),
 }
 
 /// ClassicUO turns the nearly-black fill in these two radar gumps into a live
@@ -458,6 +462,7 @@ impl GumpAtlas {
             let decoded = match art {
                 GumpArt::Gump(graphic) => files.gumps.gump(*graphic)?,
                 GumpArt::Item(graphic) => files.items.static_art(*graphic)?,
+                GumpArt::Solid(color) => Some(Image::new(1, 1, vec![*color])),
             };
             // A zero-sized entry is a shipped stub, not a failure — see
             // `gumpart`'s "Some entries really are 0x0" — and packing one would
@@ -1076,6 +1081,9 @@ pub fn art_of(elements: &[Element]) -> BTreeSet<GumpArt> {
             Element::Image { gump, .. } | Element::ImageTiled { gump, .. } => {
                 wanted.insert(want(*gump));
             }
+            Element::Rect { color, .. } => {
+                wanted.insert(GumpArt::Solid(Color16(*color)));
+            }
             Element::Button { normal, pressed, .. } => {
                 wanted.insert(want(*normal));
                 wanted.insert(want(*pressed));
@@ -1273,11 +1281,18 @@ pub fn pick_hit<H: Copy>(
     hits.rev().find_map(|(index, hit)| {
         let picture = pictures.get(index.position())?;
         let sprite = atlas.sprite(picture.graphic)?;
+        let (width, height) = picture
+            .scaled
+            .or(picture.tiled)
+            .unwrap_or((i32::from(sprite.width), i32::from(sprite.height)));
+        if picture.scissor.is_some_and(|scissor| !scissor.contains(cursor)) {
+            return None;
+        }
         (cursor.x >= picture.at.x
             && cursor.y >= picture.at.y
-            && cursor.x < picture.at.x + i32::from(sprite.width)
-            && cursor.y < picture.at.y + i32::from(sprite.height))
-        .then_some(hit)
+            && cursor.x < picture.at.x + width
+            && cursor.y < picture.at.y + height)
+            .then_some(hit)
     })
 }
 
@@ -1349,6 +1364,16 @@ pub fn window(
             } => drawn
                 .pictures
                 .push(Picture::plain(art(*gump), at.offset(GumpPixel::new(*x, *y))).tiled(*width, *height)),
+            Element::Rect {
+                x,
+                y,
+                width,
+                height,
+                color,
+            } => drawn.pictures.push(
+                Picture::plain(GumpArt::Solid(Color16(*color)), at.offset(GumpPixel::new(*x, *y)))
+                    .scaled(*width, *height),
+            ),
             Element::Button {
                 x,
                 y,
@@ -1967,6 +1992,35 @@ mod tests {
             Some(PictureIndex::new(0))
         );
         assert_eq!(pick(&[picture], GumpPixel::new(136, 223), &atlas), None);
+    }
+
+    #[test]
+    fn a_rect_layout_element_becomes_a_scaled_generated_solid() {
+        let elements = [Element::Rect {
+            x: 12,
+            y: 18,
+            width: 40,
+            height: 28,
+            color: 0x18C6,
+        }];
+        assert_eq!(
+            art_of(&elements),
+            BTreeSet::from([GumpArt::Solid(Color16(0x18C6))])
+        );
+
+        let atlas = GumpAtlas::pack([(GumpArt::Solid(Color16(0x18C6)), block(1, 1))]).expect("fits");
+        let shown = window(
+            &elements,
+            GumpPixel::new(100, 200),
+            0,
+            &BTreeSet::new(),
+            None,
+            &atlas,
+        );
+        assert_eq!(shown.pictures.len(), 1);
+        assert_eq!(shown.pictures[0].graphic, GumpArt::Solid(Color16(0x18C6)));
+        assert_eq!(shown.pictures[0].at, GumpPixel::new(112, 218));
+        assert_eq!(shown.pictures[0].scaled, Some((40, 28)));
     }
 
     /// A picture with a transparent middle — a frame, as far as picking is

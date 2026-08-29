@@ -328,6 +328,17 @@ impl World {
         self.with_save_every(seconds.saturating_mul(TICKS_PER_SECOND))
     }
 
+    /// Whether the next tick will offer the ordinary periodic snapshot.
+    ///
+    /// The shard asks before driving that tick so it can put a notice on the
+    /// wire before snapshot construction occupies the simulation thread. This
+    /// deliberately says nothing about a staff `.save`: that request arrives
+    /// while the tick is applying commands, so it cannot be known beforehand.
+    #[must_use]
+    pub const fn periodic_save_due_next_tick(&self) -> bool {
+        self.save_every != 0 && (self.state.ticks.raw() + 1).is_multiple_of(self.save_every)
+    }
+
     /// Set the tunable gameplay rules. The server builds these from the
     /// `[gameplay]` config; a test or the default takes [`Gameplay::default`],
     /// the pre-AoS numbers the systems were written with.

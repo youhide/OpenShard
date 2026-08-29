@@ -27,6 +27,7 @@ use crate::containers::{
     AddToContainer, ContainerContents, OpenContainer, add_to_container_length, open_container_length,
 };
 use crate::context::ContextMenu;
+use crate::craft::CraftCatalogue;
 use crate::error::{DecodeError, expect_id};
 use crate::feature::Feature;
 use crate::feedback::{
@@ -232,6 +233,8 @@ pub enum ServerPacket {
     SpellbookContent(SpellbookContent),
     /// `0xBF` subcommand `0x04` — close an open gump on the client.
     CloseGump(CloseGump),
+    /// `0xBF 0xE016` — compact data for the client-owned craft catalogue table.
+    CraftCatalogue(CraftCatalogue),
     /// `0xB0` — display a generic gump.
     GumpDisplay(GumpDisplay),
 }
@@ -320,6 +323,7 @@ impl ServerPacket {
             Self::ContextMenu(_) => ContextMenu::ID,
             Self::SpellbookContent(_) => <SpellbookContent as EncodePacket>::ID,
             Self::CloseGump(_) => <CloseGump as EncodePacket>::ID,
+            Self::CraftCatalogue(_) => CraftCatalogue::ID,
             Self::GumpDisplay(_) => <GumpDisplay as EncodePacket>::ID,
         }
     }
@@ -411,6 +415,7 @@ impl ServerPacket {
             Self::ContextMenu(_) => ContextMenu::LENGTH,
             Self::SpellbookContent(_) => SpellbookContent::LENGTH,
             Self::CloseGump(_) => CloseGump::LENGTH,
+            Self::CraftCatalogue(_) => CraftCatalogue::LENGTH,
             Self::GumpDisplay(_) => GumpDisplay::LENGTH,
         }
     }
@@ -504,6 +509,7 @@ impl ServerPacket {
             Self::ContextMenu(packet) => packet.encode_body(out, version),
             Self::SpellbookContent(packet) => packet.encode_body(out, version),
             Self::CloseGump(packet) => packet.encode_body(out, version),
+            Self::CraftCatalogue(packet) => packet.encode_body(out, version),
             Self::GumpDisplay(packet) => packet.encode_body(out, version),
         }
     }
@@ -549,6 +555,9 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
         crate::gump::CloseGump::SUBCOMMAND => decode_server(packet, version)
             .map(ServerPacket::CloseGump)
             .map_err(ServerDecodeError::CloseGump)?,
+        CraftCatalogue::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::CraftCatalogue)
+            .map_err(ServerDecodeError::CraftCatalogue)?,
         crate::spellbook::SpellbookContent::SUBCOMMAND => decode_server(packet, version)
             .map(ServerPacket::SpellbookContent)
             .map_err(ServerDecodeError::SpellbookContent)?,
@@ -1044,6 +1053,8 @@ pub enum ServerDecodeError {
     Party(DecodeError),
     /// `0xBF` subcommand `0x04` did not decode.
     CloseGump(DecodeError),
+    /// `0xBF` subcommand `0xE016` did not decode.
+    CraftCatalogue(DecodeError),
     /// `0xBF` subcommand `0x1B` did not decode.
     SpellbookContent(DecodeError),
 }
@@ -1091,6 +1102,7 @@ impl fmt::Display for ServerDecodeError {
             Self::PropertyListReply(error) => ("0xD6 property list", error),
             Self::Party(error) => ("0xBF 0x06 party", error),
             Self::CloseGump(error) => ("0xBF 0x04 close gump", error),
+            Self::CraftCatalogue(error) => ("0xBF 0xE016 craft catalogue", error),
             Self::SpellbookContent(error) => ("0xBF 0x1B spellbook content", error),
             Self::OpenContainer(error) => ("0x24 open container", error),
             Self::AddToContainer(error) => ("0x25 add to container", error),
@@ -1403,6 +1415,7 @@ mod tests {
         ContextMenu,
         SpellbookContent,
         CloseGump,
+        CraftCatalogue,
         GumpDisplay,
     ];
 
@@ -1799,6 +1812,25 @@ mod tests {
             ServerPacket::CloseGump(crate::gump::CloseGump {
                 gump_id: crate::gump::GumpId(0x0051_0001),
                 button: crate::gump::ButtonId::CLOSE_BOX,
+            }),
+            ServerPacket::CraftCatalogue(crate::craft::CraftCatalogue {
+                gump_id: crate::gump::GumpId(0x0051_0001),
+                rows: vec![crate::craft::CraftCatalogueRow {
+                    button: 8,
+                    result: crate::wire::Graphic(0x13EB),
+                    result_hue: crate::wire::Hue::NONE,
+                    name: crate::wire::ClilocId(1_022_036),
+                    skill: crate::wire::ClilocId(1_044_067),
+                    skill_min: 300,
+                    ready: true,
+                    weapon: None,
+                    components: vec![crate::craft::CraftCatalogueComponent {
+                        graphic: crate::wire::Graphic(0x1BF2),
+                        hue: crate::wire::Hue::NONE,
+                        name: crate::wire::ClilocId(1_045_000),
+                        amount: 3,
+                    }],
+                }],
             }),
             ServerPacket::GumpDisplay(crate::gump::GumpDisplay {
                 serial: crate::gump::GumpKey::STANDALONE,

@@ -82,6 +82,9 @@ const JANK_LOG: &str = "target/openshard-playground-jank.log";
 /// line independent of the standalone client's diagnostic CLI.
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum Scenario {
+    /// Open the live craft catalogue as soon as the window is ready. Intended
+    /// for deterministic egui captures, not for gameplay automation.
+    CraftCatalogue,
     /// Zoom out from the default view, then hold still for LOD profiling.
     ZoomSoak,
     /// Zoom out and then pan across map blocks, without desktop input.
@@ -301,6 +304,7 @@ fn main() -> ExitCode {
             solids: false,
             stall_on_update: cli.stall_app_ms.map(Duration::from_millis),
             scenario: cli.scenario.map(|scenario| match scenario {
+                Scenario::CraftCatalogue => openshard_client_app::Scenario::CraftCatalogue,
                 Scenario::ZoomSoak => openshard_client_app::Scenario::ZoomSoak,
                 Scenario::LodSweep => openshard_client_app::Scenario::LodSweep,
             }),

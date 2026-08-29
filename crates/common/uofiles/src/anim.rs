@@ -30,13 +30,14 @@
 //! [`Anim::frames`] takes `&mut self`. It is the first reader here that does
 //! not slurp its container, and the browser is the reason the rest will follow.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use openshard_protocol::direction::Direction;
-use openshard_protocol::wire::Graphic;
+use openshard_protocol::wire::{Graphic, Hue};
 
 use crate::color::Color16;
 use crate::image::Image;
@@ -485,6 +486,83 @@ pub const fn animation_body(body: Graphic) -> Graphic {
         0x02B7 => 666,
         _ => body.0,
     })
+}
+
+/// One visual override from the optional `Body.def` beside a client install.
+///
+/// The server still names the original body.  The classic client redirects it
+/// before it chooses an animation; for example, body 25 (grey wolf) becomes
+/// body 225.  Without this table a modern install's legacy `anim.mul` has no
+/// frames for many otherwise ordinary spawn bodies.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct BodyAppearance {
+    pub body: Graphic,
+    pub hue: Hue,
+}
+
+/// The visual body redirects in a client's optional `Body.def`.
+#[derive(Clone, Default, Debug)]
+pub struct BodyDef {
+    redirects: BTreeMap<Graphic, BodyAppearance>,
+}
+
+impl BodyDef {
+    /// Read `Body.def` when the install ships one.
+    ///
+    /// Older installs legitimately do not have the file, which is the same as
+    /// an empty redirect table.  A malformed individual line is ignored: the
+    /// stock file contains comments and historical examples in several forms,
+    /// and one stale override must not prevent all other bodies from drawing.
+    pub fn open(client_dir: impl AsRef<Path>) -> Result<Self, AnimError> {
+        let path = client_dir.as_ref().join("Body.def");
+        let source = match std::fs::read_to_string(&path) {
+            Ok(source) => source,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(source) => return Err(AnimError::Read { path, source }),
+        };
+
+        Ok(Self::parse(&source))
+    }
+
+    fn parse(source: &str) -> Self {
+        let mut redirects = BTreeMap::new();
+        for line in source.lines() {
+            let line = line.split('#').next().unwrap_or_default();
+            let fields: Vec<_> = line
+                .split(|c: char| c.is_whitespace() || matches!(c, '{' | '}' | ','))
+                .filter(|field| !field.is_empty())
+                .collect();
+            let Some((from, rest)) = fields.split_first() else {
+                continue;
+            };
+            let Some(to) = rest.first() else {
+                continue;
+            };
+            let Some(hue) = rest.last() else {
+                continue;
+            };
+            let (Ok(from), Ok(to), Ok(hue)) = (from.parse::<u16>(), to.parse::<u16>(), hue.parse::<u16>())
+            else {
+                continue;
+            };
+            redirects.insert(
+                Graphic(from),
+                BodyAppearance {
+                    body: Graphic(to),
+                    hue: Hue(hue),
+                },
+            );
+        }
+        Self { redirects }
+    }
+
+    /// The visual body and forced hue a client uses for `body`.
+    pub fn appearance(&self, body: Graphic) -> BodyAppearance {
+        self.redirects
+            .get(&body)
+            .copied()
+            .unwrap_or(BodyAppearance { body, hue: Hue::NONE })
+    }
 }
 
 /// The stored direction a facing is drawn from, and whether it is mirrored.
@@ -1137,6 +1215,39 @@ mod tests {
                 size: 100
             }
             .is_present()
+        );
+    }
+
+    #[test]
+    fn body_def_redirects_a_grey_wolf_to_its_real_animation_body() {
+        let body_def = BodyDef::parse(
+            "# original body { visual body } hue\n\
+             25 {225} 946\n\
+             46 {12, 59} 1106\n\
+             not a redirect\n",
+        );
+
+        assert_eq!(
+            body_def.appearance(Graphic(25)),
+            BodyAppearance {
+                body: Graphic(225),
+                hue: Hue(946),
+            }
+        );
+        assert_eq!(
+            body_def.appearance(Graphic(46)),
+            BodyAppearance {
+                body: Graphic(12),
+                hue: Hue(1106),
+            },
+            "the first client-listed alternate is the deterministic base appearance"
+        );
+        assert_eq!(
+            body_def.appearance(Graphic(400)),
+            BodyAppearance {
+                body: Graphic(400),
+                hue: Hue::NONE,
+            }
         );
     }
 }

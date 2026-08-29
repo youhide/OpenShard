@@ -458,6 +458,23 @@ impl GumpLayout {
         );
     }
 
+    /// An OpenShard flat-colour rectangle in RGB555.  This is deliberately a
+    /// primitive rather than a gump-art id: table cells and their one-pixel
+    /// borders should not depend on whatever ornamental art an installed UO
+    /// client happens to ship.
+    pub fn rect(&mut self, x: i32, y: i32, width: i32, height: i32, color: u16) {
+        self.element(
+            "rect",
+            &[
+                i64::from(x),
+                i64::from(y),
+                i64::from(width),
+                i64::from(height),
+                i64::from(color),
+            ],
+        );
+    }
+
     /// A darkened, semi-transparent rectangle.
     pub fn alpha_region(&mut self, x: i32, y: i32, width: i32, height: i32) {
         self.element(

@@ -1,0 +1,63 @@
+// The public craft catalogue, using the same ItemCell fitting code as the game.
+// Render with:
+// cargo run -p openshard-gump-render -- crates/client/gump-render/examples/craft-catalogue-table.ron --client "$OPENSHARD_CLIENT" --out /tmp/craft-catalogue-table.png --scale 1
+(
+    width: 720,
+    height: 370,
+    background: (r: 17, g: 13, b: 12),
+    elements: [
+        // The table's simple `{ rect }` body and one-pixel outline.
+        Rect(x: 10, y: 39, width: 700, height: 310, colour: (r: 33, g: 30, b: 27)),
+        Rect(x: 10, y: 39, width: 700, height: 1, colour: (r: 107, g: 107, b: 107)),
+        Rect(x: 10, y: 348, width: 700, height: 1, colour: (r: 107, g: 107, b: 107)),
+        Rect(x: 10, y: 39, width: 1, height: 310, colour: (r: 107, g: 107, b: 107)),
+        Rect(x: 709, y: 39, width: 1, height: 310, colour: (r: 107, g: 107, b: 107)),
+
+        // Headers.
+        Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 55, y: 47, size: 12.0, colour: (r: 202, g: 202, b: 202), text: "COMPONENTS"),
+        Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 210, y: 47, size: 12.0, colour: (r: 222, g: 190, b: 120), text: "RESULT"),
+        Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 270, y: 47, size: 12.0, colour: (r: 202, g: 202, b: 202), text: "RECIPE"),
+
+        // Row 1: framed component -> framed result.  Every icon is fitted,
+        // never drawn at native size.
+        Rect(x: 55, y: 69, width: 36, height: 36, colour: (r: 33, g: 30, b: 27)),
+        Rect(x: 55, y: 69, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 55, y: 104, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 55, y: 69, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)), Rect(x: 90, y: 69, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)),
+        Rect(x: 210, y: 69, width: 36, height: 36, colour: (r: 33, g: 30, b: 27)),
+        Rect(x: 210, y: 69, width: 36, height: 1, colour: (r: 180, g: 150, b: 80)), Rect(x: 210, y: 104, width: 36, height: 1, colour: (r: 180, g: 150, b: 80)), Rect(x: 210, y: 69, width: 1, height: 36, colour: (r: 180, g: 150, b: 80)), Rect(x: 245, y: 69, width: 1, height: 36, colour: (r: 180, g: 150, b: 80)),
+        FittedItem(graphic: 0x1BF2, x: 55, y: 69, width: 36, height: 36, padding: 4),
+        FittedItem(graphic: 0x13EB, x: 210, y: 69, width: 36, height: 36, padding: 4),
+        Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 270, y: 77, size: 14.0, colour: (r: 236, g: 236, b: 236), text: "Dagger"),
+        Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 490, y: 77, size: 12.0, colour: (r: 180, g: 180, b: 180), text: "Blacksmithy 0.0"),
+
+        // Row 2.
+        Rect(x: 55, y: 109, width: 36, height: 36, colour: (r: 33, g: 30, b: 27)), Rect(x: 55, y: 109, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 55, y: 144, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 55, y: 109, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)), Rect(x: 90, y: 109, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)),
+        Rect(x: 210, y: 109, width: 36, height: 36, colour: (r: 33, g: 30, b: 27)), Rect(x: 210, y: 109, width: 36, height: 1, colour: (r: 180, g: 150, b: 80)), Rect(x: 210, y: 144, width: 36, height: 1, colour: (r: 180, g: 150, b: 80)), Rect(x: 210, y: 109, width: 1, height: 36, colour: (r: 180, g: 150, b: 80)), Rect(x: 245, y: 109, width: 1, height: 36, colour: (r: 180, g: 150, b: 80)),
+        FittedItem(graphic: 0x1BF2, x: 55, y: 109, width: 36, height: 36, padding: 4), FittedItem(graphic: 0x13F0, x: 210, y: 109, width: 36, height: 36, padding: 4),
+        Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 270, y: 117, size: 14.0, colour: (r: 236, g: 236, b: 236), text: "Kryss"), Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 490, y: 117, size: 12.0, colour: (r: 180, g: 180, b: 180), text: "Blacksmithy 20.0"),
+
+        // Row 3 with two components.
+        Rect(x: 55, y: 149, width: 36, height: 36, colour: (r: 33, g: 30, b: 27)), Rect(x: 55, y: 149, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 55, y: 184, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 55, y: 149, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)), Rect(x: 90, y: 149, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)),
+        Rect(x: 95, y: 149, width: 36, height: 36, colour: (r: 33, g: 30, b: 27)), Rect(x: 95, y: 149, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 95, y: 184, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 95, y: 149, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)), Rect(x: 130, y: 149, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)),
+        Rect(x: 210, y: 149, width: 36, height: 36, colour: (r: 33, g: 30, b: 27)), Rect(x: 210, y: 149, width: 36, height: 1, colour: (r: 180, g: 150, b: 80)), Rect(x: 210, y: 184, width: 36, height: 1, colour: (r: 180, g: 150, b: 80)), Rect(x: 210, y: 149, width: 1, height: 36, colour: (r: 180, g: 150, b: 80)), Rect(x: 245, y: 149, width: 1, height: 36, colour: (r: 180, g: 150, b: 80)),
+        FittedItem(graphic: 0x1BF2, x: 55, y: 149, width: 36, height: 36, padding: 4), FittedItem(graphic: 0x1BF2, x: 95, y: 149, width: 36, height: 36, padding: 4), FittedItem(graphic: 0x13B9, x: 210, y: 149, width: 36, height: 36, padding: 4),
+        Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 270, y: 157, size: 14.0, colour: (r: 236, g: 236, b: 236), text: "Longsword"), Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 490, y: 157, size: 12.0, colour: (r: 180, g: 180, b: 180), text: "Blacksmithy 35.0"),
+
+        // Row 4.
+        Rect(x: 55, y: 189, width: 36, height: 36, colour: (r: 33, g: 30, b: 27)), Rect(x: 55, y: 189, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 55, y: 224, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 55, y: 189, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)), Rect(x: 90, y: 189, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)),
+        Rect(x: 210, y: 189, width: 36, height: 36, colour: (r: 33, g: 30, b: 27)), Rect(x: 210, y: 189, width: 36, height: 1, colour: (r: 180, g: 150, b: 80)), Rect(x: 210, y: 224, width: 36, height: 1, colour: (r: 180, g: 150, b: 80)), Rect(x: 210, y: 189, width: 1, height: 36, colour: (r: 180, g: 150, b: 80)), Rect(x: 245, y: 189, width: 1, height: 36, colour: (r: 180, g: 150, b: 80)),
+        FittedItem(graphic: 0x1BF2, x: 55, y: 189, width: 36, height: 36, padding: 4), FittedItem(graphic: 0x1B72, x: 210, y: 189, width: 36, height: 36, padding: 4),
+        Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 270, y: 197, size: 14.0, colour: (r: 236, g: 236, b: 236), text: "Ringmail Gloves"), Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 490, y: 197, size: 12.0, colour: (r: 180, g: 180, b: 180), text: "Blacksmithy 12.0"),
+
+        // Row 5.
+        Rect(x: 55, y: 229, width: 36, height: 36, colour: (r: 33, g: 30, b: 27)), Rect(x: 55, y: 229, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 55, y: 264, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 55, y: 229, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)), Rect(x: 90, y: 229, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)),
+        Rect(x: 210, y: 229, width: 36, height: 36, colour: (r: 33, g: 30, b: 27)), Rect(x: 210, y: 229, width: 36, height: 1, colour: (r: 180, g: 150, b: 80)), Rect(x: 210, y: 264, width: 36, height: 1, colour: (r: 180, g: 150, b: 80)), Rect(x: 210, y: 229, width: 1, height: 36, colour: (r: 180, g: 150, b: 80)), Rect(x: 245, y: 229, width: 1, height: 36, colour: (r: 180, g: 150, b: 80)),
+        FittedItem(graphic: 0x1BF2, x: 55, y: 229, width: 36, height: 36, padding: 4), FittedItem(graphic: 0x13B5, x: 210, y: 229, width: 36, height: 36, padding: 4),
+        Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 270, y: 237, size: 14.0, colour: (r: 236, g: 236, b: 236), text: "War Fork"), Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 490, y: 237, size: 12.0, colour: (r: 180, g: 180, b: 180), text: "Blacksmithy 40.0"),
+
+        // Row 6.
+        Rect(x: 55, y: 269, width: 36, height: 36, colour: (r: 33, g: 30, b: 27)), Rect(x: 55, y: 269, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 55, y: 304, width: 36, height: 1, colour: (r: 107, g: 107, b: 107)), Rect(x: 55, y: 269, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)), Rect(x: 90, y: 269, width: 1, height: 36, colour: (r: 107, g: 107, b: 107)),
+        Rect(x: 210, y: 269, width: 36, height: 36, colour: (r: 33, g: 30, b: 27)), Rect(x: 210, y: 269, width: 36, height: 1, colour: (r: 180, g: 150, b: 80)), Rect(x: 210, y: 304, width: 36, height: 1, colour: (r: 180, g: 150, b: 80)), Rect(x: 210, y: 269, width: 1, height: 36, colour: (r: 180, g: 150, b: 80)), Rect(x: 245, y: 269, width: 1, height: 36, colour: (r: 180, g: 150, b: 80)),
+        FittedItem(graphic: 0x1BF2, x: 55, y: 269, width: 36, height: 36, padding: 4), FittedItem(graphic: 0x13B1, x: 210, y: 269, width: 36, height: 36, padding: 4),
+        Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 270, y: 277, size: 14.0, colour: (r: 236, g: 236, b: 236), text: "Broadsword"), Text(font: "../../app/assets/NotoSans-Regular.ttf", x: 490, y: 277, size: 12.0, colour: (r: 180, g: 180, b: 180), text: "Blacksmithy 35.0"),
+    ],
+)

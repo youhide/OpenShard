@@ -18,7 +18,7 @@
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_tiles::{LAND_TILE_COUNT, LandTileId, TextureId, TileData};
-use openshard_uofiles::anim::{Anim, AnimationDirection, AnimationKey, BodyKind, DIRECTIONS};
+use openshard_uofiles::anim::{Anim, AnimationDirection, AnimationKey, BodyDef, BodyKind, DIRECTIONS};
 use openshard_uofiles::art::Art;
 use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::font::{AsciiFonts, CHARS_PER_FONT, FONT_COUNT, GLYPH_BASE};
@@ -751,6 +751,31 @@ fn a_humans_standing_animation_is_where_the_index_says() {
             );
         }
     }
+}
+
+/// `Body.def` redirects a grey wolf's wire body to the body that actually has
+/// legacy animation frames.  This is deliberately a real-install test: the
+/// redirect is only useful if its target reaches a populated index entry.
+#[test]
+fn a_grey_wolf_redirect_reaches_its_animation() {
+    let Some(dir) = client_dir() else {
+        return;
+    };
+    let appearance = BodyDef::open(&dir)
+        .expect("a readable optional Body.def")
+        .appearance(Graphic(25));
+    assert_eq!(appearance.body, Graphic(225), "the stock grey-wolf redirect");
+
+    let mut anim = Anim::open(&dir).expect("anim.idx and anim.mul");
+    let frames = anim
+        .frames(AnimationKey::new(
+            appearance.body,
+            BodyKind::of(appearance.body).standing(),
+            AnimationDirection::new(0),
+        ))
+        .expect("a well-formed wolf entry")
+        .expect("the redirected grey wolf has a standing animation");
+    assert!(!frames.is_empty(), "the redirected grey wolf has frames");
 }
 
 /// The index is mostly empty, and that is the file rather than a bug.

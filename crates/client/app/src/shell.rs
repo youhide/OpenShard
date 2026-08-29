@@ -52,12 +52,16 @@ use openshard_client_render::follow::Rig;
 use openshard_client_render::light;
 use openshard_client_render::solid::Cut;
 use openshard_protocol::feedback::{ActionStage, CombatActionKind, CombatActionOutcome, InterruptReason};
+use openshard_protocol::gump::{RawButtonId, RawGumpId, RawGumpKey};
+use openshard_protocol::localized;
 use openshard_protocol::mobile::Notoriety;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{ClilocId, Graphic, Hue};
 use openshard_protocol::world::RangedRange;
+use openshard_uofiles::cliloc::{Cliloc, ClilocNumber};
 use winit::window::Window;
 
 use crate::desk::{Desk, Tab};
+use openshard_client_net::action::GumpReply;
 use openshard_movement::sight::{EYE, Stop};
 
 use crate::crowd::ActionFill;
@@ -75,6 +79,9 @@ use crate::world::{Shard, WorldState};
 /// that happens on any path.
 #[derive(Clone, Default, Debug)]
 pub struct Request {
+    /// Reply selected in the client-owned craft catalogue. It preserves the
+    /// server's existing button encoding and validation path.
+    pub craft_reply: Option<GumpReply>,
     /// Save the next fully rendered world frame and its GPU planes. This is an
     /// edge-triggered diagnostic action, not a persistent display setting.
     pub frame_dump: bool,
@@ -290,6 +297,8 @@ pub struct Shell {
     /// the F1 administrator browser. Keeping this in the shell lets egui own
     /// the GPU textures while the source art stays in [`Resources`].
     item_catalogue: ItemArtCatalogue,
+    /// Transient controls for the client-owned craft catalogue.
+    craft_catalogue: CraftCataloguePanel,
 }
 
 impl Shell {
@@ -354,6 +363,7 @@ impl Shell {
             repaint_after: std::time::Duration::MAX,
             desk,
             item_catalogue: ItemArtCatalogue::default(),
+            craft_catalogue: CraftCataloguePanel::default(),
         }
     }
 
@@ -529,6 +539,7 @@ impl Shell {
             art,
             tiledata,
             hue_ramp,
+            cliloc,
             skill_names,
             map_editor,
             authority,
@@ -551,11 +562,13 @@ impl Shell {
                         art,
                         tiledata,
                         hue_ramp,
+                        cliloc,
                         skill_names,
                         map_editor: &mut *map_editor,
                         authority,
                     },
                     item_catalogue: &mut self.item_catalogue,
+                    craft_catalogue: &mut self.craft_catalogue,
                     desk,
                 },
             );
@@ -772,6 +785,8 @@ pub struct ShellFrame<'a> {
     pub tiledata: &'a openshard_tiles::TileData,
     /// The installed hue ramps, used by the staff dye palette and its preview.
     pub hue_ramp: &'a openshard_client_render::hue::HueRamp,
+    /// Localized recipe and skill labels supplied by the client's install.
+    pub cliloc: Option<&'a Cliloc>,
     /// Installed skill names used by the staff skill tester.
     pub skill_names: &'a openshard_uofiles::skills::Skills,
     /// Mutable map-editor session shown by staff panels.
@@ -783,6 +798,7 @@ pub struct ShellFrame<'a> {
 struct LayoutFrame<'a> {
     shell: ShellFrame<'a>,
     item_catalogue: &'a mut ItemArtCatalogue,
+    craft_catalogue: &'a mut CraftCataloguePanel,
     desk: &'a mut Desk,
 }
 
@@ -804,11 +820,13 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
                 art,
                 tiledata,
                 hue_ramp,
+                cliloc,
                 skill_names,
                 map_editor,
                 authority,
             },
         item_catalogue,
+        craft_catalogue,
         desk,
     } = frame;
     let mut request = Request::default();
@@ -1048,7 +1066,661 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
         });
     }
 
+    craft_catalogue_window(
+        &context,
+        world,
+        art,
+        hue_ramp,
+        cliloc,
+        craft_catalogue,
+        &mut request,
+    );
+
     request
+}
+
+/// Client-owned controls around the server's flat craft-recipe data.
+///
+/// The shard owns recipes and the meaning of their buttons; this owns only the
+/// ways a player narrows a long list before choosing one.
+#[derive(Default)]
+struct CraftCataloguePanel {
+    gump_id: Option<u32>,
+    query: String,
+    availability: CraftAvailability,
+    skill: Option<u32>,
+    materials: CraftMaterials,
+    sort: CraftSort,
+    /// Thumbnails are decoded only for rows inside the scroll viewport. The
+    /// key includes hue: the same ingot graphic is several distinct metals.
+    textures: BTreeMap<(u16, u16), Option<egui::TextureHandle>>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum CraftAvailability {
+    #[default]
+    All,
+    Ready,
+    Missing,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum CraftMaterials {
+    #[default]
+    Any,
+    One,
+    Several,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum CraftSort {
+    #[default]
+    Name,
+    Skill,
+    Materials,
+    Availability,
+}
+
+/// Localized, searchable data for one recipe. Keeping this separate from the
+/// wire row makes filtering and sorting linear in the catalogue rather than
+/// repeatedly resolving localization strings from a sort comparator.
+struct CraftCatalogueEntry<'a> {
+    row: &'a openshard_protocol::craft::CraftCatalogueRow,
+    name: String,
+    skill: String,
+    component_names: Vec<String>,
+    weapon_combat_skill: Option<String>,
+    search: String,
+}
+
+impl<'a> CraftCatalogueEntry<'a> {
+    fn new(row: &'a openshard_protocol::craft::CraftCatalogueRow, cliloc: Option<&Cliloc>) -> Self {
+        let name = craft_label(row.name, cliloc);
+        let skill = craft_skill_label(row.skill, cliloc);
+        let component_names: Vec<_> = row
+            .components
+            .iter()
+            .map(|component| craft_label(component.name, cliloc))
+            .collect();
+        let weapon_combat_skill = row.weapon.map(|weapon| craft_label(weapon.combat_skill, cliloc));
+        let graphics = std::iter::once(row.result)
+            .chain(row.components.iter().map(|component| component.graphic))
+            .map(|graphic| format!("{:#06x}", graphic.0))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let search = format!("{name} {skill} {} {graphics}", component_names.join(" ")).to_lowercase();
+        Self {
+            row,
+            name,
+            skill,
+            component_names,
+            weapon_combat_skill,
+            search,
+        }
+    }
+
+    fn matches(
+        &self,
+        query: &str,
+        availability: CraftAvailability,
+        skill: Option<u32>,
+        materials: CraftMaterials,
+    ) -> bool {
+        let row = self.row;
+        (availability != CraftAvailability::Ready || row.ready)
+            && (availability != CraftAvailability::Missing || !row.ready)
+            && skill.is_none_or(|skill| row.skill.0 == skill)
+            && (materials != CraftMaterials::One || row.components.len() == 1)
+            && (materials != CraftMaterials::Several || row.components.len() >= 2)
+            && (query.is_empty() || self.search.contains(query))
+    }
+
+    fn compare(&self, other: &Self, sort: CraftSort) -> std::cmp::Ordering {
+        let order = match sort {
+            CraftSort::Name => self.name.cmp(&other.name),
+            CraftSort::Skill => self.skill.cmp(&other.skill),
+            CraftSort::Materials => self.row.components.len().cmp(&other.row.components.len()),
+            CraftSort::Availability => other.row.ready.cmp(&self.row.ready),
+        };
+        order.then_with(|| self.name.cmp(&other.name))
+    }
+}
+
+/// Fixed columns keep the header and virtualized rows in sync. The component
+/// run is measured from the filtered rows, so it takes exactly as much room as
+/// the current catalogue result needs.
+#[derive(Clone, Copy)]
+struct CraftTableLayout {
+    components: f32,
+}
+
+impl CraftTableLayout {
+    const RESULT: f32 = 84.0;
+    const RECIPE: f32 = 270.0;
+    // Skill is a compact requirement badge; the full localized name belongs in
+    // its tooltip rather than consuming a text column in every row.
+    const SKILL: f32 = 76.0;
+    const STATUS: f32 = 120.0;
+    const ROW_HEIGHT: f32 = 70.0;
+    const COMPONENT_CELL: f32 = 68.0;
+
+    fn for_entries(entries: &[CraftCatalogueEntry<'_>]) -> Self {
+        Self {
+            // A table needs one shared component-column width to keep the
+            // Status cells aligned, but it must come from the visible data,
+            // not an arbitrary minimum or a hidden recipe elsewhere.
+            components: entries
+                .iter()
+                .map(|entry| entry.row.components.len().max(1) as f32 * Self::COMPONENT_CELL)
+                .fold(Self::COMPONENT_CELL, f32::max),
+        }
+    }
+
+    fn width(self) -> f32 {
+        Self::RESULT + Self::RECIPE + Self::SKILL + self.components + Self::STATUS
+    }
+}
+
+fn craft_catalogue_window(
+    context: &egui::Context,
+    world: &WorldState,
+    art: &openshard_uofiles::art::Art,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    cliloc: Option<&Cliloc>,
+    panel: &mut CraftCataloguePanel,
+    request: &mut Request,
+) {
+    let Some(view) = world.authoritative.view.as_ref() else {
+        panel.gump_id = None;
+        return;
+    };
+    // A catalogue packet has no usable shell on its own. Pair it with the
+    // gump that supplied the reply key before allowing it to draw or answer.
+    let Some((catalogue, gump)) = view.craft_catalogues.values().find_map(|catalogue| {
+        view.gumps
+            .iter()
+            .find(|gump| gump.gump_id == catalogue.gump_id)
+            .map(|gump| (catalogue, gump))
+    }) else {
+        panel.gump_id = None;
+        return;
+    };
+
+    if panel.gump_id != Some(catalogue.gump_id.0) {
+        panel.gump_id = Some(catalogue.gump_id.0);
+        // The screenshot runner can ask for a representative, narrow subset
+        // without changing the player's normal opening state. It is deliberately
+        // process-local and ignored unless that runner supplied the variable.
+        panel.query = std::env::var("OPENSHARD_CRAFT_CATALOGUE_SHOWCASE_QUERY").unwrap_or_default();
+        panel.availability = CraftAvailability::All;
+        panel.skill = None;
+        panel.materials = CraftMaterials::Any;
+        panel.sort = CraftSort::Name;
+        panel.textures.clear();
+    }
+
+    let mut open = true;
+    let mut reply = None;
+    // A wide catalogue must be wide on a wide monitor, but its scroll canvas
+    // may never enlarge the floating window past the current viewport.  The
+    // latter would hide the right-hand filters and status column rather than
+    // making them reachable by the table's horizontal scrollbar.
+    let viewport = context.content_rect().size();
+    let max_size = egui::vec2((viewport.x - 32.0).max(900.0), (viewport.y - 32.0).max(500.0));
+    egui::Window::new(format!("Crafting · {} recipes", catalogue.rows.len()))
+        .id(egui::Id::new(("craft catalogue", catalogue.gump_id.0)))
+        .default_pos([24.0, 24.0])
+        .default_size([1240.0, 760.0])
+        .min_size([900.0, 500.0])
+        .max_size(max_size)
+        .open(&mut open)
+        .show(context, |ui| {
+            ui.horizontal(|ui| {
+                ui.strong("Search");
+                ui.add(
+                    egui::TextEdit::singleline(&mut panel.query)
+                        .hint_text("name, skill, result, or component")
+                        .desired_width(360.0),
+                );
+                if ui.button("Clear").clicked() {
+                    panel.query.clear();
+                    panel.availability = CraftAvailability::All;
+                    panel.skill = None;
+                    panel.materials = CraftMaterials::Any;
+                }
+            });
+
+            ui.horizontal_wrapped(|ui| {
+                ui.strong("Availability");
+                ui.selectable_value(&mut panel.availability, CraftAvailability::All, "All");
+                ui.selectable_value(&mut panel.availability, CraftAvailability::Ready, "Available");
+                ui.selectable_value(&mut panel.availability, CraftAvailability::Missing, "Unavailable");
+                ui.separator();
+                let mut skills: Vec<_> = catalogue
+                    .rows
+                    .iter()
+                    .map(|row| row.skill)
+                    .filter(|skill| skill.0 != 0)
+                    .collect();
+                skills.sort_by_key(|skill| skill.0);
+                skills.dedup_by_key(|skill| skill.0);
+                egui::ComboBox::from_id_salt(("craft skill", catalogue.gump_id.0))
+                    .selected_text(
+                        panel
+                            .skill
+                            .map(|skill| craft_label(ClilocId(skill), cliloc))
+                            .unwrap_or_else(|| "All skills".to_owned()),
+                    )
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut panel.skill, None, "All skills");
+                        for skill in skills {
+                            ui.selectable_value(&mut panel.skill, Some(skill.0), craft_label(skill, cliloc));
+                        }
+                    });
+                ui.separator();
+                ui.strong("Components");
+                ui.selectable_value(&mut panel.materials, CraftMaterials::Any, "Any count");
+                ui.selectable_value(&mut panel.materials, CraftMaterials::One, "One");
+                ui.selectable_value(&mut panel.materials, CraftMaterials::Several, "Two or more");
+                ui.separator();
+                ui.label("Sort");
+                egui::ComboBox::from_id_salt(("craft sort", catalogue.gump_id.0))
+                    .selected_text(craft_sort_name(panel.sort))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut panel.sort, CraftSort::Name, "By name");
+                        ui.selectable_value(&mut panel.sort, CraftSort::Skill, "By skill");
+                        ui.selectable_value(&mut panel.sort, CraftSort::Materials, "By component count");
+                        ui.selectable_value(&mut panel.sort, CraftSort::Availability, "Available first");
+                    });
+            });
+
+            let query = panel.query.trim().to_lowercase();
+            let mut matching: Vec<_> = catalogue
+                .rows
+                .iter()
+                .map(|row| CraftCatalogueEntry::new(row, cliloc))
+                .filter(|entry| entry.matches(&query, panel.availability, panel.skill, panel.materials))
+                .collect();
+            matching.sort_by(|left, right| left.compare(right, panel.sort));
+            if panel.textures.len() > 512 {
+                panel.textures.clear();
+            }
+            let layout = CraftTableLayout::for_entries(&matching);
+            ui.horizontal(|ui| {
+                ui.small(format!("Showing {} of {}", matching.len(), catalogue.rows.len()));
+                ui.separator();
+                ui.small("Scroll to browse · hover framed items for details");
+            });
+            ui.separator();
+
+            let table_viewport_width = ui.available_width();
+            egui::ScrollArea::both()
+                .id_salt(("craft catalogue rows", catalogue.gump_id.0))
+                .auto_shrink([false, false])
+                .max_width(table_viewport_width)
+                .show(ui, |ui| {
+                    // The header belongs to the same horizontal canvas as the
+                    // virtualized rows. Otherwise its widest column quietly
+                    // becomes a minimum width for the whole floating window,
+                    // pushing the filters and final columns off a small screen.
+                    ui.set_min_width(layout.width());
+                    craft_table_header(ui, layout);
+                    ui.separator();
+                    egui::ScrollArea::vertical()
+                        .id_salt(("craft catalogue virtual rows", catalogue.gump_id.0))
+                        .auto_shrink([false, false])
+                        .show_rows(ui, CraftTableLayout::ROW_HEIGHT, matching.len(), |ui, rows| {
+                            for entry in &matching[rows] {
+                                let clicked = craft_table_row(ui, entry, art, hue_ramp, panel, layout);
+                                if clicked {
+                                    reply = Some(craft_reply(gump, entry.row.button));
+                                }
+                            }
+                        });
+                });
+        });
+
+    if !open {
+        reply = Some(craft_reply(gump, 0));
+    }
+    request.craft_reply = reply;
+}
+
+#[cfg(test)]
+fn craft_matches(
+    row: &openshard_protocol::craft::CraftCatalogueRow,
+    query: &str,
+    availability: CraftAvailability,
+    skill: Option<u32>,
+    materials: CraftMaterials,
+    cliloc: Option<&Cliloc>,
+) -> bool {
+    let entry = CraftCatalogueEntry::new(row, cliloc);
+    let query = query.trim().to_lowercase();
+    entry.matches(&query, availability, skill, materials)
+}
+
+fn craft_sort_name(sort: CraftSort) -> &'static str {
+    match sort {
+        CraftSort::Name => "By name",
+        CraftSort::Skill => "By skill",
+        CraftSort::Materials => "By component count",
+        CraftSort::Availability => "Available first",
+    }
+}
+
+fn craft_table_header(ui: &mut egui::Ui, layout: CraftTableLayout) {
+    ui.horizontal(|ui| {
+        ui.add_sized(
+            [CraftTableLayout::RESULT, 22.0],
+            egui::Label::new(egui::RichText::new("Result").strong()),
+        );
+        ui.add_sized(
+            [CraftTableLayout::RECIPE, 22.0],
+            egui::Label::new(egui::RichText::new("Recipe").strong()),
+        );
+        ui.add_sized(
+            [CraftTableLayout::SKILL, 22.0],
+            egui::Label::new(egui::RichText::new("Req.").strong()),
+        );
+        ui.add_sized(
+            [layout.components, 22.0],
+            egui::Label::new(egui::RichText::new("Components").strong()),
+        );
+        ui.add_sized(
+            [CraftTableLayout::STATUS, 22.0],
+            egui::Label::new(egui::RichText::new("Status").strong()),
+        );
+    });
+    ui.separator();
+}
+
+fn craft_table_row(
+    ui: &mut egui::Ui,
+    entry: &CraftCatalogueEntry<'_>,
+    art: &openshard_uofiles::art::Art,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    panel: &mut CraftCataloguePanel,
+    layout: CraftTableLayout,
+) -> bool {
+    let row = entry.row;
+    let response = ui.allocate_ui_with_layout(
+        egui::vec2(layout.width(), CraftTableLayout::ROW_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center).with_main_justify(false),
+        |ui| {
+            let fill = if row.ready {
+                ui.visuals().faint_bg_color
+            } else {
+                egui::Color32::from_rgba_unmultiplied(110, 55, 45, 42)
+            };
+            ui.painter().rect_filled(ui.max_rect(), 4.0, fill);
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.allocate_ui_with_layout(
+                egui::vec2(CraftTableLayout::RESULT, CraftTableLayout::ROW_HEIGHT),
+                egui::Layout::top_down(egui::Align::Center),
+                |ui| {
+                    craft_icon(ui, art, hue_ramp, panel, row.result, row.result_hue, 48.0)
+                        .on_hover_ui(|ui| craft_result_tooltip(ui, entry));
+                },
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(CraftTableLayout::RECIPE, 58.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.add_sized(
+                        [CraftTableLayout::RECIPE, 25.0],
+                        egui::Label::new(egui::RichText::new(&entry.name).strong())
+                            .truncate()
+                            .sense(egui::Sense::hover()),
+                    )
+                    .on_hover_text("Open recipe details");
+                    if let Some(weapon) = row.weapon {
+                        ui.horizontal_wrapped(|ui| craft_weapon_chips(ui, weapon));
+                    }
+                },
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(CraftTableLayout::SKILL, CraftTableLayout::ROW_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    craft_skill_requirement(ui, entry);
+                },
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(layout.components, CraftTableLayout::ROW_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    for (component, name) in row.components.iter().zip(&entry.component_names) {
+                        // `vertical_centered` consumes all remaining width in a
+                        // horizontal layout. Give every component a hard-sized
+                        // cell instead, so the row always begins at the left
+                        // edge of the column and material slots never drift.
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(CraftTableLayout::COMPONENT_CELL, CraftTableLayout::ROW_HEIGHT),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                craft_icon(ui, art, hue_ramp, panel, component.graphic, component.hue, 36.0)
+                                    .on_hover_text(format!(
+                                        "{name}\nRequired: ×{}\nGraphic: {:#06x}",
+                                        component.amount, component.graphic.0
+                                    ));
+                                ui.small(format!("×{}", component.amount));
+                            },
+                        );
+                    }
+                },
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(CraftTableLayout::STATUS, CraftTableLayout::ROW_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    let (status, color, fill) = if row.ready {
+                        (
+                            "Available",
+                            egui::Color32::from_rgb(95, 205, 120),
+                            egui::Color32::from_rgba_unmultiplied(52, 128, 70, 80),
+                        )
+                    } else {
+                        (
+                            "Unavailable",
+                            ui.visuals().warn_fg_color,
+                            egui::Color32::from_rgba_unmultiplied(160, 75, 60, 70),
+                        )
+                    };
+                    ui.add_sized(
+                        [108.0, 28.0],
+                        egui::Button::new(egui::RichText::new(status).color(color).strong())
+                            .fill(fill)
+                            .sense(egui::Sense::hover()),
+                    );
+                },
+            );
+        },
+    );
+    response.response.interact(egui::Sense::click()).clicked()
+}
+
+fn craft_icon(
+    ui: &mut egui::Ui,
+    art: &openshard_uofiles::art::Art,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    panel: &mut CraftCataloguePanel,
+    graphic: Graphic,
+    hue: Hue,
+    size: f32,
+) -> egui::Response {
+    // A sprite's transparent bounds are not a useful target on their own.
+    // The frame makes the cell legible and gives every result/material the
+    // same clickable footprint, whatever its native art dimensions are.
+    egui::Frame::group(ui.style())
+        .show(ui, |ui| {
+            match craft_item_texture(ui.ctx(), art, hue_ramp, &mut panel.textures, graphic, hue) {
+                Some(texture) => ui.add_sized(
+                    [size, size],
+                    egui::Image::from_texture(texture)
+                        .fit_to_exact_size(egui::vec2(size, size))
+                        .sense(egui::Sense::hover()),
+                ),
+                None => ui.add_sized([size, size], egui::Button::new("—")),
+            }
+        })
+        .inner
+}
+
+/// The repeated table cell is intentionally symbolic: the precise localized
+/// skill name is available on hover, while the number is the actionable fact.
+fn craft_skill_requirement(ui: &mut egui::Ui, entry: &CraftCatalogueEntry<'_>) -> egui::Response {
+    let response = ui.allocate_ui_with_layout(
+        egui::vec2(CraftTableLayout::SKILL, 28.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            let (icon, painter) = ui.allocate_painter(egui::vec2(20.0, 20.0), egui::Sense::hover());
+            let rect = icon.rect;
+            let accent = egui::Color32::from_rgb(218, 166, 82);
+            painter.rect_filled(rect, 4.0, egui::Color32::from_rgba_unmultiplied(122, 84, 35, 110));
+            // A compact craft-tool mark: the horizontal anvil and diagonal
+            // hammer read as a skill requirement without relying on a font
+            // glyph that may be absent from a player's installation.
+            painter.line_segment(
+                [
+                    egui::pos2(rect.left() + 4.0, rect.center().y + 4.0),
+                    egui::pos2(rect.right() - 4.0, rect.center().y + 4.0),
+                ],
+                egui::Stroke::new(2.0, accent),
+            );
+            painter.line_segment(
+                [
+                    egui::pos2(rect.left() + 6.0, rect.center().y - 4.0),
+                    egui::pos2(rect.right() - 6.0, rect.center().y + 2.0),
+                ],
+                egui::Stroke::new(2.0, accent),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(format!("{}%", tenths(entry.row.skill_min)))
+                    .small()
+                    .strong()
+                    .color(accent),
+            );
+        },
+    );
+    response.response.on_hover_text(format!(
+        "{}\nMinimum required: {}%",
+        entry.skill,
+        tenths(entry.row.skill_min)
+    ))
+}
+
+fn craft_result_tooltip(ui: &mut egui::Ui, entry: &CraftCatalogueEntry<'_>) {
+    ui.strong(&entry.name);
+    ui.small(format!(
+        "Crafting skill: {} (minimum {}%)",
+        entry.skill,
+        tenths(entry.row.skill_min)
+    ));
+    ui.small(format!("Result graphic: {:#06x}", entry.row.result.0));
+    if let Some(weapon) = entry.row.weapon {
+        ui.separator();
+        ui.strong("Weapon properties");
+        ui.label(format!(
+            "Combat skill: {}",
+            entry.weapon_combat_skill.as_deref().unwrap_or("—")
+        ));
+        ui.label(format!("Damage: {}–{}", weapon.damage_min, weapon.damage_max));
+        ui.label(format!("Speed: {:.2} s", f32::from(weapon.speed_centis) / 100.0));
+        ui.label(format!("Attack: {}", craft_weapon_kind_name(weapon.kind)));
+        if let Some(range) = weapon.range {
+            ui.label(format!("Range: {range} tiles"));
+        }
+    }
+    ui.separator();
+    ui.small("Click anywhere on this row to open recipe details.");
+}
+
+fn craft_weapon_chips(ui: &mut egui::Ui, weapon: openshard_protocol::craft::CraftWeaponProperties) {
+    craft_property_chip(ui, format!("DMG {}–{}", weapon.damage_min, weapon.damage_max));
+    craft_property_chip(ui, format!("SPD {:.2}s", f32::from(weapon.speed_centis) / 100.0));
+    craft_property_chip(ui, craft_weapon_kind_name(weapon.kind).to_ascii_uppercase());
+    if let Some(range) = weapon.range {
+        craft_property_chip(ui, format!("RNG {range}"));
+    }
+}
+
+fn craft_property_chip(ui: &mut egui::Ui, text: String) {
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .small()
+                .color(egui::Color32::from_rgb(129, 196, 224)),
+        )
+        .sense(egui::Sense::hover()),
+    );
+    ui.add_space(6.0);
+}
+
+fn craft_weapon_kind_name(kind: openshard_protocol::craft::CraftWeaponKind) -> &'static str {
+    use openshard_protocol::craft::CraftWeaponKind;
+    match kind {
+        CraftWeaponKind::Slashing => "Slashing",
+        CraftWeaponKind::Piercing => "Piercing",
+        CraftWeaponKind::Bashing => "Bashing",
+        CraftWeaponKind::Axe => "Axe",
+        CraftWeaponKind::Polearm => "Polearm",
+        CraftWeaponKind::Staff => "Staff",
+        CraftWeaponKind::Ranged => "Ranged",
+    }
+}
+
+fn craft_item_texture<'a>(
+    context: &egui::Context,
+    art: &openshard_uofiles::art::Art,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    textures: &'a mut BTreeMap<(u16, u16), Option<egui::TextureHandle>>,
+    graphic: Graphic,
+    hue: Hue,
+) -> Option<&'a egui::TextureHandle> {
+    let key = (graphic.0, hue.0);
+    textures.entry(key).or_insert_with(|| {
+        let image = art.static_art(graphic).ok().flatten()?;
+        let size = [usize::from(image.width()), usize::from(image.height())];
+        let pixels = image
+            .pixels()
+            .iter()
+            .map(|pixel| preview_pixel(*pixel, hue_ramp, hue.0))
+            .collect();
+        Some(context.load_texture(
+            format!("craft-item-art-{:04x}-{:04x}", graphic.0, hue.0),
+            egui::ColorImage::new(size, pixels),
+            egui::TextureOptions::NEAREST,
+        ))
+    });
+    textures.get(&key).and_then(Option::as_ref)
+}
+
+fn craft_label(id: ClilocId, cliloc: Option<&Cliloc>) -> String {
+    cliloc
+        .and_then(|table| table.get(ClilocNumber::new(id.0)))
+        .or_else(|| localized::fallback(id))
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("#{:08x}", id.0))
+}
+
+fn craft_skill_label(id: ClilocId, cliloc: Option<&Cliloc>) -> String {
+    if id.0 == 0 {
+        "—".to_owned()
+    } else {
+        craft_label(id, cliloc)
+    }
+}
+
+fn craft_reply(gump: &openshard_client_net::view::OpenGump, button: u32) -> GumpReply {
+    GumpReply {
+        key: RawGumpKey(gump.key.0),
+        gump_id: RawGumpId(gump.gump_id.0),
+        button: RawButtonId(button),
+        switches: Vec::new(),
+        text_entries: Vec::new(),
+    }
 }
 
 /// **What this client was told about fighting, and when.**
@@ -5542,5 +6214,96 @@ mod tests {
             parse_admin_skill(&invalid),
             Err("Enter a whole value or one decimal place, e.g. 95 or 95.5.")
         );
+    }
+
+    #[test]
+    fn craft_filter_combines_text_and_ready_state() {
+        let row = openshard_protocol::craft::CraftCatalogueRow {
+            button: 8,
+            result: Graphic(0x13EB),
+            result_hue: Hue::NONE,
+            name: ClilocId(0),
+            skill: ClilocId(0),
+            skill_min: 0,
+            ready: false,
+            weapon: None,
+            components: Vec::new(),
+        };
+
+        assert!(craft_matches(
+            &row,
+            "0x13eb",
+            CraftAvailability::All,
+            None,
+            CraftMaterials::Any,
+            None
+        ));
+        assert!(!craft_matches(
+            &row,
+            "0x13eb",
+            CraftAvailability::Ready,
+            None,
+            CraftMaterials::Any,
+            None
+        ));
+        assert!(!craft_matches(
+            &row,
+            "dagger",
+            CraftAvailability::All,
+            None,
+            CraftMaterials::Any,
+            None
+        ));
+
+        let compound = openshard_protocol::craft::CraftCatalogueRow {
+            skill: ClilocId(7),
+            components: vec![
+                openshard_protocol::craft::CraftCatalogueComponent {
+                    graphic: Graphic(0x1BF2),
+                    hue: Hue::NONE,
+                    name: ClilocId(0),
+                    amount: 2,
+                },
+                openshard_protocol::craft::CraftCatalogueComponent {
+                    graphic: Graphic(0x0F8D),
+                    hue: Hue::NONE,
+                    name: ClilocId(0),
+                    amount: 1,
+                },
+            ],
+            ..row
+        };
+        assert!(craft_matches(
+            &compound,
+            "0x1bf2",
+            CraftAvailability::All,
+            None,
+            CraftMaterials::Several,
+            None
+        ));
+        assert!(!craft_matches(
+            &compound,
+            "",
+            CraftAvailability::All,
+            None,
+            CraftMaterials::One,
+            None
+        ));
+        assert!(craft_matches(
+            &compound,
+            "",
+            CraftAvailability::All,
+            Some(7),
+            CraftMaterials::Any,
+            None
+        ));
+        assert!(!craft_matches(
+            &compound,
+            "",
+            CraftAvailability::All,
+            Some(8),
+            CraftMaterials::Any,
+            None
+        ));
     }
 }

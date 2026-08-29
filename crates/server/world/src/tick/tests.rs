@@ -2876,7 +2876,7 @@ fn consuming_a_stray_serial_does_nothing() {
 }
 
 #[test]
-fn a_layer_holds_only_one_item() {
+fn equipping_into_an_occupied_layer_swaps_the_old_item_into_the_backpack() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
@@ -2892,7 +2892,7 @@ fn a_layer_holds_only_one_item() {
     });
     world.tick(now);
 
-    // Second item, same layer: refused, and it bounces back to the ground.
+    // Second item, same layer: the worn item is stowed and this one replaces it.
     let (second, second_item) = take_loose_item(&mut world, player, now);
     let _ = packets_for(&mut world, player);
     world.queue(Command::EquipItem {
@@ -2904,15 +2904,30 @@ fn a_layer_holds_only_one_item() {
     world.tick(now);
 
     assert!(
-        packets_for(&mut world, player).iter().any(|p| p[0] == 0x27),
-        "the second is refused"
+        !packets_for(&mut world, player).iter().any(|p| p[0] == 0x27),
+        "the replacement is accepted"
     );
     assert!(
-        world.state.registry.has::<Position>(second_item),
-        "and returns to where it was lifted"
+        matches!(
+            openshard_state::item_location(&world.state, second_item),
+            Some(openshard_state::ItemLocation::Settled(
+                SettledItemLocation::Equipped(Equipped { mobile, layer })
+            )) if mobile == me && layer == LAYER_TORSO
+        ),
+        "the second item occupies the torso layer"
     );
-    assert!(!world.state.registry.has::<Equipped>(second_item));
-    assert!(nothing_is_held(&world), "the rejected equip releases the cursor");
+    let backpack = items::backpack_of(&world.state, me).expect("a fresh player has a backpack");
+    let first_item = entity(&world, first);
+    assert!(
+        matches!(
+            openshard_state::item_location(&world.state, first_item),
+            Some(openshard_state::ItemLocation::Settled(
+                SettledItemLocation::Contained(Contained { container, .. })
+            )) if container == backpack
+        ),
+        "the old garment returns to the backpack"
+    );
+    assert!(nothing_is_held(&world), "the accepted equip releases the cursor");
 }
 
 #[test]
@@ -5835,7 +5850,7 @@ fn an_armed_action_that_is_never_released_expires() {
 }
 
 #[test]
-fn reaching_an_overdue_target_opens_a_full_windup_before_damage() {
+fn a_prepared_blow_releases_after_its_short_contact_interval() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
@@ -5855,15 +5870,21 @@ fn reaching_an_overdue_target_opens_a_full_windup_before_damage() {
     world.tick(now);
     let lead = openshard_combat::swing_speed(&world.state, player_entity);
     assert_eq!(lead, WRESTLING_SWING_TICKS);
+    let release = lead / 5;
     assert_eq!(world.registry().get::<Hitpoints>(mob_entity).unwrap().current, 50);
     assert!(
         packets_for(&mut world, player).iter().any(|packet| {
-            packet[0] == 0xBF && packet.len() == 13 && packet[9..13] == 1_000_u32.to_be_bytes()
+            packet[0] == 0xBF
+                && packet.len() == 13
+                && packet[9..13]
+                    == u32::try_from(release * 1_000 / TICKS_PER_SECOND)
+                        .unwrap()
+                        .to_be_bytes()
         }),
-        "coming into reach starts the overdue swing instead of landing it invisibly"
+        "contact releases the already-prepared blow instead of landing it invisibly"
     );
 
-    for _ in 1..lead {
+    for _ in 1..release {
         world.tick(now);
     }
     assert_eq!(world.registry().get::<Hitpoints>(mob_entity).unwrap().current, 50);
@@ -6955,6 +6976,74 @@ fn an_archer_holds_a_drawn_bow_for_a_target_out_of_reach() {
     );
 }
 
+/// Melee must prepare while its target is still ahead of it. Otherwise a player
+/// who runs into reach starts the whole wind-up only after arriving, which makes
+/// a charge look like it never produced a blow at all.
+#[test]
+fn a_melee_weapon_prepares_while_running_to_its_target() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let fighter = world.state.players[&connection];
+    let fighter_serial = world.state.registry.serial_of(fighter).unwrap();
+    items::equip_worn_item(
+        &mut world.state,
+        fighter_serial,
+        Graphic(0x0F61), // longsword
+        Hue(0),
+        Layer(1),
+    )
+    .unwrap();
+    let target = spawn_mobile_at(&mut world, Point::new(START.x, START.y + 3, 0), 50, now);
+
+    engage(&mut world, connection, target, now);
+    let ready_at = match world
+        .state
+        .registry
+        .get::<CombatAction>(fighter)
+        .map(|action| action.phase)
+    {
+        Some(Phase::Arming {
+            watch: Watch::TargetInReach,
+            ready_at,
+            ..
+        }) => ready_at,
+        other => panic!("a distant melee target did not start a prepared blow: {other:?}"),
+    };
+
+    // The player's initial facing is south, so these are two real running
+    // strides. The target is three tiles south: after them the bodies are
+    // adjacent, not overlapping.
+    let hold_ticks =
+        Gameplay::ticks_from_ms(u64::try_from(openshard_movement::RUN_HOLD.as_millis()).unwrap());
+    for sequence in 0..2 {
+        world.queue(Command::Walk {
+            connection,
+            request: run(sequence, Direction::South),
+        });
+        world.tick(now);
+        for _ in 1..hold_ticks {
+            world.tick(now);
+        }
+    }
+    assert_eq!(
+        world.state.registry.get::<Position>(fighter).unwrap().0,
+        Point::new(START.x, START.y + 2, 0),
+        "the fighter ran into melee reach"
+    );
+
+    while world.state.ticks < ready_at {
+        world.tick(now);
+    }
+    assert!(
+        matches!(
+            world.state.registry.get::<CombatAction>(fighter),
+            Some(action) if matches!(action.phase, Phase::Releasing { impact } if impact > world.state.ticks)
+        ),
+        "contact releases the prepared blow through its visible strike interval"
+    );
+}
+
 /// The other silent exit from the commit pass, and the one a fighter meets every
 /// time it wins: a drawn weapon with nothing in front of it.
 ///
@@ -7332,11 +7421,12 @@ fn a_fight_with_everything_that_happens_to_one_still_has_no_blank_tick() {
     // a teleport inside the reach, a quiver the take did not empty — would leave
     // the assertion above passing over an ordinary fight, which is the way a
     // test like this dies without anyone noticing.
-    for expected in [
-        InterruptReason::OutOfReach,
-        InterruptReason::NoAmmo,
-        InterruptReason::NoTarget,
-    ] {
+    assert!(
+        timeline.contains(&Doing::Acting("shot", ActionStage::Aim)),
+        "the out-of-reach target did not leave the bow held at full draw: {:#?}",
+        runs(&timeline)
+    );
+    for expected in [InterruptReason::NoAmmo, InterruptReason::NoTarget] {
         assert!(
             timeline.contains(&Doing::Balked(expected)),
             "the script never drove the fighter into {expected:?}: {:#?}",
@@ -7435,11 +7525,11 @@ fn a_fighter_you_walk_up_to_arrives_with_what_it_is_doing() {
     );
 }
 
-/// The other half of walking up to a fight, and the half that never corrects
-/// itself: a refusal is a *standing* state, so "you will hear about it at its
-/// next transition" means never for as long as the wall stands.
+/// The other half of walking up to a fight: a bow that has lost range is already
+/// drawing and must be sent as that action, not as an old refusal that will not
+/// describe the state it is actually in.
 #[test]
-fn a_fighter_you_walk_up_to_arrives_wearing_its_refusal() {
+fn a_fighter_you_walk_up_to_arrives_wearing_its_draw() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
@@ -7456,10 +7546,11 @@ fn a_fighter_you_walk_up_to_arrives_wearing_its_refusal() {
         world.tick(now);
     }
     let newcomer = enter(&mut world, now);
+    let arrival = packets_for(&mut world, newcomer);
     assert_eq!(
-        action_balks(&packets_for(&mut world, newcomer), archer),
-        vec![InterruptReason::OutOfReach.to_bits()],
-        "and a fighter standing in a refusal arrives wearing it"
+        action_phase_intervals(&arrival, archer).len(),
+        1,
+        "and a fighter drawing for its out-of-range target arrives wearing that draw"
     );
 }
 

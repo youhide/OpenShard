@@ -9,6 +9,9 @@ renderer, but owns a small local interaction state for design review:
   position;
 - click a material's checkbox to preview a missing/available state;
 - click either craft button to show the available-material validation result.
+- recipe outputs and materials are proportionally fitted and centred into a
+  simple rectangular slot; hovering exactly that slot brightens only its
+  outline.
 
 The list viewport ends at `x = 220`; the scrollbar starts there, so its hit box
 and pixels cannot overlap a recipe row. This is a design prototype only: its

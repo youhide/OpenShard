@@ -684,7 +684,10 @@ pub fn reconcile_own_windows(
             view.vendor_buys.contains_key(&serial) || view.vendor_sells.contains_key(&serial)
         }
         WindowSubject::Paperdoll(serial) => view.paperdolls.contains_key(&serial),
-        WindowSubject::Dialog(gump_id) => view.gumps.iter().any(|gump| gump.gump_id == gump_id),
+        WindowSubject::Dialog(gump_id) => {
+            view.gumps.iter().any(|gump| gump.gump_id == gump_id)
+                && !view.craft_catalogues.contains_key(&gump_id)
+        }
         WindowSubject::Skills | WindowSubject::Status | WindowSubject::Minimap | WindowSubject::WorldMap => {
             false
         }
@@ -717,7 +720,10 @@ pub fn reconcile_own_windows(
             }
             WindowSubject::Paperdoll(serial) => view.paperdolls.contains_key(&serial),
             WindowSubject::Spellbook(serial) => view.spellbooks.contains_key(&serial),
-            WindowSubject::Dialog(gump_id) => view.gumps.iter().any(|gump| gump.gump_id == gump_id),
+            WindowSubject::Dialog(gump_id) => {
+                view.gumps.iter().any(|gump| gump.gump_id == gump_id)
+                    && !view.craft_catalogues.contains_key(&gump_id)
+            }
             // Nothing to reconcile against, and nothing to ask: the window is
             // open because it is here. `close_window`'s own `retain` is what
             // takes it away, and anything here would be a second opinion about
@@ -797,6 +803,7 @@ pub fn reconcile_own_windows(
     let dialogs: Vec<(GumpId, GumpPixel)> = view
         .gumps
         .iter()
+        .filter(|gump| !view.craft_catalogues.contains_key(&gump.gump_id))
         .map(|gump| (gump.gump_id, GumpPixel::new(gump.at.x, gump.at.y)))
         .collect();
     for (gump_id, at) in dialogs {

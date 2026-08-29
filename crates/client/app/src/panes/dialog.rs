@@ -657,10 +657,9 @@ const CARET: &str = "|";
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use openshard_protocol::gump::layout::parse;
     use openshard_protocol::gump::{ButtonId, GumpButton, GumpKey, GumpLayout, GumpPoint, SwitchId};
-
-    use super::*;
 
     fn admin_menu() -> OpenGump {
         let mut layout = GumpLayout::new();

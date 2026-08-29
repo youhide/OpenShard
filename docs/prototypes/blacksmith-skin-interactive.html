@@ -24,16 +24,16 @@
   sheet.src = '../../assets/ui/crafting/blacksmith-skin-kit-v2.png';
 
   const recipes = [
-    { name: 'Длинный меч', description: 'Надёжный клинок для ближнего боя.', materials: [['Железный слиток', 12, 8], ['Кожаная обмотка', 0, 1], ['Уголь', 5, 2], ['Ремонтный набор', 3, 1]] },
-    { name: 'Боевой топор', description: 'Тяжёлое оружие с широким лезвием.', materials: [['Железный слиток', 7, 6], ['Древесина ясеня', 3, 1], ['Уголь', 5, 2], ['Ремонтный набор', 3, 1]] },
-    { name: 'Круглый щит', description: 'Прочный щит для передней линии.', materials: [['Железный слиток', 12, 4], ['Кожа', 1, 2], ['Древесина', 6, 3], ['Заклёпки', 7, 6]] },
-    { name: 'Кольчуга', description: 'Гибкая броня из плетёных колец.', materials: [['Железный слиток', 3, 16], ['Кожаная обмотка', 4, 2], ['Уголь', 5, 5], ['Ремонтный набор', 3, 1]] },
-    { name: 'Железный кинжал', description: 'Короткий клинок для быстрой руки.', materials: [['Железный слиток', 12, 3], ['Кожаная обмотка', 0, 1], ['Уголь', 5, 1], ['Ремонтный набор', 3, 1]] },
-    { name: 'Кузнечный молот', description: 'Инструмент для точной работы.', materials: [['Железный слиток', 12, 5], ['Древесина', 6, 2], ['Уголь', 5, 1], ['Ремонтный набор', 3, 1]] },
-    { name: 'Стальные сапоги', description: 'Тяжёлая защита для похода.', materials: [['Железный слиток', 12, 9], ['Кожа', 1, 1], ['Уголь', 5, 3], ['Заклёпки', 7, 4]] },
-    { name: 'Боевой шлем', description: 'Закрывает голову от прямого удара.', materials: [['Железный слиток', 12, 7], ['Кожаная обмотка', 4, 1], ['Уголь', 5, 3], ['Ремонтный набор', 3, 1]] },
+    { name: 'Длинный меч', icon: 'sword', description: 'Надёжный клинок для ближнего боя.', materials: [['Железный слиток', 12, 8], ['Кожаная обмотка', 0, 1], ['Уголь', 5, 2], ['Ремонтный набор', 3, 1]] },
+    { name: 'Боевой топор', icon: 'axe', description: 'Тяжёлое оружие с широким лезвием.', materials: [['Железный слиток', 7, 6], ['Древесина ясеня', 3, 1], ['Уголь', 5, 2], ['Ремонтный набор', 3, 1]] },
+    { name: 'Круглый щит', icon: 'shield', description: 'Прочный щит для передней линии.', materials: [['Железный слиток', 12, 4], ['Кожа', 1, 2], ['Древесина', 6, 3], ['Заклёпки', 7, 6]] },
+    { name: 'Кольчуга', icon: 'mail', description: 'Гибкая броня из плетёных колец.', materials: [['Железный слиток', 3, 16], ['Кожаная обмотка', 4, 2], ['Уголь', 5, 5], ['Ремонтный набор', 3, 1]] },
+    { name: 'Железный кинжал', icon: 'dagger', description: 'Короткий клинок для быстрой руки.', materials: [['Железный слиток', 12, 3], ['Кожаная обмотка', 0, 1], ['Уголь', 5, 1], ['Ремонтный набор', 3, 1]] },
+    { name: 'Кузнечный молот', icon: 'hammer', description: 'Инструмент для точной работы.', materials: [['Железный слиток', 12, 5], ['Древесина', 6, 2], ['Уголь', 5, 1], ['Ремонтный набор', 3, 1]] },
+    { name: 'Стальные сапоги', icon: 'boots', description: 'Тяжёлая защита для похода.', materials: [['Железный слиток', 12, 9], ['Кожа', 1, 1], ['Уголь', 5, 3], ['Заклёпки', 7, 4]] },
+    { name: 'Боевой шлем', icon: 'helm', description: 'Закрывает голову от прямого удара.', materials: [['Железный слиток', 12, 7], ['Кожаная обмотка', 4, 1], ['Уголь', 5, 3], ['Ремонтный набор', 3, 1]] },
   ];
-  const state = { selected: 0, scroll: 0, materialToggles: new Set(), notice: '' };
+  const state = { selected: 0, scroll: 0, materialToggles: new Set(), hoveredSlot: null, notice: '' };
   const list = { x: 36, y: 142, width: 184, height: 276, row: 56 };
   const track = { x: 220, y: 142, width: 84, height: 385 };
 
@@ -74,6 +74,110 @@
     ctx.fillText(value, x, y);
   }
 
+  // A slot has its own inset. The item uses all remaining space while keeping
+  // its proportions, so a narrow dagger and a wide shield both feel centred.
+  function fittedBox(x, y, width, height, naturalWidth, naturalHeight, padding = 6) {
+    const innerWidth = width - padding * 2;
+    const innerHeight = height - padding * 2;
+    const scale = Math.min(innerWidth / naturalWidth, innerHeight / naturalHeight);
+    const fittedWidth = Math.max(1, Math.floor(naturalWidth * scale));
+    const fittedHeight = Math.max(1, Math.floor(naturalHeight * scale));
+    return {
+      x: x + padding + Math.floor((innerWidth - fittedWidth) / 2),
+      y: y + padding + Math.floor((innerHeight - fittedHeight) / 2),
+      width: fittedWidth,
+      height: fittedHeight,
+    };
+  }
+
+  const iconSize = {
+    sword: [28, 84], axe: [60, 76], shield: [68, 76], mail: [64, 70],
+    dagger: [24, 66], hammer: [62, 76], boots: [62, 56], helm: [66, 58],
+    ingot: [78, 44], leather: [72, 54], coal: [58, 58], kit: [64, 52], wood: [34, 78], rivets: [60, 50],
+  };
+
+  function materialIcon(name) {
+    if (name.includes('слиток')) return 'ingot';
+    if (name.includes('обмотка') || name === 'Кожа') return 'leather';
+    if (name === 'Уголь') return 'coal';
+    if (name.includes('Древесина')) return 'wood';
+    if (name === 'Заклёпки') return 'rivets';
+    return 'kit';
+  }
+
+  function drawIcon(kind, x, y, width, height) {
+    const [naturalWidth, naturalHeight] = iconSize[kind];
+    const box = fittedBox(x, y, width, height, naturalWidth, naturalHeight);
+    const scale = box.width / naturalWidth;
+    ctx.save();
+    ctx.translate(box.x, box.y);
+    ctx.scale(scale, scale);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#2b1710';
+    ctx.lineWidth = 5;
+    const metal = '#d8d7cf';
+    const darkMetal = '#777b80';
+    const leather = '#9a5830';
+    const gold = '#d8a441';
+    const outline = (fill) => { ctx.fillStyle = fill; ctx.stroke(); ctx.fill(); };
+    if (kind === 'sword' || kind === 'dagger') {
+      const h = naturalHeight;
+      ctx.beginPath(); ctx.moveTo(naturalWidth / 2, 0); ctx.lineTo(naturalWidth, h * .63); ctx.lineTo(naturalWidth / 2, h * .54); ctx.lineTo(0, h * .63); ctx.closePath(); outline(metal);
+      ctx.beginPath(); ctx.moveTo(2, h * .68); ctx.lineTo(naturalWidth - 2, h * .68); ctx.strokeStyle = gold; ctx.lineWidth = 8; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(naturalWidth / 2, h * .68); ctx.lineTo(naturalWidth / 2, h); ctx.strokeStyle = leather; ctx.lineWidth = 10; ctx.stroke();
+    } else if (kind === 'axe') {
+      ctx.beginPath(); ctx.moveTo(11, 3); ctx.lineTo(35, 3); ctx.lineTo(55, 25); ctx.lineTo(35, 40); ctx.lineTo(10, 28); ctx.closePath(); outline(metal);
+      ctx.beginPath(); ctx.moveTo(31, 24); ctx.lineTo(45, naturalHeight); ctx.strokeStyle = leather; ctx.lineWidth = 11; ctx.stroke();
+    } else if (kind === 'shield') {
+      ctx.beginPath(); ctx.moveTo(naturalWidth / 2, 1); ctx.lineTo(naturalWidth - 2, 15); ctx.lineTo(naturalWidth - 10, naturalHeight * .74); ctx.lineTo(naturalWidth / 2, naturalHeight - 1); ctx.lineTo(10, naturalHeight * .74); ctx.lineTo(2, 15); ctx.closePath(); outline(darkMetal);
+      ctx.strokeStyle = gold; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(naturalWidth / 2, 14); ctx.lineTo(naturalWidth / 2, naturalHeight - 12); ctx.moveTo(16, 29); ctx.lineTo(naturalWidth - 16, 29); ctx.stroke();
+    } else if (kind === 'mail') {
+      ctx.fillStyle = darkMetal; ctx.fillRect(8, 20, naturalWidth - 16, naturalHeight - 20); ctx.strokeRect(8, 20, naturalWidth - 16, naturalHeight - 20);
+      for (let row = 0; row < 4; row++) for (let col = 0; col < 4; col++) { ctx.beginPath(); ctx.arc(16 + col * 11, 28 + row * 11, 5, 0, Math.PI * 2); ctx.strokeStyle = metal; ctx.lineWidth = 3; ctx.stroke(); }
+    } else if (kind === 'hammer') {
+      ctx.fillStyle = darkMetal; ctx.fillRect(0, 0, naturalWidth, 24); ctx.strokeRect(0, 0, naturalWidth, 24);
+      ctx.beginPath(); ctx.moveTo(naturalWidth / 2, 23); ctx.lineTo(naturalWidth / 2 - 7, naturalHeight); ctx.strokeStyle = leather; ctx.lineWidth = 12; ctx.stroke();
+    } else if (kind === 'boots') {
+      for (const offset of [0, 28]) { ctx.beginPath(); ctx.moveTo(4 + offset, 0); ctx.lineTo(26 + offset, 0); ctx.lineTo(27 + offset, 34); ctx.lineTo(34 + offset, 43); ctx.lineTo(4 + offset, 43); ctx.closePath(); outline(leather); }
+    } else if (kind === 'helm') {
+      ctx.beginPath(); ctx.arc(naturalWidth / 2, naturalHeight / 2 + 8, naturalWidth / 2 - 4, Math.PI, 0); ctx.lineTo(naturalWidth - 4, naturalHeight - 2); ctx.lineTo(4, naturalHeight - 2); ctx.closePath(); outline(darkMetal);
+      ctx.strokeStyle = gold; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(naturalWidth / 2, 7); ctx.lineTo(naturalWidth / 2, naturalHeight - 3); ctx.stroke();
+    } else if (kind === 'ingot') {
+      ctx.beginPath(); ctx.moveTo(8, 8); ctx.lineTo(naturalWidth - 8, 8); ctx.lineTo(naturalWidth, naturalHeight - 7); ctx.lineTo(0, naturalHeight - 7); ctx.closePath(); outline(darkMetal);
+      ctx.strokeStyle = metal; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(13, 14); ctx.lineTo(naturalWidth - 13, 14); ctx.stroke();
+    } else if (kind === 'leather') {
+      ctx.beginPath(); ctx.moveTo(10, 2); ctx.lineTo(naturalWidth - 8, 10); ctx.lineTo(naturalWidth - 15, naturalHeight - 3); ctx.lineTo(3, naturalHeight - 10); ctx.closePath(); outline(leather);
+    } else if (kind === 'coal') {
+      ctx.beginPath(); ctx.moveTo(28, 1); ctx.lineTo(55, 18); ctx.lineTo(48, 52); ctx.lineTo(16, 57); ctx.lineTo(2, 31); ctx.closePath(); outline('#3b3938');
+      ctx.strokeStyle = '#8d7153'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(15, 23); ctx.lineTo(42, 13); ctx.stroke();
+    } else if (kind === 'wood') {
+      ctx.fillStyle = leather; ctx.fillRect(8, 0, naturalWidth - 16, naturalHeight); ctx.strokeRect(8, 0, naturalWidth - 16, naturalHeight);
+      ctx.strokeStyle = '#e0ad68'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(16, 5); ctx.lineTo(16, naturalHeight - 5); ctx.stroke();
+    } else if (kind === 'rivets') {
+      for (const [cx, cy] of [[16, 16], [44, 16], [30, 36]]) { ctx.beginPath(); ctx.arc(cx, cy, 11, 0, Math.PI * 2); ctx.fillStyle = gold; ctx.fill(); ctx.stroke(); }
+    } else {
+      ctx.fillStyle = leather; ctx.fillRect(3, 12, naturalWidth - 6, naturalHeight - 12); ctx.strokeRect(3, 12, naturalWidth - 6, naturalHeight - 12); ctx.fillStyle = gold; ctx.fillRect(12, 2, naturalWidth - 24, 14); ctx.strokeRect(12, 2, naturalWidth - 24, 14);
+    }
+    ctx.restore();
+  }
+
+  function drawSlot(id, x, y, size, icon) {
+    const hovered = state.hoveredSlot === id;
+    // Deliberately simple, like an egui frame: a flat fill and a border that
+    // becomes brighter and thicker under the pointer. The item keeps the same
+    // fitted box in both states, so hover never makes the table jump.
+    ctx.save();
+    ctx.fillStyle = hovered ? '#35291d' : '#211b15';
+    ctx.fillRect(x, y, size, size);
+    ctx.strokeStyle = hovered ? '#e2b35d' : '#806b4a';
+    ctx.lineWidth = hovered ? 2 : 1;
+    const inset = hovered ? 1 : .5;
+    ctx.strokeRect(x + inset, y + inset, size - 2 * inset, size - 2 * inset);
+    ctx.restore();
+    drawIcon(icon, x, y, size, size);
+  }
+
   function clamp(value, low, high) { return Math.max(low, Math.min(high, value)); }
   function maxScroll() { return Math.max(0, recipes.length - Math.floor(list.height / list.row)); }
   function allAvailable(recipe) { return recipe.materials.every(([, have, need]) => have >= need); }
@@ -93,7 +197,8 @@
       const y = list.y + (index - state.scroll) * list.row;
       if (y + list.row <= list.y || y >= list.y + list.height) return;
       nine(index === state.selected ? art.selected : art.darkRow, list.x, y, list.width, 52, 10);
-      text(recipe.name, list.x + 18, y + 15, 16, index === state.selected ? '#ffe49c' : '#d0b37a');
+      drawSlot(`recipe:${index}`, list.x + 7, y + 4, 44, recipe.icon);
+      text(recipe.name, list.x + 59, y + 15, 16, index === state.selected ? '#ffe49c' : '#d0b37a');
     });
     ctx.restore();
 
@@ -103,15 +208,17 @@
     drawCrop(art.thumb, track.x, thumbY, 85, 208);
 
     const recipe = recipes[state.selected];
-    text(recipe.name, 370, 108, 30, '#372516');
-    text(recipe.description, 370, 158, 17, '#594026');
+    drawSlot('result', 365, 96, 98, recipe.icon);
+    text(recipe.name, 484, 108, 30, '#372516');
+    text(recipe.description, 484, 158, 17, '#594026');
     text('Требуемые материалы', 370, 212, 16, '#584025');
     recipe.materials.forEach(([name, have, need], index) => {
       const y = 260 + index * 62;
       const forced = state.materialToggles.has(index);
       const okay = !forced && have >= need;
       nine(okay ? art.lightRow : art.missingRow, 360, y, 610, 56, 10);
-      text(name, 388, y + 16, 18, okay ? '#3e2f1d' : '#6b271f');
+      drawSlot(`material:${index}`, 366, y + 5, 46, materialIcon(name));
+      text(name, 430, y + 16, 18, okay ? '#3e2f1d' : '#6b271f');
       text(`${have} / ${need}`, 830, y + 16, 18, okay ? '#1c5b2b' : '#97261d', 'right');
       drawCrop(okay ? art.checked : art.empty, 914, y + 4, 40, 40);
     });
@@ -151,11 +258,30 @@
     state.scroll = clamp(state.scroll + Math.sign(event.deltaY), 0, maxScroll());
     draw();
   }, { passive: false });
+  function slotAt(point) {
+    if (inside(point, { x: 365, y: 96, width: 98, height: 98 })) return 'result';
+    if (inside(point, list)) {
+      const index = Math.floor((point.y - list.y) / list.row) + state.scroll;
+      const y = list.y + (index - state.scroll) * list.row;
+      if (recipes[index] && inside(point, { x: list.x + 7, y: y + 4, width: 44, height: 44 })) return `recipe:${index}`;
+    }
+    for (let index = 0; index < 4; index++) {
+      if (inside(point, { x: 366, y: 265 + index * 62, width: 46, height: 46 })) return `material:${index}`;
+    }
+    return null;
+  }
+
   canvas.addEventListener('mousemove', event => {
     const point = local(event);
-    canvas.style.cursor = inside(point, list) || inside(point, track) || (point.y >= 260 && point.y < 508 && point.x >= 890) || (point.y >= 544 && point.x >= 506) ? 'pointer' : 'default';
+    const hoveredSlot = slotAt(point);
+    if (state.hoveredSlot !== hoveredSlot) { state.hoveredSlot = hoveredSlot; draw(); }
+    canvas.style.cursor = inside(point, list) || inside(point, track) || hoveredSlot || (point.y >= 260 && point.y < 508 && point.x >= 890) || (point.y >= 544 && point.x >= 506) ? 'pointer' : 'default';
   });
-  sheet.addEventListener('load', () => { ctx.imageSmoothingEnabled = false; draw(); });
+  canvas.addEventListener('mouseleave', () => {
+    if (state.hoveredSlot !== null) { state.hoveredSlot = null; draw(); }
+  });
+  function ready() { if (sheet.complete) { ctx.imageSmoothingEnabled = false; draw(); } }
+  sheet.addEventListener('load', ready);
   sheet.addEventListener('error', () => { text('Не удалось загрузить skin atlas.', 512, 300, 22, '#d5986f', 'center'); });
 </script>
 </html>

@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenShard — виджет свойств предмета</title>
+<style>
+  @font-face { font-family: NotoCraft; src: url('../../crates/client/app/assets/NotoSans-Regular.ttf'); }
+
+  :root {
+    color-scheme: dark;
+    font-family: NotoCraft, sans-serif;
+    background: #100b07;
+    color: #ead9b0;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    min-height: 100vh;
+    margin: 0;
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(circle at 50% 10%, #422917 0, #1b110b 43%, #0c0907 100%);
+  }
+
+  main { width: min(100%, 940px); padding: 32px 20px; }
+
+  h1 { margin: 0; color: #f1ca75; font-size: 24px; font-weight: 700; }
+  .lede { margin: 8px 0 24px; max-width: 650px; color: #bca57d; font-size: 14px; line-height: 1.55; }
+
+  .stage {
+    min-height: 500px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid #604126;
+    border-radius: 10px;
+    background:
+      linear-gradient(135deg, rgb(44 29 19 / 94%), rgb(15 12 10 / 96%)),
+      repeating-linear-gradient(45deg, rgb(255 216 139 / 2%) 0 1px, transparent 1px 6px);
+    box-shadow: 0 22px 65px rgb(0 0 0 / 52%), inset 0 1px rgb(255 226 167 / 8%);
+  }
+
+  .craft-row {
+    position: absolute;
+    inset: 54px auto auto 54px;
+    display: flex;
+    gap: 14px;
+  }
+
+  .recipe {
+    width: 126px;
+    min-height: 158px;
+    display: grid;
+    grid-template-rows: 72px auto;
+    justify-items: center;
+    gap: 10px;
+    padding: 13px 10px 12px;
+    border: 1px solid #72543a;
+    border-radius: 7px;
+    color: #d7bd88;
+    background: linear-gradient(#302217, #1c1510);
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.3;
+    cursor: default;
+  }
+
+  .recipe:hover, .recipe:focus-visible {
+    border-color: #ebbd62;
+    outline: none;
+    color: #ffe1a0;
+    background: linear-gradient(#45301d, #22170f);
+    box-shadow: 0 0 0 2px rgb(238 187 91 / 18%), inset 0 1px rgb(255 236 178 / 12%);
+  }
+
+  .slot {
+    width: 70px;
+    height: 70px;
+    display: grid;
+    place-items: center;
+    border: 1px solid #8f7047;
+    border-radius: 5px;
+    background: #15110d;
+    box-shadow: inset 0 0 0 3px rgb(0 0 0 / 30%);
+  }
+
+  .icon {
+    width: 48px;
+    height: 48px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    color: #e8d5a1;
+    font-size: 28px;
+    filter: drop-shadow(0 3px 2px rgb(0 0 0 / 65%));
+  }
+
+  .icon::before {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    z-index: -1;
+    border: 1px solid rgb(255 237 177 / 26%);
+    border-radius: 50% 48% 44% 52%;
+    background: var(--icon-fill, #6a6f73);
+    transform: rotate(-16deg);
+  }
+
+  .tooltip {
+    width: min(348px, calc(100% - 32px));
+    position: absolute;
+    z-index: 1;
+    left: min(390px, calc(100% - 364px));
+    top: 104px;
+    padding: 12px;
+    pointer-events: none;
+    border: 1px solid #a47d42;
+    border-radius: 7px;
+    background:
+      linear-gradient(180deg, rgb(47 34 23 / 98%), rgb(20 15 12 / 98%)),
+      repeating-linear-gradient(90deg, rgb(255 235 180 / 2%) 0 1px, transparent 1px 5px);
+    box-shadow: 0 14px 34px rgb(0 0 0 / 64%), inset 0 1px rgb(255 236 180 / 12%);
+    transition: opacity 110ms ease, transform 110ms ease;
+  }
+
+  .tooltip[hidden] { display: block; opacity: 0; transform: translateY(-3px); }
+
+  .tooltip__head { display: grid; grid-template-columns: 48px 1fr; gap: 10px; align-items: center; }
+  .tooltip__head .slot { width: 48px; height: 48px; border-color: #b18a50; }
+  .tooltip__head .icon { transform: scale(.72); transform-origin: center; }
+  .tooltip__title { color: #ffe2a0; font-size: 17px; font-weight: 700; line-height: 1.25; }
+  .tooltip__subtitle { margin-top: 2px; color: #c1a87a; font-size: 12px; line-height: 1.35; }
+  .tooltip__rule { height: 1px; margin: 11px 0 9px; background: linear-gradient(90deg, transparent, #8f6940 8%, #8f6940 92%, transparent); }
+  .tooltip__section + .tooltip__section { margin-top: 10px; }
+  .tooltip__section-title { margin: 0 0 4px; color: #d4ad65; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  .tooltip__line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; min-height: 20px; color: #ddcfb5; font-size: 13px; line-height: 1.45; }
+  .tooltip__line--text { display: block; }
+  .tooltip__value { color: #a7d899; text-align: right; white-space: nowrap; }
+  .tooltip__value--warning { color: #e4ad62; }
+  .tooltip__footer { margin-top: 11px; padding-top: 8px; border-top: 1px solid rgb(145 109 65 / 60%); color: #8f806b; font-size: 11px; }
+
+  .hint { position: absolute; right: 20px; bottom: 18px; color: #907957; font-size: 12px; }
+
+  @media (max-width: 680px) {
+    .stage { min-height: 650px; }
+    .craft-row { inset: 34px auto auto 24px; }
+    .tooltip { left: 24px; top: 245px; }
+  }
+</style>
+
+<main>
+  <h1>Карточка свойств предмета</h1>
+  <p class="lede">Самостоятельный виджет для строк и слотов крафта. Наведите курсор или фокус клавиатуры на предмет: карточка получает только готовую модель и ничего не знает о сети, рецептах или таблице.</p>
+  <section class="stage" aria-label="Демонстрация виджета">
+    <div class="craft-row" id="samples"></div>
+    <aside class="tooltip" id="tooltip" aria-live="polite" hidden></aside>
+    <span class="hint">Наведение / Tab</span>
+  </section>
+</main>
+
+<script>
+  'use strict';
+
+  // This is the widget's complete UI-facing contract.  A craft row, an item
+  // instance, or a future OPL adapter builds this shape before it calls render.
+  const samples = [
+    {
+      title: 'Длинный меч',
+      subtitle: 'Одноручное оружие · уровень предмета 18',
+      icon: '⚔', iconFill: '#71777c',
+      sections: [
+        { title: 'Боевые свойства', lines: [
+          ['Урон', '12–18', 'good'], ['Скорость', '2.4 с', ''], ['Шанс критического удара', '+6%', 'good'],
+        ] },
+        { title: 'Создание', lines: [['Исключительное качество', '', 'text'], ['Создано Alys', '', 'text']] },
+      ],
+      footer: 'Наведите на строку рецепта, чтобы посмотреть результат.',
+    },
+    {
+      title: 'Кольчужная рубаха',
+      subtitle: 'Нагрудная броня · уровень предмета 21',
+      icon: '⛨', iconFill: '#788087',
+      sections: [
+        { title: 'Защита', lines: [['Физическое сопротивление', '+14', 'good'], ['Холод', '+5', 'good'], ['Вес', '8.0', '']] },
+        { title: 'Требования', lines: [['Сила', '35', 'warning']] },
+      ],
+      footer: 'Требования — это свойство результата, а не самой строки крафта.',
+    },
+    {
+      title: 'Кузнечный молот',
+      subtitle: 'Инструмент · осталось 43 применения',
+      icon: '⚒', iconFill: '#9a693f',
+      sections: [
+        { title: 'Инструмент', lines: [['Бонус к кузнечному делу', '+5.0', 'good'], ['Прочность', '43 / 50', 'warning']] },
+        { title: 'Описание', lines: [['Удобный молот с тяжёлым бойком.', '', 'text']] },
+      ],
+      footer: 'Карточка умеет простые строки и пары «название — значение».',
+    },
+  ];
+
+  const samplesRoot = document.querySelector('#samples');
+  const tooltip = document.querySelector('#tooltip');
+
+  function escapeHtml(value) {
+    return value.replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' })[character]);
+  }
+
+  // The widget does not inspect its caller. It draws exactly the model below;
+  // that boundary keeps the future CraftPane and OPL presentation independent.
+  function renderItemTooltip(model) {
+    const section = ({ title, lines }) => `
+      <section class="tooltip__section">
+        <h2 class="tooltip__section-title">${escapeHtml(title)}</h2>
+        ${lines.map(([label, value, tone]) => tone === 'text'
+          ? `<div class="tooltip__line tooltip__line--text">${escapeHtml(label)}</div>`
+          : `<div class="tooltip__line"><span>${escapeHtml(label)}</span><span class="tooltip__value ${tone === 'warning' ? 'tooltip__value--warning' : ''}">${escapeHtml(value)}</span></div>`).join('')}
+      </section>`;
+    tooltip.innerHTML = `
+      <div class="tooltip__head">
+        <div class="slot"><span class="icon" style="--icon-fill:${model.iconFill}">${escapeHtml(model.icon)}</span></div>
+        <div><div class="tooltip__title">${escapeHtml(model.title)}</div><div class="tooltip__subtitle">${escapeHtml(model.subtitle)}</div></div>
+      </div>
+      <div class="tooltip__rule"></div>
+      ${model.sections.map(section).join('')}
+      <div class="tooltip__footer">${escapeHtml(model.footer)}</div>`;
+    tooltip.hidden = false;
+  }
+
+  function hideItemTooltip() { tooltip.hidden = true; }
+
+  samples.forEach(model => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'recipe';
+    button.innerHTML = `<span class="slot"><span class="icon" style="--icon-fill:${model.iconFill}">${escapeHtml(model.icon)}</span></span><span>${escapeHtml(model.title)}</span>`;
+    button.addEventListener('pointerenter', () => renderItemTooltip(model));
+    button.addEventListener('focus', () => renderItemTooltip(model));
+    button.addEventListener('pointerleave', hideItemTooltip);
+    button.addEventListener('blur', hideItemTooltip);
+    samplesRoot.append(button);
+  });
+</script>
+</html>

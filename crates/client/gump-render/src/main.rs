@@ -33,7 +33,7 @@ struct Cli {
     scene: PathBuf,
 
     /// Ultima Online Classic install directory containing gump art and fonts.
-    /// Required only by scenes that use `Gump`, `Item`, `Tile`, `Resize`, or `Label`.
+    /// Required only by scenes that use `Gump`, `Item`, `FittedItem`, `Tile`, `Resize`, or `Label`.
     #[arg(short, long, env = "OPENSHARD_CLIENT", value_name = "DIR")]
     client: Option<PathBuf>,
 
@@ -77,6 +77,15 @@ fn default_background() -> Rgb {
 /// A layer in painter's order. Later entries cover earlier entries.
 #[derive(Debug, Deserialize)]
 enum Element {
+    /// A solid, axis-aligned rectangle. This mirrors the client's `{ rect }`
+    /// gump primitive and is useful for neutral frames before a skin exists.
+    Rect {
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+        colour: Rgb,
+    },
     /// A cropped project asset drawn at its native size. Paths are relative to
     /// the scene, which keeps design previews independent of the working dir.
     Asset {
@@ -127,6 +136,17 @@ enum Element {
     Gump { gump: u16, x: i32, y: i32 },
     /// One static-art icon, as used by a container or `{ tilepic }`.
     Item { graphic: u16, x: i32, y: i32 },
+    /// One static-art icon fitted proportionally and centred in its cell, as
+    /// the client's `{ tilepicfit }` gump primitive does.
+    FittedItem {
+        graphic: u16,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+        #[serde(default)]
+        padding: u32,
+    },
     /// A gump-art picture repeated, never scaled, over this rectangle.
     Tile {
         gump: u16,
@@ -213,6 +233,7 @@ fn render(
         let backdrop = read_png(&path)?;
         composite_image(&mut result, scene.width, scene.height, &backdrop)?;
     }
+    composite_rects(&mut result, scene.width, scene.height, &scene.elements);
     composite_project_assets(&mut result, scene.width, scene.height, scene_dir, &scene.elements)?;
     let wanted = wanted_art(&scene.elements);
     if !wanted.is_empty() {
@@ -278,6 +299,37 @@ fn render(
     }
     composite_ttf_labels(&mut result, scene.width, scene.height, scene_dir, &scene.elements)?;
     Ok(result)
+}
+
+/// Draw all simple rectangular background layers. Their use in a scene is for
+/// fills and frames below art; richer assets keep their ordinary painter order.
+fn composite_rects(canvas: &mut [u8], width: u32, height: u32, elements: &[Element]) {
+    for element in elements {
+        let Element::Rect {
+            x,
+            y,
+            width: rect_width,
+            height: rect_height,
+            colour,
+        } = element
+        else {
+            continue;
+        };
+        let (Ok(rect_width), Ok(rect_height)) = (i32::try_from(*rect_width), i32::try_from(*rect_height))
+        else {
+            continue;
+        };
+        let left = (*x).max(0);
+        let top = (*y).max(0);
+        let right = x.saturating_add(rect_width).min(width as i32);
+        let bottom = y.saturating_add(rect_height).min(height as i32);
+        for target_y in top..bottom {
+            for target_x in left..right {
+                let target = (target_y as u32 * width + target_x as u32) as usize * 3;
+                canvas[target..target + 3].copy_from_slice(&[colour.r, colour.g, colour.b]);
+            }
+        }
+    }
 }
 
 /// Draw the project atlas layers before optional classic-client art.
@@ -889,7 +941,7 @@ fn wanted_art(elements: &[Element]) -> BTreeSet<GumpArt> {
             Element::Gump { gump, .. } | Element::Tile { gump, .. } => {
                 wanted.insert(GumpArt::Gump(Graphic(*gump)));
             }
-            Element::Item { graphic, .. } => {
+            Element::Item { graphic, .. } | Element::FittedItem { graphic, .. } => {
                 wanted.insert(GumpArt::Item(Graphic(*graphic)));
             }
             Element::Resize { gump, .. } => {
@@ -899,7 +951,8 @@ fn wanted_art(elements: &[Element]) -> BTreeSet<GumpArt> {
                     wanted.insert(GumpArt::Gump(Graphic(gump.wrapping_add(offset))));
                 }
             }
-            Element::Asset { .. }
+            Element::Rect { .. }
+            | Element::Asset { .. }
             | Element::ScaledAsset { .. }
             | Element::NineSlice { .. }
             | Element::Label { .. }
@@ -922,6 +975,24 @@ fn pictures(elements: &[Element], atlas: &GumpAtlas) -> Result<Vec<Picture>, Box
                 GumpArt::Item(Graphic(*graphic)),
                 GumpPixel::new(*x, *y),
             )),
+            Element::FittedItem {
+                graphic,
+                x,
+                y,
+                width,
+                height,
+                padding,
+            } => {
+                let width = i32::try_from(*width)?;
+                let height = i32::try_from(*height)?;
+                let padding = i32::try_from(*padding)?;
+                if let Some(picture) = gump::ItemCell::new(GumpPixel::new(*x, *y), width, height)
+                    .padded(padding)
+                    .picture(atlas, Graphic(*graphic))
+                {
+                    pictures.push(picture);
+                }
+            }
             Element::Tile {
                 gump,
                 x,
@@ -945,7 +1016,8 @@ fn pictures(elements: &[Element], atlas: &GumpAtlas) -> Result<Vec<Picture>, Box
                 i32::try_from(*width)?,
                 i32::try_from(*height)?,
             )),
-            Element::Asset { .. }
+            Element::Rect { .. }
+            | Element::Asset { .. }
             | Element::ScaledAsset { .. }
             | Element::NineSlice { .. }
             | Element::Label { .. }

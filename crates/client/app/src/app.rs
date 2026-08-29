@@ -559,6 +559,11 @@ impl App {
     /// Begin an injected presentation scenario after the window and GPU exist.
     pub(crate) fn begin_opening_scenario(&mut self) {
         match self.scenario.take() {
+            Some(Scenario::CraftCatalogue) => {
+                if let Some(link) = self.world.shard.link() {
+                    link.act(openshard_client_net::action::Outgoing::OpenCraftCatalogue);
+                }
+            }
             Some(
                 scenario @ (Scenario::LodSweep
                 | Scenario::AtlasSoak

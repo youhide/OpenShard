@@ -73,6 +73,20 @@ pub enum Element {
         /// The picture to repeat.
         gump: u32,
     },
+    /// `{ rect }` — an OpenShard flat-colour rectangle, in RGB555.  It is the
+    /// primitive behind egui-like panels, table cells, and borders.
+    Rect {
+        /// Top-left corner, from the window's own origin.
+        x: i32,
+        /// Top-left corner, from the window's own origin.
+        y: i32,
+        /// How wide it is.
+        width: i32,
+        /// How tall it is.
+        height: i32,
+        /// RGB555 colour (`0RRRRRGGGGGBBBBB`).
+        color: u16,
+    },
     /// `{ checkertrans }` — a darkened, semi-transparent rectangle.
     AlphaRegion {
         /// Where the rectangle starts.
@@ -332,6 +346,16 @@ fn element(body: &str) -> Element {
             },
             _ => unknown(),
         },
+        "rect" => match (at(0), at(1), at(2), at(3), at(4)) {
+            (Some(x), Some(y), Some(width), Some(height), Some(color)) => Element::Rect {
+                x: x as i32,
+                y: y as i32,
+                width: width as i32,
+                height: height as i32,
+                color: color as u16,
+            },
+            _ => unknown(),
+        },
         "checkertrans" => match (at(0), at(1), at(2), at(3)) {
             (Some(x), Some(y), Some(width), Some(height)) => Element::AlphaRegion {
                 x: x as i32,
@@ -511,6 +535,7 @@ mod tests {
         layout.image(4, 4, 1417);
         layout.image_hued(4, 40, 1417, 1153);
         layout.image_tiled(0, 0, 10, 10, 2624);
+        layout.rect(10, 12, 14, 16, 0x18C6);
         layout.alpha_region(1, 2, 3, 4);
         layout.cropped_label(66, 56, 200, 20, 1153, "Populate");
         layout.item(50, 50, Graphic(0x0EED), Hue::NONE);
@@ -589,6 +614,13 @@ mod tests {
                     width: 10,
                     height: 10,
                     gump: 2624,
+                },
+                Element::Rect {
+                    x: 10,
+                    y: 12,
+                    width: 14,
+                    height: 16,
+                    color: 0x18C6,
                 },
                 Element::AlphaRegion {
                     x: 1,

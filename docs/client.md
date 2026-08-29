@@ -3826,16 +3826,16 @@ was a defect in this repository:
 
 What was found on the way and left undone:
 
-- **This client reads `anim.mul` and nothing else.** Everything drawn since LBR
-  lives in `anim2.mul` through `anim5.mul`, and which file holds a body is a
-  lookup in `Bodyconv.def` (`752 29 -1 -1 -1` — body 752 is index 29 of
-  `anim2`); `Body.def` is a second redirect, an id drawn as another body under a
-  hue. `uofiles::anim` knows neither, and `anim::animation_body` hardcodes three
-  remaps where the client has a table. So **every body that lives in a later
-  file draws nothing at all** — on the Felucca spawn set that is bodies 752 and
-  764–794 among others, tens of spawn points, and each one is a creature that
-  hits a player from an empty tile. This is the single largest hole in what the
-  client can draw, and it is a file reader, not a renderer change.
+- **This client reads `anim.mul` and nothing else.** `Body.def` redirects are
+  now applied to the render snapshot before it asks the atlas for frames (for
+  example, a grey wolf's body 25 becomes body 225 under hue 946). `Bodyconv.def`
+  is still missing: everything drawn since LBR lives in `anim2.mul` through
+  `anim5.mul`, and which file holds a body is a lookup there (`752 29 -1 -1 -1`
+  — body 752 is index 29 of `anim2`). So **every body that lives only in a
+  later file still draws nothing at all** — on the Felucca spawn set that is
+  bodies 752 and 764–794 among others, tens of spawn points, and each one is a
+  creature that hits a player from an empty tile. This is a file-reader gap,
+  not a renderer change.
 - **A modern install ships `AnimationFrame*.uop` too**, keyed by a hash rather
   than by the index arithmetic, and ClassicUO prefers it to the `.mul`. Reading
   the def redirects closes most of the gap on a legacy install; the uop is what

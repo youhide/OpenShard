@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use openshard_events::Cursor;
@@ -281,6 +282,34 @@ fn failure_channel() -> (FailureTx, FailureRx) {
     (FailureTx(tx), FailureRx(rx))
 }
 
+/// Sender half of the save task's successful-write signal. Unlike a handoff,
+/// this means the store has answered successfully, so it is the one moment the
+/// shard may honestly tell a player that the save is complete.
+#[derive(Debug, Clone)]
+struct SavedTx(mpsc::UnboundedSender<u64>);
+
+impl SavedTx {
+    fn send(&self, tick: u64) -> Result<(), mpsc::error::SendError<u64>> {
+        self.0.send(tick)
+    }
+}
+
+/// Receiver half of [`SavedTx`], read by the shard loop to announce completion
+/// to players who were warned before a periodic snapshot began.
+#[derive(Debug)]
+struct SavedRx(mpsc::UnboundedReceiver<u64>);
+
+impl SavedRx {
+    async fn recv(&mut self) -> Option<u64> {
+        self.0.recv().await
+    }
+}
+
+fn saved_channel() -> (SavedTx, SavedRx) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    (SavedTx(tx), SavedRx(rx))
+}
+
 /// Write snapshots, forever, on a task nothing waits for.
 ///
 /// # This is the only place that touches a disk
@@ -297,17 +326,23 @@ fn failure_channel() -> (FailureTx, FailureRx) {
 /// moved on. The failure goes back to the shard loop, which asks the world for a
 /// full sweep — see `World::resweep`. The cost of a failure is a fat save, and
 /// the recovery reads the world as it is now rather than as it was.
-async fn save_loop(store: Arc<Store>, mut snapshots: SnapshotRx, failures: FailureTx) {
+async fn save_loop(store: Arc<Store>, mut snapshots: SnapshotRx, failures: FailureTx, saved: SavedTx) {
     while let Some(snapshot) = snapshots.recv().await {
         let rows = snapshot.len();
         let started = Instant::now();
         match store.save(&snapshot).await {
-            Ok(()) => debug!(
-                tick = snapshot.tick,
-                rows,
-                took = ?started.elapsed(),
-                "saved"
-            ),
+            Ok(()) => {
+                debug!(
+                    tick = snapshot.tick,
+                    rows,
+                    took = ?started.elapsed(),
+                    "saved"
+                );
+                // The shard may already be shutting down, in which case there
+                // is no player-facing loop left to hear this. The write still
+                // succeeded, so dropping this notification is harmless.
+                let _ = saved.send(snapshot.tick);
+            }
             Err(error) => {
                 error!(tick = snapshot.tick, rows, %error, "save failed; the next one will be a full sweep");
                 // If the shard loop is gone there is nobody to sweep and nothing
@@ -348,6 +383,16 @@ const KEY_SWEEP: Duration = openshard_login::auth::DEFAULT_TTL;
 /// nobody sends.
 pub const SHUTDOWN_NOTICE: &str = "The shard is shutting down. Your character is being saved.";
 
+/// What players see just before the scheduled world snapshot starts.
+///
+/// This is sent and flushed before snapshot construction begins, rather than
+/// beside the handoff to the writer: the former is where a large world can hold
+/// the tick for seconds, while the latter is already after that pause.
+pub const PERIODIC_SAVE_START_NOTICE: &str = "The world is saving. You may experience a brief pause.";
+
+/// What players see only after the store confirmed the scheduled snapshot.
+pub const PERIODIC_SAVE_COMPLETE_NOTICE: &str = "The world save is complete.";
+
 /// Everything the shard loop owns between ticks.
 ///
 /// One value rather than eight locals threaded through every helper. Each step of
@@ -378,12 +423,24 @@ struct Shard {
     /// Where the relay tells a client to dial. Read on every connect, to say so
     /// when it is an address that client cannot reach.
     advertised: SocketAddrV4,
+    /// Periodic snapshots whose start was announced to players and whose write
+    /// has not yet confirmed. A staff save and shutdown snapshot are deliberately
+    /// absent: they cannot be announced before their snapshot is built.
+    announced_periodic_saves: HashSet<u64>,
 }
 
 impl Shard {
     /// Run one tick: advance the world, flush its outbound packets, hand off its
     /// snapshots, and pump the gameplay script.
     fn tick(&mut self) -> TickOutcome {
+        let periodic_save_due = self.world.periodic_save_due_next_tick();
+        if periodic_save_due {
+            // `announce` only queues the packet. Flush before constructing the
+            // snapshot, otherwise the very pause this notice explains prevents
+            // the client from seeing it in time.
+            self.world.announce(PERIODIC_SAVE_START_NOTICE);
+            self.flush_outbound();
+        }
         self.world.tick(Instant::now());
         // Before anything is sent: what the world did this tick decides which
         // connections are in it, and a refusal means there is nobody left to send
@@ -396,12 +453,28 @@ impl Shard {
         // ends play, because accepting another tick would create state no save
         // cadence can ever persist.
         for snapshot in self.world.drain_saves() {
-            if let outcome @ TickOutcome::SaveTaskGone { .. } = handoff_tick_snapshot(&self.saves, snapshot) {
-                return outcome;
+            let tick = snapshot.tick;
+            match handoff_tick_snapshot(&self.saves, snapshot) {
+                TickOutcome::Continue => {
+                    if periodic_save_due {
+                        self.announced_periodic_saves.insert(tick);
+                    }
+                }
+                outcome @ TickOutcome::SaveTaskGone { .. } => return outcome,
             }
         }
         self.answer_verbs();
         TickOutcome::Continue
+    }
+
+    /// Tell players that the scheduled save they were warned about reached the
+    /// store. A write can finish after a later snapshot has already been queued,
+    /// so the tick number, rather than a boolean, binds the two messages.
+    fn announce_completed_periodic_save(&mut self, tick: u64) {
+        if self.announced_periodic_saves.remove(&tick) {
+            self.world.announce(PERIODIC_SAVE_COMPLETE_NOTICE);
+            self.flush_outbound();
+        }
     }
 
     /// Lay down whatever the tree has for the admin verbs pressed this tick.
@@ -572,6 +645,7 @@ pub async fn run_shard(
 
     let (saves, snapshots) = snapshot_channel(reins.unwritten());
     let (failed, mut failures) = failure_channel();
+    let (saved_tx, mut saved_rx) = saved_channel();
     let (verifier, mut verdicts) = Verifier::new();
 
     // Everything that comes off a disk, in the one order that works — see
@@ -581,7 +655,7 @@ pub async fn run_shard(
 
     // Kept, not detached: shutdown hands it a final snapshot, closes the channel,
     // and awaits this task so every queued write lands before the process exits.
-    let save_task = tokio::spawn(save_loop(store, snapshots, failed));
+    let save_task = tokio::spawn(save_loop(store, snapshots, failed, saved_tx));
 
     let mut shard = Shard {
         // Taken here, beside the script's cursors and for the same reason: before
@@ -600,6 +674,7 @@ pub async fn run_shard(
         verifier,
         saves,
         advertised,
+        announced_periodic_saves: HashSet::new(),
     };
 
     // The shard's own content, queued between the restore above and the first
@@ -683,6 +758,10 @@ pub async fn run_shard(
                 warn!("a save failed; marking the world for a full sweep");
                 shard.world.resweep();
             }
+
+            // A periodic save was announced before snapshot construction, and
+            // only this success signal lets us say that it truly landed.
+            Some(tick) = saved_rx.recv() => shard.announce_completed_periodic_save(tick),
 
             // Before `events` as well: a client waiting on a password check is a
             // client that has been waiting for a hash, and answering it costs
@@ -1256,6 +1335,7 @@ mod tests {
         let unwritten = Unwritten::new();
         let (saves, snapshots) = snapshot_channel(unwritten.clone());
         let (failed, _failures) = failure_channel();
+        let (saved, mut completed) = saved_channel();
 
         // Handed over with nothing draining the queue: this is exactly the
         // state a shard is in when its store is slow and the operator is
@@ -1269,10 +1349,15 @@ mod tests {
         // runs it to the end of the queue rather than forever.
         drop(saves);
         let store = Arc::new(Store::memory());
-        save_loop(store, snapshots, failed).await;
+        save_loop(store, snapshots, failed, saved).await;
 
         assert_eq!(unwritten.writes(), 0, "nothing is owed once the store answered");
         assert_eq!(unwritten.rows(), 0, "and no rows are left behind in the count");
+        assert_eq!(
+            completed.recv().await,
+            Some(1),
+            "the successful write reaches the shard loop"
+        );
     }
 
     #[test]

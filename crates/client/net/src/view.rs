@@ -24,19 +24,19 @@
 //! not a move at all. Both are routed by serial in [`WorldView::apply`], so
 //! [`WorldView::mobiles`] holds only *other* mobiles, as its docs promise.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 
 use rustc_hash::FxHashMap;
 
 use openshard_protocol::access::AccessLevel;
 use openshard_protocol::chunks::WorldNotice;
-use openshard_protocol::containers::ContainedItem;
+use openshard_protocol::containers::{ContainedItem, GridSlot};
+use openshard_protocol::craft::CraftCatalogue;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::feedback::HarvestPreview;
 use openshard_protocol::gump::layout::{Element, parse};
 use openshard_protocol::gump::{GumpId, GumpKey, GumpPoint};
-use openshard_protocol::items::CorpseEquipmentItem;
-use openshard_protocol::items::WorldItemPayload;
+use openshard_protocol::items::{CorpseEquipmentItem, ItemAmount, WorldItemPayload};
 use openshard_protocol::mobile::{Equipment, Notoriety, PaperdollFlags, StatusFlags, Vitals};
 use openshard_protocol::properties::PropertyEntry;
 use openshard_protocol::serial::Serial;
@@ -45,7 +45,7 @@ use openshard_protocol::speech::{Font, LocalizedMessage, SpokenMessage, TalkMode
 use openshard_protocol::spellbook::SpellbookContent;
 use openshard_protocol::target::TargetCursor;
 use openshard_protocol::vendor::{BuyLine, SellLine};
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{Graphic, Hue, Layer};
 use openshard_protocol::world::{Light, MapSize, PlayerStart, Point, Weather, WeatherChange};
 
 pub use openshard_client_model::{Skill, Status};
@@ -355,6 +355,219 @@ pub struct Item {
     pub hue: Hue,
 }
 
+/// A client's complete record of one item, keyed by its serial in
+/// [`ItemCatalogue`].
+///
+/// The item itself, rather than a renderer-specific table, owns its current
+/// position.  Ground, bag and paperdoll records are views constructed from this
+/// entity by [`WorldView::project_catalogue_change`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ItemEntity {
+    /// The art all three positions draw.
+    pub graphic: Graphic,
+    /// The dye all three positions draw.
+    pub hue: Hue,
+    /// Its one current position, including position-specific data.
+    pub position: ItemPosition,
+}
+
+/// Where an [`ItemEntity`] currently is in the client's world.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ItemPosition {
+    /// Loose in the world.
+    Ground {
+        /// Stack count or corpse metadata sent by `0x1A`.
+        payload: WorldItemPayload,
+        /// Its world coordinate.
+        position: Point,
+    },
+    /// Held by a container window.
+    Contained {
+        /// The container that owns it.
+        container: Serial,
+        /// Stack count.
+        amount: ItemAmount,
+        /// Icon position inside the gump.
+        at: GumpPoint,
+        /// Enhanced-client grid cell.
+        grid: GridSlot,
+    },
+    /// Worn by a mobile.
+    Equipped {
+        /// The mobile wearing it.
+        mobile: Serial,
+        /// Its paperdoll layer.
+        layer: Layer,
+    },
+}
+
+/// The authoritative catalogue of item entities this client has been shown.
+///
+/// Packet reducers change this catalogue first.  The historical ground,
+/// container and equipment collections in [`WorldView`] remain public drawing
+/// projections, but cannot independently decide where an item is.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct ItemCatalogue {
+    items: FxHashMap<Serial, ItemEntity>,
+}
+
+impl ItemCatalogue {
+    /// The entity this client currently knows for `serial`.
+    #[must_use]
+    pub fn get(&self, serial: Serial) -> Option<&ItemEntity> {
+        self.items.get(&serial)
+    }
+
+    /// Put one item at its newly announced position, returning every serial
+    /// whose drawing projection must be rebuilt.
+    fn place(&mut self, serial: Serial, item: ItemEntity) -> Vec<Serial> {
+        if self.items.get(&serial) == Some(&item) {
+            return Vec::new();
+        }
+
+        let mut affected = vec![serial];
+        if let ItemPosition::Equipped { mobile, layer } = item.position {
+            let displaced: Vec<Serial> = self
+                .items
+                .iter()
+                .filter_map(|(&other, entity)| {
+                    (other != serial
+                        && matches!(
+                            entity.position,
+                            ItemPosition::Equipped {
+                                mobile: worn_by,
+                                layer: worn_on,
+                            } if worn_by == mobile && worn_on == layer
+                        ))
+                    .then_some(other)
+                })
+                .collect();
+            for other in displaced {
+                self.items.remove(&other);
+                affected.push(other);
+            }
+        }
+        self.items.insert(serial, item);
+        affected
+    }
+
+    /// Replace the whole outfit named by a `0x78`.
+    fn replace_outfit(&mut self, mobile: Serial, equipment: &[Equipment]) -> Vec<Serial> {
+        let incoming: HashSet<Serial> = equipment.iter().map(|item| item.serial).collect();
+        let missing: Vec<Serial> = self
+            .items
+            .iter()
+            .filter_map(|(&serial, item)| {
+                matches!(item.position, ItemPosition::Equipped { mobile: worn_by, .. } if worn_by == mobile)
+                    .then_some(serial)
+                    .filter(|serial| !incoming.contains(serial))
+            })
+            .collect();
+        let mut affected = missing;
+        for serial in &affected {
+            self.items.remove(serial);
+        }
+        for item in equipment {
+            for serial in self.place(
+                item.serial,
+                ItemEntity {
+                    graphic: item.graphic,
+                    hue: item.hue,
+                    position: ItemPosition::Equipped {
+                        mobile,
+                        layer: item.layer,
+                    },
+                },
+            ) {
+                if !affected.contains(&serial) {
+                    affected.push(serial);
+                }
+            }
+        }
+        affected
+    }
+
+    /// Replace a container's entire `0x3C` listing.
+    fn replace_contents(&mut self, container: Serial, contents: &[ContainedItem]) -> Vec<Serial> {
+        let incoming: HashSet<Serial> = contents.iter().map(|item| item.serial).collect();
+        let missing: Vec<Serial> = self
+            .items
+            .iter()
+            .filter_map(|(&serial, item)| {
+                matches!(item.position, ItemPosition::Contained { container: owner, .. } if owner == container)
+                    .then_some(serial)
+                    .filter(|serial| !incoming.contains(serial))
+            })
+            .collect();
+        let mut affected = missing;
+        for serial in &affected {
+            self.items.remove(serial);
+        }
+        for item in contents {
+            for serial in self.place(
+                item.serial,
+                ItemEntity {
+                    graphic: item.graphic,
+                    hue: item.hue,
+                    position: ItemPosition::Contained {
+                        container,
+                        amount: item.amount,
+                        at: item.at,
+                        grid: item.grid,
+                    },
+                },
+            ) {
+                if !affected.contains(&serial) {
+                    affected.push(serial);
+                }
+            }
+        }
+        affected
+    }
+
+    /// Forget the item itself and anything whose visible parent is this serial.
+    fn forget(&mut self, serial: Serial) -> Vec<Serial> {
+        // A mobile is not itself an item, but its equipment must still go when
+        // its `0x1D` arrives. `parents` therefore starts with every removed
+        // serial, while `forgotten` contains only catalogue entities actually
+        // removed and is what callers use to rebuild projections.
+        let mut parents = HashSet::from([serial]);
+        let mut forgotten = HashSet::new();
+        loop {
+            let children: Vec<Serial> = self
+                .items
+                .iter()
+                .filter_map(|(&child, item)| {
+                    if forgotten.contains(&child) {
+                        return None;
+                    }
+                    match item.position {
+                        ItemPosition::Contained { container, .. } if parents.contains(&container) => {
+                            Some(child)
+                        }
+                        ItemPosition::Equipped { mobile, .. } if parents.contains(&mobile) => Some(child),
+                        _ => None,
+                    }
+                })
+                .collect();
+            if children.is_empty() {
+                break;
+            }
+            for child in children {
+                parents.insert(child);
+                forgotten.insert(child);
+            }
+        }
+        if self.items.contains_key(&serial) {
+            forgotten.insert(serial);
+        }
+        for serial in &forgotten {
+            self.items.remove(serial);
+        }
+        forgotten.into_iter().collect()
+    }
+}
+
 /// A targeting cursor the shard has open, and the house drawn under it.
 ///
 /// One value and not two `Option`s side by side, which is the shape this would
@@ -396,7 +609,17 @@ pub struct WorldView {
     /// Every other mobile this client has been shown, by serial.
     pub mobiles: FxHashMap<Serial, Mobile>,
     /// Every ground item this client has been shown, by serial.
+    ///
+    /// This is the ground projection of [`item_catalogue`](Self::item_catalogue).
+    /// It remains a map because the renderer needs exactly this spatial slice.
     pub items: FxHashMap<Serial, Item>,
+    /// Every item entity this client currently knows, whatever its position.
+    ///
+    /// Packet reduction changes this catalogue first; [`items`](Self::items),
+    /// [`contents`](Self::contents) and mobile equipment are then rebuilt from
+    /// the resulting entities.  Keeping the source of truth here makes one
+    /// serial unable to survive in two of those projections.
+    pub item_catalogue: ItemCatalogue,
     /// What has been said to this client, oldest first, capped at
     /// [`JOURNAL_LINES`].
     ///
@@ -421,6 +644,9 @@ pub struct WorldView {
     /// Removed by [`gump_closed`](Self::gump_closed) when this client answers,
     /// which is the one thing here the server does not tell us — see its docs.
     pub gumps: Vec<OpenGump>,
+    /// Compact rows for client-owned catalogue tables, keyed by their gump
+    /// shell. They travel in an OpenShard packet rather than inside `0xB0`.
+    pub craft_catalogues: FxHashMap<GumpId, CraftCatalogue>,
     /// The gump art of every container the shard has opened a window for
     /// (`0x24`), by container serial.
     ///
@@ -706,35 +932,87 @@ impl OpenGump {
 }
 
 impl WorldView {
-    /// A serial has one location. Destination packets do not always carry the
-    /// corresponding `Remove` back to the client that performed the drag, so
-    /// moving it must also retire any stale source entry in our snapshot.
-    fn remove_from_containers(&mut self, serial: Serial, except: Option<Serial>) -> bool {
+    /// Remove every drawing projection for one item entity.
+    fn remove_item_projections(&mut self, serial: Serial) -> bool {
+        let was_ground = self.items.remove(&serial).is_some();
         let mut changed = false;
-        for (container, contents) in &mut self.contents {
-            if Some(*container) == except {
-                continue;
-            }
+        for contents in self.contents.values_mut() {
             let before = contents.len();
             contents.retain(|item| item.serial != serial);
             changed |= contents.len() != before;
         }
-        changed
-    }
-
-    /// Equipment destinations likewise omit a matching `Remove` for the
-    /// acting client.  Keep a serial in exactly one projection: worn, held in
-    /// a container, or on the ground.
-    fn remove_from_equipment(&mut self, serial: Serial) -> bool {
         let before = self.player.equipment.len();
         self.player.equipment.retain(|item| item.serial != serial);
-        let mut changed = self.player.equipment.len() != before;
+        changed |= self.player.equipment.len() != before;
         for mobile in self.mobiles.values_mut() {
             let mobile_equipment_before = mobile.equipment.len();
             mobile.equipment.retain(|item| item.serial != serial);
             changed |= mobile.equipment.len() != mobile_equipment_before;
         }
-        changed
+        was_ground || changed
+    }
+
+    /// Rebuild one drawing projection from the catalogue entity that owns it.
+    fn project_catalogue_change(&mut self, serial: Serial) {
+        let Some(entity) = self.item_catalogue.get(serial).copied() else {
+            return;
+        };
+        match entity.position {
+            ItemPosition::Ground { payload, position } => {
+                self.items.insert(
+                    serial,
+                    Item {
+                        graphic: entity.graphic,
+                        payload,
+                        position,
+                        hue: entity.hue,
+                    },
+                );
+            }
+            ItemPosition::Contained {
+                container,
+                amount,
+                at,
+                grid,
+            } => {
+                self.contents.entry(container).or_default().push(ContainedItem {
+                    serial,
+                    graphic: entity.graphic,
+                    amount,
+                    at,
+                    grid,
+                    hue: entity.hue,
+                });
+            }
+            ItemPosition::Equipped { mobile, layer } => {
+                let equipment = Equipment {
+                    serial,
+                    graphic: entity.graphic,
+                    layer,
+                    hue: entity.hue,
+                };
+                if mobile == self.player.serial {
+                    self.player.equipment.push(equipment);
+                } else if let Some(mobile) = self.mobiles.get_mut(&mobile) {
+                    mobile.equipment.push(equipment);
+                }
+            }
+        }
+    }
+
+    /// Apply a catalogue operation: erase affected old projections, then draw
+    /// only the entities that still exist in the catalogue.
+    fn apply_catalogue_change(&mut self, affected: Vec<Serial>) -> bool {
+        if affected.is_empty() {
+            return false;
+        }
+        for &serial in &affected {
+            self.remove_item_projections(serial);
+        }
+        for serial in affected {
+            self.project_catalogue_change(serial);
+        }
+        true
     }
 
     /// Forget every projection of one serial after `0x1D` removes it.
@@ -746,10 +1024,13 @@ impl WorldView {
     /// serial-keyed projection a change to the removal invariant, rather than
     /// one more branch in the packet reducer.
     fn forget(&mut self, serial: Serial) -> bool {
+        let forgotten = self.item_catalogue.forget(serial);
+        let had_catalogue_item = !forgotten.is_empty();
+        for item in forgotten {
+            self.remove_item_projections(item);
+        }
         let had_mobile = self.mobiles.remove(&serial).is_some();
-        let had_item = self.items.remove(&serial).is_some();
-        let had_worn = self.remove_from_equipment(serial);
-        let was_held = self.remove_from_containers(serial, None);
+        let had_projection = self.remove_item_projections(serial);
 
         // A container or body that is itself removed takes its windows and
         // secondary views with it.
@@ -772,9 +1053,8 @@ impl WorldView {
         let had_design = self.designs.remove(&serial).is_some();
 
         had_mobile
-            || had_item
-            || had_worn
-            || was_held
+            || had_catalogue_item
+            || had_projection
             || had_window
             || had_corpse_equipment
             || was_on_corpse
@@ -823,8 +1103,10 @@ impl WorldView {
             map: start.map,
             mobiles: FxHashMap::default(),
             items: FxHashMap::default(),
+            item_catalogue: ItemCatalogue::default(),
             journal: VecDeque::new(),
             gumps: Vec::new(),
+            craft_catalogues: FxHashMap::default(),
             containers: FxHashMap::default(),
             contents: FxHashMap::default(),
             corpse_equipment: FxHashMap::default(),
@@ -959,7 +1241,7 @@ impl WorldView {
     pub fn gump_closed(&mut self, gump_id: GumpId) -> bool {
         let before = self.gumps.len();
         self.gumps.retain(|gump| gump.gump_id != gump_id);
-        self.gumps.len() != before
+        self.gumps.len() != before || self.craft_catalogues.remove(&gump_id).is_some()
     }
 
     /// Write down a line the server said, dropping the oldest if the journal is
@@ -1099,6 +1381,14 @@ impl WorldView {
                     }
                 }
             }
+            ServerPacket::CraftCatalogue(catalogue) => {
+                let changed = self
+                    .craft_catalogues
+                    .get(&catalogue.gump_id)
+                    .is_none_or(|old| old != catalogue);
+                self.craft_catalogues.insert(catalogue.gump_id, catalogue.clone());
+                changed
+            }
             // `0xBF 0x04`: the one case where the server *does* say a gump
             // closed, unprompted by any client reply — a script or a quest
             // step tearing down its own window rather than replacing it with
@@ -1203,6 +1493,11 @@ impl WorldView {
             // coordinate here would make the authoritative world disagree with
             // that movement core whenever equipment arrives during a walk.
             ServerPacket::MobileIncoming(incoming) if incoming.serial == self.player.serial => {
+                let previous = self.player.clone();
+                let catalogue_change = self
+                    .item_catalogue
+                    .replace_outfit(incoming.serial, &incoming.equipment);
+                let relocated = self.apply_catalogue_change(catalogue_change);
                 let fresh = Player {
                     serial: self.player.serial,
                     body: incoming.body,
@@ -1221,15 +1516,25 @@ impl WorldView {
                     status: self.player.status.clone(),
                     position: self.player.position,
                     facing: self.player.facing,
-                    equipment: incoming.equipment.clone(),
+                    // The catalogue owns an item's position. The inbound list
+                    // supplies its order, while `project_catalogue_change`
+                    // below supplies the actual entities still occupying it.
+                    equipment: Vec::new(),
                     // Kept, for `0x20`'s reason above.
                     skills: self.player.skills.clone(),
                 };
-                let changed = self.player != fresh;
                 self.player = fresh;
-                changed
+                for item in &incoming.equipment {
+                    self.project_catalogue_change(item.serial);
+                }
+                relocated || self.player != previous
             }
             ServerPacket::MobileIncoming(incoming) => {
+                let previous = self.mobiles.get(&incoming.serial).cloned();
+                let catalogue_change = self
+                    .item_catalogue
+                    .replace_outfit(incoming.serial, &incoming.equipment);
+                let relocated = self.apply_catalogue_change(catalogue_change);
                 let fresh = Mobile {
                     body: incoming.body,
                     position: incoming.position,
@@ -1237,87 +1542,53 @@ impl WorldView {
                     hue: incoming.hue,
                     flags: incoming.flags,
                     notoriety: incoming.notoriety,
-                    hits: self.mobiles.get(&incoming.serial).and_then(|mobile| mobile.hits),
-                    equipment: incoming.equipment.clone(),
+                    hits: previous.as_ref().and_then(|mobile| mobile.hits),
+                    equipment: Vec::new(),
                 };
-                let changed = self.mobiles.get(&incoming.serial) != Some(&fresh);
                 self.mobiles.insert(incoming.serial, fresh);
-                changed
+                for item in &incoming.equipment {
+                    self.project_catalogue_change(item.serial);
+                }
+                relocated || self.mobiles.get(&incoming.serial) != previous.as_ref()
             }
             // A single new or changed worn item.  Shops use this immediately
             // before their buy list: the crate is equipped on layer `0x1A`,
             // then `0x74` names that crate and `0x24` names the merchant.
             // Dropping this packet therefore made a fully received shop look
             // like a packet with no owner.
-            ServerPacket::EquipUpdate(update) if update.mobile == self.player.serial => {
-                let was_ground = self.items.remove(&update.item).is_some();
-                let was_contained = self.remove_from_containers(update.item, None);
-                // A slot replacement is a separate item leaving the body, so
-                // keep the incoming serial's old copy out of every other slot.
-                let was_worn = self.remove_from_equipment(update.item);
-                let equipment = &mut self.player.equipment;
-                let fresh = Equipment {
-                    serial: update.item,
-                    graphic: update.graphic,
-                    layer: update.layer,
-                    hue: update.hue,
-                };
-                match equipment.iter_mut().find(|item| item.layer == update.layer) {
-                    Some(item) if *item == fresh => was_ground || was_contained || was_worn,
-                    Some(item) => {
-                        *item = fresh;
-                        true
-                    }
-                    None => {
-                        equipment.push(fresh);
-                        true
-                    }
-                }
-            }
             ServerPacket::EquipUpdate(update) => {
-                let was_ground = self.items.remove(&update.item).is_some();
-                let was_contained = self.remove_from_containers(update.item, None);
-                let was_worn = self.remove_from_equipment(update.item);
+                let catalogue_change = self.item_catalogue.place(
+                    update.item,
+                    ItemEntity {
+                        graphic: update.graphic,
+                        hue: update.hue,
+                        position: ItemPosition::Equipped {
+                            mobile: update.mobile,
+                            layer: update.layer,
+                        },
+                    },
+                );
+                let relocated = self.apply_catalogue_change(catalogue_change);
                 let stock_changed = if update.layer.0 == 0x1A {
                     self.vendor_stock.insert(update.mobile, update.item) != Some(update.item)
                 } else {
                     false
                 };
-                let Some(mobile) = self.mobiles.get_mut(&update.mobile) else {
-                    return stock_changed || was_ground || was_contained || was_worn;
-                };
-                let fresh = Equipment {
-                    serial: update.item,
-                    graphic: update.graphic,
-                    layer: update.layer,
-                    hue: update.hue,
-                };
-                match mobile
-                    .equipment
-                    .iter_mut()
-                    .find(|item| item.layer == update.layer)
-                {
-                    Some(item) if *item == fresh => stock_changed || was_ground || was_contained || was_worn,
-                    Some(item) => {
-                        *item = fresh;
-                        true
-                    }
-                    None => {
-                        mobile.equipment.push(fresh);
-                        true
-                    }
-                }
+                stock_changed || relocated
             }
             ServerPacket::WorldItem(item) => {
-                let fresh = Item {
-                    graphic: item.graphic,
-                    payload: item.payload,
-                    position: item.position,
-                    hue: item.hue,
-                };
-                let changed = self.items.get(&item.serial) != Some(&fresh);
-                self.items.insert(item.serial, fresh);
-                self.remove_from_containers(item.serial, None) || changed
+                let catalogue_change = self.item_catalogue.place(
+                    item.serial,
+                    ItemEntity {
+                        graphic: item.graphic,
+                        hue: item.hue,
+                        position: ItemPosition::Ground {
+                            payload: item.payload,
+                            position: item.position,
+                        },
+                    },
+                );
+                self.apply_catalogue_change(catalogue_change)
             }
             ServerPacket::TargetCursor(cursor) => {
                 // No multi, and that has to be *written* rather than left alone:
@@ -1410,9 +1681,15 @@ impl WorldView {
             ServerPacket::ContainerContents(listing) => match listing.container {
                 None => false,
                 Some(container) => {
-                    let changed = self.contents.get(&container) != Some(&listing.items);
+                    let catalogue_change = self.item_catalogue.replace_contents(container, &listing.items);
+                    let catalogue_changed = self.apply_catalogue_change(catalogue_change);
+                    let projection_changed = self.contents.get(&container) != Some(&listing.items);
+                    // A window can have deliberately dropped its projection
+                    // while the catalogue kept the entities. `0x3C` is the
+                    // authoritative drawing order for that window, so rebuild
+                    // it even when none of those entities moved.
                     self.contents.insert(container, listing.items.clone());
-                    changed
+                    catalogue_changed || projection_changed
                 }
             },
             ServerPacket::CorpseEquipment(equipment) => {
@@ -1450,12 +1727,23 @@ impl WorldView {
             // `0x25` for an item whose stack merely grew, and the reference
             // client replaces the record it already has.
             ServerPacket::AddToContainer(added) => {
-                let was_ground = self.items.remove(&added.item.serial).is_some();
-                let was_elsewhere = self.remove_from_containers(added.item.serial, Some(added.container));
-                let was_worn = self.remove_from_equipment(added.item.serial);
+                let catalogue_change = self.item_catalogue.place(
+                    added.item.serial,
+                    ItemEntity {
+                        graphic: added.item.graphic,
+                        hue: added.item.hue,
+                        position: ItemPosition::Contained {
+                            container: added.container,
+                            amount: added.item.amount,
+                            at: added.item.at,
+                            grid: added.item.grid,
+                        },
+                    },
+                );
+                let catalogue_changed = self.apply_catalogue_change(catalogue_change);
                 let held = self.contents.entry(added.container).or_default();
-                match held.iter_mut().find(|item| item.serial == added.item.serial) {
-                    Some(item) if *item == added.item => was_ground || was_elsewhere || was_worn,
+                let projection_changed = match held.iter_mut().find(|item| item.serial == added.item.serial) {
+                    Some(item) if *item == added.item => false,
                     Some(item) => {
                         *item = added.item;
                         true
@@ -1464,7 +1752,8 @@ impl WorldView {
                         held.push(added.item);
                         true
                     }
-                }
+                };
+                catalogue_changed || projection_changed
             }
             // A paperdoll. Only the window: the equipment it draws is already
             // held on the mobile this names — see `WorldView::paperdolls`.
@@ -2226,6 +2515,82 @@ mod tests {
         assert!(view.items.contains_key(&candle().serial));
     }
 
+    /// Dropping a robe sends its new ground position, not an explicit
+    /// unequip. The destination must therefore retire the paperdoll copy.
+    #[test]
+    fn a_ground_destination_retires_the_lifters_stale_equipment_source() {
+        let mut view = WorldView::entered(start());
+        let robe = shirt();
+        view.apply(&ServerPacket::EquipUpdate(
+            openshard_protocol::items::EquipUpdate {
+                item: robe.serial,
+                graphic: robe.graphic,
+                layer: robe.layer,
+                mobile: view.player.serial,
+                hue: robe.hue,
+            },
+        ));
+
+        assert!(view.apply(&ServerPacket::WorldItem(WorldItem {
+            serial: robe.serial,
+            graphic: robe.graphic,
+            payload: WorldItemPayload::Stack(ItemAmount::ONE),
+            position: Point::new(1000, 2000, 5),
+            hue: robe.hue,
+            light: None,
+            flags: ItemFlags::NONE,
+        })));
+        assert!(view.player.equipment.is_empty(), "the robe left the paperdoll");
+        assert!(
+            view.items.contains_key(&robe.serial),
+            "and now lies on the ground"
+        );
+        assert_eq!(
+            view.item_catalogue.get(robe.serial),
+            Some(&ItemEntity {
+                graphic: robe.graphic,
+                hue: robe.hue,
+                position: ItemPosition::Ground {
+                    payload: WorldItemPayload::Stack(ItemAmount::ONE),
+                    position: Point::new(1000, 2000, 5),
+                },
+            }),
+            "the catalogue, not either drawing projection, owns the new position"
+        );
+    }
+
+    /// The catalogue owns the layer, so replacing a layer retires the displaced
+    /// entity as well as its paperdoll projection.
+    #[test]
+    fn an_equipment_layer_replacement_removes_the_displaced_catalogue_entity() {
+        let mut view = WorldView::entered(start());
+        let shirt = shirt();
+        let replacement = Equipment {
+            serial: Serial::new(0x4000_0002).unwrap(),
+            graphic: Graphic(0x1515),
+            layer: shirt.layer,
+            hue: Hue(0x0022),
+        };
+        for item in [shirt, replacement] {
+            assert!(view.apply(&ServerPacket::EquipUpdate(
+                openshard_protocol::items::EquipUpdate {
+                    item: item.serial,
+                    graphic: item.graphic,
+                    layer: item.layer,
+                    mobile: view.player.serial,
+                    hue: item.hue,
+                },
+            )));
+        }
+
+        assert!(view.item_catalogue.get(shirt.serial).is_none());
+        assert_eq!(
+            view.player.equipment,
+            vec![replacement],
+            "the projection follows the catalogue's sole survivor"
+        );
+    }
+
     #[test]
     fn a_remove_forgets_whichever_map_actually_holds_the_serial() {
         // The client does not distinguish a mobile walking out of range from an
@@ -2244,6 +2609,7 @@ mod tests {
 
         assert!(view.apply(&ServerPacket::Remove(Remove { serial: item.serial })));
         assert!(!view.items.contains_key(&item.serial));
+        assert!(view.item_catalogue.get(item.serial).is_none());
         assert!(
             !view.apply(&ServerPacket::Remove(Remove { serial: item.serial })),
             "forgetting something already gone changes nothing"

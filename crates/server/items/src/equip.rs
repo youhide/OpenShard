@@ -89,11 +89,6 @@ pub fn equip_item(
         bounce(state, connection, held, DragCancelReason::OutOfRange);
         return;
     }
-    // A layer holds one thing.
-    if layer_taken(state, wearer_serial, layer) {
-        bounce(state, connection, held, DragCancelReason::Other);
-        return;
-    }
     let Some(drawn) = state.registry.get::<Drawn>(held.entity).copied() else {
         bounce(state, connection, held, DragCancelReason::Other);
         return;
@@ -103,6 +98,45 @@ pub fn equip_item(
         return;
     }
 
+    // One paperdoll layer still holds one item, but putting a new garment onto
+    // it is a replacement rather than a refusal.  Capture the old item before
+    // either relocation changes the query that found it, then put it in the
+    // player's backpack before the held item takes the freed layer.
+    let displaced = equipped_items(state, wearer_serial)
+        .find_map(|(equipped_item, worn)| (worn.layer == layer).then_some(equipped_item));
+    let displaced_backpack = if displaced.is_some() {
+        let Some(backpack) = backpack_of(state, wearer_serial) else {
+            bounce(state, connection, held, DragCancelReason::Other);
+            return;
+        };
+        Some(backpack)
+    } else {
+        None
+    };
+
+    if let Some(displaced) = displaced {
+        let Some(displaced_serial) = state.registry.serial_of(displaced) else {
+            bounce(state, connection, held, DragCancelReason::Other);
+            return;
+        };
+        let backpack = displaced_backpack.expect("a displaced item needed a backpack");
+        // The equipped backpack is its own container. Replacing that layer
+        // would otherwise try to file the old pack inside itself; the old
+        // occupied-layer rule refused this already, so keep that safe answer.
+        if displaced_serial == backpack {
+            bounce(state, connection, held, DragCancelReason::Other);
+            return;
+        }
+        let contained = Contained {
+            container: backpack,
+            position: GumpPoint::new(0, 0),
+            grid: GridSlot(item_count(state, backpack)),
+        };
+        relocate_item(state, displaced, ItemLocation::contained(contained))
+            .expect("replacing a worn item frees its paperdoll layer");
+        broadcast_unequip(state, displaced_serial, wearer);
+        tell_watchers_updated(state, backpack, displaced);
+    }
     let equipped = Equipped {
         mobile: wearer_serial,
         layer,

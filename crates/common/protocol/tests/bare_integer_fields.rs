@@ -140,6 +140,42 @@ const ALLOWLIST: &[(&str, &str, &str)] = &[
         "BuyLine: gold, the MobileStatus::gold argument",
     ),
     ("vendor.rs", "price", "SellLine: gold, same as BuyLine::price"),
+    // -- craft catalogue presentation values --------------------------------
+    (
+        "craft.rs",
+        "button",
+        "CraftCatalogueRow: the normal gump reply id; wrapping it would duplicate the raw button type at this private wire seam",
+    ),
+    (
+        "craft.rs",
+        "skill_min",
+        "CraftCatalogueRow: displayed primary-skill threshold in the game's tenths-of-a-percent unit",
+    ),
+    (
+        "craft.rs",
+        "amount",
+        "CraftCatalogueComponent: a stack count consumed by one recipe, not an item serial or identifier",
+    ),
+    (
+        "craft.rs",
+        "damage_min",
+        "CraftWeaponProperties: lower bound of one displayed damage range; both endpoints belong together",
+    ),
+    (
+        "craft.rs",
+        "damage_max",
+        "CraftWeaponProperties: same displayed damage range",
+    ),
+    (
+        "craft.rs",
+        "speed_centis",
+        "CraftWeaponProperties: ML swing duration in the authoritative centisecond unit",
+    ),
+    (
+        "craft.rs",
+        "range",
+        "CraftWeaponProperties: optional tile count for a ranged weapon, zero remains the wire sentinel for melee",
+    ),
     // -- login's own quantities, and a type that is not a packet struct -----
     // N6 amendments 7/8
     // `percent_full` was on this list and is not any more: 100 is a ceiling

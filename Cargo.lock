@@ -2752,6 +2752,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "openshard-egui-capture"
+version = "0.0.1"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "openshard-entities"
 version = "0.0.1"
 dependencies = [

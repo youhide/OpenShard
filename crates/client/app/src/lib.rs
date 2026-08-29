@@ -174,7 +174,7 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::version::ClientVersion;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
-use openshard_uofiles::anim::Anim;
+use openshard_uofiles::anim::{Anim, BodyDef};
 use openshard_uofiles::animdata::AnimData;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::cliloc::Cliloc;
@@ -271,6 +271,10 @@ impl<'a> WorldSource<'a> {
 /// A repeatable presentation path injected into the client at startup.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Scenario {
+    /// Ask the live shard for its craft catalogue once the window opens. This
+    /// is a presentation fixture for the egui capture tool, not a saved UI
+    /// preference or a simulated catalogue.
+    CraftCatalogue,
     /// Zoom out to the first composite tier and pan across many map blocks.
     LodSweep,
     /// Hold the maximum zoom while comparing the resident static-atlas texture
@@ -770,6 +774,14 @@ pub fn run<D: Dial + Send + 'static>(
         }
     };
 
+    let body_def = match BodyDef::open(dir) {
+        Ok(definition) => definition,
+        Err(error) => {
+            eprintln!("opening Body.def: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     // What a worn item draws as. Read alongside `anim`, which is what its
     // entries resolve into.
     let equip_conv = match EquipConv::load(dir.join("Equipconv.def")) {
@@ -1125,6 +1137,7 @@ pub fn run<D: Dial + Send + 'static>(
             cliloc,
             ttf_font,
             anim,
+            body_def,
             equip_conv,
             skill_names,
             skill_groups,

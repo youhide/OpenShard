@@ -1048,10 +1048,10 @@ fn finish_hit(
 /// out of reach opens a full interval when the fighters meet, rather than
 /// landing before a frame can be shown.
 ///
-/// A shot whose selected target is out of its committed reach or out of sight
-/// commits into [`Phase::Arming`] and only then [`Phase::Armed`]. This is
-/// targeted overwatch: the same opponent becoming reachable and visible
-/// releases it after the draw; it does not scan the world for a new target.
+/// A prepared action whose selected target is presently unavailable commits
+/// into [`Phase::Arming`] and only then [`Phase::Armed`]. A shot watches for
+/// sight or range; a melee blow watches for reach. In either case it remains
+/// bound to this opponent rather than scanning the world for a new target.
 pub fn commit_actions(state: &mut WorldState) {
     let now = state.ticks;
     let pending = pending_actions(state);
@@ -1149,20 +1149,22 @@ fn commit_fighter_action(
     // becomes data, and the polearm falls exactly on that seam; the ranged half
     // already reads its reach off the weapon, which makes the seam visible here.
     let kind = ranged_action(state, attacker).unwrap_or(ActionKind::Swing { reach: MELEE_REACH });
-    // A bow and either a cut sight line or excess range begin an action rather
-    // than refusing one: the archer nocks now and holds until this same target
-    // is both in reach and in view. Facet and target life remain hard admission
-    // rules; overwatch is not permission to carry an aim away.
+    // A bow begins its draw through either a cut sight line or excess range;
+    // a melee weapon begins its wind-up while its target is still too far away.
+    // The latter is the contact seam: running into reach must release a blow
+    // that was already prepared, not wait to begin preparing one on arrival.
+    // Facet and target life remain hard admission rules; a watch is never
+    // permission to carry an aim away.
     let obstruction = obstruction(state, attacker, target, kind.reach());
-    let arms_for_obstruction = matches!(
-        (kind, obstruction),
-        (
-            ActionKind::Shot { .. },
-            Some(InterruptReason::NoLineOfSight | InterruptReason::OutOfReach)
-        )
-    );
+    let watch = match (kind, obstruction) {
+        (ActionKind::Shot { .. }, Some(InterruptReason::NoLineOfSight | InterruptReason::OutOfReach)) => {
+            Some(Watch::TargetInSight)
+        }
+        (ActionKind::Swing { .. }, Some(InterruptReason::OutOfReach)) => Some(Watch::TargetInReach),
+        _ => None,
+    };
     if let Some(reason) = obstruction {
-        if !arms_for_obstruction {
+        if watch.is_none() {
             return CommitDecision::Balked(reason);
         }
     }
@@ -1182,31 +1184,31 @@ fn commit_fighter_action(
         }
     }
 
-    if arms_for_obstruction {
-        start_arming_shot(state, now, attacker, target, target_serial, kind);
+    if let Some(watch) = watch {
+        start_arming_action(state, now, attacker, target, target_serial, kind, watch);
     } else {
         start_combat_action(state, now, attacker, target, target_serial, due, kind);
     }
     CommitDecision::Committed
 }
 
-/// Nock and draw a shot against one selected target before it may be held.
-fn start_arming_shot(
+/// Prepare an action against one selected target before it may be held.
+fn start_arming_action(
     state: &mut WorldState,
     now: WorldTick,
     attacker: EntityId,
     target: EntityId,
     target_serial: Serial,
     kind: ActionKind,
+    watch: Watch,
 ) {
-    debug_assert!(matches!(kind, ActionKind::Shot { .. }));
     let telegraphed = !state.registry.has::<Hidden>(attacker);
     let ready_at = now.saturating_add(arming_ticks(state, attacker, kind));
     let action = CombatAction {
         target: target_serial,
         kind,
         phase: Phase::Arming {
-            watch: Watch::TargetInSight,
+            watch,
             ready_at,
             expires_at: ready_at.saturating_add(OVERWATCH_ENDURANCE_TICKS),
         },
@@ -1504,16 +1506,18 @@ pub fn sustain_actions(state: &mut WorldState) {
         // swinging into the dark now says so in its config. A target on another
         // facet is not somewhere a rule can put it back.
         let obstruction = obstruction(state, attacker, target, action.reach());
-        if let Phase::Arming { ready_at, .. } = action.phase {
-            match obstruction {
-                // Sight changing during the draw neither releases the arrow nor
-                // spoils it. The mandatory preparation clock is the first gate.
-                Some(InterruptReason::NoLineOfSight | InterruptReason::OutOfReach) | None => {}
-                Some(reason) => {
-                    spoil(state, attacker, reason);
-                    continue;
-                }
+        if let Phase::Arming { watch, ready_at, .. } = action.phase {
+            if !watch_waits_for(watch, obstruction) && obstruction.is_some() {
+                spoil(
+                    state,
+                    attacker,
+                    obstruction.expect("an obstruction was just checked"),
+                );
+                continue;
             }
+            // A changing watch never bypasses the mandatory preparation clock:
+            // an arrow still has to be drawn and a runner's prepared blow still
+            // has to complete its wind-up before either may release.
             if now < ready_at {
                 advance_stage(state, attacker, now);
                 continue;
@@ -1524,20 +1528,12 @@ pub fn sustain_actions(state: &mut WorldState) {
             }
             continue;
         }
-        if matches!(
-            action.phase,
-            Phase::Armed {
-                watch: Watch::TargetInSight,
-                ..
-            }
-        ) {
+        if let Phase::Armed { watch, .. } = action.phase {
             match obstruction {
                 // This is the state the watch exists to hold, not blindness and
                 // not an interruption. Either mobile may keep moving while it
                 // remains true.
-                Some(InterruptReason::NoLineOfSight | InterruptReason::OutOfReach) => {
-                    advance_stage(state, attacker, now);
-                }
+                Some(reason) if watch_waits_for(watch, Some(reason)) => advance_stage(state, attacker, now),
                 Some(reason) => spoil(state, attacker, reason),
                 None => release_armed_action(state, now, attacker, target),
             }
@@ -1558,6 +1554,21 @@ pub fn sustain_actions(state: &mut WorldState) {
         }
         advance_stage(state, attacker, now);
     }
+}
+
+/// Whether this watch treats the current obstruction as a condition to wait
+/// through instead of an interruption.
+fn watch_waits_for(watch: Watch, obstruction: Option<InterruptReason>) -> bool {
+    matches!(
+        (watch, obstruction),
+        (
+            Watch::TargetInSight,
+            Some(InterruptReason::NoLineOfSight | InterruptReason::OutOfReach)
+        ) | (
+            Watch::TargetInReach | Watch::Contact,
+            Some(InterruptReason::OutOfReach)
+        )
+    )
 }
 
 /// Move a running action into the stretch its interval says it is in, and tell
