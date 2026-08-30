@@ -299,6 +299,8 @@ pub struct Shell {
     item_catalogue: ItemArtCatalogue,
     /// Transient controls for the client-owned craft catalogue.
     craft_catalogue: CraftCataloguePanel,
+    /// Decoded item art for the tool-specific craft workbench.
+    craft_workbench: CraftWorkbenchPanel,
 }
 
 impl Shell {
@@ -364,6 +366,7 @@ impl Shell {
             desk,
             item_catalogue: ItemArtCatalogue::default(),
             craft_catalogue: CraftCataloguePanel::default(),
+            craft_workbench: CraftWorkbenchPanel::default(),
         }
     }
 
@@ -569,6 +572,7 @@ impl Shell {
                     },
                     item_catalogue: &mut self.item_catalogue,
                     craft_catalogue: &mut self.craft_catalogue,
+                    craft_workbench: &mut self.craft_workbench,
                     desk,
                 },
             );
@@ -799,6 +803,7 @@ struct LayoutFrame<'a> {
     shell: ShellFrame<'a>,
     item_catalogue: &'a mut ItemArtCatalogue,
     craft_catalogue: &'a mut CraftCataloguePanel,
+    craft_workbench: &'a mut CraftWorkbenchPanel,
     desk: &'a mut Desk,
 }
 
@@ -827,6 +832,7 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
             },
         item_catalogue,
         craft_catalogue,
+        craft_workbench,
         desk,
     } = frame;
     let mut request = Request::default();
@@ -1073,6 +1079,15 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
         hue_ramp,
         cliloc,
         craft_catalogue,
+        &mut request,
+    );
+    craft_workbench_window(
+        &context,
+        world,
+        art,
+        hue_ramp,
+        cliloc,
+        craft_workbench,
         &mut request,
     );
 
@@ -1384,6 +1399,375 @@ fn craft_catalogue_window(
         reply = Some(craft_reply(gump, 0));
     }
     request.craft_reply = reply;
+}
+
+/// Textures and identity for the normal tool-specific craft window.
+#[derive(Default)]
+struct CraftWorkbenchPanel {
+    gump_id: Option<u32>,
+    textures: BTreeMap<(u16, u16), Option<egui::TextureHandle>>,
+}
+
+/// Render the ordinary tool craft gump as an egui workbench.
+///
+/// The server still emits the old gump as a compatibility shell, but this view
+/// is its owner for OpenShard clients. Every visible action sends the exact
+/// reply number from the typed model, so this is presentation replacement, not
+/// a second crafting protocol.
+fn craft_workbench_window(
+    context: &egui::Context,
+    world: &WorldState,
+    art: &openshard_uofiles::art::Art,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    cliloc: Option<&Cliloc>,
+    panel: &mut CraftWorkbenchPanel,
+    request: &mut Request,
+) {
+    let Some(view) = world.authoritative.view.as_ref() else {
+        panel.gump_id = None;
+        return;
+    };
+    let Some((workbench, gump)) = view.craft_workbenches.values().find_map(|workbench| {
+        view.gumps
+            .iter()
+            .find(|gump| gump.gump_id == workbench.gump_id)
+            .map(|gump| (workbench, gump))
+    }) else {
+        panel.gump_id = None;
+        return;
+    };
+    if panel.gump_id != Some(workbench.gump_id.0) {
+        panel.gump_id = Some(workbench.gump_id.0);
+        panel.textures.clear();
+    }
+
+    let mut open = true;
+    let mut reply = None;
+    let title = craft_workbench_text(&workbench.title, cliloc);
+    egui::Window::new(format!("Crafting · {title}"))
+        .id(egui::Id::new(("craft workbench", workbench.gump_id.0)))
+        .default_pos([48.0, 48.0])
+        .default_size([1040.0, 700.0])
+        .min_size([760.0, 500.0])
+        .open(&mut open)
+        .show(context, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.heading(&title);
+                ui.separator();
+                match workbench.tool_uses {
+                    Some(uses) if workbench.tool_carried => ui.colored_label(
+                        egui::Color32::from_rgb(95, 205, 120),
+                        format!("Tool · {uses} uses"),
+                    ),
+                    Some(uses) => ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        format!("Tool is not carried · {uses} uses"),
+                    ),
+                    None => ui.colored_label(ui.visuals().warn_fg_color, "Tool unavailable"),
+                };
+                craft_facility_badges(ui, workbench.required_facilities, workbench.present_facilities);
+                if ui.button("Refresh").clicked() {
+                    reply = Some(craft_reply(gump, workbench.refresh_button));
+                }
+            });
+            if let Some(notice) = &workbench.notice {
+                ui.colored_label(ui.visuals().warn_fg_color, craft_workbench_text(notice, cliloc));
+            }
+            ui.separator();
+            ui.columns(2, |columns| {
+                columns[0].set_min_width(210.0);
+                columns[0].strong("Categories");
+                egui::ScrollArea::vertical().show(&mut columns[0], |ui| {
+                    for group in &workbench.groups {
+                        let label = craft_workbench_text(&group.name, cliloc);
+                        if ui.selectable_label(group.selected, label).clicked() {
+                            reply = Some(craft_reply(gump, group.button));
+                        }
+                    }
+                });
+                columns[1].vertical(|ui| match &workbench.page {
+                    openshard_protocol::craft::CraftWorkbenchPage::Items { recipes } => {
+                        ui.strong("Recipes");
+                        egui::ScrollArea::vertical()
+                            .id_salt(("craft recipes", workbench.gump_id.0))
+                            .show(ui, |ui| {
+                                for recipe in recipes {
+                                    craft_workbench_recipe_row(
+                                        ui, recipe, art, hue_ramp, cliloc, panel, gump, &mut reply,
+                                    );
+                                    ui.separator();
+                                }
+                            });
+                    }
+                    openshard_protocol::craft::CraftWorkbenchPage::Resources { materials } => {
+                        ui.strong("Materials");
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for material in materials {
+                                ui.horizontal(|ui| {
+                                    craft_workbench_icon(
+                                        ui,
+                                        art,
+                                        hue_ramp,
+                                        panel,
+                                        material.graphic,
+                                        material.hue,
+                                        34.0,
+                                    );
+                                    let text = format!(
+                                        "{} · {} available",
+                                        craft_workbench_text(&material.name, cliloc),
+                                        material.carried
+                                    );
+                                    if ui.selectable_label(material.selected, text).clicked() {
+                                        reply = Some(craft_reply(gump, material.button));
+                                    }
+                                });
+                            }
+                        });
+                    }
+                    openshard_protocol::craft::CraftWorkbenchPage::Details {
+                        recipe,
+                        success_per_mille,
+                        exceptional_per_mille,
+                    } => {
+                        ui.strong("Recipe details");
+                        craft_workbench_detail(
+                            ui,
+                            recipe,
+                            *success_per_mille,
+                            *exceptional_per_mille,
+                            art,
+                            hue_ramp,
+                            cliloc,
+                            panel,
+                            gump,
+                            &mut reply,
+                        );
+                    }
+                });
+            });
+            ui.separator();
+            ui.horizontal(|ui| {
+                if let Some(material) = &workbench.selected_material {
+                    craft_workbench_icon(ui, art, hue_ramp, panel, material.graphic, material.hue, 28.0);
+                    ui.label(format!(
+                        "Material: {} · {} available",
+                        craft_workbench_text(&material.name, cliloc),
+                        material.carried
+                    ));
+                }
+                if let Some(button) = workbench.materials_button {
+                    if ui.button("Materials").clicked() {
+                        reply = Some(craft_reply(gump, button));
+                    }
+                }
+                if ui.button("Cancel make").clicked() {
+                    reply = Some(craft_reply(gump, workbench.cancel_button));
+                }
+                if ui.button("Close").clicked() {
+                    reply = Some(craft_reply(gump, 0));
+                }
+            });
+        });
+    if !open {
+        reply = Some(craft_reply(gump, 0));
+    }
+    request.craft_reply = reply;
+}
+
+fn craft_workbench_recipe_row(
+    ui: &mut egui::Ui,
+    recipe: &openshard_protocol::craft::CraftWorkbenchRecipe,
+    art: &openshard_uofiles::art::Art,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    cliloc: Option<&Cliloc>,
+    panel: &mut CraftWorkbenchPanel,
+    gump: &openshard_client_net::view::OpenGump,
+    reply: &mut Option<GumpReply>,
+) {
+    ui.horizontal(|ui| {
+        craft_workbench_icon(
+            ui,
+            art,
+            hue_ramp,
+            panel,
+            recipe.result.graphic,
+            recipe.result.hue,
+            42.0,
+        );
+        ui.vertical(|ui| {
+            ui.strong(craft_workbench_text(&recipe.result.name, cliloc));
+            ui.small(craft_workbench_requirements(recipe, cliloc));
+        });
+        if let Some(button) = recipe.make_button {
+            if ui.button("Make").clicked() {
+                *reply = Some(craft_reply(gump, button));
+            }
+        }
+        if let Some(button) = recipe.details_button {
+            if ui.button("Details").clicked() {
+                *reply = Some(craft_reply(gump, button));
+            }
+        }
+    });
+}
+
+fn craft_workbench_detail(
+    ui: &mut egui::Ui,
+    recipe: &openshard_protocol::craft::CraftWorkbenchRecipe,
+    success_per_mille: u16,
+    exceptional_per_mille: Option<u16>,
+    art: &openshard_uofiles::art::Art,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    cliloc: Option<&Cliloc>,
+    panel: &mut CraftWorkbenchPanel,
+    gump: &openshard_client_net::view::OpenGump,
+    reply: &mut Option<GumpReply>,
+) {
+    ui.horizontal(|ui| {
+        craft_workbench_icon(
+            ui,
+            art,
+            hue_ramp,
+            panel,
+            recipe.result.graphic,
+            recipe.result.hue,
+            88.0,
+        );
+        ui.vertical(|ui| {
+            ui.heading(craft_workbench_text(&recipe.result.name, cliloc));
+            ui.label(format!(
+                "Success chance: {:.1}%",
+                f32::from(success_per_mille) / 10.0
+            ));
+            if let Some(exceptional) = exceptional_per_mille {
+                ui.label(format!(
+                    "Exceptional chance: {:.1}%",
+                    f32::from(exceptional) / 10.0
+                ));
+            }
+            for (skill, minimum) in &recipe.skills {
+                ui.small(format!(
+                    "{}: {:.1}%",
+                    craft_workbench_text(skill, cliloc),
+                    f32::from(*minimum) / 10.0
+                ));
+            }
+        });
+    });
+    ui.separator();
+    ui.strong("Materials");
+    for component in &recipe.components {
+        ui.horizontal(|ui| {
+            craft_workbench_icon(ui, art, hue_ramp, panel, component.graphic, component.hue, 32.0);
+            let carried = component
+                .carried
+                .map_or_else(String::new, |amount| format!(" · {amount} available"));
+            ui.label(format!(
+                "{} ×{}{}",
+                craft_workbench_text(&component.name, cliloc),
+                component.amount,
+                carried
+            ));
+        });
+    }
+    if recipe.use_all_resources {
+        ui.small("Uses all available resources.");
+    }
+    if recipe.markable {
+        ui.small("May receive a maker's mark.");
+    }
+    ui.separator();
+    if let Some(button) = recipe.make_button {
+        if ui.button("Make now").clicked() {
+            *reply = Some(craft_reply(gump, button));
+        }
+    }
+    if ui.button("Back").clicked() {
+        *reply = Some(craft_reply(gump, 0));
+    }
+}
+
+fn craft_workbench_requirements(
+    recipe: &openshard_protocol::craft::CraftWorkbenchRecipe,
+    cliloc: Option<&Cliloc>,
+) -> String {
+    let skills = recipe
+        .skills
+        .iter()
+        .map(|(skill, minimum)| {
+            format!(
+                "{} {:.1}%",
+                craft_workbench_text(skill, cliloc),
+                f32::from(*minimum) / 10.0
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let materials = recipe
+        .components
+        .iter()
+        .map(|component| {
+            format!(
+                "{} ×{}",
+                craft_workbench_text(&component.name, cliloc),
+                component.amount
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    match (skills.is_empty(), materials.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => skills,
+        (true, false) => materials,
+        (false, false) => format!("{skills} · {materials}"),
+    }
+}
+
+fn craft_workbench_icon(
+    ui: &mut egui::Ui,
+    art: &openshard_uofiles::art::Art,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    panel: &mut CraftWorkbenchPanel,
+    graphic: Graphic,
+    hue: Hue,
+    size: f32,
+) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        match craft_item_texture(ui.ctx(), art, hue_ramp, &mut panel.textures, graphic, hue) {
+            Some(texture) => {
+                ui.add(egui::Image::from_texture(texture).fit_to_exact_size(egui::vec2(size, size)));
+            }
+            None => {
+                ui.add_sized([size, size], egui::Label::new("—"));
+            }
+        }
+    });
+}
+
+fn craft_workbench_text(text: &openshard_protocol::craft::CraftText, cliloc: Option<&Cliloc>) -> String {
+    match text {
+        openshard_protocol::craft::CraftText::Cliloc(id) => craft_label(*id, cliloc),
+        openshard_protocol::craft::CraftText::Literal(value) => value.clone(),
+    }
+}
+
+fn craft_facility_badges(ui: &mut egui::Ui, required: u8, present: u8) {
+    const NAMES: [&str; 6] = ["Forge", "Anvil", "Fire", "Oven", "Mill", "Water"];
+    for (index, name) in NAMES.iter().enumerate() {
+        let bit = 1 << index;
+        if required & bit != 0 {
+            let ready = present & bit != 0;
+            ui.colored_label(
+                if ready {
+                    egui::Color32::from_rgb(95, 205, 120)
+                } else {
+                    ui.visuals().warn_fg_color
+                },
+                format!("{name}: {}", if ready { "ready" } else { "missing" }),
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -6222,6 +6606,7 @@ mod tests {
             button: 8,
             result: Graphic(0x13EB),
             result_hue: Hue::NONE,
+            result_item_kind: None,
             name: ClilocId(0),
             skill: ClilocId(0),
             skill_min: 0,
@@ -6259,12 +6644,16 @@ mod tests {
             skill: ClilocId(7),
             components: vec![
                 openshard_protocol::craft::CraftCatalogueComponent {
+                    item_kind: None,
+                    material: None,
                     graphic: Graphic(0x1BF2),
                     hue: Hue::NONE,
                     name: ClilocId(0),
                     amount: 2,
                 },
                 openshard_protocol::craft::CraftCatalogueComponent {
+                    item_kind: None,
+                    material: None,
                     graphic: Graphic(0x0F8D),
                     hue: Hue::NONE,
                     name: ClilocId(0),

@@ -70,7 +70,7 @@ use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
 use openshard_state::{
     FacetState, Gameplay, ItemLocation as LiveItemLocation, Outbound, TICKS_PER_SECOND, TooltipMode,
-    WorldHome, WorldState, establish_item_location, relocate_item,
+    WorldHome, WorldState, establish_item_location, kind_from_drawn, presentation_of, relocate_item,
 };
 
 use openshard_ai as ai;
@@ -1240,7 +1240,20 @@ impl World {
                 position,
                 facet,
             } => {
-                items::spawn_item(&mut self.state, graphic, hue, amount, stackable, position, facet);
+                let drawn = Drawn { id: graphic, hue };
+                if let Some((kind, material)) = kind_from_drawn(drawn) {
+                    items::spawn_item_kind(
+                        &mut self.state,
+                        kind,
+                        material,
+                        amount,
+                        stackable,
+                        position,
+                        facet,
+                    );
+                } else {
+                    items::spawn_item(&mut self.state, graphic, hue, amount, stackable, position, facet);
+                }
             }
             Command::SpawnContainer {
                 graphic,
@@ -1463,11 +1476,26 @@ impl World {
                 amount,
                 stackable,
             } => self.give_item(serial, graphic, hue, amount, stackable),
+            Command::GiveItemKind {
+                serial,
+                item_kind,
+                material,
+                amount,
+                stackable,
+            } => {
+                items::give_kind_to_backpack(&mut self.state, serial, item_kind, material, amount, stackable);
+            }
             Command::TakeItem {
                 serial,
                 graphic,
                 amount,
             } => self.take_item(serial, graphic, amount),
+            Command::TakeItemKind {
+                serial,
+                item_kind,
+                material,
+                amount,
+            } => self.take_item_kind(serial, item_kind, material, amount),
             Command::RequestCast { connection, spell } => self.begin_cast(connection, spell),
             Command::StockVendor { serial, stock } => {
                 npc::stock(&mut self.state, serial, stock);
@@ -1479,6 +1507,13 @@ impl World {
                 amount,
                 stackable,
             } => self.add_loot(container, graphic, hue, amount, stackable),
+            Command::AddLootKind {
+                container,
+                item_kind,
+                material,
+                amount,
+                stackable,
+            } => self.add_loot_kind(container, item_kind, material, amount, stackable),
             Command::ConsumeItem { serial, amount } => {
                 items::consume(&mut self.state, serial, amount);
             }
@@ -1640,9 +1675,16 @@ impl World {
 
     /// Drop an item into a player's backpack — a quest reward. Merges onto a like
     /// pile when `stackable` (gold), else a discrete piece. Silent if the serial
-    /// names no mobile or it wears no backpack.
+    /// names no mobile or it wears no backpack. Registered presentation is
+    /// immediately projected back to semantic identity; arbitrary client art
+    /// remains an explicit legacy reward.
     fn give_item(&mut self, serial: Serial, graphic: Graphic, hue: Hue, amount: u16, stackable: bool) {
-        items::give_to_backpack(&mut self.state, serial, graphic, hue, amount, stackable);
+        let drawn = Drawn { id: graphic, hue };
+        if let Some((kind, material)) = kind_from_drawn(drawn) {
+            items::give_kind_to_backpack(&mut self.state, serial, kind, material, amount, stackable);
+        } else {
+            items::give_to_backpack(&mut self.state, serial, graphic, hue, amount, stackable);
+        }
     }
 
     /// Take up to `amount` of a graphic from a player's backpack — all-or-nothing,
@@ -1655,6 +1697,45 @@ impl World {
         self.state.bus.send(openshard_items::ItemsTaken {
             player: serial,
             graphic,
+            item_kind: None,
+            material: None,
+            taken,
+        });
+    }
+
+    /// Semantic form of [`Self::take_item`]. It keeps the audited legacy seam
+    /// while the save migration is in flight, but never lets an unrelated item
+    /// with matching art satisfy a typed quest objective.
+    fn take_item_kind(
+        &mut self,
+        serial: Serial,
+        item_kind: openshard_protocol::item_kind::ItemKindId,
+        material: Option<openshard_protocol::item_kind::MaterialId>,
+        amount: u16,
+    ) {
+        let Some(drawn) = presentation_of(item_kind, material) else {
+            self.state.bus.send(openshard_items::ItemsTaken {
+                player: serial,
+                graphic: Graphic(0),
+                item_kind: Some(item_kind),
+                material,
+                taken: 0,
+            });
+            return;
+        };
+        let taken = items::take_from_backpack_identity_or_legacy(
+            &mut self.state,
+            serial,
+            item_kind,
+            material,
+            drawn,
+            amount,
+        );
+        self.state.bus.send(openshard_items::ItemsTaken {
+            player: serial,
+            graphic: drawn.id,
+            item_kind: Some(item_kind),
+            material,
             taken,
         });
     }

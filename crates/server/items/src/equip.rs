@@ -1,6 +1,8 @@
 use super::*;
 use openshard_protocol::wire::{Graphic, Hue};
-use openshard_state::weapon::{LAYER_ONE_HANDED, LAYER_TWO_HANDED, weapon_data, weapon_layer};
+use openshard_state::weapon::{
+    LAYER_ONE_HANDED, LAYER_TWO_HANDED, WeaponData, weapon_data, weapon_data_for_kind, weapon_layer,
+};
 
 /// The highest layer an item can be worn on: 1–25 are the body; higher numbers
 /// are the backpack and bank, not "worn".
@@ -23,7 +25,9 @@ pub fn equip_worn_item(
             return None;
         }
     };
-    state.registry.insert(entity, Drawn { id: graphic, hue });
+    let drawn = Drawn { id: graphic, hue };
+    state.registry.insert(entity, drawn);
+    crate::spawn::install_legacy_identity(state, entity, drawn);
     let equipped = Equipped { mobile, layer };
     establish_item_location(state, entity, ItemLocation::equipped(equipped))
         .expect("new clothing has one valid paperdoll location");
@@ -89,11 +93,11 @@ pub fn equip_item(
         bounce(state, connection, held, DragCancelReason::OutOfRange);
         return;
     }
-    let Some(drawn) = state.registry.get::<Drawn>(held.entity).copied() else {
+    if state.registry.get::<Drawn>(held.entity).is_none() {
         bounce(state, connection, held, DragCancelReason::Other);
         return;
-    };
-    if hands_conflict(state, wearer_serial, drawn.id, layer) {
+    }
+    if hands_conflict(state, wearer_serial, held.entity, layer) {
         bounce(state, connection, held, DragCancelReason::Other);
         return;
     }
@@ -167,20 +171,25 @@ pub fn equip_weapon_from_backpack(
     let Some(&player) = state.players.get(&connection) else {
         return false;
     };
-    let (Some(player_serial), Some(target_serial), Some(&Drawn { id: graphic, .. })) = (
-        state.registry.serial_of(player),
-        state.registry.serial_of(target),
-        state.registry.get::<Drawn>(target),
-    ) else {
+    let (Some(player_serial), Some(target_serial)) =
+        (state.registry.serial_of(player), state.registry.serial_of(target))
+    else {
         return false;
     };
-    let Some(weapon) = weapon_data(graphic) else {
+    let Some(weapon) = weapon_for_item(state, target) else {
+        return false;
+    };
+    let Some(&Drawn { id: graphic, .. }) = state.registry.get::<Drawn>(target) else {
         return false;
     };
     // Axes, picks and fishing poles can also have weapon rows, but their
     // double-click is already the harvest interaction: it must still raise a
     // target cursor rather than merely changing the paperdoll.
-    if openshard_state::harvest::tool_data(graphic).is_some() {
+    let is_harvest_tool = match state.registry.get::<ItemKind>(target) {
+        Some(kind) => openshard_state::has_tag(kind.0, openshard_protocol::item_kind::ItemTag::Tool),
+        None => openshard_state::harvest::tool_data(graphic).is_some(),
+    };
+    if is_harvest_tool {
         return false;
     }
     let Some(ItemLocation::Settled(SettledItemLocation::Contained(contained))) = item_location(state, target)
@@ -212,11 +221,7 @@ pub fn equip_weapon_from_backpack(
                 worn.layer == LAYER_ONE_HANDED || worn.layer == LAYER_TWO_HANDED
             } else {
                 worn.layer == LAYER_ONE_HANDED
-                    || (worn.layer == LAYER_TWO_HANDED
-                        && state
-                            .registry
-                            .get::<Drawn>(item)
-                            .is_some_and(|drawn| weapon_data(drawn.id).is_some()))
+                    || (worn.layer == LAYER_TWO_HANDED && weapon_for_item(state, item).is_some())
             };
             replaces.then_some(item)
         })
@@ -278,8 +283,11 @@ fn in_backpack_tree(state: &WorldState, mut container: Serial, backpack: Serial)
 /// The two protocol hand layers are not two independent weapon slots. A
 /// one-handed weapon may share `TwoHanded` with a shield, but a weapon in that
 /// layer is two-handed and therefore excludes anything in `OneHanded`.
-fn hands_conflict(state: &WorldState, mobile: Serial, graphic: Graphic, layer: Layer) -> bool {
-    let Some(weapon) = weapon_data(graphic) else {
+fn hands_conflict(state: &WorldState, mobile: Serial, item: EntityId, layer: Layer) -> bool {
+    let Some(weapon) = weapon_for_item(state, item) else {
+        return false;
+    };
+    let Some(&Drawn { id: graphic, .. }) = state.registry.get::<Drawn>(item) else {
         return false;
     };
     // The client proposes a layer, but tiledata (and the handful of weapon
@@ -305,11 +313,28 @@ fn hands_conflict(state: &WorldState, mobile: Serial, graphic: Graphic, layer: L
     }
     equipped_items(state, mobile).any(|(item, worn)| {
         worn.layer == LAYER_TWO_HANDED
-            && state
-                .registry
-                .get::<Drawn>(item)
-                .is_some_and(|existing| weapon_data(existing.id).is_some())
+            && state.registry.get::<ItemKind>(item).map_or_else(
+                || {
+                    state
+                        .registry
+                        .get::<Drawn>(item)
+                        .is_some_and(|existing| weapon_data(existing.id).is_some())
+                },
+                |kind| weapon_data_for_kind(kind.0).is_some(),
+            )
     })
+}
+
+/// Resolve an item's weapon role from its declared semantic identity. Old
+/// items without that component retain their graphic-table compatibility path.
+fn weapon_for_item(state: &WorldState, item: EntityId) -> Option<&'static WeaponData> {
+    match state.registry.get::<ItemKind>(item) {
+        Some(kind) => weapon_data_for_kind(kind.0),
+        None => state
+            .registry
+            .get::<Drawn>(item)
+            .and_then(|drawn| weapon_data(drawn.id)),
+    }
 }
 
 /// Despawn everything a mobile carries — its worn items and whatever those hold.

@@ -9,7 +9,9 @@
 //! turn-in path start disagreeing about what a backpack is.
 
 use super::*;
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::wire::{Graphic, Hue};
+use openshard_state::item_definition::item_definition;
 
 /// The paperdoll layer a backpack is worn on. ServUO's `Layer.Backpack`.
 pub const BACKPACK_LAYER: Layer = Layer(0x15);
@@ -71,6 +73,118 @@ pub fn give_to_backpack(
     }
 }
 
+/// [`give_to_backpack`] for a semantic item identity.
+///
+/// It preserves the existing hold/weight rules, but does not let a caller pick
+/// arbitrary classic art for the item it is awarding.
+pub fn give_kind_to_backpack(
+    state: &mut WorldState,
+    mobile: Serial,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+    amount: u16,
+    stackable: bool,
+) -> bool {
+    let Some(drawn) = presentation_of(kind, material) else {
+        return false;
+    };
+    if item_definition(kind)
+        .and_then(|definition| definition.container_gump)
+        .is_some()
+    {
+        // A container is never a pile. Its gump is a definition fact, so this
+        // branch deliberately ignores a legacy caller's `stackable` flag.
+        return give_container_kind_to_backpack(state, mobile, kind, material, amount);
+    }
+    let Some(backpack) = backpack_of(state, mobile) else {
+        return false;
+    };
+    if let Some(owner) = state.registry.entity_of(mobile) {
+        if !room_for_kind(state, owner, backpack, kind, material, drawn, amount, stackable) {
+            return false;
+        }
+    }
+    if stackable || intrinsically_stackable(drawn.id) {
+        give_kind(state, backpack, kind, material, u32::from(amount))
+            .is_some_and(|outcome| outcome.is_complete())
+    } else {
+        // Non-stacking typed items use the shared constructor so the semantic
+        // component is present even where the legacy placement API is not.
+        let Ok((entity, _)) = state.registry.spawn_with_serial(SerialKind::Item) else {
+            warn!("out of item serials; typed backpack item was not created");
+            return false;
+        };
+        state.registry.insert(entity, drawn);
+        crate::spawn::install_identity(state, entity, kind, material);
+        let contained = Contained {
+            container: backpack,
+            position: GumpPoint::new(60, 60),
+            grid: GridSlot(crate::item_count(state, backpack)),
+        };
+        establish_item_location(state, entity, ItemLocation::contained(contained))
+            .expect("a typed backpack item has one valid container parent");
+        if amount > 1 {
+            state.registry.insert(entity, Amount(amount));
+        }
+        crate::apply_core_defaults(state, entity, drawn.id);
+        tell_watchers_updated(state, backpack, entity);
+        true
+    }
+}
+
+/// Put one or more semantic containers into a backpack.
+///
+/// Unlike a generic typed payout, every container needs a separate entity and
+/// its definition's gump. This prevents an erroneous `stackable: true` from
+/// turning a backpack into one unusable stack.
+fn give_container_kind_to_backpack(
+    state: &mut WorldState,
+    mobile: Serial,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+    amount: u16,
+) -> bool {
+    if amount == 0 {
+        return true;
+    }
+    let Some(drawn) = presentation_of(kind, material) else {
+        return false;
+    };
+    let Some(gump) = item_definition(kind).and_then(|definition| definition.container_gump) else {
+        return false;
+    };
+    let Some(backpack) = backpack_of(state, mobile) else {
+        return false;
+    };
+    let Some(owner) = state.registry.entity_of(mobile) else {
+        return false;
+    };
+    let each = u32::from(state.tiles().item_weight(drawn.id.0)) * 100;
+    let stones = u16::try_from(each.saturating_mul(u32::from(amount)) / 100).unwrap_or(u16::MAX);
+    if crate::check_hold(state, owner, backpack, usize::from(amount), stones).is_some() {
+        return false;
+    }
+
+    for _ in 0..amount {
+        let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
+            warn!("out of item serials; container was not created");
+            return false;
+        };
+        state.registry.insert(entity, drawn);
+        crate::spawn::install_identity(state, entity, kind, material);
+        state.registry.insert(entity, Container { gump });
+        let contained = Contained {
+            container: backpack,
+            position: GumpPoint::new(60, 60),
+            grid: GridSlot(crate::item_count(state, backpack)),
+        };
+        establish_item_location(state, entity, ItemLocation::contained(contained))
+            .expect("a newly created semantic container has one valid parent");
+        tell_watchers_updated(state, backpack, entity);
+    }
+    true
+}
+
 /// Create one or more empty containers in a mobile's backpack.
 ///
 /// A container cannot go through [`give_to_backpack`]: that path deliberately
@@ -85,6 +199,11 @@ pub fn give_containers_to_backpack(
     hue: Hue,
     amount: u16,
 ) -> bool {
+    if let Some((kind, material)) = kind_from_drawn(Drawn { id: graphic, hue }) {
+        if item_definition(kind).and_then(|definition| definition.container_gump) == Some(gump) {
+            return give_container_kind_to_backpack(state, mobile, kind, material, amount);
+        }
+    }
     if amount == 0 {
         return true;
     }
@@ -105,7 +224,9 @@ pub fn give_containers_to_backpack(
             warn!("out of item serials; container was not created");
             return false;
         };
-        state.registry.insert(entity, Drawn { id: graphic, hue });
+        let drawn = Drawn { id: graphic, hue };
+        state.registry.insert(entity, drawn);
+        crate::spawn::install_legacy_identity(state, entity, drawn);
         state.registry.insert(entity, Container { gump });
         let contained = Contained {
             container: backpack,
@@ -146,6 +267,7 @@ fn room_for(
                     .registry
                     .get::<Drawn>(entity)
                     .is_some_and(|drawn| intrinsically_stackable(drawn.id)))
+                && crate::stack_compatible_instance_state(state, entity)
                 && state
                     .registry
                     .get::<Drawn>(entity)
@@ -155,6 +277,41 @@ fn room_for(
         crate::GOLD_WEIGHT_HUNDREDTHS
     } else {
         u32::from(state.tiles().item_weight(graphic.0)) * 100
+    };
+    let stones = u16::try_from(each.saturating_mul(u32::from(amount)) / 100).unwrap_or(u16::MAX);
+    crate::check_hold(state, owner, backpack, usize::from(!merges), stones).is_none()
+}
+
+/// [`room_for`] for an item whose identity is already semantic.
+///
+/// A legacy pile with the same drawing is deliberately *not* counted as a
+/// compatible stack: [`give_kind`] will not merge into it, so treating it as a
+/// free slot here would let a typed reward bypass the backpack item limit.
+fn room_for_kind(
+    state: &WorldState,
+    owner: EntityId,
+    backpack: Serial,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+    drawn: Drawn,
+    amount: u16,
+    stackable: bool,
+) -> bool {
+    let merges = (stackable || intrinsically_stackable(drawn.id))
+        && contained_items(state, backpack).any(|(entity, _)| {
+            (state.registry.has::<Stackable>(entity)
+                || state
+                    .registry
+                    .get::<Drawn>(entity)
+                    .is_some_and(|found| intrinsically_stackable(found.id)))
+                && crate::stack_compatible_instance_state(state, entity)
+                && state.registry.get::<ItemKind>(entity) == Some(&ItemKind(kind))
+                && state.registry.get::<Material>(entity).map(|found| found.0) == material
+        });
+    let each = if drawn.id == GOLD_GRAPHIC {
+        crate::GOLD_WEIGHT_HUNDREDTHS
+    } else {
+        u32::from(state.tiles().item_weight(drawn.id.0)) * 100
     };
     let stones = u16::try_from(each.saturating_mul(u32::from(amount)) / 100).unwrap_or(u16::MAX);
     crate::check_hold(state, owner, backpack, usize::from(!merges), stones).is_none()
@@ -219,6 +376,85 @@ pub fn take_from_backpack_of_hue(
         remaining -= take;
     }
     amount
+}
+
+/// Take a typed recipe input from a backpack, while accepting an unmigrated
+/// legacy instance only when it has the exact audited presentation for that
+/// identity. This is the migration seam that lets old saves remain craftable
+/// without making a material selector hue-based again.
+pub fn take_from_backpack_identity_or_legacy(
+    state: &mut WorldState,
+    mobile: Serial,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+    legacy: Drawn,
+    amount: u16,
+) -> u16 {
+    let Some(backpack) = backpack_of(state, mobile) else {
+        return 0;
+    };
+    let piles = matching_identity_or_legacy_piles(state, backpack, kind, material, legacy);
+    let total: u32 = piles.iter().map(|(_, held)| u32::from(*held)).sum();
+    if total < u32::from(amount) {
+        return 0;
+    }
+    let mut remaining = amount;
+    for (pile, held) in piles {
+        if remaining == 0 {
+            break;
+        }
+        let take = remaining.min(held);
+        crate::consume(state, pile, take);
+        remaining -= take;
+    }
+    amount
+}
+
+/// Count a typed recipe input, retaining the same audited legacy seam as
+/// [`take_from_backpack_identity_or_legacy`].
+#[must_use]
+pub fn carried_amount_of_identity_or_legacy(
+    state: &WorldState,
+    mobile: Serial,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+    legacy: Drawn,
+) -> u32 {
+    let Some(backpack) = backpack_of(state, mobile) else {
+        return 0;
+    };
+    matching_identity_or_legacy_piles(state, backpack, kind, material, legacy)
+        .into_iter()
+        .map(|(_, amount)| u32::from(amount))
+        .sum()
+}
+
+fn matching_identity_or_legacy_piles(
+    state: &WorldState,
+    backpack: Serial,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+    legacy: Drawn,
+) -> Vec<(Serial, u16)> {
+    contained_items(state, backpack)
+        .filter_map(|(item, _)| {
+            let matches = match state.registry.get::<ItemKind>(item) {
+                Some(ItemKind(found)) => {
+                    *found == kind
+                        && state.registry.get::<Material>(item).map(|material| material.0) == material
+                }
+                None => state.registry.get::<Drawn>(item) == Some(&legacy),
+            };
+            matches
+                .then(|| {
+                    state
+                        .registry
+                        .serial_of(item)
+                        .map(|serial| (serial, crate::amount_of(state, item)))
+                })
+                .flatten()
+        })
+        .collect()
 }
 
 /// How many of a graphic a mobile carries in its backpack, counting every pile.

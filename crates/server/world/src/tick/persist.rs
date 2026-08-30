@@ -1,20 +1,21 @@
 use super::*;
 use openshard_persistence::{
     CorpseData, CorpseEquipmentData, DoneQuestRecord, EffectRecord, ItemAffixRecord, PetData, QuestRecord,
-    RestockRecord, RunebookData, RunebookEntryData, WorldRecord,
+    RestockLineRecord, RestockRecord, RunebookData, RunebookEntryData, WorldRecord,
 };
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::identity::CharacterName;
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::wire::{Graphic, Hue, Layer};
 use openshard_protocol::world::{Aggression, PhysicalResistance};
 use openshard_state::components::{
     Banker, BehaviourBuff, BehaviourBuffs, Corpse, CraftedBy, DoneQuest, Escortable, Field, Frozen, Healer,
-    ItemAffix, ItemAffixes, Moongate, NightHome, Npc, Pet, PetOrder, PoisonCharges, Poisoned, Price, Quality,
-    QuestGiver, QuestLog, QuestState, RangedAttack, Restock, RuneMark, Runebook, RunebookEntry, Skills,
-    Spellbook, StatMod, StatMods, StockRecord, SwingSpeed, Title, TradeWindow, Trap, TrapKind, Vendor,
-    body_opens_doors, effect,
+    ItemAffix, ItemAffixes, ItemKind, Material, Moongate, NightHome, Npc, Pet, PetOrder, PoisonCharges,
+    Poisoned, Price, Quality, QuestGiver, QuestLog, QuestState, RangedAttack, Restock, RuneMark, Runebook,
+    RunebookEntry, Skills, Spellbook, StatMod, StatMods, StockRecord, SwingSpeed, Title, TradeWindow, Trap,
+    TrapKind, Vendor, body_opens_doors, effect,
 };
-use openshard_state::{KeyValue, LockKind, QuestKey, WorldTick};
+use openshard_state::{KeyValue, LockKind, QuestKey, WorldTick, kind_from_drawn, presentation_of};
 
 /// The serials [`World::restore_characters`] reserved, and the proof it ran.
 ///
@@ -450,6 +451,8 @@ impl World {
             owner,
             graphic: graphic.id.0,
             hue: graphic.hue.0,
+            kind: registry.get::<ItemKind>(item).map(|kind| kind.0.0),
+            material: registry.get::<Material>(item).map(|material| material.0.0),
             amount,
             stackable: registry.has::<Stackable>(item),
             container_gump,
@@ -776,6 +779,19 @@ impl World {
                         .lines
                         .iter()
                         .map(|l| (l.graphic.0, l.hue.0, l.amount.0, l.price.0, l.name.clone()))
+                        .collect(),
+                    typed_lines: shelf
+                        .lines
+                        .iter()
+                        .map(|line| RestockLineRecord {
+                            graphic: line.graphic.0,
+                            hue: line.hue.0,
+                            item_kind: line.item_kind.map(|kind| kind.0),
+                            material: line.material.map(|material| material.0),
+                            amount: line.amount.0,
+                            price: line.price.0,
+                            name: line.name.clone(),
+                        })
                         .collect(),
                 }),
                 // `SpawnedBy` is an index into the spawner list (0, 1, 2, ...),
@@ -1248,13 +1264,12 @@ impl World {
             return;
         }
         let position = Point::new(x, y, z);
-        self.state.registry.insert(
-            entity,
-            Drawn {
-                id: Graphic(record.graphic),
-                hue: Hue(record.hue),
-            },
-        );
+        let drawn = Drawn {
+            id: Graphic(record.graphic),
+            hue: Hue(record.hue),
+        };
+        self.state.registry.insert(entity, drawn);
+        self.restore_item_identity(entity, record, drawn);
         establish_item_location(&mut self.state, entity, LiveItemLocation::ground(facet, position))
             .expect("a restored ground item has one valid location");
         if record.graphic == openshard_state::components::CORPSE_GRAPHIC.0 {
@@ -1336,6 +1351,46 @@ impl World {
         self.state.place_item(facet, entity, position);
     }
 
+    /// Restore semantic identity from a post-ItemKind record, or migrate an
+    /// audited legacy drawing when the record predates those fields.
+    ///
+    /// A stored semantic identity must project to the drawing stored beside it.
+    /// On disagreement we keep the visible record but do not substitute a
+    /// guessed kind: that is a corrupt/missing migration row to diagnose, not a
+    /// reason to make a nearby item behave as this one.
+    fn restore_item_identity(&mut self, entity: EntityId, record: &ItemRecord, drawn: Drawn) {
+        let saved = record.kind.and_then(ItemKindId::new).and_then(|kind| {
+            let material = match record.material {
+                Some(material) => Some(MaterialId::new(material)?),
+                None => None,
+            };
+            Some((kind, material))
+        });
+        let identity = match saved {
+            Some((kind, material)) if presentation_of(kind, material) == Some(drawn) => {
+                Some((kind, material))
+            }
+            Some((kind, material)) => {
+                warn!(
+                    serial = %record.serial,
+                    kind = kind.0,
+                    material = material.map(|material| material.0),
+                    graphic = drawn.id.0,
+                    hue = drawn.hue.0,
+                    "saved item identity does not match its registry presentation"
+                );
+                None
+            }
+            None => kind_from_drawn(drawn),
+        };
+        if let Some((kind, material)) = identity {
+            self.state.registry.insert(entity, ItemKind(kind));
+            if let Some(material) = material {
+                self.state.registry.insert(entity, Material(material));
+            }
+        }
+    }
+
     /// Equip a logging-in character's saved inventory, if any is waiting.
     ///
     /// Two passes so nesting resolves whatever order the records are in: first
@@ -1362,13 +1417,12 @@ impl World {
                 continue;
             }
             restored.insert(serial, entity);
-            self.state.registry.insert(
-                entity,
-                Drawn {
-                    id: Graphic(record.graphic),
-                    hue: Hue(record.hue),
-                },
-            );
+            let drawn = Drawn {
+                id: Graphic(record.graphic),
+                hue: Hue(record.hue),
+            };
+            self.state.registry.insert(entity, drawn);
+            self.restore_item_identity(entity, record, drawn);
             if record.graphic == openshard_state::components::CORPSE_GRAPHIC.0 {
                 self.state.registry.insert(
                     entity,
@@ -1669,17 +1723,7 @@ impl World {
                 mobile.entity,
                 Restock {
                     at: mobile.boot_ticks + shelf.in_seconds * TICKS_PER_SECOND,
-                    lines: shelf
-                        .lines
-                        .into_iter()
-                        .map(|(graphic, hue, amount, price, name)| StockRecord {
-                            graphic: Graphic(graphic),
-                            hue: Hue(hue),
-                            amount: Amount(amount),
-                            price: Price(price),
-                            name,
-                        })
-                        .collect(),
+                    lines: Self::restore_restock_lines(shelf),
                 },
             );
         }
@@ -1744,6 +1788,62 @@ impl World {
                 },
             );
         }
+    }
+
+    /// Restore a vendor's remembered full shelf.
+    ///
+    /// Typed lines are authoritative: their display is re-projected from durable
+    /// ids, so a future art alias cannot turn one stock kind into another. The old
+    /// tuple remains an explicit compatibility path for snapshots that predate the
+    /// additive `typed_lines` field.
+    fn restore_restock_lines(shelf: RestockRecord) -> Vec<StockRecord> {
+        if !shelf.typed_lines.is_empty() {
+            return shelf
+                .typed_lines
+                .into_iter()
+                .filter_map(|line| {
+                    let kind = line.item_kind.map(ItemKindId);
+                    let material = line.material.map(MaterialId);
+                    let drawn = match kind {
+                        Some(kind) => presentation_of(kind, material)?,
+                        None => Drawn {
+                            id: Graphic(line.graphic),
+                            hue: Hue(line.hue),
+                        },
+                    };
+                    let legacy_identity = kind_from_drawn(drawn);
+                    Some(StockRecord {
+                        graphic: drawn.id,
+                        hue: drawn.hue,
+                        item_kind: kind.or_else(|| legacy_identity.map(|(kind, _)| kind)),
+                        material: material.or_else(|| legacy_identity.and_then(|(_, material)| material)),
+                        amount: Amount(line.amount),
+                        price: Price(line.price),
+                        name: line.name,
+                    })
+                })
+                .collect();
+        }
+        shelf
+            .lines
+            .into_iter()
+            .map(|(graphic, hue, amount, price, name)| {
+                let drawn = Drawn {
+                    id: Graphic(graphic),
+                    hue: Hue(hue),
+                };
+                let identity = kind_from_drawn(drawn);
+                StockRecord {
+                    graphic: drawn.id,
+                    hue: drawn.hue,
+                    item_kind: identity.map(|(kind, _)| kind),
+                    material: identity.and_then(|(_, material)| material),
+                    amount: Amount(amount),
+                    price: Price(price),
+                    name,
+                }
+            })
+            .collect()
     }
 
     fn finish_mobile_restore(&mut self, mobile: RestoringMobile) -> bool {

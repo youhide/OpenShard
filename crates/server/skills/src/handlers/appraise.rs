@@ -11,10 +11,12 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::wire::{ClilocId, Graphic, Layer};
-use openshard_state::armor::armor_data;
-use openshard_state::components::{Body, Drawn, Name, PoisonCharges, Price};
-use openshard_state::weapon::{LAYER_TWO_HANDED, WeaponKind, by_era, weapon_data, weapon_layer};
-use openshard_state::{Skill, WorldState};
+use openshard_state::armor::{armor_data, piece_rating};
+use openshard_state::components::{Body, Drawn, ItemKind, Name, PoisonCharges, Price};
+use openshard_state::weapon::{
+    LAYER_TWO_HANDED, WeaponKind, by_era, weapon_data, weapon_data_for_kind, weapon_layer,
+};
+use openshard_state::{Skill, WorldState, item_definition};
 
 use crate::check::roll_skill_band;
 
@@ -69,7 +71,11 @@ pub(super) fn arms_lore(state: &mut WorldState, actor: EntityId, target: EntityI
     let skill = Skill::ArmsLore;
     let era = state.gameplay.combat_era;
 
-    if let Some(weapon) = weapon_data(graphic) {
+    let weapon = match state.registry.get::<ItemKind>(target) {
+        Some(kind) => weapon_data_for_kind(kind.0),
+        None => weapon_data(graphic),
+    };
+    if let Some(weapon) = weapon {
         // The average of the era's own damage range, banded: under three it reads
         // as no damage at all, and everything from three up is one of six bands
         // five points wide, capped at thirty.
@@ -109,9 +115,13 @@ pub(super) fn arms_lore(state: &mut WorldState, actor: EntityId, target: EntityI
         return;
     }
 
-    if let Some(armor) = armor_data(graphic) {
+    let is_armor = match state.registry.get::<ItemKind>(target) {
+        Some(kind) => item_definition(kind.0).is_some_and(|definition| definition.armor_rating.is_some()),
+        None => armor_data(graphic).is_some(),
+    };
+    if is_armor {
         // Eight lines over a rating capped at thirty-five, in bands of five.
-        let band = u32::from(armor.rating).min(35).div_ceil(5);
+        let band = u32::from(piece_rating(state, target)).min(35).div_ceil(5);
         if roll_skill_band(state, actor, skill, crate::SkillBand::new(0, 1000)) {
             state.localized_message(actor, ClilocId(ARMS_ARMOR + band), "");
         } else {

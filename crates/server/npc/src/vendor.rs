@@ -13,16 +13,19 @@ use openshard_items as items;
 use openshard_map::overlay::Doors;
 use openshard_protocol::containers::{ContainedItem, ContainerContents, GridSlot, encode_open_container};
 use openshard_protocol::gump::GumpPoint;
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::serial::{RawSerial, Serial, SerialKind};
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::vendor::{BuyLine, BuyList, Purchase, Sale, SellLine, SellList};
 use openshard_protocol::version::ClientVersion;
 use openshard_protocol::wire::{Graphic, Hue, Layer};
 use openshard_state::components::{
-    Amount, Contained, Drawn, Name, Position, Price, Restock, StockRecord, Vendor,
+    Amount, Contained, Drawn, ItemKind, Material, Name, Position, Price, Restock, StockRecord, Vendor,
 };
 use openshard_state::sectors::in_range;
-use openshard_state::{ItemLocation, TooltipMode, WorldState, establish_item_location};
+use openshard_state::{
+    ItemLocation, TooltipMode, WorldState, establish_item_location, kind_from_drawn, presentation_of,
+};
 use tracing::debug;
 
 use crate::GOLD_GRAPHIC;
@@ -56,6 +59,11 @@ pub struct StockLine {
     pub graphic: Graphic,
     /// Their hue.
     pub hue: Hue,
+    /// Explicit semantic type for a new stock script. Omit only for a legacy
+    /// line; audited `(graphic, hue)` then upgrades it on stock.
+    pub item_kind: Option<ItemKindId>,
+    /// Material for `item_kind`, where that kind declares a material family.
+    pub material: Option<MaterialId>,
     /// How many the vendor holds.
     pub amount: Amount,
     /// What one unit costs.
@@ -118,9 +126,15 @@ pub fn stock(state: &mut WorldState, vendor_serial: Serial, lines: Vec<StockLine
         lines: Vec::new(),
     });
     for line in lines {
+        let Some(line) = semantic_stock_line(line) else {
+            debug!("vendor stock line has an invalid semantic projection; skipped");
+            continue;
+        };
         record.lines.push(StockRecord {
             graphic: line.graphic,
             hue: line.hue,
+            item_kind: line.item_kind,
+            material: line.material,
             amount: line.amount,
             price: line.price,
             name: line.name.clone(),
@@ -129,6 +143,29 @@ pub fn stock(state: &mut WorldState, vendor_serial: Serial, lines: Vec<StockLine
     }
     state.registry.insert(vendor, record);
     debug!(%stock_serial, "vendor stocked");
+}
+
+/// Normalize a compatibility stock line, or project the explicit typed form.
+/// Thus once a registered line reaches a vendor crate its identity can never be
+/// inferred from its display art during restock or purchase.
+fn semantic_stock_line(mut line: StockLine) -> Option<StockLine> {
+    match line.item_kind {
+        Some(kind) => {
+            let drawn = presentation_of(kind, line.material)?;
+            line.graphic = drawn.id;
+            line.hue = drawn.hue;
+        }
+        None => {
+            if let Some((kind, material)) = kind_from_drawn(Drawn {
+                id: line.graphic,
+                hue: line.hue,
+            }) {
+                line.item_kind = Some(kind);
+                line.material = material;
+            }
+        }
+    }
+    Some(line)
 }
 
 /// Put one line of goods on a shelf: the item, its count, its price and its label.
@@ -145,6 +182,9 @@ fn place_stock_line(state: &mut WorldState, stock_serial: Serial, line: &StockLi
             hue: line.hue,
         },
     );
+    if let Some(kind) = line.item_kind {
+        openshard_items::install_identity(state, entity, kind, line.material);
+    }
     let contained = Contained {
         container: stock_serial,
         position: GumpPoint::new(50, 50),
@@ -178,11 +218,15 @@ fn restock_if_due(state: &mut WorldState, vendor: EntityId, stock_serial: Serial
     }
     for line in &record.lines {
         let existing = openshard_state::contained_items(state, stock_serial)
-            .filter(|(item, _)| {
-                state
+            .filter(|(item, _)| match line.item_kind {
+                Some(kind) => {
+                    state.registry.get::<ItemKind>(*item) == Some(&ItemKind(kind))
+                        && state.registry.get::<Material>(*item).map(|material| material.0) == line.material
+                }
+                None => state
                     .registry
                     .get::<Drawn>(*item)
-                    .is_some_and(|g| g.id == line.graphic && g.hue == line.hue)
+                    .is_some_and(|g| g.id == line.graphic && g.hue == line.hue),
             })
             .map(|(item, _)| item)
             .next();
@@ -199,6 +243,8 @@ fn restock_if_due(state: &mut WorldState, vendor: EntityId, stock_serial: Serial
                 &StockLine {
                     graphic: line.graphic,
                     hue: line.hue,
+                    item_kind: line.item_kind,
+                    material: line.material,
                     amount: line.amount,
                     price: line.price,
                     name: line.name.clone(),
@@ -375,6 +421,8 @@ struct BasketLine {
     amount: u16,
     graphic: Graphic,
     hue: Hue,
+    item_kind: Option<ItemKindId>,
+    material: Option<MaterialId>,
 }
 
 struct Basket {
@@ -417,6 +465,8 @@ fn price_basket(state: &WorldState, stock_serial: Serial, list: &[Purchase]) -> 
             amount,
             graphic: id,
             hue,
+            item_kind: state.registry.get::<ItemKind>(item).map(|kind| kind.0),
+            material: state.registry.get::<Material>(item).map(|material| material.0),
         });
     }
     Basket { total, lines }
@@ -464,8 +514,13 @@ fn commit_purchase(
     let mut complete = true;
     for line in &basket.lines {
         items::remove_from_stack(state, stock_serial, line.item, line.amount);
-        complete &=
-            items::give(state, backpack, line.graphic, line.hue, u32::from(line.amount)).is_complete();
+        complete &= match line.item_kind {
+            Some(kind) => items::give_kind(state, backpack, kind, line.material, u32::from(line.amount))
+                .is_some_and(|outcome| outcome.is_complete()),
+            None => {
+                items::give(state, backpack, line.graphic, line.hue, u32::from(line.amount)).is_complete()
+            }
+        };
     }
     complete
 }
@@ -546,7 +601,7 @@ pub fn offer_sell_list(state: &mut WorldState, connection: ConnectionId, actor: 
     let lines: Vec<SellLine> = openshard_state::contained_items(state, backpack)
         .filter_map(|(entity, _)| {
             let &Drawn { id, hue } = state.registry.get::<Drawn>(entity)?;
-            let price = sell_price(*catalogue.iter().find(|(g, _)| *g == id).map(|(_, p)| p)?);
+            let price = sell_price(stock_price_for(state, entity, &catalogue)?);
             let serial = state.registry.serial_of(entity)?;
             let amount = state.registry.get::<Amount>(entity).map_or(1, |a| a.0);
             let name = state
@@ -611,10 +666,10 @@ pub fn sell(state: &mut WorldState, connection: ConnectionId, vendor_serial: Raw
         ) {
             continue;
         }
-        let Some(&Drawn { id, .. }) = state.registry.get::<Drawn>(item) else {
+        let Some(&Drawn { id: _, .. }) = state.registry.get::<Drawn>(item) else {
             continue;
         };
-        let Some(&(_, price)) = catalogue.iter().find(|(g, _)| *g == id) else {
+        let Some(price) = stock_price_for(state, item, &catalogue) else {
             continue;
         };
         let taken = items::remove_from_stack(state, backpack, item, sale.amount.0);
@@ -647,15 +702,52 @@ fn sell_price(buy: u32) -> u16 {
     ((buy / 2).max(1)).min(u32::from(u16::MAX)) as u16
 }
 
-/// Every (graphic, unit price) the vendor's crate holds.
-fn stock_prices(state: &WorldState, stock_serial: Serial) -> Vec<(Graphic, u32)> {
+/// One stock identity and its unit price. Presentation is only the matching key
+/// for still-unmigrated stock; typed rows compare their semantic components.
+#[derive(Clone, Copy)]
+struct StockPrice {
+    graphic: Graphic,
+    item_kind: Option<ItemKindId>,
+    material: Option<MaterialId>,
+    price: u32,
+}
+
+/// Every stock identity and unit price the vendor's crate holds.
+fn stock_prices(state: &WorldState, stock_serial: Serial) -> Vec<StockPrice> {
     openshard_state::contained_items(state, stock_serial)
         .filter_map(|(entity, _)| {
             let graphic = state.registry.get::<Drawn>(entity)?.id;
             let price = state.registry.get::<Price>(entity).map_or(1, |p| p.0);
-            Some((graphic, price))
+            Some(StockPrice {
+                graphic,
+                item_kind: state.registry.get::<ItemKind>(entity).map(|kind| kind.0),
+                material: state.registry.get::<Material>(entity).map(|material| material.0),
+                price,
+            })
         })
         .collect()
+}
+
+/// Resolve what this vendor pays for an item. A typed shelf is intentionally
+/// not a graphic-shaped wildcard: another semantic kind using the same classic
+/// art cannot be sold as its stock.
+fn stock_price_for(state: &WorldState, item: EntityId, catalogue: &[StockPrice]) -> Option<u32> {
+    match state.registry.get::<ItemKind>(item) {
+        Some(ItemKind(kind)) => {
+            let material = state.registry.get::<Material>(item).map(|material| material.0);
+            catalogue
+                .iter()
+                .find(|line| line.item_kind == Some(*kind) && line.material == material)
+                .map(|line| line.price)
+        }
+        None => {
+            let graphic = state.registry.get::<Drawn>(item)?.id;
+            catalogue
+                .iter()
+                .find(|line| line.item_kind.is_none() && line.graphic == graphic)
+                .map(|line| line.price)
+        }
+    }
 }
 
 /// The nearest vendor within trade range of `actor`, if any.

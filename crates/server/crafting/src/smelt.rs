@@ -14,9 +14,10 @@
 //! a double-click anywhere else says so.
 
 use openshard_entities::EntityId;
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::wire::{ClilocId, Graphic};
 use openshard_skills::{roll_skill_band, skill_value};
-use openshard_state::components::{Drawn, Stackable};
+use openshard_state::components::{Drawn, ItemKind, Material, Stackable};
 use openshard_state::harvest::{ORE_GRAPHIC, ORES};
 use openshard_state::{Skill, WorldState};
 
@@ -26,6 +27,10 @@ use crate::system::Needs;
 /// The art an ingot takes — ServUO's `BaseIngot`, one graphic for all nine
 /// metals, told apart by hue exactly as the ore is.
 pub const INGOT_GRAPHIC: Graphic = Graphic(0x1BF2);
+/// Semantic kind of an ore pile in the item registry.
+const ORE_KIND: ItemKindId = ItemKindId(2);
+/// Semantic kind of an ingot pile in the item registry.
+const INGOT_KIND: ItemKindId = ItemKindId(1);
 
 /// How many ingots one unit of the large ore pile yields. ServUO's
 /// `ingotAmount = toConsume * 2` for art `0x19B9`, which is the only ore art this
@@ -49,12 +54,24 @@ const SMELTED: ClilocId = ClilocId(501_988);
 const BURNED: ClilocId = ClilocId(501_990);
 
 /// How hard each metal is to smelt, in tenths — ServUO's `difficulty` switch,
-/// indexed like [`ORES`].
+/// keyed by the durable material id, not a row position in [`ORES`].
 ///
 /// Not the same numbers as the mining band: finding valorite and *purifying* it
 /// are different problems, and ServUO gives them different curves. The band is
-/// twenty-five points either side of the difficulty.
-const DIFFICULTY: [i32; 9] = [500, 650, 700, 750, 800, 850, 900, 950, 990];
+/// twenty-five points either side of the difficulty. Keeping this mapping
+/// explicit matters: `MaterialId` is opaque and an append-only reservation, not
+/// an array index.
+const DIFFICULTY: &[(MaterialId, i32)] = &[
+    (MaterialId(1), 500), // iron
+    (MaterialId(2), 650), // dull copper
+    (MaterialId(3), 700), // shadow iron
+    (MaterialId(4), 750), // copper
+    (MaterialId(5), 800), // bronze
+    (MaterialId(6), 850), // gold
+    (MaterialId(7), 900), // agapite
+    (MaterialId(8), 950), // verite
+    (MaterialId(9), 990), // valorite
+];
 
 /// The band either side of a metal's difficulty, in tenths.
 const BAND: i32 = 250;
@@ -64,11 +81,24 @@ pub fn smelt(state: &mut WorldState, smelter: EntityId, ore: EntityId) -> bool {
     let Some(graphic) = state.registry.get::<Drawn>(ore).copied() else {
         return false;
     };
-    if graphic.id != ORE_GRAPHIC {
+    let material = match (
+        state.registry.get::<ItemKind>(ore),
+        state.registry.get::<Material>(ore),
+    ) {
+        (Some(ItemKind(kind)), Some(Material(material))) if *kind == ORE_KIND => Some(*material),
+        (Some(_), _) => return false,
+        (None, _) if graphic.id == ORE_GRAPHIC => ORES
+            .iter()
+            .find(|row| row.hue == graphic.hue)
+            .and_then(|row| row.material),
+        _ => None,
+    };
+    let Some(material) = material else {
+        // An unmapped art/hue pair is scenery or a legacy item with no audited
+        // migration row — never a nearby metal guessed from its colour.
         return false;
-    }
-    let Some(metal) = ORES.iter().position(|row| row.hue == graphic.hue) else {
-        // A pile at a hue no metal claims is somebody's decoration, not ore.
+    };
+    let Some(difficulty) = difficulty_for(material) else {
         return false;
     };
     let needs = Needs {
@@ -80,10 +110,9 @@ pub fn smelt(state: &mut WorldState, smelter: EntityId, ore: EntityId) -> bool {
         return true;
     }
 
-    let difficulty = DIFFICULTY[metal];
     // The flat gate, and it is not the same question as the roll: a metal beyond
     // you is not a hard smelt, it is one you have never been taught.
-    if difficulty > DIFFICULTY[0] && difficulty > i32::from(skill_value(state, smelter, Skill::Mining)) {
+    if difficulty > iron_difficulty() && difficulty > i32::from(skill_value(state, smelter, Skill::Mining)) {
         state.localized_message(smelter, TOO_STRANGE, "");
         return true;
     }
@@ -124,7 +153,8 @@ pub fn smelt(state: &mut WorldState, smelter: EntityId, ore: EntityId) -> bool {
     };
     openshard_items::consume(state, serial, taking);
     let ingots = u32::from(taking) * INGOTS_PER_ORE;
-    let made = openshard_items::give(state, pack, INGOT_GRAPHIC, graphic.hue, ingots);
+    let made = openshard_items::give_kind(state, pack, INGOT_KIND, Some(material), ingots)
+        .expect("the ore material is compatible with ingots");
     if let Some(made) = made.last {
         // Ingots stack, and `give` only marks what it *creates* — a merge onto an
         // existing pile leaves the marker where it was.
@@ -144,13 +174,27 @@ pub fn smelt(state: &mut WorldState, smelter: EntityId, ore: EntityId) -> bool {
     true
 }
 
+fn difficulty_for(material: MaterialId) -> Option<i32> {
+    DIFFICULTY
+        .iter()
+        .find_map(|(defined_material, difficulty)| (*defined_material == material).then_some(*difficulty))
+}
+
+fn iron_difficulty() -> i32 {
+    difficulty_for(MaterialId(1)).expect("iron is a required smelting material")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn every_metal_has_a_difficulty() {
-        assert_eq!(DIFFICULTY.len(), ORES.len());
+    fn every_metal_has_an_explicit_difficulty() {
+        assert!(ORES.iter().all(|ore| {
+            ore.material
+                .is_some_and(|material| difficulty_for(material).is_some())
+        }));
+        assert_eq!(DIFFICULTY.len(), ORES.len(), "no unminable material is smeltable");
     }
 
     #[test]
@@ -158,7 +202,7 @@ mod tests {
         // A softer metal that were harder to smelt would let a miner make
         // valorite ingots before iron ones.
         for pair in DIFFICULTY.windows(2) {
-            assert!(pair[1] > pair[0]);
+            assert!(pair[1].1 > pair[0].1);
         }
     }
 
@@ -167,7 +211,7 @@ mod tests {
         // ServUO's gate is `difficulty > 50.0 && …`, so iron alone falls through
         // it — which is what lets a character with no Mining at all turn the ore
         // they bought into something a smith can use.
-        assert_eq!(DIFFICULTY[0], 500);
-        assert!(DIFFICULTY[1..].iter().all(|d| *d > 500));
+        assert_eq!(iron_difficulty(), 500);
+        assert!(DIFFICULTY[1..].iter().all(|(_, difficulty)| *difficulty > 500));
     }
 }

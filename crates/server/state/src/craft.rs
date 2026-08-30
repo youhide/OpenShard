@@ -10,6 +10,7 @@
 //! `state` sits below the systems and must not learn their shape. Each system owns
 //! exactly one main skill, so the mapping is complete either way round.
 
+use openshard_protocol::item_kind::ItemKindId;
 use openshard_protocol::wire::Graphic;
 
 use crate::skill::Skill;
@@ -72,6 +73,28 @@ pub fn craft_tool(graphic: Graphic) -> Option<CraftToolData> {
     })
 }
 
+/// The craft-tool row for a registered item kind.
+///
+/// This is deliberately kind-keyed. [`craft_tool`] below remains the named
+/// compatibility adapter for items not yet migrated into the registry.
+#[must_use]
+pub fn craft_tool_for_kind(kind: ItemKindId) -> Option<CraftToolData> {
+    let skill = match kind.0 {
+        10 | 19 | 20 => Skill::Blacksmith,
+        21 => Skill::Tailoring,
+        22 | 26..=35 => Skill::Carpentry,
+        23 => Skill::Tinkering,
+        24 => Skill::Alchemy,
+        25 => Skill::Fletching,
+        _ => return None,
+    };
+    Some(CraftToolData {
+        skill,
+        min_uses: MIN_USES,
+        max_uses: MAX_USES,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,6 +128,40 @@ mod tests {
                 "{:#06X} is claimed by both tables",
                 graphic.0
             );
+        }
+    }
+
+    #[test]
+    fn a_registered_pair_of_tongs_resolves_by_kind() {
+        assert_eq!(
+            craft_tool_for_kind(ItemKindId(10)).map(|tool| tool.skill),
+            Some(Skill::Blacksmith)
+        );
+        assert!(craft_tool_for_kind(ItemKindId(6)).is_none()); // spellbook
+    }
+
+    #[test]
+    fn registered_primary_tools_resolve_to_each_craft_skill() {
+        for (kind, skill) in [
+            (ItemKindId(19), Skill::Blacksmith),
+            (ItemKindId(20), Skill::Blacksmith),
+            (ItemKindId(21), Skill::Tailoring),
+            (ItemKindId(22), Skill::Carpentry),
+            (ItemKindId(23), Skill::Tinkering),
+            (ItemKindId(24), Skill::Alchemy),
+            (ItemKindId(25), Skill::Fletching),
+            (ItemKindId(26), Skill::Carpentry),
+            (ItemKindId(27), Skill::Carpentry),
+            (ItemKindId(28), Skill::Carpentry),
+            (ItemKindId(29), Skill::Carpentry),
+            (ItemKindId(30), Skill::Carpentry),
+            (ItemKindId(31), Skill::Carpentry),
+            (ItemKindId(32), Skill::Carpentry),
+            (ItemKindId(33), Skill::Carpentry),
+            (ItemKindId(34), Skill::Carpentry),
+            (ItemKindId(35), Skill::Carpentry),
+        ] {
+            assert_eq!(craft_tool_for_kind(kind).map(|tool| tool.skill), Some(skill));
         }
     }
 

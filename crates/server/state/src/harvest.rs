@@ -18,6 +18,7 @@
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::wire::{ClilocId, Graphic, Hue, SoundId};
 use openshard_protocol::world::Facet;
 
@@ -88,6 +89,10 @@ pub struct HarvestResource {
     /// And its hue — ServUO's `CraftResources.GetHue`, which is the *only* thing
     /// telling valorite ore from iron.
     pub hue: Hue,
+    /// Semantic kind paid out by this row, where the resource has migrated.
+    pub item_kind: Option<ItemKindId>,
+    /// Semantic material grade paid out with that kind.
+    pub material: Option<MaterialId>,
 }
 
 /// Which of a definition's `resources` a vein points at.
@@ -293,6 +298,24 @@ pub fn tool_data(graphic: Graphic) -> Option<ToolData> {
         });
     }
     None
+}
+
+/// The harvesting-tool row for a registered item kind.
+///
+/// This table is kind-keyed; [`tool_data`] remains the explicit legacy adapter
+/// for unregistered tools and all of the weapon-table axes.
+#[must_use]
+pub fn tool_data_for_kind(kind: ItemKindId) -> Option<ToolData> {
+    let skill = match kind.0 {
+        9 | 17 => Skill::Mining,
+        18 => Skill::Fishing,
+        _ => return None,
+    };
+    Some(ToolData {
+        skill,
+        min_uses: 50,
+        max_uses: 100,
+    })
 }
 
 /// An axe is a weapon first: it does not wear out on the *tree* in ServUO unless
@@ -682,15 +705,15 @@ const FISHING: HarvestDef = HarvestDef {
 /// forge.
 #[rustfmt::skip]
 pub static ORES: &[HarvestResource] = &[
-    ore(   0,    0, 1000, 1_007_072, 0x0000), // iron
-    ore( 650,  250, 1050, 1_007_073, 0x0973), // dull copper
-    ore( 700,  300, 1100, 1_007_074, 0x0966), // shadow iron
-    ore( 750,  350, 1150, 1_007_075, 0x096D), // copper
-    ore( 800,  400, 1200, 1_007_076, 0x0972), // bronze
-    ore( 850,  450, 1250, 1_007_077, 0x08A5), // gold
-    ore( 900,  500, 1300, 1_007_078, 0x0979), // agapite
-    ore( 950,  550, 1350, 1_007_079, 0x089F), // verite
-    ore( 990,  590, 1390, 1_007_080, 0x08AB), // valorite
+    ore(   0,    0, 1000, 1_007_072, 0x0000, 1), // iron
+    ore( 650,  250, 1050, 1_007_073, 0x0973, 2), // dull copper
+    ore( 700,  300, 1100, 1_007_074, 0x0966, 3), // shadow iron
+    ore( 750,  350, 1150, 1_007_075, 0x096D, 4), // copper
+    ore( 800,  400, 1200, 1_007_076, 0x0972, 5), // bronze
+    ore( 850,  450, 1250, 1_007_077, 0x08A5, 6), // gold
+    ore( 900,  500, 1300, 1_007_078, 0x0979, 7), // agapite
+    ore( 950,  550, 1350, 1_007_079, 0x089F, 8), // verite
+    ore( 990,  590, 1390, 1_007_080, 0x08AB, 9), // valorite
 ];
 
 /// The item art every ore pile takes — ServUO's most common `RandomSize` result.
@@ -704,7 +727,7 @@ pub const SAND_GRAPHIC: Graphic = Graphic(0x423A);
 pub const FISH_GRAPHIC: Graphic = Graphic(0x09CC);
 
 /// An ore row, so the table above reads as data.
-const fn ore(req: i32, min: i32, max: i32, cliloc: u32, hue: u16) -> HarvestResource {
+const fn ore(req: i32, min: i32, max: i32, cliloc: u32, hue: u16, material: u16) -> HarvestResource {
     HarvestResource {
         req_skill: req,
         min_skill: min,
@@ -712,6 +735,8 @@ const fn ore(req: i32, min: i32, max: i32, cliloc: u32, hue: u16) -> HarvestReso
         success_cliloc: ClilocId(cliloc),
         graphic: ORE_GRAPHIC,
         hue: Hue(hue),
+        item_kind: Some(ItemKindId(2)),
+        material: Some(MaterialId(material)),
     }
 }
 
@@ -733,13 +758,13 @@ static ORE_VEINS: &[HarvestVein] = &[
 /// The seven woods — ServUO's ML table, with `CraftResources.GetHue`'s colours.
 #[rustfmt::skip]
 static WOODS: &[HarvestResource] = &[
-    wood(   0,   0, 1000, 1_072_540, 0x0000), // regular
-    wood( 650, 250, 1050, 1_072_541, 0x07DA), // oak
-    wood( 800, 400, 1200, 1_072_542, 0x04A7), // ash
-    wood( 950, 550, 1350, 1_072_543, 0x04A8), // yew
-    wood(1000, 600, 1400, 1_072_544, 0x04A9), // heartwood
-    wood(1000, 600, 1400, 1_072_545, 0x04AA), // bloodwood
-    wood(1000, 600, 1400, 1_072_546, 0x047F), // frostwood
+    wood(   0,   0, 1000, 1_072_540, 0x0000, 20), // regular
+    wood( 650, 250, 1050, 1_072_541, 0x07DA, 21), // oak
+    wood( 800, 400, 1200, 1_072_542, 0x04A7, 22), // ash
+    wood( 950, 550, 1350, 1_072_543, 0x04A8, 23), // yew
+    wood(1000, 600, 1400, 1_072_544, 0x04A9, 24), // heartwood
+    wood(1000, 600, 1400, 1_072_545, 0x04AA, 25), // bloodwood
+    wood(1000, 600, 1400, 1_072_546, 0x047F, 26), // frostwood
 ];
 
 /// The one wood a pre-ML tree gives, ServUO's `500498` line.
@@ -750,10 +775,12 @@ static PLAIN_WOOD: &[HarvestResource] = &[HarvestResource {
     success_cliloc: ClilocId(500_498), // You put some logs in your backpack.
     graphic: LOG_GRAPHIC,
     hue: Hue(0),
+    item_kind: Some(ItemKindId(3)),
+    material: Some(MaterialId(20)),
 }];
 
 /// A wood row.
-const fn wood(req: i32, min: i32, max: i32, cliloc: u32, hue: u16) -> HarvestResource {
+const fn wood(req: i32, min: i32, max: i32, cliloc: u32, hue: u16, material: u16) -> HarvestResource {
     HarvestResource {
         req_skill: req,
         min_skill: min,
@@ -761,6 +788,8 @@ const fn wood(req: i32, min: i32, max: i32, cliloc: u32, hue: u16) -> HarvestRes
         success_cliloc: ClilocId(cliloc),
         graphic: LOG_GRAPHIC,
         hue: Hue(hue),
+        item_kind: Some(ItemKindId(3)),
+        material: Some(MaterialId(material)),
     }
 }
 
@@ -784,6 +813,8 @@ static SANDS: &[HarvestResource] = &[HarvestResource {
     success_cliloc: ClilocId(1_044_631), // You carefully dig up some workable sand.
     graphic: SAND_GRAPHIC,
     hue: Hue(0),
+    item_kind: None,
+    material: None,
 }];
 
 /// Fish, one grade, banded so a beginner still catches something.
@@ -794,6 +825,8 @@ static FISHES: &[HarvestResource] = &[HarvestResource {
     success_cliloc: ClilocId(1_043_297), // You pull out a heavy and beautiful fish!
     graphic: FISH_GRAPHIC,
     hue: Hue(0),
+    item_kind: None,
+    material: None,
 }];
 
 /// The single vein the one-resource definitions have.
@@ -1078,5 +1111,21 @@ mod tests {
         );
         // A katana is a weapon and nothing else.
         assert!(tool_data(Graphic(0x13FF)).is_none());
+    }
+
+    #[test]
+    fn registered_harvest_tools_resolve_by_kind() {
+        assert_eq!(
+            tool_data_for_kind(ItemKindId(9)).map(|tool| tool.skill),
+            Some(Skill::Mining)
+        );
+        assert_eq!(
+            tool_data_for_kind(ItemKindId(17)).map(|tool| tool.skill),
+            Some(Skill::Mining)
+        );
+        assert_eq!(
+            tool_data_for_kind(ItemKindId(18)).map(|tool| tool.skill),
+            Some(Skill::Fishing)
+        );
     }
 }

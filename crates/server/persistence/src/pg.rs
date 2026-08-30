@@ -218,7 +218,11 @@ CREATE TABLE IF NOT EXISTS items (
     lockdown_house BIGINT,
     lockdown_secure SMALLINT,
     -- Typed per-instance custom properties. See the SQLite schema.
-    affixes TEXT
+    affixes TEXT,
+    -- Semantic identity. NULL rows predate ItemKind and are migrated on load
+    -- through the audited legacy presentation mapping.
+    item_kind INTEGER,
+    material INTEGER
 );
 CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
 CREATE TABLE IF NOT EXISTS mobiles (
@@ -319,12 +323,25 @@ impl PgStore {
             .map_err(database)?
             .map(|row| row.get(0));
         match found {
-            // v34 only adds a nullable column. Existing rows mean no affixes.
-            Some(33) if SCHEMA_VERSION == 34 => {
+            // v35 adds nullable semantic identity. Existing rows retain their
+            // legacy presentation and are explicitly mapped while restoring.
+            Some(33) if SCHEMA_VERSION == 35 => {
                 client
                     .batch_execute(
                         "ALTER TABLE items ADD COLUMN IF NOT EXISTS affixes TEXT; \
-                         UPDATE meta SET value = 34 WHERE key = 'schema';",
+                         ALTER TABLE items ADD COLUMN IF NOT EXISTS item_kind INTEGER; \
+                         ALTER TABLE items ADD COLUMN IF NOT EXISTS material INTEGER; \
+                         UPDATE meta SET value = 35 WHERE key = 'schema';",
+                    )
+                    .await
+                    .map_err(database)?;
+            }
+            Some(34) if SCHEMA_VERSION == 35 => {
+                client
+                    .batch_execute(
+                        "ALTER TABLE items ADD COLUMN IF NOT EXISTS item_kind INTEGER; \
+                         ALTER TABLE items ADD COLUMN IF NOT EXISTS material INTEGER; \
+                         UPDATE meta SET value = 35 WHERE key = 'schema';",
                     )
                     .await
                     .map_err(database)?;
@@ -760,7 +777,7 @@ impl PgStore {
                  corpse, poison_level, poison_charges, trap_kind, trap_power, trap_level, \
                  uses, exceptional, crafter, \
                  rune_facet, rune_x, rune_y, rune_z, runebook, \
-                 lockdown_house, lockdown_secure, affixes FROM items",
+                 lockdown_house, lockdown_secure, affixes, item_kind, material FROM items",
                 &[],
             )
             .await
@@ -1122,9 +1139,9 @@ async fn insert_item(
               loc_kind, facet, x, y, z, parent, grid, layer, price, name, spellbook, \
               corpse, poison_level, poison_charges, trap_kind, trap_power, trap_level, uses, \
               exceptional, crafter, rune_facet, rune_x, rune_y, rune_z, runebook, \
-              lockdown_house, lockdown_secure, affixes) \
+              lockdown_house, lockdown_secure, affixes, item_kind, material) \
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21, \
-                     $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35) \
+                     $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37) \
              ON CONFLICT (serial) DO UPDATE SET \
              owner = EXCLUDED.owner, graphic = EXCLUDED.graphic, hue = EXCLUDED.hue, \
              amount = EXCLUDED.amount, stackable = EXCLUDED.stackable, gump = EXCLUDED.gump, \
@@ -1139,7 +1156,8 @@ async fn insert_item(
              crafter = EXCLUDED.crafter, rune_facet = EXCLUDED.rune_facet, \
              rune_x = EXCLUDED.rune_x, rune_y = EXCLUDED.rune_y, rune_z = EXCLUDED.rune_z, \
              runebook = EXCLUDED.runebook, lockdown_house = EXCLUDED.lockdown_house, \
-             lockdown_secure = EXCLUDED.lockdown_secure, affixes = EXCLUDED.affixes",
+             lockdown_secure = EXCLUDED.lockdown_secure, affixes = EXCLUDED.affixes, \
+             item_kind = EXCLUDED.item_kind, material = EXCLUDED.material",
             &[
                 &i64::from(item.serial.raw()),
                 // `owner` is `NOT NULL BIGINT` with `0` the sentinel for "no owner" —
@@ -1197,6 +1215,10 @@ async fn insert_item(
                     .then(|| serde_json::to_string(&item.affixes))
                     .transpose()
                     .map_err(|e| StoreError::Corrupt(e.to_string()))?,
+                &item
+                    .kind
+                    .map(|kind| i32::try_from(kind).expect("item kind id fits PostgreSQL INTEGER")),
+                &item.material.map(i32::from),
             ],
         )
         .await
@@ -1250,6 +1272,14 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
             owner,
             graphic: u16::try_from(row.get::<_, i32>(2)).map_err(|_| corrupt("graphic"))?,
             hue: u16::try_from(row.get::<_, i32>(3)).map_err(|_| corrupt("hue"))?,
+            kind: row
+                .get::<_, Option<i32>>(35)
+                .map(|kind| u32::try_from(kind).map_err(|_| corrupt("item_kind")))
+                .transpose()?,
+            material: row
+                .get::<_, Option<i32>>(36)
+                .map(|material| u16::try_from(material).map_err(|_| corrupt("material")))
+                .transpose()?,
             amount: u16::try_from(row.get::<_, i32>(4)).map_err(|_| corrupt("amount"))?,
             stackable: row.get(5),
             container_gump: row

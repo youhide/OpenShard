@@ -1,6 +1,7 @@
 use super::*;
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::identity::RawCharacterName;
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::items::DropDestination;
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::wire::{Graphic, Hue, RawCharacterSlot};
@@ -1166,6 +1167,20 @@ pub enum Command {
         /// Whether it merges onto a like pile.
         stackable: bool,
     },
+    /// Put a semantic item identity into a player's backpack. New scripts use
+    /// this instead of selecting a classic graphic/hue projection.
+    GiveItemKind {
+        /// Whose backpack.
+        serial: Serial,
+        /// The item type to award.
+        item_kind: ItemKindId,
+        /// Its material, when the item kind declares a material family.
+        material: Option<MaterialId>,
+        /// How many.
+        amount: u16,
+        /// Whether compatible piles merge.
+        stackable: bool,
+    },
     /// Take up to `amount` of a graphic from a player's backpack — a quest
     /// collect turn-in. All-or-nothing; reports back with an
     /// [`ItemsTaken`](crate::ItemsTaken) event.
@@ -1174,6 +1189,20 @@ pub enum Command {
         serial: Serial,
         /// The item graphic to take.
         graphic: Graphic,
+        /// How many to take.
+        amount: u16,
+    },
+    /// Take an exact semantic item identity from a player's backpack — the
+    /// migration-safe counterpart of [`Self::TakeItem`]. The request accepts a
+    /// legacy pile only when it has the registry's audited presentation for the
+    /// same kind/material pair.
+    TakeItemKind {
+        /// Whose backpack.
+        serial: Serial,
+        /// The semantic item kind to take.
+        item_kind: ItemKindId,
+        /// The required material, if this kind is materialized.
+        material: Option<MaterialId>,
         /// How many to take.
         amount: u16,
     },
@@ -1205,6 +1234,20 @@ pub enum Command {
         amount: u16,
         /// Whether it stacks (gold, reagents, arrows) or is a discrete piece
         /// (a weapon, a suit of armour).
+        stackable: bool,
+    },
+    /// Put a semantic item identity into a container. New death/quest scripts
+    /// use this instead of selecting a classic graphic/hue projection.
+    AddLootKind {
+        /// The container — a corpse, a chest.
+        container: Serial,
+        /// The semantic item kind to place.
+        item_kind: ItemKindId,
+        /// Its material, when the item kind declares one.
+        material: Option<MaterialId>,
+        /// How many.
+        amount: u16,
+        /// Whether compatible piles merge.
         stackable: bool,
     },
     /// Remove an item by serial, wherever it lives — a used item vanishing (a

@@ -12,6 +12,7 @@
 //! the substitution in [`crate::consume`] is a single field. Boards and leather
 //! grades work the same way.
 
+use openshard_protocol::item_kind::{ItemKindId, ItemSelector, MaterialId};
 use openshard_state::Skill;
 
 use crate::system::{Needs, Text};
@@ -20,6 +21,10 @@ use openshard_protocol::wire::{Graphic, Hue};
 /// One ingredient line — ServUO's `CraftRes`.
 #[derive(Clone, Copy, Debug)]
 pub struct CraftRes {
+    /// The semantic thing this line accepts, when its row has been migrated.
+    /// The graphic and hue remain as a classic-client/migration projection until
+    /// the whole catalogue is typed; they do not decide what a selector means.
+    pub selector: Option<ItemSelector>,
     /// The item art consumed.
     pub graphic: Graphic,
     /// And its hue. Zero is the plain grade (iron, regular wood); a line marked
@@ -54,6 +59,10 @@ pub struct CraftSkillReq {
 /// One thing a system can make.
 #[derive(Clone, Copy, Debug)]
 pub struct Recipe {
+    /// The semantic thing the recipe produces. `None` keeps an unaudited legacy
+    /// row on its graphic/hue adapter until the item catalogue gives it a stable
+    /// identity.
+    pub kind: Option<ItemKindId>,
     /// The item art it produces.
     pub graphic: Graphic,
     /// Its name, for the gump.
@@ -78,6 +87,10 @@ pub struct Recipe {
     /// [`retain_color`](Self::retain_color), which is what makes a valorite blade
     /// valorite-coloured while special wood still produces ordinary shafts.
     pub hue: Hue,
+    /// Where a typed result gets its material. This is deliberately separate
+    /// from its displayed hue: presentation is derived from `kind + material`,
+    /// never used to discover either one.
+    pub output_material: OutputMaterial,
     /// Whether a result with no fixed [`hue`](Self::hue) inherits the material
     /// hue. Weapons do; resources such as shafts and kindling deliberately do
     /// not, even when made from one of the special woods.
@@ -102,9 +115,29 @@ pub struct Recipe {
     pub needs: Needs,
 }
 
+/// The material policy of a semantic crafting result.
+///
+/// `Legacy` is the migration seam for old recipe rows. A typed row must state
+/// one of the other variants in data, so adding a kind cannot silently preserve
+/// a hue-based material choice by accident.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputMaterial {
+    /// No semantic output exists yet; use the recipe's legacy hue behavior.
+    Legacy,
+    /// The output has a kind but no material (for example an ordinary tool).
+    None,
+    /// The output is made from one fixed material.
+    Fixed(MaterialId),
+    /// Take the material carried by a resolved input line.
+    InheritInput(u8),
+}
+
 /// One material a system's axis offers — ServUO's `CraftSubRes`.
 #[derive(Clone, Copy, Debug)]
 pub struct SubRes {
+    /// The durable material grade selected by this row. Hue is only the
+    /// classic-client projection of this id.
+    pub material: MaterialId,
     /// The hue that *is* this material.
     pub hue: Hue,
     /// Its name, for the material row of the gump.
@@ -121,6 +154,9 @@ pub struct SubRes {
 /// A system's material axis — ServUO's `CraftSubResCol` plus its `SetSubRes`.
 #[derive(Clone, Copy, Debug)]
 pub struct SubResAxis {
+    /// The semantic resource kind selected by this material axis (ingot, board
+    /// or leather). Classic art below is only its client projection.
+    pub item_kind: ItemKindId,
     /// The resource graphic the axis substitutes a hue into. The recipe line
     /// carrying [`CraftRes::from_axis`] must name this same graphic.
     pub graphic: Graphic,

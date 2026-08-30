@@ -2,8 +2,9 @@
 //!
 //! Like weapon speed and damage, an armour rating is **not** in `tiledata.mul`:
 //! both references keep it per armour *class*. So it lives here, a core table keyed
-//! by item graphic ported from ServUO's `BaseArmor` subclasses (each row's
-//! `ArmorBase` getter, its graphics from the constructor and the `Flipable`
+//! by item graphic for legacy art and `ItemKindId` for registered armour,
+//! ported from ServUO's `BaseArmor` subclasses (each row's `ArmorBase` getter,
+//! its graphics from the constructor and the `Flipable`
 //! attribute), exactly the shape [`crate::weapon`] uses — and in `state` for the
 //! same reason: `combat` turns a rating into what a blow gets past, `skills` reads
 //! the same rating to tell an Arms Lore student how well a piece protects.
@@ -94,6 +95,9 @@ pub enum MedAllowance {
 /// One armour class's rating, keyed by its item [`Drawn`](crate::Drawn) id.
 #[derive(Debug, Clone, Copy)]
 pub struct ArmorData {
+    /// The durable item kind for a registered armour piece. Rows without one
+    /// are legacy classes still addressed through their drawing graphic.
+    pub item_kind: Option<ItemKindId>,
     /// The item graphic this row describes.
     pub graphic: Graphic,
     /// ServUO's `ArmorBase` — the class rating before body coverage.
@@ -108,9 +112,19 @@ pub fn armor_data(graphic: Graphic) -> Option<&'static ArmorData> {
     ARMOR.iter().find(|a| a.graphic == graphic)
 }
 
-use crate::components::{Armor, Drawn, Quality};
-use crate::{WorldState, equipped_items};
+/// The armour row for a registered item kind.
+///
+/// A declared kind not present in this semantic column cannot acquire armour
+/// properties from its presentation art.
+#[must_use]
+pub fn armor_data_for_kind(kind: ItemKindId) -> Option<&'static ArmorData> {
+    ARMOR.iter().find(|armor| armor.item_kind == Some(kind))
+}
+
+use crate::components::{Armor, Drawn, ItemKind, Material, Quality};
+use crate::{WorldState, equipped_items, item_definition, material_definition, material_from_legacy_hue};
 use openshard_entities::EntityId;
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::wire::{Graphic, Hue, Layer};
 
 /// What an exceptional piece is worth — ServUO's `ar += -8 + 8 * (int)m_Quality`
@@ -120,25 +134,20 @@ const EXCEPTIONAL_BONUS: u16 = 8;
 /// The armour a material is worth over plain iron or plain leather — ServUO's
 /// `ArmorRating` switch on `CraftResource`.
 ///
-/// Keyed by **hue**, because a hue is what a material is in this engine: the same
-/// nine ore hues [`crate::harvest::ORES`] pays a miner in, and the three leather
-/// grades. It is what makes the smith's material axis worth anything — a valorite
-/// breastplate is sixteen points better than an iron one, and until crafting
-/// landed there was no way to have one.
+/// Keyed by [`MaterialId`]. The legacy hue adapter below exists only while old
+/// item construction still reaches this reader; a valorite breastplate is worth
+/// sixteen points because it carries valorite, not because its client tint
+/// happens to be `0x08AB`.
 #[must_use]
-pub fn material_bonus(hue: Hue) -> u16 {
-    if let Some(index) = crate::harvest::ORES.iter().position(|ore| ore.hue == hue) {
-        // Two points a grade, iron at nothing through valorite at sixteen —
-        // ServUO's ladder exactly, and evenly spaced, which is why it is
-        // arithmetic here and a switch there.
-        return u16::try_from(index).unwrap_or(0) * 2;
-    }
-    match hue.0 {
-        0x08AC => 10, // spined
-        0x0845 => 13, // horned
-        0x0851 => 16, // barbed
-        _ => 0,
-    }
+pub fn material_bonus(material: MaterialId) -> u16 {
+    material_definition(material).map_or(0, |definition| definition.armor_bonus)
+}
+
+/// The pre-`Material` compatibility boundary for restored or manually created
+/// legacy items. New readers call [`material_bonus`] with the component.
+#[must_use]
+fn legacy_material_bonus(hue: Hue) -> u16 {
+    material_from_legacy_hue(hue).map_or(0, material_bonus)
 }
 
 /// One worn piece's rating: the pack's [`Armor`] override if the item carries
@@ -154,17 +163,29 @@ pub fn piece_rating(state: &WorldState, item: EntityId) -> u16 {
     if let Some(&Armor { rating }) = state.registry.get::<Armor>(item) {
         return rating;
     }
-    let Some(graphic) = state.registry.get::<Drawn>(item) else {
+    let Some(drawn) = state.registry.get::<Drawn>(item) else {
         return 0;
     };
-    let Some(armor) = armor_data(graphic.id) else {
+    // A migrated item is read by its durable kind. A legacy item with no kind
+    // keeps the graphic adapter until it is loaded or created through the
+    // registry. Crucially, an unknown *present* kind does not fall through to
+    // its art and become armour by coincidence.
+    let base_rating = match state.registry.get::<ItemKind>(item) {
+        Some(kind) => item_definition(kind.0).and_then(|definition| definition.armor_rating),
+        None => armor_data(drawn.id).map(|armor| armor.rating),
+    };
+    let Some(base_rating) = base_rating else {
         return 0;
     };
     let exceptional = state
         .registry
         .get::<Quality>(item)
         .is_some_and(|quality| quality.exceptional);
-    armor.rating + material_bonus(graphic.hue) + if exceptional { EXCEPTIONAL_BONUS } else { 0 }
+    let material_bonus = state.registry.get::<Material>(item).map_or_else(
+        || legacy_material_bonus(drawn.hue),
+        |material| material_bonus(material.0),
+    );
+    base_rating + material_bonus + if exceptional { EXCEPTIONAL_BONUS } else { 0 }
 }
 
 /// The item a mobile wears on `layer`, if any.
@@ -211,41 +232,41 @@ pub fn worn_armor_rating(state: &WorldState, mobile: EntityId) -> u16 {
 #[rustfmt::skip]
 static ARMOR: &[ArmorData] = &[
     // -- Leather (ArmorBase 13) ------------------------------------------------
-    a(0x13CC, 13, ALL), a(0x13D3, 13, ALL), // Leather chest
-    a(0x13CD, 13, ALL), a(0x13C5, 13, ALL), // Leather sleeves
-    a(0x13CB, 13, ALL), a(0x13D2, 13, ALL), // Leather leggings
-    a(0x13C6, 13, ALL),                // Leather gloves
-    a(0x13C7, 13, ALL),                // Leather gorget
-    a(0x1DB9, 13, ALL), a(0x1DBA, 13, ALL), // Leather cap
-    a(0x1C06, 13, ALL), a(0x1C07, 13, ALL), // Female leather chest
+    with_item_kind(a(0x13CC, 13, ALL), ItemKindId(99)), a(0x13D3, 13, ALL), // Leather chest
+    with_item_kind(a(0x13CD, 13, ALL), ItemKindId(97)), a(0x13C5, 13, ALL), // Leather sleeves
+    with_item_kind(a(0x13CB, 13, ALL), ItemKindId(98)), a(0x13D2, 13, ALL), // Leather leggings
+    with_item_kind(a(0x13C6, 13, ALL), ItemKindId(96)),                // Leather gloves
+    with_item_kind(a(0x13C7, 13, ALL), ItemKindId(95)),                // Leather gorget
+    with_item_kind(a(0x1DB9, 13, ALL), ItemKindId(107)), a(0x1DBA, 13, ALL), // Leather cap
+    with_item_kind(a(0x1C06, 13, ALL), ItemKindId(106)), a(0x1C07, 13, ALL), // Female leather chest
     a(0x1C00, 13, ALL), a(0x1C01, 13, ALL), // Leather shorts
     a(0x1C08, 13, ALL), a(0x1C09, 13, ALL), // Leather skirt
     a(0x1C0A, 13, ALL), a(0x1C0B, 13, ALL), // Leather bustier sleeves
     // -- Studded (16) ----------------------------------------------------------
-    a(0x13DB, 16, HALF), a(0x13E2, 16, HALF), // Studded chest
-    a(0x13DC, 16, HALF), a(0x13D4, 16, HALF), // Studded sleeves
-    a(0x13DA, 16, HALF), a(0x13E1, 16, HALF), // Studded leggings
-    a(0x13D5, 16, HALF), a(0x13DD, 16, HALF), // Studded gloves
-    a(0x13D6, 16, HALF),                // Studded gorget
-    a(0x1C02, 16, HALF), a(0x1C03, 16, HALF), // Female studded chest
-    a(0x1C0C, 16, HALF), a(0x1C0D, 16, HALF), // Studded bustier sleeves
+    with_item_kind(a(0x13DB, 16, HALF), ItemKindId(104)), a(0x13E2, 16, HALF), // Studded chest
+    with_item_kind(a(0x13DC, 16, HALF), ItemKindId(102)), a(0x13D4, 16, HALF), // Studded sleeves
+    with_item_kind(a(0x13DA, 16, HALF), ItemKindId(103)), a(0x13E1, 16, HALF), // Studded leggings
+    with_item_kind(a(0x13D5, 16, HALF), ItemKindId(101)), a(0x13DD, 16, HALF), // Studded gloves
+    with_item_kind(a(0x13D6, 16, HALF), ItemKindId(100)),                // Studded gorget
+    with_item_kind(a(0x1C02, 16, HALF), ItemKindId(109)), a(0x1C03, 16, HALF), // Female studded chest
+    with_item_kind(a(0x1C0C, 16, HALF), ItemKindId(108)), a(0x1C0D, 16, HALF), // Studded bustier sleeves
     // -- Ringmail (22) ---------------------------------------------------------
-    a(0x13EC, 22, NONE), a(0x13ED, 22, NONE), // Ringmail tunic
-    a(0x13EE, 22, NONE), a(0x13EF, 22, NONE), // Ringmail sleeves
-    a(0x13F0, 22, NONE), a(0x13F1, 22, NONE), // Ringmail leggings
-    a(0x13EB, 22, NONE), a(0x13F2, 22, NONE), // Ringmail gloves
+    with_item_kind(a(0x13EC, 22, NONE), ItemKindId(46)), a(0x13ED, 22, NONE), // Ringmail tunic
+    with_item_kind(a(0x13EE, 22, NONE), ItemKindId(45)), a(0x13EF, 22, NONE), // Ringmail sleeves
+    with_item_kind(a(0x13F0, 22, NONE), ItemKindId(44)), a(0x13F1, 22, NONE), // Ringmail leggings
+    with_item_kind(a(0x13EB, 22, NONE), ItemKindId(43)), a(0x13F2, 22, NONE), // Ringmail gloves
     // -- Chainmail (28) --------------------------------------------------------
-    a(0x13BF, 28, NONE), a(0x13C4, 28, NONE), // Chain tunic
-    a(0x13BE, 28, NONE), a(0x13C3, 28, NONE), // Chain leggings
-    a(0x13BB, 28, NONE), a(0x13C0, 28, NONE), // Chain coif
+    with_item_kind(a(0x13BF, 28, NONE), ItemKindId(49)), a(0x13C4, 28, NONE), // Chain tunic
+    with_item_kind(a(0x13BE, 28, NONE), ItemKindId(48)), a(0x13C3, 28, NONE), // Chain leggings
+    with_item_kind(a(0x13BB, 28, NONE), ItemKindId(47)), a(0x13C0, 28, NONE), // Chain coif
     // -- Platemail (40) --------------------------------------------------------
-    a(0x1415, 40, NONE), a(0x1416, 40, NONE), // Plate chest
-    a(0x1410, 40, NONE), a(0x1417, 40, NONE), // Plate arms
-    a(0x1411, 40, NONE), a(0x141A, 40, NONE), // Plate legs
-    a(0x1414, 40, NONE), a(0x1418, 40, NONE), // Plate gloves
-    a(0x1413, 40, NONE),                // Plate gorget
-    a(0x1412, 40, NONE),                // Plate helm
-    a(0x1C04, 30, NONE), a(0x1C05, 30, NONE), // Female plate chest
+    with_item_kind(a(0x1415, 40, NONE), ItemKindId(5)), a(0x1416, 40, NONE), // Plate chest
+    with_item_kind(a(0x1410, 40, NONE), ItemKindId(50)), a(0x1417, 40, NONE), // Plate arms
+    with_item_kind(a(0x1411, 40, NONE), ItemKindId(53)), a(0x141A, 40, NONE), // Plate legs
+    with_item_kind(a(0x1414, 40, NONE), ItemKindId(51)), a(0x1418, 40, NONE), // Plate gloves
+    with_item_kind(a(0x1413, 40, NONE), ItemKindId(52)),                // Plate gorget
+    with_item_kind(a(0x1412, 40, NONE), ItemKindId(54)),                // Plate helm
+    with_item_kind(a(0x1C04, 30, NONE), ItemKindId(105)), a(0x1C05, 30, NONE), // Female plate chest
     // -- Bone (30) -------------------------------------------------------------
     a(0x144F, 30, NONE), a(0x1454, 30, NONE), // Bone chest
     a(0x144E, 30, NONE), a(0x1453, 30, NONE), // Bone arms
@@ -253,30 +274,38 @@ static ARMOR: &[ArmorData] = &[
     a(0x1450, 30, NONE), a(0x1455, 30, NONE), // Bone gloves
     a(0x1451, 30, NONE), a(0x1456, 30, NONE), // Bone helm
     // -- Helms -----------------------------------------------------------------
-    a(0x140C, 18, NONE),                // Bascinet
-    a(0x1408, 30, NONE),                // Close helm
-    a(0x140A, 30, NONE),                // Helmet
-    a(0x140E, 30, NONE),                // Norse helm
+    with_item_kind(a(0x140C, 18, NONE), ItemKindId(55)),                // Bascinet
+    with_item_kind(a(0x1408, 30, NONE), ItemKindId(56)),                // Close helm
+    with_item_kind(a(0x140A, 30, NONE), ItemKindId(57)),                // Helmet
+    with_item_kind(a(0x140E, 30, NONE), ItemKindId(58)),                // Norse helm
     a(0x1F0B, 20, NONE),                // Orc helm
     // -- Shields ---------------------------------------------------------------
-    a(0x1B73,  7, NONE),                // Buckler
+    with_item_kind(a(0x1B73, 7, NONE), ItemKindId(59)),                 // Buckler
     a(0x1B7A,  8, NONE),                // Wooden shield
-    a(0x1B72, 10, NONE),                // Bronze shield
-    a(0x1B7B, 11, NONE),                // Metal shield
+    with_item_kind(a(0x1B72, 10, NONE), ItemKindId(60)),                // Bronze shield
+    with_item_kind(a(0x1B7B, 11, NONE), ItemKindId(62)),                // Metal shield
     a(0x1B78, 12, NONE),                // Wooden kite shield
-    a(0x1B74, 16, NONE),                // Metal kite shield
-    a(0x1B76, 23, NONE),                // Heater shield
-    a(0x1BC4, 30, NONE),                // Order shield
-    a(0x1BC3, 32, NONE),                // Chaos shield
+    with_item_kind(a(0x1B74, 16, NONE), ItemKindId(63)),                // Metal kite shield
+    with_item_kind(a(0x1B76, 23, NONE), ItemKindId(61)),                // Heater shield
+    with_item_kind(a(0x1BC4, 30, NONE), ItemKindId(65)),                // Order shield
+    with_item_kind(a(0x1BC3, 32, NONE), ItemKindId(64)),                // Chaos shield
 ];
 
 /// A row, so the table above reads as data.
 const fn a(graphic: u16, rating: u16, meditation: MedAllowance) -> ArmorData {
     ArmorData {
+        item_kind: None,
         graphic: Graphic(graphic),
         rating,
         meditation,
     }
+}
+
+/// Attach a durable registry identity without making the combat lookup depend
+/// on the row's client art.
+const fn with_item_kind(mut armor: ArmorData, item_kind: ItemKindId) -> ArmorData {
+    armor.item_kind = Some(item_kind);
+    armor
 }
 
 // Short names for the allowance column, so a row still fits on one line.
@@ -294,6 +323,35 @@ mod tests {
         assert_eq!(armor_data(Graphic(0x13CC)).expect("leather chest").rating, 13);
         assert_eq!(armor_data(Graphic(0x1B73)).expect("buckler").rating, 7);
         assert!(armor_data(Graphic(0x0000)).is_none());
+    }
+
+    #[test]
+    fn a_registered_plate_chest_resolves_by_kind() {
+        let plate = armor_data_for_kind(ItemKindId(5)).expect("plate chest kind");
+        assert_eq!(plate.item_kind, Some(ItemKindId(5)));
+        assert_eq!(plate.rating, 40);
+        assert!(armor_data_for_kind(ItemKindId(4)).is_none()); // longsword
+    }
+
+    #[test]
+    fn every_registered_armour_kind_has_its_direct_combat_row() {
+        for definition in crate::item_definition::ITEM_DEFINITIONS {
+            let Some(rating) = definition.armor_rating else {
+                continue;
+            };
+            let armor = armor_data_for_kind(definition.id)
+                .unwrap_or_else(|| panic!("{} has no armour row", definition.name));
+            assert_eq!(armor.rating, rating, "{}", definition.name);
+            assert_eq!(armor.item_kind, Some(definition.id));
+        }
+    }
+
+    #[test]
+    fn material_bonus_is_a_material_definition_fact() {
+        assert_eq!(material_bonus(MaterialId(1)), 0); // iron
+        assert_eq!(material_bonus(MaterialId(9)), 16); // valorite
+        assert_eq!(material_bonus(MaterialId(43)), 16); // barbed leather
+        assert_eq!(material_bonus(MaterialId(999)), 0);
     }
 
     #[test]
@@ -316,6 +374,22 @@ mod tests {
             for b in &ARMOR[i + 1..] {
                 assert_ne!(a.graphic, b.graphic, "duplicate graphic 0x{:04X}", a.graphic.0);
             }
+        }
+    }
+
+    #[test]
+    fn no_two_rows_claim_one_registered_kind() {
+        for (index, armor) in ARMOR.iter().enumerate() {
+            let Some(kind) = armor.item_kind else {
+                continue;
+            };
+            assert!(
+                ARMOR[index + 1..]
+                    .iter()
+                    .all(|other| other.item_kind != Some(kind)),
+                "duplicate armour kind {}",
+                kind.0
+            );
         }
     }
 

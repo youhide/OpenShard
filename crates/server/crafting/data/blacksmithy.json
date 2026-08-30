@@ -1,149 +1,176 @@
 {
   "groups": [1111704, 1011079, 1011080, 1011081, 1011082, 1011083, 1011084, 1011173],
   "sub_res": {
+    "item_kind": 1,
     "graphic": "0x1BF2",
     "name": 1044022,
     "entries": [
-      { "hue": "0x0000", "name": 1044022, "req_skill": 0, "message": 1044267 },
-      { "hue": "0x0973", "name": 1044023, "req_skill": 650, "message": 1044268 },
-      { "hue": "0x0966", "name": 1044024, "req_skill": 700, "message": 1044268 },
-      { "hue": "0x096D", "name": 1044025, "req_skill": 750, "message": 1044268 },
-      { "hue": "0x0972", "name": 1044026, "req_skill": 800, "message": 1044268 },
-      { "hue": "0x08A5", "name": 1044027, "req_skill": 850, "message": 1044268 },
-      { "hue": "0x0979", "name": 1044028, "req_skill": 900, "message": 1044268 },
-      { "hue": "0x089F", "name": 1044029, "req_skill": 950, "message": 1044268 },
-      { "hue": "0x08AB", "name": 1044030, "req_skill": 990, "message": 1044268 }
+      { "material": 1, "hue": "0x0000", "name": 1044022, "req_skill": 0, "message": 1044267 },
+      { "material": 2, "hue": "0x0973", "name": 1044023, "req_skill": 650, "message": 1044268 },
+      { "material": 3, "hue": "0x0966", "name": 1044024, "req_skill": 700, "message": 1044268 },
+      { "material": 4, "hue": "0x096D", "name": 1044025, "req_skill": 750, "message": 1044268 },
+      { "material": 5, "hue": "0x0972", "name": 1044026, "req_skill": 800, "message": 1044268 },
+      { "material": 6, "hue": "0x08A5", "name": 1044027, "req_skill": 850, "message": 1044268 },
+      { "material": 7, "hue": "0x0979", "name": 1044028, "req_skill": 900, "message": 1044268 },
+      { "material": 8, "hue": "0x089F", "name": 1044029, "req_skill": 950, "message": 1044268 },
+      { "material": 9, "hue": "0x08AB", "name": 1044030, "req_skill": 990, "message": 1044268 }
     ]
   },
   "recipes": [
     {
+      "kind": 43,
       "graphic": "0x13EB",
       "name": 1025099,
       "group": 0,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 120, "max": 620 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 44,
       "graphic": "0x13F0",
       "name": 1025104,
       "group": 0,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 194, "max": 694 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 16, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 16, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 45,
       "graphic": "0x13EE",
       "name": 1025103,
       "group": 0,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 169, "max": 669 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 46,
       "graphic": "0x13EC",
       "name": 1025100,
       "group": 0,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 219, "max": 719 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 18, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 18, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 47,
       "graphic": "0x13BB",
       "name": 1025051,
       "group": 0,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 145, "max": 645 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 48,
       "graphic": "0x13BE",
       "name": 1025054,
       "group": 0,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 367, "max": 867 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 18, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 18, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 49,
       "graphic": "0x13BF",
       "name": 1025055,
       "group": 0,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 391, "max": 891 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 20, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 20, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 50,
       "graphic": "0x1410",
       "name": 1025136,
       "group": 0,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 663, "max": 1163 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 18, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 18, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 51,
       "graphic": "0x1414",
       "name": 1025140,
       "group": 0,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 589, "max": 1089 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 52,
       "graphic": "0x1413",
       "name": 1025139,
       "group": 0,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 564, "max": 1064 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 53,
       "graphic": "0x1411",
       "name": 1025137,
       "group": 0,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 688, "max": 1188 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 20, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 20, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 5,
       "graphic": "0x1415",
       "name": 1046431,
       "group": 0,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 750, "max": 1250 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 25, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 25, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 105,
       "graphic": "0x1C04",
       "name": 1046430,
       "group": 0,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 441, "max": 941 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 20, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 20, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -207,53 +234,63 @@
       ]
     },
     {
+      "kind": 55,
       "graphic": "0x140C",
       "name": 1025132,
       "group": 1,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 83, "max": 583 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 15, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 15, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 56,
       "graphic": "0x1408",
       "name": 1025128,
       "group": 1,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 379, "max": 879 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 15, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 15, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 57,
       "graphic": "0x140A",
       "name": 1025130,
       "group": 1,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 379, "max": 879 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 15, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 15, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 58,
       "graphic": "0x140E",
       "name": 1025134,
       "group": 1,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 379, "max": 879 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 15, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 15, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 54,
       "graphic": "0x1412",
       "name": 1025138,
       "group": 1,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 626, "max": 1126 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 15, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 15, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -370,53 +407,63 @@
       ]
     },
     {
+      "kind": 59,
       "graphic": "0x1B73",
       "name": 1027027,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": -250, "max": 250 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 60,
       "graphic": "0x1B72",
       "name": 1027026,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": -152, "max": 348 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 61,
       "graphic": "0x1B76",
       "name": 1027030,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 243, "max": 743 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 18, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 18, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 62,
       "graphic": "0x1B7B",
       "name": 1027035,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": -102, "max": 398 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 63,
       "graphic": "0x1B74",
       "name": 1027028,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 46, "max": 546 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 16, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 16, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -430,23 +477,27 @@
       ]
     },
     {
+      "kind": 64,
       "graphic": "0x1BC3",
       "name": 1027107,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 850, "max": 1350 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 25, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 25, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 65,
       "graphic": "0x1BC4",
       "name": 1027108,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 850, "max": 1350 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 25, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 25, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -460,13 +511,15 @@
       ]
     },
     {
+      "kind": 66,
       "graphic": "0x0F5E",
       "name": 1023934,
       "group": 3,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 354, "max": 854 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -480,73 +533,87 @@
       ]
     },
     {
+      "kind": 67,
       "graphic": "0x1441",
       "name": 1025185,
       "group": 3,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 243, "max": 743 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 8, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 8, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 68,
       "graphic": "0x0F52",
       "name": 1023921,
       "group": 3,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": -4, "max": 496 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 3, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 3, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 69,
       "graphic": "0x13FF",
       "name": 1025119,
       "group": 3,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 441, "max": 941 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 8, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 8, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 70,
       "graphic": "0x1401",
       "name": 1025121,
       "group": 3,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 367, "max": 867 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 8, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 8, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 4,
       "graphic": "0x0F61",
       "name": 1023937,
       "group": 3,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 280, "max": 780 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 71,
       "graphic": "0x13B6",
       "name": 1025046,
       "group": 3,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 317, "max": 817 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 72,
       "graphic": "0x13B9",
       "name": 1025049,
       "group": 3,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 243, "max": 743 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -699,73 +766,87 @@
       ]
     },
     {
+      "kind": 73,
       "graphic": "0x0F49",
       "name": 1023913,
       "group": 4,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 342, "max": 842 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 74,
       "graphic": "0x0F47",
       "name": 1023911,
       "group": 4,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 305, "max": 805 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 75,
       "graphic": "0x0F4B",
       "name": 1023915,
       "group": 4,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 293, "max": 793 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 76,
       "graphic": "0x0F45",
       "name": 1023909,
       "group": 4,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 342, "max": 842 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 77,
       "graphic": "0x13FB",
       "name": 1025115,
       "group": 4,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 280, "max": 780 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 78,
       "graphic": "0x1443",
       "name": 1025187,
       "group": 4,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 330, "max": 830 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 16, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 16, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 79,
       "graphic": "0x13B0",
       "name": 1025040,
       "group": 4,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 391, "max": 891 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 16, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 16, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -779,13 +860,15 @@
       ]
     },
     {
+      "kind": 80,
       "graphic": "0x0F4D",
       "name": 1023917,
       "group": 5,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 317, "max": 817 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 18, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 18, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -809,13 +892,15 @@
       ]
     },
     {
+      "kind": 81,
       "graphic": "0x143E",
       "name": 1025183,
       "group": 5,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 391, "max": 891 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 20, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 20, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -839,13 +924,15 @@
       ]
     },
     {
+      "kind": 82,
       "graphic": "0x1403",
       "name": 1025123,
       "group": 5,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 453, "max": 953 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 6, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 6, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -859,53 +946,63 @@
       ]
     },
     {
+      "kind": 83,
       "graphic": "0x0F62",
       "name": 1023938,
       "group": 5,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 490, "max": 990 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 84,
       "graphic": "0x1405",
       "name": 1025125,
       "group": 5,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 429, "max": 929 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 12, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 85,
       "graphic": "0x143D",
       "name": 1025181,
       "group": 6,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 342, "max": 842 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 16, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 16, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 86,
       "graphic": "0x0F5C",
       "name": 1023932,
       "group": 6,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 145, "max": 645 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 6, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 6, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 87,
       "graphic": "0x143B",
       "name": 1025179,
       "group": 6,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 194, "max": 694 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 10, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -919,23 +1016,27 @@
       ]
     },
     {
+      "kind": 88,
       "graphic": "0x1407",
       "name": 1025127,
       "group": 6,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 280, "max": 780 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 14, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 89,
       "graphic": "0x1439",
       "name": 1025177,
       "group": 6,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": 342, "max": 842 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 16, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 16, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {

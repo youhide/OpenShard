@@ -10,7 +10,7 @@ use super::*;
 use openshard_protocol::skill::{SkillEntry, SkillLock, SkillUpdate, SkillsFull, skill_count};
 use openshard_protocol::wire::RawSkillId;
 use openshard_skills::SkillChanged;
-use openshard_state::components::{Skills, StatLocks};
+use openshard_state::components::{ItemKind, Skills, StatLocks};
 use openshard_state::{Skill, StatLock};
 
 impl World {
@@ -176,7 +176,11 @@ impl World {
             _ if items::is_carving_tool(graphic) => {
                 items::use_carving_tool(&mut self.state, player, item);
             }
-            _ if openshard_state::instrument::instrument_data(graphic).is_some() => {
+            _ if match self.state.registry.get::<ItemKind>(item) {
+                Some(kind) => openshard_state::instrument::instrument_data_for_kind(kind.0).is_some(),
+                None => openshard_state::instrument::instrument_data(graphic).is_some(),
+            } =>
+            {
                 skills::play_instrument(&mut self.state, player, item);
             }
             skills::BANDAGE_GRAPHIC => {
@@ -231,10 +235,15 @@ impl World {
     /// what knows the click happened; from the moment the window is drawn the
     /// crate owns everything, including the reply.
     fn open_craft_window(&mut self, player: EntityId, tool: EntityId) {
-        let Some(graphic) = self.state.registry.get::<Drawn>(tool).map(|g| g.id) else {
-            return;
+        let system = match self.state.registry.get::<ItemKind>(tool) {
+            Some(kind) => crafting::tool_system_for_kind(kind.0),
+            None => self
+                .state
+                .registry
+                .get::<Drawn>(tool)
+                .and_then(|graphic| crafting::tool_system(graphic.id)),
         };
-        let Some(system) = crafting::tool_system(graphic) else {
+        let Some(system) = system else {
             return;
         };
         crafting::open(

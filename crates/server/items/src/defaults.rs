@@ -13,13 +13,18 @@
 
 use openshard_state::WorldState;
 use openshard_state::components::{
-    Instrument, Name, POISON_POTION_GRAPHIC, PoisonCharges, RUNEBOOK_GRAPHIC, Runebook, Tool,
+    Container, Decays, Instrument, ItemKind, Name, POISON_POTION_GRAPHIC, PoisonCharges, RUNEBOOK_GRAPHIC,
+    Runebook, SPELLBOOK_GRAPHIC, Spellbook, Tool,
 };
-use openshard_state::craft::craft_tool;
-use openshard_state::harvest::tool_data;
-use openshard_state::instrument::{INSTRUMENT_MAX_USES, INSTRUMENT_MIN_USES, instrument_data};
+use openshard_state::craft::{craft_tool, craft_tool_for_kind};
+use openshard_state::harvest::{tool_data, tool_data_for_kind};
+use openshard_state::instrument::{
+    INSTRUMENT_MAX_USES, INSTRUMENT_MIN_USES, instrument_data, instrument_data_for_kind,
+};
+use openshard_state::item_definition::{has_tag, item_definition};
 
 use openshard_entities::{EntityId, Registry};
+use openshard_protocol::item_kind::ItemTag;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::PoisonLevel;
 
@@ -57,14 +62,44 @@ fn fresh_uses(rng: &mut openshard_state::Rng, min: u16, max: u16) -> u16 {
 /// script's spawn, a staff `.add` — so there is no path that makes a lute nobody
 /// can play.
 pub fn apply_core_defaults(state: &mut WorldState, item: EntityId, graphic: Graphic) {
-    if instrument_data(graphic).is_some() {
+    let kind = state.registry.get::<ItemKind>(item).map(|kind| kind.0);
+    if let Some(gump) = state
+        .registry
+        .get::<ItemKind>(item)
+        .and_then(|kind| item_definition(kind.0))
+        .and_then(|definition| definition.container_gump)
+    {
+        // The gump is a definition fact, not a special case in F1. Attach it
+        // here so every semantic constructor produces an openable container.
+        state.registry.insert(item, Container { gump });
+        state.registry.remove::<Decays>(item);
+        return;
+    }
+    if kind.is_some_and(|kind| has_tag(kind, ItemTag::Spellbook))
+        || (kind.is_none() && graphic == SPELLBOOK_GRAPHIC)
+    {
+        // The F1 creator, vendors and scripts all enter through the same item
+        // factory. A spellbook is not merely its `0x0EFA` drawing: without this
+        // component it cannot open or learn a scroll.
+        state.registry.insert(item, Spellbook::default());
+        return;
+    }
+    let instrument = match kind {
+        Some(kind) => instrument_data_for_kind(kind).is_some(),
+        None => instrument_data(graphic).is_some(),
+    };
+    if instrument {
         // Rolled between ServUO's two bounds on the world's own generator, so a
         // shelf of lutes replays and no two are identical.
         let uses_left = fresh_uses(&mut state.rng, INSTRUMENT_MIN_USES, INSTRUMENT_MAX_USES);
         state.registry.insert(item, Instrument { uses_left });
         return;
     }
-    if let Some(data) = tool_data(graphic) {
+    let harvest_tool = match kind {
+        Some(kind) => tool_data_for_kind(kind),
+        None => tool_data(graphic),
+    };
+    if let Some(data) = harvest_tool {
         // A pickaxe off the shelf holds a fixed number of swings, rolled the same
         // way — without it a bought pick has no `Tool` at all and the first swing
         // never wears it down.
@@ -72,7 +107,11 @@ pub fn apply_core_defaults(state: &mut WorldState, item: EntityId, graphic: Grap
         state.registry.insert(item, Tool { uses_left });
         return;
     }
-    if let Some(data) = craft_tool(graphic) {
+    let craft_tool = match kind {
+        Some(kind) => craft_tool_for_kind(kind),
+        None => craft_tool(graphic),
+    };
+    if let Some(data) = craft_tool {
         // The same for a smith's tongs or a tailor's sewing kit. The two tables
         // are separate because a pickaxe and a saw answer different questions —
         // which ground, which trade — and one of them ends up on `Skill` either
@@ -86,7 +125,9 @@ pub fn apply_core_defaults(state: &mut WorldState, item: EntityId, graphic: Grap
         state.registry.insert(item, PoisonCharges { level, charges: 1 });
         return;
     }
-    if graphic == RUNEBOOK_GRAPHIC {
+    if kind.is_some_and(|kind| has_tag(kind, ItemTag::Runebook))
+        || (kind.is_none() && graphic == RUNEBOOK_GRAPHIC)
+    {
         // An empty book with its charges. A bought one is blank — the
         // destinations are the owner's to bind — but it has to *be* a runebook
         // from the moment it exists, or a book off a shelf is a graphic that
@@ -114,10 +155,24 @@ const SHELF_RUNEBOOK_CHARGES: u8 = 6;
 /// ride the same saved column, so the graphic is what decides which component it
 /// comes back as. Restoring the wrong one would leave a pickaxe that plays music.
 pub fn restore_uses(state: &mut WorldState, item: EntityId, graphic: Graphic, uses_left: u16) {
-    if instrument_data(graphic).is_some() {
+    let instrument = match state.registry.get::<ItemKind>(item) {
+        Some(kind) => instrument_data_for_kind(kind.0).is_some(),
+        None => instrument_data(graphic).is_some(),
+    };
+    if instrument {
         state.registry.insert(item, Instrument { uses_left });
-    } else if tool_data(graphic).is_some() || craft_tool(graphic).is_some() {
-        state.registry.insert(item, Tool { uses_left });
+    } else {
+        let harvest_tool = match state.registry.get::<ItemKind>(item) {
+            Some(kind) => tool_data_for_kind(kind.0).is_some(),
+            None => tool_data(graphic).is_some(),
+        };
+        let craft_tool = match state.registry.get::<ItemKind>(item) {
+            Some(kind) => craft_tool_for_kind(kind.0).is_some(),
+            None => craft_tool(graphic).is_some(),
+        };
+        if harvest_tool || craft_tool {
+            state.registry.insert(item, Tool { uses_left });
+        }
     }
 }
 

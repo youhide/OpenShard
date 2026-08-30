@@ -17,10 +17,11 @@ use super::*;
 use openshard_movement::scene::Scene;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
+use openshard_protocol::item_kind::ItemKindId;
 use openshard_protocol::serial::RawSerial;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_state::Skill;
-use openshard_state::components::{Contained, Harvesting, Skills, Tool};
+use openshard_state::components::{Contained, Harvesting, ItemKind, Material, Skills, Tool};
 use openshard_state::harvest::{HarvestKind, LOG_GRAPHIC, ORE_GRAPHIC, SAND_GRAPHIC, TileSource, definition};
 
 /// A pickaxe, ServUO's `Pickaxe`.
@@ -230,6 +231,17 @@ fn a_pickaxe_swung_at_a_mountain_yields_ore_and_empties_the_vein() {
     assert!(
         carried(&world, player, ORE_GRAPHIC) >= u32::from(before.consumed),
         "no ore in the pack"
+    );
+    let ore = world
+        .state
+        .registry
+        .query::<ItemKind>()
+        .find(|(_, kind)| **kind == ItemKind(ItemKindId(2)))
+        .map(|(entity, _)| entity)
+        .expect("mining pays an item with an ore kind");
+    assert!(
+        world.state.registry.has::<Material>(ore),
+        "the ore carries a material id"
     );
     // Felucca pays double, so the vein is two down, not one.
     let bank_left = world.state.facet_state_mut(Facet(0)).banks.get(

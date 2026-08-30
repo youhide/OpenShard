@@ -1613,6 +1613,44 @@ fn spawn_plain_item_at(world: &mut World, point: Point, now: Instant) -> Serial 
 }
 
 #[test]
+fn a_registered_spawn_command_creates_semantic_identity() {
+    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+    use openshard_state::components::{ItemKind, Material};
+
+    let now = Instant::now();
+    let mut world = world();
+    world.queue(Command::SpawnItem {
+        graphic: Graphic(0x1415),
+        hue: Hue(0x08AB),
+        amount: 1,
+        stackable: false,
+        position: Point::new(START.x, START.y, 0),
+        facet: Facet(0),
+    });
+    world.tick(now);
+    let item = world
+        .registry()
+        .query::<Drawn>()
+        .find_map(|(item, drawn)| {
+            (*drawn
+                == Drawn {
+                    id: Graphic(0x1415),
+                    hue: Hue(0x08AB),
+                })
+            .then_some(item)
+        })
+        .expect("spawned plate chest");
+    assert_eq!(
+        world.registry().get::<ItemKind>(item),
+        Some(&ItemKind(ItemKindId(5)))
+    );
+    assert_eq!(
+        world.registry().get::<Material>(item),
+        Some(&Material(MaterialId(9)))
+    );
+}
+
+#[test]
 fn a_dagger_carves_an_animal_corpse_once() {
     // Carving is a two-packet action: use the blade, then point at the corpse.
     // Keep both halves in one test, since an item in a corpse is the result that
@@ -1733,6 +1771,43 @@ fn double_clicking_a_plain_item_fires_the_use_trigger() {
     assert_eq!(events[0].graphic, POTION_GRAPHIC, "keyed by the tile");
     assert_eq!(events[0].item, item, "on the item clicked");
     assert_eq!(events[0].by.raw(), player_serial, "by the clicker");
+    assert_eq!(
+        events[0].item_kind,
+        Some(openshard_protocol::item_kind::ItemKindId(39)),
+        "the common empty bottle is now an explicit semantic item"
+    );
+    assert_eq!(events[0].material, None);
+}
+
+#[test]
+fn the_use_trigger_carries_a_typed_items_identity() {
+    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let item = items::spawn_item_kind(
+        &mut world.state,
+        ItemKindId(5), // plate chest: a plain use-trigger item on the ground
+        Some(MaterialId(9)),
+        1,
+        false,
+        Point::new(START.x, START.y, 0),
+        Facet(0),
+    )
+    .expect("registered item");
+    let serial = world.registry().serial_of(item).expect("item serial");
+
+    let mut used: Cursor<crate::ItemUsed> = world.bus().cursor();
+    world.queue(Command::DoubleClick {
+        connection: player,
+        request: UseRequest::Use(RawSerial(serial.raw())),
+    });
+    world.tick(now);
+
+    let event = world.bus().read(&mut used).copied().next().expect("item use");
+    assert_eq!(event.item_kind, Some(ItemKindId(5)));
+    assert_eq!(event.material, Some(MaterialId(9)));
 }
 
 #[test]
@@ -3481,6 +3556,156 @@ fn picking_up_part_of_a_stack_splits_it() {
     assert!(
         packets_for(&mut world, player).iter().any(|p| p[0] == 0x1A),
         "and the player is drawn the leftover pile"
+    );
+}
+
+#[test]
+fn splitting_a_typed_pile_copies_its_identity_without_reinterpreting_art() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let here = Point::new(START.x, START.y, 0);
+    let pile_item = items::spawn_item_kind(
+        &mut world.state,
+        openshard_protocol::item_kind::ItemKindId(1),
+        Some(openshard_protocol::item_kind::MaterialId(9)),
+        100,
+        true,
+        here,
+        Facet(0),
+    )
+    .expect("typed ingot pile");
+    let pile = world.registry().serial_of(pile_item).expect("item serial");
+
+    world.queue(Command::PickUpItem {
+        connection: player,
+        serial: RawSerial(pile.raw()),
+        amount: 30,
+    });
+    world.tick(now);
+
+    let leftover = world
+        .state
+        .registry
+        .query::<Position>()
+        .find_map(|(item, _)| {
+            (item != pile_item && world.state.registry.has::<Stackable>(item)).then_some(item)
+        })
+        .expect("split remainder");
+    for item in [pile_item, leftover] {
+        assert_eq!(
+            world
+                .state
+                .registry
+                .get::<openshard_state::components::ItemKind>(item),
+            Some(&openshard_state::components::ItemKind(
+                openshard_protocol::item_kind::ItemKindId(1)
+            ))
+        );
+        assert_eq!(
+            world
+                .state
+                .registry
+                .get::<openshard_state::components::Material>(item),
+            Some(&openshard_state::components::Material(
+                openshard_protocol::item_kind::MaterialId(9)
+            ))
+        );
+    }
+}
+
+#[test]
+fn a_typed_payout_never_merges_with_a_same_drawn_different_kind() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let player_entity = world.state.players[&player];
+    let owner = world.registry().serial_of(player_entity).expect("player serial");
+    let pack = items::backpack_of(&world.state, owner).expect("backpack");
+
+    let impostor = items::give(&mut world.state, pack, Graphic(0x1BF2), Hue(0x08AB), 7)
+        .last
+        .expect("legacy-shaped pile");
+    world.state.registry.insert(
+        impostor,
+        openshard_state::components::ItemKind(openshard_protocol::item_kind::ItemKindId(999)),
+    );
+    world.state.registry.insert(
+        impostor,
+        openshard_state::components::Material(openshard_protocol::item_kind::MaterialId(9)),
+    );
+
+    let outcome = items::give_kind(
+        &mut world.state,
+        pack,
+        openshard_protocol::item_kind::ItemKindId(1),
+        Some(openshard_protocol::item_kind::MaterialId(9)),
+        5,
+    )
+    .expect("typed ingot definition");
+    let real = outcome.last.expect("typed payout");
+    assert_ne!(real, impostor);
+    assert_eq!(openshard_items::amount_of(&world.state, impostor), 7);
+    assert_eq!(openshard_items::amount_of(&world.state, real), 5);
+    assert_eq!(
+        world
+            .state
+            .registry
+            .get::<openshard_state::components::ItemKind>(real),
+        Some(&openshard_state::components::ItemKind(
+            openshard_protocol::item_kind::ItemKindId(1)
+        ))
+    );
+}
+
+#[test]
+fn a_wrong_kind_same_art_pile_cannot_bypass_typed_backpack_capacity() {
+    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let player_entity = world.state.players[&player];
+    let owner = world.registry().serial_of(player_entity).expect("player serial");
+    let pack = items::backpack_of(&world.state, owner).expect("backpack");
+    // Fill 124 of the 125 direct slots. The final item is an art-identical but
+    // deliberately different semantic pile, so a genuine typed ingot still
+    // needs the last (unavailable) slot rather than a merge.
+    assert!(items::give_containers_to_backpack(
+        &mut world.state,
+        owner,
+        items::BACKPACK_GRAPHIC,
+        items::BACKPACK_GUMP,
+        Hue::NONE,
+        124,
+    ));
+    let impostor = items::give(&mut world.state, pack, Graphic(0x1BF2), Hue(0x08AB), 7)
+        .last
+        .expect("the final occupied slot");
+    world
+        .state
+        .registry
+        .insert(impostor, openshard_state::components::ItemKind(ItemKindId(999)));
+    world
+        .state
+        .registry
+        .insert(impostor, openshard_state::components::Material(MaterialId(9)));
+
+    assert!(
+        !items::give_kind_to_backpack(
+            &mut world.state,
+            owner,
+            ItemKindId(1),
+            Some(MaterialId(9)),
+            5,
+            true,
+        ),
+        "same art is not a free merge slot for a different semantic kind"
+    );
+    assert_eq!(
+        openshard_items::amount_of(&world.state, impostor),
+        7,
+        "the existing pile was untouched"
     );
 }
 
@@ -12346,6 +12571,439 @@ fn an_admin_created_backpack_is_a_container() {
 }
 
 #[test]
+fn an_admin_created_spellbook_is_a_spellbook() {
+    // F1 is only another front end for this administrator form. It must use the
+    // same item factory as any other creation path, so an art id that represents
+    // a spellbook does not become an inert `0x0EFA` picture in the GM's pack.
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::components::{ItemKind, SPELLBOOK_GRAPHIC, Spellbook};
+
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let actor = world.state.players[&gm];
+    let actor_serial = world.registry().serial_of(actor).unwrap();
+    let pack = items::backpack_of(&world.state, actor_serial).unwrap();
+
+    world.queue(admin_item_response(gm, "0x0efa", "0", "1", false));
+    world.tick(now);
+
+    let book = world
+        .registry()
+        .query::<Contained>()
+        .find_map(|(item, held)| {
+            (held.container == pack
+                && world
+                    .registry()
+                    .get::<Drawn>(item)
+                    .is_some_and(|drawn| drawn.id == SPELLBOOK_GRAPHIC))
+            .then_some(item)
+        })
+        .expect("the F1 item form placed a spellbook");
+    assert!(
+        world.registry().has::<Spellbook>(book),
+        "the created book can be opened and taught spells"
+    );
+    assert_eq!(
+        world.registry().get::<ItemKind>(book),
+        Some(&ItemKind(ItemKindId(6))),
+        "the functional object also carries the registry identity"
+    );
+}
+
+#[test]
+fn an_admin_created_runebook_is_a_runebook() {
+    // Runebooks use a different item-state component from spellbooks.  F1 must
+    // therefore pass the registry result through the normal item factory, not
+    // merely put the book art into the administrator's backpack.
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::components::{ItemKind, RUNEBOOK_GRAPHIC, Runebook};
+
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let actor = world.state.players[&gm];
+    let actor_serial = world.registry().serial_of(actor).unwrap();
+    let pack = items::backpack_of(&world.state, actor_serial).unwrap();
+
+    world.queue(admin_item_response(gm, "0x22c5", "0", "1", false));
+    world.tick(now);
+
+    let book = world
+        .registry()
+        .query::<Contained>()
+        .find_map(|(item, held)| {
+            (held.container == pack
+                && world
+                    .registry()
+                    .get::<Drawn>(item)
+                    .is_some_and(|drawn| drawn.id == RUNEBOOK_GRAPHIC))
+            .then_some(item)
+        })
+        .expect("the F1 item form placed a runebook");
+    assert!(
+        world.registry().has::<Runebook>(book),
+        "the created book opens the runebook interface"
+    );
+    assert_eq!(
+        world.registry().get::<ItemKind>(book),
+        Some(&ItemKind(ItemKindId(8))),
+        "the functional object also carries the registry identity"
+    );
+}
+
+#[test]
+fn an_admin_created_pickaxe_is_a_semantic_harvesting_tool() {
+    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+    use openshard_state::components::{ItemKind, Material, Tool};
+
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let actor = world.state.players[&gm];
+    let actor_serial = world.registry().serial_of(actor).unwrap();
+    let pack = items::backpack_of(&world.state, actor_serial).unwrap();
+
+    world.queue(admin_item_response(gm, "0x0e86", "0", "1", false));
+    world.tick(now);
+
+    let pickaxe = world
+        .registry()
+        .query::<Contained>()
+        .find_map(|(item, held)| {
+            (held.container == pack
+                && world
+                    .registry()
+                    .get::<Drawn>(item)
+                    .is_some_and(|drawn| drawn.id == Graphic(0x0E86)))
+            .then_some(item)
+        })
+        .expect("the F1 item form placed a pickaxe");
+    assert!(world.registry().has::<Tool>(pickaxe));
+    assert_eq!(
+        world.registry().get::<ItemKind>(pickaxe),
+        Some(&ItemKind(ItemKindId(9)))
+    );
+    assert_eq!(
+        world.registry().get::<Material>(pickaxe),
+        Some(&Material(MaterialId(1)))
+    );
+}
+
+#[test]
+fn f1_normalizes_a_flipped_registered_tool_to_its_same_semantic_kind() {
+    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+    use openshard_state::components::{ItemKind, Material, Tool};
+
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let actor = world.state.players[&gm];
+    let owner = world.registry().serial_of(actor).unwrap();
+    let pack = items::backpack_of(&world.state, owner).unwrap();
+
+    world.queue(admin_item_response(gm, "0x0e85", "0x08ab", "1", false));
+    world.tick(now);
+    assert!(world.registry().query::<Contained>().any(|(item, held)| {
+        held.container == pack
+            && world.registry().get::<ItemKind>(item) == Some(&ItemKind(ItemKindId(9)))
+            && world.registry().get::<Material>(item) == Some(&Material(MaterialId(9)))
+            && world.registry().has::<Tool>(item)
+    }));
+}
+
+#[test]
+fn f1_creates_registered_shovel_and_fishing_pole_as_typed_harvest_tools() {
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::components::{ItemKind, Tool};
+
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let actor = world.state.players[&gm];
+    let owner = world.registry().serial_of(actor).unwrap();
+    let pack = items::backpack_of(&world.state, owner).unwrap();
+    for (graphic, kind) in [(0x0F39, ItemKindId(17)), (0x0DC0, ItemKindId(18))] {
+        world.queue(admin_item_response(
+            gm,
+            &format!("0x{graphic:04x}"),
+            "0",
+            "1",
+            false,
+        ));
+        world.tick(now);
+        assert!(world.registry().query::<Contained>().any(|(item, held)| {
+            held.container == pack
+                && world.registry().get::<ItemKind>(item) == Some(&ItemKind(kind))
+                && world.registry().has::<Tool>(item)
+        }));
+    }
+}
+
+#[test]
+fn an_admin_created_tongs_open_blacksmithy() {
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_protocol::item_kind::MaterialId;
+    use openshard_state::components::{ItemKind, Material, Tool};
+
+    let mut now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let actor = world.state.players[&gm];
+    let actor_serial = world.registry().serial_of(actor).unwrap();
+    let pack = items::backpack_of(&world.state, actor_serial).unwrap();
+
+    world.queue(admin_item_response(gm, "0x0fbb", "0", "1", false));
+    world.tick(now);
+
+    let tongs = world
+        .registry()
+        .query::<Contained>()
+        .find_map(|(item, held)| {
+            (held.container == pack
+                && world
+                    .registry()
+                    .get::<Drawn>(item)
+                    .is_some_and(|drawn| drawn.id == Graphic(0x0FBB)))
+            .then_some(item)
+        })
+        .expect("the F1 item form placed tongs");
+    assert!(world.registry().has::<Tool>(tongs));
+    assert_eq!(
+        world.registry().get::<ItemKind>(tongs),
+        Some(&ItemKind(ItemKindId(10)))
+    );
+    assert_eq!(
+        world.registry().get::<Material>(tongs),
+        Some(&Material(MaterialId(1)))
+    );
+
+    let serial = world.registry().serial_of(tongs).unwrap();
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        request: UseRequest::Use(RawSerial(serial.raw())),
+    });
+    now += TICK_INTERVAL;
+    world.tick(now);
+    assert_eq!(
+        world
+            .state
+            .row_of(actor)
+            .and_then(|row| row.craft_gump)
+            .map(|context| context.system),
+        Some(0),
+        "the typed F1 tool opens its blacksmithy craft window"
+    );
+}
+
+#[test]
+fn f1_creates_registered_primary_craft_tools_with_identity_and_uses() {
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::components::{ItemKind, Tool};
+
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let actor = world.state.players[&gm];
+    let owner = world.registry().serial_of(actor).unwrap();
+    let pack = items::backpack_of(&world.state, owner).unwrap();
+    for (graphic, kind) in [
+        (0x13E3, ItemKindId(19)), // smith hammer
+        (0x0FB4, ItemKindId(20)), // sledge
+        (0x0F9D, ItemKindId(21)), // sewing kit
+        (0x1034, ItemKindId(22)), // saw
+        (0x1EB8, ItemKindId(23)), // tinker's tools
+        (0x0E9B, ItemKindId(24)), // mortar
+        (0x1022, ItemKindId(25)), // fletcher's tools
+        (0x1028, ItemKindId(26)), // dovetail saw
+        (0x1030, ItemKindId(27)), // jointing plane
+        (0x102C, ItemKindId(28)), // moulding plane
+        (0x1032, ItemKindId(29)), // smoothing plane
+        (0x102E, ItemKindId(30)), // carpenter nails
+        (0x102A, ItemKindId(31)), // carpenter hammer
+        (0x10E4, ItemKindId(32)), // draw knife
+        (0x10E5, ItemKindId(33)), // froe
+        (0x10E6, ItemKindId(34)), // inshave
+        (0x10E7, ItemKindId(35)), // scorp
+    ] {
+        world.queue(admin_item_response(
+            gm,
+            &format!("0x{graphic:04x}"),
+            "0",
+            "1",
+            false,
+        ));
+        world.tick(now);
+        assert!(world.registry().query::<Contained>().any(|(item, held)| {
+            held.container == pack
+                && world.registry().get::<ItemKind>(item) == Some(&ItemKind(kind))
+                && world.registry().has::<Tool>(item)
+        }));
+    }
+}
+
+#[test]
+fn f1_creates_every_registered_definition_with_its_semantic_role() {
+    use openshard_protocol::item_kind::ItemTag;
+    use openshard_state::components::{Instrument, ItemKind, Runebook, Spellbook, Tool};
+
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let actor = world.state.players[&gm];
+    let owner = world.registry().serial_of(actor).unwrap();
+    let pack = items::backpack_of(&world.state, owner).unwrap();
+
+    for definition in openshard_state::item_definition::ITEM_DEFINITIONS {
+        world.queue(admin_item_response(
+            gm,
+            &format!("0x{:04x}", definition.graphic.0),
+            "0",
+            "1",
+            false,
+        ));
+        world.tick(now);
+        let item = world
+            .registry()
+            .query::<Contained>()
+            .find_map(|(item, held)| {
+                (held.container == pack
+                    && world.registry().get::<ItemKind>(item) == Some(&ItemKind(definition.id)))
+                .then_some(item)
+            })
+            .unwrap_or_else(|| panic!("F1 did not create {} as its registered kind", definition.name));
+
+        if definition.tags.contains(&ItemTag::Weapon) {
+            assert!(
+                openshard_state::weapon::weapon_data_for_kind(definition.id).is_some(),
+                "{} has no semantic combat row",
+                definition.name
+            );
+        }
+        if definition.tags.contains(&ItemTag::Armor) {
+            assert!(
+                openshard_state::armor::armor_data_for_kind(definition.id).is_some(),
+                "{} has no semantic armour row",
+                definition.name
+            );
+        }
+        if definition.tags.contains(&ItemTag::Tool) {
+            assert!(
+                world.registry().has::<Tool>(item),
+                "{} has no tool state",
+                definition.name
+            );
+            assert!(
+                openshard_state::harvest::tool_data_for_kind(definition.id).is_some()
+                    || openshard_state::craft::craft_tool_for_kind(definition.id).is_some(),
+                "{} has no semantic harvest or craft role",
+                definition.name
+            );
+        }
+        if definition.tags.contains(&ItemTag::Instrument) {
+            assert!(
+                world.registry().has::<Instrument>(item),
+                "{} has no instrument state",
+                definition.name
+            );
+            assert!(
+                openshard_state::instrument::instrument_data_for_kind(definition.id).is_some(),
+                "{} has no semantic instrument role",
+                definition.name
+            );
+        }
+        if definition.tags.contains(&ItemTag::Container) {
+            assert!(
+                world.registry().has::<Container>(item),
+                "{} has no container state",
+                definition.name
+            );
+        }
+        if definition.tags.contains(&ItemTag::Spellbook) {
+            assert!(
+                world.registry().has::<Spellbook>(item),
+                "{} has no spellbook state",
+                definition.name
+            );
+        }
+        if definition.tags.contains(&ItemTag::Runebook) {
+            assert!(
+                world.registry().has::<Runebook>(item),
+                "{} has no runebook state",
+                definition.name
+            );
+        }
+    }
+}
+
+#[test]
+fn an_admin_created_lute_is_an_instrument() {
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::components::{Instrument, ItemKind};
+
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let actor = world.state.players[&gm];
+    let actor_serial = world.registry().serial_of(actor).unwrap();
+    let pack = items::backpack_of(&world.state, actor_serial).unwrap();
+
+    world.queue(admin_item_response(gm, "0x0eb3", "0", "1", false));
+    world.tick(now);
+    let lute = world
+        .registry()
+        .query::<Contained>()
+        .find_map(|(item, held)| {
+            (held.container == pack
+                && world
+                    .registry()
+                    .get::<Drawn>(item)
+                    .is_some_and(|drawn| drawn.id == Graphic(0x0EB3)))
+            .then_some(item)
+        })
+        .expect("the F1 item form placed a lute");
+    assert!(world.registry().has::<Instrument>(lute));
+    assert_eq!(
+        world.registry().get::<ItemKind>(lute),
+        Some(&ItemKind(ItemKindId(11)))
+    );
+}
+
+#[test]
+fn f1_creates_every_registered_instrument_as_a_typed_playable_item() {
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::components::{Instrument, ItemKind};
+
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let actor = world.state.players[&gm];
+    let actor_serial = world.registry().serial_of(actor).unwrap();
+    let pack = items::backpack_of(&world.state, actor_serial).unwrap();
+    for (graphic, kind) in [
+        (0x0EB1, ItemKindId(12)), // harp
+        (0x0EB2, ItemKindId(13)), // lap harp
+        (0x0E9C, ItemKindId(14)), // drums
+        (0x0E9D, ItemKindId(15)), // tambourine
+        (0x0E9E, ItemKindId(16)), // tasselled tambourine
+    ] {
+        world.queue(admin_item_response(
+            gm,
+            &format!("0x{graphic:04x}"),
+            "0",
+            "1",
+            false,
+        ));
+        world.tick(now);
+        assert!(world.registry().query::<Contained>().any(|(item, held)| {
+            held.container == pack
+                && world.registry().get::<ItemKind>(item) == Some(&ItemKind(kind))
+                && world.registry().has::<Instrument>(item)
+        }));
+    }
+}
+
+#[test]
 fn an_admin_can_place_a_catalogue_animal_on_a_targeted_tile() {
     let now = Instant::now();
     let mut world = world();
@@ -12641,6 +13299,8 @@ fn placing_the_townsfolk_twice_does_not_double_the_town() {
         stock: vec![openshard_npc::StockLine {
             graphic: openshard_protocol::wire::Graphic(0x1BEF),
             hue: openshard_protocol::wire::Hue(0),
+            item_kind: None,
+            material: None,
             amount: openshard_state::components::Amount(16),
             price: openshard_state::components::Price(5),
             name: "iron ingot".to_owned(),
@@ -13532,6 +14192,8 @@ fn clear_also_removes_placed_npcs_and_their_gear_but_not_players() {
         stock: vec![npc::StockLine {
             graphic: openshard_protocol::wire::Graphic(0x0F7A),
             hue: openshard_protocol::wire::Hue(0),
+            item_kind: None,
+            material: None,
             amount: openshard_state::components::Amount(50),
             price: openshard_state::components::Price(4),
             name: "black pearl".to_owned(),
@@ -14372,11 +15034,13 @@ fn a_vendor_and_its_priced_stock_survive_a_restart() {
     home.queue(Command::StockVendor {
         serial: vendor_serial,
         stock: vec![npc::StockLine {
-            graphic: openshard_protocol::wire::Graphic(0x0F7A),
+            graphic: openshard_protocol::wire::Graphic(0),
             hue: openshard_protocol::wire::Hue(0),
+            item_kind: Some(openshard_protocol::item_kind::ItemKindId(1)),
+            material: Some(openshard_protocol::item_kind::MaterialId(9)),
             amount: openshard_state::components::Amount(50),
             price: openshard_state::components::Price(4),
-            name: "black pearl".to_owned(),
+            name: "valorite ingot".to_owned(),
         }],
     });
     home.tick(now);
@@ -14387,6 +15051,17 @@ fn a_vendor_and_its_priced_stock_survive_a_restart() {
     assert!(
         mobiles.iter().any(|m| m.serial == vendor_serial && m.vendor),
         "the vendor is in the mobile sweep, marked as one"
+    );
+    assert!(
+        mobiles.iter().any(|mobile| {
+            mobile.serial == vendor_serial
+                && mobile.restock.as_ref().is_some_and(|restock| {
+                    restock.typed_lines.iter().any(|line| {
+                        line.item_kind == Some(1) && line.material == Some(9) && line.amount == 50
+                    })
+                })
+        }),
+        "the typed restock identity is saved independently of art"
     );
     // What the store would hand back at boot: every saved item, inventories
     // and ground alike.
@@ -14427,13 +15102,31 @@ fn a_vendor_and_its_priced_stock_survive_a_restart() {
     assert_eq!(price.0, 4, "at the price it was stocked at");
     assert_eq!(
         shard.registry().get::<Name>(stock_item).unwrap().0,
-        "black pearl",
+        "valorite ingot",
         "under its label"
     );
     assert_eq!(
         shard.registry().get::<Amount>(stock_item).unwrap().0,
         50,
         "at its full amount"
+    );
+    assert_eq!(
+        shard
+            .registry()
+            .get::<openshard_state::components::ItemKind>(stock_item),
+        Some(&openshard_state::components::ItemKind(
+            openshard_protocol::item_kind::ItemKindId(1),
+        )),
+        "the typed stock kind persisted"
+    );
+    assert_eq!(
+        shard
+            .registry()
+            .get::<openshard_state::components::Material>(stock_item),
+        Some(&openshard_state::components::Material(
+            openshard_protocol::item_kind::MaterialId(9),
+        )),
+        "and its material persisted"
     );
     // And the stock sits in a crate the vendor actually wears.
     let held_in = shard
@@ -14448,6 +15141,19 @@ fn a_vendor_and_its_priced_stock_survive_a_restart() {
         .expect("the crate is worn");
     assert_eq!(worn.mobile, vendor_serial);
     assert_eq!(worn.layer, npc::STOCK_LAYER);
+    assert!(
+        shard
+            .registry()
+            .get::<openshard_state::components::Restock>(vendor)
+            .is_some_and(|restock| {
+                restock.lines.iter().any(|line| {
+                    line.item_kind == Some(openshard_protocol::item_kind::ItemKindId(1))
+                        && line.material == Some(openshard_protocol::item_kind::MaterialId(9))
+                        && line.amount.0 == 50
+                })
+            }),
+        "restock restores its direct kind/material without inferring them from its saved art"
+    );
 }
 
 #[test]
@@ -15607,6 +16313,8 @@ fn a_shop_says_nothing_the_client_cannot_read() {
         stock: vec![npc::StockLine {
             graphic: Graphic(0x0F7B),
             hue: Hue(0),
+            item_kind: None,
+            material: None,
             amount: openshard_state::components::Amount(5),
             price: openshard_state::components::Price(3),
             name: "black pearl".to_owned(),
@@ -16581,6 +17289,8 @@ pub(super) fn spawn_stocked_vendor(world: &mut World, point: Point, now: Instant
         stock: vec![npc::StockLine {
             graphic: openshard_protocol::wire::Graphic(0x0F7A),
             hue: openshard_protocol::wire::Hue(0),
+            item_kind: None,
+            material: None,
             amount: openshard_state::components::Amount(50),
             price: openshard_state::components::Price(4),
             name: "black pearl".to_owned(),
@@ -19735,7 +20445,7 @@ fn a_shop_sells_goods_and_buys_them_back() {
     let mut world = world();
     let gm = enter_gm(&mut world, now);
 
-    // A shopkeeper one tile away, stocked with black pearls by "the script".
+    // A shopkeeper one tile away, stocked with typed iron ingots by "the script".
     world.queue(Command::SpawnMobile {
         body: openshard_protocol::wire::Graphic(0x0190),
         hue: openshard_protocol::wire::Hue(0),
@@ -19779,11 +20489,15 @@ fn a_shop_sells_goods_and_buys_them_back() {
     world.queue(Command::StockVendor {
         serial: vendor_serial,
         stock: vec![npc::StockLine {
-            graphic: openshard_protocol::wire::Graphic(0x0F7A),
+            // The legacy drawing is ignored for direct typed stock; projection
+            // comes from the registry.
+            graphic: openshard_protocol::wire::Graphic(0),
             hue: openshard_protocol::wire::Hue(0),
+            item_kind: Some(openshard_protocol::item_kind::ItemKindId(1)),
+            material: Some(openshard_protocol::item_kind::MaterialId(1)),
             amount: openshard_state::components::Amount(50),
             price: openshard_state::components::Price(4),
-            name: "black pearl".to_owned(),
+            name: "iron ingot".to_owned(),
         }],
     });
     world.tick(now);
@@ -19822,7 +20536,7 @@ fn a_shop_sells_goods_and_buys_them_back() {
         "the shop opened with a price list"
     );
 
-    // Three pearls at four coins: twelve gold change hands.
+    // Three ingots at four coins: twelve gold change hands.
     world.queue(Command::Buy {
         connection: gm,
         vendor: RawSerial(vendor_serial.raw()),
@@ -19841,31 +20555,39 @@ fn a_shop_sells_goods_and_buys_them_back() {
         openshard_items::count_in_container(
             &world.state,
             backpack,
-            openshard_protocol::wire::Graphic(0x0F7A)
+            openshard_protocol::wire::Graphic(0x1BF2)
         ),
         3,
-        "three pearls delivered"
+        "three ingots delivered"
     );
-
-    // Sell two back at half price: four gold returns.
-    let pearls = world
+    let bought = world
         .state
         .registry
         .query::<Contained>()
-        .filter(|(_, held)| held.container == backpack)
-        .find(|(entity, _)| {
-            world
-                .registry()
-                .get::<Drawn>(*entity)
-                .is_some_and(|g| g.id == openshard_protocol::wire::Graphic(0x0F7A))
+        .find_map(|(item, held)| {
+            (held.container == backpack
+                && world
+                    .registry()
+                    .get::<openshard_state::components::ItemKind>(item)
+                    == Some(&openshard_state::components::ItemKind(
+                        openshard_protocol::item_kind::ItemKindId(1),
+                    ))
+                && world
+                    .registry()
+                    .get::<openshard_state::components::Material>(item)
+                    == Some(&openshard_state::components::Material(
+                        openshard_protocol::item_kind::MaterialId(1),
+                    )))
+            .then(|| world.registry().serial_of(item).unwrap().raw())
         })
-        .map(|(entity, _)| world.registry().serial_of(entity).unwrap().raw())
-        .expect("pearls in the pack");
+        .expect("bought ingots retain their typed stock identity");
+
+    // Sell two back at half price: four gold returns.
     world.queue(Command::Sell {
         connection: gm,
         vendor: RawSerial(vendor_serial.raw()),
         sales: vec![openshard_protocol::vendor::Sale {
-            serial: RawSerial(pearls),
+            serial: RawSerial(bought),
             amount: openshard_protocol::items::ItemAmount(2),
         }],
     });
@@ -19879,10 +20601,10 @@ fn a_shop_sells_goods_and_buys_them_back() {
         openshard_items::count_in_container(
             &world.state,
             backpack,
-            openshard_protocol::wire::Graphic(0x0F7A)
+            openshard_protocol::wire::Graphic(0x1BF2)
         ),
         1,
-        "one pearl kept"
+        "one ingot kept"
     );
 
     // A pauper is refused: the vendor keeps its goods when gold runs short.
@@ -20101,11 +20823,13 @@ fn a_bought_out_shelf_refills_when_its_hour_is_up() {
     world.queue(Command::StockVendor {
         serial: vendor_serial,
         stock: vec![npc::StockLine {
-            graphic: openshard_protocol::wire::Graphic(0x0F7A),
+            graphic: openshard_protocol::wire::Graphic(0),
             hue: openshard_protocol::wire::Hue(0),
+            item_kind: Some(openshard_protocol::item_kind::ItemKindId(1)),
+            material: Some(openshard_protocol::item_kind::MaterialId(9)),
             amount: openshard_state::components::Amount(20),
             price: openshard_state::components::Price(4),
-            name: "black pearl".to_owned(),
+            name: "valorite ingot".to_owned(),
         }],
     });
     world.tick(now);
@@ -20169,8 +20893,26 @@ fn a_bought_out_shelf_refills_when_its_hour_is_up() {
     );
     assert_eq!(
         world.registry().get::<Name>(item).map(|n| n.0.as_str()),
-        Some("black pearl"),
+        Some("valorite ingot"),
         "and with its label"
+    );
+    assert_eq!(
+        world
+            .registry()
+            .get::<openshard_state::components::ItemKind>(item),
+        Some(&openshard_state::components::ItemKind(
+            openshard_protocol::item_kind::ItemKindId(1),
+        )),
+        "restock reconstructed the semantic kind"
+    );
+    assert_eq!(
+        world
+            .registry()
+            .get::<openshard_state::components::Material>(item),
+        Some(&openshard_state::components::Material(
+            openshard_protocol::item_kind::MaterialId(9),
+        )),
+        "and the selected material"
     );
 }
 
@@ -20648,6 +21390,132 @@ fn give_item_lands_in_the_players_backpack() {
 }
 
 #[test]
+fn a_registered_give_item_reward_keeps_its_semantic_identity() {
+    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let serial = world.registry().serial_of(world.state.players[&conn]).unwrap();
+    world.queue(Command::GiveItem {
+        serial,
+        graphic: Graphic(0x1415), // plate chest
+        hue: Hue(0x08ab),         // valorite
+        amount: 1,
+        stackable: false,
+    });
+    world.tick(now);
+
+    let reward = world
+        .registry()
+        .query::<Contained>()
+        .find_map(|(item, _)| {
+            (world.registry().get::<Drawn>(item)
+                == Some(&Drawn {
+                    id: Graphic(0x1415),
+                    hue: Hue(0x08ab),
+                }))
+            .then_some(item)
+        })
+        .expect("plate reward in backpack");
+    assert_eq!(
+        world
+            .registry()
+            .get::<openshard_state::components::ItemKind>(reward),
+        Some(&openshard_state::components::ItemKind(ItemKindId(5)))
+    );
+    assert_eq!(
+        world
+            .registry()
+            .get::<openshard_state::components::Material>(reward),
+        Some(&openshard_state::components::Material(MaterialId(9)))
+    );
+}
+
+#[test]
+fn give_item_kind_awards_a_semantic_item_without_art_in_the_command() {
+    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let serial = world.registry().serial_of(world.state.players[&conn]).unwrap();
+    world.queue(Command::GiveItemKind {
+        serial,
+        item_kind: ItemKindId(4), // longsword
+        material: Some(MaterialId(9)),
+        amount: 1,
+        stackable: false,
+    });
+    world.tick(now);
+
+    assert!(world.registry().query::<Contained>().any(|(item, _)| {
+        world
+            .registry()
+            .get::<openshard_state::components::ItemKind>(item)
+            == Some(&openshard_state::components::ItemKind(ItemKindId(4)))
+            && world
+                .registry()
+                .get::<openshard_state::components::Material>(item)
+                == Some(&openshard_state::components::Material(MaterialId(9)))
+    }));
+}
+
+#[test]
+fn give_item_kind_creates_a_functional_backpack() {
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::components::{Container, ItemKind};
+
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let serial = world.registry().serial_of(world.state.players[&conn]).unwrap();
+    world.queue(Command::GiveItemKind {
+        serial,
+        item_kind: ItemKindId(7),
+        material: None,
+        amount: 1,
+        stackable: true,
+    });
+    world.tick(now);
+
+    assert!(world.registry().query::<Contained>().any(|(item, _)| {
+        world.registry().get::<ItemKind>(item) == Some(&ItemKind(ItemKindId(7)))
+            && world.registry().has::<Container>(item)
+    }));
+}
+
+#[test]
+fn stackable_typed_loot_never_turns_a_backpack_into_a_pile() {
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::components::{Container, ItemKind, Stackable};
+
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let serial = world
+        .registry()
+        .serial_of(world.state.players[&connection])
+        .unwrap();
+    let pack = items::backpack_of(&world.state, serial).unwrap();
+    world.queue(Command::AddLootKind {
+        container: pack,
+        item_kind: ItemKindId(7),
+        material: None,
+        amount: 1,
+        stackable: true,
+    });
+    world.tick(now);
+
+    assert!(world.registry().query::<Contained>().any(|(item, held)| {
+        held.container == pack
+            && world.registry().get::<ItemKind>(item) == Some(&ItemKind(ItemKindId(7)))
+            && world.registry().has::<Container>(item)
+            && !world.registry().has::<Stackable>(item)
+    }));
+}
+
+#[test]
 fn take_item_is_all_or_nothing_and_reports_what_it_took() {
     let now = Instant::now();
     let mut world = world();
@@ -20691,6 +21559,8 @@ fn take_item_is_all_or_nothing_and_reports_what_it_took() {
         Some(3),
         "it reported taking three"
     );
+    assert_eq!(events.last().and_then(|e| e.item_kind), None);
+    assert_eq!(events.last().and_then(|e| e.material), None);
     assert_eq!(backpack_gold(&world), 2, "two gold remain");
 
     // Take ten: short, so nothing is taken and the two are kept.
@@ -20703,6 +21573,68 @@ fn take_item_is_all_or_nothing_and_reports_what_it_took() {
     let events: Vec<crate::ItemsTaken> = world.bus().read(&mut taken).copied().collect();
     assert_eq!(events.last().map(|e| e.taken), Some(0), "short: it took nothing");
     assert_eq!(backpack_gold(&world), 2, "and left the two untouched");
+}
+
+#[test]
+fn take_item_kind_requires_the_exact_material_not_its_shared_ingot_art() {
+    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let serial = world.registry().serial_of(world.state.players[&conn]).unwrap();
+    let mut taken: Cursor<crate::ItemsTaken> = world.bus().cursor();
+    assert!(items::give_kind_to_backpack(
+        &mut world.state,
+        serial,
+        ItemKindId(1),
+        Some(MaterialId(1)), // iron
+        3,
+        true,
+    ));
+    assert!(items::give_kind_to_backpack(
+        &mut world.state,
+        serial,
+        ItemKindId(1),
+        Some(MaterialId(9)), // valorite: same ingot graphic, different identity
+        4,
+        true,
+    ));
+
+    world.queue(Command::TakeItemKind {
+        serial,
+        item_kind: ItemKindId(1),
+        material: Some(MaterialId(1)),
+        amount: 3,
+    });
+    world.tick(now);
+
+    let events: Vec<crate::ItemsTaken> = world.bus().read(&mut taken).copied().collect();
+    assert_eq!(
+        events.last(),
+        Some(&crate::ItemsTaken {
+            player: serial,
+            graphic: Graphic(0x1bf2),
+            item_kind: Some(ItemKindId(1)),
+            material: Some(MaterialId(1)),
+            taken: 3,
+        })
+    );
+    let amounts: Vec<_> = world
+        .registry()
+        .query::<Contained>()
+        .filter_map(|(item, _)| {
+            let kind = world
+                .registry()
+                .get::<openshard_state::components::ItemKind>(item)?;
+            let material = world
+                .registry()
+                .get::<openshard_state::components::Material>(item)?;
+            (kind.0 == ItemKindId(1) && material.0 == MaterialId(9))
+                .then(|| openshard_items::amount_of(&world.state, item))
+        })
+        .collect();
+    assert_eq!(amounts, vec![4], "valorite pile was not payment for iron");
 }
 
 #[test]

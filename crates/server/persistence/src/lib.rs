@@ -43,8 +43,8 @@ pub use record::{
     AccountRecord, AllianceRecord, CharacterRecord, CorpseData, CorpseEquipmentData, CreatureData,
     DecorationRecord, DoneQuestRecord, DoorState, EFFECT_POISON, EffectRecord, GuildRecord, GuildStanding,
     Inventory, ItemAffixRecord, ItemLocation, ItemRecord, MobileRecord, PetData, QuestRecord, RegionRecord,
-    RestockRecord, RunebookData, RunebookEntryData, SCHEMA_VERSION, SkillRecord, SpawnerRecord,
-    StatLockRecord, WorldRecord,
+    RestockLineRecord, RestockRecord, RunebookData, RunebookEntryData, SCHEMA_VERSION, SkillRecord,
+    SpawnerRecord, StatLockRecord, WorldRecord,
 };
 pub use sqlite::SqliteStore;
 pub use store::{MemoryStore, Store, StoreError};

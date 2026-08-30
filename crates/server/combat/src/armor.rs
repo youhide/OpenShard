@@ -21,9 +21,10 @@ use openshard_protocol::wire::Layer;
 use openshard_state::WorldState;
 use openshard_state::armor::{
     LAYER_ARMS, LAYER_CHEST, LAYER_GLOVES, LAYER_GORGET, LAYER_HELM, LAYER_LEGS, LAYER_SHIELD, MedAllowance,
-    armor_data, hit_layer, layer_coverage, piece_rating, worn_armor_rating, worn_on_layer,
+    armor_data, armor_data_for_kind, hit_layer, layer_coverage, piece_rating, worn_armor_rating,
+    worn_on_layer,
 };
-use openshard_state::components::Drawn;
+use openshard_state::components::{Drawn, ItemKind};
 
 /// How much a mobile's worn armour gets in the way of meditating, in hundredths
 /// of a rating point — ServUO's `RegenRates.GetArmorOffset`.
@@ -44,12 +45,15 @@ pub fn meditation_offset(state: &WorldState, mobile: EntityId) -> u32 {
         .filter(|(_, worn)| MEDITATION_LAYERS.contains(&worn.layer))
         .map(|(item, _)| {
             let rating = u32::from(piece_rating(state, item)) * 100;
-            match state
-                .registry
-                .get::<Drawn>(item)
-                .and_then(|graphic| armor_data(graphic.id))
-                .map_or(MedAllowance::All, |armor| armor.meditation)
-            {
+            let meditation = match state.registry.get::<ItemKind>(item) {
+                Some(kind) => armor_data_for_kind(kind.0),
+                None => state
+                    .registry
+                    .get::<Drawn>(item)
+                    .and_then(|graphic| armor_data(graphic.id)),
+            }
+            .map_or(MedAllowance::All, |armor| armor.meditation);
+            match meditation {
                 // A piece the tables do not know is not armour, so it hinders
                 // nothing — the same answer they give for its rating.
                 MedAllowance::All => 0,

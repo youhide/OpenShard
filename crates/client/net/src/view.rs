@@ -31,7 +31,7 @@ use rustc_hash::FxHashMap;
 use openshard_protocol::access::AccessLevel;
 use openshard_protocol::chunks::WorldNotice;
 use openshard_protocol::containers::{ContainedItem, GridSlot};
-use openshard_protocol::craft::CraftCatalogue;
+use openshard_protocol::craft::{CraftCatalogue, CraftWorkbench};
 use openshard_protocol::direction::Facing;
 use openshard_protocol::feedback::HarvestPreview;
 use openshard_protocol::gump::layout::{Element, parse};
@@ -647,6 +647,10 @@ pub struct WorldView {
     /// Compact rows for client-owned catalogue tables, keyed by their gump
     /// shell. They travel in an OpenShard packet rather than inside `0xB0`.
     pub craft_catalogues: FxHashMap<GumpId, CraftCatalogue>,
+    /// Typed payload for normal, tool-specific craft windows. It shares the
+    /// gump shell and reply channel with the legacy layout, but egui owns its
+    /// presentation.
+    pub craft_workbenches: FxHashMap<GumpId, CraftWorkbench>,
     /// The gump art of every container the shard has opened a window for
     /// (`0x24`), by container serial.
     ///
@@ -1107,6 +1111,7 @@ impl WorldView {
             journal: VecDeque::new(),
             gumps: Vec::new(),
             craft_catalogues: FxHashMap::default(),
+            craft_workbenches: FxHashMap::default(),
             containers: FxHashMap::default(),
             contents: FxHashMap::default(),
             corpse_equipment: FxHashMap::default(),
@@ -1241,7 +1246,9 @@ impl WorldView {
     pub fn gump_closed(&mut self, gump_id: GumpId) -> bool {
         let before = self.gumps.len();
         self.gumps.retain(|gump| gump.gump_id != gump_id);
-        self.gumps.len() != before || self.craft_catalogues.remove(&gump_id).is_some()
+        self.gumps.len() != before
+            || self.craft_catalogues.remove(&gump_id).is_some()
+            || self.craft_workbenches.remove(&gump_id).is_some()
     }
 
     /// Write down a line the server said, dropping the oldest if the journal is
@@ -1387,6 +1394,15 @@ impl WorldView {
                     .get(&catalogue.gump_id)
                     .is_none_or(|old| old != catalogue);
                 self.craft_catalogues.insert(catalogue.gump_id, catalogue.clone());
+                changed
+            }
+            ServerPacket::CraftWorkbench(workbench) => {
+                let changed = self
+                    .craft_workbenches
+                    .get(&workbench.gump_id)
+                    .is_none_or(|old| old != workbench);
+                self.craft_workbenches
+                    .insert(workbench.gump_id, workbench.clone());
                 changed
             }
             // `0xBF 0x04`: the one case where the server *does* say a gump

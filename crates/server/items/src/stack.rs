@@ -1,4 +1,5 @@
 use super::*;
+use openshard_state::components::{CraftedBy, ItemAffixes, PoisonCharges, Quality};
 use openshard_state::weapon::{ARROW, BOLT};
 
 /// ServUO's three coin clinks, chosen by the pile that was set down.
@@ -31,12 +32,27 @@ pub const fn intrinsically_stackable(graphic: Graphic) -> bool {
     matches!(graphic, GOLD_GRAPHIC | ARROW | BOLT)
 }
 
-/// Whether two items are one pile waiting to happen: both stackable, same
-/// graphic and hue, and not the same entity.
+/// Whether two items are one pile waiting to happen: both stackable, equal
+/// semantic identity where it is known, and not the same entity.
+///
+/// Unmigrated legacy pairs retain their old graphic/hue comparison at that one
+/// compatibility seam. A pair with semantic identities never falls back to art:
+/// two different kinds may share a client drawing without becoming one good.
 pub fn can_stack(state: &WorldState, a: EntityId, b: EntityId) -> bool {
-    let same_drawn = state.registry.get::<Drawn>(a) == state.registry.get::<Drawn>(b);
+    let same_identity = match (
+        state.registry.get::<ItemKind>(a),
+        state.registry.get::<ItemKind>(b),
+    ) {
+        (Some(kind_a), Some(kind_b)) => {
+            kind_a == kind_b && state.registry.get::<Material>(a) == state.registry.get::<Material>(b)
+        }
+        (None, None) => state.registry.get::<Drawn>(a) == state.registry.get::<Drawn>(b),
+        _ => false,
+    };
     a != b
-        && same_drawn
+        && same_identity
+        && stack_compatible_instance_state(state, a)
+        && stack_compatible_instance_state(state, b)
         && (state.registry.has::<Stackable>(a) && state.registry.has::<Stackable>(b)
             // Older saves can contain a bare coin, arrow or bolt.  Keep those
             // single items usable too; `same_drawn` above already proves both
@@ -45,6 +61,18 @@ pub fn can_stack(state: &WorldState, a: EntityId, b: EntityId) -> bool {
                 .registry
                 .get::<Drawn>(a)
                 .is_some_and(|drawn| intrinsically_stackable(drawn.id)))
+}
+
+/// Whether `item` carries no per-instance fact that would be erased by a pile
+/// merge.  An ordinary resource pile deliberately has none of these; a maker's
+/// mark, quality, custom affix, weapon override or poison charge belongs to one
+/// particular object and must survive even if its drawing and kind match.
+pub(crate) fn stack_compatible_instance_state(state: &WorldState, item: EntityId) -> bool {
+    !state.registry.has::<CraftedBy>(item)
+        && !state.registry.has::<Quality>(item)
+        && !state.registry.has::<ItemAffixes>(item)
+        && !state.registry.has::<Weapon>(item)
+        && !state.registry.has::<PoisonCharges>(item)
 }
 
 /// Merge a held stack onto another stack, on the ground or inside a container.
@@ -194,7 +222,22 @@ pub fn redraw_ground_item(state: &mut WorldState, item: EntityId) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+
     use super::*;
+
+    fn world() -> WorldState {
+        WorldState::new(
+            BTreeMap::new(),
+            Facet(0),
+            openshard_tiles::TileData::empty(),
+            Default::default(),
+            openshard_map::grid::Tile::new(0, 0),
+            1,
+        )
+    }
 
     #[test]
     fn gold_uses_the_classic_amount_sensitive_clinks() {
@@ -203,5 +246,40 @@ mod tests {
         assert_eq!(drop_sound(GOLD_GRAPHIC, 5, fallback), SoundId(0x02E5));
         assert_eq!(drop_sound(GOLD_GRAPHIC, 6, fallback), SoundId(0x02E6));
         assert_eq!(drop_sound(Graphic(0x0F5E), 1, fallback), fallback);
+    }
+
+    #[test]
+    fn typed_piles_with_instance_facts_never_merge() {
+        let mut state = world();
+        let first = state.registry.spawn();
+        let second = state.registry.spawn();
+        for item in [first, second] {
+            state.registry.insert(
+                item,
+                Drawn {
+                    id: Graphic(0x1BF2),
+                    hue: Hue(0x08AB),
+                },
+            );
+            state.registry.insert(item, ItemKind(ItemKindId(1)));
+            state.registry.insert(item, Material(MaterialId(9)));
+            state.registry.insert(item, Stackable);
+        }
+        assert!(
+            can_stack(&state, first, second),
+            "plain equivalent resources merge"
+        );
+
+        state.registry.insert(first, CraftedBy("a smith".to_owned()));
+        assert!(
+            !can_stack(&state, first, second),
+            "a maker-marked item cannot lose its owner to a pile merge"
+        );
+        state.registry.remove::<CraftedBy>(first);
+        state.registry.insert(first, Quality { exceptional: true });
+        assert!(!can_stack(&state, first, second));
+        state.registry.remove::<Quality>(first);
+        state.registry.insert(first, ItemAffixes::default());
+        assert!(!can_stack(&state, first, second));
     }
 }

@@ -687,6 +687,7 @@ pub fn reconcile_own_windows(
         WindowSubject::Dialog(gump_id) => {
             view.gumps.iter().any(|gump| gump.gump_id == gump_id)
                 && !view.craft_catalogues.contains_key(&gump_id)
+                && !view.craft_workbenches.contains_key(&gump_id)
         }
         WindowSubject::Skills | WindowSubject::Status | WindowSubject::Minimap | WindowSubject::WorldMap => {
             false
@@ -723,6 +724,7 @@ pub fn reconcile_own_windows(
             WindowSubject::Dialog(gump_id) => {
                 view.gumps.iter().any(|gump| gump.gump_id == gump_id)
                     && !view.craft_catalogues.contains_key(&gump_id)
+                    && !view.craft_workbenches.contains_key(&gump_id)
             }
             // Nothing to reconcile against, and nothing to ask: the window is
             // open because it is here. `close_window`'s own `retain` is what
@@ -803,7 +805,10 @@ pub fn reconcile_own_windows(
     let dialogs: Vec<(GumpId, GumpPixel)> = view
         .gumps
         .iter()
-        .filter(|gump| !view.craft_catalogues.contains_key(&gump.gump_id))
+        .filter(|gump| {
+            !view.craft_catalogues.contains_key(&gump.gump_id)
+                && !view.craft_workbenches.contains_key(&gump.gump_id)
+        })
         .map(|gump| (gump.gump_id, GumpPixel::new(gump.at.x, gump.at.y)))
         .collect();
     for (gump_id, at) in dialogs {

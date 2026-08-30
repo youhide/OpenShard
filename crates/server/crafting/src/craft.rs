@@ -13,15 +13,16 @@
 //! animation for a craft that was never possible.
 
 use openshard_entities::EntityId;
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::wire::{ClilocId, Graphic, Hue, SoundId};
-use openshard_state::WorldState;
 use openshard_state::components::{CraftedBy, Crafting, Name, Position, Quality, Tool};
+use openshard_state::{Drawn, WorldState, presentation_of};
 
 use crate::chance::{roll, train_per_item};
 use crate::consume::{self, Refusal, Share};
 use crate::defs::{SYSTEMS, system};
 use crate::environment;
-use crate::recipe::Recipe;
+use crate::recipe::{OutputMaterial, Recipe};
 use crate::system::{CraftSystemDef, SystemId};
 
 /// "You have worn out your tool!"
@@ -83,6 +84,10 @@ pub struct ItemCrafted {
     pub graphic: Graphic,
     /// Its hue, which for most materials is the material.
     pub hue: Hue,
+    /// Stable semantic kind when this was a migrated recipe row.
+    pub item_kind: Option<ItemKindId>,
+    /// Semantic material when the result has one.
+    pub material: Option<MaterialId>,
     /// How many.
     pub amount: u16,
     /// Whether it came out exceptional.
@@ -313,6 +318,27 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         return;
     }
 
+    let (identity, hue) = match output_identity(recipe, &materials) {
+        Ok(Some((kind, material, drawn))) => (Some((kind, material)), drawn.hue),
+        Ok(None) => {
+            let hue = if recipe.hue != Hue(0) {
+                recipe.hue
+            } else if recipe.retain_color {
+                materials.res_hue
+            } else {
+                Hue(0)
+            };
+            (None, hue)
+        }
+        Err(()) => {
+            // A bad typed row is shard data, not a player mistake. Do not spend
+            // ingredients trying to make an item whose identity has no valid
+            // presentation in the registry.
+            state.system_message(crafter, "This recipe is not configured correctly.");
+            return;
+        }
+    };
+
     consume::take(state, crafter, &materials, Share::All);
     if recipe.use_all_res {
         // The passive per-skill check is skipped for a batch craft, and this is
@@ -321,15 +347,8 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         train_per_item(state, crafter, recipe, materials.max_amount);
     }
 
-    let hue = if recipe.hue != Hue(0) {
-        recipe.hue
-    } else if recipe.retain_color {
-        materials.res_hue
-    } else {
-        Hue(0)
-    };
     let made = recipe.amount.saturating_mul(materials.max_amount).max(1);
-    let (item, placed) = place(state, crafter, recipe, hue, made);
+    let (item, placed) = place(state, crafter, recipe, hue, identity, made);
     if placed != made {
         state.system_message(
             crafter,
@@ -362,6 +381,8 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         item,
         graphic: recipe.graphic,
         hue,
+        item_kind: identity.map(|(kind, _)| kind),
+        material: identity.and_then(|(_, material)| material),
         amount: made,
         exceptional: outcome.exceptional,
         system: SystemId::new(work.system),
@@ -380,6 +401,7 @@ fn place(
     crafter: EntityId,
     recipe: &Recipe,
     hue: Hue,
+    identity: Option<(ItemKindId, Option<MaterialId>)>,
     amount: u16,
 ) -> (Option<EntityId>, u16) {
     let Some(serial) = state.registry.serial_of(crafter) else {
@@ -389,15 +411,51 @@ fn place(
         return (None, 0);
     };
     if recipe.use_all_res || recipe.amount > 1 || amount > 1 {
-        let outcome = openshard_items::give(state, pack, recipe.graphic, hue, u32::from(amount));
+        let outcome = match identity {
+            Some((kind, material)) => {
+                openshard_items::give_kind(state, pack, kind, material, u32::from(amount))
+                    .expect("a checked typed recipe has a presentation")
+            }
+            None => openshard_items::give(state, pack, recipe.graphic, hue, u32::from(amount)),
+        };
         (
             outcome.last,
             u16::try_from(outcome.given).expect("give cannot exceed the u16 amount requested"),
         )
     } else {
-        let item = openshard_items::place_one(state, pack, recipe.graphic, hue, amount);
+        let item = match identity {
+            Some((kind, material)) => openshard_items::place_one_kind(state, pack, kind, material, amount),
+            None => openshard_items::place_one(state, pack, recipe.graphic, hue, amount),
+        };
         (item, u16::from(item.is_some()))
     }
+}
+
+/// Resolve the semantic output before ingredients are spent.
+fn output_identity(
+    recipe: &Recipe,
+    materials: &consume::Materials,
+) -> Result<Option<(ItemKindId, Option<MaterialId>, Drawn)>, ()> {
+    let Some(kind) = recipe.kind else {
+        return matches!(recipe.output_material, OutputMaterial::Legacy)
+            .then_some(None)
+            .ok_or(());
+    };
+    let material = match recipe.output_material {
+        OutputMaterial::Legacy => return Err(()),
+        OutputMaterial::None => None,
+        OutputMaterial::Fixed(material) => Some(material),
+        OutputMaterial::InheritInput(input) => materials
+            .lines
+            .get(usize::from(input))
+            .and_then(|line| line.semantic)
+            .and_then(|(_, material)| material)
+            .ok_or(())
+            .map(Some)?,
+    };
+    presentation_of(kind, material)
+        .map(|drawn| Some((kind, material, drawn)))
+        .ok_or(())
 }
 
 /// Whether the crafter is good enough to sign their work — ServUO's
@@ -440,6 +498,19 @@ fn wear_tool(state: &mut WorldState, crafter: EntityId, tool: EntityId) {
 #[must_use]
 pub fn tool_system(graphic: Graphic) -> Option<SystemId> {
     let tool = openshard_state::craft::craft_tool(graphic)?;
+    SYSTEMS
+        .iter()
+        .position(|def| def.skill == tool.skill)
+        .and_then(SystemId::from_index)
+}
+
+/// The craft system a registered tool kind opens.
+///
+/// Legacy items without semantic identity still use [`tool_system`], but a
+/// declared non-tool kind cannot become a crafting tool merely by sharing art.
+#[must_use]
+pub fn tool_system_for_kind(kind: ItemKindId) -> Option<SystemId> {
+    let tool = openshard_state::craft::craft_tool_for_kind(kind)?;
     SYSTEMS
         .iter()
         .position(|def| def.skill == tool.skill)

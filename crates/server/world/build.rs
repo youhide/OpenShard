@@ -956,7 +956,7 @@ fn townsfolk(text: &str) -> String {
             writeln!(
                 out,
                 "            openshard_npc::StockLine {{ graphic: openshard_protocol::wire::Graphic({}), \
-                 hue: openshard_protocol::wire::Hue({}), amount: openshard_state::components::Amount({}), \
+                 hue: openshard_protocol::wire::Hue({}), item_kind: None, material: None, amount: openshard_state::components::Amount({}), \
                  price: openshard_state::components::Price({}), name: {:?}.to_owned() }},",
                 line.graphic, line.hue, line.amount, line.price, line.name
             )

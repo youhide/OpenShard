@@ -25,6 +25,7 @@ use openshard_protocol::feedback::{
 };
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::identity::AccountName;
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::items::CorpseEquipmentItem;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::skill::SkillLock;
@@ -88,6 +89,21 @@ pub struct Drawn {
     /// Its colour, or [`Hue`]`(0)` for none.
     pub hue: Hue,
 }
+
+/// The semantic definition an item instance belongs to.
+///
+/// This is deliberately separate from [`Drawn`]: a kind is gameplay identity;
+/// art is its legacy client projection.  Constructors that accept a semantic
+/// kind install both components together through the item-definition registry.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ItemKind(pub ItemKindId);
+
+/// The optional material grade of an item instance.
+///
+/// An iron ingot and a valorite ingot share an [`ItemKind`] but carry different
+/// material ids.  Things without a material axis simply omit this component.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Material(pub MaterialId);
 
 /// How many of a stackable item this entity is: a pile of 500 gold is one entity
 /// with `Amount(500)`, not 500 entities.
@@ -2074,6 +2090,11 @@ pub struct StockRecord {
     pub graphic: Graphic,
     /// Their hue.
     pub hue: Hue,
+    /// The semantic identity of this stock line, when it is registry-backed.
+    /// `None` retains an old pack's art-only shelf until its row is migrated.
+    pub item_kind: Option<ItemKindId>,
+    /// The material selected for [`Self::item_kind`].
+    pub material: Option<MaterialId>,
     /// How many the shelf holds when full.
     pub amount: Amount,
     /// What one unit costs.

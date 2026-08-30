@@ -310,7 +310,11 @@ CREATE TABLE IF NOT EXISTS items (
     lockdown_secure INTEGER,
     -- Typed per-instance custom properties. A list is JSON because an item
     -- carries only a few affixes and new kinds do not need new columns.
-    affixes TEXT
+    affixes TEXT,
+    -- Semantic identity. NULL rows predate ItemKind and are migrated on load
+    -- through the audited legacy presentation mapping.
+    item_kind INTEGER,
+    material INTEGER
 );
 CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
 -- NPC mobiles and placed decoration, each a JSON record keyed by serial: a
@@ -405,13 +409,24 @@ impl SqliteStore {
             .optional()
             .map_err(database)?;
         match found {
-            // v34 only adds a nullable column. Existing items therefore have
-            // the exact safe default: no custom properties.
-            Some(33) if SCHEMA_VERSION == 34 => {
+            // v35 adds nullable semantic identity. Existing rows retain their
+            // legacy presentation and are explicitly mapped while restoring.
+            Some(33) if SCHEMA_VERSION == 35 => {
                 connection
                     .execute_batch(
                         "ALTER TABLE items ADD COLUMN affixes TEXT; \
-                         UPDATE meta SET value = 34 WHERE key = 'schema';",
+                         ALTER TABLE items ADD COLUMN item_kind INTEGER; \
+                         ALTER TABLE items ADD COLUMN material INTEGER; \
+                         UPDATE meta SET value = 35 WHERE key = 'schema';",
+                    )
+                    .map_err(database)?;
+            }
+            Some(34) if SCHEMA_VERSION == 35 => {
+                connection
+                    .execute_batch(
+                        "ALTER TABLE items ADD COLUMN item_kind INTEGER; \
+                         ALTER TABLE items ADD COLUMN material INTEGER; \
+                         UPDATE meta SET value = 35 WHERE key = 'schema';",
                     )
                     .map_err(database)?;
             }
@@ -559,9 +574,9 @@ impl SqliteStore {
                       corpse, poison_level, poison_charges, trap_kind, trap_power, \
                       trap_level, uses, exceptional, crafter, \
                       rune_facet, rune_x, rune_y, rune_z, runebook, \
-                      lockdown_house, lockdown_secure, affixes) \
+                      lockdown_house, lockdown_secure, affixes, item_kind, material) \
                      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,\
-                             ?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35)",
+                             ?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37)",
                         params![
                             item.serial.raw(),
                             // `owner` is `NOT NULL`, `0` the sentinel for "no owner" (a
@@ -621,6 +636,8 @@ impl SqliteStore {
                                 .then(|| serde_json::to_string(&item.affixes))
                                 .transpose()
                                 .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                            item.kind,
+                            item.material,
                         ],
                     )?;
                     Ok(())
@@ -956,7 +973,7 @@ impl SqliteStore {
                      corpse, poison_level, poison_charges, trap_kind, trap_power, trap_level, \
                      uses, exceptional, crafter, \
                      rune_facet, rune_x, rune_y, rune_z, runebook, \
-                     lockdown_house, lockdown_secure, affixes FROM items",
+                     lockdown_house, lockdown_secure, affixes, item_kind, material FROM items",
                 )
                 .map_err(database)?;
             let rows = statement
@@ -977,6 +994,8 @@ impl SqliteStore {
                             owner: get_optional_serial(row, 1)?,
                             graphic: row.get(2)?,
                             hue: row.get(3)?,
+                            kind: row.get(35)?,
+                            material: row.get(36)?,
                             amount: row.get(4)?,
                             stackable: row.get(5)?,
                             container_gump: row.get(6)?,
@@ -1578,6 +1597,8 @@ mod tests {
             },
             graphic: 0x0EED,
             hue: 0,
+            kind: None,
+            material: None,
             amount: 1,
             stackable: false,
             container_gump: None,
@@ -2454,7 +2475,7 @@ mod tests {
         {
             let connection = Connection::open(&path).expect("raw open");
             let v33_schema = SCHEMA_SQL.replace(
-                "    lockdown_secure INTEGER,\n    -- Typed per-instance custom properties. A list is JSON because an item\n    -- carries only a few affixes and new kinds do not need new columns.\n    affixes TEXT\n",
+                "    lockdown_secure INTEGER,\n    -- Typed per-instance custom properties. A list is JSON because an item\n    -- carries only a few affixes and new kinds do not need new columns.\n    affixes TEXT,\n    -- Semantic identity. NULL rows predate ItemKind and are migrated on load\n    -- through the audited legacy presentation mapping.\n    item_kind INTEGER,\n    material INTEGER\n",
                 "    lockdown_secure INTEGER\n",
             );
             connection

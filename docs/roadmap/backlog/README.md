@@ -21,6 +21,10 @@ here. Order, not dates.
 
 ### Gameplay
 
+- [ ] Replace `Graphic + Hue` as item identity with `ItemKindId + MaterialId`,
+      migrate persistence and the item lifecycle, then make crafting a typed
+      recipe graph — design and staged plan: [Item kinds, materials, and recipe
+      graph](../../item_kind.md).
 - [ ] Complete classic-client per-weapon and per-body animations.
 - [ ] Finish the remaining usable skills and exact skill/spell presentation.
 - [ ] Add summons, the deferred spell subsystems, and adjacent-tile quarry

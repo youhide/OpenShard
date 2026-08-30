@@ -18,16 +18,17 @@
 
 use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::target::{TargetCursor, TargetKind};
 use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue, Layer, SoundId};
 use openshard_protocol::world::{Facet, Point};
-use openshard_state::components::{Client, Drawn, Equipped, Harvesting, Position, Tool};
+use openshard_state::components::{Client, Drawn, Equipped, Harvesting, ItemKind, Position, Tool};
 use openshard_state::harvest::{
     Bank, HarvestAction, HarvestDef, HarvestKind, HarvestResource, TileSource, VeinIdx, definition_for,
-    tool_data,
+    tool_data, tool_data_for_kind,
 };
-use openshard_state::weapon::{LAYER_ONE_HANDED, weapon_data, weapon_layer};
+use openshard_state::weapon::{LAYER_ONE_HANDED, weapon_data, weapon_data_for_kind, weapon_layer};
 use openshard_state::{Action, Skill, TargetPurpose, WorldState, in_range};
 
 use crate::check::{roll_skill_band, skill_value};
@@ -102,9 +103,14 @@ pub struct Harvested {
     pub harvester: EntityId,
     /// Which of the three systems.
     pub kind: HarvestKind,
-    /// The item art that came out.
+    /// Semantic kind that came out, if this resource row has migrated.
+    pub item_kind: Option<ItemKindId>,
+    /// Semantic material grade that came out with the kind.
+    pub material: Option<MaterialId>,
+    /// The classic item art that came out, retained for legacy script and
+    /// presentation adapters.
     pub graphic: Graphic,
-    /// And its hue, which is the only thing telling valorite from iron.
+    /// Its classic presentation hue.
     pub hue: Hue,
     /// How much.
     pub amount: u16,
@@ -122,7 +128,11 @@ pub fn use_tool(state: &mut WorldState, harvester: EntityId, tool: EntityId) -> 
     else {
         return false;
     };
-    let Some(data) = tool_data(graphic) else {
+    let data = match state.registry.get::<ItemKind>(tool) {
+        Some(kind) => tool_data_for_kind(kind.0),
+        None => tool_data(graphic),
+    };
+    let Some(data) = data else {
         return false;
     };
     // ServUO's `CheckTool`: a spent tool is refused before anything else, so the
@@ -194,11 +204,14 @@ pub fn begin_harvest(
     };
     // Which system a swing is comes from the *tile*, never the tool — but a
     // fishing pole still cannot mine, so the two have to agree.
-    let matches_tool = state
-        .registry
-        .get::<openshard_state::components::Drawn>(tool)
-        .and_then(|g| tool_data(g.id))
-        .is_some_and(|data| data.skill == def.skill);
+    let matches_tool = match state.registry.get::<ItemKind>(tool) {
+        Some(kind) => tool_data_for_kind(kind.0),
+        None => state
+            .registry
+            .get::<Drawn>(tool)
+            .and_then(|graphic| tool_data(graphic.id)),
+    }
+    .is_some_and(|data| data.skill == def.skill);
     if !matches_tool {
         state.localized_message(harvester, bad_target_line(state, tool), "");
         return false;
@@ -382,6 +395,8 @@ fn deliver(
     state.bus.send(Harvested {
         harvester,
         kind: def.kind,
+        item_kind: resource.item_kind,
+        material: resource.material,
         graphic: resource.graphic,
         hue: resource.hue,
         amount,
@@ -402,8 +417,18 @@ fn pay_out(
         return false;
     };
     // Every resource stacks, so this always merges onto the pile already in the
-    // pack rather than filling it with singles.
-    if openshard_items::give_to_backpack(state, serial, resource.graphic, resource.hue, amount, true) {
+    // pack rather than filling it with singles. Migrated rows enter through the
+    // semantic constructor; the graphic/hue branch is the temporary path for
+    // sand and fish, whose definition rows have not landed yet.
+    let given = match resource.item_kind {
+        Some(kind) => {
+            openshard_items::give_kind_to_backpack(state, serial, kind, resource.material, amount, true)
+        }
+        None => {
+            openshard_items::give_to_backpack(state, serial, resource.graphic, resource.hue, amount, true)
+        }
+    };
+    if given {
         return true;
     }
     if !def.place_at_feet {
@@ -415,7 +440,14 @@ fn pay_out(
     ) else {
         return false;
     };
-    openshard_items::spawn_item(state, resource.graphic, resource.hue, amount, true, at, facet).is_some()
+    match resource.item_kind {
+        Some(kind) => {
+            openshard_items::spawn_item_kind(state, kind, resource.material, amount, true, at, facet)
+                .is_some()
+        }
+        None => openshard_items::spawn_item(state, resource.graphic, resource.hue, amount, true, at, facet)
+            .is_some(),
+    }
 }
 
 /// Spend a swing off the tool, and say so if it broke.
@@ -561,7 +593,11 @@ fn show_backpack_chop_tool(state: &mut WorldState, harvester: EntityId, tool: En
     let Some(Drawn { id, hue }) = state.registry.get::<Drawn>(tool).copied() else {
         return;
     };
-    let Some(weapon) = weapon_data(id) else {
+    let weapon = match state.registry.get::<ItemKind>(tool) {
+        Some(kind) => weapon_data_for_kind(kind.0),
+        None => weapon_data(id),
+    };
+    let Some(weapon) = weapon else {
         return;
     };
     let layer = weapon_layer(weapon, Layer(state.tiles().static_tile(id.0).layer));
@@ -611,11 +647,14 @@ fn within_reach(state: &WorldState, harvester: EntityId, at: Point, range: u32) 
 /// What a tool says about ground it cannot work — ServUO's per-system
 /// `OnBadHarvestTarget`, which is a different sentence for each.
 fn bad_target_line(state: &WorldState, tool: EntityId) -> ClilocId {
-    let skill = state
-        .registry
-        .get::<openshard_state::components::Drawn>(tool)
-        .and_then(|g| tool_data(g.id))
-        .map(|data| data.skill);
+    let skill = match state.registry.get::<ItemKind>(tool) {
+        Some(kind) => tool_data_for_kind(kind.0),
+        None => state
+            .registry
+            .get::<Drawn>(tool)
+            .and_then(|graphic| tool_data(graphic.id)),
+    }
+    .map(|data| data.skill);
     match skill {
         Some(Skill::Lumberjacking) => NOT_CHOPPABLE,
         Some(Skill::Fishing) => NOT_FISHABLE,

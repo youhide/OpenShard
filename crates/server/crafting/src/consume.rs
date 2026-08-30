@@ -9,12 +9,14 @@
 //! while the hammer is in the air.
 
 use openshard_entities::EntityId;
+use openshard_protocol::item_kind::{ItemSelector, MaterialRule};
 use openshard_skills::skill_value;
-use openshard_state::WorldState;
+use openshard_state::{WorldState, item_definition, kind_from_drawn, material_definition};
 
 use crate::recipe::Recipe;
 use crate::system::{CraftSystemDef, Text};
 use openshard_protocol::wire::{Graphic, Hue};
+use openshard_state::Drawn;
 
 /// Why a craft cannot go ahead for want of materials.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -31,9 +33,10 @@ pub enum Refusal {
 /// What one craft will actually eat, resolved against the crafter's pack.
 #[derive(Clone, Debug)]
 pub struct Materials {
-    /// Each line as `(graphic, hue, per-craft amount)`, with the material axis
-    /// already substituted into whichever line takes it.
-    pub lines: Vec<(Graphic, Option<Hue>, u16)>,
+    /// Each resolved ingredient. `semantic` is present when the registry names
+    /// this legacy projection; the exact graphic/hue remains only for migration
+    /// compatibility and classic presentation.
+    pub lines: Vec<MaterialLine>,
     /// How many items this craft will make. One, unless the recipe consumes
     /// everything in the pack — then it is as many as the scarcest line allows.
     pub max_amount: u16,
@@ -41,6 +44,18 @@ pub struct Materials {
     /// colour of the material it was made from, which is what makes a valorite
     /// blade valorite-coloured.
     pub res_hue: Hue,
+}
+
+/// One craft input after material-axis selection.
+#[derive(Clone, Copy, Debug)]
+pub struct MaterialLine {
+    pub graphic: Graphic,
+    pub hue: Option<Hue>,
+    pub amount: u16,
+    pub semantic: Option<(
+        openshard_protocol::item_kind::ItemKindId,
+        Option<openshard_protocol::item_kind::MaterialId>,
+    )>,
 }
 
 /// How much of the materials a resolved craft spends.
@@ -77,6 +92,8 @@ pub fn check(
     // amount of Strength teaches a smith what to do with valorite.
     let mut res_hue = Hue(0);
     let mut axis_hue = None;
+    let mut axis_material = None;
+    let mut axis_identity = None;
     // The selected material belongs only to recipes whose primary resource
     // comes from the axis. A fletcher who has oak selected still makes ordinary
     // arrows from shafts and feathers, and does not need the skill to work oak
@@ -90,6 +107,8 @@ pub fn check(
             }
             res_hue = entry.hue;
             axis_hue = Some(entry.hue);
+            axis_material = Some(entry.material);
+            axis_identity = Some((axis.item_kind, entry.material));
         }
     }
 
@@ -104,7 +123,27 @@ pub fn check(
         } else {
             Some(res.hue)
         };
-        let held = openshard_items::carried_amount_of_hue(state, pack, res.graphic, hue);
+        // A migrated row resolves its declared selector before it ever consults
+        // a classic presentation pair. The old rows below retain the audited
+        // `kind_from_drawn` bridge while their data is being moved one by one.
+        let semantic = match res.selector {
+            Some(selector) => resolve_selector(selector, res.from_axis, axis_material),
+            None if res.from_axis => axis_identity.map(|(kind, material)| (kind, Some(material))),
+            None => hue.and_then(|hue| kind_from_drawn(Drawn { id: res.graphic, hue })),
+        };
+        let held = match semantic {
+            Some((kind, material)) => openshard_items::carried_amount_of_identity_or_legacy(
+                state,
+                pack,
+                kind,
+                material,
+                Drawn {
+                    id: res.graphic,
+                    hue: hue.expect("a semantic ingredient has a resolved hue"),
+                },
+            ),
+            None => openshard_items::carried_amount_of_hue(state, pack, res.graphic, hue),
+        };
         if res.amount == 0 {
             continue;
         }
@@ -113,7 +152,12 @@ pub fn check(
         }
         let whole = u16::try_from(held / u32::from(res.amount)).unwrap_or(u16::MAX);
         affordable = affordable.min(whole);
-        lines.push((res.graphic, hue, res.amount));
+        lines.push(MaterialLine {
+            graphic: res.graphic,
+            hue,
+            amount: res.amount,
+            semantic,
+        });
     }
 
     // A recipe with no materials at all can always be made once; `affordable`
@@ -130,6 +174,43 @@ pub fn check(
     })
 }
 
+/// Resolve the exact identity a selector-based recipe line consumes today.
+///
+/// The first migrated smithing row selects a material through the existing
+/// gump axis, so `KindWithMaterial { Any }` means *the selected material of
+/// this axis*, not an arbitrary pile in the pack. More general tag and
+/// cross-input selectors are kept in the protocol vocabulary but are rejected
+/// here until their evaluator can count several candidate kinds atomically.
+fn resolve_selector(
+    selector: ItemSelector,
+    from_axis: bool,
+    axis_material: Option<openshard_protocol::item_kind::MaterialId>,
+) -> Option<(
+    openshard_protocol::item_kind::ItemKindId,
+    Option<openshard_protocol::item_kind::MaterialId>,
+)> {
+    match selector {
+        ItemSelector::Exact(kind) if !from_axis => Some((kind, None)),
+        ItemSelector::KindWithMaterial { kind, material } => match material {
+            MaterialRule::Any if from_axis => {
+                let family = item_definition(kind)?.material_family?;
+                let selected = axis_material?;
+                (material_definition(selected)?.family == family).then_some((kind, Some(selected)))
+            }
+            MaterialRule::Exact(material) => Some((kind, Some(material))),
+            MaterialRule::InFamily(family) => {
+                let material = axis_material?;
+                (material_definition(material)?.family == family).then_some((kind, Some(material)))
+            }
+            // `SameAsInput` needs the already-resolved line it names; a tag
+            // needs a candidate set. Neither may quietly fall back to art.
+            MaterialRule::Any | MaterialRule::SameAsInput(_) => None,
+        },
+        ItemSelector::Tag(_) => None,
+        ItemSelector::Exact(_) => None,
+    }
+}
+
 /// Take what [`check`] resolved. Returns whether every line came out whole.
 ///
 /// Each line is all-or-nothing through `items`' own door, so a craft that finds
@@ -140,13 +221,13 @@ pub fn take(state: &mut WorldState, crafter: EntityId, materials: &Materials, sh
         return false;
     };
     let mut whole = true;
-    for (graphic, hue, per_craft) in &materials.lines {
+    for line in &materials.lines {
         let wanted = match share {
-            Share::All => u32::from(*per_craft) * u32::from(materials.max_amount),
+            Share::All => u32::from(line.amount) * u32::from(materials.max_amount),
             // Half is **not** multiplied out by the batch size: a failed run of a
             // hundred boards costs half of *one* craft's logs, not fifty crafts'.
             // ServUO floors it at one, so a bad roll is never free.
-            Share::Half => u32::from(*per_craft / 2).max(1),
+            Share::Half => u32::from(line.amount / 2).max(1),
         };
         let Ok(wanted) = u16::try_from(wanted) else {
             whole = false;
@@ -155,9 +236,47 @@ pub fn take(state: &mut WorldState, crafter: EntityId, materials: &Materials, sh
         if wanted == 0 {
             continue;
         }
-        if openshard_items::take_from_backpack_of_hue(state, pack, *graphic, *hue, wanted) == 0 {
+        let took = match line.semantic {
+            Some((kind, material)) => openshard_items::take_from_backpack_identity_or_legacy(
+                state,
+                pack,
+                kind,
+                material,
+                Drawn {
+                    id: line.graphic,
+                    hue: line.hue.expect("a semantic ingredient has a resolved hue"),
+                },
+                wanted,
+            ),
+            None => openshard_items::take_from_backpack_of_hue(state, pack, line.graphic, line.hue, wanted),
+        };
+        if took == 0 {
             whole = false;
         }
     }
     whole
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+
+    #[test]
+    fn a_material_axis_resolves_using_its_explicit_material_id() {
+        let any_material = |kind| ItemSelector::KindWithMaterial {
+            kind,
+            material: MaterialRule::Any,
+        };
+        assert_eq!(
+            resolve_selector(any_material(ItemKindId(1)), true, Some(MaterialId(1))),
+            Some((ItemKindId(1), Some(MaterialId(1)))),
+            "ingots use regular iron"
+        );
+        assert_eq!(
+            resolve_selector(any_material(ItemKindId(3)), true, Some(MaterialId(20))),
+            Some((ItemKindId(3), Some(MaterialId(20)))),
+            "logs use regular wood, not the globally first iron hue"
+        );
+    }
 }

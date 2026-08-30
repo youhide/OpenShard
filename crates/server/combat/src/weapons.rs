@@ -13,8 +13,8 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::wire::Graphic;
-use openshard_state::components::{Drawn, Weapon};
-use openshard_state::weapon::{LAYER_ONE_HANDED, WeaponData, WeaponSkill, weapon_data};
+use openshard_state::components::{Drawn, ItemKind, Weapon};
+use openshard_state::weapon::{LAYER_ONE_HANDED, WeaponData, WeaponSkill, weapon_data, weapon_data_for_kind};
 use openshard_state::weapon::{LAYER_TWO_HANDED, WeaponKind};
 use openshard_state::{Skill, WorldState};
 
@@ -61,15 +61,21 @@ pub fn combat_skill_id(state: &WorldState, mobile: EntityId) -> Skill {
 #[must_use]
 pub fn equipped_weapon(state: &WorldState, mobile: EntityId) -> Option<WeaponData> {
     let item = equipped_weapon_item(state, mobile)?;
-    let base = state
-        .registry
-        .get::<Drawn>(item)
-        .and_then(|graphic| weapon_data(graphic.id))
-        .copied();
+    let base = match state.registry.get::<ItemKind>(item) {
+        Some(kind) => weapon_data_for_kind(kind.0),
+        // Older world data has no semantic identity yet. It remains supported
+        // until it is migrated, but a declared kind always wins over its art.
+        None => state
+            .registry
+            .get::<Drawn>(item)
+            .and_then(|graphic| weapon_data(graphic.id)),
+    }
+    .copied();
     match state.registry.get::<Weapon>(item) {
         // An override stands the item's stats up, keeping the base graphic's skill
         // (a magic longsword is still a Swords weapon); same numbers either era.
         Some(&Weapon { speed, min, max }) => Some(WeaponData {
+            item_kind: base.and_then(|weapon| weapon.item_kind),
             graphic: Graphic(0),
             skill: base.map_or(WeaponSkill::Wrestling, |weapon| weapon.skill),
             kind: base.map_or(WeaponKind::Bashing, |weapon| weapon.kind),

@@ -1,4 +1,5 @@
 use super::*;
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::wire::Graphic;
 
 /// A player used (double-clicked) an item the engine has no built-in behaviour
@@ -18,6 +19,10 @@ pub struct ItemUsed {
     pub item: Serial,
     /// Its graphic, so a reader matches on the tile with no lookup.
     pub graphic: Graphic,
+    /// Semantic item kind, when the item's presentation is registry-backed.
+    pub item_kind: Option<ItemKindId>,
+    /// Semantic material grade, when the kind accepts one.
+    pub material: Option<MaterialId>,
     /// The mobile that used it.
     pub by: Serial,
 }
@@ -53,6 +58,11 @@ pub struct ItemsTaken {
     pub player: Serial,
     /// The item graphic asked for.
     pub graphic: Graphic,
+    /// Semantic item kind requested by a typed turn-in. `None` means the
+    /// compatibility `Command::TakeItem` path matched presentation art only.
+    pub item_kind: Option<ItemKindId>,
+    /// Required material for a typed turn-in, where the kind is materialized.
+    pub material: Option<MaterialId>,
     /// How many were actually taken — the amount asked, or `0`.
     pub taken: u16,
 }
@@ -117,6 +127,8 @@ pub(crate) fn item_used(state: &mut WorldState, player: EntityId, target: Entity
     state.bus.send(ItemUsed {
         item: target_serial,
         graphic: id,
+        item_kind: state.registry.get::<ItemKind>(target).map(|kind| kind.0),
+        material: state.registry.get::<Material>(target).map(|material| material.0),
         by,
     });
 }

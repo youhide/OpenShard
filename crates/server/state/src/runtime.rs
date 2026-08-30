@@ -54,8 +54,8 @@ use crate::boat::Plank;
 use crate::components::{
     Access, Amount, Balked, Body, Client, Combat, CombatAction, Contained, CorpseBody, CraftedBy, Drawn,
     Equipped, Ghost, Heading, HearsGhosts, Hidden, Hitpoints, HouseDesign, InRegion, ItemAffix, ItemAffixes,
-    ItemLocation, LastStep, Meditating, Movement, Name, Position, Quality, SettledItemLocation, Staff,
-    Stamina, Stealthing, TradeWindow, body_opens_doors, creature_name,
+    ItemKind, ItemLocation, LastStep, Meditating, Movement, Name, Position, Quality, SettledItemLocation,
+    Staff, Stamina, Stealthing, TradeWindow, body_opens_doors, creature_name,
 };
 use crate::connection::Connection;
 use crate::dialogue::Dialogue;
@@ -67,7 +67,9 @@ use crate::region::{Region, Regions};
 use crate::rng::Rng;
 use crate::sectors::{Occupant, Sectors, VIEW_RANGE};
 use crate::skill::Skill;
-use crate::weapon::{LAYER_ONE_HANDED, LAYER_TWO_HANDED, WeaponAnimation, weapon_animation, weapon_data};
+use crate::weapon::{
+    LAYER_ONE_HANDED, LAYER_TWO_HANDED, WeaponAnimation, weapon_animation, weapon_data, weapon_data_for_kind,
+};
 
 /// A character's height above the ground when the facet has no map to ask.
 const Z_WITHOUT_A_MAP: i8 = 0;
@@ -2552,10 +2554,14 @@ impl WorldState {
                 crate::equipped_items(self, mobile)
                     .find(|(_, worn)| worn.layer == layer)
                     .and_then(|(item, worn)| {
-                        self.registry
-                            .get::<Drawn>(item)
-                            .and_then(|drawn| weapon_data(drawn.id))
-                            .map(|weapon| weapon_animation(weapon, worn.layer))
+                        match self.registry.get::<ItemKind>(item) {
+                            Some(kind) => weapon_data_for_kind(kind.0),
+                            None => self
+                                .registry
+                                .get::<Drawn>(item)
+                                .and_then(|drawn| weapon_data(drawn.id)),
+                        }
+                        .map(|weapon| weapon_animation(weapon, worn.layer))
                     })
             })
             .unwrap_or(WeaponAnimation::Wrestle)

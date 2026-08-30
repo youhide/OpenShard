@@ -1,6 +1,7 @@
 use super::*;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
+use openshard_state::{Drawn, kind_from_drawn};
 
 impl World {
     /// Act on a targeting cursor's answer. Looks up what the cursor was raised for
@@ -280,14 +281,21 @@ impl World {
                     let Some(serial) = self.state.registry.serial_of(actor) else {
                         return;
                     };
-                    let created = if item.graphic == items::BACKPACK_GRAPHIC {
-                        items::give_containers_to_backpack(
+                    let created = if let Some((kind, material)) = kind_from_drawn(Drawn {
+                        id: item.graphic,
+                        hue: item.hue,
+                    }) {
+                        // F1's free-form art fields stay useful for client assets
+                        // that have not entered the registry. A known projection,
+                        // however, is created from its durable identity rather
+                        // than through a legacy art/hue compatibility path.
+                        items::give_kind_to_backpack(
                             &mut self.state,
                             serial,
-                            item.graphic,
-                            items::BACKPACK_GUMP,
-                            item.hue,
+                            kind,
+                            material,
                             item.amount,
+                            item.stackable,
                         )
                     } else {
                         items::give_to_backpack(

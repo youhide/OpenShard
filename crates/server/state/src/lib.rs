@@ -48,6 +48,7 @@ pub mod facet_rules;
 pub mod guild;
 pub mod harvest;
 pub mod instrument;
+pub mod item_definition;
 pub mod item_location;
 pub mod obstruct;
 pub mod party;
@@ -70,17 +71,21 @@ pub use components::{
     Decoration, Discorded, Door, Drawn, EMPTY_BOTTLE_GRAPHIC, Equipped, FIELD_HEIGHT, Fame, Field, FieldKind,
     Frozen, Ghost, Guard, GuildCandidate, GuildMember, Harvesting, Heading, HearsGhosts, Hidden, Hitpoints,
     House, HouseDeed, HouseDesign, HouseDoor, HouseSign, InRegion, Instrument, ItemAffix, ItemAffixes,
-    ItemLocation, Karma, KeyValue, LastStatGain, Lock, LockKind, LockedDown, MOONGATE_GRAPHIC,
-    MOONGATE_REACH, Mana, Meditating, MeleeDamage, Moongate, Movement, MurderDecay, Murders, Name, NightHome,
-    Npc, POISON_POTION_GRAPHIC, Pacified, PartyCandidate, PartyMember, PoisonCharges, Poisoned, Position,
-    RECALL_RUNE_GRAPHIC, RUNEBOOK_ENTRIES, RUNEBOOK_GRAPHIC, Resistance, RuneMark, Runebook, RunebookEntry,
-    Seated, SettledItemLocation, SkillCooldown, Skills, SpawnedBy, Stackable, Stamina, Standing,
-    StatEffectKind, StatLock, StatLocks, StatMod, StatMods, Stats, Stealthing, SwingSpeed, Title, Tool,
-    TradeWindow, Trap, TrapKind, WrestlingAmbushCooldown, WrestlingCombo, WrestlingInterceptCooldown,
+    ItemKind, ItemLocation, Karma, KeyValue, LastStatGain, Lock, LockKind, LockedDown, MOONGATE_GRAPHIC,
+    MOONGATE_REACH, Mana, Material, Meditating, MeleeDamage, Moongate, Movement, MurderDecay, Murders, Name,
+    NightHome, Npc, POISON_POTION_GRAPHIC, Pacified, PartyCandidate, PartyMember, PoisonCharges, Poisoned,
+    Position, RECALL_RUNE_GRAPHIC, RUNEBOOK_ENTRIES, RUNEBOOK_GRAPHIC, Resistance, RuneMark, Runebook,
+    RunebookEntry, Seated, SettledItemLocation, SkillCooldown, Skills, SpawnedBy, Stackable, Stamina,
+    Standing, StatEffectKind, StatLock, StatLocks, StatMod, StatMods, Stats, Stealthing, SwingSpeed, Title,
+    Tool, TradeWindow, Trap, TrapKind, WrestlingAmbushCooldown, WrestlingCombo, WrestlingInterceptCooldown,
     WrestlingOpener, WrestlingStride, effect, is_debuff, stat_shift,
 };
 pub use dialogue::{Dialogue, SpeechEntry, SpeechTable};
 pub use guild::{Alliance, AllianceId, Alliances, Guild, GuildId, Guilds, Rank, Removal};
+pub use item_definition::{
+    ItemDefinition, MaterialDefinition, has_tag, item_definition, kind_from_drawn, material_definition,
+    material_from_legacy_hue, material_from_legacy_hue_in_family, presentation_of, selector_matches,
+};
 pub use item_location::{
     ItemGraphViolation, LocationError, audit_item_graph, contained_items, despawn_item, equipped_items,
     establish_item_location, item_location, relocate_item, settled_from_origin,

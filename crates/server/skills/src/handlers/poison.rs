@@ -15,9 +15,9 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{ClilocId, CursorId, Hue, SoundId};
 use openshard_protocol::world::PoisonLevel;
 use openshard_state::components::{
-    Amount, Drawn, EMPTY_BOTTLE_GRAPHIC, POISON_POTION_GRAPHIC, PoisonCharges,
+    Amount, Drawn, EMPTY_BOTTLE_GRAPHIC, ItemKind, POISON_POTION_GRAPHIC, PoisonCharges,
 };
-use openshard_state::weapon::{WeaponKind, weapon_data};
+use openshard_state::weapon::{WeaponKind, weapon_data, weapon_data_for_kind};
 use openshard_state::{Skill, TargetPurpose, WorldState};
 
 use crate::check::roll_skill_band;
@@ -207,8 +207,14 @@ fn can_be_poisoned(state: &WorldState, target: EntityId) -> bool {
 
 /// The weapon kind of an item, if the core table knows it as a weapon at all.
 fn weapon_kind_of(state: &WorldState, item: EntityId) -> Option<WeaponKind> {
-    let graphic = state.registry.get::<Drawn>(item)?.id;
-    weapon_data(graphic).map(|weapon| weapon.kind)
+    match state.registry.get::<ItemKind>(item) {
+        Some(kind) => weapon_data_for_kind(kind.0),
+        None => state
+            .registry
+            .get::<Drawn>(item)
+            .and_then(|graphic| weapon_data(graphic.id)),
+    }
+    .map(|weapon| weapon.kind)
 }
 
 /// Take one dose out of the potion and leave the empty bottle behind.

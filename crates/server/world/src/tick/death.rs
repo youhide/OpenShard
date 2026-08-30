@@ -581,6 +581,53 @@ impl World {
         }
     }
 
+    /// Semantic counterpart of [`Self::add_loot`]. Unlike the compatibility
+    /// path it never derives gameplay identity from client presentation.
+    pub(super) fn add_loot_kind(
+        &mut self,
+        container: Serial,
+        item_kind: openshard_protocol::item_kind::ItemKindId,
+        material: Option<openshard_protocol::item_kind::MaterialId>,
+        amount: u16,
+        stackable: bool,
+    ) {
+        let is_container = self
+            .state
+            .registry
+            .entity_of(container)
+            .is_some_and(|entity| self.state.registry.has::<Container>(entity));
+        if !is_container || amount == 0 {
+            return;
+        }
+        if stackable {
+            let Some(outcome) =
+                items::give_kind(&mut self.state, container, item_kind, material, u32::from(amount))
+            else {
+                warn!(?container, ?item_kind, ?material, "invalid semantic corpse loot");
+                return;
+            };
+            if !outcome.is_complete() {
+                warn!(
+                    ?container,
+                    ?item_kind,
+                    ?material,
+                    requested = outcome.requested,
+                    given = outcome.given,
+                    missing = outcome.missing(),
+                    "semantic corpse loot is partial"
+                );
+            }
+        } else if items::place_one_kind(&mut self.state, container, item_kind, material, amount).is_none() {
+            warn!(
+                ?container,
+                ?item_kind,
+                ?material,
+                amount,
+                "semantic corpse loot could not be placed"
+            );
+        }
+    }
+
     /// Turn one dead creature into a corpse holding its gear and a little gold,
     /// then despawn the creature.
     fn lay_corpse(&mut self, entity: EntityId, serial: Serial, killer: Option<String>) {

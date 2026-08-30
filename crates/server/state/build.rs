@@ -33,7 +33,7 @@
 //! JSON — a data file is a poor place for prose, and this is the file that
 //! decides what the item means.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -103,6 +103,238 @@ fn id(raw: &str) -> u16 {
         .strip_prefix("0x")
         .unwrap_or_else(|| panic!("{raw} is not 0x-prefixed"));
     u16::from_str_radix(digits, 16).unwrap_or_else(|e| panic!("{raw} is not a u16 ({e})"))
+}
+
+/// One semantic item row. The id is decimal on purpose: it is an allocated
+/// domain number, not a convenient spelling of the graphic beside it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ItemDefinitionRow {
+    id: u32,
+    name: String,
+    graphic: String,
+    /// Alternative legacy graphics for the same semantic kind (for example a
+    /// flipped pickaxe). The first `graphic` remains the canonical projection.
+    #[serde(default)]
+    legacy_graphics: Vec<String>,
+    /// The gump that makes a semantic container openable. A container kind
+    /// must name one so a typed constructor never creates a decorative bag.
+    #[serde(default)]
+    container_gump: Option<String>,
+    material_family: Option<String>,
+    #[serde(default)]
+    armor_rating: Option<u16>,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+/// One material grade and its legacy presentation hue.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MaterialDefinitionRow {
+    id: u16,
+    family: String,
+    name: String,
+    hue: String,
+    armor_bonus: u16,
+}
+
+fn material_family(raw: &str) -> &'static str {
+    match raw {
+        "metal" => "METAL",
+        "wood" => "WOOD",
+        "leather" => "LEATHER",
+        _ => panic!("unknown material family {raw:?}"),
+    }
+}
+
+fn item_tag(raw: &str) -> &'static str {
+    match raw {
+        "ingot" => "ItemTag::Ingot",
+        "ore" => "ItemTag::Ore",
+        "log" => "ItemTag::Log",
+        "weapon" => "ItemTag::Weapon",
+        "armor" => "ItemTag::Armor",
+        "tool" => "ItemTag::Tool",
+        "instrument" => "ItemTag::Instrument",
+        "container" => "ItemTag::Container",
+        "spellbook" => "ItemTag::Spellbook",
+        "runebook" => "ItemTag::Runebook",
+        _ => panic!("unknown item tag {raw:?}"),
+    }
+}
+
+/// Turn the append-only item/material definition data into one validated
+/// registry. It owns this validation because it is the one place that can see
+/// both sides of a `kind + material -> Drawn` projection.
+fn item_definitions(items: &str, materials: &str) -> String {
+    let items: Vec<ItemDefinitionRow> = serde_json::from_str(items).expect("items.json");
+    let materials: Vec<MaterialDefinitionRow> = serde_json::from_str(materials).expect("materials.json");
+
+    let mut item_ids = BTreeSet::new();
+    let mut graphics = BTreeSet::new();
+    for row in &items {
+        assert!(row.id != 0, "item definition {:?} has reserved id 0", row.name);
+        assert!(
+            !row.name.trim().is_empty(),
+            "item definition {} has an empty name",
+            row.id
+        );
+        assert!(item_ids.insert(row.id), "duplicate item definition id {}", row.id);
+        for graphic in std::iter::once(&row.graphic)
+            .chain(&row.legacy_graphics)
+            .map(|raw| id(raw))
+        {
+            assert!(
+                graphics.insert(graphic),
+                "legacy graphic {:#06X} maps to multiple item definitions",
+                graphic
+            );
+        }
+        if let Some(family) = &row.material_family {
+            let _ = material_family(family);
+        }
+        if let Some(gump) = &row.container_gump {
+            let _ = id(gump);
+        }
+        let mut tags = BTreeSet::new();
+        for tag in &row.tags {
+            let _ = item_tag(tag);
+            assert!(
+                tags.insert(tag),
+                "item definition {:?} repeats tag {tag:?}",
+                row.name
+            );
+        }
+        let armor_tagged = row.tags.iter().any(|tag| tag == "armor");
+        assert_eq!(
+            row.armor_rating.is_some(),
+            armor_tagged,
+            "item definition {:?}: armor_rating and armor tag must appear together",
+            row.name
+        );
+        let container_tagged = row.tags.iter().any(|tag| tag == "container");
+        assert_eq!(
+            row.container_gump.is_some(),
+            container_tagged,
+            "item definition {:?}: container_gump and container tag must appear together",
+            row.name
+        );
+        let spellbook_tagged = row.tags.iter().any(|tag| tag == "spellbook");
+        let runebook_tagged = row.tags.iter().any(|tag| tag == "runebook");
+        assert!(
+            !(spellbook_tagged && runebook_tagged),
+            "item definition {:?}: spellbook and runebook are distinct item roles",
+            row.name
+        );
+        if row
+            .tags
+            .iter()
+            .any(|tag| matches!(tag.as_str(), "ingot" | "ore" | "log"))
+        {
+            assert!(
+                row.material_family.is_some(),
+                "item definition {:?}: raw material tag requires material_family",
+                row.name
+            );
+        }
+    }
+
+    let mut material_ids = BTreeSet::new();
+    let mut material_hues = BTreeSet::new();
+    for row in &materials {
+        assert!(
+            row.id != 0,
+            "material definition {:?} has reserved id 0",
+            row.name
+        );
+        assert!(
+            !row.name.trim().is_empty(),
+            "material definition {} has an empty name",
+            row.id
+        );
+        assert!(
+            material_ids.insert(row.id),
+            "duplicate material definition id {}",
+            row.id
+        );
+        let family = material_family(&row.family);
+        let hue = id(&row.hue);
+        assert!(
+            material_hues.insert((family, hue)),
+            "duplicate {family} material hue {hue:#06X}"
+        );
+    }
+
+    for row in &items {
+        if let Some(family) = &row.material_family {
+            let family = material_family(family);
+            assert!(
+                materials
+                    .iter()
+                    .any(|material| material_family(&material.family) == family),
+                "item definition {:?} names material family {family} with no material definitions",
+                row.name
+            );
+        }
+    }
+
+    let mut out = String::from("// @generated by build.rs from data/items.json and data/materials.json.\n\n");
+    out.push_str("pub const ITEM_DEFINITIONS: &[ItemDefinition] = &[\n");
+    for row in &items {
+        let family = row
+            .material_family
+            .as_deref()
+            .map(material_family)
+            .map(|family| format!("Some({family})"))
+            .unwrap_or_else(|| "None".to_owned());
+        let tags = row
+            .tags
+            .iter()
+            .map(|tag| item_tag(tag))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let legacy_graphics = row
+            .legacy_graphics
+            .iter()
+            .map(|graphic| format!("Graphic({})", id(graphic)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let container_gump = row
+            .container_gump
+            .as_deref()
+            .map(id)
+            .map(|gump| format!("Some(Graphic({gump}))"))
+            .unwrap_or_else(|| "None".to_owned());
+        writeln!(
+            out,
+            "    ItemDefinition {{ id: ItemKindId({}), name: {:?}, graphic: Graphic({}), legacy_graphics: &[{}], container_gump: {}, material_family: {}, armor_rating: {:?}, tags: &[{}] }},",
+            row.id,
+            row.name,
+            id(&row.graphic),
+            legacy_graphics,
+            container_gump,
+            family,
+            row.armor_rating,
+            tags,
+        )
+        .unwrap();
+    }
+    out.push_str("];\n\npub const MATERIAL_DEFINITIONS: &[MaterialDefinition] = &[\n");
+    for row in &materials {
+        writeln!(
+            out,
+            "    MaterialDefinition {{ id: MaterialId({}), family: {}, name: {:?}, hue: Hue({}), armor_bonus: {} }},",
+            row.id,
+            material_family(&row.family),
+            row.name,
+            id(&row.hue),
+            row.armor_bonus,
+        )
+        .unwrap();
+    }
+    out.push_str("];\n");
+    out
 }
 
 /// `data/body_types.json`, grouped by type name, into a table sorted by id.
@@ -1083,4 +1315,12 @@ fn main() {
         std::fs::write(out_dir.join(format!("{name}.rs")), render(&text))
             .unwrap_or_else(|e| panic!("writing {name}.rs: {e}"));
     }
+
+    let items = std::fs::read_to_string("data/items.json").expect("items.json");
+    let materials = std::fs::read_to_string("data/materials.json").expect("materials.json");
+    std::fs::write(
+        out_dir.join("item_definitions.rs"),
+        item_definitions(&items, &materials),
+    )
+    .expect("writing item_definitions.rs");
 }

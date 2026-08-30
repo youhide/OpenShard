@@ -59,6 +59,8 @@ impl Text {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Axis {
+    /// Semantic resource kind selected by this material axis.
+    item_kind: u32,
     /// The resource graphic the axis substitutes a hue into.
     graphic: String,
     /// The heading over the material row.
@@ -71,6 +73,8 @@ struct Axis {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AxisEntry {
+    /// Stable material id selected by this row; hue is presentation only.
+    material: u16,
     /// The hue that *is* this material.
     hue: String,
     /// Its name, for the material row.
@@ -81,12 +85,38 @@ struct AxisEntry {
     message: Text,
 }
 
+/// Only the stable ids are needed from the state-owned semantic registry. The
+/// crafting build reads them to reject dangling recipe references before Rust
+/// compilation; it does not duplicate the registry's presentation or mechanics.
+#[derive(Deserialize)]
+struct ItemDefinitionIdRow {
+    id: u32,
+    #[serde(default)]
+    material_family: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct MaterialDefinitionIdRow {
+    id: u16,
+    family: String,
+    hue: String,
+}
+
+struct DefinitionIds {
+    items: BTreeMap<u32, Option<String>>,
+    materials: BTreeMap<u16, (String, String)>,
+}
+
 /// `recipe::Recipe`. Every field with a `default` is one the overwhelming
 /// majority of rows leave alone, and leaving it out of the JSON is what makes a
 /// recipe readable at a glance.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Row {
+    /// Stable semantic output identity. Omitted while a legacy row has not been
+    /// audited into the item-definition registry.
+    #[serde(default)]
+    kind: Option<u32>,
     /// The item art produced.
     graphic: String,
     /// Its name, for the gump.
@@ -99,6 +129,11 @@ struct Row {
     /// A fixed hue for the result; zero defers to `retain_color`.
     #[serde(default = "zero")]
     hue: String,
+    /// How a typed output obtains its material. The externally tagged shape is
+    /// unambiguous in JSON: `{ "inherit_input": 0 }`, `{ "fixed": 9 }`, or
+    /// `"none"`; omitted means this is still a legacy row.
+    #[serde(default)]
+    output_material: OutputMaterialRow,
     /// Whether a zero-hued result inherits the chosen material's hue.
     #[serde(default = "yes")]
     retain_color: bool,
@@ -126,6 +161,32 @@ struct Row {
     resources: Vec<ResRow>,
 }
 
+/// `recipe::OutputMaterial`, written in JSON only where a recipe has a kind.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum OutputMaterialRow {
+    #[default]
+    Legacy,
+    None,
+    Fixed(u16),
+    InheritInput(u8),
+}
+
+impl OutputMaterialRow {
+    fn expr(&self) -> String {
+        match self {
+            Self::Legacy => "crate::recipe::OutputMaterial::Legacy".to_owned(),
+            Self::None => "crate::recipe::OutputMaterial::None".to_owned(),
+            Self::Fixed(material) => format!(
+                "crate::recipe::OutputMaterial::Fixed(openshard_protocol::item_kind::MaterialId({material}))"
+            ),
+            Self::InheritInput(input) => {
+                format!("crate::recipe::OutputMaterial::InheritInput({input})")
+            }
+        }
+    }
+}
+
 /// `recipe::CraftSkillReq`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -142,6 +203,10 @@ struct SkillRow {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ResRow {
+    /// A semantic input selector for a migrated row. It is intentionally a
+    /// small JSON vocabulary rather than serde's Rust-enum spelling.
+    #[serde(default)]
+    selector: Option<SelectorRow>,
     /// The item art consumed.
     graphic: String,
     /// And its hue; absent is the plain grade.
@@ -156,6 +221,93 @@ struct ResRow {
     /// Whether the material axis substitutes into this line.
     #[serde(default)]
     from_axis: bool,
+}
+
+/// A semantic input selector in recipe JSON.
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum SelectorRow {
+    Exact {
+        kind: u32,
+    },
+    KindWithMaterial {
+        kind: u32,
+        material: SelectorMaterialRow,
+    },
+    Tag {
+        tag: String,
+    },
+}
+
+/// A material rule in a semantic recipe selector.
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SelectorMaterialRow {
+    Any,
+    Exact(u16),
+    SameAsInput(u8),
+    InFamily(String),
+}
+
+impl SelectorRow {
+    fn expr(&self) -> String {
+        match self {
+            Self::Exact { kind } => format!(
+                "openshard_protocol::item_kind::ItemSelector::Exact(openshard_protocol::item_kind::ItemKindId({kind}))"
+            ),
+            Self::KindWithMaterial { kind, material } => format!(
+                "openshard_protocol::item_kind::ItemSelector::KindWithMaterial {{ kind: openshard_protocol::item_kind::ItemKindId({kind}), material: {} }}",
+                material.expr()
+            ),
+            Self::Tag { tag } => format!(
+                "openshard_protocol::item_kind::ItemSelector::Tag({})",
+                selector_tag(tag)
+            ),
+        }
+    }
+}
+
+impl SelectorMaterialRow {
+    fn expr(&self) -> String {
+        match self {
+            Self::Any => "openshard_protocol::item_kind::MaterialRule::Any".to_owned(),
+            Self::Exact(material) => format!(
+                "openshard_protocol::item_kind::MaterialRule::Exact(openshard_protocol::item_kind::MaterialId({material}))"
+            ),
+            Self::SameAsInput(input) => {
+                format!("openshard_protocol::item_kind::MaterialRule::SameAsInput({input})")
+            }
+            Self::InFamily(family) => format!(
+                "openshard_protocol::item_kind::MaterialRule::InFamily(openshard_protocol::item_kind::MaterialFamilyId({}))",
+                selector_family(family)
+            ),
+        }
+    }
+}
+
+fn selector_tag(raw: &str) -> &'static str {
+    match raw {
+        "ingot" => "openshard_protocol::item_kind::ItemTag::Ingot",
+        "ore" => "openshard_protocol::item_kind::ItemTag::Ore",
+        "log" => "openshard_protocol::item_kind::ItemTag::Log",
+        "weapon" => "openshard_protocol::item_kind::ItemTag::Weapon",
+        "armor" => "openshard_protocol::item_kind::ItemTag::Armor",
+        "tool" => "openshard_protocol::item_kind::ItemTag::Tool",
+        "instrument" => "openshard_protocol::item_kind::ItemTag::Instrument",
+        "container" => "openshard_protocol::item_kind::ItemTag::Container",
+        "spellbook" => "openshard_protocol::item_kind::ItemTag::Spellbook",
+        "runebook" => "openshard_protocol::item_kind::ItemTag::Runebook",
+        _ => panic!("unknown recipe selector tag {raw:?}"),
+    }
+}
+
+fn selector_family(raw: &str) -> u8 {
+    match raw {
+        "metal" => 1,
+        "wood" => 2,
+        "leather" => 3,
+        _ => panic!("unknown recipe selector material family {raw:?}"),
+    }
 }
 
 /// `system::Needs`, with every requirement absent by default.
@@ -306,6 +458,14 @@ fn generate(table: &Table) -> String {
     out.push_str("/// Everything this trade can make.\npub const RECIPES: &[Recipe] = &[\n");
     for row in &table.recipes {
         writeln!(out, "    Recipe {{").unwrap();
+        match row.kind {
+            Some(kind) => writeln!(
+                out,
+                "        kind: Some(openshard_protocol::item_kind::ItemKindId({kind})),"
+            )
+            .unwrap(),
+            None => out.push_str("        kind: None,\n"),
+        }
         writeln!(out, "        graphic: Graphic({}),", hex("graphic", &row.graphic)).unwrap();
         writeln!(out, "        name: {},", row.name.expr()).unwrap();
         writeln!(out, "        group: {},", row.group).unwrap();
@@ -320,10 +480,16 @@ fn generate(table: &Table) -> String {
         }
         out.push_str("        ],\n        resources: &[\n");
         for res in &row.resources {
+            let selector = res
+                .selector
+                .as_ref()
+                .map(|selector| format!("Some({})", selector.expr()))
+                .unwrap_or_else(|| "None".to_owned());
             writeln!(
                 out,
-                "            CraftRes {{ graphic: Graphic({}), hue: Hue({}), amount: {}, name: {}, \
+                "            CraftRes {{ selector: {}, graphic: Graphic({}), hue: Hue({}), amount: {}, name: {}, \
                  message: {}, from_axis: {} }},",
+                selector,
                 hex("resource graphic", &res.graphic),
                 hex("resource hue", &res.hue),
                 res.amount,
@@ -336,6 +502,7 @@ fn generate(table: &Table) -> String {
         out.push_str("        ],\n");
         writeln!(out, "        amount: {},", row.amount).unwrap();
         writeln!(out, "        hue: Hue({}),", hex("hue", &row.hue)).unwrap();
+        writeln!(out, "        output_material: {},", row.output_material.expr()).unwrap();
         writeln!(out, "        retain_color: {},", row.retain_color).unwrap();
         writeln!(out, "        use_all_res: {},", row.use_all_res).unwrap();
         writeln!(out, "        min_skill_offset: {},", row.min_skill_offset).unwrap();
@@ -352,6 +519,12 @@ fn generate(table: &Table) -> String {
         out.push_str("pub const SUB_RES: SubResAxis = SubResAxis {\n");
         writeln!(
             out,
+            "    item_kind: openshard_protocol::item_kind::ItemKindId({}),",
+            axis.item_kind
+        )
+        .unwrap();
+        writeln!(
+            out,
             "    graphic: Graphic({}),",
             hex("axis graphic", &axis.graphic)
         )
@@ -361,7 +534,8 @@ fn generate(table: &Table) -> String {
         for entry in &axis.entries {
             writeln!(
                 out,
-                "        SubRes {{ hue: Hue({}), name: {}, req_skill: {}, message: {} }},",
+                "        SubRes {{ material: openshard_protocol::item_kind::MaterialId({}), hue: Hue({}), name: {}, req_skill: {}, message: {} }},",
+                entry.material,
                 hex("axis hue", &entry.hue),
                 entry.name.expr(),
                 entry.req_skill,
@@ -388,6 +562,41 @@ fn check(row: &SystemRow, table: &Table) {
     assert!(!table.recipes.is_empty(), "{} has no recipes at all", row.trade);
     for recipe in &table.recipes {
         assert!(
+            recipe.kind != Some(0),
+            "{}: recipe {} has zero item kind",
+            row.trade,
+            recipe.graphic
+        );
+        match (recipe.kind, &recipe.output_material) {
+            (None, OutputMaterialRow::Legacy)
+            | (Some(_), OutputMaterialRow::None)
+            | (Some(_), OutputMaterialRow::Fixed(_))
+            | (Some(_), OutputMaterialRow::InheritInput(_)) => {}
+            (Some(_), OutputMaterialRow::Legacy) => panic!(
+                "{}: recipe {} has an item kind but no output material policy",
+                row.trade, recipe.graphic
+            ),
+            (None, _) => panic!(
+                "{}: recipe {} has an output material policy but no item kind",
+                row.trade, recipe.graphic
+            ),
+        }
+        if let OutputMaterialRow::InheritInput(input) = &recipe.output_material {
+            assert!(
+                usize::from(*input) < recipe.resources.len(),
+                "{}: recipe {} inherits material from missing input {}",
+                row.trade,
+                recipe.graphic,
+                input
+            );
+        }
+        for (input, resource) in recipe.resources.iter().enumerate() {
+            let Some(selector) = &resource.selector else {
+                continue;
+            };
+            check_selector(row, recipe, input, resource, selector);
+        }
+        assert!(
             usize::from(recipe.group) < table.groups.len(),
             "{}: recipe {} is in group {}, and the trade has {}",
             row.trade,
@@ -404,6 +613,154 @@ fn check(row: &SystemRow, table: &Table) {
             "{}: recipe {} does not lead with {}",
             row.trade, recipe.graphic, row.skill
         );
+    }
+}
+
+/// Reject a selector that the current recipe evaluator cannot yet count and
+/// consume atomically. Keeping its syntax in the protocol is useful because the
+/// vocabulary is settled; accepting it in JSON before it has semantics would
+/// make a future recipe look typed while falling through to legacy art.
+fn check_selector(system: &SystemRow, recipe: &Row, input: usize, resource: &ResRow, selector: &SelectorRow) {
+    let name = format!("{}: recipe {} input {}", system.trade, recipe.graphic, input);
+    match selector {
+        SelectorRow::Exact { kind } => {
+            assert!(*kind != 0, "{name} has reserved item kind 0");
+            assert!(
+                !resource.from_axis,
+                "{name} has Exact selector but also consumes the selected material axis"
+            );
+        }
+        SelectorRow::KindWithMaterial { kind, material } => {
+            assert!(*kind != 0, "{name} has reserved item kind 0");
+            match material {
+                SelectorMaterialRow::Any => assert!(
+                    resource.from_axis,
+                    "{name} uses material Any without the selected material axis"
+                ),
+                SelectorMaterialRow::Exact(material) => {
+                    assert!(*material != 0, "{name} has reserved material id 0");
+                }
+                SelectorMaterialRow::InFamily(_) => assert!(
+                    resource.from_axis,
+                    "{name} checks a material family without the selected material axis"
+                ),
+                SelectorMaterialRow::SameAsInput(_) => {
+                    panic!("{name} uses SameAsInput before the multi-input selector evaluator exists")
+                }
+            }
+        }
+        SelectorRow::Tag { .. } => panic!("{name} uses Tag before the candidate-set evaluator exists"),
+    }
+}
+
+/// Cross-check every semantic recipe reference against the registry that owns
+/// the durable ids. The two data directories remain independently generated,
+/// but a typo in one must fail the build rather than become an unreachable
+/// recipe row at runtime.
+fn check_definition_references(trade: &str, table: &Table, definitions: &DefinitionIds) {
+    let item = |id: u32, where_: &str| -> &Option<String> {
+        definitions
+            .items
+            .get(&id)
+            .unwrap_or_else(|| panic!("{trade}: {where_} references unknown item kind {id}"))
+    };
+    let material = |id: u16, where_: &str| -> &(String, String) {
+        definitions
+            .materials
+            .get(&id)
+            .unwrap_or_else(|| panic!("{trade}: {where_} references unknown material {id}"))
+    };
+    if let Some(axis) = &table.sub_res {
+        let family = item(axis.item_kind, "material axis")
+            .as_deref()
+            .unwrap_or_else(|| {
+                panic!(
+                    "{trade}: material axis kind {} has no material family",
+                    axis.item_kind
+                )
+            });
+        for entry in &axis.entries {
+            let (entry_family, entry_hue) = material(entry.material, "material axis entry");
+            assert_eq!(
+                entry_family, family,
+                "{trade}: material axis entry {} has the wrong family",
+                entry.material
+            );
+            assert_eq!(
+                entry_hue, &entry.hue,
+                "{trade}: material axis entry {} has a non-canonical hue",
+                entry.material
+            );
+        }
+    }
+    for recipe in &table.recipes {
+        let label = format!("recipe {}", recipe.graphic);
+        if let Some(kind) = recipe.kind {
+            item(kind, &label);
+        }
+        match (&recipe.kind, &recipe.output_material) {
+            (Some(kind), OutputMaterialRow::None) => assert!(
+                item(*kind, &label).is_none(),
+                "{trade}: {label} has material policy None for material-bearing kind {kind}"
+            ),
+            (Some(kind), OutputMaterialRow::Fixed(id)) => {
+                let family = item(*kind, &label).as_deref().unwrap_or_else(|| {
+                    panic!("{trade}: {label} fixes a material on material-less kind {kind}")
+                });
+                assert_eq!(
+                    material(*id, &label).0,
+                    family,
+                    "{trade}: {label} fixes a material from the wrong family"
+                );
+            }
+            (Some(kind), OutputMaterialRow::InheritInput(input)) => {
+                let output_family = item(*kind, &label).as_deref().unwrap_or_else(|| {
+                    panic!("{trade}: {label} inherits material onto material-less kind {kind}")
+                });
+                let source = recipe.resources.get(usize::from(*input)).unwrap_or_else(|| {
+                    panic!("{trade}: {label} inherits material from missing input {input}")
+                });
+                let SelectorRow::KindWithMaterial {
+                    kind: source_kind, ..
+                } = source
+                    .selector
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("{trade}: {label} inherits from untyped input {input}"))
+                else {
+                    panic!(
+                        "{trade}: {label} inherits material from a selector without a material-bearing kind"
+                    );
+                };
+                assert_eq!(
+                    item(*source_kind, &label).as_deref(),
+                    Some(output_family),
+                    "{trade}: {label} inherits material between incompatible item families"
+                );
+            }
+            _ => {}
+        }
+        for (index, resource) in recipe.resources.iter().enumerate() {
+            let label = format!("{label} input {index}");
+            match resource.selector.as_ref() {
+                Some(SelectorRow::Exact { kind }) => {
+                    item(*kind, &label);
+                }
+                Some(SelectorRow::KindWithMaterial { kind, material: rule }) => {
+                    let family = item(*kind, &label);
+                    if let SelectorMaterialRow::Exact(id) = rule {
+                        let expected = family.as_deref().unwrap_or_else(|| {
+                            panic!("{trade}: {label} constrains material on material-less kind {kind}")
+                        });
+                        assert_eq!(
+                            material(*id, &label).0,
+                            expected,
+                            "{trade}: {label} constrains material from the wrong family"
+                        );
+                    }
+                }
+                Some(SelectorRow::Tag { .. }) | None => {}
+            }
+        }
     }
 }
 
@@ -534,8 +891,23 @@ fn eca(name: &str) -> &str {
 fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("cargo sets OUT_DIR");
     let data = Path::new("data");
+    let state_data = Path::new("../state/data");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed={}", data.display());
+    println!("cargo:rerun-if-changed={}", state_data.display());
+
+    let items: Vec<ItemDefinitionIdRow> = read(&state_data.join("items.json"));
+    let materials: Vec<MaterialDefinitionIdRow> = read(&state_data.join("materials.json"));
+    let definitions = DefinitionIds {
+        items: items
+            .into_iter()
+            .map(|row| (row.id, row.material_family))
+            .collect(),
+        materials: materials
+            .into_iter()
+            .map(|row| (row.id, (row.family, row.hue)))
+            .collect(),
+    };
 
     // Sorted, so a rebuild on a different filesystem produces the same bytes.
     let mut files = BTreeMap::new();
@@ -560,6 +932,7 @@ fn main() {
     for (trade, path) in &files {
         println!("cargo:rerun-if-changed={}", path.display());
         let table: Table = read(path);
+        check_definition_references(trade, &table, &definitions);
         let generated = generate(&table);
         std::fs::write(Path::new(&out_dir).join(format!("{trade}.rs")), generated)
             .unwrap_or_else(|e| panic!("writing {trade}.rs: {e}"));

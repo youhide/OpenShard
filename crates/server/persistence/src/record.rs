@@ -364,7 +364,10 @@ mod optional_serial {
 /// - v34: typed custom item affixes. The v33-to-v34 migration only adds a
 ///   nullable JSON column, so every existing item correctly starts with no
 ///   affixes and remains readable.
-pub const SCHEMA_VERSION: u32 = 34;
+/// - v35: optional `item_kind` and `material` columns. Their absence keeps a
+///   pre-migration item on the audited graphic/hue restore path; new records
+///   retain semantic identity directly.
+pub const SCHEMA_VERSION: u32 = 35;
 
 /// One component of a house whose shape nobody shipped.
 ///
@@ -899,6 +902,14 @@ pub struct ItemRecord {
     pub graphic: u16,
     /// The item hue.
     pub hue: u16,
+    /// The stable semantic item-definition id. `None` means a pre-ItemKind
+    /// record and is migrated through its audited graphic/hue mapping on load.
+    #[serde(default)]
+    pub kind: Option<u32>,
+    /// The stable semantic material id, when this kind has a material axis.
+    /// Defaulted with `kind` for pre-ItemKind records.
+    #[serde(default)]
+    pub material: Option<u16>,
     /// The stack amount; `1` for a single item. For a corpse marker, its body
     /// graphic instead — the historical on-disk representation of `CorpseBody`.
     pub amount: u16,
@@ -1345,7 +1356,28 @@ pub struct RestockRecord {
     /// How many seconds until the shelf next refills.
     pub in_seconds: u64,
     /// The full shelf: `(graphic, hue, amount, price, name)` per line.
+    ///
+    /// Kept for snapshots written before semantic restock lines existed. New
+    /// records also write [`Self::typed_lines`], which is authoritative when
+    /// present.
     pub lines: Vec<(u16, u16, u16, u32, String)>,
+    /// Durable full-shelf identities, added without changing the old tuple so
+    /// historical snapshot JSON remains readable.
+    #[serde(default)]
+    pub typed_lines: Vec<RestockLineRecord>,
+}
+
+/// One vendor restock line with its semantic identity kept independently of
+/// the client presentation. See [`RestockRecord::typed_lines`].
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct RestockLineRecord {
+    pub graphic: u16,
+    pub hue: u16,
+    pub item_kind: Option<u32>,
+    pub material: Option<u16>,
+    pub amount: u16,
+    pub price: u32,
+    pub name: String,
 }
 
 /// A shut-and-openable door's live state, inside a [`DecorationRecord`].
@@ -1638,6 +1670,8 @@ mod tests {
                 owner: Some(Serial::new(0x0000_0001).unwrap()),
                 graphic: 0x0E75,
                 hue: 0,
+                kind: None,
+                material: None,
                 amount: 1,
                 stackable: false,
                 container_gump: Some(0x003C),
@@ -1810,5 +1844,15 @@ mod tests {
         let json = serde_json::to_string(&record).expect("a record must serialise");
         let back: CharacterRecord = serde_json::from_str(&json).expect("and come back");
         assert_eq!(back.z, -40);
+    }
+
+    #[test]
+    fn legacy_restock_tuple_deserializes_without_typed_lines() {
+        let record: RestockRecord =
+            serde_json::from_str(r#"{"in_seconds":12,"lines":[[7410,0,50,4,"valorite ingot"]]}"#)
+                .expect("a pre-typed restock snapshot stays readable");
+        assert_eq!(record.in_seconds, 12);
+        assert_eq!(record.lines.len(), 1);
+        assert!(record.typed_lines.is_empty());
     }
 }

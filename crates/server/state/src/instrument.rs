@@ -7,6 +7,7 @@
 //! [`crate::weapon`] and [`crate::armor`] use, and how worn a given instrument is
 //! lives on the item as an [`Instrument`](crate::Instrument).
 
+use openshard_protocol::item_kind::ItemKindId;
 use openshard_protocol::wire::{Graphic, SoundId};
 
 /// One instrument class: the graphic, and the two sounds it makes.
@@ -31,6 +32,20 @@ pub const INSTRUMENT_MAX_USES: u16 = 450;
 #[must_use]
 pub fn instrument_data(graphic: Graphic) -> Option<&'static InstrumentData> {
     INSTRUMENTS.iter().find(|i| i.graphic == graphic)
+}
+
+/// The instrument row for a registered item kind.
+#[must_use]
+pub fn instrument_data_for_kind(kind: ItemKindId) -> Option<&'static InstrumentData> {
+    match kind.0 {
+        11 => Some(&INSTRUMENTS[2]), // lute
+        12 => Some(&INSTRUMENTS[0]), // harp
+        13 => Some(&INSTRUMENTS[1]), // lap harp
+        14 => Some(&INSTRUMENTS[3]), // drums
+        15 => Some(&INSTRUMENTS[4]), // tambourine
+        16 => Some(&INSTRUMENTS[5]), // tasselled tambourine
+        _ => None,
+    }
 }
 
 /// The classic instruments, from `ServUO/Scripts/Items/Equipment/Instruments/*.cs`
@@ -75,6 +90,32 @@ mod tests {
             for b in &INSTRUMENTS[n + 1..] {
                 assert_ne!(a.graphic, b.graphic, "duplicate 0x{:04X}", a.graphic.0);
             }
+        }
+    }
+
+    #[test]
+    fn a_registered_lute_resolves_by_kind() {
+        assert_eq!(
+            instrument_data_for_kind(ItemKindId(11)).map(|instrument| instrument.graphic),
+            Some(Graphic(0x0EB3))
+        );
+        assert!(instrument_data_for_kind(ItemKindId(6)).is_none());
+    }
+
+    #[test]
+    fn every_registered_instrument_uses_its_kind_row() {
+        for (kind, graphic) in [
+            (ItemKindId(11), 0x0EB3), // lute
+            (ItemKindId(12), 0x0EB1), // harp
+            (ItemKindId(13), 0x0EB2), // lap harp
+            (ItemKindId(14), 0x0E9C), // drums
+            (ItemKindId(15), 0x0E9D), // tambourine
+            (ItemKindId(16), 0x0E9E), // tasselled tambourine
+        ] {
+            assert_eq!(
+                instrument_data_for_kind(kind).map(|instrument| instrument.graphic),
+                Some(Graphic(graphic))
+            );
         }
     }
 }

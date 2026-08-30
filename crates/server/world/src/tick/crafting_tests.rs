@@ -16,9 +16,12 @@ use openshard_crafting::SystemId;
 use openshard_movement::scene::Scene;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::serial::RawSerial;
+use openshard_protocol::server_packet::ServerPacket;
+use openshard_protocol::version::ClientVersion;
 use openshard_protocol::wire::{Graphic, Hue};
-use openshard_state::components::{Contained, CraftedBy, Crafting, Quality, Tool};
+use openshard_state::components::{Contained, CraftedBy, Crafting, ItemKind, Material, Quality, Tool};
 use openshard_state::harvest::ORE_GRAPHIC;
 use openshard_state::{CraftGumpContext, CraftGumpPage, Skill};
 
@@ -28,10 +31,14 @@ const TONGS: Graphic = Graphic(0x0FBB);
 const SEWING_KIT: Graphic = Graphic(0x0F9D);
 /// Fletcher's tools, sold by every bowyer.
 const FLETCHER_TOOLS: Graphic = Graphic(0x1022);
+/// Tinker's tools, which make the registered metal tool family.
+const TINKER_TOOLS: Graphic = Graphic(0x1EB8);
 /// A regular wooden board.
 const BOARD: Graphic = Graphic(0x1BD7);
 /// One wooden shaft.
 const SHAFT: Graphic = Graphic(0x1BD4);
+/// A leather hide, used by tailoring's material axis.
+const LEATHER: Graphic = Graphic(0x1081);
 /// A bird's feather.
 const FEATHER: Graphic = Graphic(0x1BD1);
 /// The ammunition a bow consumes.
@@ -154,14 +161,27 @@ fn craft(
     sub_res: u8,
     now: Instant,
 ) {
+    craft_in_system(world, connection, tool, SystemId::new(0), recipe, sub_res, now);
+}
+
+/// Open one trade's craft window and press one recipe row.
+fn craft_in_system(
+    world: &mut World,
+    connection: ConnectionId,
+    tool: EntityId,
+    system: SystemId,
+    recipe: u16,
+    sub_res: u8,
+    now: Instant,
+) {
     let player = world.state.players[&connection];
-    let def = openshard_crafting::system(SystemId::new(0)).expect("blacksmithy");
+    let def = openshard_crafting::system(system).expect("craft system");
     let group = def.recipes[usize::from(recipe)].group;
     openshard_crafting::open(
         &mut world.state,
         player,
         CraftGumpContext {
-            system: 0,
+            system: system.index() as u8,
             tool,
             group,
             sub_res,
@@ -240,6 +260,87 @@ fn a_smith_at_a_forge_turns_ingots_into_a_blade() {
 }
 
 #[test]
+fn tinkering_turns_a_typed_ingot_into_a_typed_metal_tool() {
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let tool = give(&mut world, connection, TINKER_TOOLS, Hue::NONE, 1);
+    let tinkering = openshard_crafting::system(SystemId::new(3)).expect("tinkering");
+    let recipe = u16::try_from(
+        tinkering
+            .recipes
+            .iter()
+            .position(|recipe| recipe.kind == Some(ItemKindId(19)))
+            .expect("typed smith hammer recipe"),
+    )
+    .unwrap();
+    let wanted = tinkering.recipes[usize::from(recipe)].resources[0].amount;
+    give(&mut world, connection, INGOT, VALORITE, wanted);
+    train(&mut world, connection, Skill::Tinkering, 1000);
+    now += TICK_INTERVAL;
+    world.tick(now);
+
+    craft_in_system(
+        &mut world,
+        connection,
+        tool,
+        SystemId::new(3),
+        recipe,
+        8, // valorite in the metal axis
+        now,
+    );
+    finish(&mut world, connection, now);
+
+    let player = world.state.players[&connection];
+    let owner = world.state.registry.serial_of(player).unwrap();
+    let pack = items::backpack_of(&world.state, owner).unwrap();
+    assert!(world.state.registry.query::<Contained>().any(|(item, held)| {
+        held.container == pack
+            && world.state.registry.get::<ItemKind>(item) == Some(&ItemKind(ItemKindId(19)))
+            && world.state.registry.get::<Material>(item) == Some(&Material(MaterialId(9)))
+            && world.state.registry.has::<Tool>(item)
+    }));
+}
+
+#[test]
+fn smithing_turns_valorite_ingots_into_typed_ringmail_with_its_material_bonus() {
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    shop(&mut world, &[(FORGE.0, 0), (ANVIL.0, 0)]);
+    let tongs = give(&mut world, connection, TONGS, Hue::NONE, 1);
+    let smithing = openshard_crafting::system(SystemId::new(0)).expect("blacksmithy");
+    let recipe = u16::try_from(
+        smithing
+            .recipes
+            .iter()
+            .position(|recipe| recipe.kind == Some(ItemKindId(43)))
+            .expect("typed ringmail gloves recipe"),
+    )
+    .unwrap();
+    let wanted = smithing.recipes[usize::from(recipe)].resources[0].amount;
+    give(&mut world, connection, INGOT, VALORITE, wanted);
+    train(&mut world, connection, Skill::Blacksmith, 1000);
+    now += TICK_INTERVAL;
+    world.tick(now);
+
+    craft(&mut world, connection, tongs, recipe, 8, now);
+    finish(&mut world, connection, now);
+
+    let ringmail = world
+        .state
+        .registry
+        .query::<ItemKind>()
+        .find_map(|(item, kind)| (kind.0 == ItemKindId(43)).then_some(item))
+        .expect("typed ringmail gloves");
+    assert_eq!(
+        world.state.registry.get::<Material>(ringmail),
+        Some(&Material(MaterialId(9)))
+    );
+    assert_eq!(openshard_state::armor::piece_rating(&world.state, ringmail), 38);
+}
+
+#[test]
 fn the_same_smith_in_the_street_is_told_to_find_a_forge() {
     // The workshop gate, and the half that matters: a forge is a *static* in most
     // of Britannia's shops, so a scan that reads only entities would pass this
@@ -314,8 +415,14 @@ fn a_valorite_order_cannot_be_paid_in_iron() {
     let connection = enter(&mut world, now);
     shop(&mut world, &[(FORGE.0, 0), (ANVIL.0, 0)]);
     let tongs = give(&mut world, connection, TONGS, Hue(0), 1);
-    let (recipe, _) = cheapest_smithing();
     let def = openshard_crafting::system(SystemId::new(0)).unwrap();
+    let recipe = u16::try_from(
+        def.recipes
+            .iter()
+            .position(|recipe| recipe.kind == Some(ItemKindId(4)))
+            .expect("the typed longsword recipe"),
+    )
+    .unwrap();
     let wanted = def.recipes[usize::from(recipe)].resources[0].amount;
     let made = def.recipes[usize::from(recipe)].graphic;
     give(&mut world, connection, INGOT, Hue(0), wanted * 10);
@@ -339,12 +446,44 @@ fn a_valorite_order_cannot_be_paid_in_iron() {
         "and the iron was not touched"
     );
 
+    // Same client art and valorite hue is still not a crafting material when a
+    // semantic component says it is another kind. This is the invariant the
+    // ItemKind migration is for; a hue-only consumer would accept this pile.
+    let impostor = give(&mut world, connection, INGOT, VALORITE, wanted * 2);
+    world.state.registry.insert(impostor, ItemKind(ItemKindId(999)));
+    world.state.registry.insert(impostor, Material(MaterialId(9)));
+    craft(&mut world, connection, tongs, recipe, valorite, now);
+    assert_eq!(carried(&world, connection, made, VALORITE), 0);
+
     // With valorite in the pack it goes ahead, and the blade comes out the colour
     // of the metal it was made from.
     give(&mut world, connection, INGOT, VALORITE, wanted * 2);
     craft(&mut world, connection, tongs, recipe, valorite, now);
     finish(&mut world, connection, now);
     assert_eq!(carried(&world, connection, made, VALORITE), 1);
+    let blade = world
+        .state
+        .registry
+        .query::<Drawn>()
+        .find_map(|(item, drawn)| {
+            (*drawn
+                == Drawn {
+                    id: Graphic(0x0F61),
+                    hue: VALORITE,
+                })
+            .then_some(item)
+        })
+        .expect("the typed longsword was placed");
+    assert_eq!(
+        world.state.registry.get::<ItemKind>(blade),
+        Some(&ItemKind(ItemKindId(4))),
+        "the recipe defines its result independently of its classic art"
+    );
+    assert_eq!(
+        world.state.registry.get::<Material>(blade),
+        Some(&Material(MaterialId(9))),
+        "the output inherits the selected ingot material, not its hue"
+    );
     assert_eq!(
         carried(&world, connection, INGOT, Hue(0)),
         u32::from(wanted) * 10,
@@ -436,6 +575,54 @@ fn a_tailor_needs_no_workshop_at_all() {
 }
 
 #[test]
+fn tailoring_turns_spined_leather_into_typed_armour_with_its_material_bonus() {
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let kit = give(&mut world, connection, SEWING_KIT, Hue::NONE, 1);
+    let tailoring_index = openshard_crafting::SYSTEMS
+        .iter()
+        .position(|def| def.skill == Skill::Tailoring)
+        .expect("tailoring system");
+    let tailoring = &openshard_crafting::SYSTEMS[tailoring_index];
+    let recipe = u16::try_from(
+        tailoring
+            .recipes
+            .iter()
+            .position(|recipe| recipe.kind == Some(ItemKindId(99)))
+            .expect("typed leather chest recipe"),
+    )
+    .unwrap();
+    let wanted = tailoring.recipes[usize::from(recipe)].resources[0].amount;
+    give(&mut world, connection, LEATHER, Hue(0x08AC), wanted);
+    train(&mut world, connection, Skill::Tailoring, 1000);
+    now += TICK_INTERVAL;
+    world.tick(now);
+
+    craft_in_system(
+        &mut world,
+        connection,
+        kit,
+        SystemId::from_index(tailoring_index).unwrap(),
+        recipe,
+        1, // spined leather
+        now,
+    );
+    finish(&mut world, connection, now);
+
+    let chest = world
+        .registry()
+        .query::<ItemKind>()
+        .find_map(|(item, kind)| (kind.0 == ItemKindId(99)).then_some(item))
+        .expect("typed leather chest");
+    assert_eq!(
+        world.registry().get::<Material>(chest),
+        Some(&Material(MaterialId(41)))
+    );
+    assert_eq!(openshard_state::armor::piece_rating(&world.state, chest), 23);
+}
+
+#[test]
 fn a_fletcher_turns_boards_and_feathers_into_every_affordable_arrow() {
     // Both steps are batch crafts: all boards become shafts first, then the
     // smaller of the shaft and feather piles decides the ammunition result.
@@ -499,10 +686,93 @@ fn a_fletcher_turns_boards_and_feathers_into_every_affordable_arrow() {
     assert_eq!(carried(&world, connection, BOARD, OAK), 0);
     assert_eq!(carried(&world, connection, SHAFT, Hue(0)), 4);
     assert_eq!(carried(&world, connection, FEATHER, Hue(0)), 0);
+    assert!(world.registry().query::<Contained>().any(|(item, held)| {
+        held.container
+            == items::backpack_of(
+                &world.state,
+                world
+                    .registry()
+                    .serial_of(world.state.players[&connection])
+                    .unwrap(),
+            )
+            .unwrap()
+            && world.registry().get::<ItemKind>(item) == Some(&ItemKind(ItemKindId(41)))
+    }));
     assert_eq!(
         world.state.registry.get::<Tool>(tool).unwrap().uses_left,
         uses_before - 2,
         "each batch costs one tool use"
+    );
+
+    // A bow is a material-bearing weapon, unlike its material-less arrows.
+    // Oak boards must therefore produce an oak bow identity and not merely a
+    // bow graphic tinted oak.
+    give(&mut world, connection, BOARD, OAK, 7);
+    let bow_recipe = def
+        .recipes
+        .iter()
+        .position(|recipe| recipe.kind == Some(ItemKindId(91)))
+        .expect("the fletching table makes typed bows");
+    assert!(openshard_crafting::begin(
+        &mut world.state,
+        player,
+        tool,
+        SystemId::from_index(system).unwrap(),
+        u16::try_from(bow_recipe).unwrap(),
+        1,
+    ));
+    finish(&mut world, connection, now);
+    assert!(world.registry().query::<Contained>().any(|(item, held)| {
+        held.container
+            == items::backpack_of(
+                &world.state,
+                world
+                    .registry()
+                    .serial_of(world.state.players[&connection])
+                    .unwrap(),
+            )
+            .unwrap()
+            && world.registry().get::<ItemKind>(item) == Some(&ItemKind(ItemKindId(91)))
+            && world.registry().get::<Material>(item) == Some(&Material(MaterialId(21)))
+    }));
+}
+
+#[test]
+fn fletching_requires_the_semantic_board_kind() {
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let impostor = give(&mut world, connection, BOARD, OAK, 1);
+    world.state.registry.insert(impostor, ItemKind(ItemKindId(999)));
+    world.state.registry.insert(impostor, Material(MaterialId(21)));
+    train(&mut world, connection, Skill::Fletching, 1000);
+    now += TICK_INTERVAL;
+    world.tick(now);
+
+    let system = openshard_crafting::SYSTEMS
+        .iter()
+        .position(|def| def.skill == Skill::Fletching)
+        .expect("fletching is a craft system");
+    let shaft_recipe = openshard_crafting::SYSTEMS[system]
+        .recipes
+        .iter()
+        .position(|recipe| recipe.graphic == SHAFT)
+        .expect("the fletching table makes shafts");
+    let player = world.state.players[&connection];
+    let def = &openshard_crafting::SYSTEMS[system];
+    assert!(
+        matches!(
+            openshard_crafting::consume::check(&world.state, player, def, &def.recipes[shaft_recipe], 1),
+            Err(openshard_crafting::Refusal::NotEnough(_))
+        ),
+        "same art and wood hue with a different kind cannot pay for a board"
+    );
+
+    // Old saves have no components yet, but their exact audited projection is
+    // accepted once; normal construction will install ItemKind(36) instead.
+    give(&mut world, connection, BOARD, OAK, 1);
+    assert!(
+        openshard_crafting::consume::check(&world.state, player, def, &def.recipes[shaft_recipe], 1).is_ok()
     );
 }
 
@@ -515,7 +785,11 @@ fn one_crafted_arrow_joins_the_stack_already_in_the_pack() {
     let mut world = world();
     let connection = enter(&mut world, now);
     let tool = give(&mut world, connection, FLETCHER_TOOLS, Hue(0), 1);
-    give(&mut world, connection, ARROW, Hue(0), 5);
+    let existing_arrows = give(&mut world, connection, ARROW, Hue(0), 5);
+    world
+        .state
+        .registry
+        .insert(existing_arrows, ItemKind(ItemKindId(41)));
     give(&mut world, connection, SHAFT, Hue(0), 1);
     give(&mut world, connection, FEATHER, Hue(0), 1);
     // Enough to guarantee an arrow, but not enough to work the selected oak.
@@ -658,6 +932,17 @@ fn the_metal_a_pile_of_ore_is_survives_the_forge() {
 
     assert_eq!(carried(&world, connection, INGOT, VALORITE), 8);
     assert_eq!(carried(&world, connection, INGOT, Hue(0)), 0);
+    let ingot = world
+        .state
+        .registry
+        .query::<ItemKind>()
+        .find(|(_, kind)| **kind == ItemKind(ItemKindId(1)))
+        .map(|(entity, _)| entity)
+        .expect("smelting creates a semantic ingot");
+    assert_eq!(
+        world.state.registry.get::<Material>(ingot),
+        Some(&Material(MaterialId(9)))
+    );
 }
 
 #[test]
@@ -801,8 +1086,176 @@ fn craftsmanship_is_read_where_the_armour_rating_is_worked_out() {
         openshard_state::armor::piece_rating(&world.state, valorite),
         plain + 16,
     );
+
+    let typed_valorite = items::spawn_item_kind(
+        &mut world.state,
+        ItemKindId(5),
+        Some(MaterialId(9)),
+        1,
+        false,
+        Point::new(START.x, START.y, 0),
+        Facet(0),
+    )
+    .expect("typed plate chest");
+    assert_eq!(
+        openshard_state::armor::piece_rating(&world.state, typed_valorite),
+        plain + 16,
+        "a migrated armour reader uses the kind definition and the material component"
+    );
     now += TICK_INTERVAL;
     world.tick(now);
+}
+
+#[test]
+fn a_semantic_item_record_restores_without_reinterpreting_its_art() {
+    let mut source = world();
+    let item = items::spawn_item_kind(
+        &mut source.state,
+        ItemKindId(4),       // longsword
+        Some(MaterialId(9)), // valorite
+        1,
+        false,
+        Point::new(START.x, START.y, 0),
+        Facet(0),
+    )
+    .expect("typed item spawn");
+    let serial = source.state.registry.serial_of(item).expect("item serial");
+    let record = World::item_record(
+        &source.state.registry,
+        item,
+        None,
+        openshard_persistence::ItemLocation::Ground {
+            facet: 0,
+            x: START.x,
+            y: START.y,
+            z: 0,
+        },
+    )
+    .expect("typed item saves");
+    assert_eq!(record.kind, Some(4));
+    assert_eq!(record.material, Some(9));
+
+    let mut restored = world();
+    let characters = restored.restore_characters(Vec::new());
+    restored.restore_items(vec![record], &characters);
+    let item = restored.state.registry.entity_of(serial).expect("restored item");
+    assert_eq!(
+        restored.state.registry.get::<ItemKind>(item),
+        Some(&ItemKind(ItemKindId(4)))
+    );
+    assert_eq!(
+        restored.state.registry.get::<Material>(item),
+        Some(&Material(MaterialId(9)))
+    );
+    assert_eq!(
+        restored.state.registry.get::<Drawn>(item),
+        Some(&Drawn {
+            id: Graphic(0x0F61),
+            hue: VALORITE,
+        })
+    );
+}
+
+#[test]
+fn a_pre_item_kind_record_migrates_through_its_audited_presentation() {
+    let mut source = world();
+    let item = items::spawn_item_kind(
+        &mut source.state,
+        ItemKindId(2),       // ore
+        Some(MaterialId(9)), // valorite
+        4,
+        true,
+        Point::new(START.x, START.y, 0),
+        Facet(0),
+    )
+    .expect("typed ore spawn");
+    let serial = source.state.registry.serial_of(item).expect("item serial");
+    let mut record = World::item_record(
+        &source.state.registry,
+        item,
+        None,
+        openshard_persistence::ItemLocation::Ground {
+            facet: 0,
+            x: START.x,
+            y: START.y,
+            z: 0,
+        },
+    )
+    .expect("ore saves");
+    // This is precisely what a v34-or-earlier record contains: the visible
+    // client projection but no semantic columns.
+    record.kind = None;
+    record.material = None;
+
+    let mut restored = world();
+    let characters = restored.restore_characters(Vec::new());
+    restored.restore_items(vec![record], &characters);
+    let ore = restored.state.registry.entity_of(serial).expect("restored ore");
+    assert_eq!(
+        restored.state.registry.get::<ItemKind>(ore),
+        Some(&ItemKind(ItemKindId(2)))
+    );
+    assert_eq!(
+        restored.state.registry.get::<Material>(ore),
+        Some(&Material(MaterialId(9)))
+    );
+    assert_eq!(
+        restored.state.registry.get::<Drawn>(ore),
+        Some(&Drawn {
+            id: ORE_GRAPHIC,
+            hue: VALORITE,
+        }),
+        "migration retains the old record's visible projection"
+    );
+}
+
+#[test]
+fn a_corrupt_semantic_record_is_not_retyped_from_its_drawing() {
+    let mut source = world();
+    let item = items::spawn_item_kind(
+        &mut source.state,
+        ItemKindId(4),       // longsword
+        Some(MaterialId(9)), // valorite
+        1,
+        false,
+        Point::new(START.x, START.y, 0),
+        Facet(0),
+    )
+    .expect("typed sword spawn");
+    let serial = source.state.registry.serial_of(item).expect("item serial");
+    let mut record = World::item_record(
+        &source.state.registry,
+        item,
+        None,
+        openshard_persistence::ItemLocation::Ground {
+            facet: 0,
+            x: START.x,
+            y: START.y,
+            z: 0,
+        },
+    )
+    .expect("sword saves");
+    // A bad external edit says this is a longsword, but its retained client art
+    // is a plate chest. Restore must preserve the evidence for diagnosis rather
+    // than guess either identity from it.
+    record.graphic = 0x1415;
+    record.hue = VALORITE.0;
+
+    let mut restored = world();
+    let characters = restored.restore_characters(Vec::new());
+    restored.restore_items(vec![record], &characters);
+    let item = restored.state.registry.entity_of(serial).expect("restored item");
+    assert!(
+        !restored.state.registry.has::<ItemKind>(item),
+        "a corrupt semantic save must not silently become another registered kind"
+    );
+    assert_eq!(
+        restored.state.registry.get::<Drawn>(item),
+        Some(&Drawn {
+            id: Graphic(0x1415),
+            hue: VALORITE,
+        })
+    );
 }
 
 #[test]
@@ -836,11 +1289,43 @@ fn double_clicking_the_tongs_is_what_opens_the_window() {
             .is_some_and(|row| row.craft_gump.is_some()),
         "the server remembers drawing it"
     );
+    let packets = packets_for(&mut world, connection);
     assert!(
-        packets_for(&mut world, connection)
-            .iter()
-            .any(|packet| packet[0] == 0xB0),
+        packets.iter().any(|packet| packet[0] == 0xB0),
         "and the client was sent one"
+    );
+    let workbench =
+        packets
+            .iter()
+            .find_map(|packet| match ServerPacket::decode(packet, ClientVersion::TOL) {
+                Ok(Some(ServerPacket::CraftWorkbench(workbench))) => Some(workbench),
+                _ => None,
+            });
+    assert!(
+        workbench.is_some(),
+        "the normal craft gump has the typed egui workbench payload"
+    );
+    assert_eq!(
+        workbench
+            .as_ref()
+            .and_then(|workbench| workbench.selected_material.as_ref())
+            .map(|material| (material.item_kind, material.material)),
+        Some((Some(ItemKindId(1)), Some(MaterialId(1)))),
+        "the default iron row carries its semantic resource and material ids beside its render art"
+    );
+    assert!(
+        matches!(
+            workbench.as_ref().map(|workbench| &workbench.page),
+            Some(openshard_protocol::craft::CraftWorkbenchPage::Items { recipes })
+                if recipes.iter().any(|recipe| {
+                    recipe.result.item_kind == Some(ItemKindId(5))
+                        && recipe
+                            .components
+                            .iter()
+                            .any(|component| component.item_kind == Some(ItemKindId(1)))
+                })
+        ),
+        "a migrated recipe reports its declared input/output kinds, not identities inferred from art"
     );
 
     // And it is forgotten when the client goes. It used to be keyed by the
@@ -895,6 +1380,20 @@ fn the_private_catalogue_opens_without_a_tool_and_selects_a_recipe() {
 
     world.queue(Command::OpenCraftCatalogue { connection });
     world.tick(now + TICK_INTERVAL);
+    let catalogue = packets_for(&mut world, connection)
+        .into_iter()
+        .find_map(|packet| match ServerPacket::decode(&packet, ClientVersion::TOL) {
+            Ok(Some(ServerPacket::CraftCatalogue(catalogue))) => Some(catalogue),
+            _ => None,
+        });
+    assert!(catalogue.is_some_and(|catalogue| {
+        catalogue.rows.iter().any(|row| {
+            row.result_item_kind == Some(ItemKindId(5))
+                && row.components.iter().any(|component| {
+                    component.item_kind == Some(ItemKindId(1)) && component.material == Some(MaterialId(1))
+                })
+        })
+    }));
     let context = world
         .state
         .row_of(player)

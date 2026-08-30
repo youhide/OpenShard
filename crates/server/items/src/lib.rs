@@ -30,15 +30,15 @@ use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue, Layer, RawLayer
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{
     Amount, Body, Client, Combat, Contained, Container, Corpse, Decays, Decoration, Door, Drawn, Equipped,
-    Ghost, House, HouseSign, ItemAffix, ItemAffixes, KeyValue, Name, PoisonCharges, Position,
-    RUNEBOOK_ENTRIES, RUNEBOOK_GRAPHIC, Ridden, Riding, RuneMark, Runebook, RunebookEntry, SPELLBOOK_GRAPHIC,
-    Seated, Spellbook, Stackable, Weapon, scroll_spell,
+    Ghost, House, HouseSign, ItemAffix, ItemAffixes, ItemKind, KeyValue, Material, Name, PoisonCharges,
+    Position, RUNEBOOK_ENTRIES, RUNEBOOK_GRAPHIC, Ridden, Riding, RuneMark, Runebook, RunebookEntry,
+    SPELLBOOK_GRAPHIC, Seated, Spellbook, Stackable, Weapon, scroll_spell,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{
     HeldItem, ItemLocation, Origin, Outbound, SettledItemLocation, TICKS_PER_SECOND, TradeWindow, WorldState,
-    contained_items, despawn_item, equipped_items, establish_item_location, item_location, relocate_item,
-    settled_from_origin,
+    contained_items, despawn_item, equipped_items, establish_item_location, item_location, kind_from_drawn,
+    presentation_of, relocate_item, settled_from_origin,
 };
 use tracing::{debug, warn};
 

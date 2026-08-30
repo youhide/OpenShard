@@ -38,7 +38,10 @@ pub fn system(id: SystemId) -> Option<&'static CraftSystemDef> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openshard_protocol::item_kind::{ItemKindId, ItemSelector, MaterialRule};
     use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_state::item_definition as find_item_definition;
+    use openshard_state::item_definition::{LEATHER, METAL, WOOD};
 
     #[test]
     fn every_trade_has_exactly_one_system() {
@@ -70,6 +73,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn every_registered_craft_tool_kind_opens_a_system() {
+        // The semantic path is deliberately stricter than the legacy graphic
+        // test above: a registry definition must not inherit a craft UI merely
+        // because its presentation happens to resemble an old tool.
+        for definition in openshard_state::item_definition::ITEM_DEFINITIONS {
+            if openshard_state::craft::craft_tool_for_kind(definition.id).is_some() {
+                assert!(
+                    crate::tool_system_for_kind(definition.id).is_some(),
+                    "registered craft tool {} ({}) opens no craft system",
+                    definition.name,
+                    definition.id.0
+                );
+            }
+        }
+    }
+
     // `every_recipe_names_a_group_that_exists` and
     // `every_recipe_leads_with_its_systems_own_skill` were here. They are
     // `build.rs::check` now — the same two assertions, a build earlier, and
@@ -85,6 +105,24 @@ mod tests {
             let Some(axis) = def.sub_res else { continue };
             assert!(!axis.entries.is_empty());
             assert_eq!(axis.entries[0].hue, Hue(0), "{:?}'s plain grade", def.skill);
+            for entry in axis.entries {
+                assert_eq!(
+                    openshard_state::presentation_of(axis.item_kind, Some(entry.material)),
+                    Some(openshard_state::Drawn {
+                        id: axis.graphic,
+                        hue: entry.hue,
+                    }),
+                    "{:?}'s axis must declare the exact kind/material it renders",
+                    def.skill,
+                );
+                assert_eq!(
+                    openshard_state::material_definition(entry.material).map(|material| material.hue),
+                    Some(entry.hue),
+                    "{:?}'s material row {:?} has a mismatched display hue",
+                    def.skill,
+                    entry.material
+                );
+            }
             let uses_axis = def
                 .recipes
                 .iter()
@@ -116,6 +154,131 @@ mod tests {
         assert_eq!(axis.entries.len(), ores.len());
         for (entry, ore) in axis.entries.iter().zip(ores) {
             assert_eq!(entry.hue, ore.hue);
+        }
+    }
+
+    #[test]
+    fn migrated_smithing_rows_name_their_inputs_and_outputs_semantically() {
+        let smithing = system(SystemId::new(0)).expect("blacksmithy");
+        for kind in [ItemKindId(4), ItemKindId(5)] {
+            let recipe = smithing
+                .recipes
+                .iter()
+                .find(|recipe| recipe.kind == Some(kind))
+                .expect("registered smithing recipe");
+            assert_eq!(
+                recipe.output_material,
+                crate::recipe::OutputMaterial::InheritInput(0)
+            );
+            assert!(matches!(
+                recipe.resources[0].selector,
+                Some(ItemSelector::KindWithMaterial {
+                    kind: ItemKindId(1),
+                    material: MaterialRule::Any,
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn every_typed_recipe_output_has_its_registered_base_projection() {
+        for system in SYSTEMS {
+            for recipe in system.recipes {
+                let Some(kind) = recipe.kind else {
+                    continue;
+                };
+                let definition = find_item_definition(kind).expect("typed recipe kind is registered");
+                let material = match recipe.output_material {
+                    crate::recipe::OutputMaterial::None => None,
+                    crate::recipe::OutputMaterial::Fixed(material) => Some(material),
+                    crate::recipe::OutputMaterial::InheritInput(_) => match definition.material_family {
+                        Some(METAL) => Some(openshard_protocol::item_kind::MaterialId(1)),
+                        Some(WOOD) => Some(openshard_protocol::item_kind::MaterialId(20)),
+                        Some(LEATHER) => Some(openshard_protocol::item_kind::MaterialId(40)),
+                        Some(family) => panic!("unmapped material family {}", family.0),
+                        None => panic!("typed material output has no material family"),
+                    },
+                    crate::recipe::OutputMaterial::Legacy => {
+                        panic!("typed recipe has legacy material policy")
+                    }
+                };
+                assert_eq!(
+                    openshard_state::presentation_of(kind, material),
+                    Some(openshard_state::Drawn {
+                        id: recipe.graphic,
+                        hue: recipe.hue,
+                    }),
+                    "{:?} recipe {:#06X}",
+                    system.skill,
+                    recipe.graphic.0
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_tinkered_pickaxe_keeps_the_ingots_semantic_material() {
+        let tinkering = system(SystemId::new(3)).expect("tinkering");
+        let recipe = tinkering
+            .recipes
+            .iter()
+            .find(|recipe| recipe.kind == Some(ItemKindId(9)))
+            .expect("registered pickaxe recipe");
+        assert_eq!(
+            recipe.output_material,
+            crate::recipe::OutputMaterial::InheritInput(0)
+        );
+        assert!(matches!(
+            recipe.resources[0].selector,
+            Some(ItemSelector::KindWithMaterial {
+                kind: ItemKindId(1),
+                material: MaterialRule::Any,
+            })
+        ));
+    }
+
+    #[test]
+    fn a_tinkered_pair_of_tongs_keeps_the_ingots_semantic_material() {
+        let tinkering = system(SystemId::new(3)).expect("tinkering");
+        let recipe = tinkering
+            .recipes
+            .iter()
+            .find(|recipe| recipe.kind == Some(ItemKindId(10)))
+            .expect("registered tongs recipe");
+        assert_eq!(
+            recipe.output_material,
+            crate::recipe::OutputMaterial::InheritInput(0)
+        );
+        assert!(matches!(
+            recipe.resources[0].selector,
+            Some(ItemSelector::KindWithMaterial {
+                kind: ItemKindId(1),
+                material: MaterialRule::Any,
+            })
+        ));
+    }
+
+    #[test]
+    fn every_registered_craft_tool_recipe_has_a_typed_output() {
+        for system in SYSTEMS {
+            for recipe in system.recipes {
+                let Some((kind, _)) = openshard_state::kind_from_drawn(openshard_state::Drawn {
+                    id: recipe.graphic,
+                    hue: recipe.hue,
+                }) else {
+                    continue;
+                };
+                if openshard_state::craft::craft_tool_for_kind(kind).is_some() {
+                    assert_eq!(
+                        recipe.kind,
+                        Some(kind),
+                        "{:?} recipe {:#06X} creates registered craft tool {} without its ItemKindId",
+                        system.skill,
+                        recipe.graphic.0,
+                        kind.0
+                    );
+                }
+            }
         }
     }
 

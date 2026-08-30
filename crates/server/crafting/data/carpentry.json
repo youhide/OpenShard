@@ -1,16 +1,17 @@
 {
   "groups": [1044294, 1044291, 1044292, 1044566, 1062760, 1044293, 1044290, 1044298, 1111809, 1044297],
   "sub_res": {
+    "item_kind": 36,
     "graphic": "0x1BD7",
     "name": 1072643,
     "entries": [
-      { "hue": "0x0000", "name": 1072643, "req_skill": 0, "message": 1072652 },
-      { "hue": "0x07DA", "name": 1072644, "req_skill": 650, "message": 1072652 },
-      { "hue": "0x04A7", "name": 1072645, "req_skill": 750, "message": 1072652 },
-      { "hue": "0x04A8", "name": 1072646, "req_skill": 850, "message": 1072652 },
-      { "hue": "0x04A9", "name": 1072647, "req_skill": 950, "message": 1072652 },
-      { "hue": "0x04AA", "name": 1072648, "req_skill": 950, "message": 1072652 },
-      { "hue": "0x047F", "name": 1072649, "req_skill": 950, "message": 1072652 }
+      { "material": 20, "hue": "0x0000", "name": 1072643, "req_skill": 0, "message": 1072652 },
+      { "material": 21, "hue": "0x07DA", "name": 1072644, "req_skill": 650, "message": 1072652 },
+      { "material": 22, "hue": "0x04A7", "name": 1072645, "req_skill": 750, "message": 1072652 },
+      { "material": 23, "hue": "0x04A8", "name": 1072646, "req_skill": 850, "message": 1072652 },
+      { "material": 24, "hue": "0x04A9", "name": 1072647, "req_skill": 950, "message": 1072652 },
+      { "material": 25, "hue": "0x04AA", "name": 1072648, "req_skill": 950, "message": 1072652 },
+      { "material": 26, "hue": "0x047F", "name": 1072649, "req_skill": 950, "message": 1072652 }
     ]
   },
   "recipes": [

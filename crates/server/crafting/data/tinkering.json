@@ -1,18 +1,19 @@
 {
   "groups": [1044049, 1044042, 1044046, 1044047, 1044048, 1044050, 1044051, 1044052, 1073107],
   "sub_res": {
+    "item_kind": 1,
     "graphic": "0x1BF2",
     "name": 1044022,
     "entries": [
-      { "hue": "0x0000", "name": 1044022, "req_skill": 0, "message": 1044267 },
-      { "hue": "0x0973", "name": 1044023, "req_skill": 650, "message": 1044268 },
-      { "hue": "0x0966", "name": 1044024, "req_skill": 700, "message": 1044268 },
-      { "hue": "0x096D", "name": 1044025, "req_skill": 750, "message": 1044268 },
-      { "hue": "0x0972", "name": 1044026, "req_skill": 800, "message": 1044268 },
-      { "hue": "0x08A5", "name": 1044027, "req_skill": 850, "message": 1044268 },
-      { "hue": "0x0979", "name": 1044028, "req_skill": 900, "message": 1044268 },
-      { "hue": "0x089F", "name": 1044029, "req_skill": 950, "message": 1044268 },
-      { "hue": "0x08AB", "name": 1044030, "req_skill": 990, "message": 1044268 }
+      { "material": 1, "hue": "0x0000", "name": 1044022, "req_skill": 0, "message": 1044267 },
+      { "material": 2, "hue": "0x0973", "name": 1044023, "req_skill": 650, "message": 1044268 },
+      { "material": 3, "hue": "0x0966", "name": 1044024, "req_skill": 700, "message": 1044268 },
+      { "material": 4, "hue": "0x096D", "name": 1044025, "req_skill": 750, "message": 1044268 },
+      { "material": 5, "hue": "0x0972", "name": 1044026, "req_skill": 800, "message": 1044268 },
+      { "material": 6, "hue": "0x08A5", "name": 1044027, "req_skill": 850, "message": 1044268 },
+      { "material": 7, "hue": "0x0979", "name": 1044028, "req_skill": 900, "message": 1044268 },
+      { "material": 8, "hue": "0x089F", "name": 1044029, "req_skill": 950, "message": 1044268 },
+      { "material": 9, "hue": "0x08AB", "name": 1044030, "req_skill": 990, "message": 1044268 }
     ]
   },
   "recipes": [
@@ -48,30 +49,36 @@
       ]
     },
     {
+      "kind": 27,
       "graphic": "0x1030",
       "name": 1024144,
       "group": 1,
       "markable": true,
+      "output_material": "none",
       "skills": [{ "skill": "Tinkering", "min": 0, "max": 500 }],
       "resources": [
         { "graphic": "0x1BD7", "amount": 4, "name": 1044041, "message": 1044351 }
       ]
     },
     {
+      "kind": 28,
       "graphic": "0x102C",
       "name": 1024140,
       "group": 1,
       "markable": true,
+      "output_material": "none",
       "skills": [{ "skill": "Tinkering", "min": 0, "max": 500 }],
       "resources": [
         { "graphic": "0x1BD7", "amount": 4, "name": 1044041, "message": 1044351 }
       ]
     },
     {
+      "kind": 29,
       "graphic": "0x1032",
       "name": 1024146,
       "group": 1,
       "markable": true,
+      "output_material": "none",
       "skills": [{ "skill": "Tinkering", "min": 0, "max": 500 }],
       "resources": [
         { "graphic": "0x1BD7", "amount": 4, "name": 1044041, "message": 1044351 }
@@ -115,33 +122,39 @@
       ]
     },
     {
+      "kind": 24,
       "graphic": "0x0E9B",
       "name": 1023739,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 200, "max": 700 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 3, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 3, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 35,
       "graphic": "0x10E7",
       "name": 1024327,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 300, "max": 800 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 2, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 2, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 23,
       "graphic": "0x1EB8",
       "name": 1044164,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 100, "max": 600 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 2, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 2, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -155,123 +168,147 @@
       ]
     },
     {
+      "kind": 32,
       "graphic": "0x10E4",
       "name": 1024324,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 300, "max": 800 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 2, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 2, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 21,
       "graphic": "0x0F9D",
       "name": 1023997,
       "group": 2,
       "markable": true,
+      "output_material": "none",
       "skills": [{ "skill": "Tinkering", "min": 100, "max": 700 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 2, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 2, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 22,
       "graphic": "0x1034",
       "name": 1024148,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 300, "max": 800 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 26,
       "graphic": "0x1028",
       "name": 1024136,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 300, "max": 800 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 33,
       "graphic": "0x10E5",
       "name": 1024325,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 300, "max": 800 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 2, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 2, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 17,
       "graphic": "0x0F39",
       "name": 1023898,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 400, "max": 900 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 31,
       "graphic": "0x102A",
       "name": 1024138,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 300, "max": 800 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 1, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 1, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 10,
       "graphic": "0x0FBB",
       "name": 1024028,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 350, "max": 850 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 1, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 1, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 19,
       "graphic": "0x13E3",
       "name": 1025091,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 400, "max": 900 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
-      "graphic": "0x0FB5",
+      "kind": 20,
+      "graphic": "0x0FB4",
       "name": 1024021,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 400, "max": 900 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 34,
       "graphic": "0x10E6",
       "name": 1024326,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 300, "max": 800 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 2, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 2, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
+      "kind": 9,
       "graphic": "0x0E86",
       "name": 1023718,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 400, "max": 900 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -304,13 +341,15 @@
       ]
     },
     {
+      "kind": 25,
       "graphic": "0x1022",
       "name": 1044166,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 350, "max": 850 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 3, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 3, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {
@@ -344,25 +383,29 @@
       ]
     },
     {
+      "kind": 23,
       "graphic": "0x1EB8",
       "name": 1072154,
       "group": 2,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 750, "max": 1000 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true },
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true },
         { "graphic": "0x105D", "amount": 1, "name": 1044171, "message": 1044253 },
         { "graphic": "0x1053", "amount": 2, "name": 1044254, "message": 1044253 },
         { "graphic": "0x0F26", "amount": 1, "name": 1062608, "message": 1044240 }
       ]
     },
     {
+      "kind": 90,
       "graphic": "0x0E87",
       "name": 1023719,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tinkering", "min": 400, "max": 900 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 4, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {

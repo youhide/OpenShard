@@ -1,4 +1,5 @@
 use super::*;
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::PoisonLevel;
 
@@ -13,6 +14,10 @@ pub struct ItemSpawned {
     pub entity: EntityId,
     /// Its wire identity.
     pub serial: Serial,
+    /// Semantic kind, present for migrated definitions.
+    pub item_kind: Option<ItemKindId>,
+    /// Semantic material grade, when this item has one.
+    pub material: Option<MaterialId>,
     /// Where it lies.
     pub position: Point,
 }
@@ -85,7 +90,12 @@ pub fn spawn_item(
             return None;
         }
     };
-    state.registry.insert(entity, Drawn { id: graphic, hue });
+    let drawn = Drawn { id: graphic, hue };
+    state.registry.insert(entity, drawn);
+    // This is the compatibility door for the many legacy graphic/hue callers
+    // that have not moved to `spawn_item_kind` yet. An unknown pair is kept
+    // visibly intact but deliberately receives no invented semantic id.
+    install_legacy_identity(state, entity, drawn);
     establish_item_location(state, entity, ItemLocation::ground(facet, position))
         .expect("a newly spawned ground item has one valid location");
     // Only a real stack carries an amount; a single item stays a bare graphic.
@@ -104,12 +114,82 @@ pub fn spawn_item(
     state.bus.send(ItemSpawned {
         entity,
         serial,
+        item_kind: state.registry.get::<ItemKind>(entity).map(|kind| kind.0),
+        material: state.registry.get::<Material>(entity).map(|material| material.0),
         position,
     });
     state.reveal(entity);
     debug!(%serial, graphic = graphic.0, position = %position, "item on the ground");
     crate::apply_core_defaults(state, entity, graphic);
     Some(entity)
+}
+
+/// Put a semantically identified item on the ground.
+///
+/// This is the constructor new gameplay code uses. Its `Drawn` component is
+/// always the checked projection from the item-definition registry, never a
+/// caller-supplied graphic/hue pair.
+pub fn spawn_item_kind(
+    state: &mut WorldState,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+    amount: u16,
+    stackable: bool,
+    position: Point,
+    facet: Facet,
+) -> Option<EntityId> {
+    let drawn = presentation_of(kind, material)?;
+    let entity = spawn_item(state, drawn.id, drawn.hue, amount, stackable, position, facet)?;
+    install_identity(state, entity, kind, material);
+    Some(entity)
+}
+
+/// Install a semantic identity after a validated construction or migration.
+///
+/// Kept beside item construction rather than exposed as an arbitrary component
+/// mutation, so a caller cannot leave `Drawn` and the semantic identity
+/// disagreeing. The registry projection is installed here as well: callers may
+/// never supply an arbitrary drawing alongside a semantic identity.
+pub fn install_identity(
+    state: &mut WorldState,
+    entity: EntityId,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+) {
+    let drawn = presentation_of(kind, material).expect("only validated item identities are installed");
+    state.registry.insert(entity, drawn);
+    state.registry.insert(entity, ItemKind(kind));
+    match material {
+        Some(material) => {
+            state.registry.insert(entity, Material(material));
+        }
+        None => {
+            state.registry.remove::<Material>(entity);
+        }
+    }
+}
+
+/// Upgrade an audited legacy presentation pair when the registry names it.
+pub(crate) fn install_legacy_identity(state: &mut WorldState, entity: EntityId, drawn: Drawn) {
+    if let Some((kind, material)) = kind_from_drawn(drawn) {
+        install_identity(state, entity, kind, material);
+    }
+}
+
+/// Copy the identity an item already carries into one of its physical copies.
+///
+/// Stack splitting is a clone operation, not another legacy migration: if two
+/// future kinds share a presentation, looking at the art here would turn one
+/// into the other. An unmigrated original retains its explicit legacy state.
+pub(crate) fn copy_identity(state: &mut WorldState, original: EntityId, copy: EntityId) {
+    if let Some(kind) = state.registry.get::<ItemKind>(original).copied() {
+        let material = state
+            .registry
+            .get::<Material>(original)
+            .copied()
+            .map(|material| material.0);
+        install_identity(state, copy, kind.0, material);
+    }
 }
 
 /// Put a container on the ground. See `Command::SpawnContainer`.
@@ -156,7 +236,9 @@ pub fn equip_new_container(
             return None;
         }
     };
-    state.registry.insert(entity, Drawn { id: graphic, hue });
+    let drawn = Drawn { id: graphic, hue };
+    state.registry.insert(entity, drawn);
+    install_legacy_identity(state, entity, drawn);
     state.registry.insert(entity, Container { gump });
     let equipped = Equipped { mobile, layer };
     establish_item_location(state, entity, ItemLocation::equipped(equipped))
@@ -187,7 +269,9 @@ pub fn spawn_leftover(
             return;
         }
     };
-    state.registry.insert(leftover, Drawn { id, hue });
+    let drawn = Drawn { id, hue };
+    state.registry.insert(leftover, drawn);
+    copy_identity(state, original, leftover);
     state.registry.insert(leftover, Stackable);
     set_stack_amount(state, leftover, amount);
     establish_item_location(state, leftover, ItemLocation::ground(facet, position))
@@ -205,4 +289,53 @@ pub fn place_on_ground(state: &mut WorldState, item: EntityId, position: Point, 
     mark_decay(state, item);
     state.place_item(facet, item, position);
     state.reveal(item);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+
+    use super::*;
+
+    fn world() -> WorldState {
+        WorldState::new(
+            BTreeMap::new(),
+            Facet(0),
+            openshard_tiles::TileData::empty(),
+            Default::default(),
+            openshard_map::grid::Tile::new(0, 0),
+            1,
+        )
+    }
+
+    #[test]
+    fn semantic_identity_replaces_a_mismatched_legacy_drawing() {
+        let mut state = world();
+        let item = state.registry.spawn();
+        state.registry.insert(
+            item,
+            Drawn {
+                id: Graphic(0x0EFA), // spellbook art, deliberately not a sword
+                hue: Hue::NONE,
+            },
+        );
+
+        install_identity(&mut state, item, ItemKindId(4), Some(MaterialId(9)));
+
+        assert_eq!(
+            state.registry.get::<Drawn>(item),
+            presentation_of(ItemKindId(4), Some(MaterialId(9))).as_ref(),
+            "identity owns the visible projection"
+        );
+        assert_eq!(
+            state.registry.get::<ItemKind>(item),
+            Some(&ItemKind(ItemKindId(4)))
+        );
+        assert_eq!(
+            state.registry.get::<Material>(item),
+            Some(&Material(MaterialId(9)))
+        );
+    }
 }

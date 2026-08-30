@@ -73,6 +73,7 @@ pub mod feedback;
 pub mod gump;
 pub mod huffman;
 pub mod identity;
+pub mod item_kind;
 pub mod items;
 pub mod localized;
 pub mod login;

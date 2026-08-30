@@ -1,5 +1,7 @@
 use super::*;
+use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 use openshard_protocol::wire::{Graphic, Hue};
+use openshard_state::item_definition::item_definition;
 
 /// Handle a double-click. See `Command::DoubleClick`.
 ///
@@ -400,7 +402,9 @@ pub fn place_one(
         warn!("out of item serials; nothing placed");
         return None;
     };
-    state.registry.insert(entity, Drawn { id: graphic, hue });
+    let drawn = Drawn { id: graphic, hue };
+    state.registry.insert(entity, drawn);
+    crate::spawn::install_legacy_identity(state, entity, drawn);
     let contained = Contained {
         container,
         position: GumpPoint::new(60, 60),
@@ -414,6 +418,40 @@ pub fn place_one(
     // A lute gets its tunes and a bottle its poison here, because a graphic alone
     // cannot say how many are left in either.
     crate::apply_core_defaults(state, entity, graphic);
+    tell_watchers_updated(state, container, entity);
+    Some(entity)
+}
+
+/// [`place_one`] for a semantic, non-stacking item.
+///
+/// The caller supplies identity, never a display pair. Keeping this separate
+/// from the legacy constructor makes quality-bearing crafted equipment retain
+/// its exact kind and material even if another kind later shares its art.
+pub fn place_one_kind(
+    state: &mut WorldState,
+    container: Serial,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+    amount: u16,
+) -> Option<EntityId> {
+    let drawn = presentation_of(kind, material)?;
+    let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
+        warn!("out of item serials; nothing placed");
+        return None;
+    };
+    state.registry.insert(entity, drawn);
+    crate::spawn::install_identity(state, entity, kind, material);
+    let contained = Contained {
+        container,
+        position: GumpPoint::new(60, 60),
+        grid: GridSlot(0),
+    };
+    establish_item_location(state, entity, ItemLocation::contained(contained))
+        .expect("a newly placed typed item has one valid container parent");
+    if amount > 1 {
+        state.registry.insert(entity, Amount(amount));
+    }
+    crate::apply_core_defaults(state, entity, drawn.id);
     tell_watchers_updated(state, container, entity);
     Some(entity)
 }
@@ -437,7 +475,9 @@ pub fn spawn_contained_leftover(
             return None;
         }
     };
-    state.registry.insert(leftover, Drawn { id, hue });
+    let drawn = Drawn { id, hue };
+    state.registry.insert(leftover, drawn);
+    crate::spawn::copy_identity(state, original, leftover);
     state.registry.insert(leftover, Stackable);
     set_stack_amount(state, leftover, amount);
     let location = Contained {
@@ -532,9 +572,93 @@ pub fn give(
     if graphic == SPELLBOOK_GRAPHIC || graphic == RUNEBOOK_GRAPHIC {
         return give_book(state, container, graphic, hue, amount);
     }
+    // The legacy API is still the entry point for old callers, but a pair the
+    // registry recognizes must immediately use the semantic payout path. This
+    // closes the last art-only merge door for ingots, ore and other migrated
+    // stack kinds without forcing every caller to change in one patch.
+    if let Some((kind, material)) = kind_from_drawn(Drawn { id: graphic, hue }) {
+        return give_kind(state, container, kind, material, amount)
+            .expect("an audited legacy identity has a valid typed presentation");
+    }
 
     let progress = fill_existing_piles(state, container, graphic, hue, amount);
     spawn_remaining_piles(state, container, graphic, hue, progress)
+}
+
+/// Put a semantically identified stack into a container.
+///
+/// The drawing is derived once from the definition registry. This is the typed
+/// counterpart of [`give`] for harvesting, crafting and vendors as they move off
+/// the legacy graphic/hue construction API.
+pub fn give_kind(
+    state: &mut WorldState,
+    container: Serial,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+    amount: u32,
+) -> Option<GiveOutcome> {
+    let drawn = presentation_of(kind, material)?;
+    if amount == 0 {
+        return Some(GiveProgress::new(0).outcome());
+    }
+    if item_definition(kind)
+        .and_then(|definition| definition.container_gump)
+        .is_some()
+    {
+        return Some(give_container_kind(
+            state, container, kind, material, drawn, amount,
+        ));
+    }
+    let progress = fill_existing_kind_piles(state, container, kind, material, amount);
+    Some(spawn_remaining_kind_piles(
+        state, container, kind, material, drawn, progress,
+    ))
+}
+
+/// Give semantic containers as separate usable entities, never as a stack.
+///
+/// `give_kind` is also used by typed loot and vendor paths, whose historic
+/// `stackable` flag must not turn an openable bag into a pile of bag art.
+fn give_container_kind(
+    state: &mut WorldState,
+    container: Serial,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+    drawn: Drawn,
+    amount: u32,
+) -> GiveOutcome {
+    let mut progress = GiveProgress::new(amount);
+    while progress.left > 0 {
+        let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
+            let outcome = progress.outcome();
+            warn!(
+                requested = outcome.requested,
+                given = outcome.given,
+                missing = outcome.missing(),
+                ?container,
+                ?kind,
+                "out of item serials; semantic container payout is partial"
+            );
+            return outcome;
+        };
+        state.registry.insert(entity, drawn);
+        crate::spawn::install_identity(state, entity, kind, material);
+        establish_item_location(
+            state,
+            entity,
+            ItemLocation::contained(Contained {
+                container,
+                position: GumpPoint::new(60, 60),
+                grid: GridSlot(0),
+            }),
+        )
+        .expect("a newly given semantic container has one valid parent");
+        crate::apply_core_defaults(state, entity, drawn.id);
+        tell_watchers_updated(state, container, entity);
+        progress.left -= 1;
+        progress.last = Some(entity);
+    }
+    progress.outcome()
 }
 
 fn give_book(
@@ -554,7 +678,9 @@ fn give_book(
         );
         return GiveProgress::new(requested).outcome();
     };
-    state.registry.insert(entity, Drawn { id: graphic, hue });
+    let drawn = Drawn { id: graphic, hue };
+    state.registry.insert(entity, drawn);
+    crate::spawn::install_legacy_identity(state, entity, drawn);
     let contained = Contained {
         container,
         position: GumpPoint::new(60, 60),
@@ -562,11 +688,9 @@ fn give_book(
     };
     establish_item_location(state, entity, ItemLocation::contained(contained))
         .expect("a newly given book has one valid container parent");
-    if graphic == SPELLBOOK_GRAPHIC {
-        state.registry.insert(entity, Spellbook::default());
-    } else {
-        crate::apply_core_defaults(state, entity, graphic);
-    }
+    // The common factory reads a registered book's semantic role.  The graphic
+    // argument remains solely for a genuinely legacy book with no identity.
+    crate::apply_core_defaults(state, entity, graphic);
     tell_watchers_updated(state, container, entity);
     GiveOutcome {
         requested,
@@ -590,6 +714,7 @@ fn fill_existing_piles(
                     .registry
                     .get::<Drawn>(*entity)
                     .is_some_and(|g| intrinsically_stackable(g.id)))
+                && crate::stack_compatible_instance_state(state, *entity)
                 && state
                     .registry
                     .get::<Drawn>(*entity)
@@ -644,7 +769,9 @@ fn spawn_remaining_piles(
             );
             return outcome;
         };
-        state.registry.insert(entity, Drawn { id: graphic, hue });
+        let drawn = Drawn { id: graphic, hue };
+        state.registry.insert(entity, drawn);
+        crate::spawn::install_legacy_identity(state, entity, drawn);
         let contained = Contained {
             container,
             position: GumpPoint::new(60, 60),
@@ -652,6 +779,94 @@ fn spawn_remaining_piles(
         };
         establish_item_location(state, entity, ItemLocation::contained(contained))
             .expect("a newly given stack has one valid container parent");
+        state.registry.insert(entity, Amount(take));
+        state.registry.insert(entity, Stackable);
+        tell_watchers_updated(state, container, entity);
+        progress.left -= u32::from(take);
+        progress.last = Some(entity);
+    }
+    progress.outcome()
+}
+
+/// The semantic counterpart of [`fill_existing_piles`].
+///
+/// A typed payout deliberately does not merge with an unmigrated legacy pile
+/// even where their current drawing matches: that would make a later art reuse
+/// an identity-changing operation. The migration bridge can be made explicit
+/// by its caller when a one-time upgrade is desired.
+fn fill_existing_kind_piles(
+    state: &mut WorldState,
+    container: Serial,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+    requested: u32,
+) -> GiveProgress {
+    let piles: Vec<EntityId> = contained_items(state, container)
+        .filter(|(entity, _)| {
+            state.registry.has::<Stackable>(*entity)
+                && crate::stack_compatible_instance_state(state, *entity)
+                && state
+                    .registry
+                    .get::<ItemKind>(*entity)
+                    .is_some_and(|found| found.0 == kind)
+                && state.registry.get::<Material>(*entity).map(|found| found.0) == material
+        })
+        .map(|(entity, _)| entity)
+        .collect();
+    let mut progress = GiveProgress::new(requested);
+    for pile in piles {
+        if progress.left == 0 {
+            break;
+        }
+        let moved = progress
+            .left
+            .min(u32::from(MAX_STACK.saturating_sub(amount_of(state, pile))));
+        if moved > 0 {
+            state
+                .registry
+                .insert(pile, Amount(amount_of(state, pile) + moved as u16));
+            tell_watchers_updated(state, container, pile);
+            progress.last = Some(pile);
+            progress.left -= moved;
+        }
+    }
+    progress
+}
+
+/// The semantic counterpart of [`spawn_remaining_piles`].
+fn spawn_remaining_kind_piles(
+    state: &mut WorldState,
+    container: Serial,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+    drawn: Drawn,
+    mut progress: GiveProgress,
+) -> GiveOutcome {
+    while progress.left > 0 {
+        let take = progress.left.min(u32::from(MAX_STACK)) as u16;
+        let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
+            let outcome = progress.outcome();
+            warn!(
+                requested = outcome.requested,
+                given = outcome.given,
+                missing = outcome.missing(),
+                ?container,
+                "out of item serials; typed payout is partial"
+            );
+            return outcome;
+        };
+        state.registry.insert(entity, drawn);
+        crate::spawn::install_identity(state, entity, kind, material);
+        establish_item_location(
+            state,
+            entity,
+            ItemLocation::contained(Contained {
+                container,
+                position: GumpPoint::new(60, 60),
+                grid: GridSlot(0),
+            }),
+        )
+        .expect("a newly given typed stack has one valid container parent");
         state.registry.insert(entity, Amount(take));
         state.registry.insert(entity, Stackable);
         tell_watchers_updated(state, container, entity);
@@ -827,5 +1042,55 @@ mod tests {
             count_in_container(&state, container, GOLD_GRAPHIC),
             u32::from(MAX_STACK)
         );
+    }
+
+    #[test]
+    fn typed_give_does_not_merge_into_an_affixed_equivalent_pile() {
+        use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+
+        let mut state = world();
+        let container_entity = state.registry.spawn();
+        let container = Serial::new(ITEM_MIN).expect("the first item serial");
+        state
+            .registry
+            .bind_serial(container_entity, container)
+            .expect("a fresh container serial");
+        state
+            .registry
+            .insert(container_entity, Container { gump: Graphic(1) });
+
+        let (existing, _) = state
+            .registry
+            .spawn_with_serial(SerialKind::Item)
+            .expect("an item serial");
+        state.registry.insert(
+            existing,
+            Drawn {
+                id: Graphic(0x1BF2),
+                hue: Hue(0x08AB),
+            },
+        );
+        state.registry.insert(existing, ItemKind(ItemKindId(1)));
+        state.registry.insert(existing, Material(MaterialId(9)));
+        state.registry.insert(existing, Stackable);
+        state.registry.insert(existing, Amount(3));
+        state.registry.insert(existing, ItemAffixes::default());
+        establish_item_location(
+            &mut state,
+            existing,
+            ItemLocation::contained(Contained {
+                container,
+                position: GumpPoint::new(60, 60),
+                grid: GridSlot(0),
+            }),
+        )
+        .expect("the original pile is in the container");
+
+        let outcome = give_kind(&mut state, container, ItemKindId(1), Some(MaterialId(9)), 2)
+            .expect("registered ingot identity");
+        let new_pile = outcome.last.expect("a new pile was issued");
+        assert_ne!(new_pile, existing);
+        assert_eq!(amount_of(&state, existing), 3, "the affixed item was not changed");
+        assert_eq!(amount_of(&state, new_pile), 2);
     }
 }
