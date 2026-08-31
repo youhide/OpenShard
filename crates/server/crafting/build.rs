@@ -22,6 +22,11 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+/// Must match `consume::MAX_CRAFT_RESOURCE_LINES`; build scripts cannot import
+/// the crate they are generating. A change to either side is one measured
+/// budget change and therefore updates both in the same commit.
+const MAX_CRAFT_RESOURCE_LINES: usize = 4;
+
 /// One trade's file.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -578,6 +583,14 @@ fn check(row: &SystemRow, table: &Table) {
     // shape before: say how many rows there were to check.
     assert!(!table.recipes.is_empty(), "{} has no recipes at all", row.trade);
     for recipe in &table.recipes {
+        assert!(
+            recipe.resources.len() <= MAX_CRAFT_RESOURCE_LINES,
+            "{}: recipe {} has {} resource lines, above the realtime limit of {}",
+            row.trade,
+            recipe.graphic,
+            recipe.resources.len(),
+            MAX_CRAFT_RESOURCE_LINES
+        );
         assert!(
             recipe.kind != Some(0),
             "{}: recipe {} has zero item kind",

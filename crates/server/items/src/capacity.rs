@@ -217,6 +217,11 @@ fn item_weight_hundredths(state: &WorldState, item: EntityId) -> u32 {
         return 0;
     };
     let amount = state.registry.get::<Amount>(item).map_or(1, |a| a.0.max(1));
+    drawn_weight_hundredths(state, id, amount)
+}
+
+/// Weight added by a prepared quantity before it has a published item entity.
+pub(crate) fn drawn_weight_hundredths(state: &WorldState, id: Graphic, amount: u16) -> u32 {
     let each = if id == GOLD_GRAPHIC {
         GOLD_WEIGHT_HUNDREDTHS
     } else {

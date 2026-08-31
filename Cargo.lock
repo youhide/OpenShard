@@ -3069,6 +3069,7 @@ dependencies = [
  "openshard-state",
  "openshard-tiles",
  "openshard-uofiles",
+ "proptest",
  "serde",
  "serde_json",
  "tracing",

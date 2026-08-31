@@ -39,6 +39,7 @@ use openshard_state::{
 
 use crate::chance::{
     roll,
+    train_attempt,
     train_per_item,
 };
 use crate::consume::{
@@ -131,6 +132,16 @@ pub struct ItemCrafted {
     pub system:      SystemId,
 }
 
+/// Every fallible fact of a successful craft, settled before ingredients,
+/// output, training, tool wear, or the domain event become visible.
+struct PreparedCraft {
+    withdrawal: consume::WithdrawalPlan,
+    placement:  openshard_items::PreparedPlacement,
+    identity:   Option<(ItemKindId, Option<MaterialId>)>,
+    hue:        Hue,
+    amount:     u16,
+}
+
 /// Why a craft cannot be begun at all. The tool half of ServUO's `CanCraft`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Blocked {
@@ -196,6 +207,12 @@ fn say_materials(state: &mut WorldState, crafter: EntityId, refusal: Refusal) {
         // a mobile with no backpack is a creature or a corpse, not a player who
         // needs telling.
         Refusal::NoPack => {}
+        Refusal::TooComplex => {
+            state.system_message(
+                crafter,
+                "That material payment is too fragmented to craft at once.",
+            );
+        }
         Refusal::NotEnough(text) | Refusal::CannotWork(text) => {
             match text {
                 crate::system::Text::Cliloc(cliloc) => state.localized_message(crafter, cliloc, ""),
@@ -335,7 +352,11 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         }
     };
 
-    let outcome = roll(state, crafter, def, recipe);
+    // Stage the two outcome draws on a private copy. A successful/failing
+    // attempt commits that stream position; an output allocation/capacity
+    // refusal does not consume randomness for a craft that never happened.
+    let mut prepared_rng = state.rng.clone();
+    let outcome = roll(state, crafter, def, recipe, &mut prepared_rng);
     if !outcome.all_skills {
         // Still a refusal even here — the crafter's skill can have *fallen* under
         // a bard's Discordance while the hammer was up. No materials lost.
@@ -344,12 +365,20 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         return;
     }
     if !outcome.success {
+        state.rng = prepared_rng;
         let share = if recipe.use_all_res {
             Share::Half
         } else {
             Share::All
         };
-        let lost = consume::take(state, crafter, &materials, share);
+        let lost = match consume::prepare_withdrawal(state, crafter, &materials, share) {
+            Ok(plan) => {
+                plan.commit(state);
+                true
+            }
+            Err(_) => false,
+        };
+        train_attempt(state, crafter, recipe);
         state.localized_message(crafter, if lost { FAILED_LOST } else { FAILED_KEPT }, "");
         wear_tool(state, crafter, work.tool);
         return;
@@ -376,24 +405,71 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         }
     };
 
-    consume::take(state, crafter, &materials, Share::All);
+    let made = match recipe.amount.checked_mul(materials.max_amount) {
+        Some(made) if openshard_items::is_valid_stack_amount(made) => made,
+        _ => {
+            state.system_message(crafter, "This recipe produces too many items at once.");
+            return;
+        }
+    };
+    let withdrawal = match consume::prepare_withdrawal(state, crafter, &materials, Share::All) {
+        Ok(plan) => plan,
+        Err(refusal) => {
+            say_materials(state, crafter, refusal);
+            return;
+        }
+    };
+    let Some(owner) = state.registry.serial_of(crafter) else {
+        return;
+    };
+    let Some(pack) = openshard_items::backpack_of(state, owner) else {
+        return;
+    };
+    let stacks = recipe.use_all_res || recipe.amount > 1 || made > 1;
+    let placement = match identity {
+        Some((kind, material)) => {
+            openshard_items::prepare_kind_placement(state, crafter, pack, kind, material, made, stacks)
+        }
+        None => openshard_items::prepare_placement(state, crafter, pack, recipe.graphic, hue, made, stacks),
+    };
+    let placement = match placement {
+        Ok(placement) => placement,
+        Err(openshard_items::PreparePlacementError::Full(full)) => {
+            state.system_message(crafter, full.message());
+            return;
+        }
+        Err(openshard_items::PreparePlacementError::NoSerials) => {
+            state.system_message(crafter, "The crafted item could not be created.");
+            return;
+        }
+        Err(
+            openshard_items::PreparePlacementError::NoContainer
+            | openshard_items::PreparePlacementError::InvalidAmount
+            | openshard_items::PreparePlacementError::UnknownIdentity,
+        ) => {
+            state.system_message(crafter, "This recipe is not configured correctly.");
+            return;
+        }
+    };
+    let prepared = PreparedCraft {
+        withdrawal,
+        placement,
+        identity,
+        hue,
+        amount: made,
+    };
+
+    state.rng = prepared_rng;
+    prepared.withdrawal.commit(state);
     if recipe.use_all_res {
         // The passive per-skill check is skipped for a batch craft, and this is
         // what stands in for it: one roll per item made, so a hundred boards
         // teach a hundred boards' worth.
         train_per_item(state, crafter, recipe, materials.max_amount);
+    } else {
+        train_attempt(state, crafter, recipe);
     }
-
-    let made = recipe.amount.saturating_mul(materials.max_amount).max(1);
-    let (item, placed) = place(state, crafter, recipe, hue, identity, made);
-    if placed != made {
-        state.system_message(
-            crafter,
-            &format!("Only {placed} of {made} crafted items could be placed in your pack."),
-        );
-        wear_tool(state, crafter, work.tool);
-        return;
-    }
+    let item = prepared.placement.commit(state);
 
     let marked = outcome.exceptional && recipe.markable && grandmaster(state, crafter, def);
     if let Some(item) = item {
@@ -417,55 +493,14 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         crafter,
         item,
         graphic: recipe.graphic,
-        hue,
-        item_kind: identity.map(|(kind, _)| kind),
-        material: identity.and_then(|(_, material)| material),
-        amount: made,
+        hue: prepared.hue,
+        item_kind: prepared.identity.map(|(kind, _)| kind),
+        material: prepared.identity.and_then(|(_, material)| material),
+        amount: prepared.amount,
         exceptional: outcome.exceptional,
         system: SystemId::new(work.system),
     });
     wear_tool(state, crafter, work.tool);
-}
-
-/// Put the finished item in the crafter's pack.
-///
-/// A stacking recipe (arrows, boards) merges onto the pile already there; a
-/// discrete one is placed as its own piece, which is what lets it carry a quality
-/// and a maker's name at all — a signature on a stack would belong to whichever
-/// pile it merged into.
-fn place(
-    state: &mut WorldState,
-    crafter: EntityId,
-    recipe: &Recipe,
-    hue: Hue,
-    identity: Option<(ItemKindId, Option<MaterialId>)>,
-    amount: u16,
-) -> (Option<EntityId>, u16) {
-    let Some(serial) = state.registry.serial_of(crafter) else {
-        return (None, 0);
-    };
-    let Some(pack) = openshard_items::backpack_of(state, serial) else {
-        return (None, 0);
-    };
-    if recipe.use_all_res || recipe.amount > 1 || amount > 1 {
-        let outcome = match identity {
-            Some((kind, material)) => {
-                openshard_items::give_kind(state, pack, kind, material, u32::from(amount))
-                    .expect("a checked typed recipe has a presentation")
-            }
-            None => openshard_items::give(state, pack, recipe.graphic, hue, u32::from(amount)),
-        };
-        (
-            outcome.last,
-            u16::try_from(outcome.given).expect("give cannot exceed the u16 amount requested"),
-        )
-    } else {
-        let item = match identity {
-            Some((kind, material)) => openshard_items::place_one_kind(state, pack, kind, material, amount),
-            None => openshard_items::place_one(state, pack, recipe.graphic, hue, amount),
-        };
-        (item, u16::from(item.is_some()))
-    }
 }
 
 /// Resolve the semantic output before ingredients are spent.

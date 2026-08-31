@@ -466,6 +466,293 @@ pub fn place_one_kind(
     Some(entity)
 }
 
+/// Why an all-or-nothing prepared placement could not be constructed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PreparePlacementError {
+    /// The destination is gone or is not a container.
+    NoContainer,
+    /// The requested quantity cannot be represented by this operation.
+    InvalidAmount,
+    /// A semantic identity has no registered presentation.
+    UnknownIdentity,
+    /// The destination or one of its parents refuses the added item/weight.
+    Full(Full),
+    /// Not every output entity could be allocated before publication.
+    NoSerials,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PlacementIdentity {
+    Legacy(Drawn),
+    Semantic {
+        kind:     ItemKindId,
+        material: Option<MaterialId>,
+        drawn:    Drawn,
+    },
+}
+
+impl PlacementIdentity {
+    const fn drawn(self) -> Drawn {
+        match self {
+            Self::Legacy(drawn) | Self::Semantic { drawn, .. } => drawn,
+        }
+    }
+
+    fn install(self, state: &mut WorldState, item: EntityId) {
+        match self {
+            Self::Legacy(drawn) => {
+                state.registry.insert(item, drawn);
+                crate::spawn::install_legacy_identity(state, item, drawn);
+            }
+            Self::Semantic {
+                kind,
+                material,
+                drawn: _,
+            } => crate::spawn::install_identity(state, item, kind, material),
+        }
+    }
+
+    fn matches(self, state: &WorldState, item: EntityId) -> bool {
+        match self {
+            Self::Legacy(drawn) => state.registry.get::<Drawn>(item) == Some(&drawn),
+            Self::Semantic { kind, material, .. } => {
+                state.registry.get::<ItemKind>(item) == Some(&ItemKind(kind))
+                    && state.registry.get::<Material>(item).map(|found| found.0) == material
+            }
+        }
+    }
+
+    fn is_container(self) -> bool {
+        match self {
+            Self::Legacy(drawn) => drawn.id == SPELLBOOK_GRAPHIC || drawn.id == RUNEBOOK_GRAPHIC,
+            Self::Semantic { kind, .. } => {
+                item_definition(kind)
+                    .and_then(|definition| definition.container_gump)
+                    .is_some()
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct PreparedFill {
+    item:     EntityId,
+    expected: u16,
+    add:      u16,
+}
+
+/// Fully allocated output placement that has not yet changed a live pile or
+/// published a new entity into its destination.
+#[derive(Debug)]
+pub struct PreparedPlacement {
+    container: Serial,
+    identity:  PlacementIdentity,
+    fills:     Vec<PreparedFill>,
+    new_items: Vec<EntityId>,
+}
+
+impl PreparedPlacement {
+    /// Discard allocated but unpublished output after the craft roll chose a
+    /// failure path. Existing-pile fills were only facts and need no rollback.
+    pub fn abort(self, state: &mut WorldState) {
+        for item in self.new_items {
+            assert!(
+                item_location(state, item).is_none(),
+                "an aborted prepared output was never published"
+            );
+            assert!(state.registry.despawn(item));
+        }
+    }
+
+    /// Publish every prepared fill/new pile. This has no ordinary failure path:
+    /// the destination, capacity, identities and serials were all settled by
+    /// preparation while the tick retained sole ownership of the world.
+    pub fn commit(self, state: &mut WorldState) -> Option<EntityId> {
+        let mut last = None;
+        for fill in self.fills {
+            assert_eq!(
+                amount_of(state, fill.item),
+                fill.expected,
+                "a prepared output pile keeps its amount until commit"
+            );
+            assert!(
+                self.identity.matches(state, fill.item),
+                "a prepared output pile keeps its identity until commit"
+            );
+            assert_eq!(
+                fill_stack(state, fill.item, u32::from(fill.add)),
+                fill.add,
+                "a prepared output fill still fits"
+            );
+            last = Some(fill.item);
+        }
+        for item in self.new_items {
+            assert!(
+                item_location(state, item).is_none(),
+                "a prepared output entity stays unpublished until commit"
+            );
+            establish_item_location(
+                state,
+                item,
+                ItemLocation::contained(Contained {
+                    container: self.container,
+                    position:  GumpPoint::new(60, 60),
+                    grid:      GridSlot(0),
+                }),
+            )
+            .expect("a prepared output has one validated live container parent");
+            tell_watchers_updated(state, self.container, item);
+            last = Some(item);
+        }
+        last
+    }
+}
+
+/// Prepare a legacy craft/reward output without publishing any gameplay state.
+pub fn prepare_placement(
+    state: &mut WorldState,
+    owner: EntityId,
+    container: Serial,
+    graphic: Graphic,
+    hue: Hue,
+    amount: u16,
+    stack: bool,
+) -> Result<PreparedPlacement, PreparePlacementError> {
+    let drawn = Drawn { id: graphic, hue };
+    let identity = match kind_from_drawn(drawn) {
+        Some((kind, material)) => {
+            PlacementIdentity::Semantic {
+                kind,
+                material,
+                drawn,
+            }
+        }
+        None => PlacementIdentity::Legacy(drawn),
+    };
+    prepare_placement_with(state, owner, container, identity, amount, stack)
+}
+
+/// Prepare a semantic craft/reward output without publishing it.
+pub fn prepare_kind_placement(
+    state: &mut WorldState,
+    owner: EntityId,
+    container: Serial,
+    kind: ItemKindId,
+    material: Option<MaterialId>,
+    amount: u16,
+    stack: bool,
+) -> Result<PreparedPlacement, PreparePlacementError> {
+    let Some(drawn) = presentation_of(kind, material) else {
+        return Err(PreparePlacementError::UnknownIdentity);
+    };
+    prepare_placement_with(
+        state,
+        owner,
+        container,
+        PlacementIdentity::Semantic {
+            kind,
+            material,
+            drawn,
+        },
+        amount,
+        stack,
+    )
+}
+
+fn prepare_placement_with(
+    state: &mut WorldState,
+    owner: EntityId,
+    container: Serial,
+    identity: PlacementIdentity,
+    amount: u16,
+    stack: bool,
+) -> Result<PreparedPlacement, PreparePlacementError> {
+    let Some(container_entity) = state.registry.entity_of(container) else {
+        return Err(PreparePlacementError::NoContainer);
+    };
+    if !state.registry.has::<Container>(container_entity) || !is_valid_stack_amount(amount) {
+        return Err(if state.registry.has::<Container>(container_entity) {
+            PreparePlacementError::InvalidAmount
+        } else {
+            PreparePlacementError::NoContainer
+        });
+    }
+
+    let separate = !stack || identity.is_container();
+    let mut left = amount;
+    let mut fills = Vec::new();
+    if !separate {
+        let mut piles: Vec<EntityId> = contained_items(state, container)
+            .filter(|(item, _)| {
+                state.registry.has::<Stackable>(*item)
+                    && crate::stack_compatible_instance_state(state, *item)
+                    && identity.matches(state, *item)
+            })
+            .map(|(item, _)| item)
+            .collect();
+        piles.sort_by_key(|item| (state.registry.serial_of(*item), *item));
+        for item in piles {
+            if left == 0 {
+                break;
+            }
+            let expected = amount_of(state, item);
+            let add = left.min(MAX_STACK - expected);
+            if add > 0 {
+                fills.push(PreparedFill { item, expected, add });
+                left -= add;
+            }
+        }
+    }
+
+    let new_count = if separate {
+        if identity.is_container() {
+            usize::from(amount)
+        } else {
+            1
+        }
+    } else {
+        usize::from(left.div_ceil(MAX_STACK))
+    };
+    let added_weight =
+        u16::try_from(crate::capacity::drawn_weight_hundredths(state, identity.drawn().id, amount) / 100)
+            .unwrap_or(u16::MAX);
+    if let Some(full) = check_hold(state, owner, container, new_count, added_weight) {
+        return Err(PreparePlacementError::Full(full));
+    }
+
+    let mut new_items = Vec::with_capacity(new_count);
+    let mut unallocated = if separate { 0 } else { left };
+    for _ in 0..new_count {
+        let Ok((item, _)) = state.registry.spawn_with_serial(SerialKind::Item) else {
+            for prepared in new_items {
+                assert!(state.registry.despawn(prepared));
+            }
+            return Err(PreparePlacementError::NoSerials);
+        };
+        identity.install(state, item);
+        let pile_amount = if separate {
+            if identity.is_container() { 1 } else { amount }
+        } else {
+            unallocated.min(MAX_STACK)
+        };
+        initialize_stack_amount(state, item, pile_amount);
+        if !separate {
+            state.registry.insert(item, Stackable);
+            unallocated -= pile_amount;
+        } else {
+            crate::apply_core_defaults(state, item, identity.drawn().id);
+        }
+        new_items.push(item);
+    }
+    assert_eq!(unallocated, 0, "every prepared output unit was allocated");
+    Ok(PreparedPlacement {
+        container,
+        identity,
+        fills,
+        new_items,
+    })
+}
+
 /// What [`give`] managed to put in a container.
 ///
 /// The count matters: running out of item serials can happen after existing
@@ -1016,6 +1303,49 @@ mod tests {
             count_in_container(&state, container, GOLD_GRAPHIC),
             u32::from(MAX_STACK)
         );
+    }
+
+    #[test]
+    fn prepared_placement_does_not_fill_an_existing_pile_before_every_serial_exists() {
+        let mut state = world();
+        let owner = state.registry.spawn();
+        let container = empty_container(&mut state);
+        let (existing, _) = state
+            .registry
+            .spawn_with_serial(SerialKind::Item)
+            .expect("an existing pile serial");
+        let drawn = Drawn {
+            id:  Graphic(0x7777),
+            hue: Hue::NONE,
+        };
+        state.registry.insert(existing, drawn);
+        state.registry.insert(existing, Stackable);
+        initialize_stack_amount(&mut state, existing, MAX_STACK - 1);
+        establish_item_location(
+            &mut state,
+            existing,
+            ItemLocation::contained(Contained {
+                container,
+                position: GumpPoint::new(60, 60),
+                grid: GridSlot(0),
+            }),
+        )
+        .expect("the original pile is in the container");
+        state
+            .registry
+            .reserve_serial(Serial::new(ITEM_MAX).expect("the final item serial"));
+
+        assert!(matches!(
+            prepare_placement(&mut state, owner, container, drawn.id, drawn.hue, 2, true,),
+            Err(PreparePlacementError::NoSerials)
+        ));
+        assert_eq!(
+            amount_of(&state, existing),
+            MAX_STACK - 1,
+            "the planned one-unit fill was never published"
+        );
+        assert_eq!(contained_items(&state, container).count(), 1);
+        assert!(openshard_state::audit_item_graph(&state).is_empty());
     }
 
     #[test]

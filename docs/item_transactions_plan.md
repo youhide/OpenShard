@@ -18,7 +18,12 @@ start at exact indexed container roots. Access-policy stops wait for A6's types;
 A2 is not yet complete. Quantity changes now pass through one stack door that
 enforces the physical-pile bound, normalises singletons, and publishes viewer
 updates; six 256-case properties cover split, merge, fill/take, give, remove,
-and consume. A0's remaining craft/measurement work and A4 onward remain open.
+and consume. A4 now has a deterministic bounded backpack `WithdrawalPlan` that
+deduplicates overlapping selectors, and A5 is built: successful crafting
+allocates and capacity-checks every output before an infallible payment/output
+commit, while failure-craft material loss uses the same atomic withdrawal
+door. A0's remaining measurement work, the indexed A4 candidate source, and A6
+onward remain open.
 
 ## Outcome
 
@@ -636,7 +641,7 @@ presentation.
       ingredients, then mark its target expectation for A5.
 - [x] Catalogue direct production writes to `ItemLocation`, `Contained`,
       `Equipped`, `Amount`, and raw `Registry::despawn` for item entities.
-- [ ] Add normalized test snapshots for ownership, quantities, identity,
+- [x] Add normalized test snapshots for ownership, quantities, identity,
       cursors, and domain events.
 - [ ] Add release-mode microbenchmarks for source-tile projection, a 125-item
       root move/access change, fixed-window withdrawal preparation/commit,
@@ -662,11 +667,11 @@ The 2026-08-31 mutation inventory found:
   entity that failed before receiving `Drawn`/`ItemLocation`.
 
 The named craft allocation regression exhausts the item serial pool only after
-the tool, ingredients, and guaranteed-success skill are established. It records
-the current seam exactly: all ingredients are spent, no output is placed, no
-`ItemCrafted` event is emitted, and the ownership graph remains structurally
-valid. A5 flips the ingredient expectation to unchanged and compares the full
-logical snapshot once output placement joins prepare.
+the tool, ingredients, and guaranteed-success skill are established. A5 has
+flipped its former loss expectation: ingredients, output, tool, skill, ownership,
+identity, cursor state, and `ItemCrafted` events now remain unchanged when output
+allocation fails. A companion full-backpack regression pins the capacity
+failure to the same normalized snapshot.
 
 ### A1 — make split allocation-first
 
@@ -741,31 +746,50 @@ turning the in-memory mutation door into a panic on I/O.
       matching, with a constant maximum number of keys per pile.
 - [ ] Implement deterministic preparation against ordered root/cell stock
       buckets, retaining each pile's root/domain/revision facts.
-- [ ] Prevent double reservation across duplicate/overlapping ingredient lines.
-- [ ] Enforce resource-line, withdrawal, and `use_all_res` batch limits before
+- [x] Prevent double reservation across duplicate/overlapping ingredient lines.
+- [x] Enforce resource-line, withdrawal, and `use_all_res` batch limits before
       mutation, with an explicit fragmentation/complexity refusal.
-- [ ] Make commit infallible over the state preparation just validated.
-- [ ] Migrate crafting material consumption first; then evaluate reagents,
+- [x] Make commit infallible over the state preparation just validated.
+- [x] Migrate crafting material consumption first; then evaluate reagents,
       quest turn-ins, and vendor payment as separate changes.
-- [ ] Add all-or-nothing and overlap property suites.
+- [x] Add all-or-nothing and overlap property suites.
 
 Done when a multi-line craft can never consume a strict subset of its planned
 ingredients.
 
 ### A5 — make successful crafting transactional
 
-- [ ] Resolve output identity, amount, capacity, merge targets, and required new
+- [x] Resolve output identity, amount, capacity, merge targets, and required new
       entities before consuming ingredients.
-- [ ] Build a `PreparedCraft` containing withdrawal and placement plans.
-- [ ] Ensure every prepare failure removes temporary entities and leaves tool,
+- [x] Build a `PreparedCraft` containing withdrawal and placement plans.
+- [x] Ensure every prepare failure removes temporary entities and leaves tool,
       skills, ingredients, output piles, and events unchanged.
-- [ ] Commit output, withdrawal, training/tool wear, messages, and
+- [x] Commit output, withdrawal, training/tool wear, messages, and
       `ItemCrafted` only after all fallible preparation succeeds.
-- [ ] Decide and document failure-craft material loss separately: it is a game
+- [x] Decide and document failure-craft material loss separately: it is a game
       rule, but its half/all withdrawal still uses the same atomic plan.
 
 Done when output serial/capacity failure consumes nothing and successful craft
 commit has no ordinary error return.
+
+**Built.** `WithdrawalPlan` reserves each physical pile once in serial order and
+folds overlapping recipe lines into that row. The generated recipe build and
+runtime share a four-line ceiling; one craft touches at most 125 piles and one
+`use_all_res` batch cannot exceed one representable physical stack. These are
+conservative pre-benchmark limits and A0 must still measure them before A4's
+indexed source replaces the current direct backpack candidate read.
+
+`PreparedPlacement` records every existing-pile fill and allocates every new
+unlocated output entity before publication. Capacity and allocator refusals
+therefore leave the normalized ownership/quantity/identity/cursor/skill/tool
+snapshot unchanged and emit no `ItemCrafted`; named regressions cover both
+failure kinds and allocation after a planned existing-pile fill. A 256-case
+overlap property varies two lines against one pile and proves the second line
+either joins the first reservation or leaves the complete snapshot untouched.
+Ordinary
+failed crafts still lose all required material, while failed `use_all_res`
+batches lose half of one craft's material as before, but both now prepare one
+atomic withdrawal before committing it.
 
 ### A6a — index and search house inventory without consuming it
 

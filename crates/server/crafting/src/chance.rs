@@ -91,38 +91,45 @@ pub fn chance(state: &WorldState, crafter: EntityId, system: &CraftSystemDef, re
     }
 }
 
-/// Roll the attempt: train every required skill, then draw for quality and for
-/// success.
+/// Draw quality and success without committing training.
 ///
-/// The passive per-skill training is what makes a smith's Mining creep up while
-/// they hammer — ServUO does it inside `GetSuccessChance`, once, for every listed
-/// skill including the main one, and skips it entirely for a `use_all_res` recipe
-/// (which trains once per item made instead, at the end).
+/// Output allocation is prepared before this draw. Training belongs to the
+/// eventual success/failure commit, so a capacity or allocator refusal cannot
+/// improve a skill for an item that never existed.
 pub(crate) fn roll(
-    state: &mut WorldState,
+    state: &WorldState,
     crafter: EntityId,
     system: &CraftSystemDef,
     recipe: &Recipe,
+    rng: &mut openshard_state::Rng,
 ) -> Roll {
-    if !recipe.use_all_res {
-        for want in recipe.skills {
-            roll_skill_band(
-                state,
-                crafter,
-                want.skill,
-                openshard_skills::SkillBand::new(want.min - recipe.min_skill_offset, want.max),
-            );
-        }
-    }
     let odds = chance(state, crafter, system, recipe);
     // Both draws are always spent, and in this order, so what follows a craft does
     // not depend on how the craft went.
-    let exceptional = draw(state, odds.exceptional);
-    let success = draw(state, odds.success);
+    let exceptional = draw(rng, odds.exceptional);
+    let success = draw(rng, odds.success);
     Roll {
         success,
         exceptional,
         all_skills: odds.all_skills,
+    }
+}
+
+/// Commit the ordinary once-per-attempt skill training.
+///
+/// `use_all_res` uses [`train_per_item`] instead, matching ServUO's separate
+/// multiple-skill-check path.
+pub(crate) fn train_attempt(state: &mut WorldState, crafter: EntityId, recipe: &Recipe) {
+    if recipe.use_all_res {
+        return;
+    }
+    for want in recipe.skills {
+        roll_skill_band(
+            state,
+            crafter,
+            want.skill,
+            openshard_skills::SkillBand::new(want.min - recipe.min_skill_offset, want.max),
+        );
     }
 }
 
@@ -142,8 +149,8 @@ pub(crate) fn train_per_item(state: &mut WorldState, crafter: EntityId, recipe: 
 }
 
 /// One draw against a per-mille chance, off the world's seeded generator.
-fn draw(state: &mut WorldState, chance: u32) -> bool {
-    chance > 0 && state.rng.below(1000) < chance
+fn draw(rng: &mut openshard_state::Rng, chance: u32) -> bool {
+    chance > 0 && rng.below(1000) < chance
 }
 
 /// `chance_at_min` at the floor, certainty at the top, straight line between —

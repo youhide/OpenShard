@@ -40,6 +40,7 @@ use openshard_state::{
     CraftGumpPage,
     Skill,
 };
+use proptest::prelude::*;
 
 use super::tests::{
     START,
@@ -156,6 +157,84 @@ fn carried(world: &World, connection: ConnectionId, graphic: Graphic, hue: Hue) 
         return 0;
     };
     openshard_items::carried_amount_of_hue(&world.state, owner, graphic, Some(hue))
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct LogicalItemSnapshot {
+    entity:     EntityId,
+    serial:     Option<u32>,
+    location:   Option<openshard_state::ItemLocation>,
+    drawn:      Drawn,
+    amount:     u16,
+    item_kind:  Option<ItemKindId>,
+    material:   Option<MaterialId>,
+    stackable:  bool,
+    tool:       Option<Tool>,
+    quality:    Option<Quality>,
+    crafted_by: Option<String>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct CraftLogicalSnapshot {
+    items:   Vec<LogicalItemSnapshot>,
+    cursors: Vec<(u64, Option<openshard_state::HeldItem>)>,
+    skills:  Vec<(EntityId, openshard_state::components::Skills)>,
+}
+
+/// The gameplay state an atomic craft is allowed to change, normalized away
+/// from sparse-set iteration order and packet ordering.
+fn craft_logical_snapshot(world: &World) -> CraftLogicalSnapshot {
+    let mut items: Vec<_> = world
+        .state
+        .registry
+        .query::<Drawn>()
+        .map(|(entity, drawn)| {
+            LogicalItemSnapshot {
+                entity,
+                serial: world.state.registry.serial_of(entity).map(|serial| serial.raw()),
+                location: openshard_state::item_location(&world.state, entity),
+                drawn: *drawn,
+                amount: openshard_items::amount_of(&world.state, entity),
+                item_kind: world.state.registry.get::<ItemKind>(entity).map(|kind| kind.0),
+                material: world
+                    .state
+                    .registry
+                    .get::<Material>(entity)
+                    .map(|material| material.0),
+                stackable: world
+                    .state
+                    .registry
+                    .has::<openshard_state::components::Stackable>(entity),
+                tool: world.state.registry.get::<Tool>(entity).copied(),
+                quality: world.state.registry.get::<Quality>(entity).copied(),
+                crafted_by: world
+                    .state
+                    .registry
+                    .get::<CraftedBy>(entity)
+                    .map(|maker| maker.0.clone()),
+            }
+        })
+        .collect();
+    items.sort_by_key(|item| (item.serial, item.entity));
+    let mut cursors: Vec<_> = world
+        .state
+        .connections
+        .iter()
+        .map(|(connection, row)| (connection.get(), row.held))
+        .collect();
+    cursors.sort_by_key(|(connection, _)| *connection);
+    let mut skills: Vec<_> = world
+        .state
+        .registry
+        .query::<openshard_state::components::Skills>()
+        .map(|(entity, skills)| (entity, skills.clone()))
+        .collect();
+    skills.sort_by_key(|(entity, _)| *entity);
+    CraftLogicalSnapshot {
+        items,
+        cursors,
+        skills,
+    }
 }
 
 /// The index of the first blacksmithy recipe made of one ingot line, and the
@@ -284,11 +363,7 @@ fn a_smith_at_a_forge_turns_ingots_into_a_blade() {
 }
 
 #[test]
-fn output_serial_exhaustion_currently_spends_successful_craft_ingredients() {
-    // This characterises the non-atomic seam A5 must remove. The successful
-    // roll consumes the ingots before output placement asks the exhausted item
-    // allocator for a serial. A5 changes the target expectation to unchanged
-    // ingredients and an unchanged logical-state snapshot.
+fn output_serial_exhaustion_leaves_a_successful_craft_logically_unchanged() {
     let mut now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
@@ -307,14 +382,15 @@ fn output_serial_exhaustion_currently_spends_successful_craft_ingredients() {
         .state
         .registry
         .reserve_serial(Serial::new(openshard_protocol::serial::ITEM_MAX).expect("the final item serial"));
+    let before = craft_logical_snapshot(&world);
 
     craft(&mut world, connection, tongs, recipe, 0, now);
     finish(&mut world, connection, now);
 
     assert_eq!(
         carried(&world, connection, INGOT, Hue(0)),
-        0,
-        "the current commit order spends the ingredients before placement fails"
+        u32::from(wanted),
+        "output allocation failure spends no ingredients"
     );
     assert_eq!(
         carried(&world, connection, made, Hue(0)),
@@ -325,6 +401,158 @@ fn output_serial_exhaustion_currently_spends_successful_craft_ingredients() {
         world.state.bus.read(&mut crafted).count(),
         0,
         "an unplaced result is not reported as crafted"
+    );
+    assert_eq!(
+        craft_logical_snapshot(&world),
+        before,
+        "allocation refusal changes no ownership, quantity, identity, cursor, or tool state"
+    );
+    assert!(openshard_state::audit_item_graph(&world.state).is_empty());
+}
+
+#[test]
+fn overlapping_material_lines_reserve_one_physical_pile_only_once() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    give(&mut world, connection, INGOT, Hue::NONE, 10);
+    let player = world.state.players[&connection];
+    let line = |amount| {
+        openshard_crafting::consume::MaterialLine {
+            graphic: INGOT,
+            hue: Some(Hue::NONE),
+            amount,
+            message: openshard_crafting::Text::Str("not enough ingots"),
+            semantic: None,
+        }
+    };
+
+    let impossible = openshard_crafting::Materials {
+        lines:      vec![line(6), line(6)],
+        max_amount: 1,
+        res_hue:    Hue::NONE,
+    };
+    let before = craft_logical_snapshot(&world);
+    assert_eq!(
+        openshard_crafting::consume::prepare_withdrawal(
+            &world.state,
+            player,
+            &impossible,
+            openshard_crafting::Share::All,
+        ),
+        Err(openshard_crafting::Refusal::NotEnough(
+            openshard_crafting::Text::Str("not enough ingots")
+        ))
+    );
+    assert_eq!(
+        craft_logical_snapshot(&world),
+        before,
+        "a refused plan mutates nothing"
+    );
+
+    let exact = openshard_crafting::Materials {
+        lines:      vec![line(6), line(4)],
+        max_amount: 1,
+        res_hue:    Hue::NONE,
+    };
+    let plan = openshard_crafting::consume::prepare_withdrawal(
+        &world.state,
+        player,
+        &exact,
+        openshard_crafting::Share::All,
+    )
+    .expect("ten units across overlapping lines fit the one ten-unit pile");
+    assert_eq!(plan.len(), 1, "one physical pile becomes one commit row");
+    plan.commit(&mut world.state);
+    assert_eq!(carried(&world, connection, INGOT, Hue::NONE), 0);
+    assert!(openshard_state::audit_item_graph(&world.state).is_empty());
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    fn overlapping_withdrawal_lines_are_all_or_nothing(
+        held in 1u16..=1_000,
+        first in 1u16..=1_000,
+        second in 1u16..=1_000,
+    ) {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        give(&mut world, connection, INGOT, Hue::NONE, held);
+        let player = world.state.players[&connection];
+        let line = |amount| openshard_crafting::consume::MaterialLine {
+            graphic: INGOT,
+            hue: Some(Hue::NONE),
+            amount,
+            message: openshard_crafting::Text::Str("not enough ingots"),
+            semantic: None,
+        };
+        let materials = openshard_crafting::Materials {
+            lines: vec![line(first), line(second)],
+            max_amount: 1,
+            res_hue: Hue::NONE,
+        };
+        let before = craft_logical_snapshot(&world);
+        let plan = openshard_crafting::consume::prepare_withdrawal(
+            &world.state,
+            player,
+            &materials,
+            openshard_crafting::Share::All,
+        );
+        let wanted = u32::from(first) + u32::from(second);
+        if wanted <= u32::from(held) {
+            let plan = plan.expect("the shared pile holds both reservations");
+            prop_assert_eq!(plan.len(), 1);
+            plan.commit(&mut world.state);
+            prop_assert_eq!(
+                carried(&world, connection, INGOT, Hue::NONE),
+                u32::from(held) - wanted
+            );
+        } else {
+            prop_assert!(matches!(plan, Err(openshard_crafting::Refusal::NotEnough(_))));
+            prop_assert_eq!(
+                craft_logical_snapshot(&world),
+                before,
+                "an unsatisfied second line cannot spend the first"
+            );
+        }
+        prop_assert!(openshard_state::audit_item_graph(&world.state).is_empty());
+    }
+}
+
+#[test]
+fn full_backpack_refuses_output_without_spending_a_successful_craft() {
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    shop(&mut world, &[(FORGE.0, 0), (ANVIL.0, 0)]);
+    let tongs = give(&mut world, connection, TONGS, Hue::NONE, 1);
+    let (recipe, _) = cheapest_smithing();
+    let def = openshard_crafting::system(SystemId::new(0)).expect("blacksmithy");
+    let wanted = def.recipes[usize::from(recipe)].resources[0].amount;
+    let made = def.recipes[usize::from(recipe)].graphic;
+    give(&mut world, connection, INGOT, Hue::NONE, wanted);
+    for _ in 0..(openshard_items::MAX_ITEMS - 2) {
+        give(&mut world, connection, Graphic(0x0F16), Hue::NONE, 1);
+    }
+    train(&mut world, connection, Skill::Blacksmith, 1000);
+    now += TICK_INTERVAL;
+    world.tick(now);
+    let before = craft_logical_snapshot(&world);
+    let mut crafted = world.state.bus.cursor_at_end::<openshard_crafting::ItemCrafted>();
+
+    craft(&mut world, connection, tongs, recipe, 0, now);
+    finish(&mut world, connection, now);
+
+    assert_eq!(carried(&world, connection, INGOT, Hue::NONE), u32::from(wanted));
+    assert_eq!(carried(&world, connection, made, Hue::NONE), 0);
+    assert_eq!(world.state.bus.read(&mut crafted).count(), 0);
+    assert_eq!(
+        craft_logical_snapshot(&world),
+        before,
+        "capacity refusal changes no item, cursor, or tool state"
     );
     assert!(openshard_state::audit_item_graph(&world.state).is_empty());
 }

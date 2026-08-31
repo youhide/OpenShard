@@ -8,13 +8,17 @@
 //! only *then* consumed, because a player can hand their ingots to a friend
 //! while the hammer is in the air.
 
-use std::collections::HashMap;
+use std::collections::{
+    BTreeMap,
+    HashMap,
+};
 
 use openshard_entities::EntityId;
 use openshard_protocol::item_kind::{
     ItemSelector,
     MaterialRule,
 };
+use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{
     Graphic,
     Hue,
@@ -26,7 +30,10 @@ use openshard_state::components::{
 };
 use openshard_state::{
     Drawn,
+    ItemLocation,
+    SettledItemLocation,
     WorldState,
+    contained_items,
     item_definition,
     kind_from_drawn,
     material_definition,
@@ -48,6 +55,109 @@ pub enum Refusal {
     /// The material was picked but the crafter cannot work it — "You have no
     /// idea how to work this metal."
     CannotWork(Text),
+    /// The recipe or the physical pile fragmentation exceeds the bounded work
+    /// one realtime craft is allowed to commit.
+    TooComplex,
+}
+
+/// The most resource lines one recipe may ask the realtime planner to join.
+///
+/// The generated recipe build asserts the same ceiling. Raising it is a
+/// benchmark decision because every additional line can overlap every earlier
+/// selector and therefore has to share the same reservation table.
+pub const MAX_CRAFT_RESOURCE_LINES: usize = 4;
+
+/// The most physical piles one atomic craft may change.
+///
+/// This matches the ordinary recursive container item ceiling. A fragmented
+/// payment above it is refused before mutation instead of turning one command
+/// into an unbounded tick.
+pub const MAX_CRAFT_WITHDRAWALS: usize = openshard_items::MAX_ITEMS;
+
+/// The largest indexed source root admitted to realtime craft preparation.
+pub const MAX_CRAFT_SOURCE_ITEMS: usize = openshard_items::MAX_ITEMS;
+
+/// A `use_all_res` click is one bounded batch, not an instruction to drain an
+/// arbitrarily large workshop.
+pub const MAX_CRAFT_BATCH: u16 = openshard_items::MAX_STACK;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ExpectedIdentity {
+    Semantic {
+        kind:     openshard_protocol::item_kind::ItemKindId,
+        material: Option<openshard_protocol::item_kind::MaterialId>,
+    },
+    Legacy(Drawn),
+}
+
+/// One physical pile reserved by an atomic material withdrawal.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Withdrawal {
+    item:     EntityId,
+    serial:   Serial,
+    source:   Serial,
+    expected: u16,
+    take:     u16,
+    identity: ExpectedIdentity,
+}
+
+/// A deterministic, all-or-nothing payment prepared from current canonical
+/// backpack state.
+///
+/// One item occurs at most once. Overlapping recipe selectors reserve from the
+/// same remaining amount and their takes are folded into that item's row.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct WithdrawalPlan {
+    rows: Vec<Withdrawal>,
+}
+
+impl WithdrawalPlan {
+    /// Commit only the exact state validated by [`prepare_withdrawal`].
+    ///
+    /// The tick is the sole owner between prepare and commit. Any mismatch is
+    /// therefore a broken caller invariant, not a gameplay refusal halfway
+    /// through payment.
+    pub fn commit(self, state: &mut WorldState) {
+        for row in self.rows {
+            assert_eq!(
+                state.registry.entity_of(row.serial),
+                Some(row.item),
+                "a prepared craft pile keeps its serial until commit"
+            );
+            assert_eq!(
+                openshard_items::amount_of(state, row.item),
+                row.expected,
+                "a prepared craft pile keeps its amount until commit"
+            );
+            assert!(
+                matches!(
+                    openshard_state::item_location(state, row.item),
+                    Some(ItemLocation::Settled(SettledItemLocation::Contained(held)))
+                        if held.container == row.source
+                ),
+                "a prepared craft pile keeps its source until commit"
+            );
+            assert!(
+                expected_identity_matches(state, row.item, row.identity),
+                "a prepared craft pile keeps its identity until commit"
+            );
+            assert!(
+                openshard_items::consume(state, row.serial, row.take),
+                "a validated craft withdrawal must consume its reserved pile"
+            );
+        }
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Whether the recipe consumes no material piles.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
 }
 
 /// What one craft will actually eat, resolved against the crafter's pack.
@@ -72,6 +182,7 @@ pub struct MaterialLine {
     pub graphic:  Graphic,
     pub hue:      Option<Hue>,
     pub amount:   u16,
+    pub message:  Text,
     pub semantic: Option<(
         openshard_protocol::item_kind::ItemKindId,
         Option<openshard_protocol::item_kind::MaterialId>,
@@ -214,20 +325,26 @@ pub(crate) fn check_stock(
     })
 }
 
-fn check_with(
+fn check_with<F>(
     state: &WorldState,
     crafter: EntityId,
     system: &CraftSystemDef,
     recipe: &Recipe,
     sub_res: usize,
-    held: impl Fn(
+    held: F,
+) -> Result<Materials, Refusal>
+where
+    F: Fn(
         Option<(
             openshard_protocol::item_kind::ItemKindId,
             Option<openshard_protocol::item_kind::MaterialId>,
         )>,
         Drawn,
     ) -> u32,
-) -> Result<Materials, Refusal> {
+{
+    if recipe.resources.len() > MAX_CRAFT_RESOURCE_LINES {
+        return Err(Refusal::TooComplex);
+    }
     // Which material the axis is set to, and whether the crafter can work it.
     // ServUO checks this against the **base** skill, not the stat-lent value: no
     // amount of Strength teaches a smith what to do with valorite.
@@ -291,6 +408,7 @@ fn check_with(
             graphic: res.graphic,
             hue,
             amount: res.amount,
+            message: res.message,
             semantic,
         });
     }
@@ -302,6 +420,9 @@ fn check_with(
     } else {
         1
     };
+    if max_amount > MAX_CRAFT_BATCH {
+        return Err(Refusal::TooComplex);
+    }
     Ok(Materials {
         lines,
         max_amount,
@@ -348,52 +469,163 @@ fn resolve_selector(
     }
 }
 
+/// Reserve every physical pile a craft payment will touch, without mutation.
+///
+/// Candidates are sorted by wire serial before selection. The temporary
+/// remaining table is shared by all resource lines, so duplicate or overlapping
+/// selectors can never promise the same units twice.
+pub fn prepare_withdrawal(
+    state: &WorldState,
+    crafter: EntityId,
+    materials: &Materials,
+    share: Share,
+) -> Result<WithdrawalPlan, Refusal> {
+    if materials.lines.len() > MAX_CRAFT_RESOURCE_LINES || materials.max_amount > MAX_CRAFT_BATCH {
+        return Err(Refusal::TooComplex);
+    }
+    let Some(owner) = state.registry.serial_of(crafter) else {
+        return Err(Refusal::NoPack);
+    };
+    let Some(source) = openshard_items::backpack_of(state, owner) else {
+        return Err(Refusal::NoPack);
+    };
+
+    let mut candidates: Vec<(Serial, EntityId, u16)> = contained_items(state, source)
+        .filter_map(|(item, _)| {
+            state
+                .registry
+                .serial_of(item)
+                .map(|serial| (serial, item, openshard_items::amount_of(state, item)))
+        })
+        .collect();
+    if candidates.len() > MAX_CRAFT_SOURCE_ITEMS {
+        return Err(Refusal::TooComplex);
+    }
+    candidates.sort_by_key(|(serial, item, _)| (*serial, *item));
+
+    let mut remaining: BTreeMap<Serial, u16> = candidates
+        .iter()
+        .map(|(serial, _, amount)| (*serial, *amount))
+        .collect();
+    let mut row_by_serial = BTreeMap::<Serial, usize>::new();
+    let mut rows: Vec<Withdrawal> = Vec::new();
+
+    for line in &materials.lines {
+        let mut wanted = match share {
+            Share::All => u32::from(line.amount) * u32::from(materials.max_amount),
+            // A failed batch pays half of one craft, matching ServUO rather than
+            // multiplying the failure cost by the whole `use_all_res` batch.
+            Share::Half => u32::from(line.amount / 2).max(1),
+        };
+        if wanted == 0 {
+            continue;
+        }
+        for &(serial, item, expected) in &candidates {
+            if wanted == 0 {
+                break;
+            }
+            let Some(identity) = line_identity_if_matches(state, item, *line) else {
+                continue;
+            };
+            let available = remaining.get(&serial).copied().unwrap_or(0);
+            if available == 0 {
+                continue;
+            }
+            let reserved = u16::try_from(wanted.min(u32::from(available)))
+                .expect("one reservation never exceeds one physical u16 pile");
+            remaining.insert(serial, available - reserved);
+            wanted -= u32::from(reserved);
+
+            if let Some(&index) = row_by_serial.get(&serial) {
+                let row = &mut rows[index];
+                row.take = row
+                    .take
+                    .checked_add(reserved)
+                    .expect("combined reservations cannot exceed the expected pile amount");
+            } else {
+                if rows.len() == MAX_CRAFT_WITHDRAWALS {
+                    return Err(Refusal::TooComplex);
+                }
+                row_by_serial.insert(serial, rows.len());
+                rows.push(Withdrawal {
+                    item,
+                    serial,
+                    source,
+                    expected,
+                    take: reserved,
+                    identity,
+                });
+            }
+        }
+        if wanted != 0 {
+            return Err(Refusal::NotEnough(line.message));
+        }
+    }
+
+    rows.sort_by_key(|row| (row.source, row.serial));
+    Ok(WithdrawalPlan { rows })
+}
+
+fn line_identity_if_matches(
+    state: &WorldState,
+    item: EntityId,
+    line: MaterialLine,
+) -> Option<ExpectedIdentity> {
+    let legacy = Drawn {
+        id:  line.graphic,
+        hue: line.hue.expect("a prepared craft ingredient has a resolved hue"),
+    };
+    match line.semantic {
+        Some((kind, material)) => {
+            match state.registry.get::<ItemKind>(item) {
+                Some(ItemKind(found))
+                    if *found == kind
+                        && state.registry.get::<Material>(item).map(|found| found.0) == material =>
+                {
+                    Some(ExpectedIdentity::Semantic { kind, material })
+                }
+                None if state.registry.get::<Drawn>(item) == Some(&legacy) => {
+                    Some(ExpectedIdentity::Legacy(legacy))
+                }
+                _ => None,
+            }
+        }
+        None if state.registry.get::<Drawn>(item) == Some(&legacy) => {
+            match state.registry.get::<ItemKind>(item) {
+                Some(ItemKind(kind)) => {
+                    Some(ExpectedIdentity::Semantic {
+                        kind:     *kind,
+                        material: state.registry.get::<Material>(item).map(|found| found.0),
+                    })
+                }
+                None => Some(ExpectedIdentity::Legacy(legacy)),
+            }
+        }
+        None => None,
+    }
+}
+
+fn expected_identity_matches(state: &WorldState, item: EntityId, identity: ExpectedIdentity) -> bool {
+    match identity {
+        ExpectedIdentity::Semantic { kind, material } => {
+            state.registry.get::<ItemKind>(item) == Some(&ItemKind(kind))
+                && state.registry.get::<Material>(item).map(|found| found.0) == material
+        }
+        ExpectedIdentity::Legacy(drawn) => state.registry.get::<Drawn>(item) == Some(&drawn),
+    }
+}
+
 /// Take what [`check`] resolved. Returns whether every line came out whole.
 ///
 /// Each line is all-or-nothing through `items`' own door, so a craft that finds
 /// itself short between the check and the take removes nothing on that line
 /// rather than eating part of it.
 pub fn take(state: &mut WorldState, crafter: EntityId, materials: &Materials, share: Share) -> bool {
-    let Some(pack) = state.registry.serial_of(crafter) else {
+    let Ok(plan) = prepare_withdrawal(state, crafter, materials, share) else {
         return false;
     };
-    let mut whole = true;
-    for line in &materials.lines {
-        let wanted = match share {
-            Share::All => u32::from(line.amount) * u32::from(materials.max_amount),
-            // Half is **not** multiplied out by the batch size: a failed run of a
-            // hundred boards costs half of *one* craft's logs, not fifty crafts'.
-            // ServUO floors it at one, so a bad roll is never free.
-            Share::Half => u32::from(line.amount / 2).max(1),
-        };
-        let Ok(wanted) = u16::try_from(wanted) else {
-            whole = false;
-            continue;
-        };
-        if wanted == 0 {
-            continue;
-        }
-        let took = match line.semantic {
-            Some((kind, material)) => {
-                openshard_items::take_from_backpack_identity_or_legacy(
-                    state,
-                    pack,
-                    kind,
-                    material,
-                    Drawn {
-                        id:  line.graphic,
-                        hue: line.hue.expect("a semantic ingredient has a resolved hue"),
-                    },
-                    wanted,
-                )
-            }
-            None => openshard_items::take_from_backpack_of_hue(state, pack, line.graphic, line.hue, wanted),
-        };
-        if took == 0 {
-            whole = false;
-        }
-    }
-    whole
+    plan.commit(state);
+    true
 }
 
 #[cfg(test)]
