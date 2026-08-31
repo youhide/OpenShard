@@ -632,7 +632,7 @@ presentation.
 
 - [x] Add named ground/container serial-exhaustion regressions; after A1 they
       pin the corrected unchanged-state refusal rather than the former loss.
-- [ ] Add a named craft test proving output allocation failure currently spends
+- [x] Add a named craft test proving output allocation failure currently spends
       ingredients, then mark its target expectation for A5.
 - [x] Catalogue direct production writes to `ItemLocation`, `Contained`,
       `Equipped`, `Amount`, and raw `Registry::despawn` for item entities.
@@ -660,6 +660,13 @@ The 2026-08-31 mutation inventory found:
   and world decor/fields/gates/spawners/death; A2 now routes those through
   `despawn_item`. The raw calls left are mobile destruction or rollback of an
   entity that failed before receiving `Drawn`/`ItemLocation`.
+
+The named craft allocation regression exhausts the item serial pool only after
+the tool, ingredients, and guaranteed-success skill are established. It records
+the current seam exactly: all ingredients are spent, no output is placed, no
+`ItemCrafted` event is emitted, and the ownership graph remains structurally
+valid. A5 flips the ingredient expectation to unchanged and compares the full
+logical snapshot once output placement joins prepare.
 
 ### A1 — make split allocation-first
 

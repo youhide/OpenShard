@@ -260,6 +260,54 @@ fn a_smith_at_a_forge_turns_ingots_into_a_blade() {
 }
 
 #[test]
+fn output_serial_exhaustion_currently_spends_successful_craft_ingredients() {
+    // This characterises the non-atomic seam A5 must remove. The successful
+    // roll consumes the ingots before output placement asks the exhausted item
+    // allocator for a serial. A5 changes the target expectation to unchanged
+    // ingredients and an unchanged logical-state snapshot.
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    shop(&mut world, &[(FORGE.0, 0), (ANVIL.0, 0)]);
+    let tongs = give(&mut world, connection, TONGS, Hue(0), 1);
+    let (recipe, _) = cheapest_smithing();
+    let def = openshard_crafting::system(SystemId::new(0)).expect("blacksmithy");
+    let wanted = def.recipes[usize::from(recipe)].resources[0].amount;
+    let made = def.recipes[usize::from(recipe)].graphic;
+    give(&mut world, connection, INGOT, Hue(0), wanted);
+    train(&mut world, connection, Skill::Blacksmith, 1000);
+    now += TICK_INTERVAL;
+    world.tick(now);
+    let mut crafted = world.state.bus.cursor_at_end::<openshard_crafting::ItemCrafted>();
+    world
+        .state
+        .registry
+        .reserve_serial(
+            Serial::new(openshard_protocol::serial::ITEM_MAX).expect("the final item serial"),
+        );
+
+    craft(&mut world, connection, tongs, recipe, 0, now);
+    finish(&mut world, connection, now);
+
+    assert_eq!(
+        carried(&world, connection, INGOT, Hue(0)),
+        0,
+        "the current commit order spends the ingredients before placement fails"
+    );
+    assert_eq!(
+        carried(&world, connection, made, Hue(0)),
+        0,
+        "the exhausted allocator cannot place the result"
+    );
+    assert_eq!(
+        world.state.bus.read(&mut crafted).count(),
+        0,
+        "an unplaced result is not reported as crafted"
+    );
+    assert!(openshard_state::audit_item_graph(&world.state).is_empty());
+}
+
+#[test]
 fn tinkering_turns_a_typed_ingot_into_a_typed_metal_tool() {
     let mut now = Instant::now();
     let mut world = world();
