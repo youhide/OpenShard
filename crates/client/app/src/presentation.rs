@@ -2593,6 +2593,9 @@ impl App {
             // backends and a stretched frame on others.
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 window.surface.configure(&window.device, &window.config);
+                if let (Some(shell), Some((_, output, _))) = (self.shell.as_mut(), ui) {
+                    shell.finish_without_painting(&window.device, &window.queue, output);
+                }
                 return;
             }
             // Nothing was acquired and nothing is wrong: the window is hidden,
@@ -2603,6 +2606,9 @@ impl App {
                     wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded
                 ) {
                     eprintln!("acquiring a frame: {other:?}");
+                }
+                if let (Some(shell), Some((_, output, _))) = (self.shell.as_mut(), ui) {
+                    shell.finish_without_painting(&window.device, &window.queue, output);
                 }
                 return;
             }
@@ -2954,6 +2960,9 @@ impl App {
             gpu.resolve(&mut encoder);
         }
         window.queue.submit([encoder.finish()]);
+        if let Some(shell) = self.shell.as_mut() {
+            shell.finish_submission();
+        }
         if atlas_audit_due || manual_frame_diagnostic || live_oracle_sample.is_some() {
             if manual_frame_diagnostic {
                 tracing::info!("running one-shot LOD diagnostics for manual GPU frame dump");

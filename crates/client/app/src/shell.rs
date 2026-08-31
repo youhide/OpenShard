@@ -335,6 +335,11 @@ pub struct Shell {
     /// HUD upload would otherwise replace the health-bar mesh before the GPU
     /// executes the earlier world-overlay render pass.
     world_overlay_renderer: egui_wgpu::Renderer,
+    /// Textures may be destroyed only after the command buffer that last used
+    /// them has been submitted. `egui_wgpu::Renderer::free_texture` destroys
+    /// the underlying wgpu texture rather than merely dropping a handle.
+    hud_textures_to_free: Vec<egui::TextureId>,
+    world_overlay_textures_to_free: Vec<egui::TextureId>,
     /// Where the world may be drawn: what [`egui::CentralPanel`] left free,
     /// converted to physical pixels. Held between frames because the camera is
     /// resized from it before the next frame's UI has run.
@@ -410,6 +415,8 @@ impl Shell {
             state,
             hud_renderer,
             world_overlay_renderer,
+            hud_textures_to_free: Vec::new(),
+            world_overlay_textures_to_free: Vec::new(),
             viewport: ViewportRect {
                 x:      0,
                 y:      0,
@@ -735,7 +742,7 @@ impl Shell {
         output: egui::FullOutput,
         size_in_pixels: [u32; 2],
     ) {
-        Self::paint_output(
+        let textures_to_free = Self::paint_output(
             &mut self.hud_renderer,
             &self.context,
             EguiLayer::Hud,
@@ -746,6 +753,31 @@ impl Shell {
             output,
             size_in_pixels,
         );
+        self.hud_textures_to_free.extend(textures_to_free);
+    }
+
+    /// Finish an egui frame when the surface supplied no texture to paint.
+    ///
+    /// Texture commands are state changes, not part of the discarded picture:
+    /// egui will not repeat a font-atlas upload merely because the swapchain was
+    /// lost or occluded. Apply them to both renderers even though this frame's
+    /// shapes have nowhere to go. Consuming the commands also fulfils
+    /// `TexturesDelta`'s contract that no delta may be dropped unhandled.
+    pub fn finish_without_painting(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        hud_output: egui::FullOutput,
+    ) {
+        let world_overlay_output = self.world_overlay_output.take();
+        debug_assert!(
+            world_overlay_output.is_some(),
+            "world overlays must be finished once after Shell::run"
+        );
+        if let Some(output) = world_overlay_output {
+            Self::finish_output_without_painting(&mut self.world_overlay_renderer, device, queue, output);
+        }
+        Self::finish_output_without_painting(&mut self.hud_renderer, device, queue, hud_output);
     }
 
     /// Paint the world-overlay layer between the world and client windows.
@@ -765,7 +797,7 @@ impl Shell {
             "world overlays must be encoded once after Shell::run and before HUD painting"
         );
         if let Some(output) = output {
-            Self::paint_output(
+            let textures_to_free = Self::paint_output(
                 &mut self.world_overlay_renderer,
                 &self.world_overlay_context,
                 EguiLayer::WorldOverlay,
@@ -776,6 +808,18 @@ impl Shell {
                 output,
                 size_in_pixels,
             );
+            self.world_overlay_textures_to_free.extend(textures_to_free);
+        }
+    }
+
+    /// Release textures retired by the egui frames in the command buffer the
+    /// caller has just submitted.
+    pub fn finish_submission(&mut self) {
+        for id in self.world_overlay_textures_to_free.drain(..) {
+            self.world_overlay_renderer.free_texture(&id);
+        }
+        for id in self.hud_textures_to_free.drain(..) {
+            self.hud_renderer.free_texture(&id);
         }
     }
 
@@ -791,9 +835,9 @@ impl Shell {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
-        output: egui::FullOutput,
+        mut output: egui::FullOutput,
         size_in_pixels: [u32; 2],
-    ) {
+    ) -> Vec<egui::TextureId> {
         let pixels_per_point = output.pixels_per_point;
         debug_assert_eq!(
             pixels_per_point,
@@ -802,11 +846,7 @@ impl Shell {
             layer.pass_label(),
         );
         let jobs = context.tessellate(output.shapes, pixels_per_point);
-        for (id, deltas) in &output.textures_delta.set {
-            for delta in deltas {
-                renderer.update_texture(device, queue, *id, delta);
-            }
-        }
+        Self::upload_textures(renderer, device, queue, &mut output.textures_delta);
         let descriptor = egui_wgpu::ScreenDescriptor {
             size_in_pixels,
             pixels_per_point,
@@ -832,8 +872,38 @@ impl Shell {
         });
         renderer.render(&mut pass.forget_lifetime(), &jobs, &descriptor);
 
-        for id in &output.textures_delta.free {
-            renderer.free_texture(id);
+        let textures_to_free = output.textures_delta.free.drain().collect();
+        textures_to_free
+    }
+
+    fn finish_output_without_painting(
+        renderer: &mut egui_wgpu::Renderer,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        mut output: egui::FullOutput,
+    ) {
+        Self::upload_textures(renderer, device, queue, &mut output.textures_delta);
+        Self::free_textures(renderer, &mut output.textures_delta);
+    }
+
+    #[expect(clippy::iter_over_hash_type)]
+    fn upload_textures(
+        renderer: &mut egui_wgpu::Renderer,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        textures: &mut egui::TexturesDelta,
+    ) {
+        for (id, deltas) in textures.set.drain() {
+            for delta in deltas {
+                renderer.update_texture(device, queue, id, &delta);
+            }
+        }
+    }
+
+    #[expect(clippy::iter_over_hash_type)]
+    fn free_textures(renderer: &mut egui_wgpu::Renderer, textures: &mut egui::TexturesDelta) {
+        for id in textures.free.drain() {
+            renderer.free_texture(&id);
         }
     }
 }
