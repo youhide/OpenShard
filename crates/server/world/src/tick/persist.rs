@@ -1357,6 +1357,10 @@ impl World {
         let ItemLocation::Ground { facet, x, y, z } = record.location else {
             return;
         };
+        if !valid_saved_amount(record.graphic, record.amount) {
+            warn!(serial = %record.serial, amount = record.amount, "refusing a corrupt saved item amount");
+            return;
+        }
         let serial = record.serial;
         let facet = if self.state.facets.contains_key(&Facet(facet)) {
             Facet(facet)
@@ -1508,6 +1512,31 @@ impl World {
         let Some(records) = self.pending_inventories.remove(&owner) else {
             return false;
         };
+        let mut refused: HashSet<Serial> = records
+            .iter()
+            .filter(|record| !valid_saved_amount(record.graphic, record.amount))
+            .map(|record| record.serial)
+            .collect();
+        loop {
+            let before = refused.len();
+            for record in &records {
+                if let ItemLocation::Contained { container, .. } = record.location {
+                    if refused.contains(&container) {
+                        refused.insert(record.serial);
+                    }
+                }
+            }
+            if refused.len() == before {
+                break;
+            }
+        }
+        for record in records.iter().filter(|record| refused.contains(&record.serial)) {
+            warn!(serial = %record.serial, amount = record.amount, "refusing a corrupt saved item or its dependent subtree");
+        }
+        let records: Vec<_> = records
+            .into_iter()
+            .filter(|record| !refused.contains(&record.serial))
+            .collect();
         // Only entities this restore actually bound may be placed in pass two.
         // Looking a serial up in the whole registry there would mistake a stale
         // or otherwise colliding live entity for the one whose spawn failed.
@@ -2090,6 +2119,10 @@ impl World {
     }
 }
 
+fn valid_saved_amount(graphic: u16, amount: u16) -> bool {
+    graphic == openshard_state::components::CORPSE_GRAPHIC.0 || openshard_items::is_valid_stack_amount(amount)
+}
+
 /// Which way a restored corpse lies. Saved with the story rather than in a column
 /// of its own — see [`CorpseData::facing`], which is also where the north a save
 /// written before facings were saved comes back as.
@@ -2195,5 +2228,21 @@ mod persisted_container_position_tests {
     #[should_panic(expected = "contained-item gump y must fit the persisted u16 field")]
     fn rejects_a_coordinate_above_the_persisted_domain() {
         persisted_container_position(GumpPoint::new(0, 65_536));
+    }
+
+    #[test]
+    fn saved_stack_amounts_must_fit_the_live_physical_pile_domain() {
+        assert!(!valid_saved_amount(0x0EED, 0));
+        assert!(valid_saved_amount(0x0EED, 1));
+        assert!(valid_saved_amount(0x0EED, openshard_items::MAX_STACK));
+        assert!(!valid_saved_amount(0x0EED, openshard_items::MAX_STACK + 1,));
+    }
+
+    #[test]
+    fn a_saved_corpse_amount_is_its_body_not_a_stack_quantity() {
+        assert!(valid_saved_amount(
+            openshard_state::components::CORPSE_GRAPHIC.0,
+            0,
+        ));
     }
 }

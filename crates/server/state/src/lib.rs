@@ -43,6 +43,7 @@ pub mod boat;
 pub mod components;
 pub mod connection;
 pub mod craft;
+pub mod craft_stock;
 pub mod dialogue;
 pub mod facet_rules;
 pub mod guild;
@@ -182,6 +183,10 @@ pub use components::{
     effect,
     is_debuff,
     stat_shift,
+};
+pub use craft_stock::{
+    CraftStockError,
+    CraftStockPile,
 };
 pub use dialogue::{
     Dialogue,

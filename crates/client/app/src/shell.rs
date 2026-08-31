@@ -6873,6 +6873,7 @@ mod tests {
             skill: ClilocId(7),
             components: vec![
                 openshard_protocol::craft::CraftCatalogueComponent {
+                    stock_key: openshard_protocol::craft::CraftKey(0),
                     item_kind: None,
                     material:  None,
                     graphic:   Graphic(0x1BF2),
@@ -6881,6 +6882,7 @@ mod tests {
                     amount:    2,
                 },
                 openshard_protocol::craft::CraftCatalogueComponent {
+                    stock_key: openshard_protocol::craft::CraftKey(1),
                     item_kind: None,
                     material:  None,
                     graphic:   Graphic(0x0F8D),

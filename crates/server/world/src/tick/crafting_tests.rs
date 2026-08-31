@@ -127,6 +127,9 @@ fn give(world: &mut World, connection: ConnectionId, graphic: Graphic, hue: Hue,
             .insert(item, openshard_state::components::Stackable);
     }
     items::apply_core_defaults(&mut world.state, item, graphic);
+    // This fixture writes construction-only fields directly; publish their
+    // final shape to the mutation-maintained stock projection once.
+    world.state.invalidate_house_inventory_for_item(item);
     item
 }
 
@@ -419,11 +422,17 @@ fn overlapping_material_lines_reserve_one_physical_pile_only_once() {
     let player = world.state.players[&connection];
     let line = |amount| {
         openshard_crafting::consume::MaterialLine {
+            key: openshard_protocol::craft::craft_key_for(
+                Some((ItemKindId(1), Some(MaterialId(1)))),
+                INGOT,
+                Hue::NONE,
+            )
+            .unwrap(),
             graphic: INGOT,
             hue: Some(Hue::NONE),
             amount,
             message: openshard_crafting::Text::Str("not enough ingots"),
-            semantic: None,
+            semantic: Some((ItemKindId(1), Some(MaterialId(1)))),
         }
     };
 
@@ -483,11 +492,17 @@ proptest! {
         give(&mut world, connection, INGOT, Hue::NONE, held);
         let player = world.state.players[&connection];
         let line = |amount| openshard_crafting::consume::MaterialLine {
+            key: openshard_protocol::craft::craft_key_for(
+                Some((ItemKindId(1), Some(MaterialId(1)))),
+                INGOT,
+                Hue::NONE,
+            )
+            .unwrap(),
             graphic: INGOT,
             hue: Some(Hue::NONE),
             amount,
             message: openshard_crafting::Text::Str("not enough ingots"),
-            semantic: None,
+            semantic: Some((ItemKindId(1), Some(MaterialId(1)))),
         };
         let materials = openshard_crafting::Materials {
             lines: vec![line(first), line(second)],
@@ -1043,6 +1058,7 @@ fn fletching_requires_the_semantic_board_kind() {
     let impostor = give(&mut world, connection, BOARD, OAK, 1);
     world.state.registry.insert(impostor, ItemKind(ItemKindId(999)));
     world.state.registry.insert(impostor, Material(MaterialId(21)));
+    world.state.invalidate_house_inventory_for_item(impostor);
     train(&mut world, connection, Skill::Fletching, 1000);
     now += TICK_INTERVAL;
     world.tick(now);

@@ -1246,6 +1246,8 @@ pub struct WorldState {
     pub default_facet: Facet,
     /// Read-only house storage projection, rebuilt from canonical item facts.
     pub(crate) house_inventory: HouseInventoryIndex,
+    /// Dense recursive container stock projection used by bounded payments.
+    pub(crate) craft_stock: crate::craft_stock::CraftStockIndex,
     /// What the client's `tiledata.mul` says about a graphic: whether it blocks,
     /// how tall it is, what it weighs, which hand it is held in, what it is
     /// called.
@@ -1742,6 +1744,7 @@ impl WorldState {
             facets,
             default_facet,
             house_inventory: HouseInventoryIndex::new(),
+            craft_stock: crate::craft_stock::CraftStockIndex::new(),
             tiles,
             multis,
             house_templates: BTreeMap::new(),

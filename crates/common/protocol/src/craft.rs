@@ -57,6 +57,8 @@ impl OpenCraftCatalogue {
 /// One material cell in a catalogue row.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CraftCatalogueComponent {
+    /// Dense selector in the shared static catalogue.
+    pub stock_key: CraftKey,
     /// Durable input type for a migrated recipe row.
     pub item_kind: Option<ItemKindId>,
     /// Required material when that input is materialized.
@@ -67,6 +69,61 @@ pub struct CraftCatalogueComponent {
     pub name:      ClilocId,
     pub amount:    u16,
 }
+
+/// Dense input selector shared by generated recipes and compact stock snapshots.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct CraftKey(pub u16);
+
+/// Largest recursive source admitted to one realtime craft operation.
+pub const MAX_CRAFT_SOURCE_ITEMS: usize = 125;
+
+/// Find the dense key which represents one already-resolved recipe input.
+#[must_use]
+pub fn craft_key_for(
+    kind: Option<(ItemKindId, Option<MaterialId>)>,
+    graphic: Graphic,
+    hue: Hue,
+) -> Option<CraftKey> {
+    CRAFT_STOCK_SELECTORS
+        .iter()
+        .position(|selector| {
+            selector.graphic == graphic
+                && selector.hue == hue
+                && match kind {
+                    Some((kind, material)) => selector.kind == Some(kind) && selector.material == material,
+                    None => selector.kind.is_none(),
+                }
+        })
+        .and_then(|index| u16::try_from(index).ok())
+        .map(CraftKey)
+}
+
+/// What one dense key counts. A semantic selector also accepts an untyped item
+/// with the exact legacy presentation pair during catalogue migration.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct CraftStockSelector {
+    pub kind:     Option<ItemKindId>,
+    pub material: Option<MaterialId>,
+    pub graphic:  Graphic,
+    pub hue:      Hue,
+}
+
+/// One skill gate used by client-owned readiness evaluation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CraftSkillRequirement {
+    pub skill:   u8,
+    pub minimum: u16,
+}
+
+/// Presentation row plus the compact facts which determine its readiness.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct CraftCatalogueDefinitionRow {
+    pub row:                CraftCatalogueRow,
+    pub skill_requirements: Vec<CraftSkillRequirement>,
+    pub needs:              u8,
+}
+
+include!(concat!(env!("OUT_DIR"), "/craft_catalogue.rs"));
 
 /// Combat family used by an item which can be wielded. The catalogue keeps
 /// this compact presentation data beside its recipe rather than requiring the
@@ -80,38 +137,6 @@ pub enum CraftWeaponKind {
     Polearm,
     Staff,
     Ranged,
-}
-
-impl CraftWeaponKind {
-    const fn encode(self) -> u8 {
-        match self {
-            Self::Slashing => 0,
-            Self::Piercing => 1,
-            Self::Bashing => 2,
-            Self::Axe => 3,
-            Self::Polearm => 4,
-            Self::Staff => 5,
-            Self::Ranged => 6,
-        }
-    }
-
-    fn decode(value: u8) -> Result<Self, DecodeError> {
-        match value {
-            0 => Ok(Self::Slashing),
-            1 => Ok(Self::Piercing),
-            2 => Ok(Self::Bashing),
-            3 => Ok(Self::Axe),
-            4 => Ok(Self::Polearm),
-            5 => Ok(Self::Staff),
-            6 => Ok(Self::Ranged),
-            value => {
-                Err(DecodeError::UnknownValue {
-                    field: "craft weapon kind",
-                    value: u32::from(value),
-                })
-            }
-        }
-    }
 }
 
 /// The concise combat facts a player needs while comparing crafted weapons.
@@ -153,11 +178,72 @@ pub struct CraftCatalogueRow {
 /// This deliberately travels outside `0xB0`: a gump layout is capped at a
 /// `u16` byte count, while a full catalogue expressed as ordinary gump rows
 /// would overflow it before the client could scroll locally.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Debug)]
 pub struct CraftCatalogue {
     /// The gump shell this data belongs to.
     pub gump_id: GumpId,
-    pub rows:    Vec<CraftCatalogueRow>,
+    /// Monotonic per-connection open identity; stale worker results are dropped.
+    pub request_id: u32,
+    pub catalogue_revision: u64,
+    pub craft_projection_revision: u64,
+    pub backpack_revision: u64,
+    pub has_pack: bool,
+    /// Present facilities as the forge/anvil/heat/oven/mill/water bitset.
+    pub facilities: u8,
+    /// `(Skill::id, effective tenths)` for the skills referenced by recipes.
+    pub skills: Vec<(u8, u16)>,
+    /// Totals in [`CRAFT_STOCK_SELECTORS`] order.
+    pub amounts: Vec<u32>,
+    /// Materialized locally after decoding; never serialized by this packet.
+    pub rows: Vec<CraftCatalogueRow>,
+}
+
+impl PartialEq for CraftCatalogue {
+    fn eq(&self, other: &Self) -> bool {
+        self.gump_id == other.gump_id
+            && self.request_id == other.request_id
+            && self.catalogue_revision == other.catalogue_revision
+            && self.craft_projection_revision == other.craft_projection_revision
+            && self.backpack_revision == other.backpack_revision
+            && self.has_pack == other.has_pack
+            && self.facilities == other.facilities
+            && self.skills == other.skills
+            && self.amounts == other.amounts
+    }
+}
+
+impl Eq for CraftCatalogue {
+}
+
+impl CraftCatalogue {
+    fn materialize_rows(&mut self) {
+        let skill = |id| {
+            self.skills
+                .iter()
+                .find_map(|&(found, value)| (found == id).then_some(value))
+                .unwrap_or_default()
+        };
+        self.rows = craft_catalogue_definitions()
+            .into_iter()
+            .map(|mut definition| {
+                let skills_ready = definition
+                    .skill_requirements
+                    .iter()
+                    .all(|requirement| skill(requirement.skill) >= requirement.minimum);
+                let facilities_ready = self.facilities & definition.needs == definition.needs;
+                let mut wanted = std::collections::BTreeMap::<CraftKey, u32>::new();
+                for component in &definition.row.components {
+                    *wanted.entry(component.stock_key).or_insert(0) += u32::from(component.amount);
+                }
+                let materials_ready = self.has_pack
+                    && wanted.into_iter().all(|(key, amount)| {
+                        self.amounts.get(usize::from(key.0)).copied().unwrap_or_default() >= amount
+                    });
+                definition.row.ready = skills_ready && facilities_ready && materials_ready;
+                definition.row
+            })
+            .collect();
+    }
 }
 
 /// A localized label used by the interactive craft workbench.
@@ -649,37 +735,20 @@ impl EncodePacket for CraftCatalogue {
     fn encode_body(&self, out: &mut PacketWriter, _version: crate::version::ClientVersion) {
         out.u16(Self::SUBCOMMAND);
         out.u32(self.gump_id.0);
-        out.u16(u16::try_from(self.rows.len()).expect("a craft catalogue fits a u16 row count"));
-        for row in &self.rows {
-            out.u32(row.button);
-            out.u16(row.result.0);
-            out.u16(row.result_hue.0);
-            out.u32(row.result_item_kind.map_or(0, |kind| kind.0));
-            out.u32(row.name.0);
-            out.u32(row.skill.0);
-            out.u16(row.skill_min);
-            out.u8(u8::from(row.ready));
-            match row.weapon {
-                Some(weapon) => {
-                    out.u8(1);
-                    out.u32(weapon.combat_skill.0);
-                    out.u8(weapon.kind.encode());
-                    out.u16(weapon.damage_min);
-                    out.u16(weapon.damage_max);
-                    out.u16(weapon.speed_centis);
-                    out.u8(weapon.range.unwrap_or(0));
-                }
-                None => out.u8(0),
-            }
-            out.u8(u8::try_from(row.components.len()).expect("a craft row fits a u8 component count"));
-            for component in &row.components {
-                out.u32(component.item_kind.map_or(0, |kind| kind.0));
-                out.u16(component.material.map_or(0, |material| material.0));
-                out.u16(component.graphic.0);
-                out.u16(component.hue.0);
-                out.u32(component.name.0);
-                out.u16(component.amount);
-            }
+        out.u32(self.request_id);
+        out.u64(self.catalogue_revision);
+        out.u64(self.craft_projection_revision);
+        out.u64(self.backpack_revision);
+        out.u8(u8::from(self.has_pack));
+        out.u8(self.facilities);
+        out.u8(u8::try_from(self.skills.len()).expect("a craft skill context fits a u8 count"));
+        for &(skill, value) in &self.skills {
+            out.u8(skill);
+            out.u16(value);
+        }
+        out.u16(u16::try_from(self.amounts.len()).expect("a craft stock context fits a u16 count"));
+        for &amount in &self.amounts {
+            out.u32(amount);
         }
     }
 }
@@ -699,65 +768,44 @@ impl DecodePacket for CraftCatalogue {
             });
         }
         let gump_id = GumpId(reader.u32()?);
-        let count = usize::from(reader.u16()?);
-        let mut rows = Vec::with_capacity(count);
-        for _ in 0..count {
-            let button = reader.u32()?;
-            let result = Graphic(reader.u16()?);
-            let result_hue = Hue(reader.u16()?);
-            let result_item_kind = ItemKindId::new(reader.u32()?);
-            let name = ClilocId(reader.u32()?);
-            let skill = ClilocId(reader.u32()?);
-            let skill_min = reader.u16()?;
-            let ready = reader.u8()? != 0;
-            let weapon = match reader.u8()? {
-                0 => None,
-                1 => {
-                    Some(CraftWeaponProperties {
-                        combat_skill: ClilocId(reader.u32()?),
-                        kind:         CraftWeaponKind::decode(reader.u8()?)?,
-                        damage_min:   reader.u16()?,
-                        damage_max:   reader.u16()?,
-                        speed_centis: reader.u16()?,
-                        range:        match reader.u8()? {
-                            0 => None,
-                            range => Some(range),
-                        },
-                    })
-                }
-                value => {
-                    return Err(DecodeError::UnknownValue {
-                        field: "craft weapon presence",
-                        value: u32::from(value),
-                    });
-                }
-            };
-            let components = (0..reader.u8()?)
-                .map(|_| {
-                    Ok(CraftCatalogueComponent {
-                        item_kind: ItemKindId::new(reader.u32()?),
-                        material:  MaterialId::new(reader.u16()?),
-                        graphic:   Graphic(reader.u16()?),
-                        hue:       Hue(reader.u16()?),
-                        name:      ClilocId(reader.u32()?),
-                        amount:    reader.u16()?,
-                    })
-                })
-                .collect::<Result<Vec<_>, DecodeError>>()?;
-            rows.push(CraftCatalogueRow {
-                button,
-                result,
-                result_hue,
-                result_item_kind,
-                name,
-                skill,
-                skill_min,
-                ready,
-                weapon,
-                components,
+        let request_id = reader.u32()?;
+        let catalogue_revision = reader.u64()?;
+        if catalogue_revision != CRAFT_CATALOGUE_REVISION {
+            return Err(DecodeError::UnknownValue {
+                field: "craft catalogue revision",
+                value: catalogue_revision as u32,
             });
         }
-        Ok(Self { gump_id, rows })
+        let craft_projection_revision = reader.u64()?;
+        let backpack_revision = reader.u64()?;
+        let has_pack = reader.u8()? != 0;
+        let facilities = reader.u8()?;
+        let skills = (0..reader.u8()?)
+            .map(|_| Ok((reader.u8()?, reader.u16()?)))
+            .collect::<Result<Vec<_>, DecodeError>>()?;
+        let amounts = (0..reader.u16()?)
+            .map(|_| reader.u32().map_err(DecodeError::from))
+            .collect::<Result<Vec<_>, DecodeError>>()?;
+        if amounts.len() != CRAFT_KEY_COUNT {
+            return Err(DecodeError::UnknownValue {
+                field: "craft stock key count",
+                value: u32::try_from(amounts.len()).unwrap_or(u32::MAX),
+            });
+        }
+        let mut catalogue = Self {
+            gump_id,
+            request_id,
+            catalogue_revision,
+            craft_projection_revision,
+            backpack_revision,
+            has_pack,
+            facilities,
+            skills,
+            amounts,
+            rows: Vec::new(),
+        };
+        catalogue.materialize_rows();
+        Ok(catalogue)
     }
 }
 
@@ -784,10 +832,18 @@ mod tests {
     }
 
     #[test]
-    fn catalogue_rows_round_trip_in_their_own_extended_packet() {
+    fn compact_catalogue_context_materializes_the_static_rows_locally() {
         let sent = CraftCatalogue {
             gump_id: GumpId(0x00AD_0001),
-            rows:    vec![CraftCatalogueRow {
+            request_id: 17,
+            catalogue_revision: CRAFT_CATALOGUE_REVISION,
+            craft_projection_revision: 0,
+            backpack_revision: 23,
+            has_pack: true,
+            facilities: 3,
+            skills: vec![(7, 300)],
+            amounts: vec![0; CRAFT_KEY_COUNT],
+            rows: vec![CraftCatalogueRow {
                 button:           8,
                 result:           Graphic(0x13EB),
                 result_hue:       Hue::NONE,
@@ -805,6 +861,7 @@ mod tests {
                     range:        None,
                 }),
                 components:       vec![CraftCatalogueComponent {
+                    stock_key: CraftKey(0),
                     item_kind: Some(ItemKindId(1)),
                     material:  Some(MaterialId(1)),
                     graphic:   Graphic(0x1BF2),
@@ -815,10 +872,22 @@ mod tests {
             }],
         };
         let bytes = encode_packet(&sent, ClientVersion::TOL);
-        assert!(matches!(
-            ServerPacket::decode(&bytes, ClientVersion::TOL),
-            Ok(Some(ServerPacket::CraftCatalogue(found))) if found == sent
-        ));
+        assert!(
+            bytes.len() < 512,
+            "opening the catalogue sends context, not 492 rows"
+        );
+        let Some(ServerPacket::CraftCatalogue(found)) =
+            ServerPacket::decode(&bytes, ClientVersion::TOL).unwrap()
+        else {
+            panic!("the compact catalogue packet must decode");
+        };
+        assert_eq!(found, sent, "the wire-owned context round-trips");
+        assert_eq!(found.rows.len(), CRAFT_RECIPE_LOCATIONS.len());
+        assert_eq!(found.rows.len(), 492);
+        assert!(
+            found.rows.iter().all(|row| !row.ready),
+            "zero stock keeps every locally materialized recipe unavailable"
+        );
     }
 
     #[test]

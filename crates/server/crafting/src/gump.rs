@@ -22,11 +22,7 @@ use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::craft::{
     CraftCatalogue,
-    CraftCatalogueComponent,
-    CraftCatalogueRow,
     CraftText,
-    CraftWeaponKind,
-    CraftWeaponProperties,
     CraftWorkbench,
     CraftWorkbenchComponent,
     CraftWorkbenchGroup,
@@ -47,10 +43,7 @@ use openshard_protocol::gump::{
     GumpResponse,
     RawGumpId,
 };
-use openshard_protocol::item_kind::{
-    ItemSelector,
-    MaterialRule,
-};
+use openshard_protocol::item_kind::ItemSelector;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::wire::{
     ClilocId,
@@ -62,11 +55,6 @@ use openshard_state::components::{
     Drawn,
     Position,
     Tool,
-};
-use openshard_state::weapon::{
-    WeaponKind,
-    weapon_data,
-    weapon_data_for_kind,
 };
 use openshard_state::{
     CraftGumpContext,
@@ -84,7 +72,6 @@ use crate::system::{
     Text,
 };
 use crate::{
-    consume,
     craft,
     environment,
 };
@@ -268,10 +255,8 @@ pub fn open(state: &mut WorldState, player: EntityId, context: CraftGumpContext)
         }),
     );
     if context.page == CraftGumpPage::Catalogue {
-        state.send_packet(
-            connection,
-            &ServerPacket::CraftCatalogue(catalogue_data(state, player)),
-        );
+        let catalogue = catalogue_data(state, player);
+        state.send_packet(connection, &ServerPacket::CraftCatalogue(catalogue));
     } else {
         state.send_packet(
             connection,
@@ -474,72 +459,42 @@ fn catalogue() -> GumpLayout {
 /// The complete catalogue's data, sent once in a compact OpenShard packet.
 /// There are deliberately no coordinates here: the client's `ScrollTable`
 /// virtualizes rows, clips them and keeps the scroll position locally.
-fn catalogue_data(state: &WorldState, player: EntityId) -> CraftCatalogue {
-    // These are facts about the player, not the recipe. Capture each once before
-    // walking the catalogue: doing either scan per row made opening this window
-    // proportional to `recipes × world items` and `recipes × map tiles`.
-    let stock = consume::MaterialStock::capture(state, player);
+fn catalogue_data(state: &mut WorldState, player: EntityId) -> CraftCatalogue {
     let facilities = environment::around(state, player);
+    let backpack = state
+        .registry
+        .serial_of(player)
+        .and_then(|serial| openshard_items::backpack_of(state, serial));
+    let (backpack_revision, amounts) = backpack
+        .and_then(|backpack| state.craft_stock_amounts(backpack).ok())
+        .unwrap_or_else(|| (0, vec![0; openshard_protocol::craft::CRAFT_KEY_COUNT]));
+    let request_id = state
+        .registry
+        .get::<Client>(player)
+        .map(|client| client.connection)
+        .and_then(|connection| state.connections.get_mut(&connection))
+        .map(|connection| {
+            connection.craft_catalogue_request = connection.craft_catalogue_request.wrapping_add(1).max(1);
+            connection.craft_catalogue_request
+        })
+        .unwrap_or_default();
     CraftCatalogue {
         gump_id: CRAFT_GUMP,
-        rows:    catalogue_recipes()
-            .enumerate()
-            .map(|(index, (system, recipe))| {
-                CraftCatalogueRow {
-                    button:           button_id(kind::DETAILS, ButtonIndex::from_position(index)).0,
-                    result:           recipe.graphic,
-                    result_hue:       recipe.hue,
-                    result_item_kind: recipe.kind,
-                    name:             text_cliloc(recipe.name),
-                    skill:            recipe
-                        .skills
-                        .first()
-                        .map_or(ClilocId(0), |requirement| skill_label(requirement.skill)),
-                    skill_min:        recipe
-                        .skills
-                        .first()
-                        .map(|requirement| requirement.min - recipe.min_skill_offset)
-                        .unwrap_or_default()
-                        .clamp(0, i32::from(u16::MAX)) as u16,
-                    ready:            catalogue_ready(state, player, system, recipe, &stock, facilities),
-                    weapon:           recipe
-                        .kind
-                        .and_then(weapon_data_for_kind)
-                        .or_else(|| {
-                            recipe
-                                .kind
-                                .is_none()
-                                .then(|| weapon_data(recipe.graphic))
-                                .flatten()
-                        })
-                        .map(|weapon| {
-                            CraftWeaponProperties {
-                                combat_skill: skill_label(weapon.skill.skill()),
-                                kind:         craft_weapon_kind(weapon.kind),
-                                damage_min:   weapon.aos_min,
-                                damage_max:   weapon.aos_max,
-                                speed_centis: weapon.ml_speed,
-                                range:        weapon.range.map(|range| range.get()),
-                            }
-                        }),
-                    components:       recipe
-                        .resources
-                        .iter()
-                        .map(|resource| {
-                            let identity = catalogue_resource_identity(system, resource);
-                            CraftCatalogueComponent {
-                                item_kind: identity.map(|(kind, _)| kind),
-                                material:  identity.and_then(|(_, material)| material),
-                                graphic:   resource.graphic,
-                                hue:       axis_hue(system, resource, 0),
-                                name:      text_cliloc(resource.name),
-                                amount:    resource.amount,
-                            }
-                        })
-                        .collect(),
-                }
+        request_id,
+        catalogue_revision: openshard_protocol::craft::CRAFT_CATALOGUE_REVISION,
+        craft_projection_revision: 0,
+        backpack_revision,
+        has_pack: backpack.is_some(),
+        facilities: facility_mask_found(facilities),
+        skills: openshard_protocol::craft::CRAFT_SKILL_IDS
+            .iter()
+            .filter_map(|&id| {
+                openshard_state::Skill::from_id(id)
+                    .map(|skill| (id, openshard_skills::skill_value(state, player, skill)))
             })
             .collect(),
+        amounts,
+        rows: Vec::new(),
     }
 }
 
@@ -783,38 +738,6 @@ fn selector_kind(selector: Option<ItemSelector>) -> Option<openshard_protocol::i
     }
 }
 
-/// The default semantic identity presented by the all-recipes catalogue.
-///
-/// A material axis uses its first row (regular iron, wood or leather) because
-/// the catalogue has no per-player selection. The interactive workbench sends
-/// the player-selected row instead.
-fn catalogue_resource_identity(
-    system: &CraftSystemDef,
-    resource: &crate::recipe::CraftRes,
-) -> Option<(
-    openshard_protocol::item_kind::ItemKindId,
-    Option<openshard_protocol::item_kind::MaterialId>,
-)> {
-    if resource.from_axis {
-        let axis = system.sub_res?;
-        let material = axis.entries.first()?.material;
-        return Some((axis.item_kind, Some(material)));
-    }
-    match resource.selector {
-        Some(ItemSelector::Exact(kind)) => Some((kind, None)),
-        Some(ItemSelector::KindWithMaterial {
-            kind,
-            material: MaterialRule::Exact(material),
-        }) => Some((kind, Some(material))),
-        _ => {
-            kind_from_drawn(Drawn {
-                id:  resource.graphic,
-                hue: resource.hue,
-            })
-        }
-    }
-}
-
 fn facility_mask(needs: crate::system::Needs) -> u8 {
     (needs.forge as u8)
         | ((needs.anvil as u8) << 1)
@@ -833,25 +756,6 @@ fn facility_mask_found(found: crate::environment::Facilities) -> u8 {
         | ((found.water as u8) << 5)
 }
 
-const fn craft_weapon_kind(kind: WeaponKind) -> CraftWeaponKind {
-    match kind {
-        WeaponKind::Slashing => CraftWeaponKind::Slashing,
-        WeaponKind::Piercing => CraftWeaponKind::Piercing,
-        WeaponKind::Bashing => CraftWeaponKind::Bashing,
-        WeaponKind::Axe => CraftWeaponKind::Axe,
-        WeaponKind::Polearm => CraftWeaponKind::Polearm,
-        WeaponKind::Staff => CraftWeaponKind::Staff,
-        WeaponKind::Ranged => CraftWeaponKind::Ranged,
-    }
-}
-
-fn text_cliloc(text: Text) -> ClilocId {
-    match text {
-        Text::Cliloc(id) => id,
-        Text::Str(_) => ClilocId(0),
-    }
-}
-
 /// One flat egui-style frame: opaque fill with a one-pixel outline.
 ///
 /// It is intentionally built from the reusable `{ rect }` primitive instead
@@ -866,51 +770,12 @@ fn flat_box(layout: &mut GumpLayout, x: i32, y: i32, width: i32, height: i32, st
     layout.rect(x + width - 1, y, 1, height, stroke);
 }
 
-/// All recipes in the same stable order the catalogue assigned their button
-/// indexes.  Keeping the flattening in one iterator makes the rendering and
-/// reply mapping mechanically agree. The system is execution metadata only: it
-/// is never presented as the recipe's exclusive parent.
-fn catalogue_recipes() -> impl Iterator<Item = (&'static CraftSystemDef, &'static Recipe)> {
-    crate::defs::SYSTEMS
-        .iter()
-        .flat_map(|system| system.recipes.iter().map(move |recipe| (system, recipe)))
-}
-
-/// Whether a recipe is actionable once a player brings the appropriate tool.
-/// The catalogue has no tool by design, so the indicator intentionally covers
-/// the other authoritative gates: skill, pack and nearby facilities.
-fn catalogue_ready(
-    state: &WorldState,
-    player: EntityId,
-    def: &CraftSystemDef,
-    recipe: &Recipe,
-    stock: &consume::MaterialStock,
-    facilities: environment::Facilities,
-) -> bool {
-    chance(state, player, def, recipe).all_skills
-        && consume::check_stock(state, player, def, recipe, 0, stock).is_ok()
-        && facilities.satisfy(def.needs.union(recipe.needs))
-}
-
 /// Resolve the flattened catalogue index back to the system and per-system
 /// recipe index that normal craft detail pages store in their context.
 fn catalogue_recipe(index: ButtonIndex) -> Option<(SystemId, u16)> {
     let position = usize::try_from(index.0).ok()?;
-    let (system_index, recipe_index, _) = crate::defs::SYSTEMS
-        .iter()
-        .enumerate()
-        .flat_map(|(system_index, system)| {
-            system
-                .recipes
-                .iter()
-                .enumerate()
-                .map(move |(recipe_index, recipe)| (system_index, recipe_index, recipe))
-        })
-        .nth(position)?;
-    Some((
-        SystemId::from_index(system_index)?,
-        u16::try_from(recipe_index).ok()?,
-    ))
+    let &(system, recipe) = openshard_protocol::craft::CRAFT_RECIPE_LOCATIONS.get(position)?;
+    Some((SystemId::from_index(usize::from(system))?, recipe))
 }
 
 /// The window's own heading.

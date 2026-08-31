@@ -113,6 +113,43 @@ fn bare_hands_take_one_second_at_default_dexterity() {
     assert_eq!(WRESTLING_SWING_TICKS, TICKS_PER_SECOND);
 }
 
+#[test]
+fn command_work_over_the_tick_budget_stays_fifo_for_the_next_tick() {
+    let now = Instant::now();
+    let mut world = world();
+    let missing = Serial::new(1).unwrap();
+    for value in 0..300u16 {
+        world.queue(Command::SetSkill {
+            serial: missing,
+            skill: 0,
+            value,
+        });
+    }
+    world.tick(now);
+    assert_eq!(world.queued(), 300 - super::MAX_COMMAND_WORK_PER_TICK);
+    world.tick(now + TICK_INTERVAL);
+    assert_eq!(world.queued(), 0);
+}
+
+#[test]
+fn catalogue_opens_are_coalesced_and_separately_budgeted() {
+    let now = Instant::now();
+    let mut world = world();
+    let repeated = ConnectionId::from_raw(1);
+    for _ in 0..10 {
+        world.queue(Command::OpenCraftCatalogue { connection: repeated });
+    }
+    for id in 2..=40 {
+        world.queue(Command::OpenCraftCatalogue {
+            connection: ConnectionId::from_raw(id),
+        });
+    }
+    world.tick(now);
+    assert_eq!(world.queued(), 40 - super::MAX_CATALOGUE_OPENS_PER_TICK);
+    world.tick(now + TICK_INTERVAL);
+    assert_eq!(world.queued(), 0);
+}
+
 pub(super) fn world() -> World {
     World::new(START)
 }

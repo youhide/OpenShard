@@ -8,12 +8,13 @@
 //! only *then* consumed, because a player can hand their ingots to a friend
 //! while the hammer is in the air.
 
-use std::collections::{
-    BTreeMap,
-    HashMap,
-};
+use std::collections::BTreeMap;
 
 use openshard_entities::EntityId;
+use openshard_protocol::craft::{
+    CraftKey,
+    craft_key_for,
+};
 use openshard_protocol::item_kind::{
     ItemSelector,
     MaterialRule,
@@ -33,7 +34,6 @@ use openshard_state::{
     ItemLocation,
     SettledItemLocation,
     WorldState,
-    contained_items,
     item_definition,
     kind_from_drawn,
     material_definition,
@@ -75,7 +75,7 @@ pub const MAX_CRAFT_RESOURCE_LINES: usize = 4;
 pub const MAX_CRAFT_WITHDRAWALS: usize = openshard_items::MAX_ITEMS;
 
 /// The largest indexed source root admitted to realtime craft preparation.
-pub const MAX_CRAFT_SOURCE_ITEMS: usize = openshard_items::MAX_ITEMS;
+pub const MAX_CRAFT_SOURCE_ITEMS: usize = openshard_protocol::craft::MAX_CRAFT_SOURCE_ITEMS;
 
 /// A `use_all_res` click is one bounded batch, not an instruction to drain an
 /// arbitrarily large workshop.
@@ -108,7 +108,9 @@ pub struct Withdrawal {
 /// same remaining amount and their takes are folded into that item's row.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct WithdrawalPlan {
-    rows: Vec<Withdrawal>,
+    source:          Serial,
+    source_revision: u64,
+    rows:            Vec<Withdrawal>,
 }
 
 impl WithdrawalPlan {
@@ -118,6 +120,13 @@ impl WithdrawalPlan {
     /// therefore a broken caller invariant, not a gameplay refusal halfway
     /// through payment.
     pub fn commit(self, state: &mut WorldState) {
+        assert_eq!(
+            state
+                .craft_stock_amounts(self.source)
+                .map(|(revision, _)| revision),
+            Ok(self.source_revision),
+            "a prepared craft source keeps its projection revision until commit"
+        );
         for row in self.rows {
             assert_eq!(
                 state.registry.entity_of(row.serial),
@@ -179,6 +188,7 @@ pub struct Materials {
 /// One craft input after material-axis selection.
 #[derive(Clone, Copy, Debug)]
 pub struct MaterialLine {
+    pub key:      CraftKey,
     pub graphic:  Graphic,
     pub hue:      Option<Hue>,
     pub amount:   u16,
@@ -199,86 +209,6 @@ pub enum Share {
     Half,
 }
 
-/// One read of a crafter's backpack, reused by catalogue rows.
-///
-/// The ordinary craft path asks one recipe question and [`check`] is the right
-/// shape for it. The all-recipes catalogue asks the same question hundreds of
-/// times. Reading the backpack for every ingredient made that request
-/// `recipes × backpack children`; this snapshot makes it one exact indexed
-/// backpack read followed by small hash lookups while preserving the exact
-/// typed/legacy matching rules used by a real craft.
-pub(crate) struct MaterialStock {
-    has_pack: bool,
-    /// Every drawn item, including typed instances. Used by legacy recipes.
-    drawn:    HashMap<Drawn, u32>,
-    /// Drawn instances without an `ItemKind`. These alone are the compatibility
-    /// half of a typed selector.
-    legacy:   HashMap<Drawn, u32>,
-    identity: HashMap<
-        (
-            openshard_protocol::item_kind::ItemKindId,
-            Option<openshard_protocol::item_kind::MaterialId>,
-        ),
-        u32,
-    >,
-}
-
-impl MaterialStock {
-    pub(crate) fn capture(state: &WorldState, crafter: EntityId) -> Self {
-        let Some(pack) = state
-            .registry
-            .serial_of(crafter)
-            .and_then(|serial| openshard_items::backpack_of(state, serial))
-        else {
-            return Self {
-                has_pack: false,
-                drawn:    HashMap::new(),
-                legacy:   HashMap::new(),
-                identity: HashMap::new(),
-            };
-        };
-
-        let mut stock = Self {
-            has_pack: true,
-            drawn:    HashMap::new(),
-            legacy:   HashMap::new(),
-            identity: HashMap::new(),
-        };
-        for (item, _) in openshard_state::contained_items(state, pack) {
-            let Some(&drawn) = state.registry.get::<Drawn>(item) else {
-                continue;
-            };
-            let amount = u32::from(openshard_items::amount_of(state, item));
-            *stock.drawn.entry(drawn).or_default() += amount;
-            match state.registry.get::<ItemKind>(item) {
-                Some(&ItemKind(kind)) => {
-                    let material = state.registry.get::<Material>(item).map(|material| material.0);
-                    *stock.identity.entry((kind, material)).or_default() += amount;
-                }
-                None => *stock.legacy.entry(drawn).or_default() += amount,
-            }
-        }
-        stock
-    }
-
-    fn held(
-        &self,
-        semantic: Option<(
-            openshard_protocol::item_kind::ItemKindId,
-            Option<openshard_protocol::item_kind::MaterialId>,
-        )>,
-        legacy: Drawn,
-    ) -> u32 {
-        match semantic {
-            Some(identity) => {
-                self.identity.get(&identity).copied().unwrap_or_default()
-                    + self.legacy.get(&legacy).copied().unwrap_or_default()
-            }
-            None => self.drawn.get(&legacy).copied().unwrap_or_default(),
-        }
-    }
-}
-
 /// The dry run: what this craft would take, or why it cannot be made.
 ///
 /// `sub_res` indexes the system's material axis; it is ignored by a system that
@@ -293,35 +223,16 @@ pub fn check(
     let Some(pack) = state
         .registry
         .serial_of(crafter)
-        .filter(|serial| openshard_items::backpack_of(state, *serial).is_some())
+        .and_then(|serial| openshard_items::backpack_of(state, serial))
     else {
         return Err(Refusal::NoPack);
     };
+    let (_, amounts) = state.craft_stock_amounts(pack).map_err(|_| Refusal::TooComplex)?;
 
     check_with(state, crafter, system, recipe, sub_res, |semantic, legacy| {
-        match semantic {
-            Some((kind, material)) => {
-                openshard_items::carried_amount_of_identity_or_legacy(state, pack, kind, material, legacy)
-            }
-            None => openshard_items::carried_amount_of_hue(state, pack, legacy.id, Some(legacy.hue)),
-        }
-    })
-}
-
-/// The catalogue's dry run against its one captured backpack view.
-pub(crate) fn check_stock(
-    state: &WorldState,
-    crafter: EntityId,
-    system: &CraftSystemDef,
-    recipe: &Recipe,
-    sub_res: usize,
-    stock: &MaterialStock,
-) -> Result<Materials, Refusal> {
-    if !stock.has_pack {
-        return Err(Refusal::NoPack);
-    }
-    check_with(state, crafter, system, recipe, sub_res, |semantic, legacy| {
-        stock.held(semantic, legacy)
+        craft_key_for(semantic, legacy.id, legacy.hue)
+            .and_then(|key| amounts.get(usize::from(key.0)).copied())
+            .unwrap_or_default()
     })
 }
 
@@ -404,7 +315,15 @@ where
         }
         let whole = u16::try_from(held / u32::from(res.amount)).unwrap_or(u16::MAX);
         affordable = affordable.min(whole);
+        let legacy = Drawn {
+            id:  res.graphic,
+            hue: hue.expect("a craft ingredient has a resolved hue"),
+        };
+        let Some(key) = craft_key_for(semantic, legacy.id, legacy.hue) else {
+            return Err(Refusal::TooComplex);
+        };
         lines.push(MaterialLine {
+            key,
             graphic: res.graphic,
             hue,
             amount: res.amount,
@@ -490,23 +409,13 @@ pub fn prepare_withdrawal(
         return Err(Refusal::NoPack);
     };
 
-    let mut candidates: Vec<(Serial, EntityId, u16)> = contained_items(state, source)
-        .filter_map(|(item, _)| {
-            state
-                .registry
-                .serial_of(item)
-                .map(|serial| (serial, item, openshard_items::amount_of(state, item)))
-        })
-        .collect();
-    if candidates.len() > MAX_CRAFT_SOURCE_ITEMS {
-        return Err(Refusal::TooComplex);
-    }
-    candidates.sort_by_key(|(serial, item, _)| (*serial, *item));
+    let keys: Vec<_> = materials.lines.iter().map(|line| line.key).collect();
+    let (source_revision, candidates) = state
+        .craft_stock_piles(source, &keys)
+        .map_err(|_| Refusal::TooComplex)?;
 
-    let mut remaining: BTreeMap<Serial, u16> = candidates
-        .iter()
-        .map(|(serial, _, amount)| (*serial, *amount))
-        .collect();
+    let mut remaining: BTreeMap<Serial, u16> =
+        candidates.iter().map(|pile| (pile.serial, pile.amount)).collect();
     let mut row_by_serial = BTreeMap::<Serial, usize>::new();
     let mut rows: Vec<Withdrawal> = Vec::new();
 
@@ -520,10 +429,13 @@ pub fn prepare_withdrawal(
         if wanted == 0 {
             continue;
         }
-        for &(serial, item, expected) in &candidates {
+        for pile in &candidates {
             if wanted == 0 {
                 break;
             }
+            let serial = pile.serial;
+            let item = pile.item;
+            let expected = pile.amount;
             let Some(identity) = line_identity_if_matches(state, item, *line) else {
                 continue;
             };
@@ -563,7 +475,11 @@ pub fn prepare_withdrawal(
     }
 
     rows.sort_by_key(|row| (row.source, row.serial));
-    Ok(WithdrawalPlan { rows })
+    Ok(WithdrawalPlan {
+        source,
+        source_revision,
+        rows,
+    })
 }
 
 fn line_identity_if_matches(

@@ -275,6 +275,11 @@ pub use defaults::{
     SAVE_EVERY_TICKS,
     TICK_INTERVAL,
 };
+
+/// Deterministic command work reserved for one simulation tick.
+pub const MAX_COMMAND_WORK_PER_TICK: usize = 256;
+/// Compact catalogue contexts admitted per tick after per-connection coalescing.
+pub const MAX_CATALOGUE_OPENS_PER_TICK: usize = 32;
 pub use persist::{
     RestoredCharacters,
     RestoredItems,
@@ -824,9 +829,35 @@ impl World {
         // next one — otherwise a system that queues work could starve the loop,
         // and the tick's length would depend on what happened in it.
         let commands = std::mem::take(&mut self.inbox);
-        for command in commands {
+        let mut last_catalogue_open = HashMap::new();
+        for (index, command) in commands.iter().enumerate() {
+            if let Command::OpenCraftCatalogue { connection } = command {
+                last_catalogue_open.insert(*connection, index);
+            }
+        }
+        let mut deferred = Vec::new();
+        let mut command_work = 0usize;
+        let mut catalogue_opens = 0usize;
+        for (index, command) in commands.into_iter().enumerate() {
+            if command_work == MAX_COMMAND_WORK_PER_TICK {
+                deferred.push(command);
+                continue;
+            }
+            if let Command::OpenCraftCatalogue { connection } = &command {
+                if last_catalogue_open.get(connection) != Some(&index) {
+                    continue;
+                }
+                if catalogue_opens == MAX_CATALOGUE_OPENS_PER_TICK {
+                    deferred.push(command);
+                    continue;
+                }
+                catalogue_opens += 1;
+            }
+            command_work += 1;
             self.apply(command, now);
         }
+        deferred.append(&mut self.inbox);
+        self.inbox = deferred;
 
         // What time it is, once, before anything asks. Derived from the tick
         // counter (see `tick/ambient.rs`), never a wall clock, so a routine and a

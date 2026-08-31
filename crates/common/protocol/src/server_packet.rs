@@ -2075,7 +2075,15 @@ mod tests {
             }),
             ServerPacket::CraftCatalogue(crate::craft::CraftCatalogue {
                 gump_id: crate::gump::GumpId(0x0051_0001),
-                rows:    vec![crate::craft::CraftCatalogueRow {
+                request_id: 1,
+                catalogue_revision: crate::craft::CRAFT_CATALOGUE_REVISION,
+                craft_projection_revision: 0,
+                backpack_revision: 2,
+                has_pack: true,
+                facilities: 3,
+                skills: vec![(7, 300)],
+                amounts: vec![0; crate::craft::CRAFT_KEY_COUNT],
+                rows: vec![crate::craft::CraftCatalogueRow {
                     button:           8,
                     result:           crate::wire::Graphic(0x13EB),
                     result_hue:       crate::wire::Hue::NONE,
@@ -2086,6 +2094,7 @@ mod tests {
                     ready:            true,
                     weapon:           None,
                     components:       vec![crate::craft::CraftCatalogueComponent {
+                        stock_key: crate::craft::CraftKey(0),
                         item_kind: Some(crate::item_kind::ItemKindId(1)),
                         material:  Some(crate::item_kind::MaterialId(1)),
                         graphic:   crate::wire::Graphic(0x1BF2),

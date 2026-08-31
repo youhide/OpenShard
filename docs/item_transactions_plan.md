@@ -6,28 +6,19 @@ boundary, and for replacing whole-world container scans with an exact index.
 Update this document in the same change that settles a decision or completes a
 stage.
 
-**Status:** A1 and A3 are built. Partial ground/container lifts validate the cursor
-transition and allocate an unlocated remainder before changing the original
-pile; serial exhaustion is now an unchanged-state refusal. A2's direct-child
-index, audited membership, and policy-free deterministic recursive walk are
-built. Located-item despawns now use the canonical cleanup door and the
-indexed-vs-slow state-machine property runs 256 sequences of up to 128 actions.
-The older `items::contents_index` whole-world snapshot is retired: status,
-quest, capacity, weight, backpack, secure-trade, and catalogue-stock reads now
-start at exact indexed container roots. Access-policy stops wait for A6's types;
-A2 is not yet complete. Quantity changes now pass through one stack door that
-enforces the physical-pile bound, normalises singletons, and publishes viewer
-updates; six 256-case properties cover split, merge, fill/take, give, remove,
-and consume. A4 now has a deterministic bounded backpack `WithdrawalPlan` that
-deduplicates overlapping selectors, and A5 is built: successful crafting
-allocates and capacity-checks every output before an infallible payment/output
-commit, while failure-craft material loss uses the same atomic withdrawal
-door. A0's remaining measurement work, the indexed A4 candidate source, and the
-remaining A6 work remain open. A6a's first piece is built: exact per-facet house
-coverage replaces the whole-house `house_at` scan and follows placement,
-restore, redesign, and demolition. A6a's recursive permissioned inventory
-projection, epochs, bounded exact-selector pages, and result revalidation are
-also built; the client-side catalogue/search window is the remaining A6a UI.
+**Status:** A1–A5 and A2's access-boundary follow-up are built. Item ownership,
+quantity changes, bounded recursive backpack stock, withdrawal, and successful
+craft output now share prepare/commit doors and unchanged-state refusals. A4's
+dense generated `CraftKey` projection gives selected-recipe checks ordered,
+revisioned candidates without a request-time container walk. A6a's exact house
+coverage and permissioned inventory backend are built; the client-side static
+catalogue/search window is its remaining UI. A6b is deliberately closed as
+`SearchOnly`. A7's shared 492-recipe artifact, revision handshake, compact
+context packet, client-side readiness, O(1) recipe lookup, and coalesced bounded
+open lane are built. A8 now caps command and catalogue-open work, removes the
+temporary whole-pack catalogue snapshot, and rejects corrupt restored stack
+amounts before allocation. Release measurements, observability, the property
+soak, documentation cleanup, and the A6a UI remain open.
 
 ## Outcome
 
@@ -751,9 +742,9 @@ turning the in-memory mutation door into a panic on I/O.
 
 ### A4 — introduce recursive `WithdrawalPlan`
 
-- [ ] Define dense catalogue-derived `CraftKey`s for semantic and audited legacy
+- [x] Define dense catalogue-derived `CraftKey`s for semantic and audited legacy
       matching, with a constant maximum number of keys per pile.
-- [ ] Implement deterministic preparation against ordered root/cell stock
+- [x] Implement deterministic preparation against ordered root/cell stock
       buckets, retaining each pile's root/domain/revision facts.
 - [x] Prevent double reservation across duplicate/overlapping ingredient lines.
 - [x] Enforce resource-line, withdrawal, and `use_all_res` batch limits before
@@ -765,6 +756,17 @@ turning the in-memory mutation door into a panic on I/O.
 
 Done when a multi-line craft can never consume a strict subset of its planned
 ingredients.
+
+**Built.** Protocol's build artifact assigns dense keys to every semantic and
+audited legacy selector used by the 492 recipes and asserts that one physical
+pile contributes to at most four keys. Each backpack root owns totals and
+serial-ordered piles for those keys plus a monotonic projection revision.
+Recursive projection is paid on canonical location/identity/amount mutation,
+refuses roots above 125 items, and never walks the root during a craft request.
+Preparation reads only the selected recipe's key buckets, revalidates each
+candidate's canonical root, identity, and amount, and commit asserts the source
+revision before its infallible quantity changes. Named nested-move and limit
+tests plus a 256-case slow recursive oracle cover the index.
 
 ### A5 — make successful crafting transactional
 
@@ -914,37 +916,51 @@ the declined craft-storage policy type.
 
 ### A7 — make catalogue availability client-owned
 
-- [ ] Stop deriving every catalogue row's readiness from live server inventory
+- [x] Stop deriving every catalogue row's readiness from live server inventory
       and facilities.
-- [ ] Generate version-identical client/server recipe artifacts and add a
+- [x] Generate version-identical client/server recipe artifacts and add a
       catalogue revision/hash handshake; never send/evaluate all recipe rows on
       catalogue open.
-- [ ] Capture a compact owned `CraftMenuSnapshot` from the player's one
+- [x] Capture a compact owned `CraftMenuSnapshot` from the player's one
       reachable-total cell plus backpack totals, skills, and facilities, with
       no recipe/source-tile/root/pile loop.
-- [ ] Add a bounded service channel that coalesces opens per connection, builds
-      the presentation response without `WorldState`, and returns a request-id
-      tagged result; drop stale results in the tick.
-- [ ] Give the client that context to evaluate all local recipe rows; a Craft
+- [x] Add a separately bounded catalogue-open lane that coalesces opens per
+      connection and emits request-id-tagged compact contexts. Because capture
+      is a fixed indexed read and row materialization is client-only, no worker
+      result exists to race or become stale inside the tick.
+- [x] Give the client that context to evaluate all local recipe rows; a Craft
       request carries one stable recipe id and the server looks up/checks only
       that row.
-- [ ] Remove or version-gate `CraftCatalogueRow::ready` across protocol, server,
+- [x] Remove or version-gate `CraftCatalogueRow::ready` across protocol, server,
       and client together.
-- [ ] Refresh context on catalogue open/explicit refresh; tolerate later
+- [x] Refresh context on catalogue open/explicit refresh; tolerate later
       staleness because the server always replans Craft authoritatively.
-- [ ] Retain an end-to-end test proving an invented green state cannot bypass
+- [x] Retain an end-to-end test proving an invented green state cannot bypass
       authoritative server preparation.
 
 Done when opening the catalogue performs no world-sized read and a stale or
 malicious client still cannot spend unavailable ingredients; queue saturation
 cannot block the realtime loop.
 
+**Built.** `protocol/build.rs` consumes the same crafting, item, and material
+JSON as the server and generates 492 stable presentation rows, recipe locations,
+dense stock selectors, skill ids, and a content hash. An open packet contains
+only revisions, facilities, relevant skills, and dense backpack totals; the
+decoder rejects a mismatched artifact and materializes readiness locally. The
+server no longer loops recipes or serializes rows and maps a selected flat id to
+`(system, recipe)` in O(1). At most 32 coalesced opens are admitted per tick.
+This synchronous bounded lane is intentionally simpler than the originally
+proposed worker channel: capture already performs fixed indexed reads, so a
+worker would add request/result ordering without removing any world-sized work.
+The authoritative craft path still replans the selected recipe, and the forged
+catalogue-reply regression remains green.
+
 ### A8 — measurement and cleanup
 
-- [ ] Split/limit inbox draining by deterministic work units while preserving
-      untouched command FIFO order; reserve the realtime simulation budget and
-      keep service results separately bounded.
-- [ ] Never suspend inside a gameplay mutation: defer the whole command before
+- [x] Split/limit inbox draining by deterministic work units while preserving
+      FIFO order inside the gameplay and coalesced catalogue-service lanes;
+      reserve the realtime simulation budget and bound service work separately.
+- [x] Never suspend inside a gameplay mutation: defer the whole command before
       prepare when its predicted cost does not fit the remaining budget.
 - [ ] Add counters/timers for index projection, snapshot/service queue latency,
       withdrawal planning, output preparation, commit, deferrals, and
@@ -953,9 +969,9 @@ cannot block the realtime loop.
       local source density, fragmentation, and simultaneous clients; assert the
       request path stays inside its declared work bounds.
 - [ ] Run the 10,000-sequence property soak and commit all regression seeds.
-- [ ] Remove the temporary catalogue `MaterialStock` backpack snapshot once
+- [x] Remove the temporary catalogue `MaterialStock` backpack snapshot once
       server readiness is gone.
-- [ ] Validate restored stack amounts before entity allocation in
+- [x] Validate restored stack amounts before entity allocation in
       `crates/server/world/src/tick/persist.rs`; zero or above-`MAX_STACK` saved
       piles are corrupt external records and must be refused, never clamped or
       allowed to reach the in-memory quantity door.

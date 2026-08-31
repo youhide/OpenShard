@@ -329,6 +329,7 @@ pub fn commit_item_relocation(state: &mut WorldState, prepared: PreparedItemRelo
         Some(prepared.previous),
         "a prepared item relocation commits against the edge it validated"
     );
+    let previous_root = state.craft_stock_root_of_item(prepared.item);
     state.invalidate_house_inventory_for_item(prepared.item);
     state.registry.insert(prepared.item, prepared.destination);
     apply_projection(
@@ -338,6 +339,12 @@ pub fn commit_item_relocation(state: &mut WorldState, prepared: PreparedItemRelo
         prepared.destination,
     );
     state.invalidate_house_inventory_for_item(prepared.item);
+    let current_root = state.craft_stock_root_of_item(prepared.item);
+    if previous_root != current_root {
+        if let Some(root) = previous_root {
+            state.refresh_craft_stock_root(root);
+        }
+    }
     prepared.previous
 }
 
@@ -346,6 +353,7 @@ pub fn commit_item_relocation(state: &mut WorldState, prepared: PreparedItemRelo
 /// Container subtree policy, spatial indexing, and removal packets belong to
 /// the caller; this function owns the canonical edge and its cursor projection.
 pub fn despawn_item(state: &mut WorldState, item: EntityId) -> bool {
+    let previous_root = state.craft_stock_root_of_item(item);
     state.invalidate_house_inventory_for_item(item);
     state.set_item_lockdown(item, None);
     match item_location(state, item) {
@@ -364,7 +372,11 @@ pub fn despawn_item(state: &mut WorldState, item: EntityId) -> bool {
         }
         Some(ItemLocation::Settled(SettledItemLocation::Ground { .. })) | None => {}
     }
-    state.registry.despawn(item)
+    let despawned = state.registry.despawn(item);
+    if let Some(root) = previous_root {
+        state.refresh_craft_stock_root(root);
+    }
+    despawned
 }
 
 /// Check the entire live ownership forest and all temporary read projections.

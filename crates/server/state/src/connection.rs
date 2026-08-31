@@ -133,39 +133,41 @@ pub struct Connection {
     /// because a cursor is a thing on a screen — every site that raises one
     /// already refused to do so without a `Client`, which is that invariant
     /// written out longhand at six call sites instead of held by the type.
-    pub pending_target: Option<TargetPurpose>,
+    pub pending_target:          Option<TargetPurpose>,
     /// The quest dialog this client has open, and on which page.
     ///
     /// A gump exists only while somebody is looking at it, and a reply naming a
     /// window this side never drew is a reply to nothing — which is the whole
     /// reason the context is kept rather than trusted off the packet.
-    pub quest_gump:     Option<QuestGumpContext>,
+    pub quest_gump:              Option<QuestGumpContext>,
     /// The guild window this client has open, on which page, and what its rows
     /// meant. See [`GuildGumpContext`] for why the rows are remembered here.
-    pub guild_gump:     Option<GuildGumpContext>,
+    pub guild_gump:              Option<GuildGumpContext>,
     /// The craft window this client has open, on which category and material.
     ///
     /// Carries more weight than the quest log's: the selected category, the
     /// chosen metal and the tool in hand all live here and never in the packet,
     /// so a reply cannot name a material the player did not pick.
-    pub craft_gump:     Option<CraftGumpContext>,
+    pub craft_gump:              Option<CraftGumpContext>,
+    /// Most recent compact catalogue context requested on this connection.
+    pub craft_catalogue_request: u32,
     /// The runebook this client has open.
-    pub runebook_gump:  Option<EntityId>,
+    pub runebook_gump:           Option<EntityId>,
     /// The gate this client has a destination list open for. The `craft_gump`
     /// shape, and for the same reason: the reply carries a button and a switch,
     /// never *which* gate asked.
-    pub gate_gump:      Option<EntityId>,
+    pub gate_gump:               Option<EntityId>,
     /// The healer this client has a "wouldst thou like to be resurrected?"
     /// confirm open for. The `gate_gump` shape: a reply carries only a button, so
     /// *which* healer asked has to live here, not in the packet.
-    pub healer_gump:    Option<EntityId>,
+    pub healer_gump:             Option<EntityId>,
     /// The house sign this client has open, and what its rows meant.
     ///
     /// The `guild_gump` shape rather than the `gate_gump` one, because a house
     /// window has rows: three lists of people, each row offering to drop whoever
     /// is on it. Which serial row four named is what this side remembers
     /// drawing, and never the number in the packet.
-    pub house_gump:     Option<HouseGumpContext>,
+    pub house_gump:              Option<HouseGumpContext>,
 }
 
 impl Connection {
@@ -184,6 +186,7 @@ impl Connection {
             quest_gump: None,
             guild_gump: None,
             craft_gump: None,
+            craft_catalogue_request: 0,
             runebook_gump: None,
             gate_gump: None,
             healer_gump: None,

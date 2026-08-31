@@ -18,3 +18,6 @@ workspace = true
 # gumpart and the UOP multi reader.
 miniz_oxide.workspace = true
 serde.workspace = true
+
+[build-dependencies]
+serde_json.workspace = true

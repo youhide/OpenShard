@@ -633,6 +633,7 @@ impl WorldState {
         if let Some(house) = inventory_house_of_item(self, item) {
             self.house_inventory.invalidate(house);
         }
+        self.refresh_craft_stock_for_item(item);
     }
 
     /// Spend at most `budget` work units rebuilding invalidated projections.
