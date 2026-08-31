@@ -699,6 +699,8 @@ pub struct WorldView {
     /// gump shell and reply channel with the legacy layout, but egui owns its
     /// presentation.
     pub craft_workbenches:   FxHashMap<GumpId, CraftWorkbench>,
+    /// Latest bounded page/result status for the client-owned house search.
+    pub house_inventory:     Option<openshard_protocol::house_inventory::HouseInventoryReply>,
     /// The gump art of every container the shard has opened a window for
     /// (`0x24`), by container serial.
     ///
@@ -1160,6 +1162,7 @@ impl WorldView {
             gumps: Vec::new(),
             craft_catalogues: FxHashMap::default(),
             craft_workbenches: FxHashMap::default(),
+            house_inventory: None,
             containers: FxHashMap::default(),
             contents: FxHashMap::default(),
             corpse_equipment: FxHashMap::default(),
@@ -1451,6 +1454,11 @@ impl WorldView {
                     .is_none_or(|old| old != workbench);
                 self.craft_workbenches
                     .insert(workbench.gump_id, workbench.clone());
+                changed
+            }
+            ServerPacket::HouseInventory(reply) => {
+                let changed = self.house_inventory.as_ref() != Some(reply);
+                self.house_inventory = Some(reply.clone());
                 changed
             }
             // `0xBF 0x04`: the one case where the server *does* say a gump

@@ -11,14 +11,14 @@ quantity changes, bounded recursive backpack stock, withdrawal, and successful
 craft output now share prepare/commit doors and unchanged-state refusals. A4's
 dense generated `CraftKey` projection gives selected-recipe checks ordered,
 revisioned candidates without a request-time container walk. A6a's exact house
-coverage and permissioned inventory backend are built; the client-side static
-catalogue/search window is its remaining UI. A6b is deliberately closed as
+coverage, permissioned inventory backend, and client-owned Ctrl+I search window
+are built. A6b is deliberately closed as
 `SearchOnly`. A7's shared 492-recipe artifact, revision handshake, compact
 context packet, client-side readiness, O(1) recipe lookup, and coalesced bounded
 open lane are built. A8 now caps command and catalogue-open work, removes the
 temporary whole-pack catalogue snapshot, and rejects corrupt restored stack
 amounts before allocation. Release measurements, observability, the property
-soak, documentation cleanup, and the A6a UI remain open.
+soak, and documentation cleanup remain open.
 
 ## Outcome
 
@@ -812,7 +812,7 @@ atomic withdrawal before committing it.
       vendor, bank, and corpse roots.
 - [x] Add `HouseInventoryIndex` by house/access/identity with recursive totals
       and ordered root/pile refs, maintained by canonical location/amount doors.
-- [ ] Add bounded selector search and paginated aggregate/root results; resolve
+- [x] Add bounded selector search and paginated aggregate/root results; resolve
       ordinary text/category matching on the client from its static item
       catalogue.
 - [x] Revalidate house, standing, root, and item before opening/highlighting a
@@ -846,15 +846,20 @@ shape, and removal doors invalidate the affected house. An epoch mismatch makes
 both search and old result resolution unavailable immediately; the tick rebuilds
 at most 256 root/item work units and publishes only a complete current epoch.
 
-The server accepts at most 32 exact catalogue identities and returns at most 50
+The shared build artifact generates material-aware item names, categories,
+presentations, and exact semantic identities for the client. Ctrl+I opens a
+local filter/selector window; an audited `0xGRAPHIC:0xHUE` form covers legacy
+items without teaching the server text matching. The server accepts at most 32
+exact catalogue identities and returns at most 50
 serial-ordered root rows per cursor page without scanning unrelated identities.
 Opening/highlighting revalidates the actor's current house and standing, the
 root's lockdown and ground coverage, the complete containment path, item
-identity, and epoch. A 256-case slow-oracle property varies nested/loose/foreign/
+identity, and epoch before passing the root through the ordinary checked
+container-open door. Wire round trips pin the bounded request/page forms and
+the client keeps pagination presentation-only. A 256-case slow-oracle property varies nested/loose/foreign/
 outside/trade/corpse roots, legacy and semantic identities, amounts, and access;
 named tests cover pagination, adjacent houses, release, partial rebuilds, and
-design-footprint transitions. The unchecked selector bullet is now specifically
-the client catalogue/search UI and its wire request/response, not server search.
+design-footprint transitions.
 
 ### A6b — optional direct crafting from opted-in house storage
 

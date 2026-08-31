@@ -831,6 +831,11 @@ pub enum Command {
         /// Which player asked.
         connection: ConnectionId,
     },
+    /// Search or open one result in the current house's read-only inventory.
+    HouseInventory {
+        connection: ConnectionId,
+        request:    openshard_protocol::house_inventory::HouseInventoryRequest,
+    },
     /// A client moved one of the status bar's stat arrows (`0xBF` `0x1A`).
     SetStatLock {
         /// Which connection.
@@ -1343,6 +1348,7 @@ impl Command {
             Self::UseSkill { .. } => "UseSkill",
             Self::UseSkillButton { .. } => "UseSkillButton",
             Self::OpenCraftCatalogue { .. } => "OpenCraftCatalogue",
+            Self::HouseInventory { .. } => "HouseInventory",
             Self::SetStatLock { .. } => "SetStatLock",
             Self::SetSkillLock { .. } => "SetSkillLock",
             Self::WarMode { .. } => "WarMode",

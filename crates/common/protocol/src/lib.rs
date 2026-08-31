@@ -71,6 +71,7 @@ pub mod extended;
 pub mod feature;
 pub mod feedback;
 pub mod gump;
+pub mod house_inventory;
 pub mod huffman;
 pub mod identity;
 pub mod item_kind;

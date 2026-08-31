@@ -25,6 +25,7 @@ use crate::error::{
     DecodeError,
     expect_id,
 };
+use crate::house_inventory::HouseInventoryRequest;
 use crate::mapedit::MapEditRequest;
 use crate::mobile::StatLockRequest;
 use crate::party::PartyRequest;
@@ -70,6 +71,8 @@ pub enum ExtendedRequest {
     Turn(TurnRequest),
     /// `0xBF.0xE015` — open the tool-free craft catalogue.
     CraftCatalogue(OpenCraftCatalogue),
+    /// `0xBF.0xE018` — bounded exact-selector house inventory search/open.
+    HouseInventory(HouseInventoryRequest),
     /// Any subcommand this engine does not act on — screen size, close-gump
     /// and the rest of the family `0xBF` carries. Not an error:
     /// the same "logged fact, not a dropped connection" treatment
@@ -107,6 +110,9 @@ impl ExtendedRequest {
             TurnRequest::SUBCOMMAND => Self::Turn(TurnRequest::decode_body(&mut reader)?),
             OpenCraftCatalogue::SUBCOMMAND => {
                 Self::CraftCatalogue(OpenCraftCatalogue::decode_body(&mut reader)?)
+            }
+            HouseInventoryRequest::SUBCOMMAND => {
+                Self::HouseInventory(HouseInventoryRequest::decode_body(&mut reader)?)
             }
             other => Self::Unknown(other),
         })

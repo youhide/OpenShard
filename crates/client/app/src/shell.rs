@@ -41,7 +41,10 @@
 //!    `pixels_per_point` before it becomes the camera's viewport. Getting this
 //!    wrong is invisible at scale factor 1 and wrong on every HiDPI screen.
 
-use std::collections::BTreeMap;
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
 use std::time::Duration;
 
 use openshard_client_net::action::GumpReply;
@@ -121,6 +124,8 @@ pub struct Request {
     /// Reply selected in the client-owned craft window. It preserves the
     /// server's existing button encoding and validation path on every page.
     pub craft_reply: Option<GumpReply>,
+    /// One bounded house inventory page or result-open request.
+    pub house_inventory: Option<openshard_protocol::house_inventory::HouseInventoryRequest>,
     /// Save the next fully rendered world frame and its GPU planes. This is an
     /// edge-triggered diagnostic action, not a persistent display setting.
     pub frame_dump: bool,
@@ -339,6 +344,8 @@ pub struct Shell {
     /// One client-owned craft window. Catalogue, workbench and recipe details
     /// are pages of this same state rather than independent floating windows.
     crafting: CraftWindowPanel,
+    /// Client-owned search/filter/page state for permissioned house storage.
+    house_inventory: HouseInventoryPanel,
 }
 
 impl Shell {
@@ -404,6 +411,7 @@ impl Shell {
             desk,
             item_catalogue: ItemArtCatalogue::default(),
             crafting: CraftWindowPanel::default(),
+            house_inventory: HouseInventoryPanel::new(),
         }
     }
 
@@ -476,6 +484,11 @@ impl Shell {
             self.desk.tab = Tab::Admin;
         }
         self.desk.open = !self.desk.open;
+    }
+
+    /// Show or hide the current-house inventory search (Ctrl+I).
+    pub fn toggle_house_inventory(&mut self) {
+        self.house_inventory.open = !self.house_inventory.open;
     }
 
     /// Record an event for egui and answer whether a *visible, active* egui
@@ -609,6 +622,7 @@ impl Shell {
                     },
                     item_catalogue: &mut self.item_catalogue,
                     crafting: &mut self.crafting,
+                    house_inventory: &mut self.house_inventory,
                     desk,
                 },
             );
@@ -838,10 +852,11 @@ pub struct ShellFrame<'a> {
 }
 
 struct LayoutFrame<'a> {
-    shell:          ShellFrame<'a>,
-    item_catalogue: &'a mut ItemArtCatalogue,
-    crafting:       &'a mut CraftWindowPanel,
-    desk:           &'a mut Desk,
+    shell:           ShellFrame<'a>,
+    item_catalogue:  &'a mut ItemArtCatalogue,
+    crafting:        &'a mut CraftWindowPanel,
+    house_inventory: &'a mut HouseInventoryPanel,
+    desk:            &'a mut Desk,
 }
 
 /// The panels, and the server's own dialogs.
@@ -869,6 +884,7 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
             },
         item_catalogue,
         crafting,
+        house_inventory,
         desk,
     } = frame;
     let mut request = Request::default();
@@ -1117,8 +1133,298 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
     }
 
     craft_window(&context, world, art, hue_ramp, cliloc, crafting, &mut request);
+    house_inventory_window(&context, world, house_inventory, &mut request);
 
     request
+}
+
+struct HouseInventoryPanel {
+    open:             bool,
+    query:            String,
+    selected:         BTreeSet<openshard_protocol::house_inventory::HouseItemIdentity>,
+    active_selectors: Vec<openshard_protocol::house_inventory::HouseItemIdentity>,
+    epoch:            Option<u64>,
+    rows:             Vec<openshard_protocol::house_inventory::HouseInventoryRow>,
+    next:             Option<openshard_protocol::house_inventory::HouseInventoryCursor>,
+    append_next:      bool,
+    last_reply:       Option<openshard_protocol::house_inventory::HouseInventoryReply>,
+    notice:           Option<String>,
+}
+
+impl HouseInventoryPanel {
+    fn new() -> Self {
+        Self {
+            open:             false,
+            query:            String::new(),
+            selected:         BTreeSet::new(),
+            active_selectors: Vec::new(),
+            epoch:            None,
+            rows:             Vec::new(),
+            next:             None,
+            append_next:      false,
+            last_reply:       None,
+            notice:           None,
+        }
+    }
+}
+
+fn house_inventory_window(
+    context: &egui::Context,
+    world: &WorldState,
+    panel: &mut HouseInventoryPanel,
+    request: &mut Request,
+) {
+    if !panel.open {
+        return;
+    }
+    let Some(view) = world.authoritative.view.as_ref() else {
+        panel.notice = Some("Enter the world before searching a house.".to_owned());
+        return;
+    };
+    if view.house_inventory.as_ref() != panel.last_reply.as_ref() {
+        if let Some(reply) = &view.house_inventory {
+            match reply {
+                openshard_protocol::house_inventory::HouseInventoryReply::Page { epoch, rows, next } => {
+                    panel.epoch = Some(*epoch);
+                    if panel.append_next {
+                        panel.rows.extend(rows.iter().copied());
+                    } else {
+                        panel.rows = rows.clone();
+                    }
+                    panel.next = *next;
+                    panel.notice = Some(format!("{} storage root result(s).", panel.rows.len()));
+                    panel.append_next = false;
+                }
+                openshard_protocol::house_inventory::HouseInventoryReply::Resolved { root, .. } => {
+                    panel.notice = Some(format!("Opened storage root {root}."));
+                }
+                openshard_protocol::house_inventory::HouseInventoryReply::Refused { reason, .. } => {
+                    panel.notice = Some(house_inventory_refusal(*reason).to_owned());
+                    panel.append_next = false;
+                }
+            }
+            panel.last_reply = Some(reply.clone());
+        }
+    }
+
+    let query = panel.query.trim().to_ascii_lowercase();
+    let mut matches: Vec<_> = openshard_protocol::house_inventory::HOUSE_ITEM_CATALOGUE
+        .iter()
+        .filter(|entry| {
+            query.is_empty()
+                || query
+                    .split_whitespace()
+                    .all(|word| entry.name.contains(word) || entry.tags.iter().any(|tag| tag.contains(word)))
+        })
+        .collect();
+    matches.sort_by_key(|entry| (entry.name, entry.identity));
+    matches.dedup_by_key(|entry| entry.identity);
+
+    let mut open = panel.open;
+    egui::Window::new("House inventory · Ctrl+I")
+        .id(egui::Id::new("house inventory"))
+        .default_pos([48.0, 48.0])
+        .default_size([720.0, 680.0])
+        .open(&mut open)
+        .show(context, |ui| {
+            ui.label("Searches only locked-down storage you may access in the house where you stand.");
+            ui.horizontal(|ui| {
+                ui.strong("Name or category");
+                ui.add(
+                    egui::TextEdit::singleline(&mut panel.query)
+                        .hint_text("e.g. valorite, armor, tool")
+                        .desired_width(320.0),
+                );
+                if ui.button("Clear").clicked() {
+                    panel.query.clear();
+                    panel.selected.clear();
+                }
+            });
+
+            if let Some(identity) = parse_legacy_house_identity(&query) {
+                let mut selected = panel.selected.contains(&identity);
+                if ui
+                    .checkbox(&mut selected, format!("Exact legacy {query}"))
+                    .changed()
+                {
+                    if selected {
+                        if panel.selected.len()
+                            < openshard_protocol::house_inventory::MAX_HOUSE_INVENTORY_SELECTORS
+                        {
+                            panel.selected.insert(identity);
+                        }
+                    } else {
+                        panel.selected.remove(&identity);
+                    }
+                }
+            }
+
+            ui.label(format!(
+                "{} catalogue match(es); {} of {} selectors chosen",
+                matches.len(),
+                panel.selected.len(),
+                openshard_protocol::house_inventory::MAX_HOUSE_INVENTORY_SELECTORS
+            ));
+            egui::ScrollArea::vertical()
+                .id_salt("house selector list")
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    for entry in matches.iter().take(300) {
+                        let mut selected = panel.selected.contains(&entry.identity);
+                        let enabled = selected
+                            || panel.selected.len()
+                                < openshard_protocol::house_inventory::MAX_HOUSE_INVENTORY_SELECTORS;
+                        ui.add_enabled_ui(enabled, |ui| {
+                            if ui
+                                .checkbox(
+                                    &mut selected,
+                                    format!(
+                                        "{} · art {:#06x}, hue {:#06x}",
+                                        entry.name, entry.graphic.0, entry.hue.0
+                                    ),
+                                )
+                                .changed()
+                            {
+                                if selected {
+                                    panel.selected.insert(entry.identity);
+                                } else {
+                                    panel.selected.remove(&entry.identity);
+                                }
+                            }
+                        });
+                    }
+                });
+
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(!panel.selected.is_empty(), egui::Button::new("Search selected"))
+                    .clicked()
+                {
+                    panel.active_selectors = panel.selected.iter().copied().collect();
+                    panel.rows.clear();
+                    panel.next = None;
+                    panel.epoch = None;
+                    panel.append_next = false;
+                    request.house_inventory = Some(
+                        openshard_protocol::house_inventory::HouseInventoryRequest::Search {
+                            expected_epoch: None,
+                            selectors:      panel.active_selectors.clone(),
+                            after:          None,
+                            limit:          openshard_protocol::house_inventory::MAX_HOUSE_INVENTORY_PAGE
+                                as u8,
+                        },
+                    );
+                }
+                if ui
+                    .add_enabled(panel.next.is_some(), egui::Button::new("Next page"))
+                    .clicked()
+                {
+                    panel.append_next = true;
+                    request.house_inventory = Some(
+                        openshard_protocol::house_inventory::HouseInventoryRequest::Search {
+                            expected_epoch: panel.epoch,
+                            selectors:      panel.active_selectors.clone(),
+                            after:          panel.next,
+                            limit:          openshard_protocol::house_inventory::MAX_HOUSE_INVENTORY_PAGE
+                                as u8,
+                        },
+                    );
+                }
+                if let Some(notice) = &panel.notice {
+                    ui.label(notice);
+                }
+            });
+
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .id_salt("house result list")
+                .show(ui, |ui| {
+                    for row in &panel.rows {
+                        ui.horizontal(|ui| {
+                            ui.label(format!(
+                                "{} · {} in root · {} total · {} pile(s)",
+                                house_identity_name(row.identity),
+                                row.root_total,
+                                row.aggregate_total,
+                                row.pile_count
+                            ));
+                            if ui.button("Open root").clicked() {
+                                if let Some(epoch) = panel.epoch {
+                                    request.house_inventory = Some(
+                                        openshard_protocol::house_inventory::HouseInventoryRequest::Resolve {
+                                            epoch,
+                                            identity: row.identity,
+                                            root: row.root,
+                                            item: row.first_pile,
+                                        },
+                                    );
+                                }
+                            }
+                        });
+                    }
+                });
+        });
+    panel.open = open;
+}
+
+fn house_identity_name(identity: openshard_protocol::house_inventory::HouseItemIdentity) -> String {
+    openshard_protocol::house_inventory::HOUSE_ITEM_CATALOGUE
+        .iter()
+        .find(|entry| entry.identity == identity)
+        .map_or_else(
+            || {
+                match identity {
+                    openshard_protocol::house_inventory::HouseItemIdentity::Semantic { kind, material } => {
+                        format!(
+                            "item kind {} material {:?}",
+                            kind.0,
+                            material.map(|material| material.0)
+                        )
+                    }
+                    openshard_protocol::house_inventory::HouseItemIdentity::Legacy { graphic, hue } => {
+                        format!("legacy {:#06x}:{:#06x}", graphic.0, hue.0)
+                    }
+                }
+            },
+            |entry| entry.name.to_owned(),
+        )
+}
+
+fn parse_legacy_house_identity(
+    query: &str,
+) -> Option<openshard_protocol::house_inventory::HouseItemIdentity> {
+    let (graphic, hue) = query.split_once(':')?;
+    let graphic = u16::from_str_radix(graphic.trim_start_matches("0x"), 16).ok()?;
+    let hue = u16::from_str_radix(hue.trim_start_matches("0x"), 16).ok()?;
+    Some(openshard_protocol::house_inventory::HouseItemIdentity::Legacy {
+        graphic: Graphic(graphic),
+        hue:     Hue(hue),
+    })
+}
+
+const fn house_inventory_refusal(
+    reason: openshard_protocol::house_inventory::HouseInventoryRefusal,
+) -> &'static str {
+    match reason {
+        openshard_protocol::house_inventory::HouseInventoryRefusal::NotInHouse => {
+            "Stand inside a house to search its storage."
+        }
+        openshard_protocol::house_inventory::HouseInventoryRefusal::Banned => {
+            "You may not search this house."
+        }
+        openshard_protocol::house_inventory::HouseInventoryRefusal::InvalidRequest => {
+            "The search selection is invalid."
+        }
+        openshard_protocol::house_inventory::HouseInventoryRefusal::Unavailable => {
+            "The house index is rebuilding; try again next tick."
+        }
+        openshard_protocol::house_inventory::HouseInventoryRefusal::Stale => {
+            "The house changed; run the search again."
+        }
+        openshard_protocol::house_inventory::HouseInventoryRefusal::NotFound => {
+            "That result moved or is no longer accessible."
+        }
+    }
 }
 
 /// Catalogue, tool workbench and recipe details are pages of one server gump.
@@ -6579,6 +6885,18 @@ fn panel_edge(named: openshard_client_render::occlusion::Edges) -> [usize; 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_legacy_house_query_requires_graphic_and_hue() {
+        assert_eq!(
+            parse_legacy_house_identity("0x0eed:0x0481"),
+            Some(openshard_protocol::house_inventory::HouseItemIdentity::Legacy {
+                graphic: Graphic(0x0EED),
+                hue:     Hue(0x0481),
+            })
+        );
+        assert_eq!(parse_legacy_house_identity("gold"), None);
+    }
 
     /// Far is a smaller `x + y`, which is the order the solid is painted in.
     ///

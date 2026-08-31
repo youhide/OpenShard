@@ -1545,6 +1545,7 @@ impl World {
                     crafting::open_catalogue(&mut self.state, player);
                 }
             }
+            Command::HouseInventory { connection, request } => self.house_inventory(connection, request),
             Command::SetStatLock {
                 connection,
                 stat,
@@ -1725,6 +1726,125 @@ impl World {
                 sales,
             } => npc::sell(&mut self.state, connection, vendor, &sales),
         }
+    }
+
+    fn house_inventory(
+        &mut self,
+        connection: ConnectionId,
+        request: openshard_protocol::house_inventory::HouseInventoryRequest,
+    ) {
+        use openshard_protocol::house_inventory::{
+            HouseInventoryRefusal as Refusal,
+            HouseInventoryReply as Reply,
+            HouseInventoryRow,
+        };
+
+        let Some(&player) = self.state.players.get(&connection) else {
+            self.state.send_packet(
+                connection,
+                &ServerPacket::HouseInventory(Reply::Refused {
+                    reason:        Refusal::NotInHouse,
+                    current_epoch: 0,
+                }),
+            );
+            return;
+        };
+        let reply = match request {
+            openshard_protocol::house_inventory::HouseInventoryRequest::Search {
+                expected_epoch,
+                selectors,
+                after,
+                limit,
+            } => {
+                match openshard_housing::inventory::search(
+                    &self.state,
+                    player,
+                    expected_epoch,
+                    &selectors,
+                    after,
+                    usize::from(limit),
+                ) {
+                    Ok(page) => {
+                        Reply::Page {
+                            epoch: page.epoch,
+                            rows:  page
+                                .rows
+                                .into_iter()
+                                .map(|row| {
+                                    HouseInventoryRow {
+                                        identity:        row.identity,
+                                        aggregate_total: row.aggregate_total,
+                                        root:            row.root,
+                                        root_total:      row.root_total,
+                                        first_pile:      row.first_pile,
+                                        pile_count:      u32::try_from(row.pile_count).unwrap_or(u32::MAX),
+                                    }
+                                })
+                                .collect(),
+                            next:  page.next,
+                        }
+                    }
+                    Err(openshard_housing::inventory::SearchRefusal::NotInAHouse) => {
+                        Reply::Refused {
+                            reason:        Refusal::NotInHouse,
+                            current_epoch: 0,
+                        }
+                    }
+                    Err(openshard_housing::inventory::SearchRefusal::Banned) => {
+                        Reply::Refused {
+                            reason:        Refusal::Banned,
+                            current_epoch: 0,
+                        }
+                    }
+                    Err(openshard_housing::inventory::SearchRefusal::Index(error)) => {
+                        match error {
+                            openshard_state::HouseInventoryError::EmptySelectors
+                            | openshard_state::HouseInventoryError::TooManySelectors
+                            | openshard_state::HouseInventoryError::InvalidPageSize => {
+                                Reply::Refused {
+                                    reason:        Refusal::InvalidRequest,
+                                    current_epoch: 0,
+                                }
+                            }
+                            openshard_state::HouseInventoryError::Unavailable { epoch } => {
+                                Reply::Refused {
+                                    reason:        Refusal::Unavailable,
+                                    current_epoch: epoch,
+                                }
+                            }
+                            openshard_state::HouseInventoryError::StaleEpoch { current } => {
+                                Reply::Refused {
+                                    reason:        Refusal::Stale,
+                                    current_epoch: current,
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            openshard_protocol::house_inventory::HouseInventoryRequest::Resolve {
+                epoch,
+                identity,
+                root,
+                item,
+            } => {
+                if openshard_housing::inventory::resolve(&self.state, player, epoch, identity, root, item)
+                    .is_some()
+                {
+                    // A result grants no mutation right. Revalidation above is
+                    // followed only by the ordinary checked container-open door.
+                    let _ = items::double_click(&mut self.state, connection, root);
+                    Reply::Resolved { epoch, root, item }
+                } else {
+                    Reply::Refused {
+                        reason:        Refusal::NotFound,
+                        current_epoch: epoch,
+                    }
+                }
+            }
+        };
+        self.state
+            .send_packet(connection, &ServerPacket::HouseInventory(reply));
     }
 
     /// Give every brain due a beat. The deciding is [`ai::think_one`]'s; the world

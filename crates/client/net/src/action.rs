@@ -14,6 +14,7 @@ use openshard_protocol::gump::{
     RawGumpKey,
     RawSwitchId,
 };
+use openshard_protocol::house_inventory::HouseInventoryRequest;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::mapedit::MapEditRequest;
 use openshard_protocol::serial::Serial;
@@ -98,6 +99,8 @@ pub enum Outgoing {
     /// Open the tool-free craft catalogue through OpenShard's private `0xBF`
     /// request. A stock client never sends this, so it remains harmless to one.
     OpenCraftCatalogue,
+    /// Search/open one result in the current house's read-only inventory.
+    HouseInventory(HouseInventoryRequest),
     /// Cast a spell selected from a spellbook this client opened.
     CastSpell {
         spellbook: Serial,
@@ -167,6 +170,7 @@ impl Outgoing {
             Self::SkillLock { skill, lock } => crate::skill::set_lock(skill, lock),
             Self::UseSkill(skill) => crate::skill::use_skill(skill),
             Self::OpenCraftCatalogue => OpenCraftCatalogue.encode(),
+            Self::HouseInventory(request) => request.encode(),
             Self::CastSpell { spellbook, spell } => crate::casting::cast(spellbook, spell),
             Self::QueryProperties(serials) => crate::properties::query(&serials, version),
             Self::PartySay(text) => crate::party::say(&text),

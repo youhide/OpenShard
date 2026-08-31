@@ -14,15 +14,13 @@ use std::ops::Bound;
 
 use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
-use openshard_protocol::item_kind::{
-    ItemKindId,
-    MaterialId,
+pub use openshard_protocol::house_inventory::{
+    HouseInventoryCursor,
+    HouseItemIdentity,
+    MAX_HOUSE_INVENTORY_PAGE,
+    MAX_HOUSE_INVENTORY_SELECTORS,
 };
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::{
-    Graphic,
-    Hue,
-};
 
 use crate::components::{
     Amount,
@@ -43,24 +41,8 @@ use crate::{
     contained_items,
 };
 
-/// Maximum exact identities accepted by one search request.
-pub const MAX_HOUSE_INVENTORY_SELECTORS: usize = 32;
-/// Maximum root rows returned by one search page.
-pub const MAX_HOUSE_INVENTORY_PAGE: usize = 50;
 /// Projection work units performed by the world tick.
 pub const HOUSE_INVENTORY_REBUILD_BUDGET: usize = 256;
-
-/// Search identity: semantic where known, exact legacy presentation otherwise.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum HouseItemIdentity {
-    /// Registry-backed gameplay identity.
-    Semantic {
-        kind:     ItemKindId,
-        material: Option<MaterialId>,
-    },
-    /// An unmigrated item, kept distinct by both art and hue.
-    Legacy { graphic: Graphic, hue: Hue },
-}
 
 /// Resolve one live item's searchable identity.
 #[must_use]
@@ -81,13 +63,6 @@ pub fn house_item_identity(state: &WorldState, item: EntityId) -> Option<HouseIt
             })
         }
     }
-}
-
-/// Stable continuation after one returned `(identity, root)` row.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct HouseInventoryCursor {
-    pub identity: HouseItemIdentity,
-    pub root:     Serial,
 }
 
 /// One permitted root contributing to an aggregate identity result.
@@ -698,8 +673,16 @@ mod tests {
     use openshard_protocol::containers::GridSlot;
     use openshard_protocol::direction::Direction;
     use openshard_protocol::gump::GumpPoint;
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
     use openshard_protocol::serial::SerialKind;
-    use openshard_protocol::wire::MultiId;
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+        MultiId,
+    };
     use openshard_protocol::world::{
         Facet,
         Point,

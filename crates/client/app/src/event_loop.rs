@@ -480,6 +480,12 @@ impl ApplicationHandler<()> for App {
                         }
                         false
                     }
+                    keyboard::Hotkey::HouseInventory => {
+                        if let Some(shell) = self.shell.as_mut() {
+                            shell.toggle_house_inventory();
+                        }
+                        true
+                    }
                     keyboard::Hotkey::Minimap => {
                         if let Some(open) = self
                             .windows

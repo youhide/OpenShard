@@ -224,6 +224,9 @@ pub(crate) enum Hotkey {
     /// Open the shard's craft catalogue. Unlike the skill sheet this is a
     /// server-owned view: it reads the live backpack and nearby workbench.
     CraftCatalogue,
+    /// Search permissioned storage in the house currently occupied. Ctrl+I
+    /// leaves plain I for the backpack.
+    HouseInventory,
     /// The minimap. Local, like the skills and status windows and unlike
     /// [`Paperdoll`](Self::Paperdoll): no round trip.
     ///
@@ -308,7 +311,7 @@ impl Hotkey {
     /// The list exists so that "no two actions share a key" is a test rather
     /// than a thing somebody notices — see [`Self::key`], which is also the
     /// question a bindings window asks.
-    pub(crate) const ALL: [Self; 25] = [
+    pub(crate) const ALL: [Self; 26] = [
         Self::Speak,
         Self::DevWindow,
         Self::Relock,
@@ -316,6 +319,7 @@ impl Hotkey {
         Self::Inventory,
         Self::UseLastItem,
         Self::CraftCatalogue,
+        Self::HouseInventory,
         Self::Minimap,
         Self::WorldMap,
         Self::PanUp,
@@ -346,7 +350,7 @@ impl Hotkey {
             Self::DevWindow => KeyCode::F1,
             Self::Relock => KeyCode::Home,
             Self::Paperdoll => KeyCode::KeyP,
-            Self::Inventory => KeyCode::KeyI,
+            Self::Inventory | Self::HouseInventory => KeyCode::KeyI,
             // F2 is already Fringe and every other function key is occupied.
             Self::UseLastItem => KeyCode::KeyU,
             Self::CraftCatalogue => KeyCode::KeyC,
@@ -376,7 +380,10 @@ impl Hotkey {
     pub(crate) const fn gesture(self) -> Gesture {
         Gesture::new(
             self.key(),
-            matches!(self, Self::PanUp | Self::PanDown | Self::WorldMap),
+            matches!(
+                self,
+                Self::PanUp | Self::PanDown | Self::WorldMap | Self::HouseInventory
+            ),
         )
     }
 

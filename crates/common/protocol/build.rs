@@ -21,8 +21,18 @@ use serde_json::Value;
 #[derive(Clone)]
 struct ItemInfo {
     id:       u32,
+    name:     String,
     family:   Option<String>,
+    tags:     Vec<String>,
     graphics: Vec<u16>,
+}
+
+#[derive(Clone)]
+struct MaterialInfo {
+    id:     u16,
+    family: String,
+    name:   String,
+    hue:    u16,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -49,7 +59,11 @@ fn main() {
     let items_json = json(&items_path);
     let materials_json = json(&materials_path);
     let items = parse_items(&items_json);
-    let materials = parse_materials(&materials_json);
+    let material_entries = parse_material_entries(&materials_json);
+    let materials = material_entries
+        .iter()
+        .map(|material| ((material.family.clone(), material.hue), material.id))
+        .collect();
     let mut revision_bytes = Vec::new();
     revision_bytes.extend(fs::read(&systems_path).expect("read craft systems"));
     revision_bytes.extend(fs::read(&items_path).expect("read item definitions"));
@@ -253,6 +267,52 @@ fn main() {
 
     let output = PathBuf::from(std::env::var_os("OUT_DIR").expect("output directory"));
     fs::write(output.join("craft_catalogue.rs"), out).expect("write craft catalogue artifact");
+    write_house_catalogue(&output, &items, &material_entries);
+}
+
+fn write_house_catalogue(output: &Path, items: &[ItemInfo], materials: &[MaterialInfo]) {
+    let mut out = String::from("pub const HOUSE_ITEM_CATALOGUE: &[HouseCatalogueEntry] = &[\n");
+    for item in items {
+        let graphic = item.graphics[0];
+        write_house_entry(&mut out, item, None, &item.name, graphic, 0);
+        if let Some(family) = &item.family {
+            for material in materials.iter().filter(|material| &material.family == family) {
+                let name = format!("{} {}", material.name, item.name);
+                write_house_entry(&mut out, item, Some(material.id), &name, graphic, material.hue);
+            }
+        }
+    }
+    out.push_str("];\n");
+    fs::write(output.join("house_item_catalogue.rs"), out).expect("write house item catalogue artifact");
+}
+
+fn write_house_entry(
+    out: &mut String,
+    item: &ItemInfo,
+    material: Option<u16>,
+    name: &str,
+    graphic: u16,
+    hue: u16,
+) {
+    writeln!(out, "    HouseCatalogueEntry {{").unwrap();
+    writeln!(
+        out,
+        "        identity: HouseItemIdentity::Semantic {{ kind: ItemKindId({}), material: {} }},",
+        item.id,
+        option_u16(material, "MaterialId")
+    )
+    .unwrap();
+    writeln!(out, "        name: {name:?},").unwrap();
+    out.push_str("        tags: &[");
+    for tag in &item.tags {
+        write!(out, "{tag:?},").unwrap();
+    }
+    if let Some(family) = &item.family {
+        write!(out, "{family:?},").unwrap();
+    }
+    out.push_str("],\n");
+    writeln!(out, "        graphic: Graphic({graphic}),").unwrap();
+    writeln!(out, "        hue: Hue({hue}),\n    }},").unwrap();
 }
 
 fn json(path: &Path) -> Value {
@@ -321,27 +381,36 @@ fn parse_items(value: &Value) -> Vec<ItemInfo> {
             }
             ItemInfo {
                 id: integer(field(item, "id"), "item id") as u32,
+                name: string(field(item, "name"), "item name").to_owned(),
                 family: item
                     .get("material_family")
                     .and_then(Value::as_str)
                     .map(str::to_owned),
+                tags: item
+                    .get("tags")
+                    .map(|tags| {
+                        array(tags, "item tags")
+                            .iter()
+                            .map(|tag| string(tag, "item tag").to_owned())
+                            .collect()
+                    })
+                    .unwrap_or_else(Vec::new),
                 graphics,
             }
         })
         .collect()
 }
 
-fn parse_materials(value: &Value) -> BTreeMap<(String, u16), u16> {
+fn parse_material_entries(value: &Value) -> Vec<MaterialInfo> {
     array(value, "materials")
         .iter()
         .map(|material| {
-            (
-                (
-                    string(field(material, "family"), "material family").to_owned(),
-                    hex(string(field(material, "hue"), "material hue")),
-                ),
-                integer(field(material, "id"), "material id") as u16,
-            )
+            MaterialInfo {
+                id:     integer(field(material, "id"), "material id") as u16,
+                family: string(field(material, "family"), "material family").to_owned(),
+                name:   string(field(material, "name"), "material name").to_owned(),
+                hue:    hex(string(field(material, "hue"), "material hue")),
+            }
         })
         .collect()
 }

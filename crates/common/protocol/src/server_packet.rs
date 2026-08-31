@@ -64,6 +64,7 @@ use crate::gump::{
     CloseGump,
     GumpDisplay,
 };
+use crate::house_inventory::HouseInventoryReply;
 use crate::items::{
     CorpseEquipment,
     DragCancel,
@@ -325,6 +326,8 @@ pub enum ServerPacket {
     CraftCatalogue(CraftCatalogue),
     /// `0xBF 0xE017` — compact data for a tool-specific craft workbench.
     CraftWorkbench(CraftWorkbench),
+    /// `0xBF 0xE019` — bounded, permission-filtered house inventory results.
+    HouseInventory(HouseInventoryReply),
     /// `0xB0` — display a generic gump.
     GumpDisplay(GumpDisplay),
 }
@@ -415,6 +418,7 @@ impl ServerPacket {
             Self::CloseGump(_) => <CloseGump as EncodePacket>::ID,
             Self::CraftCatalogue(_) => CraftCatalogue::ID,
             Self::CraftWorkbench(_) => CraftWorkbench::ID,
+            Self::HouseInventory(_) => HouseInventoryReply::ID,
             Self::GumpDisplay(_) => <GumpDisplay as EncodePacket>::ID,
         }
     }
@@ -508,6 +512,7 @@ impl ServerPacket {
             Self::CloseGump(_) => CloseGump::LENGTH,
             Self::CraftCatalogue(_) => CraftCatalogue::LENGTH,
             Self::CraftWorkbench(_) => CraftWorkbench::LENGTH,
+            Self::HouseInventory(_) => HouseInventoryReply::LENGTH,
             Self::GumpDisplay(_) => GumpDisplay::LENGTH,
         }
     }
@@ -603,6 +608,7 @@ impl ServerPacket {
             Self::CloseGump(packet) => packet.encode_body(out, version),
             Self::CraftCatalogue(packet) => packet.encode_body(out, version),
             Self::CraftWorkbench(packet) => packet.encode_body(out, version),
+            Self::HouseInventory(packet) => packet.encode_body(out, version),
             Self::GumpDisplay(packet) => packet.encode_body(out, version),
         }
     }
@@ -659,6 +665,11 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
             decode_server(packet, version)
                 .map(ServerPacket::CraftWorkbench)
                 .map_err(ServerDecodeError::CraftWorkbench)?
+        }
+        HouseInventoryReply::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::HouseInventory)
+                .map_err(ServerDecodeError::HouseInventory)?
         }
         crate::spellbook::SpellbookContent::SUBCOMMAND => {
             decode_server(packet, version)
@@ -1296,6 +1307,8 @@ pub enum ServerDecodeError {
     CraftCatalogue(DecodeError),
     /// `0xBF` subcommand `0xE017` did not decode.
     CraftWorkbench(DecodeError),
+    /// `0xBF` subcommand `0xE019` did not decode.
+    HouseInventory(DecodeError),
     /// `0xBF` subcommand `0x1B` did not decode.
     SpellbookContent(DecodeError),
 }
@@ -1345,6 +1358,7 @@ impl fmt::Display for ServerDecodeError {
             Self::CloseGump(error) => ("0xBF 0x04 close gump", error),
             Self::CraftCatalogue(error) => ("0xBF 0xE016 craft catalogue", error),
             Self::CraftWorkbench(error) => ("0xBF 0xE017 craft workbench", error),
+            Self::HouseInventory(error) => ("0xBF 0xE019 house inventory", error),
             Self::SpellbookContent(error) => ("0xBF 0x1B spellbook content", error),
             Self::OpenContainer(error) => ("0x24 open container", error),
             Self::AddToContainer(error) => ("0x25 add to container", error),
@@ -1670,6 +1684,7 @@ mod tests {
         CloseGump,
         CraftCatalogue,
         CraftWorkbench,
+        HouseInventory,
         GumpDisplay,
     ];
 

@@ -301,6 +301,12 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
                     })
                 }
                 ExtendedRequest::CraftCatalogue(_) => Some(Command::OpenCraftCatalogue { connection: id }),
+                ExtendedRequest::HouseInventory(request) => {
+                    Some(Command::HouseInventory {
+                        connection: id,
+                        request,
+                    })
+                }
                 ExtendedRequest::Unknown(subcommand) => {
                     debug!(%id, subcommand = format!("0x{subcommand:02X}"), "unhandled 0xBF");
                     None
@@ -425,6 +431,27 @@ mod tests {
                 connection,
             ),
             Some(Command::CommitMapEdit { connection, request })
+        );
+    }
+
+    #[test]
+    fn a_house_search_attaches_only_the_connection_before_entering_the_tick() {
+        let request = openshard_protocol::house_inventory::HouseInventoryRequest::Search {
+            expected_epoch: None,
+            selectors:      vec![openshard_protocol::house_inventory::HouseItemIdentity::Semantic {
+                kind:     openshard_protocol::item_kind::ItemKindId(1),
+                material: Some(openshard_protocol::item_kind::MaterialId(1)),
+            }],
+            after:          None,
+            limit:          50,
+        };
+        let connection = ConnectionId::from_raw(42);
+        assert_eq!(
+            dispatch_world_packet(
+                ClientPacket::Extended(ExtendedRequest::HouseInventory(request.clone())),
+                connection,
+            ),
+            Some(Command::HouseInventory { connection, request })
         );
     }
 

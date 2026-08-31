@@ -991,6 +991,11 @@ impl App {
         if let Some(reply) = request.craft_reply {
             self.answer_gump(reply);
         }
+        if let Some(house_inventory) = request.house_inventory {
+            if let Some(link) = self.world.shard.link() {
+                link.act(Outgoing::HouseInventory(house_inventory));
+            }
+        }
         // **No amount answer here any more.** The picker was an `egui::Window`,
         // so what it decided arrived a frame late through this struct and had
         // to be translated out of the shell's vocabulary on the way. It is a
