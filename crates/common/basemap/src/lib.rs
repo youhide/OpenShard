@@ -554,11 +554,15 @@ fn parse_index(path: &Path, bytes: &[u8], count: usize) -> Result<BaseIndex, Bas
         });
     }
     let table: Vec<u64> = bytes[HEADER_BYTES..manifest_at]
-        .chunks_exact(ENTRY_BYTES)
-        .map(|entry| u64::from_le_bytes(entry.try_into().expect("eight bytes")))
+        .as_chunks::<ENTRY_BYTES>()
+        .0
+        .iter()
+        .map(|entry| u64::from_le_bytes(*entry))
         .collect();
     let manifest: Vec<(u64, InflatedLength)> = bytes[manifest_at..table_end]
-        .chunks_exact(MANIFEST_BYTES)
+        .as_chunks::<MANIFEST_BYTES>()
+        .0
+        .iter()
         .map(|entry| {
             (
                 u64::from_le_bytes(entry[..8].try_into().expect("eight bytes")),

@@ -83,7 +83,7 @@ pub fn encode_rgba(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
         rgba.len(),
     );
     let mut rgb = Vec::with_capacity((width as usize) * (height as usize) * 3);
-    for pixel in rgba.chunks_exact(4) {
+    for pixel in rgba.as_chunks::<4>().0 {
         rgb.extend_from_slice(&pixel[..3]);
     }
     encode(width, height, &rgb)

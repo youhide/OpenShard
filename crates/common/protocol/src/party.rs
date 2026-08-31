@@ -121,7 +121,9 @@ impl PartyRequest {
 fn utf16_be_to_end(reader: &mut PacketReader<'_>) -> String {
     let units: Vec<u16> = reader
         .rest()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
         .take_while(|unit| *unit != 0)
         .collect();

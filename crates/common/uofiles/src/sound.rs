@@ -121,7 +121,9 @@ impl SoundArchive {
             });
         }
         let index = bytes
-            .chunks_exact(INDEX_ENTRY)
+            .as_chunks::<INDEX_ENTRY>()
+            .0
+            .iter()
             .map(|entry| Entry {
                 offset: u32::from_le_bytes(entry[0..4].try_into().expect("four bytes")),
                 length: u32::from_le_bytes(entry[4..8].try_into().expect("four bytes")),
@@ -278,8 +280,10 @@ fn pcm_samples(bytes: &[u8], bits_per_sample: u16) -> Option<Vec<f32>> {
         ),
         16 if bytes.len().is_multiple_of(2) => Some(
             bytes
-                .chunks_exact(2)
-                .map(|sample| f32::from(i16::from_le_bytes(sample.try_into().expect("two bytes"))) / 32768.0)
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|sample| f32::from(i16::from_le_bytes(*sample)) / 32768.0)
                 .collect(),
         ),
         _ => None,

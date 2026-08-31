@@ -3793,9 +3793,8 @@ mod tests {
         );
         queue.submit([encoder.finish()]);
         let ids = read_attachment(&device, &queue, cache.get(key).unwrap().deferred_textures().0);
-        assert!(ids.chunks_exact(4).all(|word| {
-            crate::gbuffer::ids_kind(u32::from_le_bytes(word.try_into().unwrap()))
-                == Some(crate::place::Kind::Land)
+        assert!(ids.as_chunks::<4>().0.iter().all(|word| {
+            crate::gbuffer::ids_kind(u32::from_le_bytes(*word)) == Some(crate::place::Kind::Land)
         }));
     }
 

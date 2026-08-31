@@ -7,7 +7,7 @@
 //! is the end that has to undo it.
 
 use openshard_protocol::huffman::{self, HuffmanError};
-use openshard_protocol::packet::{Frame, FrameError, MAX_PACKET_SIZE};
+use openshard_protocol::packet::{Frame, FrameError, MAX_SERVER_PACKET_SIZE};
 use openshard_protocol::server_packet::{ServerDecodeError, ServerPacket, frame_server_packet};
 use openshard_protocol::version::ClientVersion;
 
@@ -33,7 +33,7 @@ impl std::fmt::Display for PacketId {
 #[non_exhaustive]
 pub enum Event {
     /// A packet this crate decodes.
-    Packet(ServerPacket),
+    Packet(Box<ServerPacket>),
     /// A packet the framer sized but no decoder exists for yet.
     ///
     /// Not an error and not a dropped connection: the stream is intact, because
@@ -65,8 +65,8 @@ pub enum ConnectionError {
     /// Bytes are piling up that should have framed and did not.
     ///
     /// Unreachable unless framing has a bug: a variable packet cannot claim
-    /// more than [`MAX_PACKET_SIZE`], so a well-behaved stream never buffers
-    /// more than one packet's worth.
+    /// more than [`MAX_SERVER_PACKET_SIZE`], so a well-behaved stream never
+    /// buffers more than one packet's worth.
     Overflow {
         /// How many bytes are pending.
         buffered: usize,
@@ -112,7 +112,7 @@ impl std::error::Error for ConnectionError {}
 /// A compressed packet can be *longer* than its input — the table is tuned for
 /// typical content, and incompressible bytes cost more than eight bits each —
 /// so the cap is twice a packet rather than exactly one.
-const MAX_BUFFERED: usize = MAX_PACKET_SIZE * 2;
+const MAX_BUFFERED: usize = MAX_SERVER_PACKET_SIZE * 2;
 
 /// A byte stream whose already-consumed prefix does not move the unread tail.
 ///
@@ -203,7 +203,7 @@ pub enum Stream {
 ///
 /// assert_eq!(
 ///     connection.poll().unwrap(),
-///     Some(Event::Packet(ServerPacket::LoginComplete(LoginComplete))),
+///     Some(Event::Packet(Box::new(ServerPacket::LoginComplete(LoginComplete)))),
 /// );
 /// assert_eq!(connection.poll().unwrap(), None);
 /// ```
@@ -318,7 +318,7 @@ impl Connection {
     fn interpret(&self, packet: Vec<u8>) -> Result<Event, ConnectionError> {
         let id = PacketId(packet[0]);
         match ServerPacket::decode(&packet, self.version)? {
-            Some(decoded) => Ok(Event::Packet(decoded)),
+            Some(decoded) => Ok(Event::Packet(Box::new(decoded))),
             None => Ok(Event::Undecoded { id, body: packet }),
         }
     }
@@ -343,6 +343,10 @@ mod tests {
         })
     }
 
+    fn event(packet: ServerPacket) -> Event {
+        Event::Packet(Box::new(packet))
+    }
+
     #[test]
     fn a_packet_split_across_reads_arrives_once() {
         // The reason this type is sans-io: a socket cannot be asked to deliver
@@ -355,8 +359,35 @@ mod tests {
             assert_eq!(connection.poll().unwrap(), None, "not whole yet");
         }
         connection.receive(&bytes[bytes.len() - 1..]);
-        assert_eq!(connection.poll().unwrap(), Some(Event::Packet(denied())));
+        assert_eq!(connection.poll().unwrap(), Some(event(denied())));
         assert_eq!(connection.poll().unwrap(), None);
+    }
+
+    #[test]
+    fn a_large_shard_packet_survives_both_streams() {
+        // Opening the complete craft catalogue produced a 23,483-byte 0xBF.
+        // It is larger than the gateway's hostile-input cap but legal in the
+        // server-to-client direction, whose length field can describe it.
+        let length = 23_483usize;
+        let [high, low] = (length as u16).to_be_bytes();
+        let mut packet = vec![0xBF, high, low, 0xFF, 0xFF];
+        packet.resize(length, 0);
+
+        for stream in [Stream::Plain, Stream::Compressed] {
+            let wire = match stream {
+                Stream::Plain => packet.clone(),
+                Stream::Compressed => huffman::compress(&packet),
+            };
+            let mut connection = Connection::new(stream, version());
+            connection.receive(&wire);
+
+            let Some(Event::Undecoded { id, body }) = connection.poll().unwrap() else {
+                panic!("a large 0xBF must arrive intact");
+            };
+            assert_eq!(id, PacketId(0xBF));
+            assert_eq!(body, packet);
+            assert_eq!(connection.poll().unwrap(), None);
+        }
     }
 
     #[test]
@@ -370,10 +401,10 @@ mod tests {
         let mut connection = Connection::new(Stream::Plain, version());
         connection.receive(&bytes);
 
-        assert_eq!(connection.poll().unwrap(), Some(Event::Packet(denied())));
+        assert_eq!(connection.poll().unwrap(), Some(event(denied())));
         assert_eq!(
             connection.poll().unwrap(),
-            Some(Event::Packet(ServerPacket::LoginComplete(LoginComplete)))
+            Some(event(ServerPacket::LoginComplete(LoginComplete)))
         );
         assert_eq!(connection.poll().unwrap(), None);
     }
@@ -396,7 +427,7 @@ mod tests {
             connection.receive(&wire);
 
             for _ in 0..PACKET_COUNT {
-                assert_eq!(connection.poll().unwrap(), Some(Event::Packet(denied())));
+                assert_eq!(connection.poll().unwrap(), Some(event(denied())));
             }
             assert_eq!(connection.poll().unwrap(), None);
             assert_eq!(connection.buffered(), 0);
@@ -416,7 +447,7 @@ mod tests {
         let mut connection = Connection::new(Stream::Plain, version());
         connection.receive(&bytes);
         for _ in 0..3 {
-            assert_eq!(connection.poll().unwrap(), Some(Event::Packet(sound.clone())));
+            assert_eq!(connection.poll().unwrap(), Some(event(sound.clone())));
         }
         assert_eq!(connection.poll().unwrap(), None);
     }
@@ -433,10 +464,10 @@ mod tests {
         let mut connection = Connection::new(Stream::Compressed, version());
         connection.receive(&wire);
 
-        assert_eq!(connection.poll().unwrap(), Some(Event::Packet(denied())));
+        assert_eq!(connection.poll().unwrap(), Some(event(denied())));
         assert_eq!(
             connection.poll().unwrap(),
-            Some(Event::Packet(ServerPacket::LoginComplete(LoginComplete)))
+            Some(event(ServerPacket::LoginComplete(LoginComplete)))
         );
         assert_eq!(connection.poll().unwrap(), None);
     }
@@ -453,7 +484,7 @@ mod tests {
         assert_eq!(connection.poll().unwrap(), None);
 
         connection.receive(&wire[wire.len() - 1..]);
-        assert_eq!(connection.poll().unwrap(), Some(Event::Packet(denied())));
+        assert_eq!(connection.poll().unwrap(), Some(event(denied())));
     }
 
     #[test]
@@ -479,7 +510,7 @@ mod tests {
         );
         assert_eq!(
             connection.poll().unwrap(),
-            Some(Event::Packet(ServerPacket::LoginComplete(LoginComplete)))
+            Some(event(ServerPacket::LoginComplete(LoginComplete)))
         );
     }
 
@@ -529,7 +560,7 @@ mod tests {
 
         assert_eq!(
             connection.poll().unwrap(),
-            Some(Event::Packet(ServerPacket::PropertyListReply(
+            Some(event(ServerPacket::PropertyListReply(
                 openshard_protocol::properties::PropertyListReply {
                     serial,
                     hash,
@@ -542,7 +573,7 @@ mod tests {
         );
         assert_eq!(
             connection.poll().unwrap(),
-            Some(Event::Packet(ServerPacket::LoginComplete(LoginComplete)))
+            Some(event(ServerPacket::LoginComplete(LoginComplete)))
         );
     }
 
@@ -561,10 +592,10 @@ mod tests {
         let mut connection = Connection::new(Stream::Compressed, version());
         connection.receive(&wire);
 
-        assert_eq!(connection.poll().unwrap(), Some(Event::Packet(denied())));
+        assert_eq!(connection.poll().unwrap(), Some(event(denied())));
         assert_eq!(
             connection.poll().unwrap(),
-            Some(Event::Packet(ServerPacket::LoginComplete(LoginComplete)))
+            Some(event(ServerPacket::LoginComplete(LoginComplete)))
         );
         assert_eq!(connection.poll().unwrap(), None);
     }
@@ -583,6 +614,6 @@ mod tests {
         assert_eq!(connection.poll().unwrap(), None, "half a packet is not one");
 
         connection.receive(&second);
-        assert_eq!(connection.poll().unwrap(), Some(Event::Packet(denied())));
+        assert_eq!(connection.poll().unwrap(), Some(event(denied())));
     }
 }

@@ -456,41 +456,6 @@ pub fn place_one_kind(
     Some(entity)
 }
 
-/// Leave the remainder of a split stack behind *inside a container*, at the same
-/// grid slot the original is vacating. The container sibling of `spawn_leftover`
-/// (Sphere's `CItem::UnStackSplit`): the original keeps its serial and goes onto
-/// the cursor with the taken amount, and this dupe — a new serial — holds the
-/// remainder in the container, drawn into every open gump with a `0x25`.
-pub fn spawn_contained_leftover(
-    state: &mut WorldState,
-    original: EntityId,
-    amount: u16,
-    contained: Contained,
-) -> Option<EntityId> {
-    let &Drawn { id, hue } = state.registry.get::<Drawn>(original)?;
-    let leftover = match state.registry.spawn_with_serial(SerialKind::Item) {
-        Ok((entity, _)) => entity,
-        Err(error) => {
-            warn!(?error, "out of item serials; a split remainder is lost");
-            return None;
-        }
-    };
-    let drawn = Drawn { id, hue };
-    state.registry.insert(leftover, drawn);
-    crate::spawn::copy_identity(state, original, leftover);
-    state.registry.insert(leftover, Stackable);
-    set_stack_amount(state, leftover, amount);
-    let location = Contained {
-        container: contained.container,
-        position: contained.position,
-        grid: contained.grid,
-    };
-    establish_item_location(state, leftover, ItemLocation::contained(location))
-        .expect("a contained split remainder has one valid parent");
-    tell_watchers_updated(state, contained.container, leftover);
-    Some(leftover)
-}
-
 /// What [`give`] managed to put in a container.
 ///
 /// The count matters: running out of item serials can happen after existing

@@ -11,7 +11,9 @@
 use openshard_entities::EntityId;
 use openshard_protocol::item_kind::{ItemSelector, MaterialRule};
 use openshard_skills::skill_value;
+use openshard_state::components::{ItemKind, Material};
 use openshard_state::{WorldState, item_definition, kind_from_drawn, material_definition};
+use std::collections::HashMap;
 
 use crate::recipe::Recipe;
 use crate::system::{CraftSystemDef, Text};
@@ -68,6 +70,86 @@ pub enum Share {
     Half,
 }
 
+/// One read of a crafter's backpack, reused by catalogue rows.
+///
+/// The ordinary craft path asks one recipe question and [`check`] is the right
+/// shape for it. The all-recipes catalogue asks the same question hundreds of
+/// times. Reading the backpack for every ingredient made that request
+/// `recipes × backpack children`; this snapshot makes it one exact indexed
+/// backpack read followed by small hash lookups while preserving the exact
+/// typed/legacy matching rules used by a real craft.
+pub(crate) struct MaterialStock {
+    has_pack: bool,
+    /// Every drawn item, including typed instances. Used by legacy recipes.
+    drawn: HashMap<Drawn, u32>,
+    /// Drawn instances without an `ItemKind`. These alone are the compatibility
+    /// half of a typed selector.
+    legacy: HashMap<Drawn, u32>,
+    identity: HashMap<
+        (
+            openshard_protocol::item_kind::ItemKindId,
+            Option<openshard_protocol::item_kind::MaterialId>,
+        ),
+        u32,
+    >,
+}
+
+impl MaterialStock {
+    pub(crate) fn capture(state: &WorldState, crafter: EntityId) -> Self {
+        let Some(pack) = state
+            .registry
+            .serial_of(crafter)
+            .and_then(|serial| openshard_items::backpack_of(state, serial))
+        else {
+            return Self {
+                has_pack: false,
+                drawn: HashMap::new(),
+                legacy: HashMap::new(),
+                identity: HashMap::new(),
+            };
+        };
+
+        let mut stock = Self {
+            has_pack: true,
+            drawn: HashMap::new(),
+            legacy: HashMap::new(),
+            identity: HashMap::new(),
+        };
+        for (item, _) in openshard_state::contained_items(state, pack) {
+            let Some(&drawn) = state.registry.get::<Drawn>(item) else {
+                continue;
+            };
+            let amount = u32::from(openshard_items::amount_of(state, item));
+            *stock.drawn.entry(drawn).or_default() += amount;
+            match state.registry.get::<ItemKind>(item) {
+                Some(&ItemKind(kind)) => {
+                    let material = state.registry.get::<Material>(item).map(|material| material.0);
+                    *stock.identity.entry((kind, material)).or_default() += amount;
+                }
+                None => *stock.legacy.entry(drawn).or_default() += amount,
+            }
+        }
+        stock
+    }
+
+    fn held(
+        &self,
+        semantic: Option<(
+            openshard_protocol::item_kind::ItemKindId,
+            Option<openshard_protocol::item_kind::MaterialId>,
+        )>,
+        legacy: Drawn,
+    ) -> u32 {
+        match semantic {
+            Some(identity) => {
+                self.identity.get(&identity).copied().unwrap_or_default()
+                    + self.legacy.get(&legacy).copied().unwrap_or_default()
+            }
+            None => self.drawn.get(&legacy).copied().unwrap_or_default(),
+        }
+    }
+}
+
 /// The dry run: what this craft would take, or why it cannot be made.
 ///
 /// `sub_res` indexes the system's material axis; it is ignored by a system that
@@ -87,6 +169,52 @@ pub fn check(
         return Err(Refusal::NoPack);
     };
 
+    check_with(
+        state,
+        crafter,
+        system,
+        recipe,
+        sub_res,
+        |semantic, legacy| match semantic {
+            Some((kind, material)) => {
+                openshard_items::carried_amount_of_identity_or_legacy(state, pack, kind, material, legacy)
+            }
+            None => openshard_items::carried_amount_of_hue(state, pack, legacy.id, Some(legacy.hue)),
+        },
+    )
+}
+
+/// The catalogue's dry run against its one captured backpack view.
+pub(crate) fn check_stock(
+    state: &WorldState,
+    crafter: EntityId,
+    system: &CraftSystemDef,
+    recipe: &Recipe,
+    sub_res: usize,
+    stock: &MaterialStock,
+) -> Result<Materials, Refusal> {
+    if !stock.has_pack {
+        return Err(Refusal::NoPack);
+    }
+    check_with(state, crafter, system, recipe, sub_res, |semantic, legacy| {
+        stock.held(semantic, legacy)
+    })
+}
+
+fn check_with(
+    state: &WorldState,
+    crafter: EntityId,
+    system: &CraftSystemDef,
+    recipe: &Recipe,
+    sub_res: usize,
+    held: impl Fn(
+        Option<(
+            openshard_protocol::item_kind::ItemKindId,
+            Option<openshard_protocol::item_kind::MaterialId>,
+        )>,
+        Drawn,
+    ) -> u32,
+) -> Result<Materials, Refusal> {
     // Which material the axis is set to, and whether the crafter can work it.
     // ServUO checks this against the **base** skill, not the stat-lent value: no
     // amount of Strength teaches a smith what to do with valorite.
@@ -131,19 +259,13 @@ pub fn check(
             None if res.from_axis => axis_identity.map(|(kind, material)| (kind, Some(material))),
             None => hue.and_then(|hue| kind_from_drawn(Drawn { id: res.graphic, hue })),
         };
-        let held = match semantic {
-            Some((kind, material)) => openshard_items::carried_amount_of_identity_or_legacy(
-                state,
-                pack,
-                kind,
-                material,
-                Drawn {
-                    id: res.graphic,
-                    hue: hue.expect("a semantic ingredient has a resolved hue"),
-                },
-            ),
-            None => openshard_items::carried_amount_of_hue(state, pack, res.graphic, hue),
-        };
+        let held = held(
+            semantic,
+            Drawn {
+                id: res.graphic,
+                hue: hue.expect("a craft ingredient has a resolved hue"),
+            },
+        );
         if res.amount == 0 {
             continue;
         }

@@ -5,11 +5,20 @@
 //! decay. Paralyze Field is not here: it freezes whoever crosses it, and there is
 //! no freeze mechanic until the Paralyze spell brings one.
 
-use super::*;
 use openshard_magic::MAGERY_SKILL;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_state::DamageType;
-use openshard_state::components::{FIELD_HEIGHT, Field, FieldKind, Skills};
+use openshard_state::components::{
+    FIELD_HEIGHT,
+    Field,
+    FieldKind,
+    Skills,
+};
+
+use super::*;
 
 /// Fire Field's damage per pulse (pre-AoS, era 1).
 const FIRE_FIELD_DAMAGE: u16 = 2;
@@ -131,13 +140,15 @@ impl World {
             };
             for victim in victims {
                 match kind {
-                    FieldKind::Fire => combat::damage(
+                    FieldKind::Fire => {
+                        combat::damage(
                         &mut self.state,
                         victim,
                         FIRE_FIELD_DAMAGE,
                         DamageType::Fire,
                         Some(caster),
-                    ),
+                        )
+                    }
                     FieldKind::Poison => {
                         combat::apply_poison(
                             &mut self.state,
@@ -194,7 +205,7 @@ impl World {
             self.state.forget(watcher, entity, serial);
         }
         self.state.unplace(facet, entity);
-        self.state.registry.despawn(entity);
+        openshard_state::despawn_item(&mut self.state, entity);
     }
 }
 

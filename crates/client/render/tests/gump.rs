@@ -57,7 +57,9 @@ impl Rendered {
 
     fn drawn_count(&self) -> usize {
         self.pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|pixel| pixel[3] == u8::MAX)
             .count()
     }

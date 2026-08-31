@@ -15,12 +15,30 @@
 //! batch of commands, which is an ordinary thing for the inbox to hold.
 
 use openshard_protocol::gump::{
-    ButtonId, CloseGump, GUMP_WHITE, GumpAnswer, GumpButton, GumpDisplay, GumpId, GumpKey, GumpLayout,
-    GumpPoint, GumpResponse, SwitchId,
+    ButtonId,
+    CloseGump,
+    GUMP_WHITE,
+    GumpAnswer,
+    GumpButton,
+    GumpDisplay,
+    GumpId,
+    GumpKey,
+    GumpLayout,
+    GumpPoint,
+    GumpResponse,
+    SwitchId,
 };
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::wire::{Hue, SoundId};
-use openshard_state::components::{MOONGATE_GRAPHIC, MOONGATE_REACH, Moongate, Position};
+use openshard_protocol::wire::{
+    Hue,
+    SoundId,
+};
+use openshard_state::components::{
+    MOONGATE_GRAPHIC,
+    MOONGATE_REACH,
+    Moongate,
+    Position,
+};
 
 use super::*;
 
@@ -283,7 +301,7 @@ impl World {
             self.state.forget(watcher, entity, serial);
         }
         self.state.unplace(facet, entity);
-        self.state.registry.despawn(entity);
+        openshard_state::despawn_item(&mut self.state, entity);
     }
 
     /// Take everyone who stepped onto a gate this tick through it.

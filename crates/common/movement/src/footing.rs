@@ -249,15 +249,17 @@ impl<'a> Footing<'a> {
     }
 
     /// The same ground with nothing the live world has put on it — what a coarse
-    /// navigation graph is guided and joined by.
+    /// navigation graph is guided by and what its ordinary endpoints join over.
     ///
     /// The graph is baked over the bare map (`docs/map/navigation_spans.md`'s
     /// N4), so the corridor it proposes has to be read over the bare map too: a
     /// door that happens to be shut, or a crate somebody dropped, must not be
     /// able to rewrite a route's *topology*. What the live world has to say is
-    /// asked of each exact step instead — [`find_long_path`](crate::find_long_path)
-    /// takes this and [`of`](Self::of) side by side, and only the second one
-    /// approves a step.
+    /// asked of each exact step instead. The exception is an endpoint in a
+    /// column where the live layer added a floor: a player house's upper storey
+    /// does not exist here at all, so [`find_long_path`](crate::find_long_path)
+    /// follows live places until they meet this graph, then still validates
+    /// every kept step through [`of`](Self::of).
     ///
     /// **Both ends of the wire want this value**, and each used to build it for
     /// itself out of an empty overlay it kept alive somewhere: the client's

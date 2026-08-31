@@ -1,5 +1,9 @@
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
+
 use super::*;
-use openshard_protocol::wire::{Graphic, Hue};
 
 impl World {
     /// Place a batch of decoration: script-added statics the shard puts on top of
@@ -372,7 +376,7 @@ impl World {
                 self.state.facet_state_mut(facet).unblock(at.x, at.y, entity);
             }
             self.state.unplace(facet, entity);
-            self.state.registry.despawn(entity);
+            openshard_state::despawn_item(&mut self.state, entity);
         }
     }
 }

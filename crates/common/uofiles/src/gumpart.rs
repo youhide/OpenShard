@@ -316,8 +316,10 @@ fn decode_pixels(graphic: Graphic, data: &[u8]) -> Result<Option<Image>, GumpErr
         .get(HEADER..HEADER + lookup_bytes)
         .ok_or_else(|| malformed(format!("no room for a {height}-row lookup table")))?;
     let lookup: Vec<i32> = lookup_raw
-        .chunks_exact(4)
-        .map(|word| i32::from_le_bytes(word.try_into().expect("4-byte chunk")))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|word| i32::from_le_bytes(*word))
         .collect();
 
     // How far the picture runs, in (colour, run) dword-pairs, counted from
@@ -348,7 +350,7 @@ fn decode_pixels(graphic: Graphic, data: &[u8]) -> Result<Option<Image>, GumpErr
             .ok_or_else(|| malformed(format!("row {y} runs past the end of the picture")))?;
 
         let mut x = 0usize;
-        for pair in row_data.chunks_exact(4) {
+        for pair in row_data.as_chunks::<4>().0 {
             let color = Color16(u16::from_le_bytes([pair[0], pair[1]]));
             let run = usize::from(u16::from_le_bytes([pair[2], pair[3]]));
             if x + run > width {

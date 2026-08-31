@@ -16,7 +16,8 @@ use openshard_entities::EntityId;
 use openshard_items as items;
 use openshard_map::overlay::Doors;
 use openshard_movement::{
-    COARSE_MIN_DISTANCE, Weight, direction_toward, find_long_path, find_path, step_from,
+    COARSE_MIN_DISTANCE, SearchExit, Weight, direction_toward, find_long_path, find_path, search_path,
+    step_from,
 };
 use openshard_protocol::direction::Direction;
 use openshard_protocol::serial::Serial;
@@ -414,15 +415,20 @@ fn plan_step(
     let planner = state
         .footing(facet, doors)
         .among(openshard_movement::Bodies::standing(&crowd));
-    if let Some(path) = find_path(&planner, from, to, PATH_BUDGET, Weight::PLANNING) {
+    let local = search_path(&planner, from, to, PATH_BUDGET, Weight::PLANNING);
+    if local.arrived {
         return StepPlan {
-            planned: Planned::Route(path),
+            planned: Planned::Route(local.route),
             coarse: Coarse::NotAsked,
         };
     }
-    // Short and refused stays refused: joining both endpoints to the graph
-    // costs more than the local answer that has already said no.
-    let ask = fallback == Fallback::Ask && distance(from, to) > COARSE_MIN_DISTANCE;
+    // A short search that exhausted the live component stays refused: joining
+    // both endpoints to the graph costs more and cannot invent a way. A budget
+    // refusal is different. A multi-house can put hundreds of floor places in
+    // eight tiles, and the dynamic storey join is how a creature inside one
+    // reaches the static graph outside it.
+    let ask = fallback == Fallback::Ask
+        && (distance(from, to) > COARSE_MIN_DISTANCE || local.exit == SearchExit::Budget);
     let graph = ask.then(|| state.facet_state(facet).coarse_router()).flatten();
     let Some(graph) = graph else {
         return StepPlan {

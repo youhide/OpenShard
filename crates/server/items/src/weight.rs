@@ -15,7 +15,6 @@
 //! the world.
 
 use super::*;
-use std::collections::HashMap;
 
 /// The graphic of a gold coin — the pile every payout, corpse drop and vendor
 /// sale is made of, and what the status bar counts.
@@ -69,41 +68,6 @@ const DEFAULT_STRENGTH: u16 = 100;
 /// feel of a bank run.
 pub(crate) const GOLD_WEIGHT_HUNDREDTHS: u32 = 2;
 
-/// Who is inside what: every contained item, keyed by the container holding it.
-///
-/// One scan of the containment column, shared by everyone read against it. Built
-/// because the obvious walk — ask "what is in this container" once per container
-/// — costs a full column scan *per bag*, and the status pass reads several bags
-/// for every online player twice a second. Built once, it is a scan per pass
-/// instead of a scan per bag per player.
-///
-/// The map stays private: this is a read-only snapshot of a world's containment
-/// column, not an arbitrary collection callers should be able to alter while
-/// they are walking it.
-#[derive(Debug, Default)]
-pub struct Contents(HashMap<Serial, Vec<EntityId>>);
-
-impl Contents {
-    /// Every item directly held by `container`, in the registry's order.
-    #[must_use]
-    pub fn get(&self, container: &Serial) -> Option<&[EntityId]> {
-        self.0.get(container).map(Vec::as_slice)
-    }
-}
-
-/// Index every contained item by its container. See [`Contents`].
-#[must_use]
-pub fn contents_index(state: &WorldState) -> Contents {
-    let mut index = Contents::default();
-    for (entity, location) in state.registry.query::<ItemLocation>() {
-        let ItemLocation::Settled(SettledItemLocation::Contained(held)) = *location else {
-            continue;
-        };
-        index.0.entry(held.container).or_default().push(entity);
-    }
-    index
-}
-
 /// Everything a mobile carries, as `(graphic, amount)` pairs.
 ///
 /// Worn items first, then the contents of any container among them, recursively —
@@ -126,7 +90,7 @@ pub fn contents_index(state: &WorldState) -> Contents {
 /// visited set is belt-and-braces against a save restored from a store someone
 /// hand-edited, where a cycle would otherwise hang the tick.
 #[must_use]
-pub fn carried_with(state: &WorldState, contents: &Contents, mobile: EntityId) -> Vec<(Graphic, u16)> {
+pub fn carried(state: &WorldState, mobile: EntityId) -> Vec<(Graphic, u16)> {
     let Some(serial) = state.registry.serial_of(mobile) else {
         return Vec::new();
     };
@@ -137,30 +101,21 @@ pub fn carried_with(state: &WorldState, contents: &Contents, mobile: EntityId) -
         .map(|(entity, _)| entity)
         .collect();
     for item in worn {
-        gather(state, contents, item, &mut out, &mut visited);
+        gather(state, item, &mut out, &mut visited);
     }
     // What is on the cursor, if this mobile is a player mid-drag. A held item is
     // in limbo — off the sector grid, off every screen but the picker's — so it is
     // on no layer and in no container, and the only record of it is the drag
     // itself, which lives on the connection's row.
     if let Some(held) = state.row_of(mobile).and_then(|row| row.held) {
-        gather(state, contents, held.entity, &mut out, &mut visited);
+        gather(state, held.entity, &mut out, &mut visited);
     }
     out
-}
-
-/// The same for a single mobile, indexing the world itself. For one-off reads;
-/// a caller doing this for every player wants [`contents_index`] once and
-/// [`carried_with`] per player.
-#[must_use]
-pub fn carried(state: &WorldState, mobile: EntityId) -> Vec<(Graphic, u16)> {
-    carried_with(state, &contents_index(state), mobile)
 }
 
 /// Add one item and, if it is a container, everything inside it.
 fn gather(
     state: &WorldState,
-    contents: &Contents,
     item: EntityId,
     out: &mut Vec<(Graphic, u16)>,
     visited: &mut Vec<Serial>,
@@ -179,8 +134,8 @@ fn gather(
     if !state.registry.has::<Container>(item) {
         return;
     }
-    for &held in contents.get(&serial).into_iter().flatten() {
-        gather(state, contents, held, out, visited);
+    for (held, _) in contained_items(state, serial) {
+        gather(state, held, out, visited);
     }
 }
 
@@ -190,7 +145,7 @@ fn gather(
 /// like any container — a purse inside it is still banked — so it is walked the
 /// same way, just from a different root.
 #[must_use]
-pub fn banked_with(state: &WorldState, contents: &Contents, mobile: EntityId) -> Vec<(Graphic, u16)> {
+fn banked(state: &WorldState, mobile: EntityId) -> Vec<(Graphic, u16)> {
     let Some(serial) = state.registry.serial_of(mobile) else {
         return Vec::new();
     };
@@ -202,7 +157,7 @@ pub fn banked_with(state: &WorldState, contents: &Contents, mobile: EntityId) ->
     };
     let mut out = Vec::new();
     let mut visited = Vec::new();
-    gather(state, contents, bank, &mut out, &mut visited);
+    gather(state, bank, &mut out, &mut visited);
     out
 }
 
@@ -214,13 +169,7 @@ pub fn banked_with(state: &WorldState, contents: &Contents, mobile: EntityId) ->
 /// which a one-level scan of the box's own contents would miss.
 #[must_use]
 pub fn banked_gold(state: &WorldState, mobile: EntityId) -> u32 {
-    banked_gold_with(state, &contents_index(state), mobile)
-}
-
-/// The same against an index built once for several mobiles.
-#[must_use]
-pub fn banked_gold_with(state: &WorldState, contents: &Contents, mobile: EntityId) -> u32 {
-    banked_with(state, contents, mobile)
+    banked(state, mobile)
         .into_iter()
         .filter(|&(graphic, _)| graphic == GOLD_GRAPHIC)
         .map(|(_, amount)| u32::from(amount))
@@ -234,13 +183,7 @@ pub fn banked_gold_with(state: &WorldState, contents: &Contents, mobile: EntityI
 /// bank box is not carried, so its gold is [`banked_gold`]'s.
 #[must_use]
 pub fn total_gold(state: &WorldState, mobile: EntityId) -> u32 {
-    total_gold_with(state, &contents_index(state), mobile)
-}
-
-/// The same against an index built once for several mobiles.
-#[must_use]
-pub fn total_gold_with(state: &WorldState, contents: &Contents, mobile: EntityId) -> u32 {
-    carried_with(state, contents, mobile)
+    carried(state, mobile)
         .into_iter()
         .filter(|&(graphic, _)| graphic == GOLD_GRAPHIC)
         .map(|(_, amount)| u32::from(amount))
@@ -255,13 +198,7 @@ pub fn total_gold_with(state: &WorldState, contents: &Contents, mobile: EntityId
 /// thousand light items do not accumulate a thousand roundings.
 #[must_use]
 pub fn total_weight(state: &WorldState, mobile: EntityId, body_weight: u16) -> u16 {
-    total_weight_with(state, &contents_index(state), mobile, body_weight)
-}
-
-/// The same against an index built once for several mobiles.
-#[must_use]
-pub fn total_weight_with(state: &WorldState, contents: &Contents, mobile: EntityId, body_weight: u16) -> u16 {
-    let hundredths: u32 = carried_with(state, contents, mobile)
+    let hundredths: u32 = carried(state, mobile)
         .into_iter()
         .map(|(graphic, amount)| {
             let each = if graphic == GOLD_GRAPHIC {

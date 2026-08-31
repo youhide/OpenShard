@@ -1,6 +1,10 @@
-use super::*;
 use openshard_chat::MobileSpoke;
-use openshard_combat::{MobileDamaged, MobileDied, WRESTLING_SPEED, swing_ticks};
+use openshard_combat::{
+    MobileDamaged,
+    MobileDied,
+    WRESTLING_SPEED,
+    swing_ticks,
+};
 use openshard_config::CombatEra;
 use openshard_events::Cursor;
 use openshard_magic::SpellCast;
@@ -9,8 +13,13 @@ use openshard_movement::scene::Scene;
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::feedback::{
-    ActionStage, CombatActionBalked, CombatActionEnded, CombatActionOutcome, CombatActionPhase,
-    CombatActionStage, InterruptReason,
+    ActionStage,
+    CombatActionBalked,
+    CombatActionEnded,
+    CombatActionOutcome,
+    CombatActionPhase,
+    CombatActionStage,
+    InterruptReason,
 };
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::items::DropDestination;
@@ -18,22 +27,61 @@ use openshard_protocol::mobile::Remove;
 use openshard_protocol::packet::encode_packet;
 use openshard_protocol::serial::RawSerial;
 use openshard_protocol::skill::SkillLock;
-use openshard_protocol::wire::{Graphic, Hue, RawSkillId, SoundId};
-use openshard_protocol::world::{Aggression, RangedRange, RawStepSequence, TurnRequest};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    RawSkillId,
+    SoundId,
+};
+use openshard_protocol::world::{
+    Aggression,
+    RangedRange,
+    RawStepSequence,
+    TurnRequest,
+};
 use openshard_skills::SkillUsed;
-use openshard_state::action_rules::{ActionEffect, ActionRules, ConditionEffects, ConditionSet};
-use openshard_state::components::ItemAffix;
-use openshard_state::components::Riding;
+use openshard_state::action_rules::{
+    ActionEffect,
+    ActionRules,
+    ConditionEffects,
+    ConditionSet,
+};
 use openshard_state::components::{
-    ActionKind, Banker, CombatAction, Phase, SwingSpeed, Watch, WrestlingCombo, WrestlingOpener,
+    ActionKind,
+    Amount,
+    Banker,
+    CombatAction,
+    Contained,
+    Container,
+    Corpse,
+    CorpseBody,
+    CriminalUntil,
+    Decays,
+    Drawn,
+    Equipped,
+    ItemAffix,
+    MurderDecay,
+    Murders,
+    Phase,
+    Riding,
+    Route,
+    RouteRefused,
+    Skills,
+    Stackable,
+    SwingSpeed,
+    Watch,
+    WrestlingCombo,
+    WrestlingOpener,
     WrestlingStride,
 };
-use openshard_state::components::{
-    Amount, Contained, Container, Corpse, CorpseBody, CriminalUntil, Decays, Drawn, Equipped, MurderDecay,
-    Murders, Route, RouteRefused, Skills, Stackable,
-};
 use openshard_state::sectors::distance;
-use openshard_state::{SettledItemLocation, Skill, StatLock};
+use openshard_state::{
+    SettledItemLocation,
+    Skill,
+    StatLock,
+};
+
+use super::*;
 
 pub(super) const START: Tile = Tile::new(1363, 1600);
 
@@ -161,17 +209,27 @@ pub(super) fn multis_with(
 #[test]
 fn a_facet_keeps_the_coarse_router_it_was_given_and_no_other() {
     use openshard_map::grid::BlockExtent;
-    use openshard_map::map::{LandCell, WorldMap};
+    use openshard_map::map::{
+        LandCell,
+        WorldMap,
+    };
     use openshard_map::snapshot::MapSnapshot;
-    use openshard_movement::{MapTerrain, NavigationGraph};
+    use openshard_movement::{
+        MapTerrain,
+        NavigationGraph,
+    };
     use openshard_protocol::world::Facet;
-    use openshard_tiles::LandTileId;
-    use openshard_tiles::TileData;
+    use openshard_tiles::{
+        LandTileId,
+        TileData,
+    };
 
     let flat = || {
-        WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
             tile: LandTileId(0),
             z: 0,
+            }
         })
     };
     let snapshot = || MapSnapshot::new(Facet(0), flat());
@@ -1614,8 +1672,14 @@ fn spawn_plain_item_at(world: &mut World, point: Point, now: Instant) -> Serial 
 
 #[test]
 fn a_registered_spawn_command_creates_semantic_identity() {
-    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-    use openshard_state::components::{ItemKind, Material};
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
+    use openshard_state::components::{
+        ItemKind,
+        Material,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -1781,7 +1845,10 @@ fn double_clicking_a_plain_item_fires_the_use_trigger() {
 
 #[test]
 fn the_use_trigger_carries_a_typed_items_identity() {
-    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -3660,7 +3727,10 @@ fn a_typed_payout_never_merges_with_a_same_drawn_different_kind() {
 
 #[test]
 fn a_wrong_kind_same_art_pile_cannot_bypass_typed_backpack_capacity() {
-    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -4050,11 +4120,13 @@ fn the_shard_files_what_it_spawns_as_what_it_is() {
         "the player who entered is on the mobile list"
     );
     assert!(
-        items.iter().any(|&entity| world
+        items.iter().any(|&entity| {
+            world
             .state
             .registry
             .get::<Drawn>(entity)
-            .is_some_and(|drawn| drawn.id == openshard_state::components::CORPSE_GRAPHIC)),
+                .is_some_and(|drawn| drawn.id == openshard_state::components::CORPSE_GRAPHIC)
+        }),
         "the corpse the death left is on the item list"
     );
     assert!(items.len() >= 3, "the corpse, the item and the container");
@@ -4701,10 +4773,13 @@ fn ghosts_cannot_be_selected_or_swung_at() {
         .state
         .registry
         .insert(ghost_entity, Ghost { body: living_body });
-    world
-        .state
-        .registry
-        .insert(ghost_entity, Hitpoints { current: 0, max: 100 });
+    world.state.registry.insert(
+        ghost_entity,
+        Hitpoints {
+            current: 0,
+            max:     100,
+        },
+    );
     let _ = packets_for(&mut world, attacker);
 
     // A fresh player request clears the target instead of accepting a ghost's
@@ -5988,10 +6063,13 @@ fn a_target_that_dies_mid_swing_ends_its_attackers_action_with_a_reason() {
 
     // Killed by something that is not this swing, a full interval before it
     // would have landed.
-    world
-        .state
-        .registry
-        .insert(mob_entity, Hitpoints { current: 0, max: 50 });
+    world.state.registry.insert(
+        mob_entity,
+        Hitpoints {
+            current: 0,
+            max:     50,
+        },
+    );
     world.tick(now);
 
     assert_eq!(
@@ -6416,7 +6494,10 @@ fn an_even_unskilled_duel_sometimes_misses() {
     // Two poorly-matched fighters (low attacker skill, a guarded defender) do not
     // land every blow: over a run of swings the attacker's own client hears both
     // the thwack of a hit and the whistle of a miss.
-    use combat::weapons::{SWORDS_SKILL, WRESTLING_SKILL};
+    use combat::weapons::{
+        SWORDS_SKILL,
+        WRESTLING_SKILL,
+    };
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
@@ -6463,7 +6544,10 @@ fn tactics_scales_the_blow() {
     // Tactics; the same seed rolls the same base damage, so more Tactics must mean
     // more damage dealt. Swords is pinned at the cap so every blow lands and no
     // gain draw perturbs the shared rng sequence.
-    use combat::weapons::{SWORDS_SKILL, TACTICS_SKILL};
+    use combat::weapons::{
+        SWORDS_SKILL,
+        TACTICS_SKILL,
+    };
     fn total_dealt(tactics: u16) -> u16 {
         let now = Instant::now();
         let mut world = world();
@@ -6498,7 +6582,10 @@ fn tactics_scales_the_blow() {
 fn lumberjacking_lends_an_axe_its_bite() {
     // Same axe, same seed: a lumberjack swings harder — but only with an axe. A
     // sword ignores Lumberjacking entirely.
-    use combat::weapons::{LUMBERJACKING_SKILL, SWORDS_SKILL};
+    use combat::weapons::{
+        LUMBERJACKING_SKILL,
+        SWORDS_SKILL,
+    };
     fn total_dealt(graphic: u16, lumber: u16) -> u16 {
         let now = Instant::now();
         let mut world = world();
@@ -6540,7 +6627,10 @@ fn a_creature_can_be_given_combat_skills() {
     // The pack can hand a monster Wrestling and Tactics; the creature then carries
     // a Skills sheet — which is exactly what turns on its to-hit roll and damage
     // scaling, so a skilled monster fights the way a skilled player does.
-    use combat::weapons::{TACTICS_SKILL, WRESTLING_SKILL};
+    use combat::weapons::{
+        TACTICS_SKILL,
+        WRESTLING_SKILL,
+    };
     let now = Instant::now();
     let mut world = world();
     world.queue(Command::SpawnMobile {
@@ -7482,13 +7572,15 @@ fn fight_timeline<S: FnMut(&mut World, u32)>(
                     };
                     Doing::Acting(kind, action.stage)
                 }
-                None => match world
+                None => {
+                    match world
                     .registry()
                     .get::<openshard_state::components::Balked>(fighter)
                 {
                     Some(balked) => Doing::Balked(balked.reason),
                     None => Doing::Silent,
-                },
+                    }
+                }
             };
             if screen.blank_now() {
                 return match &doing {
@@ -7598,17 +7690,23 @@ fn a_fight_with_everything_that_happens_to_one_still_has_no_blank_tick() {
     let timeline = fight_timeline(&mut world, connection, fighter, 900, now, |world, tick| {
         match tick {
             // Two steps mid-draw, which is what the condition table is for.
-            60 | 61 => world.queue(Command::Walk {
+            60 | 61 => {
+                world.queue(Command::Walk {
                 connection,
                 request: walk((tick - 60) as u8, Direction::South),
-            }),
+                })
+            }
             // Out past the bow's reach, and back inside it.
-            200 => world
+            200 => {
+                world
                 .state
-                .teleport(mob_entity, Point::new(START.x + 25, START.y, 0)),
-            300 => world
+                    .teleport(mob_entity, Point::new(START.x + 25, START.y, 0))
+            }
+            300 => {
+                world
                 .state
-                .teleport(mob_entity, Point::new(START.x + 3, START.y, 0)),
+                    .teleport(mob_entity, Point::new(START.x + 3, START.y, 0))
+            }
             // The quiver runs dry, and is refilled.
             // One at a time: the take is all-or-nothing against the amount asked
             // for, so a round number bigger than the quiver takes nothing at all.
@@ -7620,7 +7718,10 @@ fn a_fight_with_everything_that_happens_to_one_still_has_no_blank_tick() {
             750 => {
                 world.state.registry.insert(
                     mob_entity,
-                    openshard_state::components::Hitpoints { current: 0, max: 100 },
+                    openshard_state::components::Hitpoints {
+                        current: 0,
+                        max:     100,
+                    },
                 );
             }
             _ => {}
@@ -9331,8 +9432,12 @@ fn a_poisoned_creature_comes_back_poisoned() {
 
 #[test]
 fn a_stat_buff_shifts_stats_and_pools_then_expires() {
-    use openshard_state::components::StatEffectKind;
-    use openshard_state::components::{Mana, StatMods, Stats};
+    use openshard_state::components::{
+        Mana,
+        StatEffectKind,
+        StatMods,
+        Stats,
+    };
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
@@ -9385,8 +9490,11 @@ fn a_stat_buff_shifts_stats_and_pools_then_expires() {
 
 #[test]
 fn recasting_a_buff_refreshes_rather_than_stacks() {
-    use openshard_state::components::StatEffectKind;
-    use openshard_state::components::{StatMods, Stats};
+    use openshard_state::components::{
+        StatEffectKind,
+        StatMods,
+        Stats,
+    };
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
@@ -9435,8 +9543,11 @@ fn a_stat_buff_survives_a_relogin() {
     // character (its shift folded into the saved stats, its timer on the effects
     // list) and comes back on relog — still buffed, and still counting down to the
     // same base it would have returned to.
-    use openshard_state::components::StatEffectKind;
-    use openshard_state::components::{StatMods, Stats};
+    use openshard_state::components::{
+        StatEffectKind,
+        StatMods,
+        Stats,
+    };
     use openshard_state::effect;
     let now = Instant::now();
     let mut world = world();
@@ -11329,7 +11440,8 @@ fn reagents_are_consumed_on_a_cast_and_a_short_pack_fizzles() {
         .unwrap();
     }
 
-    let spell = |reagents: Vec<(Graphic, u16)>| Command::CastSpell {
+    let spell = |reagents: Vec<(Graphic, u16)>| {
+        Command::CastSpell {
         serial,
         spell: SpellId(5),
         target: None,
@@ -11339,6 +11451,7 @@ fn reagents_are_consumed_on_a_cast_and_a_short_pack_fizzles() {
         skill: 1,
         pack: Some(pack),
         reagents,
+        }
     };
     let mut cast: Cursor<SpellCast> = world.bus().cursor();
 
@@ -12366,7 +12479,9 @@ fn admin_creature_response(connection: ConnectionId, kind: u16) -> Command {
         response: openshard_protocol::gump::GumpResponse {
             serial: openshard_protocol::gump::RawGumpKey(0),
             gump_id: openshard_protocol::gump::RawGumpId(crate::admin::ADMIN_CREATURE_GUMP.0),
-            button: openshard_protocol::gump::RawButtonId(openshard_protocol::gump::admin::CREATURE_CREATE.0),
+            button:       openshard_protocol::gump::RawButtonId(
+                openshard_protocol::gump::admin::CREATURE_CREATE.0,
+            ),
             switches: Vec::new(),
             text_entries: vec![(
                 openshard_protocol::gump::admin::CREATURE_KIND_FIELD,
@@ -12576,7 +12691,11 @@ fn an_admin_created_spellbook_is_a_spellbook() {
     // same item factory as any other creation path, so an art id that represents
     // a spellbook does not become an inert `0x0EFA` picture in the GM's pack.
     use openshard_protocol::item_kind::ItemKindId;
-    use openshard_state::components::{ItemKind, SPELLBOOK_GRAPHIC, Spellbook};
+    use openshard_state::components::{
+        ItemKind,
+        SPELLBOOK_GRAPHIC,
+        Spellbook,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -12617,7 +12736,11 @@ fn an_admin_created_runebook_is_a_runebook() {
     // therefore pass the registry result through the normal item factory, not
     // merely put the book art into the administrator's backpack.
     use openshard_protocol::item_kind::ItemKindId;
-    use openshard_state::components::{ItemKind, RUNEBOOK_GRAPHIC, Runebook};
+    use openshard_state::components::{
+        ItemKind,
+        RUNEBOOK_GRAPHIC,
+        Runebook,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -12654,8 +12777,15 @@ fn an_admin_created_runebook_is_a_runebook() {
 
 #[test]
 fn an_admin_created_pickaxe_is_a_semantic_harvesting_tool() {
-    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-    use openshard_state::components::{ItemKind, Material, Tool};
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
+    use openshard_state::components::{
+        ItemKind,
+        Material,
+        Tool,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -12692,8 +12822,15 @@ fn an_admin_created_pickaxe_is_a_semantic_harvesting_tool() {
 
 #[test]
 fn f1_normalizes_a_flipped_registered_tool_to_its_same_semantic_kind() {
-    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-    use openshard_state::components::{ItemKind, Material, Tool};
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
+    use openshard_state::components::{
+        ItemKind,
+        Material,
+        Tool,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -12715,7 +12852,10 @@ fn f1_normalizes_a_flipped_registered_tool_to_its_same_semantic_kind() {
 #[test]
 fn f1_creates_registered_shovel_and_fishing_pole_as_typed_harvest_tools() {
     use openshard_protocol::item_kind::ItemKindId;
-    use openshard_state::components::{ItemKind, Tool};
+    use openshard_state::components::{
+        ItemKind,
+        Tool,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -12742,9 +12882,15 @@ fn f1_creates_registered_shovel_and_fishing_pole_as_typed_harvest_tools() {
 
 #[test]
 fn an_admin_created_tongs_open_blacksmithy() {
-    use openshard_protocol::item_kind::ItemKindId;
-    use openshard_protocol::item_kind::MaterialId;
-    use openshard_state::components::{ItemKind, Material, Tool};
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
+    use openshard_state::components::{
+        ItemKind,
+        Material,
+        Tool,
+    };
 
     let mut now = Instant::now();
     let mut world = world();
@@ -12799,7 +12945,10 @@ fn an_admin_created_tongs_open_blacksmithy() {
 #[test]
 fn f1_creates_registered_primary_craft_tools_with_identity_and_uses() {
     use openshard_protocol::item_kind::ItemKindId;
-    use openshard_state::components::{ItemKind, Tool};
+    use openshard_state::components::{
+        ItemKind,
+        Tool,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -12845,7 +12994,13 @@ fn f1_creates_registered_primary_craft_tools_with_identity_and_uses() {
 #[test]
 fn f1_creates_every_registered_definition_with_its_semantic_role() {
     use openshard_protocol::item_kind::ItemTag;
-    use openshard_state::components::{Instrument, ItemKind, Runebook, Spellbook, Tool};
+    use openshard_state::components::{
+        Instrument,
+        ItemKind,
+        Runebook,
+        Spellbook,
+        Tool,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -12939,7 +13094,10 @@ fn f1_creates_every_registered_definition_with_its_semantic_role() {
 #[test]
 fn an_admin_created_lute_is_an_instrument() {
     use openshard_protocol::item_kind::ItemKindId;
-    use openshard_state::components::{Instrument, ItemKind};
+    use openshard_state::components::{
+        Instrument,
+        ItemKind,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -12972,7 +13130,10 @@ fn an_admin_created_lute_is_an_instrument() {
 #[test]
 fn f1_creates_every_registered_instrument_as_a_typed_playable_item() {
     use openshard_protocol::item_kind::ItemKindId;
-    use openshard_state::components::{Instrument, ItemKind};
+    use openshard_state::components::{
+        Instrument,
+        ItemKind,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -13111,10 +13272,12 @@ fn a_guildmate_is_green_and_a_guild_at_war_is_orange() {
         .state
         .guilds
         .found("The Silver Serpent".to_owned(), "OSS".to_owned(), serial);
-    let member = |guild: GuildId| GuildMember {
+    let member = |guild: GuildId| {
+        GuildMember {
         guild,
         title: String::new(),
         rank: openshard_state::Rank::Member,
+        }
     };
     world.state.registry.insert(one, member(ours));
     world.state.registry.insert(two, member(ours));
@@ -13212,7 +13375,8 @@ fn decorating_twice_does_not_lay_a_second_britain() {
 
     // Two statics on two tiles, one door, one container — one of each kind that
     // `decorate` places, because each was its own loop and each needed the guard.
-    let batch = || Command::Decorate {
+    let batch = || {
+        Command::Decorate {
         facet: Facet(0),
         statics: vec![
             (
@@ -13241,6 +13405,7 @@ fn decorating_twice_does_not_lay_a_second_britain() {
             hue: openshard_protocol::wire::Hue(0),
             position: Point::new(START.x + 4, START.y, 0),
         }],
+        }
     };
 
     world.queue(batch());
@@ -13269,7 +13434,8 @@ fn placing_the_townsfolk_twice_does_not_double_the_town() {
 
     // Two shopkeepers, one of them stocked: the stocking is additive, so a
     // second placement would both duplicate the vendor and refill its crate.
-    let blacksmith = |title: &str, x: u16| Command::SpawnMobile {
+    let blacksmith = |title: &str, x: u16| {
+        Command::SpawnMobile {
         body: openshard_protocol::wire::Graphic(400),
         hue: openshard_protocol::wire::Hue(0),
         hits: 100,
@@ -13307,6 +13473,7 @@ fn placing_the_townsfolk_twice_does_not_double_the_town() {
         }],
         escort_to: None,
         quests: Vec::new(),
+        }
     };
 
     for command in [
@@ -13349,7 +13516,8 @@ fn a_townsperson_of_another_trade_may_share_a_post() {
     // blanket "something already stands here", or a future dataset that stacks a
     // guard beside a banker would silently lose one of them.
     let at = Point::new(START.x + 1, START.y + 2, 0);
-    let person = |title: &str| Command::SpawnMobile {
+    let person = |title: &str| {
+        Command::SpawnMobile {
         body: openshard_protocol::wire::Graphic(400),
         hue: openshard_protocol::wire::Hue(0),
         hits: 100,
@@ -13379,6 +13547,7 @@ fn a_townsperson_of_another_trade_may_share_a_post() {
         stock: Vec::new(),
         escort_to: None,
         quests: Vec::new(),
+        }
     };
     world.queue(person("the banker"));
     world.queue(person("the guard"));
@@ -14078,7 +14247,11 @@ fn an_admin_button_from_a_non_staff_client_is_ignored() {
 
 #[test]
 fn a_spawner_fills_to_its_ceiling_and_clear_empties_it() {
-    use crate::spawner::{CreatureTemplate, SpawnArea, Spawner};
+    use crate::spawner::{
+        CreatureTemplate,
+        SpawnArea,
+        Spawner,
+    };
     let now = Instant::now();
     let mut world = world();
     let creature = CreatureTemplate {
@@ -14528,7 +14701,10 @@ fn a_characters_inventory_survives_a_logout_and_restore() {
 #[test]
 fn a_spellbook_keeps_its_spells_across_a_logout_and_restore() {
     use openshard_protocol::serial::SerialKind;
-    use openshard_state::components::{SPELLBOOK_GRAPHIC, Spellbook};
+    use openshard_state::components::{
+        SPELLBOOK_GRAPHIC,
+        Spellbook,
+    };
 
     // A bought spellbook with spells learned into it must open again after a
     // relog: without the mask on disk it comes back as a graphic with no
@@ -14711,7 +14887,10 @@ fn a_relogin_in_the_same_run_keeps_the_inventory() {
 
 #[test]
 fn a_spawner_respawn_timer_survives_a_restart() {
-    use crate::spawner::{SpawnArea, Spawner};
+    use crate::spawner::{
+        SpawnArea,
+        Spawner,
+    };
 
     // The user's case: a rare spawn on a long timer, killed with time still to
     // wait, must come back with that wait ahead of it — not pop again the moment
@@ -14761,7 +14940,10 @@ fn a_spawner_respawn_timer_survives_a_restart() {
 
 #[test]
 fn re_registering_a_region_keeps_the_first_and_its_timer() {
-    use crate::spawner::{SpawnArea, Spawner};
+    use crate::spawner::{
+        SpawnArea,
+        Spawner,
+    };
 
     let mut world = world();
     let area = SpawnArea {
@@ -14811,7 +14993,11 @@ fn re_registering_a_region_keeps_the_first_and_its_timer() {
 /// error anywhere. What a re-populate must not stack is the *same* region.
 #[test]
 fn two_different_regions_over_one_box_are_both_laid() {
-    use crate::spawner::{CreatureTemplate, SpawnArea, Spawner};
+    use crate::spawner::{
+        CreatureTemplate,
+        SpawnArea,
+        Spawner,
+    };
 
     let mut world = world();
     let area = SpawnArea {
@@ -14821,7 +15007,8 @@ fn two_different_regions_over_one_box_are_both_laid() {
         height: 60,
         facet: Facet(0),
     };
-    let creature = |body: u16| CreatureTemplate {
+    let creature = |body: u16| {
+        CreatureTemplate {
         fame: 0,
         karma: 0,
         body: openshard_protocol::wire::Graphic(body),
@@ -14838,6 +15025,7 @@ fn two_different_regions_over_one_box_are_both_laid() {
         ranged_kind: DamageType::Physical,
         wander: false,
         skills: Vec::new(),
+        }
     };
     // An orc camp, and the undead patch that overlaps it.
     let orcs = Spawner::new(
@@ -14881,14 +15069,19 @@ fn two_different_regions_over_one_box_are_both_laid() {
 /// one and was only ever bumped, which agreed with the index by luck.
 #[test]
 fn a_regions_id_is_its_slot_however_the_list_was_built() {
-    use crate::spawner::{SpawnArea, Spawner};
+    use crate::spawner::{
+        SpawnArea,
+        Spawner,
+    };
 
-    let area = |x: u16| SpawnArea {
+    let area = |x: u16| {
+        SpawnArea {
         x,
         y: 100,
         width: 5,
         height: 5,
         facet: Facet(0),
+        }
     };
     let slots_hold = |world: &World, what: &str| {
         for (slot, spawner) in world.spawners.iter().enumerate() {
@@ -14983,7 +15176,10 @@ fn every_region_the_tree_ships_reaches_the_world() {
 
 #[test]
 fn a_vendor_and_its_priced_stock_survive_a_restart() {
-    use openshard_state::components::{Price, Vendor};
+    use openshard_state::components::{
+        Price,
+        Vendor,
+    };
 
     // The whole-world save: a staff Populate seeds the vendor once, and from
     // then on the *save* is the truth — a restart brings the shopkeeper back
@@ -15158,7 +15354,11 @@ fn a_vendor_and_its_priced_stock_survive_a_restart() {
 
 #[test]
 fn a_wounded_spawner_creature_survives_a_restart_and_is_counted() {
-    use crate::spawner::{CreatureTemplate, SpawnArea, Spawner};
+    use crate::spawner::{
+        CreatureTemplate,
+        SpawnArea,
+        Spawner,
+    };
 
     // ServUO's model exactly: a live creature is saved as it stands — wounded
     // stays wounded — and its region re-counts it on load, so a restart neither
@@ -15212,9 +15412,13 @@ fn a_wounded_spawner_creature_survives_a_restart_and_is_counted() {
         .expect("the region filled");
     let spawned_serial = home.registry().serial_of(spawned).unwrap();
     // Wound it, as a fight would.
-    home.state
-        .registry
-        .insert(spawned, Hitpoints { current: 3, max: 10 });
+    home.state.registry.insert(
+        spawned,
+        Hitpoints {
+            current: 3,
+            max:     10,
+        },
+    );
 
     home.take_snapshot();
     let snapshot = home.drain_saves().next_back().expect("a snapshot");
@@ -15255,8 +15459,9 @@ fn a_wounded_spawner_creature_survives_a_restart_and_is_counted() {
 
 #[test]
 fn decoration_and_door_state_survive_a_restart() {
-    use crate::tick::command::DecorDoor;
     use openshard_state::components::Decoration;
+
+    use crate::tick::command::DecorDoor;
 
     // Decoration is saved like everything else — and a door left open stays
     // open across the restart, its doorway unblocked until it swings shut.
@@ -15976,10 +16181,12 @@ fn a_locked_door_comes_back_locked() {
         booted
             .registry()
             .query::<openshard_state::components::Lock>()
-            .any(|(_, lock)| lock.kind
+            .any(|(_, lock)| {
+                lock.kind
                 == openshard_state::LockKind::Key(
                     openshard_state::KeyValue::new(0xBEEF).expect("non-zero test key"),
-                )),
+                    )
+            }),
         "and comes back"
     );
 }
@@ -16300,7 +16507,10 @@ fn a_trade_answers_its_own_keyword_and_only_within_earshot() {
 #[test]
 fn a_shop_says_nothing_the_client_cannot_read() {
     use openshard_protocol::packet::Frame;
-    use openshard_protocol::server_packet::{ServerPacket, frame_server_packet};
+    use openshard_protocol::server_packet::{
+        ServerPacket,
+        frame_server_packet,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -21259,7 +21469,11 @@ fn lod_walking_into_a_sleeping_town_wakes_it() {
 
 #[test]
 fn lod_a_spawner_with_no_player_near_stays_dormant_then_wakes() {
-    use crate::spawner::{CreatureTemplate, SpawnArea, Spawner};
+    use crate::spawner::{
+        CreatureTemplate,
+        SpawnArea,
+        Spawner,
+    };
     // With LOD on, a spawn region no player is near keeps its timer held and puts
     // nothing down — the freeze a whole-facet Populate caused was a thousand such
     // regions all filling at once. It fills the moment a player arrives.
@@ -21391,7 +21605,10 @@ fn give_item_lands_in_the_players_backpack() {
 
 #[test]
 fn a_registered_give_item_reward_keeps_its_semantic_identity() {
-    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -21434,7 +21651,10 @@ fn a_registered_give_item_reward_keeps_its_semantic_identity() {
 
 #[test]
 fn give_item_kind_awards_a_semantic_item_without_art_in_the_command() {
-    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -21464,7 +21684,10 @@ fn give_item_kind_awards_a_semantic_item_without_art_in_the_command() {
 #[test]
 fn give_item_kind_creates_a_functional_backpack() {
     use openshard_protocol::item_kind::ItemKindId;
-    use openshard_state::components::{Container, ItemKind};
+    use openshard_state::components::{
+        Container,
+        ItemKind,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -21488,7 +21711,11 @@ fn give_item_kind_creates_a_functional_backpack() {
 #[test]
 fn stackable_typed_loot_never_turns_a_backpack_into_a_pile() {
     use openshard_protocol::item_kind::ItemKindId;
-    use openshard_state::components::{Container, ItemKind, Stackable};
+    use openshard_state::components::{
+        Container,
+        ItemKind,
+        Stackable,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -21577,7 +21804,10 @@ fn take_item_is_all_or_nothing_and_reports_what_it_took() {
 
 #[test]
 fn take_item_kind_requires_the_exact_material_not_its_shared_ingot_art() {
-    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
 
     let now = Instant::now();
     let mut world = world();
@@ -21639,8 +21869,9 @@ fn take_item_kind_requires_the_exact_material_not_its_shared_ingot_art() {
 
 #[test]
 fn a_non_admin_gump_reply_reaches_the_pack_as_gump_answered() {
-    use crate::events::GumpAnswered;
     use openshard_protocol::gump::GumpResponse as WireGumpResponse;
+
+    use crate::events::GumpAnswered;
     let now = Instant::now();
     let mut world = world();
     let conn = enter(&mut world, now);
@@ -21785,7 +22016,9 @@ fn a_guild_line_is_not_said_out_loud() {
 
     world.queue(Command::Say {
         connection: speaker_connection,
-        mode: openshard_protocol::speech::RawTalkMode(openshard_protocol::speech::TalkMode::Guild.to_wire()),
+        mode:       openshard_protocol::speech::RawTalkMode(
+            openshard_protocol::speech::TalkMode::Guild.to_wire(),
+        ),
         hue: openshard_protocol::wire::RawHue(0x3B2),
         font: openshard_protocol::speech::RawFont(3),
         text: "regroup".to_owned(),
@@ -21798,7 +22031,9 @@ fn a_guild_line_is_not_said_out_loud() {
         .filter(|out| {
             String::from_utf16_lossy(
                 &out.packet
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
                     .collect::<Vec<_>>(),
             )
@@ -22136,12 +22371,14 @@ fn a_deed_for_a_foundation_builds_a_house_with_a_design() {
     /// fixture prove nothing.
     fn platform() -> Vec<Component> {
         (-1..=1)
-            .map(|dx| Component {
+            .map(|dx| {
+                Component {
                 graphic: Graphic(WALL),
                 dx,
                 dy: 0,
                 dz: 0,
                 flags: 1,
+                }
             })
             .collect()
     }

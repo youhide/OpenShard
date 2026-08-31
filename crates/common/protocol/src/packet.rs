@@ -70,13 +70,21 @@ pub const SEED_LENGTH_NEW: usize = 21;
 /// Length of the legacy seed: four raw bytes, no id.
 pub const SEED_LENGTH_OLD: usize = 4;
 
-/// The largest packet the server will accept.
+/// The largest packet the server will accept from a client.
 ///
 /// Matches Sphere's `MAX_BUFFER`. A variable-length packet claiming more than
 /// this is a client trying to make the server allocate, so it is rejected at
 /// the framing layer rather than anywhere that could be tricked into honouring
 /// it.
 pub const MAX_PACKET_SIZE: usize = 18_000;
+
+/// The largest packet the client will accept from its trusted shard.
+///
+/// Server packets use the same `u16` length field, but they are not hostile
+/// per-connection input to the shard and some OpenShard-only data packets are
+/// legitimately larger than Sphere's 18 KB receive buffer. The wire itself is
+/// the bound in this direction.
+pub const MAX_SERVER_PACKET_SIZE: usize = u16::MAX as usize;
 
 /// Framing could not proceed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -86,11 +94,11 @@ pub enum FrameError {
     /// advanced past it. Fatal for the connection.
     UnknownPacket(u8),
     /// A variable-length packet declared a length below its own header, or above
-    /// [`MAX_PACKET_SIZE`].
+    /// the limit for its direction.
     BadLength {
         /// The packet id.
         id: u8,
-        /// The length the client claimed.
+        /// The length the packet claimed.
         claimed: usize,
     },
 }
@@ -261,7 +269,7 @@ pub fn client_packet_length(id: u8, version: Option<ClientVersion>) -> Option<Pa
 /// assert_eq!(frame_client_packet(&talk, None), Ok(Frame::Complete(5)));
 /// ```
 pub fn frame_client_packet(buffer: &[u8], version: Option<ClientVersion>) -> Result<Frame, FrameError> {
-    frame_packet(buffer, |id| client_packet_length(id, version))
+    frame_packet(buffer, |id| client_packet_length(id, version), MAX_PACKET_SIZE)
 }
 
 /// Bytes already checked to be exactly one whole client-to-server packet.
@@ -396,8 +404,9 @@ impl FramedClientPacket {
 /// known size or a `u16` at offset 1 — and only the table that answers "how long
 /// is this id" differs. Writing the rule twice would mean two places that could
 /// disagree about a length below its own header, or about
-/// [`MAX_PACKET_SIZE`]; the client-to-server side of that pair is the one that
-/// faces hostile input, and it is not the copy anybody would remember to fix.
+/// its direction's size limit; the client-to-server side of that pair is the
+/// one that faces hostile input, and it is not the copy anybody would remember
+/// to fix.
 ///
 /// So the rule lives here once and the tables are arguments:
 /// [`frame_client_packet`] passes [`client_packet_length`], and the client's
@@ -405,6 +414,7 @@ impl FramedClientPacket {
 pub(crate) fn frame_packet(
     buffer: &[u8],
     length_of: impl FnOnce(u8) -> Option<PacketLength>,
+    max_packet_size: usize,
 ) -> Result<Frame, FrameError> {
     let Some(&id) = buffer.first() else {
         return Ok(Frame::Incomplete { needed: 1 });
@@ -426,13 +436,12 @@ pub(crate) fn frame_packet(
                 return Ok(Frame::Incomplete { needed: 3 });
             }
             let claimed = u16::from_be_bytes([buffer[1], buffer[2]]) as usize;
-            // Two distinct attacks, one check. Under 3 is nonsense — the
-            // declared length covers the id and the length field themselves —
-            // and would advance the caller by 0 or 2 bytes, re-framing the same
-            // packet forever. Over the cap is a client trying to make the
-            // server reserve 64KB per connection.
+            // Two invalid shapes, one check. Under 3 is nonsense — the declared
+            // length covers the id and the length field themselves — and would
+            // advance the caller by 0 or 2 bytes, re-framing the same packet
+            // forever. Over the direction's cap must not be reserved or read.
             #[allow(clippy::manual_range_contains, reason = "two failure modes, not one range")]
-            if claimed < 3 || claimed > MAX_PACKET_SIZE {
+            if claimed < 3 || claimed > max_packet_size {
                 return Err(FrameError::BadLength { id, claimed });
             }
             if buffer.len() < claimed {

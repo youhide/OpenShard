@@ -68,7 +68,7 @@ async fn saying_dot_admin_opens_the_staff_menu_and_its_buttons_answer() {
             let Event::Packet(packet) = event else {
                 continue;
             };
-            let was_gump = matches!(packet, ServerPacket::GumpDisplay(_));
+            let was_gump = matches!(packet.as_ref(), ServerPacket::GumpDisplay(_));
             view.apply(&packet);
             if was_gump {
                 return view.gumps.last().cloned().expect("a 0xB0 opened a window");

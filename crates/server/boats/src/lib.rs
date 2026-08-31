@@ -501,7 +501,7 @@ pub fn sink(state: &mut WorldState, boat: EntityId) {
     let facet = state.facet_of(boat);
     state.facet_state_mut(facet).cast_off(boat);
     state.unplace(facet, boat);
-    state.registry.despawn(boat);
+    openshard_state::despawn_item(state, boat);
 }
 
 /// The ship covering `at`, if one does.

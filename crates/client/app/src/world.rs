@@ -1155,7 +1155,8 @@ pub(crate) fn terrain(resources: &resources::Resources) -> openshard_movement::M
 }
 
 /// The bare static map, as a footing with nothing live on it — what the coarse
-/// graph is guided and joined by.
+/// graph is guided by and what its ordinary endpoints join over. An endpoint on
+/// a live house floor follows that floor to the graph instead.
 ///
 /// The same pairing [`footing`] beneath makes — the ground is a facet's and the
 /// tile table is the install's — so this is the seam that reads them together

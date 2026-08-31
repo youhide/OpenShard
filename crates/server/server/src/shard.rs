@@ -581,6 +581,7 @@ fn report_pace(pace: &mut crate::pace::Pace, window: crate::pace::Window, shutdo
                 declared_ticks_per_second = openshard_state::TICKS_PER_SECOND,
                 busy_share = window.busy_share(),
                 worst_tick_ms = window.worst.as_secs_f32() * 1000.0,
+                worst_tick_work = %window.worst_work,
                 "the tick has been slower than its declared rate for {windows} seconds; every \
                  interval announced in that time was wrong. Stopping — the world is saved on the \
                  way out. Raise or clear `[watchdog] tick_behind_windows` to let it run on."
@@ -597,6 +598,7 @@ fn report_pace(pace: &mut crate::pace::Pace, window: crate::pace::Window, shutdo
             behind_ticks_per_second = window.behind_ticks(),
             busy_share = window.busy_share(),
             worst_tick_ms = window.worst.as_secs_f32() * 1000.0,
+            worst_tick_work = %window.worst_work,
             "the tick is slower than the rate every announced duration is denominated in; \
              clients are being told intervals this shard will not keep"
         ),
@@ -605,6 +607,7 @@ fn report_pace(pace: &mut crate::pace::Pace, window: crate::pace::Window, shutdo
             declared_ticks_per_second = openshard_state::TICKS_PER_SECOND,
             busy_share = window.busy_share(),
             worst_tick_ms = window.worst.as_secs_f32() * 1000.0,
+            worst_tick_work = %window.worst_work,
             "the tick is keeping its declared rate"
         ),
         None => {}
@@ -732,6 +735,7 @@ pub async fn run_shard(
 
             _ = ticker.tick() => {
                 let began = Instant::now();
+                let work = crate::pace::TickWork::from_kinds(shard.world.queued_command_kinds());
                 if let Some(TickOutcome::SaveTaskGone { tick, rows }) =
                     stop_for_failed_tick_handoff(&shutdown, shard.tick())
                 {
@@ -747,7 +751,7 @@ pub async fn run_shard(
                 // Measured around the tick rather than inside it: the world is
                 // never handed a wall clock, so replay is untouched and a run
                 // with this measurement produces the same world as one without.
-                if let Some(window) = pace.record(began, began.elapsed()) {
+                if let Some(window) = pace.record(began, began.elapsed(), work) {
                     report_pace(&mut pace, window, &shutdown);
                 }
             }

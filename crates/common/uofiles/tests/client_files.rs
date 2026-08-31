@@ -125,7 +125,7 @@ fn the_statics_a_facet_reports_are_the_statics_its_index_describes() {
     let data = std::fs::read(dir.join(format!("statics{facet}.mul"))).unwrap();
 
     let mut expected = 0usize;
-    for entry in index.chunks_exact(12) {
+    for entry in index.as_chunks::<12>().0 {
         let offset = u32::from_le_bytes(entry[0..4].try_into().unwrap());
         let length = u32::from_le_bytes(entry[4..8].try_into().unwrap());
         if offset == u32::MAX || length == u32::MAX || length == 0 {

@@ -87,8 +87,9 @@ pub use item_definition::{
     material_from_legacy_hue, material_from_legacy_hue_in_family, presentation_of, selector_matches,
 };
 pub use item_location::{
-    ItemGraphViolation, LocationError, audit_item_graph, contained_items, despawn_item, equipped_items,
-    establish_item_location, item_location, relocate_item, settled_from_origin,
+    ContainedItems, ItemGraphViolation, LocationError, PreparedItemRelocation, audit_item_graph,
+    commit_item_relocation, contained_items, despawn_item, equipped_items, establish_item_location,
+    item_location, prepare_item_relocation, recursive_contained_items, relocate_item, settled_from_origin,
 };
 pub use obstruct::{DOOR_HEIGHT, Obstacle, Obstructions};
 pub use openshard_protocol::world::{DamageType, RangedRange};

@@ -442,25 +442,29 @@ impl Readings<'_> {
         let distance = i32::from(from.x)
             .abs_diff(i32::from(to.x))
             .max(i32::from(from.y).abs_diff(i32::from(to.y)));
-        // Near enough that the graph is not worth asking — see
-        // `COARSE_MIN_DISTANCE`, which is where that threshold is argued. The
-        // bounded search is then the whole answer, and its own exit is the
-        // reason: `Exhausted` really did look everywhere a body could stand.
-        if distance <= COARSE_MIN_DISTANCE {
-            return Err(match local.exit {
-                SearchExit::Exhausted => Refusal::Nowhere,
-                SearchExit::Budget | SearchExit::Goal => Refusal::TooFar,
-            });
+        // Near enough that the graph is normally not worth asking — see
+        // `COARSE_MIN_DISTANCE`, which is where that threshold is argued. An
+        // exhausted search really did look everywhere a body could stand and
+        // remains the whole answer. A search that spent its budget did *not*:
+        // a large multi-house can put a thousand live `(x, y, z)` places inside
+        // eight tiles, and its storey join is precisely the fallback for that
+        // shape.
+        if distance <= COARSE_MIN_DISTANCE && local.exit == SearchExit::Exhausted {
+            return Err(Refusal::Nowhere);
         }
         let Some(coarse) = self.coarse else {
             // Far, and nothing to divide it with. Deliberately not `Nowhere`
             // however the local search ended: with no corridor to fall back on,
             // an exhausted 600-node search around a house says nothing at all
             // about whether the far side of the town is reachable.
-            return Err(Refusal::NoGraph);
+            return Err(match distance <= COARSE_MIN_DISTANCE {
+                true => Refusal::TooFar,
+                false => Refusal::NoGraph,
+            });
         };
-        // Graph and endpoint joins are both the bare map. Live terrain
-        // only approves or rejects the resulting exact steps.
+        // The graph and ordinary endpoint joins are the bare map. An endpoint
+        // inside a runtime house joins through its live floors to that graph;
+        // either way every resulting step is approved against this reading.
         let (route, exit) = search_long_path(
             &self.guide,
             footing,

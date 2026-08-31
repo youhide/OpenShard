@@ -17,6 +17,9 @@
 
 // The tool's own module, reached the way `tests/traced.rs` reaches
 // `examples/oracle/mod.rs` — one reader, not a second copy of it in `tests/`.
+// This gate exercises the window reader; the same module's house reader is
+// exercised by the example binary that also includes it.
+#[allow(dead_code)]
 #[path = "../examples/shard/mod.rs"]
 mod shard;
 

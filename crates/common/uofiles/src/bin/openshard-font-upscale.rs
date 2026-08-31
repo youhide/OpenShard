@@ -404,7 +404,9 @@ fn read_png(path: &Path) -> Result<RgbaImage, Box<dyn std::error::Error>> {
     let rgba = match info.color_type {
         png::ColorType::Rgba => source.to_vec(),
         png::ColorType::Rgb => source
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|rgb| [rgb[0], rgb[1], rgb[2], 255])
             .collect(),
         other => return Err(format!("{} decoded as unsupported {other:?}", path.display()).into()),
@@ -553,7 +555,12 @@ mod tests {
         let glyph = Image::new(2, 1, vec![Color16(0x7C00), Color16::TRANSPARENT]);
         let (width, height, rgba) = padded_rgba(&glyph, 1);
         assert_eq!((width, height), (4, 3));
-        assert!(rgba.chunks_exact(4).all(|pixel| pixel[..3] == [255, 0, 0]));
+        assert!(
+            rgba.as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| pixel[..3] == [255, 0, 0])
+        );
         assert_eq!(rgba[((width + 1) * 4 + 3) as usize], 255);
         assert_eq!(rgba[((width + 2) * 4 + 3) as usize], 0);
     }

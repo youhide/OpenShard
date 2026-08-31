@@ -301,7 +301,7 @@ fn load_statics(
             // else in a file that parses perfectly.
             let (block_x, block_y) = land.origin_of(block).expect("a block of this facet");
 
-            for entry in chunk.chunks_exact(STATIC_BYTES) {
+            for entry in chunk.as_chunks::<STATIC_BYTES>().0 {
                 out.push(StaticItem {
                     tile: Graphic(u16::from_le_bytes([entry[0], entry[1]])),
                     // The file stores an offset within the block; a world
@@ -328,9 +328,11 @@ fn load_statics(
 /// business, and this is only the byte format. The two facts meet in
 /// [`LandGrid::from_file_order`]: the file's order **is** the array's order.
 fn cells_of(bytes: &[u8]) -> impl Iterator<Item = LandCell> + '_ {
-    bytes.chunks_exact(BLOCK_BYTES).flat_map(|block| {
+    bytes.as_chunks::<BLOCK_BYTES>().0.iter().flat_map(|block| {
         block[BLOCK_HEADER..]
-            .chunks_exact(CELL_BYTES)
+            .as_chunks::<CELL_BYTES>()
+            .0
+            .iter()
             .map(|cell| LandCell {
                 // Little-endian: the files are, the network is not.
                 tile: LandTileId(u16::from_le_bytes([cell[0], cell[1]])),

@@ -140,7 +140,12 @@ impl Frame {
     /// How many pixels the ground pass wrote. Anything drawn is opaque and the
     /// clear is fully transparent, so this counts exactly, with no threshold.
     fn drawn(&self) -> usize {
-        self.pixels.chunks_exact(4).filter(|p| p[3] == u8::MAX).count()
+        self.pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|p| p[3] == u8::MAX)
+            .count()
     }
 }
 

@@ -655,7 +655,9 @@ impl Anim {
             });
         }
         let entries = raw
-            .chunks_exact(IDX_ENTRY)
+            .as_chunks::<IDX_ENTRY>()
+            .0
+            .iter()
             .map(|entry| IdxEntry {
                 position: u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]),
                 size: u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]]),
@@ -757,7 +759,7 @@ fn decode_body(key: AnimationKey, raw: &[u8]) -> Result<Vec<AnimFrame>, AnimErro
         .get(..PALETTE_BYTES)
         .ok_or_else(|| malformed("shorter than its own palette".to_owned()))?;
     let mut palette = [Color16::TRANSPARENT; PALETTE_COLORS];
-    for (slot, word) in palette.iter_mut().zip(palette_bytes.chunks_exact(2)) {
+    for (slot, word) in palette.iter_mut().zip(palette_bytes.as_chunks::<2>().0) {
         *slot = Color16(u16::from_le_bytes([word[0], word[1]]));
     }
 
@@ -778,7 +780,7 @@ fn decode_body(key: AnimationKey, raw: &[u8]) -> Result<Vec<AnimFrame>, AnimErro
         .ok_or_else(|| malformed(format!("claims {count} frames it has no offsets for")))?;
 
     let mut frames = Vec::with_capacity(count);
-    for offset in offsets.chunks_exact(4) {
+    for offset in offsets.as_chunks::<4>().0 {
         let at = u32::from_le_bytes([offset[0], offset[1], offset[2], offset[3]]) as usize;
         let frame = body_data
             .get(at..)

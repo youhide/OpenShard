@@ -40,6 +40,63 @@ use std::time::{Duration, Instant};
 
 use openshard_world::TICK_INTERVAL;
 
+/// A bounded, value-free account of the commands applied by one tick.
+///
+/// Four distinct kinds are enough to make the usual one-request spike exact,
+/// while keeping this `Copy` and allocation-free on the realtime path. The
+/// command count still says when a burst, rather than one kind of work, filled
+/// the tick.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct TickWork {
+    commands: u32,
+    kinds: [&'static str; 4],
+    kind_count: u8,
+    omitted_kinds: u32,
+}
+
+impl TickWork {
+    pub(crate) fn from_kinds(kinds: impl IntoIterator<Item = &'static str>) -> Self {
+        let mut work = Self {
+            commands: 0,
+            kinds: [""; 4],
+            kind_count: 0,
+            omitted_kinds: 0,
+        };
+        for kind in kinds {
+            work.commands = work.commands.saturating_add(1);
+            if work.kinds[..usize::from(work.kind_count)].contains(&kind) {
+                continue;
+            }
+            if usize::from(work.kind_count) < work.kinds.len() {
+                work.kinds[usize::from(work.kind_count)] = kind;
+                work.kind_count += 1;
+            } else {
+                work.omitted_kinds = work.omitted_kinds.saturating_add(1);
+            }
+        }
+        work
+    }
+}
+
+impl std::fmt::Display for TickWork {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.commands == 0 {
+            return f.write_str("scheduled systems only");
+        }
+        write!(f, "{} command(s): ", self.commands)?;
+        for (index, kind) in self.kinds[..usize::from(self.kind_count)].iter().enumerate() {
+            if index > 0 {
+                f.write_str(", ")?;
+            }
+            f.write_str(kind)?;
+        }
+        if self.omitted_kinds > 0 {
+            write!(f, " (+{} other kind(s))", self.omitted_kinds)?;
+        }
+        Ok(())
+    }
+}
+
 /// How many intervals one verdict is measured over: one second's worth at the
 /// declared rate.
 ///
@@ -66,6 +123,8 @@ pub(crate) struct Window {
     pub(crate) busy: Duration,
     /// The longest single tick in the window, which is what an average hides.
     pub(crate) worst: Duration,
+    /// Which queued commands that longest tick applied.
+    pub(crate) worst_work: TickWork,
 }
 
 impl Window {
@@ -123,6 +182,7 @@ impl Window {
 struct Open {
     began: Instant,
     body: Duration,
+    work: TickWork,
 }
 
 /// What has accumulated since the last verdict.
@@ -132,6 +192,7 @@ struct Partial {
     elapsed: Duration,
     busy: Duration,
     worst: Duration,
+    worst_work: TickWork,
 }
 
 impl Partial {
@@ -142,6 +203,12 @@ impl Partial {
             elapsed: Duration::ZERO,
             busy: Duration::ZERO,
             worst: Duration::ZERO,
+            worst_work: TickWork {
+                commands: 0,
+                kinds: [""; 4],
+                kind_count: 0,
+                omitted_kinds: 0,
+            },
         }
     }
 }
@@ -208,14 +275,17 @@ impl Pace {
     /// Record one tick: when it began, and how long its body took.
     ///
     /// Returns the window it closed, if it closed one.
-    pub(crate) fn record(&mut self, began: Instant, body: Duration) -> Option<Window> {
-        let previous = self.open.replace(Open { began, body })?;
+    pub(crate) fn record(&mut self, began: Instant, body: Duration, work: TickWork) -> Option<Window> {
+        let previous = self.open.replace(Open { began, body, work })?;
         // One interval is complete: from the previous tick's start to this one's,
         // occupied by the previous tick's body.
         self.partial.intervals += 1;
         self.partial.elapsed += began.saturating_duration_since(previous.began);
         self.partial.busy += previous.body;
-        self.partial.worst = self.partial.worst.max(previous.body);
+        if previous.body > self.partial.worst {
+            self.partial.worst = previous.body;
+            self.partial.worst_work = previous.work;
+        }
         if self.partial.intervals < WINDOW {
             return None;
         }
@@ -223,6 +293,7 @@ impl Pace {
             elapsed: self.partial.elapsed,
             busy: self.partial.busy,
             worst: self.partial.worst,
+            worst_work: self.partial.worst_work,
         };
         self.partial = Partial::empty();
         Some(window)
@@ -287,7 +358,7 @@ pub(crate) enum Verdict {
 
 #[cfg(test)]
 mod tests {
-    use super::{BehindWindows, Pace, Verdict, WINDOW, Window};
+    use super::{BehindWindows, Pace, TickWork, Verdict, WINDOW, Window};
     use openshard_world::TICK_INTERVAL;
     use std::time::{Duration, Instant};
 
@@ -305,7 +376,7 @@ mod tests {
         // starts to be measured between.
         for step in 0..=intervals {
             let at = start + every * step;
-            if let Some(window) = pace.record(at, body) {
+            if let Some(window) = pace.record(at, body, TickWork::from_kinds([])) {
                 if let Some(verdict) = pace.verdict(window) {
                     said.push(verdict);
                 }
@@ -368,7 +439,9 @@ mod tests {
         let start = Instant::now();
         let mut closed = None;
         for step in 0..=WINDOW {
-            closed = pace.record(start + every * step, body).or(closed);
+            closed = pace
+                .record(start + every * step, body, TickWork::from_kinds([]))
+                .or(closed);
         }
         closed.expect("a whole window's worth of intervals was driven")
     }
@@ -390,6 +463,30 @@ mod tests {
             "an overrunning tick was reported as idle: {}",
             overrunning.busy_share()
         );
+    }
+
+    #[test]
+    fn the_window_names_the_commands_from_its_worst_tick() {
+        let mut pace = Pace::new(NEVER_STOPS);
+        let start = Instant::now();
+        let mut closed = None;
+        for step in 0..=WINDOW {
+            let slow = step == 7;
+            let body = if slow {
+                Duration::from_millis(200)
+            } else {
+                Duration::from_millis(1)
+            };
+            let work = if slow {
+                TickWork::from_kinds(["OpenCraftCatalogue"])
+            } else {
+                TickWork::from_kinds([])
+            };
+            closed = pace.record(start + TICK_INTERVAL * step, body, work).or(closed);
+        }
+        let window = closed.expect("a complete measurement window");
+        assert_eq!(window.worst, Duration::from_millis(200));
+        assert_eq!(window.worst_work.to_string(), "1 command(s): OpenCraftCatalogue");
     }
 
     /// The watchdog: a shard that stays wrong for the operator's whole patience

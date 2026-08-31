@@ -279,7 +279,7 @@ impl UnicodeTalkRequest {
 /// Decode big-endian UTF-16 up to a null terminator (or the end).
 fn utf16_be_to_string(bytes: &[u8]) -> String {
     let mut units = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
+    for pair in bytes.as_chunks::<2>().0 {
         let unit = u16::from_be_bytes([pair[0], pair[1]]);
         if unit == 0 {
             break;
@@ -294,7 +294,7 @@ fn utf16_be_to_string(bytes: &[u8]) -> String {
 /// `0xAE` gets wrong.
 fn utf16_le_to_string(bytes: &[u8]) -> String {
     let mut units = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
+    for pair in bytes.as_chunks::<2>().0 {
         let unit = u16::from_le_bytes([pair[0], pair[1]]);
         if unit == 0 {
             break;
@@ -889,7 +889,9 @@ mod tests {
         assert_eq!(&packet[18..25], b"Cidad\xE3o");
         // The text runs from offset 48, one big-endian UTF-16 unit per char.
         let text_units: Vec<u16> = packet[48..]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|p| u16::from_be_bytes([p[0], p[1]]))
             .collect();
         let mut expected: Vec<u16> = "olá".encode_utf16().collect();

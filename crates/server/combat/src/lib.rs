@@ -1507,13 +1507,11 @@ pub fn sustain_actions(state: &mut WorldState) {
         // facet is not somewhere a rule can put it back.
         let obstruction = obstruction(state, attacker, target, action.reach());
         if let Phase::Arming { watch, ready_at, .. } = action.phase {
-            if !watch_waits_for(watch, obstruction) && obstruction.is_some() {
-                spoil(
-                    state,
-                    attacker,
-                    obstruction.expect("an obstruction was just checked"),
-                );
-                continue;
+            if let Some(reason) = obstruction {
+                if !watch_waits_for(watch, Some(reason)) {
+                    spoil(state, attacker, reason);
+                    continue;
+                }
             }
             // A changing watch never bypasses the mandatory preparation clock:
             // an arrow still has to be drawn and a runner's prepared blow still

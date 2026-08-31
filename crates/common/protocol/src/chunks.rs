@@ -71,13 +71,13 @@
 //!
 //! # Why a fragment cap smaller than a packet
 //!
-//! Not because a chunk needs it — none of Felucca's does — but because
-//! **4.58% of them do at [`FRAGMENT_BYTES`]**, which is 328 chunks a facet. A
-//! reassembly path exercised by one chunk in twenty is a path that works; one
-//! exercised only by a hypothetical dense generated world is a path that is
-//! wrong the first time it runs. The cap also bounds how long a bulk transfer
-//! can sit in front of a movement packet, since this rides the one stream
-//! everything else does.
+//! [`FRAGMENT_BYTES`] plus [`ChunkData::OVERHEAD_BYTES`] is 16,408 bytes, still
+//! below the gateway's 18,000-byte client-input cap even though this direction
+//! may now use the wire's full `u16` length. It halves the framing overhead of
+//! the former 8 KiB slices while retaining a bound on how long bulk transfer
+//! can sit in front of a movement packet on the one stream everything uses.
+//! Measured Felucca chunks fit in one such fragment; synthetic dense chunks keep
+//! the reassembly path covered.
 
 use crate::access::OPENSHARD_SUBCOMMANDS;
 use crate::codec::{PacketReader, PacketWriter};
@@ -88,9 +88,9 @@ use crate::world::{Facet, WorldId};
 
 /// The largest slice of one chunk's deflated blob a single packet carries.
 ///
-/// See the module header for why this is well below `MAX_PACKET_SIZE` rather
-/// than at it.
-pub const FRAGMENT_BYTES: usize = 8_192;
+/// See the module header for why this remains below `MAX_PACKET_SIZE` rather
+/// than growing to the server-to-client wire limit.
+pub const FRAGMENT_BYTES: usize = 16_384;
 
 /// How many chunks one [`ChunkRequest`] may name.
 ///
@@ -388,9 +388,8 @@ impl ChunkData {
     ///
     /// # Panics
     ///
-    /// If the record needs more than 255 fragments. That is 2,088,960 deflated
-    /// bytes for one 64-tile square — roughly ten megabytes of record, or four
-    /// hundred statics on every tile of the chunk — so it is a world nobody can
+    /// If the record needs more than 255 fragments. That is 4,177,920 deflated
+    /// bytes for one 64-tile square, so it is a world nobody can reasonably
     /// build rather than a case to handle. It panics loudly here instead of
     /// being wrapped into a byte and sent as a different chunk.
     #[must_use]

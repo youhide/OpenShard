@@ -381,7 +381,9 @@ fn chunk_body<'a>(bytes: &'a [u8], header: &ChunkHeader) -> Result<ChunkBody<'a>
 
 fn decode_land(bytes: &[u8]) -> Vec<LandCell> {
     bytes
-        .chunks_exact(CELL_BYTES)
+        .as_chunks::<CELL_BYTES>()
+        .0
+        .iter()
         .map(|cell| LandCell {
             tile: LandTileId(u16::from_le_bytes([cell[0], cell[1]])),
             z: cell[2] as i8,
@@ -391,7 +393,9 @@ fn decode_land(bytes: &[u8]) -> Vec<LandCell> {
 
 fn decode_counts(bytes: &[u8], statics: u32) -> Result<Vec<u32>, DecodeError> {
     let counts: Vec<u32> = bytes
-        .chunks_exact(COUNT_BYTES)
+        .as_chunks::<COUNT_BYTES>()
+        .0
+        .iter()
         .map(|count| u32::from_le_bytes([count[0], count[1], count[2], count[3]]))
         .collect();
     // In `u64`, so a set of counts that overflows a `u32` is reported rather
@@ -417,7 +421,7 @@ fn decode_statics(
     // dropped.
     let origin = header.key.at.block_origin();
     let mut items = Vec::with_capacity(header.statics as usize);
-    let mut records = bytes.chunks_exact(STATIC_BYTES);
+    let mut records = bytes.as_chunks::<STATIC_BYTES>().0.iter();
     for (local, count) in header.extent.blocks().zip(counts) {
         let block = header.extent.coord_of(local).expect("a block of this extent");
         let (block_x, block_y) = crate::grid::BlockCoord {

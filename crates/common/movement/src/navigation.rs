@@ -28,23 +28,28 @@ use std::time::Instant;
 
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
+use rustc_hash::FxHashMap;
 
 use crate::footing::Footing;
 use openshard_map::chunk::{CHUNK_TILES, ChunkCoord};
 use openshard_map::grid::Tile;
 
 use crate::walk::steps_out_of;
-use crate::{Effort, Rigour, Weight, debug_enabled, find_path_toward_within, find_path_within, step_allowed};
+use crate::{
+    Effort, Rigour, Weight, can_stand, debug_enabled, destination_place, find_path_toward_within,
+    find_path_within, step_allowed,
+};
 
 /// The whole work one long query may do, in node expansions.
 ///
-/// **The ceiling that used to be a clock.** A long query is two region floods
-/// and up to nine refinement passes over a corridor, and what kept the sum of
-/// them off the tick was 50 ms of wall clock read inside each — see
-/// [`Effort`] for why that was the wrong instrument in three separate ways.
-/// This is the same ceiling in the unit the searches under it are already
-/// written in, so what a query may cost stops depending on how busy the
-/// machine is.
+/// **The ceiling that used to be a clock.** An ordinary long query is two
+/// region floods and up to nine refinement passes over a corridor; an endpoint
+/// on a runtime storey substitutes a bounded directed live flood for its region
+/// flood. What kept the sum off the tick was 50 ms of wall clock read inside
+/// each — see [`Effort`] for why that was the wrong instrument in three separate
+/// ways. This is the same ceiling in the unit the searches under it are already
+/// written in, so what a query may cost stops depending on how busy the machine
+/// is.
 ///
 /// **The number is measured, not converted.** Converting the old one would give
 /// ~200,000 — 50 ms at the ~250 ns an expansion costs — and nothing comes near
@@ -1632,18 +1637,35 @@ impl NavigationGraph {
     fn refine(
         &self,
         footing: &Footing<'_>,
-        from: Point,
-        to: Point,
+        endpoints: (Point, Point),
         nodes: &[NodeId],
+        joins: (&EndpointJoin, &EndpointJoin),
         rigour: Rigour,
         effort: &mut Effort,
     ) -> Result<Vec<Direction>, NodeId> {
+        let (from, to) = endpoints;
+        let (source, target) = joins;
         let mut route = Vec::new();
         let mut at = from;
         let mut region = self
             .region_at(from)
             .expect("the query was checked before refinement");
-        for &node in nodes {
+        let mut first = 0;
+        if let Some((&node, prefix)) = nodes
+            .first()
+            .and_then(|node| source.route(*node).map(|route| (node, route)))
+        {
+            let Some(next_at) = append(footing, at, prefix, &mut route) else {
+                return Err(node);
+            };
+            if next_at != self.nodes[node.0].point {
+                return Err(node);
+            }
+            at = next_at;
+            region = self.node_region(node);
+            first = 1;
+        }
+        for &node in &nodes[first..] {
             if effort.spent_out() {
                 return Err(node);
             }
@@ -1668,10 +1690,19 @@ impl NavigationGraph {
         if effort.spent_out() {
             return Err(last);
         }
-        let Some(segment) = region_route(footing, self.regions[region.0], at, to, rigour, effort) else {
-            return Err(last);
-        };
-        append(footing, at, &segment, &mut route).ok_or(last)?;
+        if let Some(suffix) = target.route(last) {
+            let Some(next_at) = append(footing, at, suffix, &mut route) else {
+                return Err(last);
+            };
+            if next_at != to {
+                return Err(last);
+            }
+        } else {
+            let Some(segment) = region_route(footing, self.regions[region.0], at, to, rigour, effort) else {
+                return Err(last);
+            };
+            append(footing, at, &segment, &mut route).ok_or(last)?;
+        }
         Ok(route)
     }
 
@@ -1697,6 +1728,259 @@ enum Join {
     /// The endpoint is where the walk ends: what it costs to reach it from each
     /// node.
     Into,
+}
+
+/// An endpoint joined to the static graph, and the live route behind each
+/// quoted cost when that endpoint stands on a runtime floor.
+///
+/// The ordinary join has no routes: refinement can reproduce it inside the
+/// endpoint's region from the same static map. A live-storey join cannot be
+/// reproduced that way — the graph has no node at a player house's upper-floor
+/// height — so the prefix or suffix is kept until the abstract path chooses
+/// which portal it actually uses.
+struct EndpointJoin {
+    costs: Vec<(NodeId, u32)>,
+    routes: FxHashMap<usize, Vec<Direction>>,
+}
+
+impl EndpointJoin {
+    fn static_costs(costs: Vec<(NodeId, u32)>) -> Self {
+        Self {
+            costs,
+            routes: FxHashMap::default(),
+        }
+    }
+
+    fn route(&self, node: NodeId) -> Option<&[Direction]> {
+        self.routes.get(&node.0).map(Vec::as_slice)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LiveVisit {
+    /// The preceding place and the step from it to this one. `None` at the
+    /// endpoint the flood started from.
+    previous: Option<(Point, Direction)>,
+    cost: u32,
+}
+
+#[derive(Clone, Copy)]
+struct ReverseLiveVisit {
+    /// The next place toward the endpoint and the forward step that reaches it.
+    /// `None` at the endpoint itself.
+    next: Option<(Point, Direction)>,
+    cost: u32,
+}
+
+impl NavigationGraph {
+    /// Whether `endpoint` stands in a column whose topology the live layer
+    /// changed by adding a surface.
+    ///
+    /// This is a player-house floor or stair, or a moored deck. It includes the
+    /// map ground under a live floor: that point may exist in the guide too,
+    /// but a house wall can separate it from every static portal in its region
+    /// while the house's own exit lies across the next border. Joining it over
+    /// the guide and leaving the difference to refinement would then forbid all
+    /// of the region's portals without ever following the live storey out.
+    fn needs_live_join(footing: &Footing<'_>, endpoint: Point) -> bool {
+        let tile = Tile::new(endpoint.x, endpoint.y);
+        let live_surface = footing.overlay.surfaces_at(tile).next().is_some();
+        live_surface && can_stand(footing, tile, i32::from(endpoint.z), crate::PLAYER_HEIGHT)
+    }
+
+    /// Join a live-only endpoint to the first band of static portals it can
+    /// actually walk to.
+    ///
+    /// This is the dynamic storey graph: nodes are `(x, y, z)` places reached
+    /// by the production step rule, not tiles, so crossing a region boundary
+    /// upstairs remains upstairs even though the baked graph has only the map
+    /// below it. The walk ends once it has reached static portal nodes plus a
+    /// bounded band beyond the first; every chosen edge is replayed through the
+    /// live footing by [`NavigationGraph::refine`].
+    fn live_join(
+        &self,
+        footing: &Footing<'_>,
+        endpoint: Point,
+        join: Join,
+        effort: &mut Effort,
+    ) -> EndpointJoin {
+        match join {
+            Join::OutOf => self.live_join_out(footing, endpoint, effort),
+            Join::Into => self.live_join_into(footing, endpoint, effort),
+        }
+    }
+
+    fn live_join_out(&self, footing: &Footing<'_>, endpoint: Point, effort: &mut Effort) -> EndpointJoin {
+        let mut visited = FxHashMap::default();
+        let mut open = VecDeque::new();
+        let mut costs = Vec::new();
+        let mut routes = FxHashMap::default();
+        let mut first = None;
+        visited.insert(
+            endpoint,
+            LiveVisit {
+                previous: None,
+                cost: 0,
+            },
+        );
+        open.push_back(endpoint);
+
+        while let Some(here) = open.pop_front() {
+            if effort.spent_out() {
+                break;
+            }
+            let cost = visited[&here].cost;
+            if first.is_some_and(|first| cost > first + LIVE_JOIN_SLACK) {
+                break;
+            }
+            effort.spend(1);
+            for node in self.nodes_at(here) {
+                if routes.contains_key(&node.0) {
+                    continue;
+                }
+                first.get_or_insert(cost);
+                costs.push((node, cost));
+                routes.insert(node.0, reconstruct_live_out(&visited, endpoint, here));
+            }
+            for (&direction, landing) in Direction::ALL.iter().zip(steps_out_of(footing, here)) {
+                let Some(landing) = landing else {
+                    continue;
+                };
+                if visited.contains_key(&landing) {
+                    continue;
+                }
+                visited.insert(
+                    landing,
+                    LiveVisit {
+                        previous: Some((here, direction)),
+                        cost: cost + 1,
+                    },
+                );
+                open.push_back(landing);
+            }
+        }
+        EndpointJoin { costs, routes }
+    }
+
+    fn live_join_into(&self, footing: &Footing<'_>, endpoint: Point, effort: &mut Effort) -> EndpointJoin {
+        let mut visited = FxHashMap::default();
+        let mut open = VecDeque::new();
+        let mut costs = Vec::new();
+        let mut routes = FxHashMap::default();
+        let mut first = None;
+        visited.insert(endpoint, ReverseLiveVisit { next: None, cost: 0 });
+        open.push_back(endpoint);
+
+        while let Some(here) = open.pop_front() {
+            if effort.spent_out() {
+                break;
+            }
+            let cost = visited[&here].cost;
+            if first.is_some_and(|first| cost > first + LIVE_JOIN_SLACK) {
+                break;
+            }
+            effort.spend(1);
+            for node in self.nodes_at(here) {
+                if routes.contains_key(&node.0) {
+                    continue;
+                }
+                first.get_or_insert(cost);
+                costs.push((node, cost));
+                routes.insert(node.0, reconstruct_live_into(&visited, here, endpoint));
+            }
+
+            // There is no inverse step rule: descent is intentionally not the
+            // inverse of climbing. Enumerate every standable place in the eight
+            // neighbouring columns and ask the real forward rule which of them
+            // lands here, the same construction the static region join uses.
+            for direction_from_here in Direction::ALL {
+                let Some(column) = crate::step_from(here, direction_from_here) else {
+                    continue;
+                };
+                for candidate in live_places_at(footing, Tile::new(column.x, column.y)) {
+                    if visited.contains_key(&candidate) {
+                        continue;
+                    }
+                    let direction = direction_from_here.opposite();
+                    if step_allowed(footing, candidate, direction) != Some(here) {
+                        continue;
+                    }
+                    visited.insert(
+                        candidate,
+                        ReverseLiveVisit {
+                            next: Some((here, direction)),
+                            cost: cost + 1,
+                        },
+                    );
+                    open.push_back(candidate);
+                }
+            }
+        }
+        EndpointJoin { costs, routes }
+    }
+
+    fn nodes_at(&self, point: Point) -> impl Iterator<Item = NodeId> + '_ {
+        self.region_at(point)
+            .into_iter()
+            .flat_map(|region| self.nodes_in_region(region))
+            .filter(move |&node| self.nodes[node.0].point == point)
+    }
+}
+
+fn live_places_at(footing: &Footing<'_>, tile: Tile) -> Vec<Point> {
+    let mut heights: Vec<i8> = footing
+        .map
+        .into_iter()
+        .flat_map(|map| map.spans().surfaces(tile.x, tile.y).map(|span| span.stand_z))
+        .collect();
+    heights.extend(
+        footing
+            .overlay
+            .surfaces_at(tile)
+            .filter_map(|cover| i8::try_from(cover.surface()).ok()),
+    );
+    heights.sort_unstable();
+    heights.dedup();
+    heights
+        .into_iter()
+        .filter_map(|z| {
+            can_stand(footing, tile, i32::from(z), crate::PLAYER_HEIGHT)
+                .then_some(Point::new(tile.x, tile.y, z))
+        })
+        .collect()
+}
+
+fn reconstruct_live_out(
+    visited: &FxHashMap<Point, LiveVisit>,
+    start: Point,
+    mut here: Point,
+) -> Vec<Direction> {
+    let mut route = Vec::new();
+    while here != start {
+        let (previous, direction) = visited[&here]
+            .previous
+            .expect("a reached live-storey place has a predecessor");
+        route.push(direction);
+        here = previous;
+    }
+    route.reverse();
+    route
+}
+
+fn reconstruct_live_into(
+    visited: &FxHashMap<Point, ReverseLiveVisit>,
+    mut here: Point,
+    goal: Point,
+) -> Vec<Direction> {
+    let mut route = Vec::new();
+    while here != goal {
+        let (next, direction) = visited[&here]
+            .next
+            .expect("a reached reverse live-storey place has a successor");
+        route.push(direction);
+        here = next;
+    }
+    route
 }
 
 /// The places a flood is being run for, and how many of them are still
@@ -1886,8 +2170,9 @@ pub enum LongExit {
     Route,
     /// One or both endpoints are on a tile the static graph has no region for.
     OffGraph,
-    /// The endpoint's own 32×32 region has no portal it can walk to. Nothing
-    /// about the rest of the facet was even consulted.
+    /// An ordinary endpoint's own 32×32 region, or a live endpoint's bounded
+    /// storey connector, has no portal it can walk to. Nothing about the rest
+    /// of the facet was even consulted.
     NoJoin,
     /// Endpoints join the graph, and no corridor of portals connects them.
     NoCorridor,
@@ -1908,15 +2193,25 @@ pub enum LongExit {
 /// one has, on the same ground.
 const LIVE_REROUTES: usize = 8;
 
+/// How far past the first static portal a live-storey join keeps flooding.
+///
+/// A player house can carry a route through several baked regions before its
+/// staircase reaches the map again: every upper floor is in the live layer,
+/// while every portal in [`NavigationGraph`] is at a height the static map
+/// owns. Stopping at the first portal would make that portal a single point of
+/// failure under a crate or a shut door. Sixty-four more steps covers two whole
+/// regions and gives the abstract search alternatives without turning an
+/// isolated live platform into a facet-wide flood.
+const LIVE_JOIN_SLACK: u32 = 64;
+
 /// The shortest failed search worth asking the graph about, in tiles.
 ///
-/// A coarse graph is counterproductive for a short failed search: joining an
-/// endpoint to the graph is [`NavigationGraph::local_costs`] — a flood over the
-/// endpoint's own region, at *both* ends — and that costs more than the local
-/// answer the caller has already been refused, especially around a house with
-/// several doors. It used to be one exact search per node of that region, which
-/// is what made the distance worth drawing at all; a flood is cheaper and the
-/// threshold is still a real one, since the region is walked either way.
+/// A coarse graph is counterproductive after a short search has exhausted the
+/// reachable component: joining an endpoint is another flood, at *both* ends,
+/// and cannot invent an exit. A budget refusal is not that answer. Several live
+/// storeys can put hundreds of places inside eight tiles, so callers let
+/// `Budget` fall through to the dynamic storey join while `Exhausted` remains a
+/// final short refusal.
 ///
 /// A property of this router rather than of any one caller, which is why it
 /// lives beside [`find_long_path`] and not beside the budgets: the client's
@@ -1993,6 +2288,11 @@ fn find_long_path_inner(
     rigour: Rigour,
     effort: &mut Effort,
 ) -> (Option<Vec<Direction>>, LongExit) {
+    // A click names the art it hit; the route is to the standing place that art
+    // resolves to. The bounded search already makes this resolution internally,
+    // but a live-storey join keeps a suffix to the exact point and therefore
+    // must name the same destination before it starts.
+    let to = destination_place(footing, from, to);
     let (Some(from_region), Some(to_region)) = (graph.region_at(from), graph.region_at(to)) else {
         return (None, LongExit::OffGraph);
     };
@@ -2015,22 +2315,28 @@ fn find_long_path_inner(
     // the endpoint's own flood does not change between those retries — a portal
     // the corridor may not use is one `abstract_path` skips, not one the ground
     // stopped reaching. Joined once, read every retry.
-    let source = graph.local_costs(guide, from_region, from, Join::OutOf, effort);
-    let target = graph.local_costs(guide, to_region, to, Join::Into, effort);
+    let source = match NavigationGraph::needs_live_join(footing, from) {
+        true => graph.live_join(footing, from, Join::OutOf, effort),
+        false => EndpointJoin::static_costs(graph.local_costs(guide, from_region, from, Join::OutOf, effort)),
+    };
+    let target = match NavigationGraph::needs_live_join(footing, to) {
+        true => graph.live_join(footing, to, Join::Into, effort),
+        false => EndpointJoin::static_costs(graph.local_costs(guide, to_region, to, Join::Into, effort)),
+    };
     if effort.spent_out() {
         return (None, LongExit::Spent);
     }
-    if source.is_empty() || target.is_empty() {
+    if source.costs.is_empty() || target.costs.is_empty() {
         return (None, LongExit::NoJoin);
     }
     for _ in 0..=LIVE_REROUTES {
         if effort.spent_out() {
             return (None, LongExit::Spent);
         }
-        let Some(path) = graph.abstract_path(from, to, &forbidden, &source, &target) else {
+        let Some(path) = graph.abstract_path(from, to, &forbidden, &source.costs, &target.costs) else {
             return (None, LongExit::NoCorridor);
         };
-        match graph.refine(footing, from, to, &path, rigour, effort) {
+        match graph.refine(footing, (from, to), &path, (&source, &target), rigour, effort) {
             Ok(route) => return (Some(route), LongExit::Route),
             Err(node) if !forbidden[node.0] => graph.forbid_portal(node, &mut forbidden),
             Err(_) => return (None, LongExit::PortalsExhausted),
@@ -2179,6 +2485,42 @@ mod tests {
         }
     }
 
+    /// A long upper floor laid over the map, fenced on both sides and reached
+    /// by ten two-unit treads at its east end.
+    ///
+    /// The floor crosses the x=32 baked-region boundary while the only way back
+    /// to static ground is in the next region. That is the shape a placed house
+    /// adds which a map-only endpoint join cannot represent: its portal at the
+    /// boundary exists at z=0, while the body crosses it at z=20.
+    fn live_storey() -> Grid {
+        let mut grid = Grid::open(96, 32);
+        let floor = |z| Cover::standing(z, 0);
+        for x in 4..=40 {
+            grid.blocked.set(Tile::new(x, 10), vec![floor(20)]);
+        }
+        for x in 41..=50 {
+            let z = 20 - i8::try_from((x - 40) * 2).unwrap();
+            grid.blocked.set(Tile::new(x, 10), vec![floor(z)]);
+        }
+        // Whole-tile wall art on the two neighbouring rows. The standing half
+        // is what prevents `landing` from treating the blocked upper edge as an
+        // unguarded drop to the ground under it.
+        for x in 3..=50 {
+            for y in [9, 11] {
+                grid.blocked
+                    .set(Tile::new(x, y), vec![Cover::blocking(0, 40), floor(20)]);
+            }
+        }
+        grid.blocked
+            .set(Tile::new(3, 10), vec![Cover::blocking(0, 40), floor(20)]);
+        // A ground-floor arch: somebody downstairs can leave the house here,
+        // while the wall still keeps the upper floor from becoming an
+        // unguarded drop. The staircase remains the only way *up*.
+        grid.blocked
+            .set(Tile::new(4, 9), vec![Cover::blocking(16, 24), floor(20)]);
+        grid
+    }
+
     fn end(footing: &Footing<'_>, from: Point, route: &[Direction]) -> Point {
         route.iter().fold(from, |at, &direction| {
             step_allowed(footing, at, direction).unwrap()
@@ -2204,6 +2546,67 @@ mod tests {
         )
         .unwrap();
         assert_eq!(end(&terrain.footing(), from, &route), to);
+    }
+
+    /// A placed house is absent from the baked graph. Its upper floor crosses a
+    /// region border at a height the graph has no node for, and its staircase
+    /// is further away than the exact search's deliberately tiny budget.
+    ///
+    /// Both directions matter: climbing is bounded while descending is not, so
+    /// a reverse join made by reversing the outward edges would pass this first
+    /// assertion and fail the second.
+    #[test]
+    fn a_live_storey_joins_the_static_graph_in_both_directions() {
+        let terrain = live_storey();
+        let empty = Overlay::default();
+        let guide = Footing::new(Some(terrain.scene.terrain()), &empty, Doors::AsTheyStand);
+        let graph = NavigationGraph::build(&guide, 96, 32).unwrap();
+        let live = terrain.footing();
+        let upstairs = Point::new(4, 10, 20);
+        let street = Point::new(90, 10, 0);
+
+        let local = crate::search_path(&live, upstairs, street, 20, Weight::EXACT);
+        assert_eq!(
+            local.exit,
+            crate::SearchExit::Budget,
+            "the fixture stopped needing the graph"
+        );
+        let out = find_long_path(&guide, &live, &graph, upstairs, street, 20, Weight::EXACT)
+            .expect("the live upper floor should join the static route outside");
+        assert_eq!(end(&live, upstairs, &out), street);
+
+        let into = find_long_path(&guide, &live, &graph, street, upstairs, 20, Weight::EXACT)
+            .expect("the static route should join the live staircase upward");
+        assert_eq!(end(&live, street, &into), upstairs);
+    }
+
+    /// The old tile-keyed answer to this query was an empty route: both places
+    /// have `(4, 10)`. The place-keyed exact search fixed that for a small
+    /// house; the live-storey join keeps the answer when a larger house spends
+    /// the exact budget before reaching its stairs.
+    #[test]
+    fn a_long_house_route_reaches_another_floor_of_the_same_column() {
+        let terrain = live_storey();
+        let empty = Overlay::default();
+        let guide = Footing::new(Some(terrain.scene.terrain()), &empty, Doors::AsTheyStand);
+        let graph = NavigationGraph::build(&guide, 96, 32).unwrap();
+        let live = terrain.footing();
+        let downstairs = Point::new(4, 10, 0);
+        let upstairs = Point::new(4, 10, 20);
+
+        let local = crate::search_path(&live, downstairs, upstairs, 20, Weight::EXACT);
+        assert_eq!(
+            local.exit,
+            crate::SearchExit::Budget,
+            "the fixture stopped needing the graph"
+        );
+        let route = find_long_path(&guide, &live, &graph, downstairs, upstairs, 20, Weight::EXACT)
+            .expect("the route should leave the column, climb the house, and return upstairs");
+        assert!(
+            !route.is_empty(),
+            "two floors of one column became an empty route again"
+        );
+        assert_eq!(end(&live, downstairs, &route), upstairs);
     }
 
     #[test]

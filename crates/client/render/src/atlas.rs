@@ -2275,7 +2275,11 @@ fn fallback_frame(
     let mut pixels = Vec::with_capacity(usize::from(width) * usize::from(height));
     for y in 0..height {
         for x in 0..width {
-            pixels.push(opaque(x, y).then_some(SILHOUETTE).unwrap_or(Color16::TRANSPARENT));
+            pixels.push(if opaque(x, y) {
+                SILHOUETTE
+            } else {
+                Color16::TRANSPARENT
+            });
         }
     }
     AnimFrame {

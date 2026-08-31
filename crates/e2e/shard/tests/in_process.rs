@@ -227,7 +227,11 @@ async fn a_stop_tells_the_player_before_it_hangs_up() {
         let mut said = None;
         loop {
             match socket.next_event().await {
-                Ok(Some(Event::Packet(ServerPacket::SpokenMessage(line)))) => said = Some(line.text),
+                Ok(Some(Event::Packet(packet))) => {
+                    if let ServerPacket::SpokenMessage(line) = *packet {
+                        said = Some(line.text);
+                    }
+                }
                 Ok(Some(_)) => continue, // whatever else was in flight
                 // The hang-up, and the end of the ordering assertion: anything
                 // still unheard at this point was never sent.

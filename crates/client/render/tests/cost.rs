@@ -637,8 +637,10 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
     let lit = picture(&night);
     let unlit = picture(&dark);
     let changed = lit
-        .chunks_exact(4)
-        .zip(unlit.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(unlit.as_chunks::<4>().0)
         .filter(|(a, b)| a != b)
         .count();
     let total = (VIEWPORT.0 * VIEWPORT.1) as usize;

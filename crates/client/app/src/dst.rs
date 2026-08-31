@@ -459,7 +459,7 @@ enum ToShard {
 /// What crosses the wire back.
 enum ToClient {
     /// Anything the walk handshake is made of.
-    Packet(ServerPacket),
+    Packet(Box<ServerPacket>),
     /// The `0x1A` that redraws a leaf that swung aside — modelled as the one
     /// fact this end takes from it, which is that the leaf is no longer shut and
     /// no longer in the way.
@@ -851,7 +851,7 @@ impl Sim {
                 }
             };
             let at = self.now + self.hop();
-            self.to_client.push_back((at, ToClient::Packet(answer)));
+            self.to_client.push_back((at, ToClient::Packet(Box::new(answer))));
         }
 
         while self.to_client.front().is_some_and(|(at, _)| *at <= self.now) {

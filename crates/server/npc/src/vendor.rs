@@ -666,7 +666,7 @@ pub fn sell(state: &mut WorldState, connection: ConnectionId, vendor_serial: Raw
         ) {
             continue;
         }
-        let Some(&Drawn { id: _, .. }) = state.registry.get::<Drawn>(item) else {
+        let Some(&Drawn { .. }) = state.registry.get::<Drawn>(item) else {
             continue;
         };
         let Some(price) = stock_price_for(state, item, &catalogue) else {

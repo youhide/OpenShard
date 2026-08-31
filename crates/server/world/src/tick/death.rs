@@ -1,10 +1,21 @@
-use super::*;
 use openshard_protocol::containers::GridSlot;
-use openshard_protocol::wire::{Graphic, Hue, Layer};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
 use openshard_state::components::{
-    CORPSE_GRAPHIC, CORPSE_GUMP, Corpse, DEATH_SHROUD_GRAPHIC, Decays, creature_name, ghost_body,
+    CORPSE_GRAPHIC,
+    CORPSE_GUMP,
+    Corpse,
+    DEATH_SHROUD_GRAPHIC,
+    Decays,
+    creature_name,
+    ghost_body,
 };
 use tracing::warn;
+
+use super::*;
 
 /// How long a corpse lies before it rots away with its loot — ServUO's default
 /// seven minutes, in ticks.
@@ -477,7 +488,7 @@ impl World {
             })
             .map(|(item, _)| item);
         if let Some(item) = shroud {
-            self.state.registry.despawn(item);
+            openshard_state::despawn_item(&mut self.state, item);
         }
     }
 
@@ -877,9 +888,15 @@ impl World {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_protocol::serial::SerialKind;
-    use openshard_state::components::{Amount, Contained, Container, Drawn};
+    use openshard_state::components::{
+        Amount,
+        Contained,
+        Container,
+        Drawn,
+    };
+
+    use super::*;
 
     #[test]
     fn a_skeleton_corpse_has_visible_gold_weapon_and_supplies() {

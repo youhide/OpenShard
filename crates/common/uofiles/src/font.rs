@@ -199,7 +199,7 @@ impl AsciiFonts {
                 at += pixel_bytes;
 
                 let mut colors = Vec::with_capacity(width * height);
-                for word in pixels.chunks_exact(2) {
+                for word in pixels.as_chunks::<2>().0 {
                     colors.push(Color16(u16::from_le_bytes([word[0], word[1]])));
                 }
                 glyphs.push(Image::new(width as u16, height as u16, colors));

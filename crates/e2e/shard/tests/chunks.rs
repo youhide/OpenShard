@@ -124,7 +124,7 @@ async fn hear(
     let collecting = async {
         while let Some(event) = socket.next_event().await.expect("the socket stayed up") {
             if let Event::Packet(packet) = event {
-                heard.push(packet);
+                heard.push(*packet);
                 if done(&heard) {
                     return;
                 }

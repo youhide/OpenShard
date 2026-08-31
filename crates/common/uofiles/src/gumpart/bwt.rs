@@ -107,8 +107,8 @@ fn expand_runs(graphic: Graphic, input: &[u8]) -> Result<Vec<u8>, GumpError> {
         .get(..1024)
         .ok_or_else(|| malformed("shorter than its own 1024-byte count table".to_owned()))?;
     let mut counts = [0i32; 256];
-    for (index, word) in header.chunks_exact(4).enumerate() {
-        counts[index] = i32::from_le_bytes(word.try_into().expect("4-byte chunk"));
+    for (index, word) in header.as_chunks::<4>().0.iter().enumerate() {
+        counts[index] = i32::from_le_bytes(*word);
     }
 
     let total: i64 = counts.iter().map(|&count| i64::from(count)).sum();

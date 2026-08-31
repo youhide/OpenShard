@@ -89,7 +89,7 @@ resolution that used to be spelled out in the shard's boot and both bake binarie
 is one function all four now go through.
 
 **E1 is built too**: the wire carries a chunk. Four subcommands — a request, a
-deflated chunk in fragments of at most 8,192 bytes, a notice on world entry
+deflated chunk in fragments of at most 16,384 bytes, a notice on world entry
 saying which facet at which revision, and a refusal — with the deflating and the
 joining as one pair of functions in `openshard-protocol`, so the two ends of the
 wire are a round trip rather than two implementations.

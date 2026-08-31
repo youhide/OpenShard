@@ -221,7 +221,9 @@ impl TexMaps {
             })?;
 
         let pixels = raw
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|word| Color16(u16::from_le_bytes([word[0], word[1]])))
             .collect();
         Ok(Some(Image::new(side, side, pixels)))

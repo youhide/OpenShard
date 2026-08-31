@@ -1,5 +1,9 @@
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
+
 use super::*;
-use openshard_protocol::wire::{Graphic, Hue};
 
 impl World {
     /// Keep every spawn region at its ceiling. Once per tick, but cheap: a region
@@ -180,7 +184,8 @@ impl World {
         let now = self.state.ticks;
         self.spawners
             .iter()
-            .map(|s| openshard_persistence::SpawnerRecord {
+            .map(|s| {
+                openshard_persistence::SpawnerRecord {
                 id: s.id,
                 facet: s.area.facet.0,
                 x: s.area.x,
@@ -193,7 +198,8 @@ impl World {
                 creatures: s
                     .creatures
                     .iter()
-                    .map(|c| openshard_persistence::CreatureData {
+                        .map(|c| {
+                            openshard_persistence::CreatureData {
                         body: c.body.0,
                         hue: c.hue.0,
                         hits: c.hits,
@@ -214,8 +220,10 @@ impl World {
                             .iter()
                             .map(|(skill, value)| (skill.id(), *value))
                             .collect(),
+                            }
                     })
                     .collect(),
+                }
             })
             .collect()
     }
@@ -237,7 +245,8 @@ impl World {
             let creatures = record
                 .creatures
                 .into_iter()
-                .map(|c| crate::spawner::CreatureTemplate {
+                .map(|c| {
+                    crate::spawner::CreatureTemplate {
                     body: Graphic(c.body),
                     hue: Hue(c.hue),
                     hits: c.hits,
@@ -260,6 +269,7 @@ impl World {
                             openshard_state::Skill::from_id(id).map(|skill| (skill, value))
                         })
                         .collect(),
+                    }
                 })
                 .collect();
             // The slot it lands in, not the number in the row. They are the same
@@ -347,6 +357,6 @@ impl World {
                 self.despawn_item_tree(child);
             }
         }
-        self.state.registry.despawn(item);
+        openshard_state::despawn_item(&mut self.state, item);
     }
 }

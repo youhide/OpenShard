@@ -38,7 +38,7 @@ use openshard_state::sectors::in_range;
 use openshard_state::{
     HeldItem, ItemLocation, Origin, Outbound, SettledItemLocation, TICKS_PER_SECOND, TradeWindow, WorldState,
     contained_items, despawn_item, equipped_items, establish_item_location, item_location, kind_from_drawn,
-    presentation_of, relocate_item, settled_from_origin,
+    presentation_of, relocate_item,
 };
 use tracing::{debug, warn};
 

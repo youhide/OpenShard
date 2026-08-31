@@ -242,7 +242,9 @@ fn draw(
 /// is a different question with a different instrument.
 fn shadowed(pixels: &[u8]) -> usize {
     pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|px| px[0] > 0 && px[1] < 128 && px[0] >= px[2])
         .count()
 }

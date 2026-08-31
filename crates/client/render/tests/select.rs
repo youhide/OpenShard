@@ -352,7 +352,9 @@ fn wash(device: &wgpu::Device, queue: &wgpu::Queue, selection: Selection) -> Vec
         .to_vec();
     readback.unmap();
     bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|pixel| [pixel[0], pixel[1], pixel[2], pixel[3]])
         .collect()
 }

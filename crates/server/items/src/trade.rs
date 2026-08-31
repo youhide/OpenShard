@@ -350,17 +350,8 @@ fn escrowed(state: &WorldState, index: TradeIndex) -> Vec<Serial> {
     let Some(trade) = state.trades.get(index.0) else {
         return Vec::new();
     };
-    let mut items: Vec<Serial> = state
-        .registry
-        .query::<ItemLocation>()
-        .filter(|(_, location)| {
-            matches!(
-                location,
-                ItemLocation::Settled(SettledItemLocation::Contained(held))
-                    if held.container == trade.from.container_serial
-                        || held.container == trade.to.container_serial
-            )
-        })
+    let mut items: Vec<Serial> = contained_items(state, trade.from.container_serial)
+        .chain(contained_items(state, trade.to.container_serial))
         .filter_map(|(entity, _)| state.registry.serial_of(entity))
         .collect();
     items.sort_unstable();

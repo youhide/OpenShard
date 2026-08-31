@@ -247,40 +247,6 @@ pub fn equip_new_container(
     Some(entity)
 }
 
-/// Leave the remainder of a split stack behind, at the same spot, as a fresh
-/// pile. A dupe with a new serial — the original goes onto the cursor keeping
-/// its own serial, so the client's drag and its eventual drop still name it,
-/// and the copy is what the ground is left with. Straight from Sphere's
-/// `CItem::UnStackSplit`.
-pub fn spawn_leftover(
-    state: &mut WorldState,
-    original: EntityId,
-    amount: u16,
-    position: Point,
-    facet: Facet,
-) {
-    let Some(&Drawn { id, hue }) = state.registry.get::<Drawn>(original) else {
-        return;
-    };
-    let leftover = match state.registry.spawn_with_serial(SerialKind::Item) {
-        Ok((entity, _)) => entity,
-        Err(error) => {
-            warn!(?error, "out of item serials; a split remainder is lost");
-            return;
-        }
-    };
-    let drawn = Drawn { id, hue };
-    state.registry.insert(leftover, drawn);
-    copy_identity(state, original, leftover);
-    state.registry.insert(leftover, Stackable);
-    set_stack_amount(state, leftover, amount);
-    establish_item_location(state, leftover, ItemLocation::ground(facet, position))
-        .expect("a split remainder has one valid ground location");
-    mark_decay(state, leftover);
-    state.place_item(facet, leftover, position);
-    state.reveal(leftover);
-}
-
 /// Land an item on the ground at `position` and draw it for everyone in range.
 pub fn place_on_ground(state: &mut WorldState, item: EntityId, position: Point, facet: Facet) {
     relocate_item(state, item, ItemLocation::ground(facet, position))

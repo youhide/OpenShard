@@ -25,6 +25,10 @@ here. Order, not dates.
       migrate persistence and the item lifecycle, then make crafting a typed
       recipe graph — design and staged plan: [Item kinds, materials, and recipe
       graph](../../item_kind.md).
+- [ ] Make item ownership and quantities atomic, index container membership,
+      withdraw craft ingredients from eligible nearby boxes, and hold the whole
+      lifecycle against a reference model with property tests — staged plan:
+      [Item ownership, container indexes, and atomic crafting](../../item_transactions_plan.md).
 - [ ] Complete classic-client per-weapon and per-body animations.
 - [ ] Finish the remaining usable skills and exact skill/spell presentation.
 - [ ] Add summons, the deferred spell subsystems, and adjacent-tile quarry

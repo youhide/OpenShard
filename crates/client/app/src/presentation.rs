@@ -289,10 +289,8 @@ fn audit_captured_composite_ids(
         .expect("completed map-composite audit has mapped bytes");
     let (mut nothing, mut land, mut statics, mut mobile, mut invalid) = (0_u64, 0_u64, 0_u64, 0_u64, 0_u64);
     for source_row in mapped.chunks_exact(stride as usize) {
-        for word in source_row[..row as usize].chunks_exact(4) {
-            match openshard_client_render::gbuffer::ids_kind(u32::from_le_bytes(
-                word.try_into().expect("four ID bytes"),
-            )) {
+        for word in source_row[..row as usize].as_chunks::<4>().0 {
+            match openshard_client_render::gbuffer::ids_kind(u32::from_le_bytes(*word)) {
                 Some(openshard_client_render::place::Kind::Nothing) => nothing += 1,
                 Some(openshard_client_render::place::Kind::Land) => land += 1,
                 Some(openshard_client_render::place::Kind::Static) => statics += 1,

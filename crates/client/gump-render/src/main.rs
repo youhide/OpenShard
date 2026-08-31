@@ -227,7 +227,7 @@ fn render(
     scene_dir: &Path,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let pixel_count = usize::try_from(u64::from(scene.width) * u64::from(scene.height))?;
-    let mut result = vec![scene.background.r, scene.background.g, scene.background.b].repeat(pixel_count);
+    let mut result = [scene.background.r, scene.background.g, scene.background.b].repeat(pixel_count);
     if let Some(path) = &scene.backdrop {
         let path = scene_dir.join(path);
         let backdrop = read_png(&path)?;
@@ -579,10 +579,11 @@ fn composite_crop(
                 canvas_width,
                 canvas_height,
                 image,
-                source_x + local_x,
-                source_y + local_y,
-                target_x + i32::try_from(local_x)?,
-                target_y + i32::try_from(local_y)?,
+                (source_x + local_x, source_y + local_y),
+                (
+                    target_x + i32::try_from(local_x)?,
+                    target_y + i32::try_from(local_y)?,
+                ),
             );
         }
     }
@@ -618,10 +619,11 @@ fn composite_scaled_crop(
                 canvas_width,
                 canvas_height,
                 image,
-                sampled_x,
-                sampled_y,
-                target_x + i32::try_from(local_x)?,
-                target_y + i32::try_from(local_y)?,
+                (sampled_x, sampled_y),
+                (
+                    target_x + i32::try_from(local_x)?,
+                    target_y + i32::try_from(local_y)?,
+                ),
             );
         }
     }
@@ -682,10 +684,11 @@ fn composite_nine_slice(
                 canvas_width,
                 canvas_height,
                 image,
-                source_x,
-                source_y,
-                target_x + i32::try_from(local_x)?,
-                target_y + i32::try_from(local_y)?,
+                (source_x, source_y),
+                (
+                    target_x + i32::try_from(local_x)?,
+                    target_y + i32::try_from(local_y)?,
+                ),
             );
         }
     }
@@ -743,11 +746,11 @@ fn composite_asset_pixel(
     canvas_width: u32,
     canvas_height: u32,
     image: &RgbaImage,
-    source_x: u32,
-    source_y: u32,
-    target_x: i32,
-    target_y: i32,
+    source: (u32, u32),
+    target: (i32, i32),
 ) {
+    let (source_x, source_y) = source;
+    let (target_x, target_y) = target;
     if target_x < 0 || target_y < 0 || target_x >= canvas_width as i32 || target_y >= canvas_height as i32 {
         return;
     }
@@ -887,7 +890,9 @@ fn read_png(path: &Path) -> Result<RgbaImage, Box<dyn std::error::Error>> {
     let rgba = match info.color_type {
         png::ColorType::Rgba => source.to_vec(),
         png::ColorType::Rgb => source
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|rgb| [rgb[0], rgb[1], rgb[2], u8::MAX])
             .collect(),
         other => return Err(format!("{} decoded as unsupported {other:?}", path.display()).into()),
@@ -913,7 +918,12 @@ fn composite_image(
         )
         .into());
     }
-    for (target, source) in canvas.chunks_exact_mut(3).zip(image.rgba.chunks_exact(4)) {
+    for (target, source) in canvas
+        .as_chunks_mut::<3>()
+        .0
+        .iter_mut()
+        .zip(image.rgba.as_chunks::<4>().0)
+    {
         blend(target, source, source[3]);
     }
     Ok(())
@@ -1199,7 +1209,7 @@ mod tests {
             .expect("one source pixel fits an atlas");
         let quads =
             openshard_client_render::gump::collect(&[Picture::plain(art, GumpPixel::new(1, 0))], &atlas);
-        let mut canvas = vec![1, 2, 3].repeat(2);
+        let mut canvas = [1, 2, 3].repeat(2);
         composite(&mut canvas, 2, 1, &quads, atlas.pixels());
         assert_eq!(
             &canvas[..3],

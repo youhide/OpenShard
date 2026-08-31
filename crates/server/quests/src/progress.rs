@@ -19,7 +19,6 @@
 
 use openshard_combat::MobileDied;
 use openshard_entities::EntityId;
-use openshard_items::Contents;
 use openshard_map::overlay::Doors;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::serial::Serial;
@@ -36,9 +35,8 @@ use crate::gump::{self, sound};
 /// cadence — fast enough that picking an item up feels immediate, slow enough
 /// that a still player costs nothing.
 ///
-/// Public because the caller has to build the containment index the pass reads,
-/// and building it every tick to be thrown away nineteen times out of twenty is
-/// the cost this cadence exists to avoid.
+/// Public because the tick avoids even the indexed backpack walks on the other
+/// nineteen ticks out of twenty.
 pub const OBTAIN_EVERY_TICKS: u64 = TICKS_PER_SECOND / 2;
 
 /// How far an escorted NPC may fall behind before it gives up, in ticks.
@@ -72,7 +70,7 @@ pub fn advance_slay(state: &mut WorldState, deaths: &[MobileDied]) {
 /// Progress goes **down** as well as up: drop the items and the objective falls
 /// back, which is ServUO's behaviour and the only honest reading of an objective
 /// that says "carry five of these".
-pub fn refresh_obtain(state: &mut WorldState, contents: &Contents) {
+pub fn refresh_obtain(state: &mut WorldState) {
     if !state.ticks.is_multiple_of(OBTAIN_EVERY_TICKS) {
         return;
     }
@@ -95,7 +93,7 @@ pub fn refresh_obtain(state: &mut WorldState, contents: &Contents) {
                 let ObjectiveKind::Obtain { graphic } = objective.kind else {
                     continue;
                 };
-                let held = openshard_items::carried_amount_with(state, contents, serial, graphic);
+                let held = openshard_items::carried_amount(state, serial, graphic);
                 let held = u16::try_from(held.min(u32::from(objective.count)))
                     .expect("carried progress is capped by the u16 objective count");
                 let Some(slot) = quest.progress.get_mut(index) else {

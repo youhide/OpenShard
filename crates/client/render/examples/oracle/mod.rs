@@ -77,8 +77,10 @@ pub fn read_gbuffer(
 ) -> Vec<Drawn> {
     let ids = read_plane(device, queue, gbuffer.ids(), width, height, 4);
     let positions = read_plane(device, queue, gbuffer.position(), width, height, 16);
-    ids.chunks_exact(4)
-        .zip(positions.chunks_exact(16))
+    ids.as_chunks::<4>()
+        .0
+        .iter()
+        .zip(positions.as_chunks::<16>().0)
         .map(|(word, point)| {
             let word = u32::from_le_bytes([word[0], word[1], word[2], word[3]]);
             let axis = |i: usize| {

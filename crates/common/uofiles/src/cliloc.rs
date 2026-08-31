@@ -193,8 +193,11 @@ fn decompress_bwt(bytes: &[u8]) -> Option<Vec<u8>> {
     transformed.push(0);
 
     let mut partial = [0i32; 256 * 3];
-    for (entry, chunk) in partial[..256].iter_mut().zip(transformed[..1024].chunks_exact(4)) {
-        *entry = i32::from_le_bytes(chunk.try_into().ok()?);
+    for (entry, chunk) in partial[..256]
+        .iter_mut()
+        .zip(transformed[..1024].as_chunks::<4>().0)
+    {
+        *entry = i32::from_le_bytes(*chunk);
     }
     let length = partial[..256].iter().try_fold(0usize, |sum, &count| {
         sum.checked_add(usize::try_from(count).ok()?)

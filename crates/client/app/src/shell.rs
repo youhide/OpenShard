@@ -79,8 +79,8 @@ use crate::world::{Shard, WorldState};
 /// that happens on any path.
 #[derive(Clone, Default, Debug)]
 pub struct Request {
-    /// Reply selected in the client-owned craft catalogue. It preserves the
-    /// server's existing button encoding and validation path.
+    /// Reply selected in the client-owned craft window. It preserves the
+    /// server's existing button encoding and validation path on every page.
     pub craft_reply: Option<GumpReply>,
     /// Save the next fully rendered world frame and its GPU planes. This is an
     /// edge-triggered diagnostic action, not a persistent display setting.
@@ -297,10 +297,9 @@ pub struct Shell {
     /// the F1 administrator browser. Keeping this in the shell lets egui own
     /// the GPU textures while the source art stays in [`Resources`].
     item_catalogue: ItemArtCatalogue,
-    /// Transient controls for the client-owned craft catalogue.
-    craft_catalogue: CraftCataloguePanel,
-    /// Decoded item art for the tool-specific craft workbench.
-    craft_workbench: CraftWorkbenchPanel,
+    /// One client-owned craft window. Catalogue, workbench and recipe details
+    /// are pages of this same state rather than independent floating windows.
+    crafting: CraftWindowPanel,
 }
 
 impl Shell {
@@ -365,8 +364,7 @@ impl Shell {
             repaint_after: std::time::Duration::MAX,
             desk,
             item_catalogue: ItemArtCatalogue::default(),
-            craft_catalogue: CraftCataloguePanel::default(),
-            craft_workbench: CraftWorkbenchPanel::default(),
+            crafting: CraftWindowPanel::default(),
         }
     }
 
@@ -571,8 +569,7 @@ impl Shell {
                         authority,
                     },
                     item_catalogue: &mut self.item_catalogue,
-                    craft_catalogue: &mut self.craft_catalogue,
-                    craft_workbench: &mut self.craft_workbench,
+                    crafting: &mut self.crafting,
                     desk,
                 },
             );
@@ -802,8 +799,7 @@ pub struct ShellFrame<'a> {
 struct LayoutFrame<'a> {
     shell: ShellFrame<'a>,
     item_catalogue: &'a mut ItemArtCatalogue,
-    craft_catalogue: &'a mut CraftCataloguePanel,
-    craft_workbench: &'a mut CraftWorkbenchPanel,
+    crafting: &'a mut CraftWindowPanel,
     desk: &'a mut Desk,
 }
 
@@ -831,8 +827,7 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
                 authority,
             },
         item_catalogue,
-        craft_catalogue,
-        craft_workbench,
+        crafting,
         desk,
     } = frame;
     let mut request = Request::default();
@@ -1072,43 +1067,59 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
         });
     }
 
-    craft_catalogue_window(
-        &context,
-        world,
-        art,
-        hue_ramp,
-        cliloc,
-        craft_catalogue,
-        &mut request,
-    );
-    craft_workbench_window(
-        &context,
-        world,
-        art,
-        hue_ramp,
-        cliloc,
-        craft_workbench,
-        &mut request,
-    );
+    craft_window(&context, world, art, hue_ramp, cliloc, crafting, &mut request);
 
     request
 }
 
-/// Client-owned controls around the server's flat craft-recipe data.
+/// Catalogue, tool workbench and recipe details are pages of one server gump.
+/// Giving every page the same egui id makes replacement keep the window's
+/// position and size instead of making details look like a second dialog.
+fn crafting_window_id(gump_id: u32) -> egui::Id {
+    egui::Id::new(("crafting", gump_id))
+}
+
+/// Client-owned state shared by every page of the craft window.
 ///
-/// The shard owns recipes and the meaning of their buttons; this owns only the
-/// ways a player narrows a long list before choosing one.
+/// The shard owns recipes and the meaning of their buttons; this owns only
+/// presentation state. Details and Back therefore switch the page inside one
+/// state instead of closing one UI and constructing another.
 #[derive(Default)]
-struct CraftCataloguePanel {
+struct CraftWindowPanel {
     gump_id: Option<u32>,
     query: String,
     availability: CraftAvailability,
     skill: Option<u32>,
     materials: CraftMaterials,
     sort: CraftSort,
+    /// These areas may be absent while a detail page is visible. Their offsets
+    /// live here so returning to either list resumes exactly where it was.
+    table_scroll: egui::Vec2,
+    row_scroll: f32,
+    recipe_scroll: f32,
+    /// A gump reply closes the authoritative shell locally before the shard
+    /// sends its replacement page. Keep this state alive across that gap.
+    awaiting_page: bool,
     /// Thumbnails are decoded only for rows inside the scroll viewport. The
     /// key includes hue: the same ingot graphic is several distinct metals.
     textures: BTreeMap<(u16, u16), Option<egui::TextureHandle>>,
+}
+
+impl CraftWindowPanel {
+    fn close(&mut self) {
+        self.gump_id = None;
+        self.awaiting_page = false;
+        self.table_scroll = egui::Vec2::ZERO;
+        self.row_scroll = 0.0;
+        self.recipe_scroll = 0.0;
+        self.textures.clear();
+    }
+
+    fn page_missing(&mut self) {
+        if !self.awaiting_page {
+            self.close();
+        }
+    }
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -1201,12 +1212,12 @@ impl<'a> CraftCatalogueEntry<'a> {
     }
 }
 
-/// Fixed columns keep the header and virtualized rows in sync. The component
-/// run is measured from the filtered rows, so it takes exactly as much room as
-/// the current catalogue result needs.
+/// Fixed columns keep the header and virtualized rows in sync. The number of
+/// component columns comes from the filtered rows, so short recipes leave
+/// explicit empty cells and the final Status column never drifts.
 #[derive(Clone, Copy)]
 struct CraftTableLayout {
-    components: f32,
+    component_columns: usize,
 }
 
 impl CraftTableLayout {
@@ -1217,50 +1228,83 @@ impl CraftTableLayout {
     const SKILL: f32 = 76.0;
     const STATUS: f32 = 120.0;
     const ROW_HEIGHT: f32 = 70.0;
-    const COMPONENT_CELL: f32 = 68.0;
+    const COMPONENT: f32 = 92.0;
 
     fn for_entries(entries: &[CraftCatalogueEntry<'_>]) -> Self {
         Self {
-            // A table needs one shared component-column width to keep the
-            // Status cells aligned, but it must come from the visible data,
-            // not an arbitrary minimum or a hidden recipe elsewhere.
-            components: entries
+            // Every material has a real column. Empty cells in shorter recipes
+            // keep Status at one x coordinate instead of attaching it to the
+            // last material the particular row happened to have.
+            component_columns: entries
                 .iter()
-                .map(|entry| entry.row.components.len().max(1) as f32 * Self::COMPONENT_CELL)
-                .fold(Self::COMPONENT_CELL, f32::max),
+                .map(|entry| entry.row.components.len().max(1))
+                .fold(1, usize::max),
         }
     }
 
     fn width(self) -> f32 {
-        Self::RESULT + Self::RECIPE + Self::SKILL + self.components + Self::STATUS
+        Self::RESULT
+            + Self::RECIPE
+            + Self::SKILL
+            + self.component_columns as f32 * Self::COMPONENT
+            + Self::STATUS
     }
 }
 
-fn craft_catalogue_window(
+/// Render exactly one craft window. The two typed packets describe different
+/// pages of the same server gump; they must never own separate egui state or
+/// compete to write the frame's reply.
+fn craft_window(
     context: &egui::Context,
     world: &WorldState,
     art: &openshard_uofiles::art::Art,
     hue_ramp: &openshard_client_render::hue::HueRamp,
     cliloc: Option<&Cliloc>,
-    panel: &mut CraftCataloguePanel,
+    panel: &mut CraftWindowPanel,
     request: &mut Request,
 ) {
     let Some(view) = world.authoritative.view.as_ref() else {
-        panel.gump_id = None;
+        panel.close();
         return;
     };
-    // A catalogue packet has no usable shell on its own. Pair it with the
-    // gump that supplied the reply key before allowing it to draw or answer.
-    let Some((catalogue, gump)) = view.craft_catalogues.values().find_map(|catalogue| {
+
+    let workbench = view.craft_workbenches.values().find_map(|workbench| {
+        view.gumps
+            .iter()
+            .find(|gump| gump.gump_id == workbench.gump_id)
+            .map(|gump| (workbench, gump))
+    });
+    if let Some((workbench, gump)) = workbench {
+        panel.awaiting_page = false;
+        craft_workbench_window(context, workbench, gump, art, hue_ramp, cliloc, panel, request);
+        return;
+    }
+
+    let catalogue = view.craft_catalogues.values().find_map(|catalogue| {
         view.gumps
             .iter()
             .find(|gump| gump.gump_id == catalogue.gump_id)
             .map(|gump| (catalogue, gump))
-    }) else {
-        panel.gump_id = None;
-        return;
-    };
+    });
+    if let Some((catalogue, gump)) = catalogue {
+        panel.awaiting_page = false;
+        craft_catalogue_window(context, catalogue, gump, art, hue_ramp, cliloc, panel, request);
+    } else {
+        panel.page_missing();
+    }
+}
 
+#[allow(clippy::too_many_arguments)]
+fn craft_catalogue_window(
+    context: &egui::Context,
+    catalogue: &openshard_protocol::craft::CraftCatalogue,
+    gump: &openshard_client_net::view::OpenGump,
+    art: &openshard_uofiles::art::Art,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    cliloc: Option<&Cliloc>,
+    panel: &mut CraftWindowPanel,
+    request: &mut Request,
+) {
     if panel.gump_id != Some(catalogue.gump_id.0) {
         panel.gump_id = Some(catalogue.gump_id.0);
         // The screenshot runner can ask for a representative, narrow subset
@@ -1271,6 +1315,9 @@ fn craft_catalogue_window(
         panel.skill = None;
         panel.materials = CraftMaterials::Any;
         panel.sort = CraftSort::Name;
+        panel.table_scroll = egui::Vec2::ZERO;
+        panel.row_scroll = 0.0;
+        panel.recipe_scroll = 0.0;
         panel.textures.clear();
     }
 
@@ -1283,7 +1330,7 @@ fn craft_catalogue_window(
     let viewport = context.content_rect().size();
     let max_size = egui::vec2((viewport.x - 32.0).max(900.0), (viewport.y - 32.0).max(500.0));
     egui::Window::new(format!("Crafting · {} recipes", catalogue.rows.len()))
-        .id(egui::Id::new(("craft catalogue", catalogue.gump_id.0)))
+        .id(crafting_window_id(catalogue.gump_id.0))
         .default_pos([24.0, 24.0])
         .default_size([1240.0, 760.0])
         .min_size([900.0, 500.0])
@@ -1369,43 +1416,43 @@ fn craft_catalogue_window(
             ui.separator();
 
             let table_viewport_width = ui.available_width();
-            egui::ScrollArea::both()
+            let table_scroll = egui::ScrollArea::both()
                 .id_salt(("craft catalogue rows", catalogue.gump_id.0))
                 .auto_shrink([false, false])
                 .max_width(table_viewport_width)
-                .show(ui, |ui| {
-                    // The header belongs to the same horizontal canvas as the
-                    // virtualized rows. Otherwise its widest column quietly
-                    // becomes a minimum width for the whole floating window,
-                    // pushing the filters and final columns off a small screen.
-                    ui.set_min_width(layout.width());
-                    craft_table_header(ui, layout);
-                    ui.separator();
-                    egui::ScrollArea::vertical()
-                        .id_salt(("craft catalogue virtual rows", catalogue.gump_id.0))
-                        .auto_shrink([false, false])
-                        .show_rows(ui, CraftTableLayout::ROW_HEIGHT, matching.len(), |ui, rows| {
-                            for entry in &matching[rows] {
-                                let clicked = craft_table_row(ui, entry, art, hue_ramp, panel, layout);
-                                if clicked {
-                                    reply = Some(craft_reply(gump, entry.row.button));
-                                }
+                .scroll_offset(panel.table_scroll);
+            let table_output = table_scroll.show(ui, |ui| {
+                // The header belongs to the same horizontal canvas as the
+                // virtualized rows. Otherwise its widest column quietly
+                // becomes a minimum width for the whole floating window,
+                // pushing the filters and final columns off a small screen.
+                ui.set_min_width(layout.width());
+                craft_table_header(ui, layout);
+                ui.separator();
+                let row_scroll = egui::ScrollArea::vertical()
+                    .id_salt(("craft catalogue virtual rows", catalogue.gump_id.0))
+                    .auto_shrink([false, false])
+                    .vertical_scroll_offset(panel.row_scroll);
+                let row_output =
+                    row_scroll.show_rows(ui, CraftTableLayout::ROW_HEIGHT, matching.len(), |ui, rows| {
+                        for entry in &matching[rows] {
+                            let clicked = craft_table_row(ui, entry, art, hue_ramp, panel, layout);
+                            if clicked {
+                                panel.awaiting_page = true;
+                                reply = Some(craft_reply(gump, entry.row.button));
                             }
-                        });
-                });
+                        }
+                    });
+                panel.row_scroll = row_output.state.offset.y;
+            });
+            panel.table_scroll = table_output.state.offset;
         });
 
     if !open {
+        panel.close();
         reply = Some(craft_reply(gump, 0));
     }
     request.craft_reply = reply;
-}
-
-/// Textures and identity for the normal tool-specific craft window.
-#[derive(Default)]
-struct CraftWorkbenchPanel {
-    gump_id: Option<u32>,
-    textures: BTreeMap<(u16, u16), Option<egui::TextureHandle>>,
 }
 
 /// Render the ordinary tool craft gump as an egui workbench.
@@ -1414,30 +1461,27 @@ struct CraftWorkbenchPanel {
 /// is its owner for OpenShard clients. Every visible action sends the exact
 /// reply number from the typed model, so this is presentation replacement, not
 /// a second crafting protocol.
+#[allow(clippy::too_many_arguments)]
 fn craft_workbench_window(
     context: &egui::Context,
-    world: &WorldState,
+    workbench: &openshard_protocol::craft::CraftWorkbench,
+    gump: &openshard_client_net::view::OpenGump,
     art: &openshard_uofiles::art::Art,
     hue_ramp: &openshard_client_render::hue::HueRamp,
     cliloc: Option<&Cliloc>,
-    panel: &mut CraftWorkbenchPanel,
+    panel: &mut CraftWindowPanel,
     request: &mut Request,
 ) {
-    let Some(view) = world.authoritative.view.as_ref() else {
-        panel.gump_id = None;
-        return;
-    };
-    let Some((workbench, gump)) = view.craft_workbenches.values().find_map(|workbench| {
-        view.gumps
-            .iter()
-            .find(|gump| gump.gump_id == workbench.gump_id)
-            .map(|gump| (workbench, gump))
-    }) else {
-        panel.gump_id = None;
-        return;
-    };
     if panel.gump_id != Some(workbench.gump_id.0) {
         panel.gump_id = Some(workbench.gump_id.0);
+        panel.query.clear();
+        panel.availability = CraftAvailability::All;
+        panel.skill = None;
+        panel.materials = CraftMaterials::Any;
+        panel.sort = CraftSort::Name;
+        panel.table_scroll = egui::Vec2::ZERO;
+        panel.row_scroll = 0.0;
+        panel.recipe_scroll = 0.0;
         panel.textures.clear();
     }
 
@@ -1445,7 +1489,7 @@ fn craft_workbench_window(
     let mut reply = None;
     let title = craft_workbench_text(&workbench.title, cliloc);
     egui::Window::new(format!("Crafting · {title}"))
-        .id(egui::Id::new(("craft workbench", workbench.gump_id.0)))
+        .id(crafting_window_id(workbench.gump_id.0))
         .default_pos([48.0, 48.0])
         .default_size([1040.0, 700.0])
         .min_size([760.0, 500.0])
@@ -1467,6 +1511,7 @@ fn craft_workbench_window(
                 };
                 craft_facility_badges(ui, workbench.required_facilities, workbench.present_facilities);
                 if ui.button("Refresh").clicked() {
+                    panel.awaiting_page = true;
                     reply = Some(craft_reply(gump, workbench.refresh_button));
                 }
             });
@@ -1481,6 +1526,7 @@ fn craft_workbench_window(
                     for group in &workbench.groups {
                         let label = craft_workbench_text(&group.name, cliloc);
                         if ui.selectable_label(group.selected, label).clicked() {
+                            panel.awaiting_page = true;
                             reply = Some(craft_reply(gump, group.button));
                         }
                     }
@@ -1488,16 +1534,18 @@ fn craft_workbench_window(
                 columns[1].vertical(|ui| match &workbench.page {
                     openshard_protocol::craft::CraftWorkbenchPage::Items { recipes } => {
                         ui.strong("Recipes");
-                        egui::ScrollArea::vertical()
+                        let recipe_scroll = egui::ScrollArea::vertical()
                             .id_salt(("craft recipes", workbench.gump_id.0))
-                            .show(ui, |ui| {
-                                for recipe in recipes {
-                                    craft_workbench_recipe_row(
-                                        ui, recipe, art, hue_ramp, cliloc, panel, gump, &mut reply,
-                                    );
-                                    ui.separator();
-                                }
-                            });
+                            .vertical_scroll_offset(panel.recipe_scroll);
+                        let output = recipe_scroll.show(ui, |ui| {
+                            for recipe in recipes {
+                                craft_workbench_recipe_row(
+                                    ui, recipe, art, hue_ramp, cliloc, panel, gump, &mut reply,
+                                );
+                                ui.separator();
+                            }
+                        });
+                        panel.recipe_scroll = output.state.offset.y;
                     }
                     openshard_protocol::craft::CraftWorkbenchPage::Resources { materials } => {
                         ui.strong("Materials");
@@ -1519,6 +1567,7 @@ fn craft_workbench_window(
                                         material.carried
                                     );
                                     if ui.selectable_label(material.selected, text).clicked() {
+                                        panel.awaiting_page = true;
                                         reply = Some(craft_reply(gump, material.button));
                                     }
                                 });
@@ -1541,6 +1590,11 @@ fn craft_workbench_window(
                             cliloc,
                             panel,
                             gump,
+                            if workbench.tool_uses.is_some() {
+                                "Back to recipes"
+                            } else {
+                                "Back to catalogue"
+                            },
                             &mut reply,
                         );
                     }
@@ -1558,35 +1612,41 @@ fn craft_workbench_window(
                 }
                 if let Some(button) = workbench.materials_button {
                     if ui.button("Materials").clicked() {
+                        panel.awaiting_page = true;
                         reply = Some(craft_reply(gump, button));
                     }
                 }
                 if ui.button("Cancel make").clicked() {
+                    panel.awaiting_page = true;
                     reply = Some(craft_reply(gump, workbench.cancel_button));
                 }
                 if ui.button("Close").clicked() {
+                    panel.close();
                     reply = Some(craft_reply(gump, 0));
                 }
             });
         });
     if !open {
+        panel.close();
         reply = Some(craft_reply(gump, 0));
     }
     request.craft_reply = reply;
 }
 
+#[allow(clippy::too_many_arguments)]
 fn craft_workbench_recipe_row(
     ui: &mut egui::Ui,
     recipe: &openshard_protocol::craft::CraftWorkbenchRecipe,
     art: &openshard_uofiles::art::Art,
     hue_ramp: &openshard_client_render::hue::HueRamp,
     cliloc: Option<&Cliloc>,
-    panel: &mut CraftWorkbenchPanel,
+    panel: &mut CraftWindowPanel,
     gump: &openshard_client_net::view::OpenGump,
     reply: &mut Option<GumpReply>,
 ) {
+    let mut open_details = false;
     ui.horizontal(|ui| {
-        craft_workbench_icon(
+        open_details |= craft_workbench_icon(
             ui,
             art,
             hue_ramp,
@@ -1594,24 +1654,41 @@ fn craft_workbench_recipe_row(
             recipe.result.graphic,
             recipe.result.hue,
             42.0,
-        );
+        )
+        .interact(egui::Sense::click())
+        .on_hover_text("Open recipe details")
+        .clicked();
         ui.vertical(|ui| {
-            ui.strong(craft_workbench_text(&recipe.result.name, cliloc));
+            open_details |= ui
+                .add(
+                    egui::Label::new(
+                        egui::RichText::new(craft_workbench_text(&recipe.result.name, cliloc)).strong(),
+                    )
+                    .sense(egui::Sense::click()),
+                )
+                .on_hover_text("Open recipe details")
+                .clicked();
             ui.small(craft_workbench_requirements(recipe, cliloc));
         });
         if let Some(button) = recipe.make_button {
             if ui.button("Make").clicked() {
+                panel.awaiting_page = true;
                 *reply = Some(craft_reply(gump, button));
             }
         }
         if let Some(button) = recipe.details_button {
             if ui.button("Details").clicked() {
+                open_details = true;
+            }
+            if open_details {
+                panel.awaiting_page = true;
                 *reply = Some(craft_reply(gump, button));
             }
         }
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn craft_workbench_detail(
     ui: &mut egui::Ui,
     recipe: &openshard_protocol::craft::CraftWorkbenchRecipe,
@@ -1620,8 +1697,9 @@ fn craft_workbench_detail(
     art: &openshard_uofiles::art::Art,
     hue_ramp: &openshard_client_render::hue::HueRamp,
     cliloc: Option<&Cliloc>,
-    panel: &mut CraftWorkbenchPanel,
+    panel: &mut CraftWindowPanel,
     gump: &openshard_client_net::view::OpenGump,
+    back_label: &str,
     reply: &mut Option<GumpReply>,
 ) {
     ui.horizontal(|ui| {
@@ -1680,10 +1758,12 @@ fn craft_workbench_detail(
     ui.separator();
     if let Some(button) = recipe.make_button {
         if ui.button("Make now").clicked() {
+            panel.awaiting_page = true;
             *reply = Some(craft_reply(gump, button));
         }
     }
-    if ui.button("Back").clicked() {
+    if ui.button(back_label).clicked() {
+        panel.awaiting_page = true;
         *reply = Some(craft_reply(gump, 0));
     }
 }
@@ -1728,27 +1808,29 @@ fn craft_workbench_icon(
     ui: &mut egui::Ui,
     art: &openshard_uofiles::art::Art,
     hue_ramp: &openshard_client_render::hue::HueRamp,
-    panel: &mut CraftWorkbenchPanel,
+    panel: &mut CraftWindowPanel,
     graphic: Graphic,
     hue: Hue,
     size: f32,
-) {
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        match craft_item_texture(ui.ctx(), art, hue_ramp, &mut panel.textures, graphic, hue) {
-            Some(texture) => {
-                ui.add(egui::Image::from_texture(texture).fit_to_exact_size(egui::vec2(size, size)));
+) -> egui::Response {
+    egui::Frame::group(ui.style())
+        .show(ui, |ui| {
+            match craft_item_texture(ui.ctx(), art, hue_ramp, &mut panel.textures, graphic, hue) {
+                Some(texture) => {
+                    ui.add(egui::Image::from_texture(texture).fit_to_exact_size(egui::vec2(size, size)));
+                }
+                None => {
+                    ui.add_sized([size, size], egui::Label::new("—"));
+                }
             }
-            None => {
-                ui.add_sized([size, size], egui::Label::new("—"));
-            }
-        }
-    });
+        })
+        .response
 }
 
 fn craft_workbench_text(text: &openshard_protocol::craft::CraftText, cliloc: Option<&Cliloc>) -> String {
     match text {
         openshard_protocol::craft::CraftText::Cliloc(id) => craft_label(*id, cliloc),
-        openshard_protocol::craft::CraftText::Literal(value) => value.clone(),
+        openshard_protocol::craft::CraftText::Literal(value) => craft_plain_text(value),
     }
 }
 
@@ -1795,28 +1877,46 @@ fn craft_sort_name(sort: CraftSort) -> &'static str {
 
 fn craft_table_header(ui: &mut egui::Ui, layout: CraftTableLayout) {
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_sized(
             [CraftTableLayout::RESULT, 22.0],
             egui::Label::new(egui::RichText::new("Result").strong()),
         );
-        ui.add_sized(
+        let recipe = ui.add_sized(
             [CraftTableLayout::RECIPE, 22.0],
             egui::Label::new(egui::RichText::new("Recipe").strong()),
         );
-        ui.add_sized(
+        craft_table_column_separator(ui, &recipe);
+        let skill = ui.add_sized(
             [CraftTableLayout::SKILL, 22.0],
             egui::Label::new(egui::RichText::new("Req.").strong()),
         );
-        ui.add_sized(
-            [layout.components, 22.0],
-            egui::Label::new(egui::RichText::new("Components").strong()),
-        );
-        ui.add_sized(
+        craft_table_column_separator(ui, &skill);
+        for index in 0..layout.component_columns {
+            let label = if layout.component_columns == 1 {
+                "Component".to_owned()
+            } else {
+                format!("Component {}", index + 1)
+            };
+            let component = ui.add_sized(
+                [CraftTableLayout::COMPONENT, 22.0],
+                egui::Label::new(egui::RichText::new(label).strong()),
+            );
+            craft_table_column_separator(ui, &component);
+        }
+        let status = ui.add_sized(
             [CraftTableLayout::STATUS, 22.0],
             egui::Label::new(egui::RichText::new("Status").strong()),
         );
+        craft_table_column_separator(ui, &status);
     });
     ui.separator();
+}
+
+fn craft_table_column_separator(ui: &egui::Ui, cell: &egui::Response) {
+    let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+    ui.painter()
+        .line_segment([cell.rect.left_top(), cell.rect.left_bottom()], stroke);
 }
 
 fn craft_table_row(
@@ -1824,10 +1924,11 @@ fn craft_table_row(
     entry: &CraftCatalogueEntry<'_>,
     art: &openshard_uofiles::art::Art,
     hue_ramp: &openshard_client_render::hue::HueRamp,
-    panel: &mut CraftCataloguePanel,
+    panel: &mut CraftWindowPanel,
     layout: CraftTableLayout,
 ) -> bool {
     let row = entry.row;
+    let mut clicked = false;
     let response = ui.allocate_ui_with_layout(
         egui::vec2(layout.width(), CraftTableLayout::ROW_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center).with_main_justify(false),
@@ -1843,58 +1944,59 @@ fn craft_table_row(
                 egui::vec2(CraftTableLayout::RESULT, CraftTableLayout::ROW_HEIGHT),
                 egui::Layout::top_down(egui::Align::Center),
                 |ui| {
-                    craft_icon(ui, art, hue_ramp, panel, row.result, row.result_hue, 48.0)
-                        .on_hover_ui(|ui| craft_result_tooltip(ui, entry));
+                    clicked |= craft_icon(ui, art, hue_ramp, panel, row.result, row.result_hue, 48.0)
+                        .interact(egui::Sense::click())
+                        .on_hover_ui(|ui| craft_result_tooltip(ui, entry))
+                        .clicked();
                 },
             );
-            ui.allocate_ui_with_layout(
-                egui::vec2(CraftTableLayout::RECIPE, 58.0),
+            let recipe_cell = ui.allocate_ui_with_layout(
+                egui::vec2(CraftTableLayout::RECIPE, CraftTableLayout::ROW_HEIGHT),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    ui.add_sized(
-                        [CraftTableLayout::RECIPE, 25.0],
-                        egui::Label::new(egui::RichText::new(&entry.name).strong())
-                            .truncate()
-                            .sense(egui::Sense::hover()),
-                    )
-                    .on_hover_text("Open recipe details");
+                    clicked |= ui
+                        .add_sized(
+                            [CraftTableLayout::RECIPE, 25.0],
+                            egui::Label::new(egui::RichText::new(&entry.name).strong())
+                                .truncate()
+                                .sense(egui::Sense::click()),
+                        )
+                        .on_hover_text("Open recipe details")
+                        .clicked();
                     if let Some(weapon) = row.weapon {
                         ui.horizontal_wrapped(|ui| craft_weapon_chips(ui, weapon));
                     }
                 },
             );
-            ui.allocate_ui_with_layout(
+            craft_table_column_separator(ui, &recipe_cell.response);
+            let skill_cell = ui.allocate_ui_with_layout(
                 egui::vec2(CraftTableLayout::SKILL, CraftTableLayout::ROW_HEIGHT),
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
                     craft_skill_requirement(ui, entry);
                 },
             );
-            ui.allocate_ui_with_layout(
-                egui::vec2(layout.components, CraftTableLayout::ROW_HEIGHT),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    for (component, name) in row.components.iter().zip(&entry.component_names) {
-                        // `vertical_centered` consumes all remaining width in a
-                        // horizontal layout. Give every component a hard-sized
-                        // cell instead, so the row always begins at the left
-                        // edge of the column and material slots never drift.
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(CraftTableLayout::COMPONENT_CELL, CraftTableLayout::ROW_HEIGHT),
-                            egui::Layout::top_down(egui::Align::Center),
-                            |ui| {
-                                craft_icon(ui, art, hue_ramp, panel, component.graphic, component.hue, 36.0)
-                                    .on_hover_text(format!(
-                                        "{name}\nRequired: ×{}\nGraphic: {:#06x}",
-                                        component.amount, component.graphic.0
-                                    ));
-                                ui.small(format!("×{}", component.amount));
-                            },
-                        );
-                    }
-                },
-            );
-            ui.allocate_ui_with_layout(
+            craft_table_column_separator(ui, &skill_cell.response);
+            for index in 0..layout.component_columns {
+                let component_cell = ui.allocate_ui_with_layout(
+                    egui::vec2(CraftTableLayout::COMPONENT, CraftTableLayout::ROW_HEIGHT),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        if let Some((component, name)) =
+                            row.components.get(index).zip(entry.component_names.get(index))
+                        {
+                            craft_icon(ui, art, hue_ramp, panel, component.graphic, component.hue, 36.0)
+                                .on_hover_text(format!(
+                                    "{name}\nRequired: ×{}\nGraphic: {:#06x}",
+                                    component.amount, component.graphic.0
+                                ));
+                            ui.small(format!("×{}", component.amount));
+                        }
+                    },
+                );
+                craft_table_column_separator(ui, &component_cell.response);
+            }
+            let status_cell = ui.allocate_ui_with_layout(
                 egui::vec2(CraftTableLayout::STATUS, CraftTableLayout::ROW_HEIGHT),
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
@@ -1911,6 +2013,8 @@ fn craft_table_row(
                             egui::Color32::from_rgba_unmultiplied(160, 75, 60, 70),
                         )
                     };
+                    ui.painter()
+                        .rect_filled(ui.max_rect(), 0.0, fill.gamma_multiply(0.35));
                     ui.add_sized(
                         [108.0, 28.0],
                         egui::Button::new(egui::RichText::new(status).color(color).strong())
@@ -1919,16 +2023,17 @@ fn craft_table_row(
                     );
                 },
             );
+            craft_table_column_separator(ui, &status_cell.response);
         },
     );
-    response.response.interact(egui::Sense::click()).clicked()
+    clicked || response.response.interact(egui::Sense::click()).clicked()
 }
 
 fn craft_icon(
     ui: &mut egui::Ui,
     art: &openshard_uofiles::art::Art,
     hue_ramp: &openshard_client_render::hue::HueRamp,
-    panel: &mut CraftCataloguePanel,
+    panel: &mut CraftWindowPanel,
     graphic: Graphic,
     hue: Hue,
     size: f32,
@@ -2085,8 +2190,40 @@ fn craft_label(id: ClilocId, cliloc: Option<&Cliloc>) -> String {
     cliloc
         .and_then(|table| table.get(ClilocNumber::new(id.0)))
         .or_else(|| localized::fallback(id))
-        .map(str::to_owned)
+        .map(craft_plain_text)
         .unwrap_or_else(|| format!("#{:08x}", id.0))
+}
+
+/// Craft rows already carry amounts and layout separately, so their labels
+/// need only the visible words from old gump-authored clilocs. Those strings
+/// commonly contain HTML alignment tags and an amount slot which this typed
+/// packet deliberately does not duplicate as an argument.
+fn craft_plain_text(text: &str) -> String {
+    let mut visible = String::with_capacity(text.len());
+    let mut in_tag = false;
+    let mut in_slot = false;
+    for character in text.chars() {
+        if in_tag {
+            if character == '>' {
+                in_tag = false;
+            }
+        } else if in_slot {
+            if character == '~' {
+                in_slot = false;
+            }
+        } else if character == '<' {
+            in_tag = true;
+        } else if character == '~' {
+            in_slot = true;
+        } else {
+            visible.push(character);
+        }
+    }
+    visible
+        .replace("()", " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn craft_skill_label(id: ClilocId, cliloc: Option<&Cliloc>) -> String {
@@ -2203,6 +2340,7 @@ fn combat_recorder_panel(
 
 /// The compact F1 workflow for making arbitrary test items.  The shard remains
 /// the authority: this only avoids manually opening and filling a classic gump.
+#[allow(clippy::too_many_arguments)]
 fn admin_items_panel(
     ui: &mut egui::Ui,
     item: &mut crate::desk::AdminItem,
@@ -6694,5 +6832,45 @@ mod tests {
             CraftMaterials::Any,
             None
         ));
+    }
+
+    #[test]
+    fn craft_labels_drop_gump_markup_and_slots_owned_by_typed_fields() {
+        assert_eq!(
+            craft_plain_text("<CENTER>CARPENTRY MENU</CENTER>"),
+            "CARPENTRY MENU"
+        );
+        assert_eq!(craft_plain_text("WOOD (~1_AMT~)"), "WOOD");
+        assert_eq!(craft_plain_text("  plain   recipe  "), "plain recipe");
+    }
+
+    #[test]
+    fn craft_page_replacement_keeps_the_single_window_state() {
+        let mut panel = CraftWindowPanel {
+            gump_id: Some(0x0052_0001),
+            query: "dagger".to_owned(),
+            table_scroll: egui::vec2(37.0, 19.0),
+            row_scroll: 420.0,
+            recipe_scroll: 84.0,
+            awaiting_page: true,
+            ..CraftWindowPanel::default()
+        };
+
+        // AnswerGump removes the authoritative page before its replacement
+        // arrives. That gap is navigation, not a newly opened craft window.
+        panel.page_missing();
+        assert_eq!(panel.gump_id, Some(0x0052_0001));
+        assert_eq!(panel.query, "dagger");
+        assert_eq!(panel.table_scroll, egui::vec2(37.0, 19.0));
+        assert_eq!(panel.row_scroll, 420.0);
+        assert_eq!(panel.recipe_scroll, 84.0);
+
+        // A genuinely absent window still releases the session state.
+        panel.awaiting_page = false;
+        panel.page_missing();
+        assert_eq!(panel.gump_id, None);
+        assert_eq!(panel.table_scroll, egui::Vec2::ZERO);
+        assert_eq!(panel.row_scroll, 0.0);
+        assert_eq!(panel.recipe_scroll, 0.0);
     }
 }

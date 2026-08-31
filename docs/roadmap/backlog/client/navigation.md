@@ -115,7 +115,7 @@ whether or not the terrain overlay is switched on (`App::route_shown`,
     says reading the hover is what this should always have been; it is now also
     the one reader left that can disagree with the picture about what is in
     front.
-- **The client's flat plan gives up well before the coarse one does, and the
+- ~~**The client's flat plan gives up well before the coarse one does, and the
   fallback only runs past 8 tiles.** That same 68-step route costs ~1,600 node
   expansions and `PLAN_BUDGET` is 700, so the flat search exits on budget and
   `Readings::path` falls through to `find_long_path`, which answers it — but only
@@ -124,8 +124,10 @@ whether or not the terrain overlay is switched on (`App::route_shown`,
   whole answer, and a big enough building will run it out. Nothing measured is
   hitting it yet; the fix, when something does, is to let the corridor answer a
   short query whose flat search exited on `Budget` rather than on `Exhausted` —
-  the two failures are already told apart in `SearchExit` for exactly this.
-- **A placed multi-house has no navigation graph of its own.** The coarse graph
+  the two failures are already told apart in `SearchExit` for exactly this.~~
+  Fixed: `Exhausted` inside the threshold remains a final local refusal, while
+  `Budget` falls through to the hierarchy on both the client and the shard's AI.
+- ~~**A placed multi-house has no navigation graph of its own.** The coarse graph
   is baked from the static map, while a house's floors and stairs arrive in the
   live overlay; consequently an endpoint on an upper storey cannot join the
   coarse graph. The five-storey tower still fits the 700-node local cap (645
@@ -137,7 +139,17 @@ whether or not the terrain overlay is switched on (`App::route_shown`,
   out of that bake and validate every refined edge against the live `Footing`,
   as the existing coarse route does. This is a dynamic navigation graph rather
   than a polygon mesh: UO movement and overlapping storeys are already defined
-  on tile-height places.
+  on tile-height places.~~ Fixed at the graph seam without a second persistent
+  artifact: when an endpoint stands in a column with a live surface,
+  `NavigationGraph::live_join` floods directed `(x, y, z)` places until they
+  meet the static portals. It keeps the chosen prefix/suffix for refinement,
+  and every edge is replayed through the current `Footing`, so doors, items and
+  mobiles remain live vetoes. The reverse join enumerates and checks real
+  predecessors rather than reversing descent; climbing and dropping therefore
+  retain the production step rule's asymmetry. The flood stops 64 steps past
+  the first portal and shares `LONG_PATH_EFFORT`, so an isolated live platform
+  cannot turn into an unbounded facet walk. Tests cover out of a live upper
+  storey, into it, and two floors of one `(x, y)` after the flat budget is spent.
 - **The preview replans per frame while a destination is live** — the walk plans
   at most once a step, and drawing from its stored route would blink the line out
   on every mouse-move (see `App::route_shown`). Bounded by `PLAN_BUDGET` and paid

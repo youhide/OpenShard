@@ -426,6 +426,11 @@ fn catalogue() -> GumpLayout {
 /// There are deliberately no coordinates here: the client's `ScrollTable`
 /// virtualizes rows, clips them and keeps the scroll position locally.
 fn catalogue_data(state: &WorldState, player: EntityId) -> CraftCatalogue {
+    // These are facts about the player, not the recipe. Capture each once before
+    // walking the catalogue: doing either scan per row made opening this window
+    // proportional to `recipes × world items` and `recipes × map tiles`.
+    let stock = consume::MaterialStock::capture(state, player);
+    let facilities = environment::around(state, player);
     CraftCatalogue {
         gump_id: CRAFT_GUMP,
         rows: catalogue_recipes()
@@ -446,7 +451,7 @@ fn catalogue_data(state: &WorldState, player: EntityId) -> CraftCatalogue {
                     .map(|requirement| requirement.min - recipe.min_skill_offset)
                     .unwrap_or_default()
                     .clamp(0, i32::from(u16::MAX)) as u16,
-                ready: catalogue_ready(state, player, system, recipe),
+                ready: catalogue_ready(state, player, system, recipe, &stock, facilities),
                 weapon: recipe
                     .kind
                     .and_then(weapon_data_for_kind)
@@ -607,7 +612,7 @@ fn workbench_data(
         tool_carried,
         required_facilities: facilities,
         present_facilities,
-        notice: context.notice.map(|notice| CraftText::Cliloc(notice)),
+        notice: context.notice.map(CraftText::Cliloc),
         materials_button: def.sub_res.map(|_| button_id(kind::MISC, misc::RESOURCES).0),
         refresh_button: button_id(kind::MISC, misc::REFRESH).0,
         cancel_button: button_id(kind::MISC, misc::CANCEL).0,
@@ -811,10 +816,17 @@ fn catalogue_recipes() -> impl Iterator<Item = (&'static CraftSystemDef, &'stati
 /// Whether a recipe is actionable once a player brings the appropriate tool.
 /// The catalogue has no tool by design, so the indicator intentionally covers
 /// the other authoritative gates: skill, pack and nearby facilities.
-fn catalogue_ready(state: &WorldState, player: EntityId, def: &CraftSystemDef, recipe: &Recipe) -> bool {
+fn catalogue_ready(
+    state: &WorldState,
+    player: EntityId,
+    def: &CraftSystemDef,
+    recipe: &Recipe,
+    stock: &consume::MaterialStock,
+    facilities: environment::Facilities,
+) -> bool {
     chance(state, player, def, recipe).all_skills
-        && consume::check(state, player, def, recipe, 0).is_ok()
-        && environment::around(state, player).satisfy(def.needs.union(recipe.needs))
+        && consume::check_stock(state, player, def, recipe, 0, stock).is_ok()
+        && facilities.satisfy(def.needs.union(recipe.needs))
 }
 
 /// Resolve the flattened catalogue index back to the system and per-system

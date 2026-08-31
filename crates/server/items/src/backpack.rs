@@ -100,7 +100,7 @@ pub fn give_kind_to_backpack(
         return false;
     };
     if let Some(owner) = state.registry.entity_of(mobile) {
-        if !room_for_kind(state, owner, backpack, kind, material, drawn, amount, stackable) {
+        if !room_for_kind(state, owner, backpack, (kind, material), drawn, amount, stackable) {
             return false;
         }
     }
@@ -291,12 +291,12 @@ fn room_for_kind(
     state: &WorldState,
     owner: EntityId,
     backpack: Serial,
-    kind: ItemKindId,
-    material: Option<MaterialId>,
+    identity: (ItemKindId, Option<MaterialId>),
     drawn: Drawn,
     amount: u16,
     stackable: bool,
 ) -> bool {
+    let (kind, material) = identity;
     let merges = (stackable || intrinsically_stackable(drawn.id))
         && contained_items(state, backpack).any(|(entity, _)| {
             (state.registry.has::<Stackable>(entity)
@@ -461,16 +461,25 @@ fn matching_identity_or_legacy_piles(
 ///
 /// A read, not a take: a collect objective needs to know how far along it is
 /// without destroying the evidence. Only the backpack itself — a bag *inside* it
-/// counts for weight (see [`carried_with`](crate::carried_with)) but not here, so
+/// counts for weight (see [`carried`](crate::carried)) but not here, so
 /// that "in your pack" means the one place a player can see at a glance.
 ///
-/// Walks the containment column once. Callers asking about several graphics, or
-/// about several players in a pass, should build a [`Contents`](crate::Contents)
-/// and use [`carried_amount_with`] instead — otherwise it is a full column scan
-/// per question.
+/// Reads only the backpack's indexed direct children. Nested bags deliberately
+/// do not contribute to this particular "in your pack" question.
 #[must_use]
 pub fn carried_amount(state: &WorldState, mobile: Serial, graphic: Graphic) -> u32 {
-    carried_amount_with(state, &crate::contents_index(state), mobile, graphic)
+    let Some(backpack) = backpack_of(state, mobile) else {
+        return 0;
+    };
+    contained_items(state, backpack)
+        .filter(|(item, _)| {
+            state
+                .registry
+                .get::<Drawn>(*item)
+                .is_some_and(|drawn| drawn.id == graphic)
+        })
+        .map(|(item, _)| u32::from(crate::amount_of(state, item)))
+        .sum()
 }
 
 /// [`carried_amount`], for a particular hue — the read half of
@@ -481,41 +490,13 @@ pub fn carried_amount_of_hue(state: &WorldState, mobile: Serial, graphic: Graphi
     let Some(backpack) = backpack_of(state, mobile) else {
         return 0;
     };
-    crate::contents_index(state)
-        .get(&backpack)
-        .into_iter()
-        .flatten()
-        .filter(|item| {
+    contained_items(state, backpack)
+        .filter(|(item, _)| {
             state
                 .registry
-                .get::<Drawn>(**item)
+                .get::<Drawn>(*item)
                 .is_some_and(|g| g.id == graphic && hue.is_none_or(|want| g.hue == want))
         })
-        .map(|item| u32::from(crate::amount_of(state, *item)))
-        .sum()
-}
-
-/// [`carried_amount`], against an index already built.
-#[must_use]
-pub fn carried_amount_with(
-    state: &WorldState,
-    contents: &crate::Contents,
-    mobile: Serial,
-    graphic: Graphic,
-) -> u32 {
-    let Some(backpack) = backpack_of(state, mobile) else {
-        return 0;
-    };
-    contents
-        .get(&backpack)
-        .into_iter()
-        .flatten()
-        .filter(|item| {
-            state
-                .registry
-                .get::<Drawn>(**item)
-                .is_some_and(|g| g.id == graphic)
-        })
-        .map(|item| u32::from(crate::amount_of(state, *item)))
+        .map(|(item, _)| u32::from(crate::amount_of(state, item)))
         .sum()
 }

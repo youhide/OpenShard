@@ -116,13 +116,13 @@ happens when we are wrong, not for what happens when we are right.
 length.** `design.rs`'s shape exactly, for `design.rs`'s reason: a receiver that
 inflates without a bound is a receiver a sender can make allocate anything.
 
-**One chunk is one blob, cut into fragments of at most 8,192 bytes.** Not because
-a chunk needs it — none of Felucca's does — but because *4.58% of them do* at
-that cap, which is 328 chunks a facet. A reassembly path exercised by one chunk
-in twenty is a path that works; one exercised only by a hypothetical dense
-generated world is a path that is wrong the first time it runs. The cap also
-bounds how long a bulk transfer can sit in front of a movement packet on the one
-stream this direction just chose.
+**One chunk is one blob, cut into fragments of at most 16,384 bytes.** With the
+24-byte envelope each packet is at most 16,408 bytes, still below the original
+18,000-byte receive cap. This doubles the former slice size and reduces framing
+overhead while continuing to bound how long bulk transfer can sit in front of a
+movement packet on the one stream this direction just chose. Every measured
+Felucca chunk fits in one fragment at this size; synthetic dense chunks exercise
+the reassembly path.
 
 **Every chunk named in a request is answered exactly once — with its bytes, or
 with a refusal.** *Taken in E1, and it is the one thing this document did not

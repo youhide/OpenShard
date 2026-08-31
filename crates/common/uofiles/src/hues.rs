@@ -144,7 +144,7 @@ impl Hues {
                 let raw = bytes.get(at..at + ENTRY_BYTES)?;
 
                 let mut colors = [Color16::TRANSPARENT; COLORS_PER_HUE];
-                for (slot, word) in colors.iter_mut().zip(raw.chunks_exact(2)) {
+                for (slot, word) in colors.iter_mut().zip(raw.as_chunks::<2>().0) {
                     *slot = Color16(u16::from_le_bytes([word[0], word[1]]));
                 }
                 let bounds = COLORS_PER_HUE * 2;

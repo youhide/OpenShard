@@ -119,21 +119,14 @@ impl World {
 
     /// The four numbers that come from what a mobile carries, wears and rides.
     pub(super) fn derived_status(&self, entity: EntityId) -> StatusSnapshot {
-        self.derived_status_with(&items::contents_index(&self.state), entity)
-    }
-
-    /// The same against a containment index built once for several mobiles — one
-    /// scan of the column for a whole refresh pass, rather than one per bag per
-    /// player.
-    fn derived_status_with(&self, contents: &items::Contents, entity: EntityId) -> StatusSnapshot {
         StatusSnapshot {
             // What is on the character, and — only if the operator asked for it —
             // what is in the bank as well. Off is UO's own answer (the box is
             // virtual, so its gold never reaches the total), which is why a banker
             // has to be asked for a balance.
-            gold: items::total_gold_with(&self.state, contents, entity)
+            gold: items::total_gold(&self.state, entity)
                 + if self.state.gameplay.bank_gold_in_status {
-                    items::banked_gold_with(&self.state, contents, entity)
+                    items::banked_gold(&self.state, entity)
                 } else {
                     0
                 },
@@ -148,7 +141,7 @@ impl World {
             } else {
                 openshard_state::armor::worn_armor_rating(&self.state, entity)
             },
-            weight: items::total_weight_with(&self.state, contents, entity, BODY_WEIGHT),
+            weight: items::total_weight(&self.state, entity, BODY_WEIGHT),
             // A mount takes a follower slot in both references. Real pet slots
             // wait on taming; this is the one follower the engine can have today,
             // and reporting it is truer than reporting none.
@@ -170,10 +163,11 @@ impl World {
     ///
     /// The weight comes from what the refresh pass last worked out, not from a
     /// fresh walk of the pack: a step happens up to ten times a second per player
-    /// and weighing a pack is a scan of the containment column. Half a second of
-    /// staleness costs at most one step's worth of fatigue in the wrong direction,
-    /// which is a fair trade for not re-weighing a mule on every tile. Before the
-    /// first pass has run there is nothing remembered, and it weighs once.
+    /// and weighing a pack is an indexed recursive walk of that pack. Half a
+    /// second of staleness costs at most one step's worth of fatigue in the wrong
+    /// direction, which is a fair trade for not re-weighing a mule on every tile.
+    /// Before the first pass has run there is nothing remembered, and it weighs
+    /// once.
     pub(super) fn spend_step_stamina(&mut self, entity: EntityId, running: bool) -> Option<&'static str> {
         // Staff walk through everything, fatigue included.
         if self.state.is_staff(entity) {
@@ -217,9 +211,8 @@ impl World {
         // connection's row and a connection that has gone took them with it. This
         // used to be a `retain` over the map, and it was the second hand-written
         // teardown of the same state — `disconnect` cleared it too.
-        let contents = items::contents_index(&self.state);
         for (connection, entity) in players {
-            let now = self.derived_status_with(&contents, entity);
+            let now = self.derived_status(entity);
             let Some(row) = self.state.connection_mut(connection) else {
                 continue;
             };

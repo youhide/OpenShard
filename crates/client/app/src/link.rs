@@ -182,7 +182,7 @@ pub enum Update {
     /// [`Walk`] is the owner's. See [`fold`], which the owner calls, and this
     /// module's own docs for why the split moved.
     Mutation {
-        packet: openshard_protocol::server_packet::ServerPacket,
+        packet: Box<openshard_protocol::server_packet::ServerPacket>,
         /// Stamped after decoding, before this packet waits for the window.
         received: Instant,
     },
@@ -1144,14 +1144,19 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                 // socket closes — closing it is the client's half, and both
                 // references do it here. Nothing after this packet is worth
                 // reading, so the loop ends and the window is told why.
-                if matches!(packet, openshard_protocol::server_packet::ServerPacket::LogoutAck(_)) {
+                if matches!(
+                    packet.as_ref(),
+                    openshard_protocol::server_packet::ServerPacket::LogoutAck(_)
+                ) {
                     return "logged out".to_owned();
                 }
                 // The answer to "what moved since the world we kept". It arrives
                 // once, before any chunk of this connection, and what it decides
                 // is which of the two fetches happens — or neither.
                 if let Some(Pending::Asking { .. }) = &pending {
-                    if let openshard_protocol::server_packet::ServerPacket::ChangesReply(reply) = &packet {
+                    if let openshard_protocol::server_packet::ServerPacket::ChangesReply(reply) =
+                        packet.as_ref()
+                    {
                         let Some(notice) = world_notice else {
                             return "the shard answered about a world it never described".to_owned();
                         };
@@ -1223,7 +1228,9 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                 // point after world entry, and what it costs to act on is a
                 // handful of chunks — see `published`, which is the decision,
                 // and `Update::GroundMoved`, which is what the window is given.
-                if let openshard_protocol::server_packet::ServerPacket::PublishNotice(publish) = &packet {
+                if let openshard_protocol::server_packet::ServerPacket::PublishNotice(publish) =
+                    packet.as_ref()
+                {
                     let GroundSource::Fetched { .. } = &ground else {
                         // A client drawing a facet off its own disk. The shard's
                         // ground is not the ground on this screen, and chunks of
@@ -1454,38 +1461,38 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                         continue;
                     }
                 }
-                if let openshard_protocol::server_packet::ServerPacket::Animation(animation) = packet {
-                    report(Update::Animation(animation));
+                if let openshard_protocol::server_packet::ServerPacket::Animation(animation) = packet.as_ref() {
+                    report(Update::Animation(*animation));
                 }
-                if let openshard_protocol::server_packet::ServerPacket::NewAnimation(animation) = packet {
-                    report(Update::NewAnimation(animation));
+                if let openshard_protocol::server_packet::ServerPacket::NewAnimation(animation) = packet.as_ref() {
+                    report(Update::NewAnimation(*animation));
                 }
-                if let openshard_protocol::server_packet::ServerPacket::Effect(effect) = packet {
-                    report(Update::Effect(effect));
+                if let openshard_protocol::server_packet::ServerPacket::Effect(effect) = packet.as_ref() {
+                    report(Update::Effect(*effect));
                 }
-                if let openshard_protocol::server_packet::ServerPacket::SwingTiming(timing) = packet {
-                    report(Update::SwingTiming(timing));
+                if let openshard_protocol::server_packet::ServerPacket::SwingTiming(timing) = packet.as_ref() {
+                    report(Update::SwingTiming(*timing));
                 }
-                if let openshard_protocol::server_packet::ServerPacket::HarvestToolVisual(visual) = packet {
-                    report(Update::HarvestToolVisual(visual));
+                if let openshard_protocol::server_packet::ServerPacket::HarvestToolVisual(visual) = packet.as_ref() {
+                    report(Update::HarvestToolVisual(*visual));
                 }
-                if let openshard_protocol::server_packet::ServerPacket::HarvestRefused(refusal) = packet {
-                    report(Update::HarvestRefused(refusal));
+                if let openshard_protocol::server_packet::ServerPacket::HarvestRefused(refusal) = packet.as_ref() {
+                    report(Update::HarvestRefused(*refusal));
                 }
-                if let openshard_protocol::server_packet::ServerPacket::HarvestCompleted(completion) = packet {
-                    report(Update::HarvestCompleted(completion));
+                if let openshard_protocol::server_packet::ServerPacket::HarvestCompleted(completion) = packet.as_ref() {
+                    report(Update::HarvestCompleted(*completion));
                 }
-                if let openshard_protocol::server_packet::ServerPacket::CombatActionPhase(phase) = packet {
-                    report(Update::CombatActionPhase(phase));
+                if let openshard_protocol::server_packet::ServerPacket::CombatActionPhase(phase) = packet.as_ref() {
+                    report(Update::CombatActionPhase(*phase));
                 }
-                if let openshard_protocol::server_packet::ServerPacket::CombatActionEnded(ended) = packet {
-                    report(Update::CombatActionEnded(ended));
+                if let openshard_protocol::server_packet::ServerPacket::CombatActionEnded(ended) = packet.as_ref() {
+                    report(Update::CombatActionEnded(*ended));
                 }
-                if let openshard_protocol::server_packet::ServerPacket::CombatActionBalked(balked) = packet {
-                    report(Update::CombatActionBalked(balked));
+                if let openshard_protocol::server_packet::ServerPacket::CombatActionBalked(balked) = packet.as_ref() {
+                    report(Update::CombatActionBalked(*balked));
                 }
-                if let openshard_protocol::server_packet::ServerPacket::CombatActionStage(stage) = packet {
-                    report(Update::CombatActionStage(stage));
+                if let openshard_protocol::server_packet::ServerPacket::CombatActionStage(stage) = packet.as_ref() {
+                    report(Update::CombatActionStage(*stage));
                 }
                 // Undivided: which packets move the player is [`Walk`]'s answer
                 // and `Walk` belongs to the owner. The desync a fold can find,
@@ -1627,10 +1634,10 @@ mod tests {
     /// order, retires the wrong step.
     fn acked(sequence: u8) -> Update {
         Update::Mutation {
-            packet: ServerPacket::WalkAck(WalkAck {
+            packet: Box::new(ServerPacket::WalkAck(WalkAck {
                 sequence: StepSequence(sequence),
                 notoriety: Notoriety::Innocent,
-            }),
+            })),
             received: Instant::now(),
         }
     }
@@ -1645,24 +1652,26 @@ mod tests {
         );
 
         let staged = updates.take();
+        let [
+            Update::Mutation { packet: first, .. },
+            Update::Mutation { packet: second, .. },
+        ] = staged.as_slice()
+        else {
+            panic!("both numbered steps remain ordered mutations");
+        };
         assert!(matches!(
-            staged.as_slice(),
-            [
-                Update::Mutation {
-                    packet: ServerPacket::WalkAck(WalkAck {
-                        sequence: StepSequence(101),
-                        ..
-                    }),
-                    ..
-                },
-                Update::Mutation {
-                    packet: ServerPacket::WalkAck(WalkAck {
-                        sequence: StepSequence(102),
-                        ..
-                    }),
-                    ..
-                },
-            ]
+            first.as_ref(),
+            ServerPacket::WalkAck(WalkAck {
+                sequence: StepSequence(101),
+                ..
+            })
+        ));
+        assert!(matches!(
+            second.as_ref(),
+            ServerPacket::WalkAck(WalkAck {
+                sequence: StepSequence(102),
+                ..
+            })
         ));
         assert!(
             updates.publish(acked(103)),
@@ -1679,15 +1688,15 @@ mod tests {
 
         let staged = updates.take();
         assert!(matches!(&staged[0], Update::Lost(reason) if reason == "before"));
+        let Update::Mutation { packet, .. } = &staged[1] else {
+            panic!("the numbered step remains a mutation");
+        };
         assert!(matches!(
-            &staged[1],
-            Update::Mutation {
-                packet: ServerPacket::WalkAck(WalkAck {
-                    sequence: StepSequence(101),
-                    ..
-                }),
+            packet.as_ref(),
+            ServerPacket::WalkAck(WalkAck {
+                sequence: StepSequence(101),
                 ..
-            }
+            })
         ));
         assert!(matches!(&staged[2], Update::Lost(reason) if reason == "after"));
     }
@@ -1809,12 +1818,11 @@ mod tests {
         for (packet, update) in staged.iter().take(MAX_ORDERED_UPDATES - 1).enumerate() {
             assert!(matches!(update, Update::Lost(reason) if reason == &format!("packet {packet}")));
         }
-        let Some(Update::Mutation {
-            packet: ServerPacket::WalkAck(ack),
-            ..
-        }) = staged.last()
-        else {
+        let Some(Update::Mutation { packet, .. }) = staged.last() else {
             panic!("the numbered walk remains ordered with packets");
+        };
+        let ServerPacket::WalkAck(ack) = packet.as_ref() else {
+            panic!("the ordered mutation remains the numbered walk");
         };
         assert_eq!(ack.sequence, StepSequence(101));
 

@@ -197,7 +197,7 @@ impl Art {
 
         let side = LAND_TILE_SIZE as usize;
         let mut pixels = vec![Color16::TRANSPARENT; side * side];
-        let mut words = raw.chunks_exact(2);
+        let mut words = raw.as_chunks::<2>().0.iter();
         for y in 0..side {
             let row = land_row(y as u16);
             for x in row.start as usize..row.end as usize {
@@ -300,7 +300,7 @@ fn decode_static(graphic: Graphic, raw: &[u8]) -> Result<Image, ArtError> {
                     x + length
                 )));
             }
-            for (offset, word) in span.chunks_exact(2).enumerate() {
+            for (offset, word) in span.as_chunks::<2>().0.iter().enumerate() {
                 pixels[y * width as usize + x + offset] = Color16(u16::from_le_bytes([word[0], word[1]]));
             }
             x += length;

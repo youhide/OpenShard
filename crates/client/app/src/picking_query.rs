@@ -914,10 +914,10 @@ impl App {
     /// *asked* for — it is what the layout left over, which `Shell` holds between
     /// frames — and it is applied beside this call rather than through it.
     pub(crate) fn apply(&mut self, request: shell::Request) {
-        // The egui catalogue is only a different presentation of the craft
-        // gump. Its rows keep the gump's button ids, and this common answer
-        // path closes the local shell in the same atomic step as every native
-        // dialog reply.
+        // The egui craft window is only a different presentation of the craft
+        // gump. Every page keeps the gump's button ids, and this common answer
+        // path closes the authoritative shell while Shell retains the one
+        // client-owned presentation state across the replacement page.
         if let Some(reply) = request.craft_reply {
             self.answer_gump(reply);
         }

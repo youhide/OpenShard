@@ -188,7 +188,9 @@ impl SkillGroups {
             let record = bytes.get(at..at + width)?;
             names.push(match unicode {
                 true => record
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
                     .take_while(|unit| *unit != 0)
                     .map(|unit| char::from_u32(u32::from(unit)).unwrap_or('?'))
@@ -203,7 +205,9 @@ impl SkillGroups {
             });
         }
         let of_skill = bytes[table_at..]
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|four| i32::from_le_bytes([four[0], four[1], four[2], four[3]]))
             .map(|group| match usize::try_from(group) {
                 Ok(group) if group < names.len() => GroupId(group as u8),

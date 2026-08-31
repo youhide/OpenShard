@@ -156,7 +156,7 @@ impl Skills {
             return None;
         }
         let mut skills = Vec::new();
-        for entry in index.chunks_exact(INDEX_ENTRY) {
+        for entry in index.as_chunks::<INDEX_ENTRY>().0 {
             let offset = u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]);
             let length = u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]]);
             // "Nothing here", written three ways, all of which the reference

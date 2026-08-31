@@ -178,7 +178,9 @@ impl<'a> PacketReader<'a> {
     pub fn fixed_string_utf16(&mut self, len: usize) -> CodecResult<String> {
         let raw = self.take(len.checked_mul(2).ok_or(CodecError::InvalidText)?)?;
         let units: Vec<u16> = raw
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
             .take_while(|unit| *unit != 0)
             .collect();

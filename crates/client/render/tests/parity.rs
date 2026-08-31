@@ -397,7 +397,7 @@ fn dump_all_planes(
 /// *nothing at all* read as two colours and pass.
 fn plane_colours(pixels: &[u8]) -> usize {
     let mut seen = BTreeSet::new();
-    for pixel in pixels.chunks_exact(4) {
+    for pixel in pixels.as_chunks::<4>().0 {
         if pixel[3] != 0 {
             seen.insert([pixel[0], pixel[1], pixel[2]]);
         }
@@ -423,8 +423,10 @@ fn differing_pixels(a: &[u8], b: &[u8]) -> usize {
         b.len(),
         "two dumps of the same rect came back different sizes"
     );
-    a.chunks_exact(4)
-        .zip(b.chunks_exact(4))
+    a.as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.as_chunks::<4>().0)
         .filter(|(p, q)| p != q)
         .count()
 }

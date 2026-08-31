@@ -597,7 +597,7 @@ fn read_plane(
 
     if index < 0x20 {
         // A stair buffer: five bytes a tile, written out longhand.
-        for entry in buffer.chunks_exact(5) {
+        for entry in buffer.as_chunks::<5>().0 {
             tiles.push(DesignTile {
                 graphic: Graphic(u16::from_be_bytes([entry[0], entry[1]])),
                 dx: entry[2] as i8,
@@ -629,7 +629,7 @@ fn read_plane(
     } else {
         (STOREY_HEIGHTS[plane - 4], 0)
     };
-    for (cell, graphic) in buffer.chunks_exact(2).enumerate() {
+    for (cell, graphic) in buffer.as_chunks::<2>().0.iter().enumerate() {
         let graphic = Graphic(u16::from_be_bytes([graphic[0], graphic[1]]));
         if graphic.0 == 0 {
             continue;

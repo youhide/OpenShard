@@ -70,7 +70,7 @@ async fn hear_until(
                 .expect("the socket stayed up")
                 .expect("the shard did not hang up before answering");
             if let Event::Packet(packet) = event {
-                heard.push(packet);
+                heard.push(*packet);
                 if done(&heard) {
                     return;
                 }

@@ -1,14 +1,30 @@
-use super::*;
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::identity::RawCharacterName;
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
 use openshard_protocol::items::DropDestination;
 use openshard_protocol::mobile::Notoriety;
-use openshard_protocol::wire::{Graphic, Hue, RawCharacterSlot};
-use openshard_protocol::world::{
-    Aggression, DamageType, PhysicalResistance, PoisonLevel, RangedRange, Sight,
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    RawCharacterSlot,
 };
-use openshard_state::{LockKind, Skill};
+use openshard_protocol::world::{
+    Aggression,
+    DamageType,
+    PhysicalResistance,
+    PoisonLevel,
+    RangedRange,
+    Sight,
+};
+use openshard_state::{
+    LockKind,
+    Skill,
+};
+
+use super::*;
 
 /// How a character looks: its body graphic and hue. Chosen on the creation
 /// screen, or restored from the save.
@@ -233,7 +249,8 @@ impl StoredCharacter {
                 done_quests: record.done_quests.clone(),
                 // The three ride together: a title or a rank with no guild is a
                 // fact about nothing, so the `Option` is over all of them.
-                guild: record.guild.map(|id| GuildSeat {
+                guild:           record.guild.map(|id| {
+                    GuildSeat {
                     guild: openshard_state::GuildId(id),
                     title: record.guild_title.clone(),
                     // The floor, for a number the five ranks do not name. A
@@ -241,6 +258,7 @@ impl StoredCharacter {
                     // grant a permission — see `CharacterRecord::guild_rank`.
                     rank: openshard_state::Rank::from_number(record.guild_rank)
                         .unwrap_or(openshard_state::Rank::Ronin),
+                    }
                 }),
                 guild_candidate: record.guild_candidate,
             },
@@ -1280,4 +1298,95 @@ pub enum Command {
         /// What it let go, by item serial and amount.
         sales: Vec<openshard_protocol::vendor::Sale>,
     },
+}
+
+impl Command {
+    /// Stable, value-free name for tick diagnostics.
+    ///
+    /// Values are deliberately excluded: commands carry chat, character names
+    /// and large content batches that do not belong in a watchdog line. Keeping
+    /// this exhaustive also means a new kind of tick work cannot silently show
+    /// up as "unknown" when it is the thing making a tick slow.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::Authenticated { .. } => "Authenticated",
+            Self::CreateCharacter { .. } => "CreateCharacter",
+            Self::PlayCharacter { .. } => "PlayCharacter",
+            Self::Enter(_) => "Enter",
+            Self::Walk { .. } => "Walk",
+            Self::Turn { .. } => "Turn",
+            Self::RequestStatus { .. } => "RequestStatus",
+            Self::LogoutRequest { .. } => "LogoutRequest",
+            Self::Resync { .. } => "Resync",
+            Self::RequestSkills { .. } => "RequestSkills",
+            Self::GumpResponse { .. } => "GumpResponse",
+            Self::TargetResponse { .. } => "TargetResponse",
+            Self::RegisterSpawner { .. } => "RegisterSpawner",
+            Self::ClearSpawners => "ClearSpawners",
+            Self::RegisterRegions { .. } => "RegisterRegions",
+            Self::ClearRegions { .. } => "ClearRegions",
+            Self::Decorate { .. } => "Decorate",
+            Self::GenerateDoors { .. } => "GenerateDoors",
+            Self::ClearDecorations => "ClearDecorations",
+            Self::Step { .. } => "Step",
+            Self::SpawnItem { .. } => "SpawnItem",
+            Self::SpawnContainer { .. } => "SpawnContainer",
+            Self::SpawnMobile { .. } => "SpawnMobile",
+            Self::Damage { .. } => "Damage",
+            Self::CastSpell { .. } => "CastSpell",
+            Self::Heal { .. } => "Heal",
+            Self::SetStats { .. } => "SetStats",
+            Self::SetSkill { .. } => "SetSkill",
+            Self::SetWeapon { .. } => "SetWeapon",
+            Self::SetPoison { .. } => "SetPoison",
+            Self::UseSkill { .. } => "UseSkill",
+            Self::UseSkillButton { .. } => "UseSkillButton",
+            Self::OpenCraftCatalogue { .. } => "OpenCraftCatalogue",
+            Self::SetStatLock { .. } => "SetStatLock",
+            Self::SetSkillLock { .. } => "SetSkillLock",
+            Self::WarMode { .. } => "WarMode",
+            Self::Attack { .. } => "Attack",
+            Self::Say { .. } => "Say",
+            Self::Speak { .. } => "Speak",
+            Self::DoubleClick { .. } => "DoubleClick",
+            Self::SingleClick { .. } => "SingleClick",
+            Self::QueryProperties { .. } => "QueryProperties",
+            Self::ContextMenuRequest { .. } => "ContextMenuRequest",
+            Self::DesignDetails { .. } => "DesignDetails",
+            Self::RequestChunks { .. } => "RequestChunks",
+            Self::RequestChanges { .. } => "RequestChanges",
+            Self::CommitMapEdit { .. } => "CommitMapEdit",
+            Self::ContextMenuSelect { .. } => "ContextMenuSelect",
+            Self::Party { .. } => "Party",
+            Self::EquipItem { .. } => "EquipItem",
+            Self::PickUpItem { .. } => "PickUpItem",
+            Self::DropItem { .. } => "DropItem",
+            Self::TradeAction { .. } => "TradeAction",
+            Self::TradeCancel { .. } => "TradeCancel",
+            Self::Disconnect { .. } => "Disconnect",
+            Self::DeleteCharacter { .. } => "DeleteCharacter",
+            Self::ShowGump { .. } => "ShowGump",
+            Self::RegisterNpcSpeech { .. } => "RegisterNpcSpeech",
+            Self::RegisterQuests { .. } => "RegisterQuests",
+            Self::BindQuestGiver { .. } => "BindQuestGiver",
+            Self::MakeEscortable { .. } => "MakeEscortable",
+            Self::QuestLogRequest { .. } => "QuestLogRequest",
+            Self::GuildWindowRequest { .. } => "GuildWindowRequest",
+            Self::CloseGump { .. } => "CloseGump",
+            Self::Message { .. } => "Message",
+            Self::PlaySound { .. } => "PlaySound",
+            Self::GiveItem { .. } => "GiveItem",
+            Self::GiveItemKind { .. } => "GiveItemKind",
+            Self::TakeItem { .. } => "TakeItem",
+            Self::TakeItemKind { .. } => "TakeItemKind",
+            Self::RequestCast { .. } => "RequestCast",
+            Self::StockVendor { .. } => "StockVendor",
+            Self::AddLoot { .. } => "AddLoot",
+            Self::AddLootKind { .. } => "AddLootKind",
+            Self::ConsumeItem { .. } => "ConsumeItem",
+            Self::Buy { .. } => "Buy",
+            Self::Sell { .. } => "Sell",
+        }
+    }
 }

@@ -87,10 +87,9 @@ pub fn check_hold(
     if state.is_staff(mobile) {
         return None;
     }
-    let contents = contents_index(state);
     let mut at = Some(container);
     // Bounded by construction — a container cannot be inside itself — and the
-    // visited list is `carried_with`'s belt and braces against a hand-edited save
+    // visited list is `carried`'s belt and braces against a hand-edited save
     // where a cycle would otherwise hang the tick.
     let mut visited: Vec<Serial> = Vec::new();
     while let Some(serial) = at {
@@ -98,7 +97,7 @@ pub fn check_hold(
             break;
         }
         visited.push(serial);
-        if let Some(full) = holds_one_more(state, &contents, serial, plus_items, plus_weight) {
+        if let Some(full) = holds_one_more(state, serial, plus_items, plus_weight) {
             return Some(full);
         }
         at = state
@@ -115,16 +114,15 @@ pub fn check_hold(
 /// The two ceilings for one container, with nothing above it asked about.
 fn holds_one_more(
     state: &WorldState,
-    contents: &Contents,
     container: Serial,
     plus_items: usize,
     plus_weight: u16,
 ) -> Option<Full> {
-    if subtree_items(state, contents, container) + plus_items > MAX_ITEMS {
+    if subtree_items(state, container) + plus_items > MAX_ITEMS {
         return Some(Full::Items);
     }
     let ceiling = weight_ceiling(state, container);
-    let carried = subtree_weight(state, contents, container);
+    let carried = subtree_weight(state, container);
     // A shard with no tiledata weighs everything at zero, so this never fires —
     // said here rather than left to be inferred from a passing test on a
     // terrainless shard.
@@ -161,7 +159,7 @@ fn weight_ceiling(state: &WorldState, container: Serial) -> u16 {
 ///
 /// A stack is **one** item however many are on it: fifty ingots take one slot in
 /// the reference and take one here.
-fn subtree_items(state: &WorldState, contents: &Contents, container: Serial) -> usize {
+fn subtree_items(state: &WorldState, container: Serial) -> usize {
     let mut count = 0;
     let mut stack = vec![container];
     let mut visited: Vec<Serial> = Vec::new();
@@ -170,7 +168,7 @@ fn subtree_items(state: &WorldState, contents: &Contents, container: Serial) -> 
             continue;
         }
         visited.push(serial);
-        for &item in contents.get(&serial).into_iter().flatten() {
+        for (item, _) in contained_items(state, serial) {
             count += 1;
             if state.registry.has::<Container>(item) {
                 if let Some(inner) = state.registry.serial_of(item) {
@@ -183,7 +181,7 @@ fn subtree_items(state: &WorldState, contents: &Contents, container: Serial) -> 
 }
 
 /// What everything in a container weighs, in stones, the subtree included.
-fn subtree_weight(state: &WorldState, contents: &Contents, container: Serial) -> u16 {
+fn subtree_weight(state: &WorldState, container: Serial) -> u16 {
     if state.registry.entity_of(container).is_none() {
         return 0;
     }
@@ -195,7 +193,7 @@ fn subtree_weight(state: &WorldState, contents: &Contents, container: Serial) ->
             continue;
         }
         visited.push(serial);
-        for &item in contents.get(&serial).into_iter().flatten() {
+        for (item, _) in contained_items(state, serial) {
             hundredths = hundredths.saturating_add(item_weight_hundredths(state, item));
             if state.registry.has::<Container>(item) {
                 if let Some(inner) = state.registry.serial_of(item) {
@@ -235,18 +233,17 @@ fn item_weight_hundredths(state: &WorldState, item: EntityId) -> u32 {
 /// together because the two walks are the same walk.
 #[must_use]
 pub fn cost_of(state: &WorldState, item: EntityId) -> (usize, u16) {
-    let contents = contents_index(state);
     let own_weight = item_weight_hundredths(state, item);
     let Some(serial) = state.registry.serial_of(item) else {
         return (1, u16::try_from(own_weight / 100).unwrap_or(u16::MAX));
     };
     let inside_items = if state.registry.has::<Container>(item) {
-        subtree_items(state, &contents, serial)
+        subtree_items(state, serial)
     } else {
         0
     };
     let inside_weight = if state.registry.has::<Container>(item) {
-        subtree_weight(state, &contents, serial)
+        subtree_weight(state, serial)
     } else {
         0
     };

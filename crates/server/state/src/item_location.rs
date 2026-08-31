@@ -37,6 +37,19 @@ pub enum LocationError {
     OriginMismatch,
 }
 
+/// One ownership-edge replacement whose destination has already been checked.
+///
+/// Compound item operations prepare this before allocating or changing any
+/// quantity. The fields are private so only this module can manufacture a
+/// value that [`commit_item_relocation`] may apply without an ordinary failure
+/// branch.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PreparedItemRelocation {
+    item: EntityId,
+    previous: ItemLocation,
+    destination: ItemLocation,
+}
+
 /// A contradiction found by [`audit_item_graph`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ItemGraphViolation {
@@ -55,6 +68,11 @@ pub enum ItemGraphViolation {
     /// A worn item is missing from its mobile's [`Worn`] index — the one way
     /// that index can be *wrong* rather than merely out of date.
     UnindexedOutfit(EntityId),
+    /// A contained item is missing from its parent's [`ContainedItems`] index.
+    UnindexedContainedItem(EntityId),
+    /// A live contained item occurs more than once in its parent's candidate
+    /// list.
+    DuplicateContainedCandidate(EntityId),
     /// A held edge and the connection's cursor row disagree.
     CursorProjection(EntityId),
     /// A connection cursor names an item whose canonical edge says otherwise.
@@ -94,22 +112,79 @@ pub struct Worn {
     pub items: Vec<EntityId>,
 }
 
+/// Candidate direct children kept on one container.
+///
+/// The item's canonical [`ItemLocation`] remains authoritative. A raw despawn
+/// may leave a stale candidate, so every read rechecks the edge; the canonical
+/// location door ensures a live child is never missing or duplicated.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct ContainedItems {
+    /// Candidate children. Stale rows are harmless and are pruned on mutation.
+    pub candidates: Vec<EntityId>,
+}
+
 /// Items whose canonical parent is `container`.
 pub fn contained_items(
     state: &WorldState,
     container: Serial,
 ) -> impl Iterator<Item = (EntityId, crate::components::Contained)> + '_ {
-    state
+    let candidates: &[EntityId] = state
         .registry
-        .query::<ItemLocation>()
-        .filter_map(move |(item, location)| match *location {
-            ItemLocation::Settled(SettledItemLocation::Contained(contained))
+        .entity_of(container)
+        .and_then(|entity| state.registry.get::<ContainedItems>(entity))
+        .map_or(&[], |contents| contents.candidates.as_slice());
+    candidates
+        .iter()
+        .copied()
+        .filter_map(move |item| match item_location(state, item) {
+            Some(ItemLocation::Settled(SettledItemLocation::Contained(contained)))
                 if contained.container == container =>
             {
                 Some((item, contained))
             }
             _ => None,
         })
+}
+
+/// Every descendant below `root`, in stable serial order.
+///
+/// Recursion pays only indexed direct-child reads. Canonical edges are checked
+/// by [`contained_items`] at every level and the visited set makes this total
+/// even over a corrupt restored cycle; the ownership audit still reports that
+/// cycle separately.
+#[must_use]
+pub fn recursive_contained_items(
+    state: &WorldState,
+    root: Serial,
+) -> Vec<(EntityId, crate::components::Contained)> {
+    fn visit(
+        state: &WorldState,
+        container: Serial,
+        visited: &mut HashSet<EntityId>,
+        descendants: &mut Vec<(EntityId, crate::components::Contained)>,
+    ) {
+        let mut direct: Vec<_> = contained_items(state, container).collect();
+        direct.sort_by_key(|(item, _)| (state.registry.serial_of(*item), *item));
+        for (item, contained) in direct {
+            if !visited.insert(item) {
+                continue;
+            }
+            descendants.push((item, contained));
+            if state.registry.has::<Container>(item) {
+                if let Some(serial) = state.registry.serial_of(item) {
+                    visit(state, serial, visited, descendants);
+                }
+            }
+        }
+    }
+
+    let mut descendants = Vec::new();
+    let mut visited = HashSet::new();
+    if let Some(root_entity) = state.registry.entity_of(root) {
+        visited.insert(root_entity);
+    }
+    visit(state, root, &mut visited, &mut descendants);
+    descendants
 }
 
 /// Items canonically worn by `mobile`.
@@ -191,11 +266,25 @@ pub fn relocate_item(
     item: EntityId,
     location: ItemLocation,
 ) -> Result<ItemLocation, LocationError> {
+    let prepared = prepare_item_relocation(state, item, location)?;
+    Ok(commit_item_relocation(state, prepared))
+}
+
+/// Validate an ownership-edge replacement without changing the world.
+///
+/// This is the prepare half used by compound operations such as stack splitting:
+/// a cursor refusal must be known before the operation allocates a remainder or
+/// changes the original pile's amount.
+pub fn prepare_item_relocation(
+    state: &WorldState,
+    item: EntityId,
+    destination: ItemLocation,
+) -> Result<PreparedItemRelocation, LocationError> {
     let Some(previous) = item_location(state, item) else {
         return Err(LocationError::Unlocated);
     };
     validate_cursor_projection(state, item, previous)?;
-    if let ItemLocation::Held { origin, .. } = location {
+    if let ItemLocation::Held { origin, .. } = destination {
         let expected = match previous {
             ItemLocation::Settled(previous) => previous,
             ItemLocation::Held { origin, .. } => origin,
@@ -204,10 +293,36 @@ pub fn relocate_item(
             return Err(LocationError::OriginMismatch);
         }
     }
-    validate_destination(state, item, location)?;
-    state.registry.insert(item, location);
-    apply_projection(state, item, Some(previous), location);
-    Ok(previous)
+    validate_destination(state, item, destination)?;
+    Ok(PreparedItemRelocation {
+        item,
+        previous,
+        destination,
+    })
+}
+
+/// Apply a relocation returned by [`prepare_item_relocation`].
+///
+/// # Panics
+///
+/// Panics if the item moved between prepare and commit. The world tick is the
+/// sole owner and compound operations commit immediately, so that would be a
+/// caller violating the prepared-operation contract rather than a gameplay
+/// refusal.
+pub fn commit_item_relocation(state: &mut WorldState, prepared: PreparedItemRelocation) -> ItemLocation {
+    assert_eq!(
+        item_location(state, prepared.item),
+        Some(prepared.previous),
+        "a prepared item relocation commits against the edge it validated"
+    );
+    state.registry.insert(prepared.item, prepared.destination);
+    apply_projection(
+        state,
+        prepared.item,
+        Some(prepared.previous),
+        prepared.destination,
+    );
+    prepared.previous
 }
 
 /// Remove an item while also releasing any cursor that owns it.
@@ -215,12 +330,21 @@ pub fn relocate_item(
 /// Container subtree policy, spatial indexing, and removal packets belong to
 /// the caller; this function owns the canonical edge and its cursor projection.
 pub fn despawn_item(state: &mut WorldState, item: EntityId) -> bool {
-    if let Some(ItemLocation::Held { connection, .. }) = item_location(state, item) {
-        if let Some(row) = state.connections.get_mut(&connection) {
-            if row.held.is_some_and(|held| held.entity == item) {
-                row.held = None;
+    match item_location(state, item) {
+        Some(ItemLocation::Settled(SettledItemLocation::Contained(contained))) => {
+            uncontain(state, contained.container, item);
+        }
+        Some(ItemLocation::Settled(SettledItemLocation::Equipped(equipped))) => {
+            unwear(state, equipped.mobile, item);
+        }
+        Some(ItemLocation::Held { connection, .. }) => {
+            if let Some(row) = state.connections.get_mut(&connection) {
+                if row.held.is_some_and(|held| held.entity == item) {
+                    row.held = None;
+                }
             }
         }
+        Some(ItemLocation::Settled(SettledItemLocation::Ground { .. })) | None => {}
     }
     state.registry.despawn(item)
 }
@@ -270,6 +394,22 @@ pub fn audit_item_graph(state: &WorldState) -> Vec<ItemGraphViolation> {
                     || has_equipped
                 {
                     violations.push(ItemGraphViolation::ContainedProjection(item));
+                }
+                let occurrences = state
+                    .registry
+                    .entity_of(contained.container)
+                    .and_then(|parent| state.registry.get::<ContainedItems>(parent))
+                    .map_or(0, |contents| {
+                        contents
+                            .candidates
+                            .iter()
+                            .filter(|&&candidate| candidate == item)
+                            .count()
+                    });
+                if occurrences == 0 {
+                    violations.push(ItemGraphViolation::UnindexedContainedItem(item));
+                } else if occurrences > 1 {
+                    violations.push(ItemGraphViolation::DuplicateContainedCandidate(item));
                 }
             }
             ItemLocation::Settled(SettledItemLocation::Equipped(equipped)) => {
@@ -345,6 +485,9 @@ fn apply_projection(
     if let Some(ItemLocation::Settled(SettledItemLocation::Equipped(equipped))) = previous {
         unwear(state, equipped.mobile, item);
     }
+    if let Some(ItemLocation::Settled(SettledItemLocation::Contained(contained))) = previous {
+        uncontain(state, contained.container, item);
+    }
 
     match location {
         ItemLocation::Settled(SettledItemLocation::Ground { facet, position }) => {
@@ -353,6 +496,7 @@ fn apply_projection(
         }
         ItemLocation::Settled(SettledItemLocation::Contained(contained)) => {
             state.registry.insert(item, contained);
+            contain(state, contained.container, item);
         }
         ItemLocation::Settled(SettledItemLocation::Equipped(equipped)) => {
             state.registry.insert(item, equipped);
@@ -369,6 +513,46 @@ fn apply_projection(
             });
         }
     }
+}
+
+/// Put `item` into its parent's candidate list, pruning stale rows and any old
+/// duplicate of the same live child.
+fn contain(state: &mut WorldState, container: Serial, item: EntityId) {
+    let Some(parent) = state.registry.entity_of(container) else {
+        return;
+    };
+    let mut candidates = state
+        .registry
+        .get::<ContainedItems>(parent)
+        .map_or_else(Vec::new, |contents| contents.candidates.clone());
+    candidates.retain(|&candidate| {
+        candidate != item
+            && matches!(
+                item_location(state, candidate),
+                Some(ItemLocation::Settled(SettledItemLocation::Contained(contained)))
+                    if contained.container == container
+            )
+    });
+    candidates.push(item);
+    state.registry.insert(parent, ContainedItems { candidates });
+}
+
+/// Remove `item` from its former parent's candidate list when that parent is
+/// still live. A raw despawn may leave a stale row; readers revalidate it.
+fn uncontain(state: &mut WorldState, container: Serial, item: EntityId) {
+    let Some(parent) = state.registry.entity_of(container) else {
+        return;
+    };
+    let Some(contents) = state.registry.get::<ContainedItems>(parent) else {
+        return;
+    };
+    let candidates: Vec<_> = contents
+        .candidates
+        .iter()
+        .copied()
+        .filter(|&candidate| candidate != item)
+        .collect();
+    state.registry.insert(parent, ContainedItems { candidates });
 }
 
 /// Put `item` into `mobile`'s outfit index, pruning whatever has fallen out of
@@ -545,6 +729,7 @@ mod tests {
     use openshard_protocol::version::ClientVersion;
     use openshard_protocol::wire::{Graphic, Hue, Layer};
     use openshard_protocol::world::{Facet, Point};
+    use proptest::prelude::*;
     use std::collections::BTreeMap;
 
     fn world() -> WorldState {
@@ -585,6 +770,29 @@ mod tests {
             },
         );
         (entity, serial)
+    }
+
+    fn slow_contained(state: &WorldState, container: Serial) -> Vec<EntityId> {
+        let mut children: Vec<_> = state
+            .registry
+            .query::<ItemLocation>()
+            .filter_map(|(item, location)| {
+                matches!(
+                    location,
+                    ItemLocation::Settled(SettledItemLocation::Contained(contained))
+                        if contained.container == container
+                )
+                .then_some(item)
+            })
+            .collect();
+        children.sort();
+        children
+    }
+
+    fn indexed_contained(state: &WorldState, container: Serial) -> Vec<EntityId> {
+        let mut children: Vec<_> = contained_items(state, container).map(|(item, _)| item).collect();
+        children.sort();
+        children
     }
 
     #[test]
@@ -693,6 +901,164 @@ mod tests {
     }
 
     #[test]
+    fn container_membership_follows_the_canonical_edge_between_parents() {
+        let mut state = world();
+        let at = Point::new(10, 10, 0);
+        let (first, first_serial) = item(&mut state, 1);
+        let (second, second_serial) = item(&mut state, 2);
+        for container in [first, second] {
+            state.registry.insert(container, Container { gump: Graphic(1) });
+            establish_item_location(&mut state, container, ItemLocation::ground(Facet(0), at)).unwrap();
+        }
+        let (child, _) = item(&mut state, 3);
+        let in_first = Contained {
+            container: first_serial,
+            position: GumpPoint::new(10, 20),
+            grid: GridSlot(1),
+        };
+        establish_item_location(&mut state, child, ItemLocation::contained(in_first)).unwrap();
+
+        assert_eq!(
+            contained_items(&state, first_serial).collect::<Vec<_>>(),
+            vec![(child, in_first)]
+        );
+        assert!(contained_items(&state, second_serial).next().is_none());
+
+        let in_second = Contained {
+            container: second_serial,
+            position: GumpPoint::new(30, 40),
+            grid: GridSlot(2),
+        };
+        relocate_item(&mut state, child, ItemLocation::contained(in_second)).unwrap();
+
+        assert!(contained_items(&state, first_serial).next().is_none());
+        assert_eq!(
+            contained_items(&state, second_serial).collect::<Vec<_>>(),
+            vec![(child, in_second)]
+        );
+        assert!(audit_item_graph(&state).is_empty());
+    }
+
+    #[test]
+    fn a_stale_container_candidate_is_never_returned_as_a_live_child() {
+        let mut state = world();
+        let at = Point::new(10, 10, 0);
+        let (container, container_serial) = item(&mut state, 1);
+        state.registry.insert(container, Container { gump: Graphic(1) });
+        establish_item_location(&mut state, container, ItemLocation::ground(Facet(0), at)).unwrap();
+        let (child, _) = item(&mut state, 2);
+        establish_item_location(
+            &mut state,
+            child,
+            ItemLocation::contained(Contained {
+                container: container_serial,
+                position: GumpPoint::new(10, 20),
+                grid: GridSlot(1),
+            }),
+        )
+        .unwrap();
+
+        assert!(
+            state.registry.despawn(child),
+            "the fixture bypasses the cleanup door"
+        );
+
+        assert!(contained_items(&state, container_serial).next().is_none());
+        assert!(audit_item_graph(&state).is_empty());
+    }
+
+    #[test]
+    fn the_item_graph_audit_names_missing_and_duplicate_container_membership() {
+        let mut state = world();
+        let at = Point::new(10, 10, 0);
+        let (container, container_serial) = item(&mut state, 1);
+        state.registry.insert(container, Container { gump: Graphic(1) });
+        establish_item_location(&mut state, container, ItemLocation::ground(Facet(0), at)).unwrap();
+        let (child, _) = item(&mut state, 2);
+        establish_item_location(
+            &mut state,
+            child,
+            ItemLocation::contained(Contained {
+                container: container_serial,
+                position: GumpPoint::new(10, 20),
+                grid: GridSlot(1),
+            }),
+        )
+        .unwrap();
+
+        state.registry.insert(container, ContainedItems::default());
+        assert_eq!(
+            audit_item_graph(&state),
+            vec![ItemGraphViolation::UnindexedContainedItem(child)]
+        );
+
+        state.registry.insert(
+            container,
+            ContainedItems {
+                candidates: vec![child, child],
+            },
+        );
+        assert_eq!(
+            audit_item_graph(&state),
+            vec![ItemGraphViolation::DuplicateContainedCandidate(child)]
+        );
+    }
+
+    #[test]
+    fn recursive_container_walk_is_depth_first_and_serial_ordered() {
+        let mut state = world();
+        let at = Point::new(10, 10, 0);
+        let (root, root_serial) = item(&mut state, 1);
+        state.registry.insert(root, Container { gump: Graphic(1) });
+        establish_item_location(&mut state, root, ItemLocation::ground(Facet(0), at)).unwrap();
+
+        let (lower_serial_child, _) = item(&mut state, 2);
+        let (nested, nested_serial) = item(&mut state, 3);
+        state.registry.insert(nested, Container { gump: Graphic(1) });
+        let (nested_child, _) = item(&mut state, 4);
+
+        // Insert in the opposite order to prove the traversal is not the
+        // candidate vector's incidental insertion order.
+        establish_item_location(
+            &mut state,
+            nested,
+            ItemLocation::contained(Contained {
+                container: root_serial,
+                position: GumpPoint::new(30, 40),
+                grid: GridSlot(2),
+            }),
+        )
+        .unwrap();
+        establish_item_location(
+            &mut state,
+            lower_serial_child,
+            ItemLocation::contained(Contained {
+                container: root_serial,
+                position: GumpPoint::new(10, 20),
+                grid: GridSlot(1),
+            }),
+        )
+        .unwrap();
+        establish_item_location(
+            &mut state,
+            nested_child,
+            ItemLocation::contained(Contained {
+                container: nested_serial,
+                position: GumpPoint::new(50, 60),
+                grid: GridSlot(3),
+            }),
+        )
+        .unwrap();
+
+        let walked: Vec<_> = recursive_contained_items(&state, root_serial)
+            .into_iter()
+            .map(|(item, _)| item)
+            .collect();
+        assert_eq!(walked, vec![lower_serial_child, nested, nested_child]);
+        assert!(audit_item_graph(&state).is_empty());
+    }
+
+    #[test]
     fn cursor_projection_moves_and_despawns_with_the_item() {
         let mut state = world();
         let (item, _) = item(&mut state, 1);
@@ -726,6 +1092,97 @@ mod tests {
         assert!(despawn_item(&mut state, item));
         assert!(state.held_of(connection).is_none());
         assert!(audit_item_graph(&state).is_empty());
+    }
+
+    #[test]
+    fn despawning_a_contained_item_removes_its_parent_candidate() {
+        let mut state = world();
+        let at = Point::new(10, 10, 0);
+        let (container, container_serial) = item(&mut state, 1);
+        state.registry.insert(container, Container { gump: Graphic(1) });
+        establish_item_location(&mut state, container, ItemLocation::ground(Facet(0), at)).unwrap();
+        let (child, _) = item(&mut state, 2);
+        establish_item_location(
+            &mut state,
+            child,
+            ItemLocation::contained(Contained {
+                container: container_serial,
+                position: GumpPoint::new(10, 20),
+                grid: GridSlot(1),
+            }),
+        )
+        .unwrap();
+
+        assert!(despawn_item(&mut state, child));
+
+        assert!(contained_items(&state, container_serial).next().is_none());
+        assert_eq!(
+            state.registry.get::<ContainedItems>(container),
+            Some(&ContainedItems::default())
+        );
+        assert!(audit_item_graph(&state).is_empty());
+    }
+
+    proptest! {
+        #[test]
+        fn indexed_membership_matches_a_slow_scan_after_mutation_sequences(
+            actions in prop::collection::vec((0_u8..8, 0_u8..4), 1..=128),
+        ) {
+            let mut state = world();
+            let at = Point::new(10, 10, 0);
+            let (first, first_serial) = item(&mut state, 1);
+            let (second, second_serial) = item(&mut state, 2);
+            for container in [first, second] {
+                state.registry.insert(container, Container { gump: Graphic(1) });
+                establish_item_location(&mut state, container, ItemLocation::ground(Facet(0), at))
+                    .unwrap();
+            }
+            let children: Vec<_> = (0..8)
+                .map(|graphic| {
+                    let (child, _) = item(&mut state, graphic + 10);
+                    establish_item_location(
+                        &mut state,
+                        child,
+                        ItemLocation::ground(Facet(0), at),
+                    )
+                    .unwrap();
+                    child
+                })
+                .collect();
+
+            for (slot, destination) in actions {
+                let child = children[usize::from(slot)];
+                if !state.registry.contains(child) {
+                    continue;
+                }
+                match destination {
+                    0 => {
+                        relocate_item(&mut state, child, ItemLocation::ground(Facet(0), at)).unwrap();
+                    }
+                    1 | 2 => {
+                        let container = if destination == 1 { first_serial } else { second_serial };
+                        relocate_item(
+                            &mut state,
+                            child,
+                            ItemLocation::contained(Contained {
+                                container,
+                                position: GumpPoint::new(i32::from(slot), i32::from(destination)),
+                                grid: GridSlot(slot),
+                            }),
+                        )
+                        .unwrap();
+                    }
+                    3 => {
+                        despawn_item(&mut state, child);
+                    }
+                    _ => unreachable!("the strategy emits four destinations"),
+                }
+
+                prop_assert_eq!(indexed_contained(&state, first_serial), slow_contained(&state, first_serial));
+                prop_assert_eq!(indexed_contained(&state, second_serial), slow_contained(&state, second_serial));
+                prop_assert!(audit_item_graph(&state).is_empty());
+            }
+        }
     }
 
     #[test]

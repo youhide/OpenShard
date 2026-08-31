@@ -565,6 +565,15 @@ impl World {
         self.inbox.len()
     }
 
+    /// Value-free names of the commands the next tick will apply.
+    ///
+    /// The shard watchdog snapshots this immediately before calling [`tick`].
+    /// Returning names rather than commands keeps player text and bulky content
+    /// batches out of logs while still saying what occupied a slow tick.
+    pub fn queued_command_kinds(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.inbox.iter().map(Command::kind)
+    }
+
     /// Take the packets the last tick produced.
     pub fn drain_outbound(&mut self) -> std::vec::Drain<'_, Outbound> {
         self.state.outbox.drain(..)
@@ -861,8 +870,7 @@ impl World {
         // same reason `refresh_statuses` is — a call beside every mutation is a
         // call someone eventually forgets.
         if self.state.ticks.is_multiple_of(quests::OBTAIN_EVERY_TICKS) {
-            let contents = items::contents_index(&self.state);
-            quests::refresh_obtain(&mut self.state, &contents);
+            quests::refresh_obtain(&mut self.state);
         }
         for (serial, direction) in quests::advance_escorts(&mut self.state) {
             self.step(serial, direction);

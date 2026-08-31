@@ -1,4 +1,9 @@
 use super::*;
+use openshard_entities::SpawnError;
+use openshard_state::{
+    LocationError, PreparedItemRelocation, commit_item_relocation, prepare_item_relocation,
+};
+use std::fmt;
 
 /// How near, in tiles, a mobile must be to reach an item on the ground or set one
 /// down. Sphere reaches two; a third forgives the diagonal the cursor is shown
@@ -31,6 +36,40 @@ struct LiftableItem {
     location: ItemLocation,
 }
 
+/// A lift whose cursor transition and optional stack remainder are ready to
+/// commit without allocation or another gameplay refusal.
+struct PreparedLift {
+    relocation: PreparedItemRelocation,
+    split: Option<PreparedSplit>,
+}
+
+/// The quantity half of a partial lift.
+///
+/// `leftover` already owns its serial and identity, but deliberately has no
+/// location and has emitted no event or packet until [`commit_split`].
+struct PreparedSplit {
+    original: EntityId,
+    leftover: EntityId,
+    taken: u16,
+    remainder: u16,
+    origin: SettledItemLocation,
+}
+
+#[derive(Debug)]
+enum PrepareLiftError {
+    Location(LocationError),
+    Allocation(SpawnError),
+}
+
+impl fmt::Display for PrepareLiftError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Location(error) => write!(formatter, "invalid cursor transition: {error:?}"),
+            Self::Allocation(error) => write!(formatter, "cannot allocate split remainder: {error}"),
+        }
+    }
+}
+
 /// The art of an item that already passed the lift gate.
 ///
 /// [`liftable_item`] refuses every entity without [`Drawn`] before it can become
@@ -41,6 +80,76 @@ fn held_graphic(state: &WorldState, item: EntityId) -> Graphic {
         .get::<Drawn>(item)
         .expect("an item on a cursor must have art")
         .id
+}
+
+/// Validate a lift and reserve its remainder before changing the visible pile.
+fn prepare_lift(
+    state: &mut WorldState,
+    connection: ConnectionId,
+    item: LiftableItem,
+    amount: u16,
+    origin: SettledItemLocation,
+) -> Result<PreparedLift, PrepareLiftError> {
+    let relocation = prepare_item_relocation(state, item.entity, ItemLocation::Held { connection, origin })
+        .map_err(PrepareLiftError::Location)?;
+
+    let total = amount_of(state, item.entity);
+    let stackable = state.registry.has::<Stackable>(item.entity)
+        || state
+            .registry
+            .get::<Drawn>(item.entity)
+            .is_some_and(|drawn| intrinsically_stackable(drawn.id));
+    let split = if amount > 0 && amount < total && stackable {
+        // Serial first. `spawn_with_serial` leaves no entity behind on failure,
+        // so this is the last ordinary failure before the operation commits.
+        let (leftover, _) = state
+            .registry
+            .spawn_with_serial(SerialKind::Item)
+            .map_err(PrepareLiftError::Allocation)?;
+        let drawn = *state
+            .registry
+            .get::<Drawn>(item.entity)
+            .expect("a liftable item has art");
+        state.registry.insert(leftover, drawn);
+        crate::spawn::copy_identity(state, item.entity, leftover);
+        state.registry.insert(leftover, Stackable);
+        set_stack_amount(state, leftover, total - amount);
+        Some(PreparedSplit {
+            original: item.entity,
+            leftover,
+            taken: amount,
+            remainder: total - amount,
+            origin,
+        })
+    } else {
+        None
+    };
+
+    Ok(PreparedLift { relocation, split })
+}
+
+/// Publish a prepared remainder at the origin the original pile is vacating.
+fn commit_split(state: &mut WorldState, split: PreparedSplit) {
+    // Normalise legacy gold/arrows/bolts while they participate, so persistence
+    // retains the fact that both resulting singleton piles remain stackable.
+    state.registry.insert(split.original, Stackable);
+    set_stack_amount(state, split.original, split.taken);
+    set_stack_amount(state, split.leftover, split.remainder);
+    establish_item_location(state, split.leftover, ItemLocation::Settled(split.origin))
+        .expect("a prepared split remainder keeps the original's valid parent");
+    match split.origin {
+        SettledItemLocation::Ground { facet, position } => {
+            mark_decay(state, split.leftover);
+            state.place_item(facet, split.leftover, position);
+            state.reveal(split.leftover);
+        }
+        SettledItemLocation::Contained(contained) => {
+            tell_watchers_updated(state, contained.container, split.leftover);
+        }
+        SettledItemLocation::Equipped(_) => {
+            unreachable!("paperdoll lifts are never split")
+        }
+    }
 }
 
 /// Lift an item onto a client's cursor. See `Command::PickUpItem`.
@@ -181,26 +290,17 @@ fn lift_ground_item(
         reject_drag(state, connection, DragCancelReason::OutOfRange);
         return false;
     }
-    let held = HeldItem {
-        entity: item.entity,
-        origin: Origin::Ground { position, facet },
+    let origin = SettledItemLocation::Ground { facet, position };
+    let prepared = match prepare_lift(state, connection, item, amount, origin) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            warn!(%error, "partial lift could not be prepared");
+            reject_drag(state, connection, DragCancelReason::CannotLift);
+            return false;
+        }
     };
-    // Taking part of a stack: leave the remainder behind as a new pile and lift
-    // the original, now reduced to what was taken. The original keeps its serial
-    // and goes to the cursor — the client's drag and its eventual drop still name
-    // it — so only the leftover is a new object.
-    let total = amount_of(state, item.entity);
-    let stackable = state.registry.has::<Stackable>(item.entity)
-        || state
-            .registry
-            .get::<Drawn>(item.entity)
-            .is_some_and(|drawn| intrinsically_stackable(drawn.id));
-    if amount > 0 && amount < total && stackable {
-        // Normalise legacy gold while it participates, so the correction
-        // survives persistence and every later stack operation.
-        state.registry.insert(item.entity, Stackable);
-        spawn_leftover(state, item.entity, total - amount, position, facet);
-        set_stack_amount(state, item.entity, amount);
+    if let Some(split) = prepared.split {
+        commit_split(state, split);
     }
     // Off the sector grid, off every screen but the picker's — whose own
     // client already put it on the cursor, so a 0x1D there would fight it.
@@ -216,15 +316,7 @@ fn lift_ground_item(
     }
     // Off the ground, off the decay clock.
     state.registry.remove::<Decays>(item.entity);
-    relocate_item(
-        state,
-        item.entity,
-        ItemLocation::Held {
-            connection,
-            origin: settled_from_origin(held.origin),
-        },
-    )
-    .expect("a lifted ground item has one cursor parent");
+    commit_item_relocation(state, prepared.relocation);
     true
 }
 
@@ -245,20 +337,17 @@ fn lift_contained_item(
         reject_drag(state, connection, DragCancelReason::CannotLift);
         return false;
     }
-    // Taking part of a stack out of a container: leave the remainder behind in
-    // the same slot as a new pile and lift the original, reduced to what was
-    // taken — the ground split's `UnStackSplit`, but the leftover stays contained
-    // rather than dropping to the floor.
-    let total = amount_of(state, item.entity);
-    let stackable = state.registry.has::<Stackable>(item.entity)
-        || state
-            .registry
-            .get::<Drawn>(item.entity)
-            .is_some_and(|drawn| intrinsically_stackable(drawn.id));
-    if amount > 0 && amount < total && stackable {
-        state.registry.insert(item.entity, Stackable);
-        spawn_contained_leftover(state, item.entity, total - amount, contained);
-        set_stack_amount(state, item.entity, amount);
+    let origin = SettledItemLocation::Contained(contained);
+    let prepared = match prepare_lift(state, connection, item, amount, origin) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            warn!(%error, "partial lift could not be prepared");
+            reject_drag(state, connection, DragCancelReason::CannotLift);
+            return false;
+        }
+    };
+    if let Some(split) = prepared.split {
+        commit_split(state, split);
     }
     // Out of a container. The lifter's own client takes it out of the gump
     // itself, but anybody *else* looking in has to be told — a second viewer
@@ -266,15 +355,7 @@ fn lift_contained_item(
     // take something back is the whole point.
     note_looter(state, contained.container, player);
     tell_watchers_removed_except(state, contained.container, item.serial, Some(connection));
-    relocate_item(
-        state,
-        item.entity,
-        ItemLocation::Held {
-            connection,
-            origin: SettledItemLocation::Contained(contained),
-        },
-    )
-    .expect("a lifted contained item has one cursor parent");
+    commit_item_relocation(state, prepared.relocation);
     true
 }
 
@@ -730,17 +811,83 @@ pub fn reject_drag(state: &mut WorldState, connection: ConnectionId, reason: Dra
 mod tests {
     use std::collections::BTreeMap;
 
+    use openshard_protocol::access::AccessLevel;
+    use openshard_protocol::identity::AccountName;
+    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+    use openshard_protocol::serial::{ITEM_MAX, RawSerial};
+    use openshard_protocol::version::ClientVersion;
+    use openshard_state::FacetState;
+    use openshard_state::connection::Connection;
+
     use super::*;
 
     fn world() -> WorldState {
-        WorldState::new(
-            BTreeMap::new(),
+        let tiles = openshard_tiles::TileData::empty();
+        let mut facets = BTreeMap::new();
+        facets.insert(
             Facet(0),
-            openshard_tiles::TileData::empty(),
+            FacetState::new(
+                None,
+                None,
+                64,
+                64,
+                openshard_state::facet_rules::FacetRules::classic(Facet(0)),
+                None,
+                &tiles,
+            ),
+        );
+        WorldState::new(
+            facets,
+            Facet(0),
+            tiles,
             Default::default(),
             openshard_map::grid::Tile::new(0, 0),
             1,
         )
+    }
+
+    fn connected_player(state: &mut WorldState, at: Point) -> (ConnectionId, EntityId) {
+        let connection = ConnectionId::from_raw(7);
+        let (player, _) = state
+            .registry
+            .spawn_with_serial(SerialKind::Mobile)
+            .expect("a mobile serial");
+        state.registry.insert(
+            player,
+            Body {
+                id: Graphic(0x0190),
+                hue: Hue(0),
+            },
+        );
+        state.registry.insert(player, Position(at));
+        state.registry.insert(player, Facet(0));
+        state.connections.insert(
+            connection,
+            Connection::new(
+                ClientVersion::TOL,
+                AccountName("split-test".to_owned()),
+                AccessLevel::Player,
+            ),
+        );
+        state.players.insert(connection, player);
+        (connection, player)
+    }
+
+    fn stack(state: &mut WorldState, drawn: Drawn, amount: u16) -> (EntityId, Serial) {
+        let (item, serial) = state
+            .registry
+            .spawn_with_serial(SerialKind::Item)
+            .expect("an item serial");
+        state.registry.insert(item, drawn);
+        state.registry.insert(item, Stackable);
+        set_stack_amount(state, item, amount);
+        (item, serial)
+    }
+
+    fn exhaust_item_serials(state: &mut WorldState) {
+        state
+            .registry
+            .reserve_serial(Serial::new(ITEM_MAX).expect("the final item serial"));
     }
 
     #[test]
@@ -749,5 +896,173 @@ mod tests {
         let mut state = world();
         let entity = state.registry.spawn();
         held_graphic(&state, entity);
+    }
+
+    #[test]
+    fn ground_split_refuses_without_quantity_or_location_loss_when_serials_are_exhausted() {
+        let mut state = world();
+        let at = Point::new(10, 10, 0);
+        let (connection, player) = connected_player(&mut state, at);
+        let (item, serial) = stack(
+            &mut state,
+            Drawn {
+                id: Graphic(0x1BF2),
+                hue: Hue(0x08AB),
+            },
+            10,
+        );
+        state.registry.insert(item, ItemKind(ItemKindId(1)));
+        state.registry.insert(item, Material(MaterialId(9)));
+        establish_item_location(&mut state, item, ItemLocation::ground(Facet(0), at)).unwrap();
+        state.place_item(Facet(0), item, at);
+        state.seen.entry(player).or_default().insert(item);
+        exhaust_item_serials(&mut state);
+
+        pick_up(&mut state, connection, RawSerial(serial.raw()), 4);
+
+        assert_eq!(amount_of(&state, item), 10);
+        assert_eq!(
+            item_location(&state, item),
+            Some(ItemLocation::ground(Facet(0), at))
+        );
+        assert_eq!(state.held_of(connection), None);
+        assert!(state.seen.get(&player).is_some_and(|seen| seen.contains(&item)));
+        assert_eq!(state.registry.query::<Drawn>().count(), 1);
+        assert!(openshard_state::audit_item_graph(&state).is_empty());
+    }
+
+    #[test]
+    fn contained_split_refuses_without_quantity_or_membership_loss_when_serials_are_exhausted() {
+        let mut state = world();
+        let at = Point::new(10, 10, 0);
+        let (connection, _) = connected_player(&mut state, at);
+        let (container, container_serial) = stack(
+            &mut state,
+            Drawn {
+                id: Graphic(0x0E75),
+                hue: Hue(0),
+            },
+            1,
+        );
+        state.registry.insert(
+            container,
+            Container {
+                gump: Graphic(0x003C),
+            },
+        );
+        establish_item_location(&mut state, container, ItemLocation::ground(Facet(0), at)).unwrap();
+        let (item, serial) = stack(
+            &mut state,
+            Drawn {
+                id: GOLD_GRAPHIC,
+                hue: Hue(0),
+            },
+            10,
+        );
+        let contained = Contained {
+            container: container_serial,
+            position: GumpPoint::new(30, 40),
+            grid: GridSlot(2),
+        };
+        establish_item_location(&mut state, item, ItemLocation::contained(contained)).unwrap();
+        exhaust_item_serials(&mut state);
+
+        pick_up(&mut state, connection, RawSerial(serial.raw()), 4);
+
+        assert_eq!(amount_of(&state, item), 10);
+        assert_eq!(
+            item_location(&state, item),
+            Some(ItemLocation::contained(contained))
+        );
+        assert_eq!(state.held_of(connection), None);
+        assert_eq!(contained_items(&state, container_serial).count(), 1);
+        assert_eq!(state.registry.query::<Drawn>().count(), 2);
+        assert!(openshard_state::audit_item_graph(&state).is_empty());
+    }
+
+    #[test]
+    fn a_typed_ground_split_copies_identity_to_its_remainder() {
+        let mut state = world();
+        let at = Point::new(10, 10, 0);
+        let (connection, _) = connected_player(&mut state, at);
+        let (item, serial) = stack(
+            &mut state,
+            Drawn {
+                id: Graphic(0x1BF2),
+                hue: Hue(0x08AB),
+            },
+            10,
+        );
+        state.registry.insert(item, ItemKind(ItemKindId(1)));
+        state.registry.insert(item, Material(MaterialId(9)));
+        establish_item_location(&mut state, item, ItemLocation::ground(Facet(0), at)).unwrap();
+        state.place_item(Facet(0), item, at);
+
+        pick_up(&mut state, connection, RawSerial(serial.raw()), 4);
+
+        let (remainder, _) = state
+            .registry
+            .query::<ItemLocation>()
+            .find(|(candidate, location)| {
+                *candidate != item && **location == ItemLocation::ground(Facet(0), at)
+            })
+            .expect("the remainder stays on the ground");
+        assert_eq!(amount_of(&state, item), 4);
+        assert_eq!(amount_of(&state, remainder), 6);
+        assert_eq!(
+            state.registry.get::<ItemKind>(remainder),
+            Some(&ItemKind(ItemKindId(1)))
+        );
+        assert_eq!(
+            state.registry.get::<Material>(remainder),
+            Some(&Material(MaterialId(9)))
+        );
+        assert!(openshard_state::audit_item_graph(&state).is_empty());
+    }
+
+    #[test]
+    fn a_legacy_contained_split_keeps_its_exact_presentation() {
+        let mut state = world();
+        let at = Point::new(10, 10, 0);
+        let (connection, _) = connected_player(&mut state, at);
+        let (container, container_serial) = stack(
+            &mut state,
+            Drawn {
+                id: Graphic(0x0E75),
+                hue: Hue(0),
+            },
+            1,
+        );
+        state.registry.insert(
+            container,
+            Container {
+                gump: Graphic(0x003C),
+            },
+        );
+        establish_item_location(&mut state, container, ItemLocation::ground(Facet(0), at)).unwrap();
+        let drawn = Drawn {
+            id: Graphic(0x2222),
+            hue: Hue(0x0444),
+        };
+        let (item, serial) = stack(&mut state, drawn, 10);
+        let contained = Contained {
+            container: container_serial,
+            position: GumpPoint::new(30, 40),
+            grid: GridSlot(2),
+        };
+        establish_item_location(&mut state, item, ItemLocation::contained(contained)).unwrap();
+
+        pick_up(&mut state, connection, RawSerial(serial.raw()), 4);
+
+        let (remainder, _) = contained_items(&state, container_serial)
+            .next()
+            .expect("the remainder stays in the container");
+        assert_ne!(remainder, item);
+        assert_eq!(amount_of(&state, item), 4);
+        assert_eq!(amount_of(&state, remainder), 6);
+        assert_eq!(state.registry.get::<Drawn>(remainder), Some(&drawn));
+        assert!(!state.registry.has::<ItemKind>(remainder));
+        assert!(!state.registry.has::<Material>(remainder));
+        assert!(openshard_state::audit_item_graph(&state).is_empty());
     }
 }

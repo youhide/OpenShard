@@ -2073,7 +2073,8 @@ impl WorldState {
 
     /// The same ground with nothing the shard has put on it — the bare map
     /// [`FacetState::coarse`] was baked over, and the reading a long route's
-    /// *corridor* is proposed and joined by.
+    /// *corridor* and ordinary endpoint joins use. A live house floor follows
+    /// live places until it reaches that graph instead.
     ///
     /// Never what approves a step: a route from the coarse graph is refined hop
     /// by hop through [`footing`](Self::footing), which is where a shut door and

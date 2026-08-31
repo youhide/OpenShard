@@ -42,7 +42,10 @@ use crate::login::{
     supported_features_length,
 };
 use crate::mobile::{MobileIncoming, MobileMove, MobileStatus, OpenPaperdoll, Remove, StatLocks};
-use crate::packet::{DecodePacket, EncodePacket, Frame, FrameError, PacketLength, frame_body, frame_packet};
+use crate::packet::{
+    DecodePacket, EncodePacket, Frame, FrameError, MAX_SERVER_PACKET_SIZE, PacketLength, frame_body,
+    frame_packet,
+};
 use crate::party::{PartyInvitation, PartyMemberList, PartyRemoveMember, PartyTextMessage};
 use crate::properties::{PropertyListReply, TooltipRevision};
 use crate::skill::{SkillUpdate, SkillsFull, SkillsPacket};
@@ -1306,7 +1309,11 @@ pub fn server_packet_length(id: u8, version: ClientVersion) -> Option<PacketLeng
 /// );
 /// ```
 pub fn frame_server_packet(buffer: &[u8], version: ClientVersion) -> Result<Frame, FrameError> {
-    frame_packet(buffer, |id| server_packet_length(id, version))
+    frame_packet(
+        buffer,
+        |id| server_packet_length(id, version),
+        MAX_SERVER_PACKET_SIZE,
+    )
 }
 
 #[cfg(test)]
@@ -2022,6 +2029,22 @@ mod tests {
                 "{packet:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_large_private_packet_uses_the_wire_limit_not_the_gateway_limit() {
+        // The complete craft catalogue is currently about 23 KB. That is a
+        // legitimate server response even though the hostile client-input cap
+        // is 18 KB; the packet's u16 field is the bound in this direction.
+        let length = 23_483usize;
+        let [high, low] = (length as u16).to_be_bytes();
+        let mut bytes = vec![0xBF, high, low];
+        bytes.resize(length, 0);
+
+        assert_eq!(
+            frame_server_packet(&bytes, version()),
+            Ok(Frame::Complete(length))
+        );
     }
 
     #[test]

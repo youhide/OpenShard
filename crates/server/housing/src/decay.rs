@@ -411,5 +411,5 @@ fn forget_everywhere(state: &mut WorldState, item: EntityId) {
 /// a crate that places buildings.
 pub(crate) fn take_off_the_ground(state: &mut WorldState, item: EntityId) {
     forget_everywhere(state, item);
-    state.registry.despawn(item);
+    openshard_state::despawn_item(state, item);
 }
