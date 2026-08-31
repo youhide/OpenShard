@@ -1,16 +1,11 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = ["crates/common/*", "crates/server/*", "crates/client/*", "crates/e2e/*"]
 # `vendor/` is third-party source, not one of the three groups, and its crates
 # are built through the patch below rather than as members. See vendor/README.md.
 exclude = ["vendor"]
 
-# `egui-wgpu 0.35` is on wgpu 29 and this client is on wgpu 30, and the two do
-# not mix: a `Device` from one is not a `Device` for the other. The vendored copy
-# is that crate with the four wgpu 30 changes applied, and it is temporary — see
-# vendor/README.md for the exit condition.
 [patch.crates-io]
-egui-wgpu = { path = "vendor/egui-wgpu" }
 # `wgpu 30.0.0` reuses an in-flight Vulkan acquire fence on non-Windows
 # surfaces, causing validation errors on the second frame. Upstream fixed this
 # in #9918; keep the patch pinned until crates.io publishes the backport.

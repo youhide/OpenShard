@@ -318,7 +318,9 @@ fn inspect_saved_step(
                     dx:      row.get(1)?,
                     dy:      row.get(2)?,
                     dz:      row.get(3)?,
-                    flags:   row.get(4)?,
+                    // SQLite only has signed 64-bit integers. Preserve the stored
+                    // bit pattern for component flags instead of rejecting bit 63.
+                    flags:   row.get::<_, i64>(4)?.cast_unsigned(),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
