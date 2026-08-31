@@ -16,10 +16,23 @@ use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::speech::{DEFAULT_LANGUAGE_TAG, Font, TalkMode, UnicodeMessage};
+use openshard_protocol::speech::{
+    DEFAULT_LANGUAGE_TAG,
+    Font,
+    TalkMode,
+    UnicodeMessage,
+};
 use openshard_protocol::wire::Hue;
-use openshard_state::components::{Body, Client, Name, Position};
-use openshard_state::{Gameplay, WorldState};
+use openshard_state::components::{
+    Body,
+    Client,
+    Name,
+    Position,
+};
+use openshard_state::{
+    Gameplay,
+    WorldState,
+};
 
 /// A mobile said something.
 ///
@@ -35,7 +48,7 @@ pub struct MobileSpoke {
     /// Its wire identity.
     pub serial: Serial,
     /// What was said.
-    pub text: String,
+    pub text:   String,
 }
 
 /// How far speech in `mode` carries, in tiles. A whisper is heard only right up

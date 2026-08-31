@@ -42,7 +42,10 @@
 //! real one open. SQLite lets any number of readers in beside a writer, so
 //! nothing here has to wait for a save to finish.
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use rusqlite::OptionalExtension;
 
@@ -71,18 +74,18 @@ pub enum Source {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Placed {
     /// Which table it came from.
-    pub source: Source,
+    pub source:  Source,
     /// Where it stands, in the map's own coordinates.
-    pub x: u16,
+    pub x:       u16,
     /// Where it stands, in the map's own coordinates.
-    pub y: u16,
+    pub y:       u16,
     /// How high. Signed: UO has basements.
-    pub z: i8,
+    pub z:       i8,
     /// The graphic as it stands now — a door's *current* leaf, since that is
     /// what the record keeps and what the client would be looking at.
     pub graphic: u16,
     /// Its hue, `0` for none.
-    pub hue: u16,
+    pub hue:     u16,
 }
 
 /// One classic house placed by the shard.
@@ -96,9 +99,9 @@ pub struct House {
     /// The house's persistent serial, used only to select the one to inspect.
     pub serial: u32,
     /// The client's multi id (not the `0x4000`-offset graphic).
-    pub multi: u16,
+    pub multi:  u16,
     /// The multi origin in world coordinates.
-    pub at: openshard_protocol::world::Point,
+    pub at:     openshard_protocol::world::Point,
 }
 
 /// The window to read: one facet, and the rectangle a scene's radius covers.
@@ -241,14 +244,16 @@ pub fn house(database: &Path, serial: u32) -> Option<House> {
         )
         .optional()
         .unwrap_or_else(|error| panic!("reading house {serial}: {error}"))
-        .map(|(multi, x, y, z)| House {
-            serial,
-            multi: u16::try_from(multi).unwrap_or_else(|_| panic!("house {serial} multi: {multi}")),
-            at: openshard_protocol::world::Point::new(
-                u16::try_from(x).unwrap_or_else(|_| panic!("house {serial} x: {x}")),
-                u16::try_from(y).unwrap_or_else(|_| panic!("house {serial} y: {y}")),
-                i8::try_from(z).unwrap_or_else(|_| panic!("house {serial} z: {z}")),
-            ),
+        .map(|(multi, x, y, z)| {
+            House {
+                serial,
+                multi: u16::try_from(multi).unwrap_or_else(|_| panic!("house {serial} multi: {multi}")),
+                at: openshard_protocol::world::Point::new(
+                    u16::try_from(x).unwrap_or_else(|_| panic!("house {serial} x: {x}")),
+                    u16::try_from(y).unwrap_or_else(|_| panic!("house {serial} y: {y}")),
+                    i8::try_from(z).unwrap_or_else(|_| panic!("house {serial} z: {z}")),
+                ),
+            }
         })
 }
 

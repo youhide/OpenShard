@@ -37,8 +37,8 @@ pub const MAX_MESH_FACES: usize = 2 * crate::facing::MAX_TREADS as usize;
 /// both by a formula.
 #[derive(Clone, Copy, Debug)]
 pub struct Face {
-    vertices: [WorldSpot; MAX_FACE_VERTICES],
-    count: u8,
+    vertices:   [WorldSpot; MAX_FACE_VERTICES],
+    count:      u8,
     /// The unit normal this face's light — and its projected geometry, once
     /// something reads one — both answer with.
     pub normal: [f32; 3],
@@ -111,8 +111,8 @@ impl Mesh {
                 y: 0.0,
                 z: 0.0,
             }; MAX_FACE_VERTICES],
-            count: 0,
-            normal: [0.0, 0.0, 1.0],
+            count:    0,
+            normal:   [0.0, 0.0, 1.0],
         }; MAX_MESH_FACES],
         count: 0,
     };

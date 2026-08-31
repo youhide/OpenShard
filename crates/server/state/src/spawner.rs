@@ -1,6 +1,9 @@
 //! Identity of a spawn region within one world's spawner list.
 
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 /// A spawn region's slot in the world's spawner list.
 ///

@@ -79,14 +79,29 @@
 
 use std::path::PathBuf;
 
-use openshard_client_render::camera::{Camera, RealPixel, TileBounds, Zoom};
+use openshard_client_render::camera::{
+    Camera,
+    RealPixel,
+    TileBounds,
+    Zoom,
+};
 use openshard_client_render::cutaway::Cutaway;
-use openshard_client_render::occlusion::{Builder, Shape};
-use openshard_client_render::solids::{Frame, SolidsRenderer, Style};
+use openshard_client_render::occlusion::{
+    Builder,
+    Shape,
+};
+use openshard_client_render::solids::{
+    Frame,
+    SolidsRenderer,
+    Style,
+};
 use openshard_map::grid::BlockExtent;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_tiles::{StaticTile, TileFlags};
+use openshard_tiles::{
+    StaticTile,
+    TileFlags,
+};
 
 fn env_opt(name: &str) -> Option<String> {
     std::env::var(name).ok()
@@ -172,24 +187,24 @@ fn dump(
     mark: Option<(i32, i32)>,
 ) {
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("readback"),
-        size: u64::from(width) * u64::from(height) * 4,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("readback"),
+        size:               u64::from(width) * u64::from(height) * 4,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: surface,
+            texture:   surface,
             mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    wgpu::TextureAspect::All,
         },
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
+                offset:         0,
+                bytes_per_row:  Some(width * 4),
                 rows_per_image: Some(height),
             },
         },
@@ -325,11 +340,11 @@ fn main() {
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("clear"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &surface_view,
-                depth_slice: None,
+                view:           &surface_view,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                ops:            wgpu::Operations {
+                    load:  wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -345,8 +360,8 @@ fn main() {
             &mut encoder,
             Frame {
                 target: &surface_view,
-                size: (width, height_px),
-                rect: openshard_client_render::blit::ViewportRect {
+                size:   (width, height_px),
+                rect:   openshard_client_render::blit::ViewportRect {
                     x: 0,
                     y: 0,
                     width,
@@ -373,16 +388,31 @@ fn main() {
     // one's mesh cast a shadow on the far one's? See the module doc's own
     // "through the real lit pipeline" section for why this is a `Prism`
     // (top + one `+x` riser) rather than `SolidsRenderer`'s three faces.
-    use openshard_client_render::atlas::{LandAtlas, TexmapAtlas};
+    use openshard_client_render::atlas::{
+        LandAtlas,
+        TexmapAtlas,
+    };
     use openshard_client_render::blit::Frame as BlitFrame;
     use openshard_client_render::camera::project_exact;
     use openshard_client_render::debug::View;
     use openshard_client_render::depth;
     use openshard_client_render::geometry::Vec2;
-    use openshard_client_render::light::{Light, Lighting, NIGHT};
-    use openshard_client_render::mesh_face::{MeshFaceRow, MeshFaceVertex};
+    use openshard_client_render::light::{
+        Light,
+        Lighting,
+        NIGHT,
+    };
+    use openshard_client_render::mesh_face::{
+        MeshFaceRow,
+        MeshFaceVertex,
+    };
     use openshard_client_render::place::Stance;
-    use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, Target};
+    use openshard_client_render::renderer::{
+        self,
+        GroundRenderer,
+        MeshFaceRenderer,
+        Target,
+    };
 
     // Two independent `Prism`s (one per riser: `facing::Prism` only ever
     // carries one climb axis) each widen their own footprint by
@@ -398,7 +428,10 @@ fn main() {
     // `Prism`'s tread/riser seam.
     fn box_mesh(solid: openshard_client_render::solid::Solid) -> openshard_client_render::mesh::Mesh {
         use openshard_client_render::camera::WorldSpot;
-        use openshard_client_render::mesh::{Face, Mesh};
+        use openshard_client_render::mesh::{
+            Face,
+            Mesh,
+        };
 
         let (lo, hi) = (solid.min, solid.max);
         let mut mesh = Mesh::EMPTY;
@@ -492,7 +525,7 @@ fn main() {
     let base_tile = depth::base_for(i32::from((a.x + b.x) / 2), i32::from((a.y + b.y) / 2));
     let depth_of = |p: Point| {
         depth::Order {
-            tile: i32::from(p.x) + i32::from(p.y),
+            tile:       i32::from(p.x) + i32::from(p.y),
             priority_z: depth::static_priority_z(p.z, &cube_tile),
         }
         .to_depth(base_tile)
@@ -519,9 +552,9 @@ fn main() {
         for face in mesh.faces() {
             let id = rows.len() as u32;
             rows.push(MeshFaceRow {
-                tile: (tile.x, tile.y),
+                tile:   (tile.x, tile.y),
                 stance: Stance::of_normal(face.normal).expect("a prism face's own axis-aligned normal"),
-                solid: mine.raw(),
+                solid:  mine.raw(),
             });
             for corner in face.fan() {
                 let screen = camera.to_view_exact(project_exact(corner));
@@ -583,9 +616,11 @@ fn main() {
             wide: blocks,
             down: blocks,
         },
-        |_x, _y| openshard_map::map::LandCell {
-            tile: FLOOR_TILE,
-            z: 0,
+        |_x, _y| {
+            openshard_map::map::LandCell {
+                tile: FLOOR_TILE,
+                z:    0,
+            }
         },
     );
 
@@ -616,12 +651,12 @@ fn main() {
     let mut lighting = Lighting {
         ambient: NIGHT,
         lights: vec![Light {
-            at: Vec2::new(f32::from(a.x) + ldx, f32::from(a.y) + ldy),
-            z: light_z,
-            radius: light_radius,
-            color: [1.0, 1.0, 1.0],
+            at:        Vec2::new(f32::from(a.x) + ldx, f32::from(a.y) + ldy),
+            z:         light_z,
+            radius:    light_radius,
+            color:     [1.0, 1.0, 1.0],
             intensity: 1.0,
-            beam: None,
+            beam:      None,
         }],
         occlusion,
         sun: None,
@@ -672,16 +707,16 @@ fn main() {
             &queue,
             &mut encoder,
             BlitFrame {
-                target: &surface_view,
-                world: &world_view,
-                gbuffer: &gbuffer_views,
-                face_instances: &dummy_instances,
-                item_instances: &dummy_instances,
+                target:           &surface_view,
+                world:            &world_view,
+                gbuffer:          &gbuffer_views,
+                face_instances:   &dummy_instances,
+                item_instances:   &dummy_instances,
                 mobile_instances: &dummy_instances,
-                mesh_instances: mesh_pass.rows_buffer(),
+                mesh_instances:   mesh_pass.rows_buffer(),
                 ground_instances: ground_pass.instances_buffer(),
-                zoom: Zoom::ONE,
-                rect: openshard_client_render::blit::ViewportRect {
+                zoom:             Zoom::ONE,
+                rect:             openshard_client_render::blit::ViewportRect {
                     x: 0,
                     y: 0,
                     width,

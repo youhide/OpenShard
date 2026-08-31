@@ -23,7 +23,7 @@ use std::fmt::Write;
 #[derive(Clone, Debug)]
 pub struct Series {
     /// What to call it in the legend.
-    pub name: String,
+    pub name:   String,
     /// The points, in order.
     pub points: Vec<(f64, f64)>,
 }
@@ -32,9 +32,9 @@ pub struct Series {
 #[derive(Clone, Debug)]
 pub struct Panel {
     /// What the vertical axis is, in words and units.
-    pub title: String,
+    pub title:    String,
     /// The curves. Two or more on purpose: one curve on its own says nothing.
-    pub series: Vec<Series>,
+    pub series:   Vec<Series>,
     /// A horizontal line to draw across the panel, if the quantity has an
     /// expected value — the oracle's constant speed, a lag of zero.
     ///
@@ -144,9 +144,9 @@ mod tests {
 
     fn panel() -> Panel {
         Panel {
-            title: "speed".to_string(),
-            series: vec![Series {
-                name: "body".to_string(),
+            title:    "speed".to_string(),
+            series:   vec![Series {
+                name:   "body".to_string(),
                 points: vec![(0.0, 10.0), (1.0, 20.0), (2.0, -5.0)],
             }],
             baseline: Some(10.0),
@@ -182,9 +182,9 @@ mod tests {
     #[test]
     fn a_constant_series_does_not_divide_by_zero() {
         let flat = Panel {
-            title: "still".to_string(),
-            series: vec![Series {
-                name: "eye".to_string(),
+            title:    "still".to_string(),
+            series:   vec![Series {
+                name:   "eye".to_string(),
                 points: vec![(0.0, 7.0), (1.0, 7.0)],
             }],
             baseline: None,

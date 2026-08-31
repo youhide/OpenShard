@@ -37,7 +37,11 @@
 //! side in terms of the shadow side would mean threading an axis through a
 //! function whose every caller wants a fraction.
 
-use crate::light::{TileVec, WorldVec, Z_PER_TILE};
+use crate::light::{
+    TileVec,
+    WorldVec,
+    Z_PER_TILE,
+};
 
 /// The direction every screen pixel's world line runs in, in world units —
 /// tiles on `x` and `y`, `z` units on `z`.
@@ -372,7 +376,7 @@ pub struct Range {
     /// How many it has. Zero for a static this frame's grid holds nothing for,
     /// which is a real answer and not a missing one — see
     /// `statics::push_volumes`.
-    pub count: u32,
+    pub count:  u32,
 }
 
 /// One box a static stands as, with the frame's own name for it.
@@ -396,9 +400,9 @@ pub struct Range {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Volume {
     /// The low corner, in world units.
-    pub lo: WorldVec,
+    pub lo:    WorldVec,
     /// And the high one.
-    pub hi: WorldVec,
+    pub hi:    WorldVec,
     /// Which solid of this frame's grid a fragment of this box is a point of —
     /// `occlusion::SolidId::word`, so `SolidId::NOBODY` where the grid has none
     /// (a static the cutaway hid, or one past the draw ceiling).
@@ -495,14 +499,14 @@ impl Volume {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Meeting {
     /// The point, in world units, clamped into the box — see [`Meeting::outside`].
-    pub at: WorldVec,
+    pub at:      WorldVec,
     /// Which way the surface it met looks: the box's own camera-facing face on
     /// one axis, so always one of `+x`, `+y`, `+z`.
     ///
     /// The face the ray left by — and for a **miss**, which left by none, the
     /// face its clamp reached first. [`presented_face`] carries the rule that
     /// was measured against that and refused.
-    pub normal: WorldVec,
+    pub normal:  WorldVec,
     /// How far, in **tiles**, the ray passed outside the box before the clamp
     /// pulled it back — at most [`FRAGMENT`] for a ray this grid can tell from
     /// one that went through, and [`Meeting::hit`] is that comparison spelled
@@ -520,7 +524,7 @@ pub struct Meeting {
     /// Only [`nearest`] reads it — the box with the largest `t` is the one in
     /// front — and it is on the struct rather than recomputed there because the
     /// slab test has already worked it out.
-    pub t: f32,
+    pub t:       f32,
 }
 
 impl Meeting {
@@ -716,12 +720,14 @@ where
             // A real hit always beats a miss, however near the miss came; two
             // hits are decided by which is in front, and two misses by which
             // came closer.
-            Some((_, had)) => match (had.hit(), met.hit()) {
-                (false, true) => true,
-                (true, false) => false,
-                (true, true) => met.t > had.t,
-                (false, false) => met.outside < had.outside,
-            },
+            Some((_, had)) => {
+                match (had.hit(), met.hit()) {
+                    (false, true) => true,
+                    (true, false) => false,
+                    (true, true) => met.t > had.t,
+                    (false, false) => met.outside < had.outside,
+                }
+            }
         };
         if better {
             best = Some((what, met));
@@ -839,8 +845,8 @@ mod tests {
         // own test was written from.
         let mut out = Vec::new();
         Volume {
-            lo: WorldVec::new(100.0, 101.0, 3.0),
-            hi: WorldVec::new(101.0, 102.0, 7.0),
+            lo:    WorldVec::new(100.0, 101.0, 3.0),
+            hi:    WorldVec::new(101.0, 102.0, 7.0),
             solid: Some(crate::occlusion::SolidId::new(9)),
             edges: crate::occlusion::Edges::EAST,
         }
@@ -1386,7 +1392,12 @@ mod tests {
     /// client's real art; this is it over art nobody had to ship.
     #[test]
     fn every_pixel_of_a_blocks_picture_meets_that_blocks_own_box() {
-        use crate::facing::{Block, Blocks, Span, blocks_silhouette};
+        use crate::facing::{
+            Block,
+            Blocks,
+            Span,
+            blocks_silhouette,
+        };
 
         for top in [5u8, 10] {
             let block = Block::new(Span::new(0, 8), Span::new(0, 8), Span::new(0, top))

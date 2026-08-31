@@ -23,9 +23,18 @@ pub mod tailoring;
 pub mod tinkering;
 
 use openshard_protocol::wire::SoundId;
-use openshard_state::{Skill, TICKS_PER_SECOND};
+use openshard_state::{
+    Skill,
+    TICKS_PER_SECOND,
+};
 
-use crate::system::{CraftSystemDef, Eca, Needs, SystemId, Text};
+use crate::system::{
+    CraftSystemDef,
+    Eca,
+    Needs,
+    SystemId,
+    Text,
+};
 
 include!(concat!(env!("OUT_DIR"), "/systems.rs"));
 
@@ -37,11 +46,23 @@ pub fn system(id: SystemId) -> Option<&'static CraftSystemDef> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use openshard_protocol::item_kind::{ItemKindId, ItemSelector, MaterialRule};
-    use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        ItemSelector,
+        MaterialRule,
+    };
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
     use openshard_state::item_definition as find_item_definition;
-    use openshard_state::item_definition::{LEATHER, METAL, WOOD};
+    use openshard_state::item_definition::{
+        LEATHER,
+        METAL,
+        WOOD,
+    };
+
+    use super::*;
 
     #[test]
     fn every_trade_has_exactly_one_system() {
@@ -109,7 +130,7 @@ mod tests {
                 assert_eq!(
                     openshard_state::presentation_of(axis.item_kind, Some(entry.material)),
                     Some(openshard_state::Drawn {
-                        id: axis.graphic,
+                        id:  axis.graphic,
                         hue: entry.hue,
                     }),
                     "{:?}'s axis must declare the exact kind/material it renders",
@@ -173,7 +194,7 @@ mod tests {
             assert!(matches!(
                 recipe.resources[0].selector,
                 Some(ItemSelector::KindWithMaterial {
-                    kind: ItemKindId(1),
+                    kind:     ItemKindId(1),
                     material: MaterialRule::Any,
                 })
             ));
@@ -191,13 +212,15 @@ mod tests {
                 let material = match recipe.output_material {
                     crate::recipe::OutputMaterial::None => None,
                     crate::recipe::OutputMaterial::Fixed(material) => Some(material),
-                    crate::recipe::OutputMaterial::InheritInput(_) => match definition.material_family {
-                        Some(METAL) => Some(openshard_protocol::item_kind::MaterialId(1)),
-                        Some(WOOD) => Some(openshard_protocol::item_kind::MaterialId(20)),
-                        Some(LEATHER) => Some(openshard_protocol::item_kind::MaterialId(40)),
-                        Some(family) => panic!("unmapped material family {}", family.0),
-                        None => panic!("typed material output has no material family"),
-                    },
+                    crate::recipe::OutputMaterial::InheritInput(_) => {
+                        match definition.material_family {
+                            Some(METAL) => Some(openshard_protocol::item_kind::MaterialId(1)),
+                            Some(WOOD) => Some(openshard_protocol::item_kind::MaterialId(20)),
+                            Some(LEATHER) => Some(openshard_protocol::item_kind::MaterialId(40)),
+                            Some(family) => panic!("unmapped material family {}", family.0),
+                            None => panic!("typed material output has no material family"),
+                        }
+                    }
                     crate::recipe::OutputMaterial::Legacy => {
                         panic!("typed recipe has legacy material policy")
                     }
@@ -205,7 +228,7 @@ mod tests {
                 assert_eq!(
                     openshard_state::presentation_of(kind, material),
                     Some(openshard_state::Drawn {
-                        id: recipe.graphic,
+                        id:  recipe.graphic,
                         hue: recipe.hue,
                     }),
                     "{:?} recipe {:#06X}",
@@ -231,7 +254,7 @@ mod tests {
         assert!(matches!(
             recipe.resources[0].selector,
             Some(ItemSelector::KindWithMaterial {
-                kind: ItemKindId(1),
+                kind:     ItemKindId(1),
                 material: MaterialRule::Any,
             })
         ));
@@ -252,7 +275,7 @@ mod tests {
         assert!(matches!(
             recipe.resources[0].selector,
             Some(ItemSelector::KindWithMaterial {
-                kind: ItemKindId(1),
+                kind:     ItemKindId(1),
                 material: MaterialRule::Any,
             })
         ));
@@ -263,7 +286,7 @@ mod tests {
         for system in SYSTEMS {
             for recipe in system.recipes {
                 let Some((kind, _)) = openshard_state::kind_from_drawn(openshard_state::Drawn {
-                    id: recipe.graphic,
+                    id:  recipe.graphic,
                     hue: recipe.hue,
                 }) else {
                     continue;

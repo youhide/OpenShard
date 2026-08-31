@@ -22,34 +22,40 @@
 //! is a licence to *try*, not a discount on the odds.
 
 use openshard_entities::EntityId;
-use openshard_skills::{roll_skill_band, skill_value};
+use openshard_skills::{
+    roll_skill_band,
+    skill_value,
+};
 use openshard_state::WorldState;
 
 use crate::recipe::Recipe;
-use crate::system::{CraftSystemDef, Eca};
+use crate::system::{
+    CraftSystemDef,
+    Eca,
+};
 
 /// The odds of one recipe for one crafter, in per-mille.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Chance {
     /// The chance the craft succeeds at all.
-    pub success: u32,
+    pub success:     u32,
     /// The chance it comes out exceptional. Read only on the success branch, but
     /// rolled either way.
     pub exceptional: u32,
     /// Whether every required skill clears its floor. False means the crafter
     /// cannot attempt this at all, which is a refusal and not a failure.
-    pub all_skills: bool,
+    pub all_skills:  bool,
 }
 
 /// What one attempt actually did.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Roll {
     /// Whether it worked.
-    pub success: bool,
+    pub success:     bool,
     /// Whether it came out exceptional. Meaningless unless `success`.
     pub exceptional: bool,
     /// Whether the crafter was allowed to try — see [`Chance::all_skills`].
-    pub all_skills: bool,
+    pub all_skills:  bool,
 }
 
 /// The odds, without touching the world — what the gump's detail page prints.

@@ -6,12 +6,24 @@
 //! slightly different minimap size.
 
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
-use openshard_client_render::gump::{GumpArt, GumpPixel, Picture};
+use openshard_client_render::gump::{
+    GumpArt,
+    GumpPixel,
+    Picture,
+};
 use openshard_protocol::wire::Graphic;
 
-use crate::panes::{Input, PaneCtx, PaneFrame, Response};
+use crate::panes::{
+    Input,
+    PaneCtx,
+    PaneFrame,
+    Response,
+};
 use crate::windows::Drawn;
 
 /// The two radar gumps used by the classic client.  The art supplies the
@@ -87,7 +99,7 @@ pub(crate) fn tangent_margin_fraction() -> f32 {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Window {
     pub extent: (i32, i32),
-    pub frame: Picture,
+    pub frame:  Picture,
     zoom_steps: i8,
 }
 
@@ -123,9 +135,9 @@ impl Window {
 /// manager gestures shared by every [`crate::windows::OwnWindow`].
 #[derive(Debug, Default)]
 pub struct MinimapPane {
-    large: bool,
+    large:           bool,
     last_left_press: Option<Instant>,
-    zoom_steps: i8,
+    zoom_steps:      i8,
 }
 
 impl MinimapPane {
@@ -192,11 +204,28 @@ impl MinimapPane {
 
 #[cfg(test)]
 mod tests {
-    use super::{SMALL_EXTENT, SMALL_FRAME, TANGENT_MARGIN_FRACTION, Window};
-    use openshard_client_render::gump::{GumpArt, GumpPixel, Picture};
-    use openshard_client_render::radar::{RadarExtent, RadarTile, RadarView};
+    use openshard_client_render::gump::{
+        GumpArt,
+        GumpPixel,
+        Picture,
+    };
+    use openshard_client_render::radar::{
+        RadarExtent,
+        RadarTile,
+        RadarView,
+    };
     use openshard_client_render::radar_pass::Placement;
-    use openshard_protocol::world::{Facet, Point};
+    use openshard_protocol::world::{
+        Facet,
+        Point,
+    };
+
+    use super::{
+        SMALL_EXTENT,
+        SMALL_FRAME,
+        TANGENT_MARGIN_FRACTION,
+        Window,
+    };
 
     /// Britannia, so nothing below is clipped by a toy facet — except the two
     /// edge cases that mean to be.
@@ -221,12 +250,12 @@ mod tests {
             facet(),
             1.0 / zoom,
             Placement {
-                origin: (0.0, 0.0),
-                extent: (
+                origin:   (0.0, 0.0),
+                extent:   (
                     content_extent.0 as f32 * magnify,
                     content_extent.1 as f32 * magnify,
                 ),
-                circle: true,
+                circle:   true,
                 rotation: std::f32::consts::FRAC_PI_4,
             },
             device_scale,
@@ -250,8 +279,8 @@ mod tests {
     #[test]
     fn hit_bounds_include_the_first_pixel_and_exclude_the_far_edges() {
         let window = Window {
-            extent: SMALL_EXTENT,
-            frame: Picture::plain(GumpArt::Gump(SMALL_FRAME), GumpPixel::new(0, 0)),
+            extent:     SMALL_EXTENT,
+            frame:      Picture::plain(GumpArt::Gump(SMALL_FRAME), GumpPixel::new(0, 0)),
             zoom_steps: 0,
         };
         assert!(window.contains(GumpPixel::new(SMALL_EXTENT.0 / 2, SMALL_EXTENT.1 / 2)));

@@ -7,11 +7,25 @@
 //! this path.
 
 use openshard_protocol::gump::{
-    ButtonId, CloseGump, GUMP_WHITE, GumpAnswer, GumpButton, GumpDisplay, GumpId, GumpKey, GumpLayout,
-    GumpPoint, GumpResponse,
+    ButtonId,
+    CloseGump,
+    GUMP_WHITE,
+    GumpAnswer,
+    GumpButton,
+    GumpDisplay,
+    GumpId,
+    GumpKey,
+    GumpLayout,
+    GumpPoint,
+    GumpResponse,
 };
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_state::components::{Client, Ghost, Healer, Position};
+use openshard_state::components::{
+    Client,
+    Ghost,
+    Healer,
+    Position,
+};
 use openshard_state::sectors::in_range;
 
 use super::*;
@@ -158,17 +172,17 @@ impl World {
             connection,
             &ServerPacket::CloseGump(CloseGump {
                 gump_id: HEALER_GUMP,
-                button: ButtonId::CLOSE_BOX,
+                button:  ButtonId::CLOSE_BOX,
             }),
         );
         self.state.send_packet(
             connection,
             &ServerPacket::GumpDisplay(GumpDisplay {
-                serial: GumpKey::on(serial),
+                serial:  GumpKey::on(serial),
                 gump_id: HEALER_GUMP,
-                at: GumpPoint::new(100, 0),
-                layout: text.to_owned(),
-                lines: lines.to_vec(),
+                at:      GumpPoint::new(100, 0),
+                layout:  text.to_owned(),
+                lines:   lines.to_vec(),
             }),
         );
         if let Some(row) = self.state.row_of_mut(ghost) {
@@ -185,7 +199,7 @@ impl World {
                 connection,
                 &ServerPacket::CloseGump(CloseGump {
                     gump_id: HEALER_GUMP,
-                    button: ButtonId::CLOSE_BOX,
+                    button:  ButtonId::CLOSE_BOX,
                 }),
             );
         }

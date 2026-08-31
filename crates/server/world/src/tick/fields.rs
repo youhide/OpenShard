@@ -85,7 +85,7 @@ impl World {
         self.state.registry.insert(
             entity,
             Drawn {
-                id: graphic,
+                id:  graphic,
                 hue: Hue(0),
             },
         );
@@ -142,11 +142,11 @@ impl World {
                 match kind {
                     FieldKind::Fire => {
                         combat::damage(
-                        &mut self.state,
-                        victim,
-                        FIRE_FIELD_DAMAGE,
-                        DamageType::Fire,
-                        Some(caster),
+                            &mut self.state,
+                            victim,
+                            FIRE_FIELD_DAMAGE,
+                            DamageType::Fire,
+                            Some(caster),
                         )
                     }
                     FieldKind::Poison => {

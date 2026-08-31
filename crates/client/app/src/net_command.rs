@@ -9,23 +9,45 @@
 
 use std::time::Instant;
 
-use openshard_client_net::view::{Heard, WorldView};
+use openshard_client_net::view::{
+    Heard,
+    WorldView,
+};
 use openshard_client_render::control::Follow;
 use openshard_client_render::items::GroundItem;
 use openshard_client_render::mobiles;
-use openshard_protocol::items::{CORPSE_GRAPHIC, WorldItemPayload};
+use openshard_protocol::items::{
+    CORPSE_GRAPHIC,
+    WorldItemPayload,
+};
 use openshard_protocol::localized;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::speech::LocalizedMessage;
-use openshard_protocol::wire::{Graphic, Hue, Layer, SoundId};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+    SoundId,
+};
 use openshard_protocol::world::Point;
 use openshard_uofiles::anim::is_ghost;
-use openshard_uofiles::cliloc::{Cliloc, ClilocNumber};
+use openshard_uofiles::cliloc::{
+    Cliloc,
+    ClilocNumber,
+};
 
 use crate::app::App;
 use crate::audio::Footstep;
-use crate::world::{MotionRenderState, advance_presentation_to, footing};
-use crate::{clutter, crowd, link};
+use crate::world::{
+    MotionRenderState,
+    advance_presentation_to,
+    footing,
+};
+use crate::{
+    clutter,
+    crowd,
+    link,
+};
 
 /// Whether two authoritative positions are one ordinary movement step apart.
 /// A relocation must not sound like somebody walked across the map.
@@ -104,11 +126,13 @@ fn navigation_bake(
     // the read above instead. A graph that cannot be written is still a graph
     // this run can route with, so the failure is a line and not a refusal.
     match bake::save(&path, &graph, &stamp) {
-        Ok(bytes) => eprintln!(
-            "the navigation graph took {:.1}s and {bytes} bytes; kept at {}",
-            started.elapsed().as_secs_f64(),
-            path.display(),
-        ),
+        Ok(bytes) => {
+            eprintln!(
+                "the navigation graph took {:.1}s and {bytes} bytes; kept at {}",
+                started.elapsed().as_secs_f64(),
+                path.display(),
+            )
+        }
         Err(error) => eprintln!("the navigation graph was not kept: {error}"),
     }
     post.publish(link::Update::Navigation {
@@ -151,13 +175,17 @@ pub(crate) fn project_motion(
     // handed, as the layer the saddle equips onto — see `mounted` below.
     let mounted = equipment.iter().any(|layer| layer.layer == Layer::MOUNT);
     let command = match (motion.corrected, motion.transition) {
-        (true, _) => crowd::CommandedMove::Snap {
-            at: motion.rendered.position,
-        },
+        (true, _) => {
+            crowd::CommandedMove::Snap {
+                at: motion.rendered.position,
+            }
+        }
         (false, Some((from, to))) => crowd::CommandedMove::Transition { from, to },
-        (false, None) => crowd::CommandedMove::Standing {
-            at: motion.rendered.position,
-        },
+        (false, None) => {
+            crowd::CommandedMove::Standing {
+                at: motion.rendered.position,
+            }
+        }
     };
     *player = crowd.command(
         who,
@@ -505,13 +533,15 @@ impl App {
         use crate::combat_log::Event;
         let log = &mut self.world.presentation.combat_log;
         match update {
-            link::Update::CombatActionPhase(phase) => log.record(
-                Some(phase.actor),
-                Event::Committed {
-                    kind: phase.kind,
-                    phase: phase.phase,
-                },
-            ),
+            link::Update::CombatActionPhase(phase) => {
+                log.record(
+                    Some(phase.actor),
+                    Event::Committed {
+                        kind:  phase.kind,
+                        phase: phase.phase,
+                    },
+                )
+            }
             link::Update::CombatActionStage(stage) => {
                 log.record(Some(stage.actor), Event::Staged { stage: stage.stage });
             }
@@ -526,24 +556,30 @@ impl App {
             link::Update::CombatActionBalked(balked) => {
                 log.record(Some(balked.actor), Event::Balked { balk: balked.balk });
             }
-            link::Update::SwingTiming(timing) => log.record(
-                Some(timing.serial),
-                Event::Timed {
-                    millis: timing.duration.millis(),
-                },
-            ),
-            link::Update::Animation(animation) => log.record(
-                Some(animation.serial),
-                Event::Animated {
-                    group: animation.action,
-                },
-            ),
-            link::Update::NewAnimation(animation) => log.record(
-                Some(animation.serial),
-                Event::Animated {
-                    group: animation.action,
-                },
-            ),
+            link::Update::SwingTiming(timing) => {
+                log.record(
+                    Some(timing.serial),
+                    Event::Timed {
+                        millis: timing.duration.millis(),
+                    },
+                )
+            }
+            link::Update::Animation(animation) => {
+                log.record(
+                    Some(animation.serial),
+                    Event::Animated {
+                        group: animation.action,
+                    },
+                )
+            }
+            link::Update::NewAnimation(animation) => {
+                log.record(
+                    Some(animation.serial),
+                    Event::Animated {
+                        group: animation.action,
+                    },
+                )
+            }
             // The arrow. `from` is the shooter where the shard named one, which
             // it does for every projectile combat emits.
             link::Update::Effect(effect) => {
@@ -570,77 +606,97 @@ impl App {
         );
         self.project_player_motion();
         let (trace_event, trace_detail) = match &update {
-            link::Update::World { view } => (
-                "world",
-                format!("entered={}", crate::movement_trace::point(view.player.position)),
-            ),
-            link::Update::Mutation { packet, .. } => (
-                "mutation",
-                format!("packet={}", crate::movement_trace::packet_kind(packet)),
-            ),
+            link::Update::World { view } => {
+                (
+                    "world",
+                    format!("entered={}", crate::movement_trace::point(view.player.position)),
+                )
+            }
+            link::Update::Mutation { packet, .. } => {
+                (
+                    "mutation",
+                    format!("packet={}", crate::movement_trace::packet_kind(packet)),
+                )
+            }
             link::Update::Animation(_) => ("animation", String::new()),
             link::Update::NewAnimation(_) => ("new animation", String::new()),
             link::Update::Effect(effect) => ("effect", format!("art=0x{:04X}", effect.art.0)),
-            link::Update::SwingTiming(timing) => (
-                "swing timing",
-                format!(
-                    "serial={} duration_ms={}",
-                    timing.serial,
-                    timing.duration.millis()
-                ),
-            ),
-            link::Update::HarvestToolVisual(visual) => (
-                "harvest tool visual",
-                format!("serial={} graphic=0x{:04X}", visual.serial, visual.graphic.0),
-            ),
+            link::Update::SwingTiming(timing) => {
+                (
+                    "swing timing",
+                    format!(
+                        "serial={} duration_ms={}",
+                        timing.serial,
+                        timing.duration.millis()
+                    ),
+                )
+            }
+            link::Update::HarvestToolVisual(visual) => {
+                (
+                    "harvest tool visual",
+                    format!("serial={} graphic=0x{:04X}", visual.serial, visual.graphic.0),
+                )
+            }
             link::Update::HarvestRefused(refusal) => {
                 ("harvest refused", format!("serial={}", refusal.serial))
             }
             link::Update::HarvestCompleted(completion) => {
                 ("harvest completed", format!("serial={}", completion.serial))
             }
-            link::Update::CombatActionPhase(phase) => (
-                "combat action phase",
-                format!(
-                    "serial={} kind={:?} phase={:?}",
-                    phase.actor, phase.kind, phase.phase
-                ),
-            ),
-            link::Update::CombatActionEnded(ended) => (
-                "combat action ended",
-                format!("serial={} outcome={:?}", ended.actor, ended.outcome),
-            ),
-            link::Update::CombatActionBalked(balked) => (
-                "combat action balked",
-                format!("serial={} balk={:?}", balked.actor, balked.balk),
-            ),
-            link::Update::CombatActionStage(stage) => (
-                "combat action stage",
-                format!("serial={} stage={:?}", stage.actor, stage.stage),
-            ),
+            link::Update::CombatActionPhase(phase) => {
+                (
+                    "combat action phase",
+                    format!(
+                        "serial={} kind={:?} phase={:?}",
+                        phase.actor, phase.kind, phase.phase
+                    ),
+                )
+            }
+            link::Update::CombatActionEnded(ended) => {
+                (
+                    "combat action ended",
+                    format!("serial={} outcome={:?}", ended.actor, ended.outcome),
+                )
+            }
+            link::Update::CombatActionBalked(balked) => {
+                (
+                    "combat action balked",
+                    format!("serial={} balk={:?}", balked.actor, balked.balk),
+                )
+            }
+            link::Update::CombatActionStage(stage) => {
+                (
+                    "combat action stage",
+                    format!("serial={} stage={:?}", stage.actor, stage.stage),
+                )
+            }
             link::Update::Design(bytes) => ("design", format!("bytes={}", bytes.len())),
-            link::Update::Ground { snapshot, .. } => (
-                "ground",
-                format!(
-                    "facet={} revision={} {}x{}",
-                    snapshot.facet().0,
-                    snapshot.revision().get(),
-                    snapshot.map().width(),
-                    snapshot.map().height(),
-                ),
-            ),
-            link::Update::GroundMoved { chunks } => (
-                "ground moved",
-                format!(
-                    "chunks={} revision={}",
-                    chunks.len(),
-                    chunks
-                        .first()
-                        .expect("a publish that moved no chunk is not fetched")
-                        .revision()
-                        .get(),
-                ),
-            ),
+            link::Update::Ground { snapshot, .. } => {
+                (
+                    "ground",
+                    format!(
+                        "facet={} revision={} {}x{}",
+                        snapshot.facet().0,
+                        snapshot.revision().get(),
+                        snapshot.map().width(),
+                        snapshot.map().height(),
+                    ),
+                )
+            }
+            link::Update::GroundMoved { chunks } => {
+                (
+                    "ground moved",
+                    format!(
+                        "chunks={} revision={}",
+                        chunks.len(),
+                        chunks
+                            .first()
+                            .expect("a publish that moved no chunk is not fetched")
+                            .revision()
+                            .get(),
+                    ),
+                )
+            }
             link::Update::Navigation { graph, .. } => {
                 let (regions, nodes, edges) = graph.counts();
                 (
@@ -683,11 +739,12 @@ impl App {
             link::Update::NewAnimation(animation) => self.world.presentation.crowd.play_new(animation),
             link::Update::Effect(effect) => self.world.presentation.fire(effect),
             link::Update::SwingTiming(timing) => self.world.presentation.crowd.time_swing(timing),
-            link::Update::HarvestToolVisual(visual) => self
-                .world
-                .presentation
-                .crowd
-                .harvest_tool(visual, &self.resources.tiledata),
+            link::Update::HarvestToolVisual(visual) => {
+                self.world
+                    .presentation
+                    .crowd
+                    .harvest_tool(visual, &self.resources.tiledata)
+            }
             link::Update::HarvestRefused(refusal) => self.world.presentation.crowd.refuse_harvest(refusal),
             link::Update::HarvestCompleted(completion) => {
                 self.world.presentation.crowd.complete_harvest(completion);
@@ -903,28 +960,30 @@ impl App {
         // `ResendPacketResync` guards against.
         let was_out_of_step = walk.out_of_step();
         match link::fold(walk, packet) {
-            Ok(folded) => match folded.movement {
-                // A correction is worth applying even when the view is
-                // unchanged: the view never held the prediction, so rolling one
-                // back moves the *drawn* body and nothing else.
-                Some(movement) => {
-                    match movement {
-                        link::Movement::Ack { sequence, .. } => {
-                            self.ping.acknowledged(sequence, received, Instant::now());
-                        }
-                        link::Movement::Reject { .. } | link::Movement::Relocation { .. } => {
-                            self.ping.discard_pending();
-                        }
-                        link::Movement::Turn { .. } => {
-                            if let ServerPacket::WalkAck(ack) = packet {
-                                self.ping.acknowledged(ack.sequence, received, Instant::now());
+            Ok(folded) => {
+                match folded.movement {
+                    // A correction is worth applying even when the view is
+                    // unchanged: the view never held the prediction, so rolling one
+                    // back moves the *drawn* body and nothing else.
+                    Some(movement) => {
+                        match movement {
+                            link::Movement::Ack { sequence, .. } => {
+                                self.ping.acknowledged(sequence, received, Instant::now());
+                            }
+                            link::Movement::Reject { .. } | link::Movement::Relocation { .. } => {
+                                self.ping.discard_pending();
+                            }
+                            link::Movement::Turn { .. } => {
+                                if let ServerPacket::WalkAck(ack) = packet {
+                                    self.ping.acknowledged(ack.sequence, received, Instant::now());
+                                }
                             }
                         }
+                        self.apply_movement(packet, movement);
                     }
-                    self.apply_movement(packet, movement);
+                    None => self.apply_mutation(packet),
                 }
-                None => self.apply_mutation(packet),
-            },
+            }
             // The two ends have lost track of each other over the walk, and
             // this end cannot repair it: the ack names a step it is not
             // holding, and guessing which one was meant would turn a
@@ -993,12 +1052,14 @@ impl App {
         // a turn in place: without this fallback the view records its new
         // facing but `PlayerMotion` keeps projecting the old one to the crowd.
         let movement = movement.or(match packet {
-            ServerPacket::PlayerUpdate(update) => Some(link::Movement::Relocation {
-                confirmed: openshard_client_net::walk::Predicted {
-                    position: update.position,
-                    facing: update.facing,
-                },
-            }),
+            ServerPacket::PlayerUpdate(update) => {
+                Some(link::Movement::Relocation {
+                    confirmed: openshard_client_net::walk::Predicted {
+                        position: update.position,
+                        facing:   update.facing,
+                    },
+                })
+            }
             _ => None,
         });
         // A refused lift or drop bounces the server-held item back. The cursor
@@ -1061,13 +1122,13 @@ impl App {
             {
                 self.audio.play_footstep(
                     Footstep {
-                        who: Some(moved.serial),
-                        body: moved.body,
-                        at: moved.position,
+                        who:     Some(moved.serial),
+                        body:    moved.body,
+                        at:      moved.position,
                         running: moved.facing.running,
                         mounted: mounted(&previous.equipment),
-                        hidden: moved.flags.0 & 0x80 != 0,
-                        dead: false,
+                        hidden:  moved.flags.0 & 0x80 != 0,
+                        dead:    false,
                     },
                     listener,
                 );
@@ -1081,24 +1142,29 @@ impl App {
         // presentation event; the authoritative view remains the sole record
         // of the current hit points.
         let health_before = match packet {
-            ServerPacket::Health(bar) => match bar.serial == view.player.serial {
-                true => view.player.hits.map(|hits| (bar.serial, hits.current)),
-                false => view
-                    .mobiles
-                    .get(&bar.serial)
-                    .and_then(|mobile| mobile.hits)
-                    .map(|hits| (bar.serial, hits.current)),
-            },
+            ServerPacket::Health(bar) => {
+                match bar.serial == view.player.serial {
+                    true => view.player.hits.map(|hits| (bar.serial, hits.current)),
+                    false => {
+                        view.mobiles
+                            .get(&bar.serial)
+                            .and_then(|mobile| mobile.hits)
+                            .map(|hits| (bar.serial, hits.current))
+                    }
+                }
+            }
             _ => None,
         };
         let damage = match packet {
-            ServerPacket::Health(bar) => match bar.serial == view.player.serial {
-                true => view.player.hits,
-                false => view.mobiles.get(&bar.serial).and_then(|mobile| mobile.hits),
+            ServerPacket::Health(bar) => {
+                match bar.serial == view.player.serial {
+                    true => view.player.hits,
+                    false => view.mobiles.get(&bar.serial).and_then(|mobile| mobile.hits),
+                }
+                .and_then(|before| before.current.checked_sub(bar.vitals.current))
+                .filter(|amount| *amount > 0)
+                .map(|amount| (bar.serial, amount))
             }
-            .and_then(|before| before.current.checked_sub(bar.vitals.current))
-            .filter(|amount| *amount > 0)
-            .map(|amount| (bar.serial, amount)),
             _ => None,
         };
         let previous_latest = view.journal.back().cloned();
@@ -1396,11 +1462,13 @@ impl App {
                             view.contents
                                 .get(serial)
                                 .and_then(|items| items.iter().find(|item| item.serial == layer.item))
-                                .map(|item| openshard_protocol::mobile::Equipment {
-                                    serial: item.serial,
-                                    graphic: item.graphic,
-                                    layer: layer.layer,
-                                    hue: item.hue,
+                                .map(|item| {
+                                    openshard_protocol::mobile::Equipment {
+                                        serial:  item.serial,
+                                        graphic: item.graphic,
+                                        layer:   layer.layer,
+                                        hue:     item.hue,
+                                    }
                                 })
                         })
                         .collect();
@@ -1706,15 +1774,18 @@ impl App {
     /// there is nothing to tell the player that an empty tile does not already
     /// say.
     pub(crate) fn fold_design(&mut self, bytes: &[u8]) {
-        use openshard_protocol::design::{DesignBounds, DesignDetail};
+        use openshard_protocol::design::{
+            DesignBounds,
+            DesignDetail,
+        };
 
         // The header first, for the serial — which is what says whose box to
         // look up. Read with a placeholder box, because the header is before
         // every plane and needs none.
         let peek = DesignBounds {
-            x_min: 0,
-            y_min: 0,
-            width: 1,
+            x_min:  0,
+            y_min:  0,
+            width:  1,
             height: 1,
         };
         let Ok(header) = DesignDetail::decode(bytes, peek) else {
@@ -1736,18 +1807,20 @@ impl App {
         self.world.authoritative.designs.insert(
             serial,
             crate::world::HouseShape {
-                revision: design.revision.0,
+                revision:   design.revision.0,
                 components: design
                     .tiles
                     .into_iter()
-                    .map(|tile| openshard_uofiles::multi::Component {
-                        graphic: tile.graphic,
-                        dx: i16::from(tile.dx),
-                        dy: i16::from(tile.dy),
-                        dz: i16::from(tile.dz),
-                        // Every tile on the wire is one the client draws: the
-                        // undrawn ones never went into the packet.
-                        flags: 1,
+                    .map(|tile| {
+                        openshard_uofiles::multi::Component {
+                            graphic: tile.graphic,
+                            dx:      i16::from(tile.dx),
+                            dy:      i16::from(tile.dy),
+                            dz:      i16::from(tile.dz),
+                            // Every tile on the wire is one the client draws: the
+                            // undrawn ones never went into the packet.
+                            flags:   1,
+                        }
                     })
                     .collect(),
             },
@@ -1814,9 +1887,9 @@ impl App {
         let multi = multis.get(MultiId::from_graphic(item.graphic).0)?;
         let box_ = openshard_uofiles::multi::bounds(&multi.components)?;
         Some(openshard_protocol::design::DesignBounds {
-            x_min: i8::try_from(box_.min_x).ok()?,
-            y_min: i8::try_from(box_.min_y).ok()?,
-            width: usize::from(box_.max_x.abs_diff(box_.min_x)) + 1,
+            x_min:  i8::try_from(box_.min_x).ok()?,
+            y_min:  i8::try_from(box_.min_y).ok()?,
+            width:  usize::from(box_.max_x.abs_diff(box_.min_x)) + 1,
             height: usize::from(box_.max_y.abs_diff(box_.min_y)) + 1,
         })
     }
@@ -1951,9 +2024,19 @@ mod tests {
     use openshard_client_render::follow::Gaze;
     use openshard_client_render::mobiles::EquipmentLayer;
     use openshard_movement::WALK_HOLD;
-    use openshard_protocol::direction::{Direction, Facing};
-    use openshard_protocol::speech::{Font, TalkMode};
-    use openshard_protocol::wire::{Graphic, Hue, Layer};
+    use openshard_protocol::direction::{
+        Direction,
+        Facing,
+    };
+    use openshard_protocol::speech::{
+        Font,
+        TalkMode,
+    };
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+        Layer,
+    };
     use openshard_protocol::world::Point;
     use openshard_tiles::AnimId;
 
@@ -1970,7 +2053,11 @@ mod tests {
     #[test]
     fn the_cutaway_does_not_follow_a_corner_cut() {
         use openshard_map::grid::Tile;
-        use openshard_map::overlay::{Cover, Doors, Overlay};
+        use openshard_map::overlay::{
+            Cover,
+            Doors,
+            Overlay,
+        };
 
         /// Somewhere to stand, on flat open ground with no map under it.
         const HERE: Point = Point::new(100, 100, 0);
@@ -2061,13 +2148,13 @@ mod tests {
     #[test]
     fn a_missing_begging_cliloc_uses_the_shared_fallback() {
         let message = LocalizedMessage {
-            serial: None,
-            graphic: None,
-            mode: TalkMode::Regular,
-            hue: Hue::NONE,
-            font: Font::DEFAULT,
-            cliloc: localized::begging::UNWILLING,
-            name: "System".to_owned(),
+            serial:    None,
+            graphic:   None,
+            mode:      TalkMode::Regular,
+            hue:       Hue::NONE,
+            font:      Font::DEFAULT,
+            cliloc:    localized::begging::UNWILLING,
+            name:      "System".to_owned(),
             arguments: String::new(),
         };
 
@@ -2087,8 +2174,8 @@ mod tests {
         let mut player = crowd.see(None, start, Graphic(400), facing, Hue::NONE, false, false);
         player.equipment = vec![EquipmentLayer {
             graphic: AnimId(7005),
-            hue: Hue::NONE,
-            layer: Layer::TUNIC,
+            hue:     Hue::NONE,
+            layer:   Layer::TUNIC,
         }]
         .into();
         let equipment = player.equipment.clone();
@@ -2099,16 +2186,16 @@ mod tests {
             None,
             &mut player,
             MotionRenderState {
-                rendered: openshard_client_net::walk::Predicted {
+                rendered:   openshard_client_net::walk::Predicted {
                     position: next,
                     facing,
                 },
-                predicted: openshard_client_net::walk::Predicted {
+                predicted:  openshard_client_net::walk::Predicted {
                     position: next,
                     facing,
                 },
                 transition: Some((start, next)),
-                corrected: false,
+                corrected:  false,
             },
             false,
         );
@@ -2121,16 +2208,16 @@ mod tests {
             None,
             &mut player,
             MotionRenderState {
-                rendered: openshard_client_net::walk::Predicted {
+                rendered:   openshard_client_net::walk::Predicted {
                     position: next,
                     facing,
                 },
-                predicted: openshard_client_net::walk::Predicted {
+                predicted:  openshard_client_net::walk::Predicted {
                     position: next,
                     facing,
                 },
                 transition: Some((start, next)),
-                corrected: false,
+                corrected:  false,
             },
             false,
         );
@@ -2173,8 +2260,8 @@ mod tests {
         // The saddle arrives, as `entered` now puts it: into the list first.
         player.equipment = vec![EquipmentLayer {
             graphic: AnimId(0x00C8),
-            hue: Hue::NONE,
-            layer: Layer::MOUNT,
+            hue:     Hue::NONE,
+            layer:   Layer::MOUNT,
         }]
         .into();
         project_motion(
@@ -2182,10 +2269,10 @@ mod tests {
             None,
             &mut player,
             MotionRenderState {
-                rendered: openshard_client_net::walk::Predicted { position: at, facing },
-                predicted: openshard_client_net::walk::Predicted { position: at, facing },
+                rendered:   openshard_client_net::walk::Predicted { position: at, facing },
+                predicted:  openshard_client_net::walk::Predicted { position: at, facing },
                 transition: None,
-                corrected: false,
+                corrected:  false,
             },
             false,
         );
@@ -2204,7 +2291,11 @@ mod tests {
     /// is not a house at all.
     #[test]
     fn a_multi_becomes_the_statics_it_draws_as() {
-        use openshard_uofiles::multi::{Component, Multi, Multis};
+        use openshard_uofiles::multi::{
+            Component,
+            Multi,
+            Multis,
+        };
 
         let cottage = Multi::new(
             0x64,
@@ -2212,24 +2303,24 @@ mod tests {
                 // The signature tile every multi starts with, undrawn.
                 Component {
                     graphic: Graphic(1),
-                    dx: 0,
-                    dy: 0,
-                    dz: 0,
-                    flags: 0,
+                    dx:      0,
+                    dy:      0,
+                    dz:      0,
+                    flags:   0,
                 },
                 Component {
                     graphic: Graphic(0x0006),
-                    dx: -1,
-                    dy: 2,
-                    dz: 0,
-                    flags: 1,
+                    dx:      -1,
+                    dy:      2,
+                    dz:      0,
+                    flags:   1,
                 },
                 Component {
                     graphic: Graphic(0x0007),
-                    dx: 1,
-                    dy: 0,
-                    dz: 20,
-                    flags: 1,
+                    dx:      1,
+                    dy:      0,
+                    dz:      20,
+                    flags:   1,
                 },
             ],
         );
@@ -2290,16 +2381,20 @@ mod tests {
     /// been true since houses existed and drew a static nobody chose.
     #[test]
     fn a_multi_id_the_table_does_not_hold_draws_nothing() {
-        use openshard_uofiles::multi::{Component, Multi, Multis};
+        use openshard_uofiles::multi::{
+            Component,
+            Multi,
+            Multis,
+        };
 
         let known = Multi::new(
             0x64,
             vec![Component {
                 graphic: Graphic(0x0006),
-                dx: 0,
-                dy: 0,
-                dz: 0,
-                flags: 1,
+                dx:      0,
+                dy:      0,
+                dz:      0,
+                flags:   1,
             }],
         );
         let multis = Multis::of([known]);
@@ -2319,25 +2414,29 @@ mod tests {
     /// building.
     #[test]
     fn a_design_wins_over_the_multi_table() {
-        use openshard_uofiles::multi::{Component, Multi, Multis};
+        use openshard_uofiles::multi::{
+            Component,
+            Multi,
+            Multis,
+        };
 
         let foundation = Multi::new(
             0x64,
             vec![Component {
                 graphic: Graphic(0x0006),
-                dx: 0,
-                dy: 0,
-                dz: 0,
-                flags: 1,
+                dx:      0,
+                dy:      0,
+                dz:      0,
+                flags:   1,
             }],
         );
         let multis = Multis::of([foundation]);
         let design = [Component {
             graphic: Graphic(0x1234),
-            dx: 2,
-            dy: 3,
-            dz: 4,
-            flags: 1,
+            dx:      2,
+            dy:      3,
+            dz:      4,
+            flags:   1,
         }];
 
         let MultiDraw::Pieces(pieces) = multi_pieces(
@@ -2367,10 +2466,10 @@ mod tests {
 
         let design = [Component {
             graphic: Graphic(0x1234),
-            dx: 0,
-            dy: 0,
-            dz: 0,
-            flags: 1,
+            dx:      0,
+            dy:      0,
+            dz:      0,
+            flags:   1,
         }];
         let MultiDraw::Pieces(pieces) =
             multi_pieces(None, Some(&design), Graphic(0x53EC), Point::new(1, 1, 0), Hue(0))

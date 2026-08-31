@@ -38,11 +38,11 @@ const LIGHTING_BYTES: u64 = (7 + 3 * MAX_LIGHTS as u64) * 16;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ViewportRect {
     /// Pixels from the surface's left edge.
-    pub x: u32,
+    pub x:      u32,
     /// Pixels from its top edge.
-    pub y: u32,
+    pub y:      u32,
     /// Width in physical pixels.
-    pub width: u32,
+    pub width:  u32,
     /// Height in physical pixels.
     pub height: u32,
 }
@@ -57,23 +57,23 @@ pub struct ViewportRect {
 #[derive(Clone, Copy, Debug)]
 pub struct Frame<'a> {
     /// Where the picture goes — the surface.
-    pub target: &'a wgpu::TextureView,
+    pub target:           &'a wgpu::TextureView,
     /// The world image it comes from.
-    pub world: &'a wgpu::TextureView,
+    pub world:            &'a wgpu::TextureView,
     /// What the world passes wrote about each of that image's pixels beside the
     /// picture — see [`crate::gbuffer`]. What the lighting is computed against,
     /// and the reason this pass can tell a wall's lit face from the shadow
     /// behind it.
-    pub gbuffer: &'a crate::gbuffer::Views,
+    pub gbuffer:          &'a crate::gbuffer::Views,
     /// The statics pass's own instance buffer, bound a second time as storage
     /// so a static's fragment can read `instances[id]` back instead of
     /// carrying its `(x, y, z)` on every pixel of its own picture — see
     /// `docs/gbuffer.md` decision 2. [`dummy_instances`] when a caller has
     /// none this frame.
-    pub face_instances: &'a wgpu::Buffer,
+    pub face_instances:   &'a wgpu::Buffer,
     /// Server-item rows.  Their ids carry `IDS_DYNAMIC_ITEM`, so immutable map
     /// rows and cached composites never accidentally address this buffer.
-    pub item_instances: &'a wgpu::Buffer,
+    pub item_instances:   &'a wgpu::Buffer,
     /// The same, for the mobiles pass — a separate buffer because mobiles are
     /// a separate `SpriteRenderer` with its own instance list, not a second
     /// user of the statics one.
@@ -84,7 +84,7 @@ pub struct Frame<'a> {
     /// instead of `face_instances[id]` — a mesh face has no picture, so its
     /// row is not `SpriteQuad`-shaped and lives in its own buffer.
     /// [`dummy_mesh_instances`] when a caller has none this frame.
-    pub mesh_instances: &'a wgpu::Buffer,
+    pub mesh_instances:   &'a wgpu::Buffer,
     /// The ground pass's own instance buffer, bound a second time as storage —
     /// `docs/gbuffer.md` step 7, the ground half of what step 3 did for a
     /// static's tile. A `Kind::Land` pixel's `place.x`/`place.y` is an id into
@@ -93,26 +93,26 @@ pub struct Frame<'a> {
     /// real frame does, since the ground pass always runs.
     pub ground_instances: &'a wgpu::Buffer,
     /// Which way the scaling goes, and so which sampler is right.
-    pub zoom: Zoom,
+    pub zoom:             Zoom,
     /// The rectangle of `target` the world gets.
-    pub rect: ViewportRect,
+    pub rect:             ViewportRect,
 }
 
 /// Draws one texture over a rectangle of another.
 #[derive(Debug)]
 pub struct Blit {
-    pipeline: wgpu::RenderPipeline,
+    pipeline:         wgpu::RenderPipeline,
     /// The same deferred shader, but source-over composited instead of clearing
     /// the surface. It is used only for the private cutaway layer.
     cutaway_pipeline: wgpu::RenderPipeline,
-    layout: wgpu::BindGroupLayout,
+    layout:           wgpu::BindGroupLayout,
     /// For magnifying: a texel has to stay a square.
-    nearest: wgpu::Sampler,
+    nearest:          wgpu::Sampler,
     /// For minifying: nearest would sample one texel in four and the ground
     /// would shimmer as the camera walks.
-    linear: wgpu::Sampler,
+    linear:           wgpu::Sampler,
     /// The frame's lights, rewritten every frame — see [`crate::light`].
-    lighting: wgpu::Buffer,
+    lighting:         wgpu::Buffer,
     /// The cutaway's independent copy of the same uniform block. Both blits
     /// are recorded before one submission; sharing a buffer would make the
     /// second opacity overwrite the first draw's uniform data.
@@ -121,7 +121,7 @@ pub struct Blit {
     /// [`crate::occlusion`]. Recreated when the frame's grid changes size, which
     /// is a zoom step or a resize and not an ordinary frame; rewritten every
     /// frame, because the camera moves and the grid is relative to it.
-    occluders: wgpu::Texture,
+    occluders:        wgpu::Texture,
     /// What each of those tiles *is*, over the same rectangle and in the same
     /// order — the sky field today, an aperture and a body's opacity when the
     /// steps that write them land. See [`crate::occlusion::Occlusion::field_bytes`].
@@ -129,7 +129,7 @@ pub struct Blit {
     /// A second texture and not four more channels of the first: the occluder
     /// cell is what a ray walks through cell after cell in a loop, and this is
     /// read once per fragment. `docs/lighting_world.md` decides it once, there.
-    field: wgpu::Texture,
+    field:            wgpu::Texture,
     /// What the cells above name — one texel a reference, folded into rows
     /// [`crate::occlusion::LIST_ROW`] wide. See
     /// [`Occlusion::id_bytes`](crate::occlusion::Occlusion::id_bytes).
@@ -138,7 +138,7 @@ pub struct Blit {
     /// it costs the shader is this one extra `textureLoad`. What it buys is that
     /// a solid is a shape the world holds rather than a tile's property, so the
     /// same box can be referenced by every cell it stands over.
-    ids: wgpu::Texture,
+    ids:              wgpu::Texture,
     /// The primitives those references name — one struct a solid, indexed
     /// outright. See
     /// [`Occlusion::primitive_bytes`](crate::occlusion::Occlusion::primitive_bytes).
@@ -154,7 +154,7 @@ pub struct Blit {
     /// own terms and not the camera's: the two planes above are the camera's
     /// rectangle, and this is a list whose length is what the camera happens to
     /// be looking at.
-    primitives: wgpu::Buffer,
+    primitives:       wgpu::Buffer,
     /// The hole in each of those primitives, one struct a solid and in the
     /// [`Occlusion::primitive_bytes`](crate::occlusion::Occlusion::primitive_bytes)
     /// order — see
@@ -171,7 +171,7 @@ pub struct Blit {
     /// hole**: the primitive's own `HOLED` bit is what makes the shader read this
     /// at all, so a frame with no window in it neither lays these bytes out nor
     /// sends them, which is every frame of a real map until step 16 lands.
-    apertures: wgpu::Texture,
+    apertures:        wgpu::Texture,
     /// The broad phase, as the shader traverses it: the tree's nodes, depth
     /// first, the root first. See
     /// [`Occlusion::node_bytes`](crate::occlusion::Occlusion::node_bytes) and
@@ -181,14 +181,14 @@ pub struct Blit {
     /// reason than that one has: a traversal ends at the **root's own escape**,
     /// which is this frame's node count, so capacity left over from a larger
     /// frame is not merely unreferenced but unreachable.
-    nodes: wgpu::Buffer,
+    nodes:            wgpu::Buffer,
     /// And the permutation its leaves index into — one `SolidId` a word. See
     /// [`Occlusion::order_bytes`](crate::occlusion::Occlusion::order_bytes).
     ///
     /// A second buffer and not a field of the node: a leaf is a *run* of this,
     /// which is two numbers in the node and however many primitives here, and
     /// folding them together would be the same list held twice.
-    order: wgpu::Buffer,
+    order:            wgpu::Buffer,
 }
 
 impl Blit {
@@ -212,56 +212,56 @@ impl Blit {
         };
 
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("blit"),
+            label:   Some("blit"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                    binding:    0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding:    1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
+                    ty:         wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding:    2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 // The id plane and the occlusion grid, both integer
                 // textures and therefore both unfilterable: there is no sampler
                 // for either, and the shader reads exact texels.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding:    3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 4,
+                    binding:    4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 // And the field plane over the same rectangle — what a tile *is*
                 // rather than what a ray passes through. Unfilterable for the
@@ -269,14 +269,14 @@ impl Blit {
                 // a second blur over the one `Occlusion::blur_sky` already did,
                 // at the resolution of the screen instead of of the map.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 5,
+                    binding:    5,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 // And the primitives the grid indexes into — the list of
                 // decision 30, and one of the three that are not pictures of the
@@ -284,14 +284,14 @@ impl Blit {
                 // `docs/occluders.md`'s D8; read-only, the same as 9 through 12
                 // below.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 6,
+                    binding:    6,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 // And the hole in each of those solids, indexed by the same
                 // number. This is an exact, unfilterable texture because the
@@ -299,99 +299,99 @@ impl Blit {
                 // four-float record as a texel saves one storage binding without
                 // quantising the aperture.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 7,
+                    binding:    7,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 // And the references between the two: what a cell counts through
                 // is a run of these, and each one names a solid. Step 23.1.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 8,
+                    binding:    8,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 // The map statics, server items and mobiles passes' own instance data, each
                 // bound a second time as storage — decision 2's `instances[id]`.
                 // Read-only: this pass never writes a fragment's own instance
                 // back, only looks one up. `docs/gbuffer.md` step 3.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 9,
+                    binding:    9,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 17,
+                    binding:    17,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 10,
+                    binding:    10,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 // The mesh-face pass's own row buffer — `docs/gbuffer.md`
                 // step 4c. Read-only, the same reason 9 and 10 are.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 11,
+                    binding:    11,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 // The ground pass's own instance data, bound a second time as
                 // storage — `docs/gbuffer.md` step 7, `Kind::Land`'s share of
                 // decision 2. Read-only, the same reason 9, 10 and 11 are.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 12,
+                    binding:    12,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 // Where each pixel's fragment is — the G-buffer's second plane,
                 // `crate::gbuffer::POSITION_FORMAT`. Unfilterable, and not
                 // because `Rgba32Float` happens to be: a filtered position is
                 // a point on neither of the two surfaces it was averaged from.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 13,
+                    binding:    13,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 // And which way that pixel's surface looks — the third plane,
                 // `crate::gbuffer::NORMAL_FORMAT`, one octahedral word. An
@@ -401,38 +401,38 @@ impl Blit {
                 // normal and the ground's behind it points into the seam
                 // between them.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 14,
+                    binding:    14,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 // And the broad phase: the tree's nodes and the permutation its
                 // leaves index into, `docs/occluders.md`'s S5. Read-only storage,
                 // the same as every list above — a traversal indexes them and
                 // writes nothing.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 15,
+                    binding:    15,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 16,
+                    binding:    16,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
             ],
         });
@@ -441,100 +441,100 @@ impl Blit {
         // black — so the first frame writes it before drawing. Every frame
         // does; this only has to be a buffer of the right size to bind.
         let lighting = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("lighting"),
-            size: LIGHTING_BYTES,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            label:              Some("lighting"),
+            size:               LIGHTING_BYTES,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let cutaway_lighting = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("cutaway lighting"),
-            size: LIGHTING_BYTES,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            label:              Some("cutaway lighting"),
+            size:               LIGHTING_BYTES,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("blit"),
+            label:  Some("blit"),
             // `src/shaders/blit.wesl`, compiled to plain WGSL by `build.rs`.
             source: wgpu::ShaderSource::Wgsl(include_str!(concat!(env!("OUT_DIR"), "/blit.wgsl")).into()),
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("blit"),
+            label:              Some("blit"),
             bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
+            immediate_size:     0,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("blit"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+            label:          Some("blit"),
+            layout:         Some(&pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 // The corners come from the vertex index. WebGL2 has
                 // `gl_VertexID`, so this costs nothing there either.
-                buffers: &[],
+                buffers:             &[],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
+                targets:             &[Some(wgpu::ColorTargetState {
                     format,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+            primitive:      wgpu::PrimitiveState {
+                topology:           wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
+                front_face:         wgpu::FrontFace::Ccw,
+                cull_mode:          None,
+                unclipped_depth:    false,
+                polygon_mode:       wgpu::PolygonMode::Fill,
+                conservative:       false,
             },
             // No depth at all: the world's depth buffer ordered the world, and
             // this draws the result of that as a picture.
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            depth_stencil:  None,
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
 
         let cutaway_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("cutaway blit"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+            label:          Some("cutaway blit"),
+            layout:         Some(&pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
+                buffers:             &[],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
+                targets:             &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+            primitive:      wgpu::PrimitiveState {
+                topology:           wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
+                front_face:         wgpu::FrontFace::Ccw,
+                cull_mode:          None,
+                unclipped_depth:    false,
+                polygon_mode:       wgpu::PolygonMode::Fill,
+                conservative:       false,
             },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            depth_stencil:  None,
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
 
         Self {
@@ -645,15 +645,15 @@ impl Blit {
         // would be a handle to a texture that is no longer being drawn into.
         let magnifying = zoom.numerator() >= zoom.denominator();
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(if cutaway { "cutaway blit" } else { "blit" }),
-            layout: &self.layout,
+            label:   Some(if cutaway { "cutaway blit" } else { "blit" }),
+            layout:  &self.layout,
             entries: &[
                 wgpu::BindGroupEntry {
-                    binding: 0,
+                    binding:  0,
                     resource: wgpu::BindingResource::TextureView(world),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 1,
+                    binding:  1,
                     resource: wgpu::BindingResource::Sampler(if magnifying {
                         &self.nearest
                     } else {
@@ -661,15 +661,15 @@ impl Blit {
                     }),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding:  2,
                     resource: lighting_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding:  3,
                     resource: wgpu::BindingResource::TextureView(&gbuffer.ids),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 4,
+                    binding:  4,
                     resource: wgpu::BindingResource::TextureView(
                         &self
                             .occluders
@@ -677,17 +677,17 @@ impl Blit {
                     ),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 5,
+                    binding:  5,
                     resource: wgpu::BindingResource::TextureView(
                         &self.field.create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 6,
+                    binding:  6,
                     resource: self.primitives.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 7,
+                    binding:  7,
                     resource: wgpu::BindingResource::TextureView(
                         &self
                             .apertures
@@ -695,45 +695,45 @@ impl Blit {
                     ),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 8,
+                    binding:  8,
                     resource: wgpu::BindingResource::TextureView(
                         &self.ids.create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 9,
+                    binding:  9,
                     resource: face_instances.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 10,
+                    binding:  10,
                     resource: mobile_instances.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 11,
+                    binding:  11,
                     resource: mesh_instances.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 12,
+                    binding:  12,
                     resource: ground_instances.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 13,
+                    binding:  13,
                     resource: wgpu::BindingResource::TextureView(&gbuffer.position),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 14,
+                    binding:  14,
                     resource: wgpu::BindingResource::TextureView(&gbuffer.normal),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 15,
+                    binding:  15,
                     resource: self.nodes.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 16,
+                    binding:  16,
                     resource: self.order.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 17,
+                    binding:  17,
                     resource: item_instances.as_entire_binding(),
                 },
             ],
@@ -742,13 +742,13 @@ impl Blit {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("blit"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                depth_slice: None,
+                view:           target,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
+                ops:            wgpu::Operations {
                     // The opaque picture owns the clear. The transparent layer
                     // loads it and source-overs only its non-empty texels.
-                    load: match cutaway {
+                    load:  match cutaway {
                         true => wgpu::LoadOp::Load,
                         false => wgpu::LoadOp::Clear(crate::renderer::CLEAR),
                     },
@@ -855,8 +855,8 @@ fn lighting_bytes(lighting: &Lighting, opacity: f32) -> Vec<u8> {
     // and the shader tests the intensity: one branch, and a night frame does not
     // pay for a sky it does not have.
     let sun = lighting.sun.unwrap_or(crate::light::Sun {
-        toward: crate::light::TileVec::default(),
-        color: [0.0; 3],
+        toward:    crate::light::TileVec::default(),
+        color:     [0.0; 3],
         intensity: 0.0,
     });
     // `axes` and not any arithmetic: this is the wire, and the shader reads the
@@ -889,7 +889,7 @@ fn lighting_bytes(lighting: &Lighting, opacity: f32) -> Vec<u8> {
         // `cos_half > -1`, so an omnidirectional flame costs a comparison and
         // never a dot product. See `crate::light::Beam`.
         let beam = light.beam.unwrap_or(crate::light::Beam {
-            toward: crate::light::TileVec::default(),
+            toward:   crate::light::TileVec::default(),
             cos_half: -1.0,
         });
         let toward = beam.toward.axes();
@@ -929,18 +929,18 @@ fn lighting_bytes(lighting: &Lighting, opacity: f32) -> Vec<u8> {
 /// the same order, and the only thing that differs is what the bytes mean.
 fn grid_texture(device: &wgpu::Device, label: &str, width: u32, height: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
-        label: Some(label),
-        size: wgpu::Extent3d {
-            width: width.max(1),
-            height: height.max(1),
+        label:           Some(label),
+        size:            wgpu::Extent3d {
+            width:                 width.max(1),
+            height:                height.max(1),
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Uint,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
+        sample_count:    1,
+        dimension:       wgpu::TextureDimension::D2,
+        format:          wgpu::TextureFormat::Rgba8Uint,
+        usage:           wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats:    &[],
     })
 }
 
@@ -952,9 +952,9 @@ fn grid_texture(device: &wgpu::Device, label: &str, width: u32, height: u32) -> 
 /// primitive: what says a tile stands nothing is its own count in the index.
 fn primitive_buffer(device: &wgpu::Device, count: usize) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("primitives"),
-        size: (count.max(1) * crate::occlusion::PRIMITIVE_BYTES) as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        label:              Some("primitives"),
+        size:               (count.max(1) * crate::occlusion::PRIMITIVE_BYTES) as u64,
+        usage:              wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }
@@ -969,18 +969,18 @@ fn primitive_buffer(device: &wgpu::Device, count: usize) -> wgpu::Buffer {
 fn aperture_texture(device: &wgpu::Device, count: usize) -> wgpu::Texture {
     let (width, height) = aperture_extent(count, device.limits().max_texture_dimension_2d);
     device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("apertures"),
-        size: wgpu::Extent3d {
+        label:           Some("apertures"),
+        size:            wgpu::Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
+        sample_count:    1,
+        dimension:       wgpu::TextureDimension::D2,
+        format:          wgpu::TextureFormat::Rgba32Float,
+        usage:           wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats:    &[],
     })
 }
 
@@ -1011,9 +1011,9 @@ fn aperture_extent(count: usize, max_dimension: u32) -> (u32, u32) {
 /// zeros rather than no node at all.
 fn tree_buffer(device: &wgpu::Device, label: &str, bytes: usize) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some(label),
-        size: bytes.max(4) as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        label:              Some(label),
+        size:               bytes.max(4) as u64,
+        usage:              wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }
@@ -1030,9 +1030,9 @@ fn tree_buffer(device: &wgpu::Device, label: &str, bytes: usize) -> wgpu::Buffer
 /// the same way it owns a real instance buffer when it has one.
 pub fn dummy_instances(device: &wgpu::Device) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("blit dummy instances"),
-        size: crate::sprite::SpriteQuad::STRIDE,
-        usage: wgpu::BufferUsages::STORAGE,
+        label:              Some("blit dummy instances"),
+        size:               crate::sprite::SpriteQuad::STRIDE,
+        usage:              wgpu::BufferUsages::STORAGE,
         mapped_at_creation: false,
     })
 }
@@ -1041,9 +1041,9 @@ pub fn dummy_instances(device: &wgpu::Device) -> wgpu::Buffer {
 /// draw this frame still needs a valid resource in binding 11.
 pub fn dummy_mesh_instances(device: &wgpu::Device) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("blit dummy mesh instances"),
-        size: crate::mesh_face::MeshFaceRow::STRIDE,
-        usage: wgpu::BufferUsages::STORAGE,
+        label:              Some("blit dummy mesh instances"),
+        size:               crate::mesh_face::MeshFaceRow::STRIDE,
+        usage:              wgpu::BufferUsages::STORAGE,
         mapped_at_creation: false,
     })
 }
@@ -1054,9 +1054,9 @@ pub fn dummy_mesh_instances(device: &wgpu::Device) -> wgpu::Buffer {
 /// the argument, empty or not.
 pub fn dummy_ground_instances(device: &wgpu::Device) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("blit dummy ground instances"),
-        size: crate::ground::GroundQuad::STRIDE,
-        usage: wgpu::BufferUsages::STORAGE,
+        label:              Some("blit dummy ground instances"),
+        size:               crate::ground::GroundQuad::STRIDE,
+        usage:              wgpu::BufferUsages::STORAGE,
         mapped_at_creation: false,
     })
 }
@@ -1100,8 +1100,8 @@ impl Blit {
                 },
                 bytes,
                 wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(width * 4),
+                    offset:         0,
+                    bytes_per_row:  Some(width * 4),
                     rows_per_image: Some(height),
                 },
                 wgpu::Extent3d {
@@ -1147,13 +1147,13 @@ impl Blit {
                 },
                 bytes,
                 wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(row * 4),
+                    offset:         0,
+                    bytes_per_row:  Some(row * 4),
                     rows_per_image: Some((bytes.len() / (row as usize * 4)) as u32),
                 },
                 wgpu::Extent3d {
-                    width: row,
-                    height: (bytes.len() / (row as usize * 4)) as u32,
+                    width:                 row,
+                    height:                (bytes.len() / (row as usize * 4)) as u32,
                     depth_or_array_layers: 1,
                 },
             );
@@ -1179,19 +1179,19 @@ impl Blit {
                 let width = (bytes.len() / record_bytes) as u32;
                 queue.write_texture(
                     wgpu::TexelCopyTextureInfo {
-                        texture: &self.apertures,
+                        texture:   &self.apertures,
                         mip_level: 0,
-                        origin: wgpu::Origin3d {
+                        origin:    wgpu::Origin3d {
                             x: 0,
                             y: row as u32,
                             z: 0,
                         },
-                        aspect: wgpu::TextureAspect::All,
+                        aspect:    wgpu::TextureAspect::All,
                     },
                     bytes,
                     wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(width * record_bytes as u32),
+                        offset:         0,
+                        bytes_per_row:  Some(width * record_bytes as u32),
                         rows_per_image: Some(1),
                     },
                     wgpu::Extent3d {
@@ -1246,25 +1246,25 @@ pub const WORLD_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// filled it.
 pub fn world_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("world"),
-        size: wgpu::Extent3d {
-            width: width.max(1),
-            height: height.max(1),
+        label:           Some("world"),
+        size:            wgpu::Extent3d {
+            width:                 width.max(1),
+            height:                height.max(1),
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
+        sample_count:    1,
+        dimension:       wgpu::TextureDimension::D2,
         // `Rgba8Unorm`, like every other texture here: the world passes write
         // the art's own bytes and this carries them to the surface unconverted.
-        format: WORLD_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+        format:          WORLD_FORMAT,
+        usage:           wgpu::TextureUsages::RENDER_ATTACHMENT
             | wgpu::TextureUsages::TEXTURE_BINDING
             // So a test can read the world image back and compare it with what
             // the blit produced, which is the only way to know the blit is a
             // copy at 1:1 rather than merely plausible.
             | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        view_formats:    &[],
     })
 }
 

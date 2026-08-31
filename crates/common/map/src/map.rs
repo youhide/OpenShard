@@ -11,11 +11,19 @@
 
 use std::fmt;
 
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Point;
 use openshard_tiles::LandTileId;
 
-use crate::grid::{BlockCoord, BlockExtent, BlockIndex, LandGrid};
+use crate::grid::{
+    BlockCoord,
+    BlockExtent,
+    BlockIndex,
+    LandGrid,
+};
 
 /// Tiles along each side of a map block.
 pub const BLOCK_SIZE: u32 = 8;
@@ -28,7 +36,7 @@ pub struct LandCell {
     /// Index into the land table of `tiledata.mul`.
     pub tile: LandTileId,
     /// The ground's height here.
-    pub z: i8,
+    pub z:    i8,
 }
 
 /// One thing standing on the ground.
@@ -37,13 +45,13 @@ pub struct StaticItem {
     /// Index into the static table of `tiledata.mul`.
     pub tile: Graphic,
     /// Where in the world, not in the block: resolved on load.
-    pub x: u16,
+    pub x:    u16,
     /// Where in the world.
-    pub y: u16,
+    pub y:    u16,
     /// Its base height. What you stand on is this plus the tile's height.
-    pub z: i8,
+    pub z:    i8,
     /// Its colour.
-    pub hue: Hue,
+    pub hue:  Hue,
 }
 
 /// The known sizes of a Britannia facet, in tiles.
@@ -76,10 +84,10 @@ fn describe_size(width: u32, height: u32) -> &'static str {
 #[derive(Debug)]
 pub struct BlockPatch<'a> {
     /// Which block of the facet, in the land's own order.
-    at: BlockIndex,
+    at:      BlockIndex,
     /// Its sixty-four cells, row-major within the block — [`LandGrid::block`]'s
     /// order, because that is where it will go.
-    land: &'a [LandCell],
+    land:    &'a [LandCell],
     /// Everything standing in it. Any order: [`WorldMap::replace_blocks`]
     /// imposes the sort, for the reason [`WorldMap::from_parts`] does.
     statics: &'a [StaticItem],
@@ -112,7 +120,7 @@ impl<'a> BlockPatch<'a> {
 /// touched inside a tick, and a facet is under 100MB.
 pub struct WorldMap {
     /// The ground, and the only thing that knows the order it is in.
-    land: LandGrid,
+    land:    LandGrid,
     /// Every static on the facet, its blocks in the order the land's own
     /// [`BlockIndex`] gives them — **one run**, not one vector per block.
     ///
@@ -151,7 +159,7 @@ pub struct WorldMap {
     /// is O(the block). The price is one extra `u32` a block, 1.75 MiB on a
     /// 150 MiB world, and the runs the repointing orphans — see
     /// [`dead`](Self::dead).
-    blocks: Vec<BlockRun>,
+    blocks:  Vec<BlockRun>,
     /// How many of [`statics`](Self::statics) no block addresses any more.
     ///
     /// Zero for a facet built by an importer, and it grows only through the
@@ -161,7 +169,7 @@ pub struct WorldMap {
     /// because it is the same trade: never compact while a session is editing,
     /// except that dead items exceeding live ones repack the run — at which
     /// point the facet is laid out in block order again and the count is zero.
-    dead: usize,
+    dead:    usize,
 }
 
 /// Where one block's statics are in the facet's run.
@@ -172,7 +180,7 @@ pub struct WorldMap {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct BlockRun {
     /// The first item.
-    base: u32,
+    base:  u32,
     /// How many there are. Zero for the 73.7% of Britannia's blocks that hold
     /// nothing, whose `base` is then never read.
     count: u32,
@@ -298,7 +306,7 @@ impl WorldMap {
         let mut total: u32 = 0;
         for count in counts {
             blocks.push(BlockRun {
-                base: total,
+                base:  total,
                 count: *count,
             });
             total = total
@@ -793,9 +801,13 @@ impl WorldMap {
             return Some((quad[0], quad.map(|cell| cell.z)));
         }
         let own = self.land(x, y)?;
-        let at = |corner_x: Option<u16>, corner_y: Option<u16>| match (corner_x, corner_y) {
-            (Some(corner_x), Some(corner_y)) => self.land(corner_x, corner_y).map_or(own.z, |cell| cell.z),
-            _ => own.z,
+        let at = |corner_x: Option<u16>, corner_y: Option<u16>| {
+            match (corner_x, corner_y) {
+                (Some(corner_x), Some(corner_y)) => {
+                    self.land(corner_x, corner_y).map_or(own.z, |cell| cell.z)
+                }
+                _ => own.z,
+            }
         };
         let (east, south) = (x.checked_add(1), y.checked_add(1));
         Some((
@@ -870,9 +882,11 @@ mod tests {
     /// tested where it lives.
     #[test]
     fn off_the_map_is_none_not_a_panic() {
-        let map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |x, y| LandCell {
-            tile: LandTileId(x + y),
-            z: 0,
+        let map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |x, y| {
+            LandCell {
+                tile: LandTileId(x + y),
+                z:    0,
+            }
         });
         assert_eq!(map.land(16, 0), None);
         assert_eq!(map.land(0, 16), None);
@@ -892,9 +906,11 @@ mod tests {
     fn a_stepped_row_is_the_row_a_lookup_builds() {
         // Three blocks across, two down, and every tile carries its own
         // position — so a cell that came from the wrong tile says which.
-        let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 2 }, |x, y| LandCell {
-            tile: LandTileId(x),
-            z: y as i8,
+        let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 2 }, |x, y| {
+            LandCell {
+                tile: LandTileId(x),
+                z:    y as i8,
+            }
         });
 
         for y in [0u16, 7, 8, 15] {
@@ -917,9 +933,11 @@ mod tests {
     #[test]
     fn a_tiles_corners_are_its_neighbours_own_heights() {
         // A ramp running south-east: z is x + y.
-        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, y| LandCell {
-            tile: LandTileId(3),
-            z: (x + y) as i8,
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, y| {
+            LandCell {
+                tile: LandTileId(3),
+                z:    (x + y) as i8,
+            }
         });
         assert_eq!(map.land_corners(2, 3), Some([5, 6, 6, 7]));
         // The far corner of the facet has no eastern or southern neighbour, so
@@ -942,15 +960,19 @@ mod tests {
     /// corners coincide and a transposed pair would pass.
     #[test]
     fn a_tiles_corner_quad_is_the_four_reads_it_replaces() {
-        let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 2 }, |x, y| LandCell {
-            tile: LandTileId(3),
-            z: ((x * 5) as i8).wrapping_sub((y * 3) as i8),
+        let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 2 }, |x, y| {
+            LandCell {
+                tile: LandTileId(3),
+                z:    ((x * 5) as i8).wrapping_sub((y * 3) as i8),
+            }
         });
         let slowly = |x: u16, y: u16| {
             let own = map.land(x, y)?.z;
-            let at = |x: Option<u16>, y: Option<u16>| match (x, y) {
-                (Some(x), Some(y)) => map.land(x, y).map_or(own, |cell| cell.z),
-                _ => own,
+            let at = |x: Option<u16>, y: Option<u16>| {
+                match (x, y) {
+                    (Some(x), Some(y)) => map.land(x, y).map_or(own, |cell| cell.z),
+                    _ => own,
+                }
             };
             let (east, south) = (x.checked_add(1), y.checked_add(1));
             Some([own, at(east, Some(y)), at(Some(x), south), at(east, south)])
@@ -1007,9 +1029,11 @@ mod tests {
     /// caller that has coordinates and a caller that has heights cannot drift.
     #[test]
     fn the_maps_average_is_the_average_of_its_corners() {
-        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, y| LandCell {
-            tile: LandTileId(3),
-            z: ((x * 3) as i8).wrapping_sub((y * 2) as i8),
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, y| {
+            LandCell {
+                tile: LandTileId(3),
+                z:    ((x * 3) as i8).wrapping_sub((y * 2) as i8),
+            }
         });
         for y in 0..8u16 {
             for x in 0..8u16 {
@@ -1227,10 +1251,10 @@ mod tests {
         // downstream of.
         map.place_static(StaticItem {
             tile: Graphic(100),
-            x: 1,
-            y: 3,
-            z: 0,
-            hue: Hue(0),
+            x:    1,
+            y:    3,
+            z:    0,
+            hue:  Hue(0),
         });
         expected.push((Graphic(100), 1, 3));
         assert_eq!(whole_facet(&map), sorted(expected.clone()));
@@ -1269,12 +1293,14 @@ mod tests {
     #[test]
     fn from_parts_sorts_each_blocks_own_part_of_the_run() {
         let land = LandGrid::from_blocks(BlockExtent { wide: 2, down: 1 }, |_, _| LandCell::default());
-        let item = |tile, x, y| StaticItem {
-            tile: Graphic(tile),
-            x,
-            y,
-            z: 0,
-            hue: Hue(0),
+        let item = |tile, x, y| {
+            StaticItem {
+                tile: Graphic(tile),
+                x,
+                y,
+                z: 0,
+                hue: Hue(0),
+            }
         };
         // In file order, which is not tile order: block 0's three items and then
         // block 1's two, the two on (3, 5) in the order the file has them.
@@ -1319,10 +1345,10 @@ mod tests {
             for n in 0..each {
                 statics.push(StaticItem {
                     tile: Graphic(block.get() as u16 * 100 + n),
-                    x: origin_x as u16 + n % 8,
-                    y: origin_y as u16,
-                    z: 0,
-                    hue: Hue(0),
+                    x:    origin_x as u16 + n % 8,
+                    y:    origin_y as u16,
+                    z:    0,
+                    hue:  Hue(0),
                 });
             }
         }
@@ -1356,10 +1382,10 @@ mod tests {
         // be downstream of.
         map.place_static(StaticItem {
             tile: Graphic(999),
-            x: 1,
-            y: 1,
-            z: 0,
-            hue: Hue(0),
+            x:    1,
+            y:    1,
+            z:    0,
+            hue:  Hue(0),
         });
 
         assert_eq!(
@@ -1396,7 +1422,7 @@ mod tests {
         let land = vec![
             LandCell {
                 tile: LandTileId(4),
-                z: 12,
+                z:    12,
             };
             CELLS_PER_BLOCK
         ];
@@ -1423,10 +1449,10 @@ mod tests {
             placed += 1;
             map.place_static(StaticItem {
                 tile: Graphic(500 + placed),
-                x: 1,
-                y: 1,
-                z: placed as i8,
-                hue: Hue(0),
+                x:    1,
+                y:    1,
+                z:    placed as i8,
+                hue:  Hue(0),
             });
             if map.dead == 0 {
                 break;
@@ -1463,10 +1489,10 @@ mod tests {
         // in an order that leaves the run out of block order.
         edited.place_static(StaticItem {
             tile: Graphic(901),
-            x: 2,
-            y: 2,
-            z: 0,
-            hue: Hue(0),
+            x:    2,
+            y:    2,
+            z:    0,
+            hue:  Hue(0),
         });
         edited.remove_static(8, 8, 0).expect("block (1, 1) holds two");
         let at = extent.index_of(BlockCoord { x: 2, y: 2 }).expect("a block");
@@ -1474,17 +1500,17 @@ mod tests {
         let arrived = [
             StaticItem {
                 tile: Graphic(902),
-                x: 19,
-                y: 17,
-                z: 0,
-                hue: Hue(0),
+                x:    19,
+                y:    17,
+                z:    0,
+                hue:  Hue(0),
             },
             StaticItem {
                 tile: Graphic(903),
-                x: 17,
-                y: 17,
-                z: 0,
-                hue: Hue(0),
+                x:    17,
+                y:    17,
+                z:    0,
+                hue:  Hue(0),
             },
         ];
         edited.replace_blocks(&[BlockPatch::new(at, &land, &arrived)]);

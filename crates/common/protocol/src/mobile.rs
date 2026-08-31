@@ -6,17 +6,36 @@
 
 use std::fmt;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{
+    Deserialize,
+    Deserializer,
+    Serialize,
+    Serializer,
+};
 
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::direction::Facing;
 use crate::error::DecodeError;
 use crate::feature::Feature;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
-use crate::serial::{RawSerial, Serial};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+};
+use crate::serial::{
+    RawSerial,
+    Serial,
+};
 use crate::skill::SkillLock;
 use crate::version::ClientVersion;
-use crate::wire::{Graphic, Hue, Layer};
+use crate::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
 use crate::world::Point;
 
 /// Status flags on a mobile: poisoned, invisible, in war mode.
@@ -244,7 +263,8 @@ impl fmt::Display for InvalidStat {
     }
 }
 
-impl std::error::Error for InvalidStat {}
+impl std::error::Error for InvalidStat {
+}
 
 /// A stat arrow's new position, exactly as a client's `0xBF 0x1A` sent it.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
@@ -295,7 +315,7 @@ impl DecodePacket for LookRequest {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct StatusQuery {
     /// Which window is asking.
-    pub kind: StatusQueryKind,
+    pub kind:   StatusQueryKind,
     /// Whom it is asking about, exactly as sent. Class D on this end: nothing
     /// here routes by it — every query this engine acts on is about the asking
     /// player's own mobile, which the connection already knows — but the client
@@ -375,13 +395,13 @@ impl DecodePacket for StatusQuery {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Equipment {
     /// The item's serial.
-    pub serial: Serial,
+    pub serial:  Serial,
     /// Its graphic.
     pub graphic: Graphic,
     /// Which layer: hair, weapon, robe.
-    pub layer: Layer,
+    pub layer:   Layer,
     /// Its colour. [`Hue::NONE`] means the graphic's own.
-    pub hue: Hue,
+    pub hue:     Hue,
 }
 
 /// `0x1D` — take an object off the client's screen. 5 bytes.
@@ -463,9 +483,9 @@ pub struct OpenPaperdoll {
     pub serial: Serial,
     /// The title across the top: the name, plus any honorific. Clamped to 60
     /// bytes.
-    pub text: String,
+    pub text:   String,
     /// War mode, and whether the beholder may lift what is worn.
-    pub flags: PaperdollFlags,
+    pub flags:  PaperdollFlags,
 }
 
 impl EncodePacket for OpenPaperdoll {
@@ -514,7 +534,7 @@ pub struct Vitals {
     /// What there is now.
     pub current: u16,
     /// The most there can be.
-    pub max: u16,
+    pub max:     u16,
 }
 
 /// `0x11` — a mobile's full status: the paperdoll numbers. Variable length.
@@ -536,35 +556,35 @@ pub struct Vitals {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MobileStatus {
     /// Whose status.
-    pub serial: Serial,
+    pub serial:        Serial,
     /// The name shown on the bar, clamped to 30 bytes.
-    pub name: String,
+    pub name:          String,
     /// Hit points, current and maximum.
-    pub hits: Vitals,
+    pub hits:          Vitals,
     /// Whether the body is female — a bit the client draws the paperdoll from.
-    pub female: bool,
+    pub female:        bool,
     /// Strength.
-    pub strength: u16,
+    pub strength:      u16,
     /// Dexterity. In UO this is also the stamina cap.
-    pub dexterity: u16,
+    pub dexterity:     u16,
     /// Intelligence.
-    pub intelligence: u16,
+    pub intelligence:  u16,
     /// Stamina. A zero current is what stops a client running.
-    pub stamina: Vitals,
+    pub stamina:       Vitals,
     /// Mana.
-    pub mana: Vitals,
+    pub mana:          Vitals,
     /// Gold in the pack, shown on the status bar.
-    pub gold: u32,
+    pub gold:          u32,
     /// Physical resistance (pre-AoS: armour rating).
-    pub armor: u16,
+    pub armor:         u16,
     /// Carried weight. Kept under `max_weight` or the client refuses to run.
-    pub weight: u16,
+    pub weight:        u16,
     /// The weight the character can carry before it is overloaded.
-    pub max_weight: u16,
+    pub max_weight:    u16,
     /// The sum of the three stats a character may train to.
-    pub stat_cap: u16,
+    pub stat_cap:      u16,
     /// Pets currently following.
-    pub followers: u8,
+    pub followers:     u8,
     /// The most pets that may follow.
     pub followers_max: u8,
 }
@@ -647,7 +667,7 @@ impl DecodePacket for MobileStatus {
         let name = reader.fixed_string(30)?;
         let hits = Vitals {
             current: reader.u16()?,
-            max: reader.u16()?,
+            max:     reader.u16()?,
         };
         let _renamable = reader.bool()?;
         let kind = reader.u8()?;
@@ -658,11 +678,11 @@ impl DecodePacket for MobileStatus {
         let intelligence = reader.u16()?;
         let stamina = Vitals {
             current: reader.u16()?,
-            max: reader.u16()?,
+            max:     reader.u16()?,
         };
         let mana = Vitals {
             current: reader.u16()?,
-            max: reader.u16()?,
+            max:     reader.u16()?,
         };
         let gold = reader.u32()?;
         let armor = reader.u16()?;
@@ -719,17 +739,17 @@ impl DecodePacket for MobileStatus {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct MobileMove {
     /// The mobile's serial.
-    pub serial: Serial,
+    pub serial:    Serial,
     /// Its body graphic.
-    pub body: Graphic,
+    pub body:      Graphic,
     /// Where.
-    pub position: Point,
+    pub position:  Point,
     /// Which way, and whether running.
-    pub facing: Facing,
+    pub facing:    Facing,
     /// Its hue.
-    pub hue: Hue,
+    pub hue:       Hue,
     /// Poisoned, invisible, war mode.
-    pub flags: StatusFlags,
+    pub flags:     StatusFlags,
     /// How to colour its health bar.
     pub notoriety: Notoriety,
 }
@@ -797,17 +817,17 @@ impl DecodePacket for MobileMove {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MobileIncoming {
     /// The mobile's serial.
-    pub serial: Serial,
+    pub serial:    Serial,
     /// Its body graphic.
-    pub body: Graphic,
+    pub body:      Graphic,
     /// Where.
-    pub position: Point,
+    pub position:  Point,
     /// Which way, and whether running.
-    pub facing: Facing,
+    pub facing:    Facing,
     /// Its hue.
-    pub hue: Hue,
+    pub hue:       Hue,
     /// Poisoned, invisible, war mode.
-    pub flags: StatusFlags,
+    pub flags:     StatusFlags,
     /// How to colour its health bar.
     pub notoriety: Notoriety,
     /// What it is wearing.
@@ -923,9 +943,9 @@ impl DecodePacket for MobileIncoming {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct StatLockBits {
     /// Strength's arrow.
-    pub strength: SkillLock,
+    pub strength:     SkillLock,
     /// Dexterity's arrow.
-    pub dexterity: SkillLock,
+    pub dexterity:    SkillLock,
     /// Intelligence's arrow.
     pub intelligence: SkillLock,
 }
@@ -949,7 +969,7 @@ pub struct StatLocks {
     /// Whose stats.
     pub serial: Serial,
     /// The three arrows.
-    pub locks: StatLockBits,
+    pub locks:  StatLockBits,
 }
 
 impl EncodePacket for StatLocks {
@@ -1014,9 +1034,9 @@ mod tests {
         let packet = encode_packet(
             &StatLocks {
                 serial: Serial::new(0x0000_0007).unwrap(),
-                locks: StatLockBits {
-                    strength: SkillLock::Locked,
-                    dexterity: SkillLock::Down,
+                locks:  StatLockBits {
+                    strength:     SkillLock::Locked,
+                    dexterity:    SkillLock::Down,
                     intelligence: SkillLock::Up,
                 },
             },
@@ -1160,12 +1180,12 @@ mod tests {
 
     fn mobile() -> MobileIncoming {
         MobileIncoming {
-            serial: Serial::new(0x0000_0002).unwrap(),
-            body: Graphic(0x0190),
-            position: Point::new(1475, 1774, -5),
-            facing: facing(),
-            hue: Hue(0x83EA),
-            flags: StatusFlags::NONE,
+            serial:    Serial::new(0x0000_0002).unwrap(),
+            body:      Graphic(0x0190),
+            position:  Point::new(1475, 1774, -5),
+            facing:    facing(),
+            hue:       Hue(0x83EA),
+            flags:     StatusFlags::NONE,
             notoriety: Notoriety::Innocent,
             equipment: Vec::new(),
         }
@@ -1173,10 +1193,10 @@ mod tests {
 
     fn shirt() -> Equipment {
         Equipment {
-            serial: Serial::new(0x4000_0001).unwrap(),
+            serial:  Serial::new(0x4000_0001).unwrap(),
             graphic: Graphic(0x1517),
-            layer: Layer(0x05),
-            hue: Hue(0x0021),
+            layer:   Layer(0x05),
+            hue:     Hue(0x0021),
         }
     }
 
@@ -1189,7 +1209,7 @@ mod tests {
         assert_eq!(
             encode_packet(
                 &Remove {
-                    serial: Serial::new(0x4EAD_BEEF).unwrap()
+                    serial: Serial::new(0x4EAD_BEEF).unwrap(),
                 },
                 version()
             ),
@@ -1201,12 +1221,12 @@ mod tests {
     fn a_move_matches_its_declared_length() {
         let bytes = encode_packet(
             &MobileMove {
-                serial: Serial::new(2).unwrap(),
-                body: Graphic(0x0190),
-                position: Point::new(1475, 1774, -5),
-                facing: facing(),
-                hue: Hue(0x83EA),
-                flags: StatusFlags::NONE,
+                serial:    Serial::new(2).unwrap(),
+                body:      Graphic(0x0190),
+                position:  Point::new(1475, 1774, -5),
+                facing:    facing(),
+                hue:       Hue(0x83EA),
+                flags:     StatusFlags::NONE,
                 notoriety: Notoriety::Innocent,
             },
             ClientVersion::TOL,
@@ -1311,10 +1331,12 @@ mod tests {
     fn a_mobile_wearing_a_lot_still_declares_its_length() {
         let mut incoming = mobile();
         incoming.equipment = (0..25)
-            .map(|index| Equipment {
-                serial: Serial::new(0x4000_0000 + index).unwrap(),
-                layer: Layer(index as u8),
-                ..shirt()
+            .map(|index| {
+                Equipment {
+                    serial: Serial::new(0x4000_0000 + index).unwrap(),
+                    layer: Layer(index as u8),
+                    ..shirt()
+                }
             })
             .collect();
 
@@ -1374,24 +1396,30 @@ mod tests {
 
     fn a_status() -> MobileStatus {
         MobileStatus {
-            serial: Serial::new(0x0001_2345).unwrap(),
-            name: "Lord British".to_owned(),
-            hits: Vitals {
+            serial:        Serial::new(0x0001_2345).unwrap(),
+            name:          "Lord British".to_owned(),
+            hits:          Vitals {
                 current: 100,
-                max: 100,
+                max:     100,
             },
-            female: false,
-            strength: 100,
-            dexterity: 90,
-            intelligence: 80,
-            stamina: Vitals { current: 90, max: 90 },
-            mana: Vitals { current: 80, max: 80 },
-            gold: 1234,
-            armor: 0,
-            weight: 14,
-            max_weight: 390,
-            stat_cap: 225,
-            followers: 0,
+            female:        false,
+            strength:      100,
+            dexterity:     90,
+            intelligence:  80,
+            stamina:       Vitals {
+                current: 90,
+                max:     90,
+            },
+            mana:          Vitals {
+                current: 80,
+                max:     80,
+            },
+            gold:          1234,
+            armor:         0,
+            weight:        14,
+            max_weight:    390,
+            stat_cap:      225,
+            followers:     0,
             followers_max: 5,
         }
     }
@@ -1401,8 +1429,8 @@ mod tests {
         let bytes = encode_packet(
             &OpenPaperdoll {
                 serial: Serial::new(0x0001_2345).unwrap(),
-                text: "Lord British".to_owned(),
-                flags: PaperdollFlags::CAN_LIFT,
+                text:   "Lord British".to_owned(),
+                flags:  PaperdollFlags::CAN_LIFT,
             },
             version(),
         );
@@ -1425,8 +1453,8 @@ mod tests {
     fn a_paperdoll_reads_back_the_title_and_the_flags() {
         let sent = OpenPaperdoll {
             serial: Serial::new(0x0001_2345).unwrap(),
-            text: "Lord British".to_owned(),
-            flags: PaperdollFlags::WARMODE.with(PaperdollFlags::CAN_LIFT),
+            text:   "Lord British".to_owned(),
+            flags:  PaperdollFlags::WARMODE.with(PaperdollFlags::CAN_LIFT),
         };
         let bytes = encode_packet(&sent, version());
         let read: OpenPaperdoll = crate::packet::decode_packet(&bytes, version()).unwrap();

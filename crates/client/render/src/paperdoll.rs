@@ -57,18 +57,35 @@
 use std::collections::BTreeMap;
 
 use openshard_protocol::direction::Direction;
-use openshard_protocol::wire::{Graphic, Hue, Layer};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
 use openshard_tiles::AnimId;
 use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::gumpart::Gumps;
 
-use crate::gump::{GumpArt, GumpPixel, Picture, PictureIndex};
+use crate::gump::{
+    GumpArt,
+    GumpPixel,
+    Picture,
+    PictureIndex,
+};
 use crate::items::HIGHLIGHT_HUE;
 use crate::mobiles::EquipmentLayer;
 
 mod frame;
 use frame::furniture;
-pub use frame::{DollButton, NAME_AT, NAME_FONT, NAME_HUE, Whose, frame, title};
+pub use frame::{
+    DollButton,
+    NAME_AT,
+    NAME_FONT,
+    NAME_HUE,
+    Whose,
+    frame,
+    title,
+};
 
 /*
 /// Whose paperdoll a window is, which the frame is chosen by.
@@ -266,9 +283,9 @@ pub fn title(text: &str, at: GumpPixel) -> GumpLabel<'_> {
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct Doll {
     /// The art, in painter's order: the frame, its furniture, then the doll.
-    pub pictures: Vec<Picture>,
+    pub pictures:       Vec<Picture>,
     /// Which of those pictures is a button, by its index.
-    pub hits: BTreeMap<PictureIndex, DollButton>,
+    pub hits:           BTreeMap<PictureIndex, DollButton>,
     /// Worn-item pictures, keyed by their painter index.  The app resolves a
     /// layer back to the authoritative item serial before it starts a drag.
     pub equipment_hits: BTreeMap<PictureIndex, Layer>,
@@ -305,9 +322,9 @@ pub const FEMALE_GUMP_OFFSET: u16 = 60_000;
 #[derive(Clone, Copy, Debug)]
 pub struct Wearer<'a> {
     /// Its body id, as the shard named it.
-    pub body: Graphic,
+    pub body:      Graphic,
     /// Its hue, or [`Hue::NONE`] — the body picture's, not the equipment's.
-    pub hue: Hue,
+    pub hue:       Hue,
     /// What it is wearing: `AnimID`s and layers, exactly as
     /// [`crate::mobiles::Mobile::equipment`] holds them, so that one resolution
     /// out of `tiledata` serves the world sprite and the paperdoll alike.
@@ -324,7 +341,7 @@ const LAYERS: usize = 0x19;
 /// this order once.
 struct LayerOrder {
     layers: [Layer; LAYERS],
-    len: usize,
+    len:    usize,
 }
 
 impl LayerOrder {
@@ -540,11 +557,13 @@ fn place_cloak(layers: &mut LayerOrder, facing: Direction) {
     let at = match facing {
         Direction::North => layers.len() - 1,
         Direction::SouthEast => 0,
-        _ => layers
-            .iter()
-            .take(layers.len() - 1)
-            .position(|layer| *layer == Layer::HELMET)
-            .unwrap_or(layers.len() - 1),
+        _ => {
+            layers
+                .iter()
+                .take(layers.len() - 1)
+                .position(|layer| *layer == Layer::HELMET)
+                .unwrap_or(layers.len() - 1)
+        }
     };
     layers.copy_within(at..layers.len() - 1, at + 1);
     layers[at] = Layer::CLOAK;
@@ -710,10 +729,12 @@ pub fn body_gump(body: Graphic, hue: Hue) -> (Graphic, Hue) {
         0x04E5 => (Graphic(0xC835), hue),
         // The one body whose hue is not its own.
         0x03DB => (Graphic(0x000C), Hue(0x03EA)),
-        _ => match openshard_uofiles::anim::is_female(body) {
-            true => (Graphic(0x000D), hue),
-            false => (Graphic(0x000C), hue),
-        },
+        _ => {
+            match openshard_uofiles::anim::is_female(body) {
+                true => (Graphic(0x000D), hue),
+                false => (Graphic(0x000C), hue),
+            }
+        }
     }
 }
 
@@ -751,10 +772,12 @@ pub fn gump_of(
         false => anim_id,
     };
     let anim_id = match equip_conv.resolve(body, anim_id) {
-        Some(entry) if entry.gump.0 > MALE_GUMP_OFFSET => match entry.gump.0 >= FEMALE_GUMP_OFFSET {
-            true => entry.gump.0 - FEMALE_GUMP_OFFSET,
-            false => entry.gump.0 - MALE_GUMP_OFFSET,
-        },
+        Some(entry) if entry.gump.0 > MALE_GUMP_OFFSET => {
+            match entry.gump.0 >= FEMALE_GUMP_OFFSET {
+                true => entry.gump.0 - FEMALE_GUMP_OFFSET,
+                false => entry.gump.0 - MALE_GUMP_OFFSET,
+            }
+        }
         Some(entry) => entry.gump.0,
         None => anim_id.0,
     };
@@ -832,8 +855,8 @@ pub fn window(
     at: GumpPixel,
 ) -> Doll {
     let mut doll = Doll {
-        pictures: vec![Picture::plain(GumpArt::Gump(frame(whose)), at)],
-        hits: BTreeMap::new(),
+        pictures:       vec![Picture::plain(GumpArt::Gump(frame(whose)), at)],
+        hits:           BTreeMap::new(),
         equipment_hits: BTreeMap::new(),
     };
     furniture(&mut doll, whose, held, at);

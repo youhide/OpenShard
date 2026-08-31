@@ -1,19 +1,39 @@
 //! The login conversation as a state machine.
 
 use std::fmt;
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{
+    Ipv4Addr,
+    SocketAddrV4,
+};
 use std::time::Instant;
 
 use openshard_protocol::identity::AccountName;
 use openshard_protocol::login::{
-    AccountLogin, ClientVersionReport, DenyReason, GameServerLogin, LoginDenied, LoginStagePacket,
-    PercentFull, Relay, SelectShard, ShardEntry, ShardList,
+    AccountLogin,
+    ClientVersionReport,
+    DenyReason,
+    GameServerLogin,
+    LoginDenied,
+    LoginStagePacket,
+    PercentFull,
+    Relay,
+    SelectShard,
+    ShardEntry,
+    ShardList,
 };
+use openshard_protocol::seed::Seed;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::{seed::Seed, version::ClientVersion};
-use tracing::{debug, warn};
+use openshard_protocol::version::ClientVersion;
+use tracing::{
+    debug,
+    warn,
+};
 
-use crate::accounts::{CredentialCheck, DevAccounts, PasswordVerdict};
+use crate::accounts::{
+    CredentialCheck,
+    DevAccounts,
+    PasswordVerdict,
+};
 use crate::auth::AuthKeys;
 
 /// Why a connection is closing, carried from the failure site to whoever logs
@@ -153,7 +173,7 @@ enum GameState {
 /// parameter. The whole conversation is testable as a sequence of byte slices.
 #[derive(Debug)]
 pub struct LoginSession {
-    state: LoginSessionState,
+    state:   LoginSessionState,
     /// What the client claims to be, from the seed or `0xBD`.
     ///
     /// Defaults to the oldest possible client, which is the conservative
@@ -176,7 +196,7 @@ impl LoginSession {
     /// A session expecting its first packet.
     pub const fn new() -> Self {
         Self {
-            state: LoginSessionState::Fresh,
+            state:   LoginSessionState::Fresh,
             version: ClientVersion::OLDEST,
         }
     }
@@ -246,11 +266,11 @@ impl LoginSession {
 #[derive(Debug)]
 pub struct LoginServer {
     /// Where accounts live.
-    pub accounts: DevAccounts,
+    pub accounts:     DevAccounts,
     /// Keys issued at relay, redeemed at game login.
-    pub keys: AuthKeys,
+    pub keys:         AuthKeys,
     /// The shard list to advertise.
-    pub shards: Vec<ShardEntry>,
+    pub shards:       Vec<ShardEntry>,
     /// Where to send a client after it picks a shard.
     pub game_address: SocketAddrV4,
 }
@@ -262,10 +282,10 @@ impl LoginServer {
             accounts,
             keys: AuthKeys::new(),
             shards: vec![ShardEntry {
-                name: shard_name.to_owned(),
+                name:         shard_name.to_owned(),
                 percent_full: PercentFull::EMPTY,
-                timezone: 0,
-                address: *game_address.ip(),
+                timezone:     0,
+                address:      *game_address.ip(),
             }],
             game_address,
         }
@@ -582,15 +602,19 @@ pub fn single_shard(address: Ipv4Addr, port: u16) -> SocketAddrV4 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::accounts::DevAccounts;
     use openshard_protocol::feature::Feature;
     use openshard_protocol::identity::{
-        AccountName, PlaintextPassword, RawAccountName, RawPlaintextPassword,
+        AccountName,
+        PlaintextPassword,
+        RawAccountName,
+        RawPlaintextPassword,
     };
     use openshard_protocol::login::RawShardIndex;
     use openshard_protocol::seed::RawSeedValue;
     use openshard_protocol::wire::AuthKey;
+
+    use super::*;
+    use crate::accounts::DevAccounts;
 
     fn server() -> LoginServer {
         let accounts = DevAccounts::new()
@@ -627,7 +651,7 @@ mod tests {
     fn modern_session() -> LoginSession {
         let mut session = LoginSession::new();
         session.on_seed(Seed {
-            value: RawSeedValue(0x0A00_0001),
+            value:   RawSeedValue(0x0A00_0001),
             version: Some(ClientVersion::TOL),
         });
         session
@@ -635,7 +659,7 @@ mod tests {
 
     fn login(account: &str, password: &str) -> Vec<u8> {
         AccountLogin {
-            account: RawAccountName(account.to_owned()),
+            account:  RawAccountName(account.to_owned()),
             password: RawPlaintextPassword(password.to_owned()),
         }
         .encode()
@@ -644,7 +668,7 @@ mod tests {
     fn game_login(key: AuthKey, account: &str) -> Vec<u8> {
         GameServerLogin {
             auth_key: key,
-            account: RawAccountName(account.to_owned()),
+            account:  RawAccountName(account.to_owned()),
             password: RawPlaintextPassword("hunter2".to_owned()),
         }
         .encode()
@@ -730,7 +754,7 @@ mod tests {
         let mut session = modern_session();
         let game_login = GameServerLogin {
             auth_key: key,
-            account: RawAccountName("admin".to_owned()),
+            account:  RawAccountName("admin".to_owned()),
             password: RawPlaintextPassword("hunter2".to_owned()),
         };
         assert_eq!(
@@ -960,7 +984,7 @@ mod tests {
         let mut session = modern_session();
         let forged = GameServerLogin {
             auth_key: AuthKey(0xDEAD_BEEF),
-            account: RawAccountName("admin".to_owned()),
+            account:  RawAccountName("admin".to_owned()),
             password: RawPlaintextPassword("hunter2".to_owned()),
         };
         assert_eq!(
@@ -986,7 +1010,7 @@ mod tests {
 
         let forged = GameServerLogin {
             auth_key: AuthKey(0xDEAD_BEEF),
-            account: RawAccountName("admin".to_owned()),
+            account:  RawAccountName("admin".to_owned()),
             password: RawPlaintextPassword("hunter2".to_owned()),
         };
         let mut session = modern_session();
@@ -997,7 +1021,7 @@ mod tests {
         let key = relay_key(&mut server, now);
         let wrong_account = GameServerLogin {
             auth_key: key,
-            account: RawAccountName("banned".to_owned()),
+            account:  RawAccountName("banned".to_owned()),
             password: RawPlaintextPassword("x".to_owned()),
         };
         let mut session = modern_session();
@@ -1010,7 +1034,7 @@ mod tests {
         let key = relay_key(&mut server, now);
         let wrong_password = GameServerLogin {
             auth_key: key,
-            account: RawAccountName("admin".to_owned()),
+            account:  RawAccountName("admin".to_owned()),
             password: RawPlaintextPassword("wrong".to_owned()),
         };
         let mut session = modern_session();
@@ -1048,7 +1072,7 @@ mod tests {
 
         let game_login = GameServerLogin {
             auth_key: key,
-            account: RawAccountName("admin".to_owned()),
+            account:  RawAccountName("admin".to_owned()),
             password: RawPlaintextPassword("hunter2".to_owned()),
         };
         assert_eq!(
@@ -1092,7 +1116,7 @@ mod tests {
 
         let bob = GameServerLogin {
             auth_key: alices_key,
-            account: RawAccountName("bob".to_owned()),
+            account:  RawAccountName("bob".to_owned()),
             password: RawPlaintextPassword("b".to_owned()),
         };
         assert_eq!(
@@ -1110,7 +1134,7 @@ mod tests {
 
         let game_login = GameServerLogin {
             auth_key: key,
-            account: RawAccountName("admin".to_owned()),
+            account:  RawAccountName("admin".to_owned()),
             password: RawPlaintextPassword("hunter2".to_owned()),
         };
         let too_late = issued + crate::auth::DEFAULT_TTL + std::time::Duration::from_secs(1);
@@ -1134,7 +1158,7 @@ mod tests {
 
         let game_login = GameServerLogin {
             auth_key: key,
-            account: RawAccountName("admin".to_owned()),
+            account:  RawAccountName("admin".to_owned()),
             password: RawPlaintextPassword("wrong".to_owned()),
         };
         assert_eq!(
@@ -1165,7 +1189,7 @@ mod tests {
         // Connection one: the client announces a modern version in the seed.
         let mut first = LoginSession::new();
         first.on_seed(Seed {
-            value: RawSeedValue(1),
+            value:   RawSeedValue(1),
             version: Some(ClientVersion::TOL),
         });
         let Response::Send(_) = drive(&mut server, &mut first, pkt(&login("admin", "hunter2")), now) else {
@@ -1198,7 +1222,7 @@ mod tests {
 
         let mut first = LoginSession::new();
         first.on_seed(Seed {
-            value: RawSeedValue(1),
+            value:   RawSeedValue(1),
             version: Some(ClientVersion::new(2, 0, 0, 0)),
         });
         let Response::Send(_) = drive(&mut server, &mut first, pkt(&login("admin", "hunter2")), now) else {
@@ -1226,7 +1250,7 @@ mod tests {
 
         let mut modern = LoginSession::new();
         modern.on_seed(Seed {
-            value: RawSeedValue(1),
+            value:   RawSeedValue(1),
             version: Some(ClientVersion::new(4, 0, 0, 0)),
         });
         let Response::Send(list) = drive(&mut server, &mut modern, pkt(&login("admin", "hunter2")), now)
@@ -1237,7 +1261,7 @@ mod tests {
 
         let mut ancient = LoginSession::new();
         ancient.on_seed(Seed {
-            value: RawSeedValue(1),
+            value:   RawSeedValue(1),
             version: Some(ClientVersion::new(3, 255, 255, 255)),
         });
         let Response::Send(list) = drive(&mut server, &mut ancient, pkt(&login("admin", "hunter2")), now)
@@ -1262,7 +1286,7 @@ mod tests {
         let mut server = server();
         let mut session = LoginSession::new();
         session.on_seed(Seed {
-            value: RawSeedValue(0xC0A8_0001),
+            value:   RawSeedValue(0xC0A8_0001),
             version: None,
         });
         assert_eq!(session.version(), ClientVersion::OLDEST);

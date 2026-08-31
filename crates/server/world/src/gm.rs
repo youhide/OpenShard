@@ -14,21 +14,45 @@
 
 use openshard_commands::StaffCommand;
 use openshard_entities::EntityId;
+use openshard_items as items;
 use openshard_map::grid::Tile;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::speech::{Font, SpokenMessage, TalkMode};
-use openshard_protocol::target::{TargetCursor, TargetKind};
-use openshard_protocol::wire::{CursorId, Graphic, Hue};
-use openshard_protocol::world::{Facet, Point};
-use openshard_state::components::{
-    Client, HouseDoor, HouseSign, Position, SPELLBOOK_GRAPHIC, Spellbook, Staff, Stats,
+use openshard_protocol::speech::{
+    Font,
+    SpokenMessage,
+    TalkMode,
 };
-use openshard_state::{HouseChange, TargetPurpose, WorldState};
-
-use openshard_items as items;
+use openshard_protocol::target::{
+    TargetCursor,
+    TargetKind,
+};
+use openshard_protocol::wire::{
+    CursorId,
+    Graphic,
+    Hue,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 use openshard_skills as skills;
+use openshard_state::components::{
+    Client,
+    HouseDoor,
+    HouseSign,
+    Position,
+    SPELLBOOK_GRAPHIC,
+    Spellbook,
+    Staff,
+    Stats,
+};
+use openshard_state::{
+    HouseChange,
+    TargetPurpose,
+    WorldState,
+};
 
 /// The character that turns speech into a command. Sphere's, and what the
 /// `Command::Say` handler strips before calling [`run`].
@@ -120,13 +144,15 @@ fn describe_tile(state: &mut WorldState, actor: EntityId) {
     };
     let (x, y) = (at.x, at.y);
     let mut lines = vec![match world.map().land(x, y) {
-        Some(cell) => format!(
-            "({x}, {y}) on facet {} at revision {}: land {} at z {}",
-            facet.0,
-            world.revision().get(),
-            cell.tile.0,
-            cell.z
-        ),
+        Some(cell) => {
+            format!(
+                "({x}, {y}) on facet {} at revision {}: land {} at z {}",
+                facet.0,
+                world.revision().get(),
+                cell.tile.0,
+                cell.z
+            )
+        }
         None => format!("({x}, {y}) is not on facet {}.", facet.0),
     }];
     lines.extend(world.map().statics_at(x, y).enumerate().map(|(nth, item)| {
@@ -171,13 +197,15 @@ fn set_land(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         return;
     };
     let z = match args.get(1) {
-        Some(word) => match word.parse::<i8>() {
-            Ok(z) => z,
-            Err(_) => {
-                notify(state, actor, "The height has to be a number from -128 to 127.");
-                return;
+        Some(word) => {
+            match word.parse::<i8>() {
+                Ok(z) => z,
+                Err(_) => {
+                    notify(state, actor, "The height has to be a number from -128 to 127.");
+                    return;
+                }
             }
-        },
+        }
         None => was.z,
     };
     let op = openshard_map::patch::PatchOp::SetLand {
@@ -215,13 +243,15 @@ fn add_static(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         return;
     };
     let z = match args.get(1) {
-        Some(word) => match word.parse::<i8>() {
-            Ok(z) => z,
-            Err(_) => {
-                notify(state, actor, "The height has to be a number from -128 to 127.");
-                return;
+        Some(word) => {
+            match word.parse::<i8>() {
+                Ok(z) => z,
+                Err(_) => {
+                    notify(state, actor, "The height has to be a number from -128 to 127.");
+                    return;
+                }
             }
-        },
+        }
         // Where the operator is standing, which is what "under you" means for
         // something that has a height of its own.
         None => position.z,
@@ -251,13 +281,15 @@ fn add_static(state: &mut WorldState, actor: EntityId, args: &[&str]) {
 /// That is not a race this has to guard, because both are one tick.
 fn remove_static(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     let nth = match args.first() {
-        Some(word) => match parse_u16(word) {
-            Some(nth) => nth,
-            None => {
-                notify(state, actor, "Usage: .rmstatic [nth], as printed by .tile");
-                return;
+        Some(word) => {
+            match parse_u16(word) {
+                Some(nth) => nth,
+                None => {
+                    notify(state, actor, "Usage: .rmstatic [nth], as printed by .tile");
+                    return;
+                }
             }
-        },
+        }
         None => 0,
     };
     let Some((facet, at)) = standing_on(state, actor) else {
@@ -407,7 +439,11 @@ fn make_key(state: &mut WorldState, actor: EntityId, args: &[&str]) {
 /// behaviour is the point. Hued the colour of old straw and named for what it
 /// is, so nobody mistakes it for a townsperson somebody forgot to give a trade.
 mod scarecrow {
-    use openshard_protocol::wire::{Graphic, Hue, Layer};
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+        Layer,
+    };
 
     /// The body: ServUO's `BODY_MALE`, the same one every human wears.
     pub const BODY: Graphic = Graphic(0x0190);
@@ -457,13 +493,15 @@ fn place_dummy(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     }
     let hits = match args.first() {
         None => scarecrow::HITS,
-        Some(word) => match word.parse::<u16>() {
-            Ok(hits) if hits > 0 => hits,
-            _ => {
-                notify(state, actor, "Usage: .dummy [hits|off]");
-                return;
+        Some(word) => {
+            match word.parse::<u16>() {
+                Ok(hits) if hits > 0 => hits,
+                _ => {
+                    notify(state, actor, "Usage: .dummy [hits|off]");
+                    return;
+                }
             }
-        },
+        }
     };
     let Some(&Position(at)) = state.registry.get::<Position>(actor) else {
         return;
@@ -601,7 +639,7 @@ fn make_poison(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     state.registry.insert(
         potion,
         openshard_state::components::PoisonCharges {
-            level: openshard_protocol::world::PoisonLevel::new(level),
+            level:   openshard_protocol::world::PoisonLevel::new(level),
             charges: 1,
         },
     );
@@ -648,7 +686,7 @@ fn set_trap(state: &mut WorldState, actor: EntityId, args: &[&str]) {
             connection,
             &ServerPacket::TargetCursor(TargetCursor {
                 cursor_id: CursorId(serial),
-                kind: TargetKind::Object,
+                kind:      TargetKind::Object,
             }),
         );
     }
@@ -681,14 +719,16 @@ fn connection_and_serial(
 fn toggle_gm_mode(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     let on = match args.first().map(|word| word.to_lowercase()) {
         None => !state.is_staff(actor),
-        Some(word) => match word.as_str() {
-            "on" | "1" | "true" | "yes" => true,
-            "off" | "0" | "false" | "no" => false,
-            _ => {
-                notify(state, actor, "Usage: .gm [on|off]");
-                return;
+        Some(word) => {
+            match word.as_str() {
+                "on" | "1" | "true" | "yes" => true,
+                "off" | "0" | "false" | "no" => false,
+                _ => {
+                    notify(state, actor, "Usage: .gm [on|off]");
+                    return;
+                }
             }
-        },
+        }
     };
     if on {
         state.registry.insert(actor, Staff);
@@ -708,13 +748,13 @@ fn save_world(state: &mut WorldState, actor: EntityId) {
     let connections: Vec<_> = state.players.keys().copied().collect();
     for connection in connections {
         let packet = ServerPacket::SpokenMessage(SpokenMessage {
-            serial: None, // the system talking, not a mobile
+            serial:  None, // the system talking, not a mobile
             graphic: None,
-            mode: TalkMode::Regular,
-            hue: SYSTEM_HUE,
-            font: SYSTEM_FONT,
-            name: "System".to_owned(),
-            text: "The world is being saved.".to_owned(),
+            mode:    TalkMode::Regular,
+            hue:     SYSTEM_HUE,
+            font:    SYSTEM_FONT,
+            name:    "System".to_owned(),
+            text:    "The world is being saved.".to_owned(),
         });
         state.send_packet(connection, &packet);
     }
@@ -762,9 +802,11 @@ fn go_to(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     // facet with no map (development mode) keeps the actor's current height.
     let z = match args.get(2).and_then(parse_i8) {
         Some(z) => z,
-        None => ground_z(state, facet, destination)
-            .or_else(|| state.registry.get::<Position>(actor).map(|p| p.0.z))
-            .unwrap_or(0),
+        None => {
+            ground_z(state, facet, destination)
+                .or_else(|| state.registry.get::<Position>(actor).map(|p| p.0.z))
+                .unwrap_or(0)
+        }
     };
     state.move_to(actor, facet, Point::new(destination.x, destination.y, z));
     notify(state, actor, &format!("Went to {x}, {y}, {z} on facet {facet}."));
@@ -785,7 +827,7 @@ fn teleport_cursor(state: &mut WorldState, actor: EntityId) {
         connection,
         &ServerPacket::TargetCursor(TargetCursor {
             cursor_id: CursorId(serial),
-            kind: TargetKind::Location,
+            kind:      TargetKind::Location,
         }),
     );
 }
@@ -804,7 +846,7 @@ fn sight_cursor(state: &mut WorldState, actor: EntityId) {
         connection,
         &ServerPacket::TargetCursor(TargetCursor {
             cursor_id: CursorId(serial),
-            kind: TargetKind::Location,
+            kind:      TargetKind::Location,
         }),
     );
 }
@@ -879,16 +921,18 @@ pub(crate) fn report_sight(state: &mut WorldState, actor: EntityId, to: Point) {
                 base,
                 top,
                 wallish,
-            } => format!(
-                "  ({}, {}): {} {:#06x} z {base}..{top} over ray {ray}",
-                step.tile.x,
-                step.tile.y,
-                match wallish {
-                    true => "wall",
-                    false => "platform",
-                },
-                graphic.0
-            ),
+            } => {
+                format!(
+                    "  ({}, {}): {} {:#06x} z {base}..{top} over ray {ray}",
+                    step.tile.x,
+                    step.tile.y,
+                    match wallish {
+                        true => "wall",
+                        false => "platform",
+                    },
+                    graphic.0
+                )
+            }
             openshard_movement::sight::Stop::Door => {
                 format!("  ({}, {}): a shut door, ray {ray}", step.tile.x, step.tile.y)
             }
@@ -1021,8 +1065,8 @@ fn set_stat(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         return;
     };
     let current = state.registry.get::<Stats>(actor).copied().unwrap_or(Stats {
-        strength: 0,
-        dexterity: 0,
+        strength:     0,
+        dexterity:    0,
         intelligence: 0,
     });
     let mut next = current;
@@ -1164,13 +1208,15 @@ fn place_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         return;
     };
     let at = match args.get(1..) {
-        Some([x, y, z]) => match (x.parse::<u16>(), y.parse::<u16>(), z.parse::<i8>()) {
-            (Ok(x), Ok(y), Ok(z)) => Point::new(x, y, z),
-            _ => {
-                notify(state, actor, "House coordinates must be x y z numbers.");
-                return;
+        Some([x, y, z]) => {
+            match (x.parse::<u16>(), y.parse::<u16>(), z.parse::<i8>()) {
+                (Ok(x), Ok(y), Ok(z)) => Point::new(x, y, z),
+                _ => {
+                    notify(state, actor, "House coordinates must be x y z numbers.");
+                    return;
+                }
             }
-        },
+        }
         Some([]) => feet,
         _ => {
             notify(
@@ -1312,11 +1358,13 @@ fn demolish_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         }
     };
     match openshard_housing::decay::demolish(state, house) {
-        Ok(_) => notify(
-            state,
-            actor,
-            "The house comes down. What it held is in the crate.",
-        ),
+        Ok(_) => {
+            notify(
+                state,
+                actor,
+                "The house comes down. What it held is in the crate.",
+            )
+        }
         Err(error) => notify(state, actor, error.message()),
     }
 }
@@ -1344,11 +1392,13 @@ fn launch_boat(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     };
     let multi = openshard_protocol::wire::MultiId::from_graphic(Graphic(raw_multi));
     match openshard_boats::place(state, actor, at, facet, multi, owner) {
-        Ok(_) => notify(
-            state,
-            actor,
-            &format!("A ship ({:#06x}) is moored at your feet.", multi.0),
-        ),
+        Ok(_) => {
+            notify(
+                state,
+                actor,
+                &format!("A ship ({:#06x}) is moored at your feet.", multi.0),
+            )
+        }
         Err(refusal) => notify(state, actor, refusal.message()),
     }
 }
@@ -1442,11 +1492,13 @@ fn design_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         return;
     }
     match openshard_housing::design::redesign(state, actor, house, components) {
-        Ok(revision) => notify(
-            state,
-            actor,
-            &format!("The house is rebuilt to {:#06x} (revision {revision}).", multi.0),
-        ),
+        Ok(revision) => {
+            notify(
+                state,
+                actor,
+                &format!("The house is rebuilt to {:#06x} (revision {revision}).", multi.0),
+            )
+        }
         Err(refusal) => notify(state, actor, refusal.message()),
     }
 }
@@ -1471,7 +1523,7 @@ fn house_list(state: &mut WorldState, actor: EntityId, change: HouseChange) {
         connection,
         &ServerPacket::TargetCursor(TargetCursor {
             cursor_id: CursorId(serial.raw()),
-            kind: TargetKind::Object,
+            kind:      TargetKind::Object,
         }),
     );
     notify(state, actor, "Whom?");

@@ -63,16 +63,37 @@
 //!
 //! [`WorldMap`]: openshard_map::map::WorldMap
 
-use openshard_map::chunk::{Chunk, ChunkCoord, ChunkKey, assemble, chunks_of};
+use openshard_map::chunk::{
+    Chunk,
+    ChunkCoord,
+    ChunkKey,
+    assemble,
+    chunks_of,
+};
 use openshard_map::codec;
 use openshard_map::grid::BlockExtent;
-use openshard_map::snapshot::{MapRevision, MapSnapshot};
+use openshard_map::snapshot::{
+    MapRevision,
+    MapSnapshot,
+};
 use openshard_protocol::chunks::{
-    Changes, ChunkAt, ChunkData, ChunkRequest, FacetBlocks, JoinError, MAX_CHUNKS, Refusal, WorldNotice, join,
+    Changes,
+    ChunkAt,
+    ChunkData,
+    ChunkRequest,
+    FacetBlocks,
+    JoinError,
+    MAX_CHUNKS,
+    Refusal,
+    WorldNotice,
+    join,
 };
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::world::Facet;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::{
+    FxHashMap,
+    FxHashSet,
+};
 
 /// How many chunks may be outstanding at once.
 ///
@@ -115,7 +136,7 @@ pub enum FetchError {
     /// instead of looking like a lost packet.
     Refused {
         /// Which chunk.
-        at: ChunkAt,
+        at:     ChunkAt,
         /// Which of the two facts the shard stated.
         reason: Refusal,
     },
@@ -124,19 +145,19 @@ pub enum FetchError {
         /// Which facet it claimed.
         facet: Facet,
         /// Which chunk of it.
-        at: ChunkAt,
+        at:    ChunkAt,
     },
     /// The fragments of one chunk do not make one blob.
     Join {
         /// Which chunk.
-        at: ChunkAt,
+        at:     ChunkAt,
         /// Why.
         source: JoinError,
     },
     /// The blob a chunk's fragments joined into is not a chunk record.
     Record {
         /// Which chunk.
-        at: ChunkAt,
+        at:     ChunkAt,
         /// Why.
         source: codec::DecodeError,
     },
@@ -168,11 +189,11 @@ pub enum FetchError {
     /// that straddles a publish, which is the same fact one level down.
     WrongRevision {
         /// Which chunk.
-        at: ChunkAt,
+        at:     ChunkAt,
         /// The revision the difference was computed against.
         wanted: MapRevision,
         /// The revision the chunk was cut at.
-        found: MapRevision,
+        found:  MapRevision,
     },
     /// The world a fetch was told to fill in is not the world being described.
     ///
@@ -184,7 +205,7 @@ pub enum FetchError {
         /// What the shard described.
         blocks: FacetBlocks,
         /// What the world in hand is.
-        held: BlockExtent,
+        held:   BlockExtent,
     },
     /// The chunks are all here and do not make one facet.
     Assembly {
@@ -196,43 +217,53 @@ pub enum FetchError {
 impl std::fmt::Display for FetchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::TooWide { blocks } => write!(
-                f,
-                "a facet of {}x{} blocks has chunks the wire cannot name",
-                blocks.wide, blocks.down
-            ),
+            Self::TooWide { blocks } => {
+                write!(
+                    f,
+                    "a facet of {}x{} blocks has chunks the wire cannot name",
+                    blocks.wide, blocks.down
+                )
+            }
             Self::Refused { at, reason } => {
                 write!(f, "chunk ({}, {}) was refused: {reason}", at.x, at.y)
             }
-            Self::Unasked { facet, at } => write!(
-                f,
-                "chunk ({}, {}) of facet {} arrived and nobody asked for it",
-                at.x, at.y, facet.0
-            ),
+            Self::Unasked { facet, at } => {
+                write!(
+                    f,
+                    "chunk ({}, {}) of facet {} arrived and nobody asked for it",
+                    at.x, at.y, facet.0
+                )
+            }
             Self::Join { at, source } => {
                 write!(f, "chunk ({}, {}) did not arrive whole: {source}", at.x, at.y)
             }
             Self::Record { at, source } => {
                 write!(f, "chunk ({}, {}) is not a chunk record: {source}", at.x, at.y)
             }
-            Self::WrongChunk { asked, found } => write!(
-                f,
-                "chunk ({}, {}) was asked for and chunk ({}, {}) of facet {} arrived",
-                asked.x, asked.y, found.at.x, found.at.y, found.facet.0
-            ),
-            Self::WrongRevision { at, wanted, found } => write!(
-                f,
-                "chunk ({}, {}) arrived at revision {} and what moved was asked about revision {}",
-                at.x,
-                at.y,
-                found.get(),
-                wanted.get()
-            ),
-            Self::WrongWorld { blocks, held } => write!(
-                f,
-                "a world of {}x{} blocks was kept and the shard describes one of {}x{}",
-                held.wide, held.down, blocks.wide, blocks.down
-            ),
+            Self::WrongChunk { asked, found } => {
+                write!(
+                    f,
+                    "chunk ({}, {}) was asked for and chunk ({}, {}) of facet {} arrived",
+                    asked.x, asked.y, found.at.x, found.at.y, found.facet.0
+                )
+            }
+            Self::WrongRevision { at, wanted, found } => {
+                write!(
+                    f,
+                    "chunk ({}, {}) arrived at revision {} and what moved was asked about revision {}",
+                    at.x,
+                    at.y,
+                    found.get(),
+                    wanted.get()
+                )
+            }
+            Self::WrongWorld { blocks, held } => {
+                write!(
+                    f,
+                    "a world of {}x{} blocks was kept and the shard describes one of {}x{}",
+                    held.wide, held.down, blocks.wide, blocks.down
+                )
+            }
             Self::Assembly { source } => write!(f, "the chunks do not make one facet: {source}"),
         }
     }
@@ -273,7 +304,7 @@ enum Filling {
     /// a thing to check afterwards.
     Held {
         /// The world as it was, out of [`crate::cache`].
-        world: MapSnapshot,
+        world:    MapSnapshot,
         /// The revision every arriving chunk has to carry.
         revision: MapRevision,
     },
@@ -307,29 +338,29 @@ enum Filling {
 #[derive(Debug)]
 pub struct Fetch {
     /// Which facet is being fetched. Every reply is checked against it.
-    facet: Facet,
+    facet:       Facet,
     /// How big the shard said it is. `assemble`'s second argument, and the only
     /// thing that makes a set of chunks a *whole* facet rather than a narrower
     /// world that parses perfectly.
-    extent: BlockExtent,
+    extent:      BlockExtent,
     /// Every chunk the facet has, in `chunks_of` order.
     ///
     /// The order is the base set's own, which is not a coincidence: E3's cache
     /// is a base set, and a facet fetched in the order it is written is a facet
     /// that can be written as it arrives.
-    wanted: Vec<ChunkAt>,
+    wanted:      Vec<ChunkAt>,
     /// How many of [`wanted`](Self::wanted) have been asked for. A cursor rather
     /// than a set, because nothing is ever asked for twice.
-    asked: usize,
+    asked:       usize,
     /// Asked for and not yet whole: the fragments each has so far.
     ///
     /// A chunk leaves this map when it is whole, which is what makes "is this
     /// chunk outstanding" the same question as "did anybody ask for it".
     outstanding: FxHashMap<ChunkAt, Vec<ChunkData>>,
     /// Whole, decoded, and checked against what was asked for.
-    held: Vec<Chunk>,
+    held:        Vec<Chunk>,
     /// What the chunks are being put into. See [`Filling`].
-    filling: Filling,
+    filling:     Filling,
 }
 
 impl Fetch {
@@ -341,9 +372,11 @@ impl Fetch {
     pub fn of(notice: WorldNotice) -> Result<Self, FetchError> {
         let extent = extent_of(notice)?;
         let wanted: Vec<ChunkAt> = chunks_of(extent)
-            .map(|at| ChunkAt {
-                x: at.x as u16,
-                y: at.y as u16,
+            .map(|at| {
+                ChunkAt {
+                    x: at.x as u16,
+                    y: at.y as u16,
+                }
             })
             .collect();
         Ok(Self::new(notice.facet, extent, wanted, Filling::Nothing))
@@ -381,7 +414,7 @@ impl Fetch {
         if held.map().extent() != extent {
             return Err(FetchError::WrongWorld {
                 blocks: notice.blocks,
-                held: held.map().extent(),
+                held:   held.map().extent(),
             });
         }
         Ok(Self::new(
@@ -538,19 +571,23 @@ impl Fetch {
                 self.fragment(data)?;
                 Ok(true)
             }
-            ServerPacket::ChunkRefused(refused) => Err(FetchError::Refused {
-                at: refused.at,
-                reason: refused.reason,
-            }),
+            ServerPacket::ChunkRefused(refused) => {
+                Err(FetchError::Refused {
+                    at:     refused.at,
+                    reason: refused.reason,
+                })
+            }
             _ => Ok(false),
         }
     }
 
     /// One fragment, and the chunk it completes if it is the last of them.
     fn fragment(&mut self, data: &ChunkData) -> Result<(), FetchError> {
-        let unasked = || FetchError::Unasked {
-            facet: data.facet,
-            at: data.at,
+        let unasked = || {
+            FetchError::Unasked {
+                facet: data.facet,
+                at:    data.at,
+            }
         };
         if data.facet != self.facet {
             return Err(unasked());
@@ -573,7 +610,7 @@ impl Fetch {
         let chunk = codec::decode(&record).map_err(|source| FetchError::Record { at: data.at, source })?;
         let asked = ChunkKey {
             facet: self.facet,
-            at: ChunkCoord {
+            at:    ChunkCoord {
                 x: u32::from(data.at.x),
                 y: u32::from(data.at.y),
             },
@@ -594,9 +631,9 @@ impl Fetch {
             Filling::Held { revision, .. } | Filling::Loose { revision } => {
                 if chunk.revision() != revision {
                     return Err(FetchError::WrongRevision {
-                        at: data.at,
+                        at:     data.at,
                         wanted: revision,
-                        found: chunk.revision(),
+                        found:  chunk.revision(),
                     });
                 }
             }
@@ -691,7 +728,7 @@ impl Fetch {
     pub fn abandon(self, published: &Changes, revision: MapRevision) -> (Drain, Restart) {
         let drain = Drain {
             facet: self.facet,
-            owed: self
+            owed:  self
                 .outstanding
                 .iter()
                 .map(|(&at, pieces)| (at, pieces.len()))
@@ -740,7 +777,7 @@ pub struct Drain {
     /// fragments have been seen. A chunk leaves when its last fragment arrives
     /// or when the shard refuses it, which are the only two things the shard
     /// can answer with.
-    owed: FxHashMap<ChunkAt, usize>,
+    owed:  FxHashMap<ChunkAt, usize>,
 }
 
 impl Drain {
@@ -850,12 +887,12 @@ enum Whose {
 pub struct Restart {
     /// Every square that moved between the world this end can still show and
     /// [`revision`](Self::revision).
-    moved: Changes,
+    moved:    Changes,
     /// The revision to fetch at: the newest publish's, since each one is the
     /// world as it now stands.
     revision: MapRevision,
     /// Which of the three fetches to start again.
-    whose: Whose,
+    whose:    Whose,
 }
 
 impl Restart {
@@ -983,9 +1020,19 @@ fn extent_of(notice: WorldNotice) -> Result<BlockExtent, FetchError> {
 #[cfg(test)]
 mod tests {
     use openshard_map::chunk::CHUNK_TILES;
-    use openshard_map::map::{LandCell, StaticItem, WorldMap};
-    use openshard_protocol::chunks::{ChunkRefused, WorldRevision};
-    use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_map::map::{
+        LandCell,
+        StaticItem,
+        WorldMap,
+    };
+    use openshard_protocol::chunks::{
+        ChunkRefused,
+        WorldRevision,
+    };
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
     use openshard_protocol::world::WorldId;
     use openshard_tiles::LandTileId;
 
@@ -1011,9 +1058,11 @@ mod tests {
     /// a fetch that transposed two chunks, and this is the one test where the
     /// chunks are put back together by code that has never seen the shard.
     fn a_facet() -> MapSnapshot {
-        let mut map = WorldMap::from_blocks(extent(), |x, y| LandCell {
-            tile: LandTileId(x.wrapping_mul(7).wrapping_add(y)),
-            z: (x as i32 - y as i32) as i8,
+        let mut map = WorldMap::from_blocks(extent(), |x, y| {
+            LandCell {
+                tile: LandTileId(x.wrapping_mul(7).wrapping_add(y)),
+                z:    (x as i32 - y as i32) as i8,
+            }
         });
         let seam = CHUNK_TILES as u16;
         for (n, (x, y)) in [
@@ -1152,15 +1201,15 @@ mod tests {
             4,
             LandCell {
                 tile: LandTileId(0x3FF),
-                z: 12,
+                z:    12,
             },
         );
         map.place_static(StaticItem {
             tile: Graphic(0x4321),
-            x: 70,
-            y: 71,
-            z: 3,
-            hue: Hue(9),
+            x:    70,
+            y:    71,
+            z:    3,
+            hue:  Hue(9),
         });
         MapSnapshot::restored(FACET, revision, map)
     }
@@ -1331,7 +1380,7 @@ mod tests {
         assert_eq!(request.chunks.len(), 4, "the fixture is four chunks");
         // One of the four is whole before the publish lands.
         let first = ChunkRequest {
-            facet: FACET,
+            facet:  FACET,
             chunks: vec![request.chunks[0]],
         };
         for packet in answers(&snapshot, &first) {
@@ -1345,7 +1394,7 @@ mod tests {
 
         let moved = a_facet_that_moved(published_at);
         let rest = ChunkRequest {
-            facet: FACET,
+            facet:  FACET,
             chunks: request.chunks[1..].to_vec(),
         };
         for packet in answers(&moved, &rest) {
@@ -1590,9 +1639,11 @@ mod tests {
         }
 
         let expected: Vec<ChunkAt> = chunks_of(extent())
-            .map(|at| ChunkAt {
-                x: at.x as u16,
-                y: at.y as u16,
+            .map(|at| {
+                ChunkAt {
+                    x: at.x as u16,
+                    y: at.y as u16,
+                }
             })
             .collect();
         assert_eq!(order, expected);
@@ -1728,9 +1779,11 @@ mod tests {
                     wide: blocks.wide,
                     down: blocks.down,
                 },
-                |_, _| LandCell {
-                    tile: LandTileId(3),
-                    z: 0,
+                |_, _| {
+                    LandCell {
+                        tile: LandTileId(3),
+                        z:    0,
+                    }
                 },
             ),
         );

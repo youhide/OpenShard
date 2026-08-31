@@ -9,7 +9,10 @@
 //! the fourth is that nobody reconciled it with the others, so what it is held
 //! to instead is a set of crossings worked out by hand, below.
 
-use crate::vector::{Axis, Vec3};
+use crate::vector::{
+    Axis,
+    Vec3,
+};
 
 /// Where a ray meets a box, as two distances along it.
 ///
@@ -23,17 +26,17 @@ use crate::vector::{Axis, Vec3};
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Crossing {
     /// Where the ray enters, in multiples of the direction vector.
-    pub near: f64,
+    pub near:      f64,
     /// And leaves. Never less than `near`; equal to it where the line meets the
     /// box at a single point — a corner, or a box with no extent on the axis
     /// the line crosses.
-    pub far: f64,
+    pub far:       f64,
     /// Which of the three slabs decided `near`.
     pub near_axis: Axis,
     /// And which decided `far`. Not the same one in general, and taking the
     /// entry axis for both is a normal that points off a face the ray never
     /// touched.
-    pub far_axis: Axis,
+    pub far_axis:  Axis,
 }
 
 /// An axis-aligned box: two opposite corners.
@@ -164,8 +167,14 @@ fn facing(axis: Axis, direction: Vec3) -> Vec3 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Aabb, Crossing};
-    use crate::vector::{Axis, Vec3};
+    use super::{
+        Aabb,
+        Crossing,
+    };
+    use crate::vector::{
+        Axis,
+        Vec3,
+    };
 
     /// The unit cube at the origin, which every case below is worked out
     /// against by hand.

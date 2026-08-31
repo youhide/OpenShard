@@ -25,7 +25,11 @@
 //! rebuilding anything in between. `docs/parity.md` D5: a comparison names which
 //! plane disagreed, and "the frame differs" is not an answer.
 
-use crate::blit::{Blit, Frame, ViewportRect};
+use crate::blit::{
+    Blit,
+    Frame,
+    ViewportRect,
+};
 use crate::debug::View;
 use crate::light::Lighting;
 
@@ -149,9 +153,9 @@ pub fn read_rect(
     let row = rect.width * texel;
     let padded = row + (align - row % align) % align;
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("frame readback"),
-        size: u64::from(padded) * u64::from(rect.height),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("frame readback"),
+        size:               u64::from(padded) * u64::from(rect.height),
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -171,14 +175,14 @@ pub fn read_rect(
         wgpu::TexelCopyBufferInfo {
             buffer: &buffer,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(padded),
+                offset:         0,
+                bytes_per_row:  Some(padded),
                 rows_per_image: Some(rect.height),
             },
         },
         wgpu::Extent3d {
-            width: rect.width,
-            height: rect.height,
+            width:                 rect.width,
+            height:                rect.height,
             depth_or_array_layers: 1,
         },
     );

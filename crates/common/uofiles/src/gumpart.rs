@@ -88,13 +88,21 @@
 //! were written to avoid.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_protocol::wire::Graphic;
 
 use crate::color::Color16;
 use crate::image::Image;
-use crate::uop::{RawEntry, Uop, UopCompression, UopError};
+use crate::uop::{
+    RawEntry,
+    Uop,
+    UopCompression,
+    UopError,
+};
 
 mod bwt;
 
@@ -122,14 +130,14 @@ pub enum GumpError {
         /// Which gump.
         graphic: Graphic,
         /// The flag the container recorded.
-        flag: u16,
+        flag:    u16,
     },
     /// An entry decoded but is not shaped like a picture.
     Malformed {
         /// Which gump.
         graphic: Graphic,
         /// What went wrong.
-        detail: String,
+        detail:  String,
     },
 }
 
@@ -137,12 +145,14 @@ impl fmt::Display for GumpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Container(source) => write!(f, "{source}"),
-            Self::UnsupportedCompression { graphic, flag } => write!(
-                f,
-                "gump {:#06X} uses compression flag {flag}, which this reader has never seen a real \
+            Self::UnsupportedCompression { graphic, flag } => {
+                write!(
+                    f,
+                    "gump {:#06X} uses compression flag {flag}, which this reader has never seen a real \
                  container use",
-                graphic.0
-            ),
+                    graphic.0
+                )
+            }
             Self::Malformed { graphic, detail } => {
                 write!(f, "gump {:#06X} is malformed: {detail}", graphic.0)
             }

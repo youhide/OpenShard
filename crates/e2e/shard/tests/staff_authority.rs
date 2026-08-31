@@ -26,10 +26,21 @@ use std::time::Duration;
 
 use openshard_client_net::transport::enter_world;
 use openshard_commands::StaffCommand;
-use openshard_config::{Config, RawAccessLevel};
+use openshard_config::{
+    Config,
+    RawAccessLevel,
+};
+use openshard_e2e_shard::{
+    ACCOUNT,
+    NYSTUL,
+    WITNESS,
+    plan,
+    plan_for,
+    spawn,
+    stock_config,
+    version,
+};
 use openshard_protocol::access::AccessLevel;
-
-use openshard_e2e_shard::{ACCOUNT, NYSTUL, WITNESS, plan, plan_for, spawn, stock_config, version};
 
 /// The stock config with `admin` promoted, the way an operator does it by
 /// uncommenting one line.

@@ -22,8 +22,17 @@
 //! id — a member who was offline when it disbanded, and so was never swept —
 //! would silently find itself in the new guild.
 
-use openshard_persistence::{AllianceRecord, GuildRecord, GuildStanding};
-use openshard_state::guild::{Alliance, AllianceId, Guild, GuildId};
+use openshard_persistence::{
+    AllianceRecord,
+    GuildRecord,
+    GuildStanding,
+};
+use openshard_state::guild::{
+    Alliance,
+    AllianceId,
+    Guild,
+    GuildId,
+};
 use tracing::info;
 
 use super::World;
@@ -37,14 +46,16 @@ impl World {
         self.state
             .guilds
             .iter()
-            .map(|guild| GuildRecord {
-                id: guild.id.0,
-                name: guild.name.clone(),
-                abbreviation: guild.abbreviation.clone(),
-                leader: guild.leader,
-                relations: standings(guild.wars.iter()),
-                proposals: standings(guild.war_offers.iter()),
-                alliance: guild.alliance.map(|id| id.0),
+            .map(|guild| {
+                GuildRecord {
+                    id:           guild.id.0,
+                    name:         guild.name.clone(),
+                    abbreviation: guild.abbreviation.clone(),
+                    leader:       guild.leader,
+                    relations:    standings(guild.wars.iter()),
+                    proposals:    standings(guild.war_offers.iter()),
+                    alliance:     guild.alliance.map(|id| id.0),
+                }
             })
             .collect()
     }
@@ -54,12 +65,14 @@ impl World {
         self.state
             .alliances
             .iter()
-            .map(|alliance| AllianceRecord {
-                id: alliance.id.0,
-                name: alliance.name.clone(),
-                leader: alliance.leader.0,
-                members: alliance.members.iter().map(|guild| guild.0).collect(),
-                pending: alliance.pending.iter().map(|guild| guild.0).collect(),
+            .map(|alliance| {
+                AllianceRecord {
+                    id:      alliance.id.0,
+                    name:    alliance.name.clone(),
+                    leader:  alliance.leader.0,
+                    members: alliance.members.iter().map(|guild| guild.0).collect(),
+                    pending: alliance.pending.iter().map(|guild| guild.0).collect(),
+                }
             })
             .collect()
     }
@@ -73,13 +86,13 @@ impl World {
     pub fn restore_guilds(&mut self, records: Vec<GuildRecord>) {
         for record in &records {
             self.state.guilds.restore(Guild {
-                id: GuildId(record.id),
-                name: record.name.clone(),
+                id:           GuildId(record.id),
+                name:         record.name.clone(),
                 abbreviation: record.abbreviation.clone(),
-                leader: record.leader,
-                wars: wars(&record.relations),
-                war_offers: wars(&record.proposals),
-                alliance: record.alliance.map(AllianceId),
+                leader:       record.leader,
+                wars:         wars(&record.relations),
+                war_offers:   wars(&record.proposals),
+                alliance:     record.alliance.map(AllianceId),
             });
         }
         if !records.is_empty() {
@@ -97,9 +110,9 @@ impl World {
     pub fn restore_alliances(&mut self, records: Vec<AllianceRecord>) {
         for record in &records {
             self.state.alliances.restore(Alliance {
-                id: AllianceId(record.id),
-                name: record.name.clone(),
-                leader: GuildId(record.leader),
+                id:      AllianceId(record.id),
+                name:    record.name.clone(),
+                leader:  GuildId(record.leader),
                 members: record.members.iter().copied().map(GuildId).collect(),
                 pending: record.pending.iter().copied().map(GuildId).collect(),
             });
@@ -138,9 +151,11 @@ impl World {
 /// allied became membership of a named group. Written rather than dropped for
 /// the reason [`GuildStanding`]'s own doc gives.
 fn standings<'a>(wars: impl Iterator<Item = &'a GuildId>) -> Vec<GuildStanding> {
-    wars.map(|&other| GuildStanding {
-        other: other.0,
-        at_war: true,
+    wars.map(|&other| {
+        GuildStanding {
+            other:  other.0,
+            at_war: true,
+        }
     })
     .collect()
 }

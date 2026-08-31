@@ -1,15 +1,34 @@
 //! The entity registry: the single owner of every entity and component.
 
 use std::any::TypeId;
-use std::{fmt, iter, option};
+use std::{
+    fmt,
+    iter,
+    option,
+};
 
+use openshard_protocol::serial::{
+    Serial,
+    SerialKind,
+};
 use rustc_hash::FxHashMap;
 
-use crate::component::{Column, Component, Iter, IterMut, SparseSet, split_two};
-use crate::entity::{EntityAllocator, EntityId};
-use openshard_protocol::serial::{Serial, SerialKind};
-
-use crate::serial::{SerialAllocator, SerialPoolExhausted};
+use crate::component::{
+    Column,
+    Component,
+    Iter,
+    IterMut,
+    SparseSet,
+    split_two,
+};
+use crate::entity::{
+    EntityAllocator,
+    EntityId,
+};
+use crate::serial::{
+    SerialAllocator,
+    SerialPoolExhausted,
+};
 
 /// Iterator returned by [`Registry::query`].
 ///
@@ -35,7 +54,7 @@ pub enum BindSerialError {
     /// The entity already has a different serial. Serials are not reassignable.
     AlreadyBound {
         /// The entity in question.
-        entity: EntityId,
+        entity:   EntityId,
         /// The serial it already holds.
         existing: Serial,
     },
@@ -55,7 +74,8 @@ impl fmt::Display for BindSerialError {
     }
 }
 
-impl std::error::Error for BindSerialError {}
+impl std::error::Error for BindSerialError {
+}
 
 /// Spawning an entity with a fresh serial failed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -67,7 +87,8 @@ impl fmt::Display for SpawnError {
     }
 }
 
-impl std::error::Error for SpawnError {}
+impl std::error::Error for SpawnError {
+}
 
 /// Owns every entity, every component, and the serial index.
 ///
@@ -80,15 +101,15 @@ impl std::error::Error for SpawnError {}
 /// the serial mapping is the whole point.
 #[derive(Default)]
 pub struct Registry {
-    entities: EntityAllocator,
+    entities:         EntityAllocator,
     /// Columns, one per component type. Indexed by `column_index`; never
     /// reordered or removed, so indices stay stable for the lifetime of the
     /// registry.
-    columns: Vec<Box<dyn Column>>,
-    column_index: FxHashMap<TypeId, usize>,
+    columns:          Vec<Box<dyn Column>>,
+    column_index:     FxHashMap<TypeId, usize>,
     serial_to_entity: FxHashMap<Serial, EntityId>,
     entity_to_serial: FxHashMap<EntityId, Serial>,
-    serials: SerialAllocator,
+    serials:          SerialAllocator,
 }
 
 impl fmt::Debug for Registry {
@@ -556,8 +577,8 @@ mod tests {
         assert_eq!(
             reg.bind_serial(a, other),
             Err(BindSerialError::AlreadyBound {
-                entity: a,
-                existing: s
+                entity:   a,
+                existing: s,
             })
         );
         assert_eq!(

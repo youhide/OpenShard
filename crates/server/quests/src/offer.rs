@@ -7,12 +7,33 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::serial::Serial;
-use openshard_state::components::{DoneQuest, QuestGiver, QuestLog, QuestState};
-use openshard_state::quest::{ObjectiveKind, QuestKey};
-use openshard_state::{QuestGumpContext, QuestSection, TICKS_PER_SECOND, WorldState, WorldTick};
+use openshard_state::components::{
+    DoneQuest,
+    QuestGiver,
+    QuestLog,
+    QuestState,
+};
+use openshard_state::quest::{
+    ObjectiveKind,
+    QuestKey,
+};
+use openshard_state::{
+    QuestGumpContext,
+    QuestSection,
+    TICKS_PER_SECOND,
+    WorldState,
+    WorldTick,
+};
 
-use crate::events::{QuestAccepted, QuestRefused, QuestResigned};
-use crate::gump::{self, sound};
+use crate::events::{
+    QuestAccepted,
+    QuestRefused,
+    QuestResigned,
+};
+use crate::gump::{
+    self,
+    sound,
+};
 use crate::turnin;
 
 /// How many quests one character may have at once. ServUO's `QuestLimitReached`.
@@ -170,7 +191,7 @@ pub fn accept(state: &mut WorldState, player: EntityId, key: &QuestKey, giver: O
     if let Some(serial) = state.registry.serial_of(player) {
         state.bus.send(QuestAccepted {
             player: serial,
-            key: key.clone(),
+            key:    key.clone(),
         });
     }
     gump::play(state, player, sound::ACCEPT);
@@ -182,18 +203,18 @@ pub fn refuse(state: &mut WorldState, player: EntityId, key: &QuestKey) {
     if let Some(serial) = state.registry.serial_of(player) {
         state.bus.send(QuestRefused {
             player: serial,
-            key: key.clone(),
+            key:    key.clone(),
         });
     }
     gump::show(
         state,
         player,
         QuestGumpContext {
-            quest: Some(key.clone()),
-            section: QuestSection::Refuse,
-            offer: true,
+            quest:     Some(key.clone()),
+            section:   QuestSection::Refuse,
+            offer:     true,
             completed: false,
-            giver: None,
+            giver:     None,
         },
     );
 }
@@ -220,7 +241,7 @@ pub fn resign(state: &mut WorldState, player: EntityId, key: &QuestKey) {
     if let Some(serial) = state.registry.serial_of(player) {
         state.bus.send(QuestResigned {
             player: serial,
-            key: key.clone(),
+            key:    key.clone(),
         });
     }
     gump::play(state, player, sound::RESIGN);

@@ -36,7 +36,11 @@
 
 use std::fmt;
 
-use crate::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell};
+use crate::map::{
+    BLOCK_SIZE,
+    CELLS_PER_BLOCK,
+    LandCell,
+};
 
 /// A tile's column and row on the facet, with no height.
 ///
@@ -129,10 +133,12 @@ impl BlockExtent {
         // An empty extent counts zero blocks, so the guard rejects every index
         // before either division runs: neither can be by a zero `down`.
         match index.0 < self.count() {
-            true => Some(BlockCoord {
-                x: index.0 / self.down,
-                y: index.0 % self.down,
-            }),
+            true => {
+                Some(BlockCoord {
+                    x: index.0 / self.down,
+                    y: index.0 % self.down,
+                })
+            }
             false => None,
         }
     }
@@ -279,11 +285,11 @@ impl TerrainCells {
 /// Every conversion between a tile, a block and a linear position is a method
 /// here, and none of them is written anywhere else.
 pub struct LandGrid {
-    width: u32,
+    width:  u32,
     height: u32,
     /// Blocks column-major, cells row-major within a block. See the module
     /// header — this is the only field in the workspace laid out that way.
-    cells: TerrainCells,
+    cells:  TerrainCells,
 }
 
 impl fmt::Debug for LandGrid {
@@ -626,8 +632,9 @@ impl LandGrid {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_tiles::LandTileId;
+
+    use super::*;
 
     /// A 2x2-block grid (16x16 tiles) whose cells number themselves straight
     /// down the file — cell `n` of the array carries tile id `n`.
@@ -638,9 +645,11 @@ mod tests {
         LandGrid::from_file_order(
             16,
             16,
-            (0..4 * CELLS_PER_BLOCK).map(|at| LandCell {
-                tile: LandTileId(at as u16),
-                z: 0,
+            (0..4 * CELLS_PER_BLOCK).map(|at| {
+                LandCell {
+                    tile: LandTileId(at as u16),
+                    z:    0,
+                }
             }),
         )
     }
@@ -910,7 +919,7 @@ mod tests {
         let mut grid = grid_16x16();
         let cell = LandCell {
             tile: LandTileId(999),
-            z: -12,
+            z:    -12,
         };
         grid.set(9, 3, cell);
         assert_eq!(grid.get(9, 3), Some(cell));

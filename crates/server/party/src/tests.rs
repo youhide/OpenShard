@@ -12,11 +12,21 @@ use openshard_gateway::ConnectionId;
 use openshard_protocol::access::AccessLevel;
 use openshard_protocol::identity::AccountName;
 use openshard_protocol::party::CAPACITY;
-use openshard_protocol::serial::{Serial, SerialKind};
+use openshard_protocol::serial::{
+    Serial,
+    SerialKind,
+};
 use openshard_protocol::version::ClientVersion;
 use openshard_protocol::world::Facet;
 use openshard_state::connection::Connection;
-use openshard_state::{Client, FacetState, Name, PartyCandidate, PartyMember, WorldState};
+use openshard_state::{
+    Client,
+    FacetState,
+    Name,
+    PartyCandidate,
+    PartyMember,
+    WorldState,
+};
 
 use crate::Refusal;
 

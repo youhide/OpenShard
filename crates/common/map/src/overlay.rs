@@ -42,9 +42,8 @@
 //! `openshard-movement`, which is why nothing here knows how tall a body is; see
 //! [`Body`].
 
-use rustc_hash::FxHashMap;
-
 use openshard_tiles::StaticTile;
+use rustc_hash::FxHashMap;
 
 use crate::grid::Tile;
 
@@ -108,7 +107,7 @@ impl Doors {
 /// nothing but the order of the pair would say which was which.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Body {
-    z: i32,
+    z:      i32,
     height: i32,
 }
 
@@ -153,13 +152,13 @@ pub enum CoverKind {
         /// A shut door: in the way now, and not in the way at all to a mobile
         /// that will open it. What [`Doors::AllOpen`] leaves out, and the whole
         /// of what "potentially passable" means here.
-        door: bool,
+        door:           bool,
         /// Whether this is a structural wall rather than ordinary furniture.
         /// Both stop movement, but only a wall stops a sight ray.
         sight_blocking: bool,
         /// Whether a sight-blocking cover is wall-like and therefore gets the
         /// classic one-storey minimum height.
-        sight_wallish: bool,
+        sight_wallish:  bool,
     },
     /// Somewhere to stand that the map does not have — a deck over open water,
     /// the first floor of a house somebody built this morning.
@@ -192,7 +191,7 @@ pub enum CoverKind {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Cover {
     /// The base z its body sits at.
-    pub z: i8,
+    pub z:      i8,
     /// How tall it is: its body spans `[z, z + height)`.
     ///
     /// Zero-height art still occupies its own tile — `tiledata.mul` gives
@@ -201,7 +200,7 @@ pub struct Cover {
     /// exists to fix. [`Cover::top`] is where that is fixed, once.
     pub height: u8,
     /// What it does to a body.
-    pub kind: CoverKind,
+    pub kind:   CoverKind,
 }
 
 impl Cover {
@@ -212,9 +211,9 @@ impl Cover {
             z,
             height,
             kind: CoverKind::Blocks {
-                door: false,
+                door:           false,
                 sight_blocking: false,
-                sight_wallish: false,
+                sight_wallish:  false,
             },
         }
     }
@@ -226,9 +225,9 @@ impl Cover {
             z,
             height,
             kind: CoverKind::Blocks {
-                door: true,
+                door:           true,
                 sight_blocking: false,
-                sight_wallish: false,
+                sight_wallish:  false,
             },
         }
     }
@@ -330,14 +329,16 @@ impl Cover {
     #[must_use]
     pub const fn as_sight_blocker(self) -> Self {
         match self.kind {
-            CoverKind::Blocks { door, .. } => Self {
-                kind: CoverKind::Blocks {
-                    door,
-                    sight_blocking: true,
-                    sight_wallish: false,
-                },
-                ..self
-            },
+            CoverKind::Blocks { door, .. } => {
+                Self {
+                    kind: CoverKind::Blocks {
+                        door,
+                        sight_blocking: true,
+                        sight_wallish: false,
+                    },
+                    ..self
+                }
+            }
             CoverKind::Stands { .. } => self,
         }
     }
@@ -361,14 +362,16 @@ impl Cover {
     #[must_use]
     pub const fn as_sight_wall(self) -> Self {
         match self.kind {
-            CoverKind::Blocks { door, .. } => Self {
-                kind: CoverKind::Blocks {
-                    door,
-                    sight_blocking: true,
-                    sight_wallish: true,
-                },
-                ..self
-            },
+            CoverKind::Blocks { door, .. } => {
+                Self {
+                    kind: CoverKind::Blocks {
+                        door,
+                        sight_blocking: true,
+                        sight_wallish: true,
+                    },
+                    ..self
+                }
+            }
             CoverKind::Stands { .. } => self,
         }
     }
@@ -741,8 +744,9 @@ impl Cover {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_tiles::TileFlags;
+
+    use super::*;
 
     const HERE: Tile = Tile::new(100, 100);
 

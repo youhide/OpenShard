@@ -11,11 +11,23 @@
 
 use openshard_client_render::gump::Frame;
 use openshard_client_render::radar::{
-    BASE_CHUNK_TILES, PLAYER_MARKER, RadarCache, RadarChunk, RadarChunkCoord, RadarExtent, RadarLod,
-    RadarRegion, RadarTile, UNKNOWN,
+    BASE_CHUNK_TILES,
+    PLAYER_MARKER,
+    RadarCache,
+    RadarChunk,
+    RadarChunkCoord,
+    RadarExtent,
+    RadarLod,
+    RadarRegion,
+    RadarTile,
+    UNKNOWN,
 };
 use openshard_client_render::radar_pass::{
-    Placement, RADAR_CHUNK_PAGE_BYTES, RadarChunkRenderer, RadarMarker, RadarOverlayRenderer,
+    Placement,
+    RADAR_CHUNK_PAGE_BYTES,
+    RadarChunkRenderer,
+    RadarMarker,
+    RadarOverlayRenderer,
 };
 use openshard_protocol::world::Facet;
 use openshard_uofiles::color::Color16;
@@ -87,15 +99,15 @@ fn adjacent_chunks_each_draw_their_own_pixels() {
         },
         region(facet, (0, 0), (BASE_CHUNK_TILES * 2, BASE_CHUNK_TILES)),
         Placement {
-            origin: (0.0, 0.0),
-            extent: (width as f32, height as f32),
-            circle: false,
+            origin:   (0.0, 0.0),
+            extent:   (width as f32, height as f32),
+            circle:   false,
             rotation: 0.0,
         },
         Placement {
-            origin: (0.0, 0.0),
-            extent: (width as f32, height as f32),
-            circle: false,
+            origin:   (0.0, 0.0),
+            extent:   (width as f32, height as f32),
+            circle:   false,
             rotation: 0.0,
         },
         [&west, &east],
@@ -152,9 +164,9 @@ fn pages_recycled_through_eviction_each_belong_to_one_chunk() {
     };
     let (width, height) = (u32::from(BASE_CHUNK_TILES) * 2, u32::from(BASE_CHUNK_TILES));
     let whole = Placement {
-        origin: (0.0, 0.0),
-        extent: (width as f32, height as f32),
-        circle: false,
+        origin:   (0.0, 0.0),
+        extent:   (width as f32, height as f32),
+        circle:   false,
         rotation: 0.0,
     };
     // Two layers, which is what makes the pair at the end a fit rather than a
@@ -261,9 +273,9 @@ fn two_identical_draws_grow_the_instance_buffer_once() {
 
     let (width, height) = (u32::from(BASE_CHUNK_TILES) * 2, u32::from(BASE_CHUNK_TILES));
     let whole = Placement {
-        origin: (0.0, 0.0),
-        extent: (width as f32, height as f32),
-        circle: false,
+        origin:   (0.0, 0.0),
+        extent:   (width as f32, height as f32),
+        circle:   false,
         rotation: 0.0,
     };
     let mut chunks = RadarChunkRenderer::new(&device, FORMAT, 16 * 1024 * 1024);
@@ -327,9 +339,9 @@ fn the_page_cache_counts_its_evictions_apart_from_its_truncated_draws() {
 
     let (width, height) = (u32::from(BASE_CHUNK_TILES) * 2, u32::from(BASE_CHUNK_TILES));
     let whole = Placement {
-        origin: (0.0, 0.0),
-        extent: (width as f32, height as f32),
-        circle: false,
+        origin:   (0.0, 0.0),
+        extent:   (width as f32, height as f32),
+        circle:   false,
         rotation: 0.0,
     };
     // Exactly one layer: `RadarChunkRenderer::new` clamps the budget to at
@@ -407,15 +419,15 @@ fn a_marker_lands_on_its_tile_over_the_terrain() {
     let (target, view) = cleared_target(&device, &mut encoder, side, side);
     let frame = Frame {
         target: &view,
-        width: side,
+        width:  side,
         height: side,
-        scale: 1.0,
+        scale:  1.0,
     };
     let region = region(facet, (0, 0), (BASE_CHUNK_TILES, BASE_CHUNK_TILES));
     let at = Placement {
-        origin: (0.0, 0.0),
-        extent: (side as f32, side as f32),
-        circle: false,
+        origin:   (0.0, 0.0),
+        extent:   (side as f32, side as f32),
+        circle:   false,
         rotation: 0.0,
     };
 
@@ -431,7 +443,7 @@ fn a_marker_lands_on_its_tile_over_the_terrain() {
         at,
         at,
         &[RadarMarker {
-            tile: RadarTile::new(10, 20),
+            tile:  RadarTile::new(10, 20),
             color: PLAYER_MARKER,
         }],
     );
@@ -483,9 +495,9 @@ fn an_unmapped_window_is_filled_rather_than_left_transparent() {
             scale: 1.0,
         },
         Placement {
-            origin: (16.0, 16.0),
-            extent: (32.0, 32.0),
-            circle: true,
+            origin:   (16.0, 16.0),
+            extent:   (32.0, 32.0),
+            circle:   true,
             rotation: 0.0,
         },
         UNKNOWN,
@@ -548,21 +560,21 @@ fn a_coarse_ancestor_draws_under_the_one_chunk_that_is_ready() {
         &mut encoder,
         Frame {
             target: &view,
-            width: side,
+            width:  side,
             height: side,
-            scale: 1.0,
+            scale:  1.0,
         },
         region(facet, (0, 0), (BASE_CHUNK_TILES * 2, BASE_CHUNK_TILES * 2)),
         Placement {
-            origin: (0.0, 0.0),
-            extent: (side as f32, side as f32),
-            circle: false,
+            origin:   (0.0, 0.0),
+            extent:   (side as f32, side as f32),
+            circle:   false,
             rotation: 0.0,
         },
         Placement {
-            origin: (0.0, 0.0),
-            extent: (side as f32, side as f32),
-            circle: false,
+            origin:   (0.0, 0.0),
+            extent:   (side as f32, side as f32),
+            circle:   false,
             rotation: 0.0,
         },
         [&fine, &coarse],
@@ -600,29 +612,29 @@ fn cleared_target(
     height: u32,
 ) -> (wgpu::Texture, wgpu::TextureView) {
     let target = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("radar test target"),
-        size: wgpu::Extent3d {
+        label:           Some("radar test target"),
+        size:            wgpu::Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        sample_count:    1,
+        dimension:       wgpu::TextureDimension::D2,
+        format:          FORMAT,
+        usage:           wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats:    &[],
     });
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
     encoder
         .begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("clear"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
+                view:           &view,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                ops:            wgpu::Operations {
+                    load:  wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -651,23 +663,23 @@ fn read_back(
     assert!(stride.is_multiple_of(256), "the fixture avoids row padding");
 
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("radar readback"),
-        size: u64::from(stride * height),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("radar readback"),
+        size:               u64::from(stride * height),
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: target,
+            texture:   target,
             mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    wgpu::TextureAspect::All,
         },
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(stride),
+                offset:         0,
+                bytes_per_row:  Some(stride),
                 rows_per_image: Some(height),
             },
         },

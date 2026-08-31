@@ -7,7 +7,11 @@
 //! target) rather than being fixed at spawn.
 
 use std::any::Any;
-use std::{fmt, iter, slice};
+use std::{
+    fmt,
+    iter,
+    slice,
+};
 
 use crate::entity::EntityId;
 
@@ -27,7 +31,8 @@ pub type Entities<'a> = iter::Copied<slice::Iter<'a, EntityId>>;
 /// bound is what lets the simulation shard work across cores.
 pub trait Component: Send + Sync + 'static {}
 
-impl<T: Send + Sync + 'static> Component for T {}
+impl<T: Send + Sync + 'static> Component for T {
+}
 
 /// Type-erased view of a column, so [`crate::Registry`] can hold columns of
 /// mixed component types and still clean up after a despawn.
@@ -48,11 +53,11 @@ const EMPTY: u32 = u32::MAX;
 /// and touches no empty slots.
 pub struct SparseSet<T> {
     /// Entity slot index -> dense position, or [`EMPTY`].
-    sparse: Vec<u32>,
+    sparse:         Vec<u32>,
     /// The entity owning each dense position, including its generation.
     dense_entities: Vec<EntityId>,
     /// The component values, parallel to `dense_entities`.
-    dense_data: Vec<T>,
+    dense_data:     Vec<T>,
     /// How many times the *membership* of this column has changed — an entity
     /// gaining or losing the component, never a value being overwritten.
     ///
@@ -63,7 +68,7 @@ pub struct SparseSet<T> {
     /// the first system that equips something without knowing the cache exists
     /// leaves it stale, and nothing fails until a client sees the wrong thing.
     /// Counting here means there is nothing to remember.
-    version: u64,
+    version:        u64,
 }
 
 impl<T> Default for SparseSet<T> {
@@ -85,10 +90,10 @@ impl<T> SparseSet<T> {
     /// An empty column.
     pub const fn new() -> Self {
         Self {
-            sparse: Vec::new(),
+            sparse:         Vec::new(),
             dense_entities: Vec::new(),
-            dense_data: Vec::new(),
-            version: 0,
+            dense_data:     Vec::new(),
+            version:        0,
         }
     }
 

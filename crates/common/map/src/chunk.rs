@@ -67,9 +67,24 @@
 
 use openshard_protocol::world::Facet;
 
-use crate::grid::{BlockCoord, BlockExtent, BlockIndex, LandGrid};
-use crate::map::{BLOCK_SIZE, BlockPatch, CELLS_PER_BLOCK, LandCell, StaticItem, WorldMap};
-use crate::snapshot::{MapRevision, MapSnapshot};
+use crate::grid::{
+    BlockCoord,
+    BlockExtent,
+    BlockIndex,
+    LandGrid,
+};
+use crate::map::{
+    BLOCK_SIZE,
+    BlockPatch,
+    CELLS_PER_BLOCK,
+    LandCell,
+    StaticItem,
+    WorldMap,
+};
+use crate::snapshot::{
+    MapRevision,
+    MapSnapshot,
+};
 
 /// Tiles along each side of a chunk.
 pub const CHUNK_TILES: u32 = 64;
@@ -131,7 +146,7 @@ pub struct ChunkKey {
     /// Which facet.
     pub facet: Facet,
     /// Where on it.
-    pub at: ChunkCoord,
+    pub at:    ChunkCoord,
 }
 
 /// One square of the world, self-contained.
@@ -148,14 +163,14 @@ pub struct ChunkKey {
 /// is what [`WorldMap::statics_in_row`] needs them to be.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Chunk {
-    key: ChunkKey,
+    key:      ChunkKey,
     revision: MapRevision,
     /// How many blocks this chunk covers — [`BLOCKS_PER_CHUNK`] square, except
     /// at a facet's eastern or southern edge where the facet simply stops.
-    extent: BlockExtent,
+    extent:   BlockExtent,
     /// `extent.count()` blocks of [`CELLS_PER_BLOCK`] cells, in the order
     /// [`BlockExtent::index_of`] gives them.
-    land: Vec<LandCell>,
+    land:     Vec<LandCell>,
     /// Where each block's items start, plus a final entry holding the total —
     /// `extent.count() + 1` of them, non-decreasing. The CSR half of the
     /// layout: block `i` owns `items[offsets[i]..offsets[i + 1]]`.
@@ -164,7 +179,7 @@ pub struct Chunk {
     /// leading zero, and this prefix sum is built from it on the way in. Which
     /// is the same division of labour as [`WorldMap::from_parts`]' sort: the decoder
     /// says what is there, the type says what shape it is in.
-    offsets: Vec<u32>,
+    offsets:  Vec<u32>,
     /// Every static in the chunk, its blocks in order and each block's items in
     /// the `(y, x)` stable order [`WorldMap::from_parts`] imposes.
     ///
@@ -172,7 +187,7 @@ pub struct Chunk {
     /// Packing them against the block is the encoding's business and happens at
     /// that boundary — a decoded chunk hands `WorldMap` exactly what the `.mul`
     /// importer hands it.
-    items: Vec<StaticItem>,
+    items:    Vec<StaticItem>,
 }
 
 impl Chunk {
@@ -408,7 +423,7 @@ pub enum AssemblyError {
         /// What was asked for.
         wanted: Facet,
         /// What the chunk says it is.
-        found: Facet,
+        found:  Facet,
     },
     /// Two chunks claim to be different revisions of the world.
     ///
@@ -429,11 +444,11 @@ pub enum AssemblyError {
     /// A chunk covers a different number of blocks than its position allows.
     WrongExtent {
         /// Where it says it is.
-        at: ChunkCoord,
+        at:     ChunkCoord,
         /// What the facet's size makes of that position.
         wanted: BlockExtent,
         /// What the chunk claims.
-        found: BlockExtent,
+        found:  BlockExtent,
     },
     /// Two chunks cover the same block.
     Overlap {
@@ -450,25 +465,31 @@ pub enum AssemblyError {
 impl std::fmt::Display for AssemblyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::WrongFacet { wanted, found } => write!(
-                f,
-                "a chunk of facet {} was handed to an assembly of facet {}",
-                found.0, wanted.0
-            ),
-            Self::MixedRevisions { first, found } => write!(
-                f,
-                "chunks from revisions {} and {} cannot make one world",
-                first.get(),
-                found.get()
-            ),
+            Self::WrongFacet { wanted, found } => {
+                write!(
+                    f,
+                    "a chunk of facet {} was handed to an assembly of facet {}",
+                    found.0, wanted.0
+                )
+            }
+            Self::MixedRevisions { first, found } => {
+                write!(
+                    f,
+                    "chunks from revisions {} and {} cannot make one world",
+                    first.get(),
+                    found.get()
+                )
+            }
             Self::OutsideFacet { at } => {
                 write!(f, "chunk ({}, {}) is not on this facet", at.x, at.y)
             }
-            Self::WrongExtent { at, wanted, found } => write!(
-                f,
-                "chunk ({}, {}) covers {}x{} blocks where the facet leaves room for {}x{}",
-                at.x, at.y, found.wide, found.down, wanted.wide, wanted.down
-            ),
+            Self::WrongExtent { at, wanted, found } => {
+                write!(
+                    f,
+                    "chunk ({}, {}) covers {}x{} blocks where the facet leaves room for {}x{}",
+                    at.x, at.y, found.wide, found.down, wanted.wide, wanted.down
+                )
+            }
             Self::Overlap { at } => write!(f, "chunk ({}, {}) arrived twice", at.x, at.y),
             Self::Incomplete { missing } => {
                 write!(f, "{missing} blocks of the facet were not covered by any chunk")
@@ -477,7 +498,8 @@ impl std::fmt::Display for AssemblyError {
     }
 }
 
-impl std::error::Error for AssemblyError {}
+impl std::error::Error for AssemblyError {
+}
 
 /// Build a facet out of a complete set of chunks.
 ///
@@ -518,7 +540,7 @@ pub fn assemble(
         if chunk.key.facet != facet {
             return Err(AssemblyError::WrongFacet {
                 wanted: facet,
-                found: chunk.key.facet,
+                found:  chunk.key.facet,
             });
         }
         match revision {
@@ -596,7 +618,7 @@ struct Placed<'a> {
     /// The block, as [`WorldMap::replace_blocks`] takes it.
     patch: BlockPatch<'a>,
     /// The chunk it was cut out of.
-    from: ChunkCoord,
+    from:  ChunkCoord,
 }
 
 /// Put *some* chunks back into a facet somebody already holds.
@@ -654,7 +676,7 @@ pub fn apply(world: &mut WorldMap, facet: Facet, chunks: &[Chunk]) -> Result<Map
         if chunk.key.facet != facet {
             return Err(AssemblyError::WrongFacet {
                 wanted: facet,
-                found: chunk.key.facet,
+                found:  chunk.key.facet,
             });
         }
         match revision {
@@ -683,7 +705,7 @@ pub fn apply(world: &mut WorldMap, facet: Facet, chunks: &[Chunk]) -> Result<Map
             let index = facet_extent.index_of(block).expect("a block inside the facet");
             placed.push(Placed {
                 patch: BlockPatch::new(index, chunk.land_in_block(local), chunk.statics_in_block(local)),
-                from: at,
+                from:  at,
             });
         }
     }
@@ -709,11 +731,18 @@ pub fn apply(world: &mut WorldMap, facet: Facet, chunks: &[Chunk]) -> Result<Map
 
 #[cfg(test)]
 pub(crate) mod fixture {
-    use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
+    use openshard_tiles::LandTileId;
 
     use crate::grid::BlockExtent;
-    use crate::map::{LandCell, StaticItem, WorldMap};
-    use openshard_tiles::LandTileId;
+    use crate::map::{
+        LandCell,
+        StaticItem,
+        WorldMap,
+    };
 
     /// A facet that is **not** a whole number of chunks on either axis.
     ///
@@ -731,7 +760,7 @@ pub(crate) mod fixture {
     pub fn cell(x: u16, y: u16) -> LandCell {
         LandCell {
             tile: LandTileId(u16::try_from(u32::from(x) * TILES + u32::from(y)).unwrap()),
-            z: (i32::from(x) - i32::from(y)) as i8,
+            z:    (i32::from(x) - i32::from(y)) as i8,
         }
     }
 
@@ -776,10 +805,10 @@ pub(crate) mod fixture {
         for n in 0..3u16 {
             map.place_static(StaticItem {
                 tile: Graphic(0x200 + n),
-                x: 20,
-                y: 21,
-                z: 5,
-                hue: Hue(n),
+                x:    20,
+                y:    21,
+                z:    5,
+                hue:  Hue(n),
             });
         }
         map
@@ -788,9 +817,13 @@ pub(crate) mod fixture {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
     use openshard_tiles::LandTileId;
+
+    use super::*;
 
     const FACET: Facet = Facet(0);
 
@@ -859,15 +892,15 @@ mod tests {
             4,
             LandCell {
                 tile: LandTileId(0x3FF),
-                z: 12,
+                z:    12,
             },
         );
         map.place_static(StaticItem {
             tile: Graphic(0x4321),
-            x: 70,
-            y: 71,
-            z: 3,
-            hue: Hue(9),
+            x:    70,
+            y:    71,
+            z:    3,
+            hue:  Hue(9),
         });
         MapSnapshot::restored(FACET, snapshot().revision().after(), map)
     }
@@ -963,7 +996,7 @@ mod tests {
             apply(&mut world, Facet(3), &[chunk(ChunkCoord { x: 0, y: 0 })]),
             Err(AssemblyError::WrongFacet {
                 wanted: Facet(3),
-                found: FACET
+                found:  FACET,
             })
         ));
         assert!(matches!(
@@ -984,7 +1017,7 @@ mod tests {
                 &[chunk(ChunkCoord { x: 1, y: 1 }), chunk(ChunkCoord { x: 1, y: 1 })],
             ),
             Err(AssemblyError::Overlap {
-                at: ChunkCoord { x: 1, y: 1 }
+                at: ChunkCoord { x: 1, y: 1 },
             })
         ));
 
@@ -1009,7 +1042,7 @@ mod tests {
                 &[Chunk::of(&wider, ChunkCoord { x: 2, y: 0 }).expect("a chunk of the wider facet")],
             ),
             Err(AssemblyError::OutsideFacet {
-                at: ChunkCoord { x: 2, y: 0 }
+                at: ChunkCoord { x: 2, y: 0 },
             })
         ));
 
@@ -1080,7 +1113,7 @@ mod tests {
             assemble(Facet(1), extent(), &chunks).err(),
             Some(AssemblyError::WrongFacet {
                 wanted: Facet(1),
-                found: FACET
+                found:  FACET,
             })
         );
     }
@@ -1127,7 +1160,7 @@ mod tests {
         assert_eq!(
             assemble(FACET, extent(), &chunks).err(),
             Some(AssemblyError::Overlap {
-                at: ChunkCoord { x: 0, y: 0 }
+                at: ChunkCoord { x: 0, y: 0 },
             })
         );
     }

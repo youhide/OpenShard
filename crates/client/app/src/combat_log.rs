@@ -30,12 +30,19 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 use openshard_protocol::feedback::{
-    ActionPhase, ActionStage, BalkState, CombatActionKind, CombatActionOutcome,
+    ActionPhase,
+    ActionStage,
+    BalkState,
+    CombatActionKind,
+    CombatActionOutcome,
 };
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Graphic;
 
-use crate::crowd::{ActionFill, ActionProgress};
+use crate::crowd::{
+    ActionFill,
+    ActionProgress,
+};
 
 /// How many entries are kept. Older ones fall off the front.
 ///
@@ -54,7 +61,7 @@ pub struct Entry {
     /// carries no tick number, so what can be measured here is when the *client*
     /// learned something. That is also the right clock for the question — the bar
     /// is drawn against it too, so a gap in this log is a gap the player saw.
-    pub at: Duration,
+    pub at:    Duration,
     /// Whose fighting this is about, where the packet names somebody.
     pub actor: Option<Serial>,
     /// What happened.
@@ -67,7 +74,7 @@ pub struct Entry {
 pub enum Event {
     /// `CombatActionPhase` — an action began, or re-announced its interval.
     Committed {
-        kind: CombatActionKind,
+        kind:  CombatActionKind,
         phase: ActionPhase,
     },
     /// `CombatActionStage` — it moved into a new stretch.
@@ -108,11 +115,11 @@ pub enum Event {
 pub struct Seen {
     /// The bar, how full it is, and whether the short loose follows a held
     /// draw: `None` for a body with no action running.
-    pub bar: Option<(CombatActionKind, ActionStage, ActionFill, bool)>,
+    pub bar:     Option<(CombatActionKind, ActionStage, ActionFill, bool)>,
     /// The word standing beside it, if one was.
     pub outcome: Option<CombatActionOutcome>,
     /// What it was held up by, if anything.
-    pub balked: Option<openshard_protocol::feedback::InterruptReason>,
+    pub balked:  Option<openshard_protocol::feedback::InterruptReason>,
 }
 
 impl Seen {
@@ -120,7 +127,7 @@ impl Seen {
     #[must_use]
     pub fn of(progress: ActionProgress) -> Self {
         Self {
-            bar: progress.running.map(|running| {
+            bar:     progress.running.map(|running| {
                 (
                     running.kind,
                     running.stage,
@@ -129,7 +136,7 @@ impl Seen {
                 )
             }),
             outcome: progress.ended,
-            balked: progress.balked,
+            balked:  progress.balked,
         }
     }
 }
@@ -146,7 +153,7 @@ pub struct CombatLog {
     /// This client's clock, advanced by the app with the same delta the crowd
     /// gets — so a timestamp here and the fill of a bar are the same clock, and a
     /// gap in the log is a gap a person could have seen.
-    now: Duration,
+    now:     Duration,
 }
 
 impl Default for CombatLog {
@@ -154,7 +161,7 @@ impl Default for CombatLog {
     fn default() -> Self {
         Self {
             entries: VecDeque::new(),
-            now: Duration::ZERO,
+            now:     Duration::ZERO,
         }
     }
 }
@@ -221,13 +228,15 @@ impl CombatLog {
     pub fn to_text(&self, only: Option<Serial>) -> String {
         let mut out = String::new();
         let mut previous: Option<Duration> = None;
-        for entry in self.entries.iter().filter(|entry| match only {
-            // A mark is never filtered out: it is the reader's own bookmark, and
-            // a bookmark that vanishes when the filter narrows is one nobody can
-            // navigate by.
-            Some(_) if matches!(entry.event, Event::Mark { .. }) => true,
-            Some(serial) => entry.actor == Some(serial),
-            None => true,
+        for entry in self.entries.iter().filter(|entry| {
+            match only {
+                // A mark is never filtered out: it is the reader's own bookmark, and
+                // a bookmark that vanishes when the filter narrows is one nobody can
+                // navigate by.
+                Some(_) if matches!(entry.event, Event::Mark { .. }) => true,
+                Some(serial) => entry.actor == Some(serial),
+                None => true,
+            }
         }) {
             let gap = previous.map_or(Duration::ZERO, |at| entry.at.saturating_sub(at));
             previous = Some(entry.at);
@@ -250,23 +259,27 @@ impl CombatLog {
 #[must_use]
 pub fn describe(event: &Event) -> String {
     match event {
-        Event::Committed { kind, phase } => match phase {
-            ActionPhase::Arming { ready_in } => {
-                format!("commit  {kind:?} arming over {}ms", ready_in.millis())
+        Event::Committed { kind, phase } => {
+            match phase {
+                ActionPhase::Arming { ready_in } => {
+                    format!("commit  {kind:?} arming over {}ms", ready_in.millis())
+                }
+                ActionPhase::Releasing { impact_in } => {
+                    format!("commit  {kind:?} releasing over {}ms", impact_in.millis())
+                }
+                ActionPhase::Armed { endurance } => {
+                    format!("commit  {kind:?} armed for {}ms", endurance.millis())
+                }
             }
-            ActionPhase::Releasing { impact_in } => {
-                format!("commit  {kind:?} releasing over {}ms", impact_in.millis())
-            }
-            ActionPhase::Armed { endurance } => {
-                format!("commit  {kind:?} armed for {}ms", endurance.millis())
-            }
-        },
+        }
         Event::Staged { stage } => format!("stage   {stage:?}"),
         Event::Ended { outcome } => format!("end     {outcome:?}"),
-        Event::Balked { balk } => match balk {
-            BalkState::Blocked(reason) => format!("balk    blocked: {reason:?}"),
-            BalkState::Clear => "balk    lifted".to_owned(),
-        },
+        Event::Balked { balk } => {
+            match balk {
+                BalkState::Blocked(reason) => format!("balk    blocked: {reason:?}"),
+                BalkState::Clear => "balk    lifted".to_owned(),
+            }
+        }
         Event::Timed { millis } => format!("timing  animation stretched to {millis}ms"),
         Event::Animated { group } => format!("animate group {group}"),
         Event::Flight { art } => format!("flight  art 0x{:04X}", art.0),
@@ -313,10 +326,19 @@ fn describe_seen(seen: Seen) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CombatLog, Event};
-    use openshard_protocol::feedback::{ActionStage, CombatActionOutcome, InterruptReason};
-    use openshard_protocol::serial::Serial;
     use std::time::Duration;
+
+    use openshard_protocol::feedback::{
+        ActionStage,
+        CombatActionOutcome,
+        InterruptReason,
+    };
+    use openshard_protocol::serial::Serial;
+
+    use super::{
+        CombatLog,
+        Event,
+    };
 
     fn serial(raw: u32) -> Serial {
         Serial::new(raw).expect("a nonzero serial")

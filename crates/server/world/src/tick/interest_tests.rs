@@ -1,9 +1,12 @@
-use openshard_protocol::world::{RawFastwalkKey, RawStepSequence};
+use openshard_movement::WALK_INTERVAL;
+use openshard_protocol::world::{
+    RawFastwalkKey,
+    RawStepSequence,
+};
+use openshard_state::sectors::VIEW_RANGE;
 
 use super::tests::*;
 use super::*;
-use openshard_movement::WALK_INTERVAL;
-use openshard_state::sectors::VIEW_RANGE;
 
 const ALICE: ConnectionId = ConnectionId::from_raw(1);
 const BOB: ConnectionId = ConnectionId::from_raw(2);
@@ -67,9 +70,9 @@ fn a_mobile_is_drawn_once_however_much_it_walks() {
     for step in 1..=5u32 {
         world.queue(Command::Walk {
             connection: BOB,
-            request: WalkRequest {
-                facing: Facing::walking(Direction::South),
-                sequence: RawStepSequence((step - 1) as u8),
+            request:    WalkRequest {
+                facing:       Facing::walking(Direction::South),
+                sequence:     RawStepSequence((step - 1) as u8),
                 fastwalk_key: RawFastwalkKey(0),
             },
         });
@@ -160,9 +163,9 @@ fn a_player_is_never_sent_itself() {
 
     world.queue(Command::Walk {
         connection: ALICE,
-        request: WalkRequest {
-            facing: Facing::walking(Direction::South),
-            sequence: RawStepSequence(0),
+        request:    WalkRequest {
+            facing:       Facing::walking(Direction::South),
+            sequence:     RawStepSequence(0),
             fastwalk_key: RawFastwalkKey(0),
         },
     });
@@ -223,9 +226,9 @@ fn the_index_never_disagrees_with_the_position() {
     for step in 1..=50u32 {
         world.queue(Command::Walk {
             connection: alice,
-            request: WalkRequest {
-                facing: Facing::walking(Direction::South),
-                sequence: RawStepSequence((step - 1) as u8),
+            request:    WalkRequest {
+                facing:       Facing::walking(Direction::South),
+                sequence:     RawStepSequence((step - 1) as u8),
                 fastwalk_key: RawFastwalkKey(0),
             },
         });
@@ -285,10 +288,10 @@ fn the_living_do_not_hear_the_dead() {
 
     world.queue(Command::Say {
         connection: ALICE,
-        mode: RawTalkMode(0),
-        hue: RawHue(0),
-        font: RawFont(3),
-        text: "can anyone hear me".to_owned(),
+        mode:       RawTalkMode(0),
+        hue:        RawHue(0),
+        font:       RawFont(3),
+        text:       "can anyone hear me".to_owned(),
     });
     world.tick(now);
 

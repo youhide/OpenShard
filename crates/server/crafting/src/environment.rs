@@ -17,11 +17,14 @@
 
 use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
+use openshard_protocol::wire::Graphic;
 use openshard_state::WorldState;
-use openshard_state::components::{Drawn, Position};
+use openshard_state::components::{
+    Drawn,
+    Position,
+};
 
 use crate::system::Needs;
-use openshard_protocol::wire::Graphic;
 
 /// How far a workshop reaches — ServUO's `range` argument, 2 everywhere it is
 /// called.
@@ -40,11 +43,11 @@ pub struct Facilities {
     /// An anvil.
     pub anvil: bool,
     /// Any fire — every forge is one, and so is a campfire.
-    pub heat: bool,
+    pub heat:  bool,
     /// An oven.
-    pub oven: bool,
+    pub oven:  bool,
     /// A flour mill.
-    pub mill: bool,
+    pub mill:  bool,
     /// Water.
     pub water: bool,
 }

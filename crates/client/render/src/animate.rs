@@ -35,11 +35,13 @@
 
 use std::time::Duration;
 
-use rustc_hash::FxHashMap;
-
 use openshard_protocol::wire::Graphic;
 use openshard_tiles::TileData;
-use openshard_uofiles::animdata::{AnimData, Sequence};
+use openshard_uofiles::animdata::{
+    AnimData,
+    Sequence,
+};
+use rustc_hash::FxHashMap;
 
 /// How long one step of an animated static's cycle lasts, at an interval of one.
 ///
@@ -72,7 +74,7 @@ pub struct StaticAnimations {
     /// Only the graphics that both carry the flag and have a cycle to play. A
     /// lookup that misses is a static that does not animate, which is almost all
     /// of them.
-    cycles: FxHashMap<u16, Sequence>,
+    cycles:  FxHashMap<u16, Sequence>,
     /// Real time since this was built. Its own clock rather than an `Instant`,
     /// for the reason [`crate::follow`] gives: a rule that reads the wall cannot
     /// be handed a cadence by a test.
@@ -205,7 +207,7 @@ mod tests {
     /// way it would not be for the parse.
     fn fixture(cycles: &[(u16, Sequence)]) -> StaticAnimations {
         StaticAnimations {
-            cycles: cycles.iter().copied().collect(),
+            cycles:  cycles.iter().copied().collect(),
             elapsed: Duration::ZERO,
         }
     }

@@ -48,7 +48,10 @@
 //! against a facet nobody is serving.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Instant;
@@ -154,27 +157,50 @@ use openshard_client_net::session::Plan;
 use openshard_client_net::transport::Dial;
 use openshard_client_render::animate::StaticAnimations;
 use openshard_client_render::atlas::FontAtlas;
-use openshard_client_render::bench::{self, Scope};
+use openshard_client_render::bench::{
+    self,
+    Scope,
+};
 use openshard_client_render::camera::Camera;
 use openshard_client_render::control::Control;
 use openshard_client_render::debug::View;
-use openshard_client_render::follow::{Gaze, Rig};
-use openshard_client_render::frame::{self};
-use openshard_client_render::gump::{GumpAtlas, GumpPixel};
+use openshard_client_render::follow::{
+    Gaze,
+    Rig,
+};
+use openshard_client_render::frame::{
+    self,
+};
+use openshard_client_render::gump::{
+    GumpAtlas,
+    GumpPixel,
+};
 use openshard_client_render::hue::HueRamp;
 use openshard_client_render::mobiles::Mobile;
 use openshard_client_render::occlusion;
 use openshard_client_render::sprite::SpriteQuad;
-use openshard_client_render::text::{self, GumpLabel};
+use openshard_client_render::text::{
+    self,
+    GumpLabel,
+};
 use openshard_map::grid::Tile;
 use openshard_movement::Leeway;
-use openshard_protocol::direction::{Direction, Facing};
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
 #[cfg(test)]
 use openshard_protocol::serial::Serial;
 use openshard_protocol::version::ClientVersion;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Point;
-use openshard_uofiles::anim::{Anim, BodyDef};
+use openshard_uofiles::anim::{
+    Anim,
+    BodyDef,
+};
 use openshard_uofiles::animdata::AnimData;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::cliloc::Cliloc;
@@ -187,7 +213,10 @@ use openshard_uofiles::skillgrp::SkillGroups;
 use openshard_uofiles::skills::Skills as SkillNames;
 use openshard_uofiles::texmaps::TexMaps;
 use openshard_uofiles::ttf_font::TtfFont;
-use winit::event_loop::{ControlFlow, EventLoop};
+use winit::event_loop::{
+    ControlFlow,
+    EventLoop,
+};
 
 /// Where the camera starts: Britain, by the bank.
 pub(crate) const START: Point = Point::new(1495, 1629, 0);
@@ -205,11 +234,11 @@ pub(crate) const START: Point = Point::new(1495, 1629, 0);
 pub struct Opening {
     /// The tile to open the camera on, if not [`START`]. See the field's use in
     /// [`run`] for what it does when there is a shard.
-    pub at: Option<Tile>,
+    pub at:              Option<Tile>,
     /// Whether the occlusion grid is drawn as solids from the first frame —
     /// `docs/lighting.md` step 23.0, F5 in the window, and the checkbox in the
     /// dev panel.
-    pub solids: bool,
+    pub solids:          bool,
     /// Pause the App update callback immediately after it enters the world.
     /// This is an opt-in diagnostic for exercising backpressure; it is never a
     /// gameplay setting and defaults to no pause.
@@ -217,7 +246,7 @@ pub struct Opening {
     /// An opt-in, deterministic presentation scenario.  It is a diagnostic
     /// input rather than a player command: the event loop drives it directly,
     /// so a renderer investigation does not depend on a desktop input injector.
-    pub scenario: Option<Scenario>,
+    pub scenario:        Option<Scenario>,
 }
 
 /// Where this client's ground comes from.
@@ -732,17 +761,21 @@ pub fn run<D: Dial + Send + 'static>(
     // face with a shard-specific file, but every ordinary run has legible
     // Unicode text without a launch flag.
     let ttf_font = match ttf_font {
-        Some(path) => match TtfFont::open(&path) {
-            Ok(font) => Some(font),
-            Err(error) => {
-                eprintln!("opening {}: {error}", path.display());
-                return ExitCode::FAILURE;
+        Some(path) => {
+            match TtfFont::open(&path) {
+                Ok(font) => Some(font),
+                Err(error) => {
+                    eprintln!("opening {}: {error}", path.display());
+                    return ExitCode::FAILURE;
+                }
             }
-        },
-        None => Some(
-            TtfFont::from_bytes(DEFAULT_TTF_FONT)
-                .expect("the checked-in Noto Sans face is a valid TrueType font"),
-        ),
+        }
+        None => {
+            Some(
+                TtfFont::from_bytes(DEFAULT_TTF_FONT)
+                    .expect("the checked-in Noto Sans face is a valid TrueType font"),
+            )
+        }
     };
     if let Some(world) = &world {
         eprintln!(
@@ -860,9 +893,11 @@ pub fn run<D: Dial + Send + 'static>(
     // See `openshard_client_net::cache`.
     let ground_source = match world {
         Some(_) => link::GroundSource::OwnDisk,
-        None => link::GroundSource::Fetched {
-            cache: PathBuf::from("."),
-        },
+        None => {
+            link::GroundSource::Fetched {
+                cache: PathBuf::from("."),
+            }
+        }
     };
     // The mailbox and the wake-up, as one value: the shard thread takes a copy
     // and so does every worker this side starts later — the navigation bake over
@@ -967,7 +1002,7 @@ pub fn run<D: Dial + Send + 'static>(
                         Ok(graph)
                     } else {
                         Err(openshard_movement::bake::Error::Incompatible {
-                            path: navigation_path.clone(),
+                            path:   navigation_path.clone(),
                             reason: format!(
                                 "dimensions {}x{}, expected {width}x{height}",
                                 graph.dimensions().0,
@@ -995,7 +1030,7 @@ pub fn run<D: Dial + Send + 'static>(
                         Ok(graph)
                     } else {
                         Err(openshard_client_artscan::interiors::Error::Incompatible {
-                            path: interior_path.clone(),
+                            path:   interior_path.clone(),
                             reason: format!(
                                 "dimensions {}x{}, expected {width}x{height}",
                                 graph.dimensions().0,
@@ -1056,60 +1091,60 @@ pub fn run<D: Dial + Send + 'static>(
         // borrows both.
         world: world::WorldState {
             authoritative: world::AuthoritativeWorld {
-                designs: std::collections::HashMap::new(),
-                view: None,
-                walk: None,
+                designs:       std::collections::HashMap::new(),
+                view:          None,
+                walk:          None,
                 facet_checked: false,
             },
-            motion: world::PlayerMotion::new(start, Facing::walking(Direction::SouthEast)),
-            presentation: world::PresentationWorld {
-                tile_animations: StaticAnimations::build(&animdata, &tiledata),
-                flame_clock: std::time::Duration::ZERO,
+            motion:        world::PlayerMotion::new(start, Facing::walking(Direction::SouthEast)),
+            presentation:  world::PresentationWorld {
+                tile_animations:       StaticAnimations::build(&animdata, &tiledata),
+                flame_clock:           std::time::Duration::ZERO,
                 // 400 is the male human body. Its group and frame come from the
                 // crowd on the first redraw, which is also what decides that a
                 // placeholder nobody is walking stands.
-                player: Mobile {
-                    at: start,
-                    body: Graphic(400),
-                    group: openshard_uofiles::anim::BodyKind::of(Graphic(400)).standing(),
-                    facing: Direction::SouthEast,
-                    frame: openshard_uofiles::anim::AnimationFrameIndex(0),
-                    from: None,
-                    corpse: false,
-                    hue: Hue::NONE,
-                    drawn: Gaze::on(start),
+                player:                Mobile {
+                    at:        start,
+                    body:      Graphic(400),
+                    group:     openshard_uofiles::anim::BodyKind::of(Graphic(400)).standing(),
+                    facing:    Direction::SouthEast,
+                    frame:     openshard_uofiles::anim::AnimationFrameIndex(0),
+                    from:      None,
+                    corpse:    false,
+                    hue:       Hue::NONE,
+                    drawn:     Gaze::on(start),
                     equipment: Vec::new().into(),
                 },
-                cutaway_at: start,
-                cutaway_fades: openshard_client_render::cutaway::Fades::default(),
+                cutaway_at:            start,
+                cutaway_fades:         openshard_client_render::cutaway::Fades::default(),
                 static_geometry_cache: None,
-                interior_cache: std::cell::RefCell::default(),
-                others: Vec::new(),
-                corpses: Vec::new(),
-                items: Vec::new(),
-                item_serials: Vec::new(),
-                item_houses: Vec::new(),
-                multi_preview: Vec::new(),
-                damage_numbers: Vec::new(),
-                effects: Vec::new(),
-                health_estimates: std::collections::BTreeMap::new(),
-                crowd: {
+                interior_cache:        std::cell::RefCell::default(),
+                others:                Vec::new(),
+                corpses:               Vec::new(),
+                items:                 Vec::new(),
+                item_serials:          Vec::new(),
+                item_houses:           Vec::new(),
+                multi_preview:         Vec::new(),
+                damage_numbers:        Vec::new(),
+                effects:               Vec::new(),
+                health_estimates:      std::collections::BTreeMap::new(),
+                crowd:                 {
                     // The body's ease, which is not the camera's — see `STARTUP_EASE`.
                     let mut crowd = Crowd::default();
                     crowd.set_ease(f1.map_or(STARTUP_EASE, desk::F1Settings::ease));
                     crowd
                 },
-                combat_log: combat_log::CombatLog::default(),
+                combat_log:            combat_log::CombatLog::default(),
             },
             // Nobody is in the way of a world nobody has described yet. The
             // first `entered` fills this, beside the clutter — see
             // `clutter::project`.
-            bodies: Vec::new(),
-            render_ready: !connected,
-            connection: String::from("offline"),
+            bodies:        Vec::new(),
+            render_ready:  !connected,
+            connection:    String::from("offline"),
             // No dial, no shard, and that is the *viewer* — the one state in
             // which this end moves the body itself. See `world::Shard`.
-            shard: match shard {
+            shard:         match shard {
                 Some(link) => world::Shard::Live(link),
                 None => world::Shard::Viewer,
             },
@@ -1273,21 +1308,21 @@ pub fn run<D: Dial + Send + 'static>(
             openshard_client_render::lod::LodThresholds::DEFAULT,
         ),
         input: input::Input {
-            aiming: false,
-            ctrl_held: false,
-            shift_held: false,
-            war_mode_held: false,
+            aiming:         false,
+            ctrl_held:      false,
+            shift_held:     false,
+            war_mode_held:  false,
             // No click has landed, so the next one cannot be the second of a
             // pair.
-            last_click: None,
+            last_click:     None,
             // Nobody has pointed at anything yet, and a window that opens
             // under a resting cursor hears `CursorEntered` on the first move.
             pointer_inside: false,
-            pointer_gump: GumpPixel::new(0, 0),
+            pointer_gump:   GumpPixel::new(0, 0),
             // No button is down on a client that has not been clicked.
-            left_press: None,
-            focused: true,
-            occluded: false,
+            left_press:     None,
+            focused:        true,
+            occluded:       false,
         },
         next_tick: Instant::now(),
         last_advance: Instant::now(),
@@ -1298,15 +1333,15 @@ pub fn run<D: Dial + Send + 'static>(
         map_editor: editor_mode::MapEditor::open(dir, multis),
         picking: picking::Picking::default(),
         windows: windows::Windows {
-            own_windows: Vec::new(),
+            own_windows:    Vec::new(),
             locally_closed: HashSet::new(),
-            drawn_windows: Vec::new(),
-            grip: windows::WindowGrip::Idle,
-            hand: None,
-            world_press: None,
-            prompt: None,
-            stack_pass: None,
-            keyboard: None,
+            drawn_windows:  Vec::new(),
+            grip:           windows::WindowGrip::Idle,
+            hand:           None,
+            world_press:    None,
+            prompt:         None,
+            stack_pass:     None,
+            keyboard:       None,
         },
         tooltips: tooltips::Tooltips::default(),
         chat: Chat::default(),

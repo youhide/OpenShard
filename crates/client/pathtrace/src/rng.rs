@@ -16,7 +16,7 @@
 /// One pixel's own stream of numbers.
 #[derive(Clone, Debug)]
 pub struct Stream {
-    state: u64,
+    state:     u64,
     /// The stream selector, forced odd — what makes two pixels' sequences
     /// different rather than offset copies of one sequence.
     increment: u64,
@@ -31,7 +31,7 @@ impl Stream {
     /// image rather than an unrelated picture of the same scene.
     pub fn new(seed: u64, sequence: u64) -> Self {
         let mut stream = Self {
-            state: 0,
+            state:     0,
             increment: (sequence << 1) | 1,
         };
         stream.next_u32();

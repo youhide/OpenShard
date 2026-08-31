@@ -5,14 +5,40 @@
 //! patch produced, and a refusal for every way a log can fail to be this
 //! world's.
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use openshard_basemap::{BaseError, Loaded, load, patches, write};
+use openshard_basemap::{
+    BaseError,
+    Loaded,
+    load,
+    patches,
+    write,
+};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, StaticItem, WorldMap};
-use openshard_map::patch::{Patch, PatchAuthor, PatchError, PatchOp, PatchTime, StaticId};
-use openshard_map::snapshot::{MapRevision, MapSnapshot};
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_map::map::{
+    LandCell,
+    StaticItem,
+    WorldMap,
+};
+use openshard_map::patch::{
+    Patch,
+    PatchAuthor,
+    PatchError,
+    PatchOp,
+    PatchTime,
+    StaticId,
+};
+use openshard_map::snapshot::{
+    MapRevision,
+    MapSnapshot,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Facet;
 use openshard_tiles::LandTileId;
 
@@ -22,7 +48,7 @@ const BLOCKS: u32 = 9;
 /// The ground the fixture starts as, so a test can say what a patch replaced.
 const GROUND: LandCell = LandCell {
     tile: LandTileId(3),
-    z: 0,
+    z:    0,
 };
 
 fn rock(x: u16, y: u16) -> StaticItem {
@@ -84,15 +110,15 @@ fn a_world_is_its_base_set_plus_its_log() {
     let (base_set, log) = world("resolves");
     let hill = LandCell {
         tile: LandTileId(9),
-        z: 40,
+        z:    40,
     };
 
     // Two patches, each against the revision the one before it produced.
     let first = patch(
         MapRevision::INITIAL,
         vec![PatchOp::SetLand {
-            x: 10,
-            y: 10,
+            x:   10,
+            y:   10,
             was: GROUND,
             now: hill,
         }],
@@ -148,8 +174,8 @@ fn a_patch_that_does_not_follow_the_one_before_it_is_refused() {
         patch(
             MapRevision::INITIAL,
             vec![PatchOp::SetLand {
-                x: 1,
-                y: 1,
+                x:   1,
+                y:   1,
                 was: GROUND,
                 now: LandCell { tile: GROUND.tile, z },
             }],
@@ -177,13 +203,13 @@ fn a_patch_against_a_world_that_is_not_there_is_refused() {
     let (base_set, log) = world("elsewhere");
     let elsewhere = LandCell {
         tile: LandTileId(200),
-        z: -12,
+        z:    -12,
     };
     let stray = patch(
         MapRevision::INITIAL,
         vec![PatchOp::SetLand {
-            x: 4,
-            y: 4,
+            x:   4,
+            y:   4,
             was: elsewhere,
             now: GROUND,
         }],
@@ -219,7 +245,7 @@ fn an_ordinal_survives_the_log() {
         first.revision(),
         vec![PatchOp::RemoveStatic {
             which: StaticId(1),
-            was: rock(2, 2),
+            was:   rock(2, 2),
         }],
     );
     for committed in [&first, &second] {
@@ -248,7 +274,7 @@ fn a_log_of_another_facet_is_refused() {
     assert!(matches!(
         load(&base_set),
         Err(BaseError::Log {
-            source: patches::LogError::WrongFacet { .. }
+            source: patches::LogError::WrongFacet { .. },
         })
     ));
     // And a patch cannot be committed to a log of a world it is not part of.
@@ -275,7 +301,7 @@ fn a_log_written_over_another_revision_is_refused() {
     assert!(matches!(
         load(&base_set),
         Err(BaseError::Log {
-            source: patches::LogError::WrongBase { .. }
+            source: patches::LogError::WrongBase { .. },
         })
     ));
     clean(&base_set, &log);
@@ -302,7 +328,7 @@ fn a_torn_record_is_refused_rather_than_trimmed() {
     assert!(matches!(
         load(&base_set),
         Err(BaseError::Log {
-            source: patches::LogError::Truncated { at: 0, .. }
+            source: patches::LogError::Truncated { at: 0, .. },
         })
     ));
     clean(&base_set, &log);
@@ -331,7 +357,7 @@ fn a_flipped_bit_is_caught_by_the_checksum() {
     assert!(matches!(
         load(&base_set),
         Err(BaseError::Log {
-            source: patches::LogError::Corrupt { at: 0, .. }
+            source: patches::LogError::Corrupt { at: 0, .. },
         })
     ));
     clean(&base_set, &log);
@@ -344,7 +370,7 @@ fn a_file_that_is_not_a_log_is_refused() {
     assert!(matches!(
         load(&base_set),
         Err(BaseError::Log {
-            source: patches::LogError::NotALog { .. }
+            source: patches::LogError::NotALog { .. },
         })
     ));
 
@@ -352,7 +378,7 @@ fn a_file_that_is_not_a_log_is_refused() {
     assert!(matches!(
         load(&base_set),
         Err(BaseError::Log {
-            source: patches::LogError::NotALog { .. }
+            source: patches::LogError::NotALog { .. },
         })
     ));
     clean(&base_set, &log);

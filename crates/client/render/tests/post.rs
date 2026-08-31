@@ -29,22 +29,54 @@
 
 use std::path::PathBuf;
 
-use openshard_client_render::atlas::{LandAtlas, StaticAtlas, TexmapAtlas};
-use openshard_client_render::blit::{self, Blit, ViewportRect};
+use openshard_client_render::atlas::{
+    LandAtlas,
+    StaticAtlas,
+    TexmapAtlas,
+};
+use openshard_client_render::blit::{
+    self,
+    Blit,
+    ViewportRect,
+};
 use openshard_client_render::camera::Camera;
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::debug::View;
-use openshard_client_render::frame::{self, Impostor};
+use openshard_client_render::frame::{
+    self,
+    Impostor,
+};
 use openshard_client_render::hue::HueRamp;
-use openshard_client_render::items::{self, GroundItem};
-use openshard_client_render::light::{self, Tuning};
-use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, SpriteRenderer, Target};
+use openshard_client_render::items::{
+    self,
+    GroundItem,
+};
+use openshard_client_render::light::{
+    self,
+    Tuning,
+};
+use openshard_client_render::renderer::{
+    self,
+    GroundRenderer,
+    MeshFaceRenderer,
+    SpriteRenderer,
+    Target,
+};
 use openshard_client_render::statics::StaticGeometry;
-use openshard_client_render::{dump, ground};
+use openshard_client_render::{
+    dump,
+    ground,
+};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, WorldMap};
+use openshard_map::map::{
+    LandCell,
+    WorldMap,
+};
 use openshard_protocol::items::ItemAmount;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
 use openshard_uofiles::animdata::AnimData;
@@ -92,12 +124,12 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 
 /// Everything one drawn frame leaves behind — `tests/lid.rs`'s own `Drawn`.
 struct Drawn {
-    world: wgpu::Texture,
-    gbuffer: openshard_client_render::gbuffer::Gbuffer,
+    world:    wgpu::Texture,
+    gbuffer:  openshard_client_render::gbuffer::Gbuffer,
     lighting: light::Lighting,
-    ground: GroundRenderer,
-    statics: SpriteRenderer,
-    mesh: MeshFaceRenderer,
+    ground:   GroundRenderer,
+    statics:  SpriteRenderer,
+    mesh:     MeshFaceRenderer,
 }
 
 /// One frame over flat synthetic land, holding the post and the flame — and
@@ -120,9 +152,11 @@ fn draw(
             wide: BLOCKS,
             down: BLOCKS,
         },
-        |_, _| LandCell {
-            tile: openshard_tiles::LandTileId(LAND),
-            z: 0,
+        |_, _| {
+            LandCell {
+                tile: openshard_tiles::LandTileId(LAND),
+                z:    0,
+            }
         },
     );
     let camera = Camera::new(at, VIEWPORT.0, VIEWPORT.1);
@@ -255,8 +289,8 @@ fn shadow_plane(device: &wgpu::Device, queue: &wgpu::Queue, drawn: &Drawn) -> Ve
     let into = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("post shadow dump"),
         size: wgpu::Extent3d {
-            width: VIEWPORT.0,
-            height: VIEWPORT.1,
+            width:                 VIEWPORT.0,
+            height:                VIEWPORT.1,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -275,9 +309,9 @@ fn shadow_plane(device: &wgpu::Device, queue: &wgpu::Queue, drawn: &Drawn) -> Ve
     let mut blit = Blit::new(device, format);
     let dummy_mobiles = blit::dummy_instances(device);
     let rect = ViewportRect {
-        x: 0,
-        y: 0,
-        width: VIEWPORT.0,
+        x:      0,
+        y:      0,
+        width:  VIEWPORT.0,
         height: VIEWPORT.1,
     };
     let mut lighting = drawn.lighting.clone();
@@ -324,11 +358,13 @@ fn a_posts_shadow_is_a_quarter_tiles_and_a_lost_footprint_makes_it_a_whole_tiles
     let at = Point::new(AT.0, AT.1, 0);
     let items: Vec<GroundItem> = [(POST, AT), (FLAME, FLAME_AT)]
         .iter()
-        .map(|&(id, (x, y))| GroundItem {
-            amount: ItemAmount::ONE,
-            at: Point::new(x, y, 0),
-            graphic: Graphic(id),
-            hue: Hue::NONE,
+        .map(|&(id, (x, y))| {
+            GroundItem {
+                amount:  ItemAmount::ONE,
+                at:      Point::new(x, y, 0),
+                graphic: Graphic(id),
+                hue:     Hue::NONE,
+            }
         })
         .collect();
 

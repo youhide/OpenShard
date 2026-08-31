@@ -7,7 +7,14 @@
 
 use std::fmt;
 
-use openshard_protocol::serial::{ITEM_MAX, ITEM_MIN, MOBILE_MAX, MOBILE_MIN, Serial, SerialKind};
+use openshard_protocol::serial::{
+    ITEM_MAX,
+    ITEM_MIN,
+    MOBILE_MAX,
+    MOBILE_MIN,
+    Serial,
+    SerialKind,
+};
 
 /// The serial pool for one kind is full.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -19,7 +26,8 @@ impl fmt::Display for SerialPoolExhausted {
     }
 }
 
-impl std::error::Error for SerialPoolExhausted {}
+impl std::error::Error for SerialPoolExhausted {
+}
 
 /// Hands out fresh serials from each pool.
 ///
@@ -34,7 +42,7 @@ impl std::error::Error for SerialPoolExhausted {}
 #[derive(Clone, Debug)]
 pub struct SerialAllocator {
     next_mobile: u32,
-    next_item: u32,
+    next_item:   u32,
 }
 
 impl Default for SerialAllocator {
@@ -48,7 +56,7 @@ impl SerialAllocator {
     pub const fn new() -> Self {
         Self {
             next_mobile: MOBILE_MIN,
-            next_item: ITEM_MIN,
+            next_item:   ITEM_MIN,
         }
     }
 

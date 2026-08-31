@@ -8,13 +8,26 @@
 //! `0x9E` lists what the vendor will take from the player's pack (with offered
 //! prices), `0x9F` names what the player let go.
 
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
 use crate::items::ItemAmount;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
-use crate::serial::{RawSerial, Serial};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+};
+use crate::serial::{
+    RawSerial,
+    Serial,
+};
 use crate::version::ClientVersion;
-use crate::wire::{Graphic, Hue};
+use crate::wire::{
+    Graphic,
+    Hue,
+};
 
 /// One line of a vendor's buy list: the price and label for one stock item, in
 /// the same order as the `0x3C` contents it rides beside.
@@ -29,7 +42,7 @@ pub struct BuyLine {
     /// what it pays back) live in `openshard_npc`, far above `protocol`.
     pub price: u32,
     /// The label the client shows — usually the item's name.
-    pub name: String,
+    pub name:  String,
 }
 
 /// `0x74` — the prices and labels for a vendor's buy container.
@@ -38,7 +51,7 @@ pub struct BuyList {
     /// The stock container the lines pair with, by order.
     pub container: Serial,
     /// One line per stocked item.
-    pub lines: Vec<BuyLine>,
+    pub lines:     Vec<BuyLine>,
 }
 
 impl EncodePacket for BuyList {
@@ -115,7 +128,7 @@ pub struct Purchase {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct BuyReply {
     /// The vendor mobile, as the client named it.
-    pub vendor: RawSerial,
+    pub vendor:    RawSerial,
     /// What was bought; empty when the gump was closed without buying.
     pub purchases: Vec<Purchase>,
 }
@@ -155,19 +168,19 @@ impl DecodePacket for BuyReply {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct SellLine {
     /// The player's item.
-    pub serial: Serial,
+    pub serial:  Serial,
     /// Its graphic.
     pub graphic: Graphic,
     /// Its hue.
-    pub hue: Hue,
+    pub hue:     Hue,
     /// How many the player carries. A quantity, on N10's allowlist for
     /// [`Purchase::amount`]'s reason.
-    pub amount: ItemAmount,
+    pub amount:  ItemAmount,
     /// What the vendor pays per unit. A quantity, on N10's allowlist for
     /// [`BuyLine::price`]'s reason.
-    pub price: u16,
+    pub price:   u16,
     /// The label the client shows.
-    pub name: String,
+    pub name:    String,
 }
 
 /// `0x9E` — what the vendor offers to buy from the player.
@@ -176,7 +189,7 @@ pub struct SellList {
     /// The vendor mobile.
     pub vendor: Serial,
     /// One line per item the vendor will take.
-    pub lines: Vec<SellLine>,
+    pub lines:  Vec<SellLine>,
 }
 
 impl EncodePacket for SellList {
@@ -258,7 +271,7 @@ pub struct SellReply {
     /// The vendor mobile, as the client named it.
     pub vendor: RawSerial,
     /// What was sold; empty when the gump was closed without selling.
-    pub sales: Vec<Sale>,
+    pub sales:  Vec<Sale>,
 }
 
 impl DecodePacket for SellReply {
@@ -280,7 +293,10 @@ impl DecodePacket for SellReply {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::{decode_packet, encode_packet};
+    use crate::packet::{
+        decode_packet,
+        encode_packet,
+    };
 
     fn version() -> ClientVersion {
         ClientVersion::new(7, 0, 45, 65)
@@ -291,14 +307,14 @@ mod tests {
         let bytes = encode_packet(
             &BuyList {
                 container: Serial::new(0x4000_0010).unwrap(),
-                lines: vec![
+                lines:     vec![
                     BuyLine {
                         price: 3,
-                        name: "black pearl".to_owned(),
+                        name:  "black pearl".to_owned(),
                     },
                     BuyLine {
                         price: 12,
-                        name: "longsword".to_owned(),
+                        name:  "longsword".to_owned(),
                     },
                 ],
             },
@@ -333,7 +349,7 @@ mod tests {
             reply.purchases,
             vec![Purchase {
                 serial: RawSerial(0x4000_0020),
-                amount: ItemAmount(5)
+                amount: ItemAmount(5),
             }]
         );
     }
@@ -353,13 +369,13 @@ mod tests {
         let list = encode_packet(
             &SellList {
                 vendor: Serial::new(0x0000_0BBB).unwrap(),
-                lines: vec![SellLine {
-                    serial: Serial::new(0x4000_0033).unwrap(),
+                lines:  vec![SellLine {
+                    serial:  Serial::new(0x4000_0033).unwrap(),
                     graphic: Graphic(0x0F7A),
-                    hue: Hue::NONE,
-                    amount: ItemAmount(20),
-                    price: 2,
-                    name: "black pearl".to_owned(),
+                    hue:     Hue::NONE,
+                    amount:  ItemAmount(20),
+                    price:   2,
+                    name:    "black pearl".to_owned(),
                 }],
             },
             version(),
@@ -380,7 +396,7 @@ mod tests {
             reply.sales,
             vec![Sale {
                 serial: RawSerial(0x4000_0033),
-                amount: ItemAmount(10)
+                amount: ItemAmount(10),
             }]
         );
     }

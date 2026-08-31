@@ -18,72 +18,101 @@
 //! anything that matters.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc,
+    Mutex,
+};
 
-use openshard_protocol::identity::{AccountName, CharacterName};
+use openshard_protocol::identity::{
+    AccountName,
+    CharacterName,
+};
 use openshard_protocol::serial::Serial;
 #[cfg(test)]
-use openshard_protocol::world::{Aggression, DamageType};
-use rusqlite::{Connection, OptionalExtension, params};
+use openshard_protocol::world::{
+    Aggression,
+    DamageType,
+};
+use rusqlite::{
+    Connection,
+    OptionalExtension,
+    params,
+};
 
 use crate::journal::Snapshot;
 use crate::record::{
-    AccountRecord, CharacterRecord, DecorationRecord, GuildRecord, ItemLocation, ItemRecord, MobileRecord,
-    RegionRecord, SCHEMA_VERSION, SpawnerRecord, StatLockRecord, WorldRecord,
+    AccountRecord,
+    CharacterRecord,
+    DecorationRecord,
+    GuildRecord,
+    ItemLocation,
+    ItemRecord,
+    MobileRecord,
+    RegionRecord,
+    SCHEMA_VERSION,
+    SpawnerRecord,
+    StatLockRecord,
+    WorldRecord,
 };
 use crate::store::StoreError;
 
 /// The flat form of an [`ItemLocation`] for the `items` table: a kind tag and the
 /// union of every variant's parameters, the fields not used by a kind left zero.
 struct FlatLocation {
-    kind: u8,
-    facet: u8,
-    x: u16,
-    y: u16,
-    z: i8,
+    kind:   u8,
+    facet:  u8,
+    x:      u16,
+    y:      u16,
+    z:      i8,
     parent: u32,
-    grid: u8,
-    layer: u8,
+    grid:   u8,
+    layer:  u8,
 }
 
 impl ItemLocation {
     fn flatten(self) -> FlatLocation {
         match self {
-            ItemLocation::Ground { facet, x, y, z } => FlatLocation {
-                kind: 0,
-                facet,
-                x,
-                y,
-                z,
-                parent: 0,
-                grid: 0,
-                layer: 0,
-            },
+            ItemLocation::Ground { facet, x, y, z } => {
+                FlatLocation {
+                    kind: 0,
+                    facet,
+                    x,
+                    y,
+                    z,
+                    parent: 0,
+                    grid: 0,
+                    layer: 0,
+                }
+            }
             ItemLocation::Contained {
                 container,
                 x,
                 y,
                 grid,
-            } => FlatLocation {
-                kind: 1,
-                facet: 0,
-                x,
-                y,
-                z: 0,
-                parent: container.raw(),
-                grid,
-                layer: 0,
-            },
-            ItemLocation::Equipped { mobile, layer } => FlatLocation {
-                kind: 2,
-                facet: 0,
-                x: 0,
-                y: 0,
-                z: 0,
-                parent: mobile.raw(),
-                grid: 0,
-                layer,
-            },
+            } => {
+                FlatLocation {
+                    kind: 1,
+                    facet: 0,
+                    x,
+                    y,
+                    z: 0,
+                    parent: container.raw(),
+                    grid,
+                    layer: 0,
+                }
+            }
+            ItemLocation::Equipped { mobile, layer } => {
+                FlatLocation {
+                    kind: 2,
+                    facet: 0,
+                    x: 0,
+                    y: 0,
+                    z: 0,
+                    parent: mobile.raw(),
+                    grid: 0,
+                    layer,
+                }
+            }
         }
     }
 
@@ -91,26 +120,32 @@ impl ItemLocation {
     /// no version wrote — a corrupt or future row, dropped rather than guessed.
     fn inflate(f: &FlatLocation) -> Option<Self> {
         match f.kind {
-            0 => Some(ItemLocation::Ground {
-                facet: f.facet,
-                x: f.x,
-                y: f.y,
-                z: f.z,
-            }),
+            0 => {
+                Some(ItemLocation::Ground {
+                    facet: f.facet,
+                    x:     f.x,
+                    y:     f.y,
+                    z:     f.z,
+                })
+            }
             // `f.parent` came off the same `NOT NULL` column `insert_item`/`write_item`
             // writes a real serial into for these two kinds, so a value that does not
             // parse as one is as corrupt as an unknown `kind` tag — dropped the same
             // way, via the `?` on this function's own `Option` return.
-            1 => Some(ItemLocation::Contained {
-                container: Serial::new(f.parent)?,
-                x: f.x,
-                y: f.y,
-                grid: f.grid,
-            }),
-            2 => Some(ItemLocation::Equipped {
-                mobile: Serial::new(f.parent)?,
-                layer: f.layer,
-            }),
+            1 => {
+                Some(ItemLocation::Contained {
+                    container: Serial::new(f.parent)?,
+                    x:         f.x,
+                    y:         f.y,
+                    grid:      f.grid,
+                })
+            }
+            2 => {
+                Some(ItemLocation::Equipped {
+                    mobile: Serial::new(f.parent)?,
+                    layer:  f.layer,
+                })
+            }
             _ => None,
         }
     }
@@ -432,7 +467,7 @@ impl SqliteStore {
             }
             Some(version) if version != SCHEMA_VERSION => {
                 return Err(StoreError::SchemaMismatch {
-                    found: version,
+                    found:      version,
                     understood: SCHEMA_VERSION,
                 });
             }
@@ -459,7 +494,7 @@ impl SqliteStore {
         // snapshot from a future schema must not be half-written.
         if snapshot.schema != SCHEMA_VERSION {
             return Err(StoreError::SchemaMismatch {
-                found: snapshot.schema,
+                found:      snapshot.schema,
                 understood: SCHEMA_VERSION,
             });
         }
@@ -678,6 +713,10 @@ impl SqliteStore {
                 for spawner in spawners {
                     let creatures = serde_json::to_string(&spawner.creatures)
                         .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+                    let respawn_secs = i64::try_from(spawner.respawn_secs)
+                        .map_err(|_| StoreError::Corrupt("spawner respawn_secs exceeds SQLite INTEGER".into()))?;
+                    let remaining_secs = i64::try_from(spawner.remaining_secs)
+                        .map_err(|_| StoreError::Corrupt("spawner remaining_secs exceeds SQLite INTEGER".into()))?;
                     transaction
                         .execute(
                             "INSERT INTO spawners \
@@ -692,8 +731,8 @@ impl SqliteStore {
                                 spawner.width,
                                 spawner.height,
                                 spawner.max_count,
-                                spawner.respawn_secs,
-                                spawner.remaining_secs,
+                                respawn_secs,
+                                remaining_secs,
                                 creatures,
                             ],
                         )
@@ -859,6 +898,8 @@ impl SqliteStore {
                 }
             }
             if let Some(record) = world {
+                let clock_minutes = i64::try_from(record.clock_minutes)
+                    .map_err(|_| StoreError::Corrupt("world clock_minutes exceeds SQLite INTEGER".into()))?;
                 // `rng_state` goes in as the signed word with the same bits. A
                 // generator state uses the whole `u64`, the column is signed, and
                 // the two casts are exact inverses — a `try_into` here would refuse
@@ -872,7 +913,7 @@ impl SqliteStore {
                          guild_high_water = excluded.guild_high_water, \
                          alliance_high_water = excluded.alliance_high_water",
                         params![
-                            record.clock_minutes,
+                            clock_minutes,
                             record.rng_state.cast_signed(),
                             record.guild_high_water,
                             record.alliance_high_water
@@ -979,33 +1020,33 @@ impl SqliteStore {
             let rows = statement
                 .query_map([], |row| {
                     let flat = FlatLocation {
-                        kind: row.get(7)?,
-                        facet: row.get(8)?,
-                        x: row.get(9)?,
-                        y: row.get(10)?,
-                        z: row.get(11)?,
+                        kind:   row.get(7)?,
+                        facet:  row.get(8)?,
+                        x:      row.get(9)?,
+                        y:      row.get(10)?,
+                        z:      row.get(11)?,
                         parent: row.get(12)?,
-                        grid: row.get(13)?,
-                        layer: row.get(14)?,
+                        grid:   row.get(13)?,
+                        layer:  row.get(14)?,
                     };
                     Ok((
                         ItemRecord {
-                            serial: get_serial(row, 0)?,
-                            owner: get_optional_serial(row, 1)?,
-                            graphic: row.get(2)?,
-                            hue: row.get(3)?,
-                            kind: row.get(35)?,
-                            material: row.get(36)?,
-                            amount: row.get(4)?,
-                            stackable: row.get(5)?,
+                            serial:         get_serial(row, 0)?,
+                            owner:          get_optional_serial(row, 1)?,
+                            graphic:        row.get(2)?,
+                            hue:            row.get(3)?,
+                            kind:           row.get(35)?,
+                            material:       row.get(36)?,
+                            amount:         row.get(4)?,
+                            stackable:      row.get(5)?,
                             container_gump: row.get(6)?,
-                            price: row.get(15)?,
-                            name: row.get(16)?,
+                            price:          row.get(15)?,
+                            name:           row.get(16)?,
                             // Bit-cast back from the i64 the mask was stored as.
-                            spellbook: row.get::<_, Option<i64>>(17)?.map(|mask| mask as u64),
-                            corpse: None,
-                            poison: row.get::<_, Option<u8>>(19)?.zip(row.get::<_, Option<u16>>(20)?),
-                            trap: match (
+                            spellbook:      row.get::<_, Option<i64>>(17)?.map(|mask| mask as u64),
+                            corpse:         None,
+                            poison:         row.get::<_, Option<u8>>(19)?.zip(row.get::<_, Option<u16>>(20)?),
+                            trap:           match (
                                 row.get::<_, Option<u8>>(21)?,
                                 row.get::<_, Option<u16>>(22)?,
                                 row.get::<_, Option<u8>>(23)?,
@@ -1015,14 +1056,14 @@ impl SqliteStore {
                                 }
                                 _ => None,
                             },
-                            uses: row.get(24)?,
-                            crafted: match row.get::<_, Option<bool>>(25)? {
+                            uses:           row.get(24)?,
+                            crafted:        match row.get::<_, Option<bool>>(25)? {
                                 Some(fine) => Some((fine, row.get(26)?)),
                                 None => None,
                             },
                             // All four or none: a rune half-read is a rune that
                             // points somewhere nobody marked.
-                            rune: match (
+                            rune:           match (
                                 row.get::<_, Option<u8>>(27)?,
                                 row.get::<_, Option<u16>>(28)?,
                                 row.get::<_, Option<u16>>(29)?,
@@ -1031,25 +1072,27 @@ impl SqliteStore {
                                 (Some(facet), Some(x), Some(y), Some(z)) => Some((facet, x, y, z)),
                                 _ => None,
                             },
-                            runebook: None,
+                            runebook:       None,
                             // A house serial that will not parse drops the whole
                             // pin: an item claiming to be locked down in nothing
                             // is one nobody could ever release.
-                            locked_down: match row.get::<_, Option<u32>>(32)?.and_then(Serial::new) {
-                                Some(house) => Some(crate::record::LockdownData {
-                                    house,
-                                    secure: row.get(33)?,
-                                }),
+                            locked_down:    match row.get::<_, Option<u32>>(32)?.and_then(Serial::new) {
+                                Some(house) => {
+                                    Some(crate::record::LockdownData {
+                                        house,
+                                        secure: row.get(33)?,
+                                    })
+                                }
                                 None => None,
                             },
-                            affixes: Vec::new(),
+                            affixes:        Vec::new(),
                             // A placeholder overwritten below; the location cannot be
                             // built inside `query_map`'s closure return type cleanly.
-                            location: ItemLocation::Ground {
+                            location:       ItemLocation::Ground {
                                 facet: 0,
-                                x: 0,
-                                y: 0,
-                                z: 0,
+                                x:     0,
+                                y:     0,
+                                z:     0,
                             },
                         },
                         flat,
@@ -1091,24 +1134,30 @@ impl SqliteStore {
                     let creatures: String = row.get(9)?;
                     Ok((
                         SpawnerRecord {
-                            id: openshard_state::SpawnerId(row.get(0)?),
-                            facet: row.get(1)?,
-                            x: row.get(2)?,
-                            y: row.get(3)?,
-                            width: row.get(4)?,
-                            height: row.get(5)?,
-                            max_count: row.get(6)?,
-                            respawn_secs: row.get(7)?,
-                            remaining_secs: row.get(8)?,
-                            creatures: Vec::new(),
+                            id:             openshard_state::SpawnerId(row.get(0)?),
+                            facet:          row.get(1)?,
+                            x:              row.get(2)?,
+                            y:              row.get(3)?,
+                            width:          row.get(4)?,
+                            height:         row.get(5)?,
+                            max_count:      row.get(6)?,
+                            respawn_secs:   0,
+                            remaining_secs: 0,
+                            creatures:      Vec::new(),
                         },
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
                         creatures,
                     ))
                 })
                 .map_err(database)?;
             let mut spawners = Vec::new();
             for row in rows {
-                let (mut record, creatures) = row.map_err(database)?;
+                let (mut record, respawn_secs, remaining_secs, creatures) = row.map_err(database)?;
+                record.respawn_secs = u64::try_from(respawn_secs)
+                    .map_err(|_| StoreError::Corrupt("negative spawner respawn_secs".into()))?;
+                record.remaining_secs = u64::try_from(remaining_secs)
+                    .map_err(|_| StoreError::Corrupt("negative spawner remaining_secs".into()))?;
                 record.creatures =
                     serde_json::from_str(&creatures).map_err(|e| StoreError::Corrupt(e.to_string()))?;
                 spawners.push(record);
@@ -1450,7 +1499,7 @@ impl SqliteStore {
             let rows = statement
                 .query_map([], |row| {
                     Ok(AccountRecord {
-                        name: AccountName(row.get(0)?),
+                        name:       AccountName(row.get(0)?),
                         credential: row.get(1)?,
                     })
                 })
@@ -1522,16 +1571,19 @@ where
 {
     match tokio::task::spawn_blocking(work).await {
         Ok(result) => result,
-        Err(join) => Err(StoreError::Database(format!(
-            "the sqlite task did not finish: {join}"
-        ))),
+        Err(join) => {
+            Err(StoreError::Database(format!(
+                "the sqlite task did not finish: {join}"
+            )))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_protocol::world::Sight;
+
+    use super::*;
 
     fn character(serial: u32, x: u16) -> CharacterRecord {
         CharacterRecord {
@@ -1587,38 +1639,38 @@ mod tests {
 
     fn contained(serial: u32, owner: u32, container: u32) -> ItemRecord {
         ItemRecord {
-            serial: Serial::new(serial).expect("a valid test serial"),
+            serial:         Serial::new(serial).expect("a valid test serial"),
             // `0` is the on-disk sentinel for "no owner" — a ground item — the
             // same convention `get_optional_serial` reads back.
-            owner: if owner == 0 {
+            owner:          if owner == 0 {
                 None
             } else {
                 Some(Serial::new(owner).expect("a valid test serial"))
             },
-            graphic: 0x0EED,
-            hue: 0,
-            kind: None,
-            material: None,
-            amount: 1,
-            stackable: false,
+            graphic:        0x0EED,
+            hue:            0,
+            kind:           None,
+            material:       None,
+            amount:         1,
+            stackable:      false,
             container_gump: None,
-            price: None,
-            name: None,
-            spellbook: None,
-            corpse: None,
-            poison: None,
-            trap: None,
-            uses: None,
-            crafted: None,
-            rune: None,
-            runebook: None,
-            locked_down: None,
-            affixes: Vec::new(),
-            location: ItemLocation::Contained {
+            price:          None,
+            name:           None,
+            spellbook:      None,
+            corpse:         None,
+            poison:         None,
+            trap:           None,
+            uses:           None,
+            crafted:        None,
+            rune:           None,
+            runebook:       None,
+            locked_down:    None,
+            affixes:        Vec::new(),
+            location:       ItemLocation::Contained {
                 container: Serial::new(container).expect("a valid test serial"),
-                x: 0,
-                y: 0,
-                grid: 0,
+                x:         0,
+                y:         0,
+                grid:      0,
             },
         }
     }
@@ -1750,9 +1802,9 @@ mod tests {
         // hundred rolls.
         let store = SqliteStore::open_in_memory().expect("open");
         let record = WorldRecord {
-            clock_minutes: 13 * 60,
-            rng_state: 0xFEDC_BA98_7654_3210,
-            guild_high_water: 0,
+            clock_minutes:       13 * 60,
+            rng_state:           0xFEDC_BA98_7654_3210,
+            guild_high_water:    0,
             alliance_high_water: 0,
         };
         assert!(record.rng_state > i64::MAX.cast_unsigned(), "the high bit is set");
@@ -1768,26 +1820,31 @@ mod tests {
 
     #[tokio::test]
     async fn a_guild_and_its_members_survive_a_reopen() {
-        use crate::record::{GuildRecord, GuildStanding};
+        use crate::record::{
+            GuildRecord,
+            GuildStanding,
+        };
 
         // A guild sweep replaces the set, so a guild disbanded since the last save
         // is absent from the next one — and the delete is what makes that stick.
         // The membership does not ride here at all: it is a character column, and
         // the two are written on their own schedules.
         let path = temp_db("guilds");
-        let guild = |id: u32, name: &str, at_war_with: Option<u32>| GuildRecord {
-            id,
-            name: name.to_owned(),
-            abbreviation: name[..3].to_owned(),
-            leader: Serial::new(0x0000_0001).expect("a leader serial"),
-            relations: at_war_with
-                .map(|other| vec![GuildStanding { other, at_war: true }])
-                .unwrap_or_default(),
-            proposals: vec![GuildStanding {
-                other: 99,
-                at_war: false,
-            }],
-            alliance: None,
+        let guild = |id: u32, name: &str, at_war_with: Option<u32>| {
+            GuildRecord {
+                id,
+                name: name.to_owned(),
+                abbreviation: name[..3].to_owned(),
+                leader: Serial::new(0x0000_0001).expect("a leader serial"),
+                relations: at_war_with
+                    .map(|other| vec![GuildStanding { other, at_war: true }])
+                    .unwrap_or_default(),
+                proposals: vec![GuildStanding {
+                    other:  99,
+                    at_war: false,
+                }],
+                alliance: None,
+            }
         };
 
         let mut member = character(1, 100);
@@ -1804,12 +1861,12 @@ mod tests {
                         guild(2, "Blackrose", Some(1)),
                     ]),
                     world: Some(WorldRecord {
-                        clock_minutes: 0,
-                        rng_state: 0,
+                        clock_minutes:       0,
+                        rng_state:           0,
                         // Higher than any guild in the table, which is the whole
                         // reason it is saved rather than derived: guild 3 was
                         // founded and disbanded, and leaves no row.
-                        guild_high_water: 3,
+                        guild_high_water:    3,
                         alliance_high_water: 0,
                     }),
                     ..snapshot(vec![member.clone()], vec![])
@@ -1826,16 +1883,16 @@ mod tests {
         assert_eq!(
             guilds[0].relations,
             vec![GuildStanding {
-                other: 2,
-                at_war: true
+                other:  2,
+                at_war: true,
             }],
             "the war did not survive the door"
         );
         assert_eq!(
             guilds[0].proposals,
             vec![GuildStanding {
-                other: 99,
-                at_war: false
+                other:  99,
+                at_war: false,
             }],
             "a standing offer is half a war, and losing it undoes one"
         );
@@ -1873,24 +1930,24 @@ mod tests {
                 .save(&Snapshot {
                     alliances: Some(vec![
                         AllianceRecord {
-                            id: 1,
-                            name: "The Northern Compact".to_owned(),
-                            leader: 1,
+                            id:      1,
+                            name:    "The Northern Compact".to_owned(),
+                            leader:  1,
                             members: vec![1, 2],
                             pending: vec![3],
                         },
                         AllianceRecord {
-                            id: 2,
-                            name: "The Ash Pact".to_owned(),
-                            leader: 4,
+                            id:      2,
+                            name:    "The Ash Pact".to_owned(),
+                            leader:  4,
                             members: vec![4, 5],
                             pending: vec![],
                         },
                     ]),
                     world: Some(WorldRecord {
-                        clock_minutes: 0,
-                        rng_state: 0,
-                        guild_high_water: 0,
+                        clock_minutes:       0,
+                        rng_state:           0,
+                        guild_high_water:    0,
                         // Higher than either row, which is the whole reason it is
                         // saved rather than derived from the table.
                         alliance_high_water: 7,
@@ -1904,9 +1961,9 @@ mod tests {
                 .save(&Snapshot {
                     tick: 2,
                     alliances: Some(vec![AllianceRecord {
-                        id: 1,
-                        name: "The Northern Compact".to_owned(),
-                        leader: 2,
+                        id:      1,
+                        name:    "The Northern Compact".to_owned(),
+                        leader:  2,
                         members: vec![1, 2],
                         pending: vec![3],
                     }]),
@@ -1946,7 +2003,7 @@ mod tests {
         let store = SqliteStore::open_in_memory().expect("open");
         store
             .put_account(&AccountRecord {
-                name: AccountName::new("admin"),
+                name:       AccountName::new("admin"),
                 credential: "secret".into(),
             })
             .await
@@ -1965,22 +2022,22 @@ mod tests {
             .await
             .expect("save");
         let future = Snapshot {
-            tick: 2,
-            schema: SCHEMA_VERSION + 1,
-            characters: vec![character(1, 999)],
-            removed: vec![],
+            tick:        2,
+            schema:      SCHEMA_VERSION + 1,
+            characters:  vec![character(1, 999)],
+            removed:     vec![],
             inventories: vec![],
-            ground: None,
-            spawners: None,
-            mobiles: None,
+            ground:      None,
+            spawners:    None,
+            mobiles:     None,
             decorations: None,
-            regions: None,
-            guilds: None,
-            alliances: None,
-            houses: None,
-            designs: None,
-            boats: None,
-            world: None,
+            regions:     None,
+            guilds:      None,
+            alliances:   None,
+            houses:      None,
+            designs:     None,
+            boats:       None,
+            world:       None,
         };
         let error = store.save(&future).await.expect_err("must refuse");
         assert!(matches!(error, StoreError::SchemaMismatch { .. }));
@@ -1995,7 +2052,12 @@ mod tests {
     async fn mobiles_and_decorations_replace_and_reopen() {
         // The two whole-world tables: a sweep replaces the set, a dead mobile's
         // items go with it, and everything survives a reopen from the file.
-        use crate::record::{DecorationRecord, DoorState, Inventory, MobileRecord};
+        use crate::record::{
+            DecorationRecord,
+            DoorState,
+            Inventory,
+            MobileRecord,
+        };
         fn mobile(serial: u32, hits: u16) -> MobileRecord {
             MobileRecord {
                 serial: Serial::new(serial).expect("a valid test serial"),
@@ -2037,22 +2099,22 @@ mod tests {
             }
         }
         let decoration = DecorationRecord {
-            key_value: 0,
-            locked: false,
-            serial: Serial::new(0x4000_0100).unwrap(),
-            graphic: 0x0675,
-            hue: 0,
-            facet: 0,
-            x: 1401,
-            y: 1600,
-            z: 0,
-            door: Some(DoorState {
+            key_value:      0,
+            locked:         false,
+            serial:         Serial::new(0x4000_0100).unwrap(),
+            graphic:        0x0675,
+            hue:            0,
+            facet:          0,
+            x:              1401,
+            y:              1600,
+            z:              0,
+            door:           Some(DoorState {
                 closed_graphic: 0x0675,
-                open_graphic: 0x0676,
-                offset_x: -1,
-                offset_y: 1,
-                link: Some(Serial::new(0x4000_0101).unwrap()),
-                is_open: true,
+                open_graphic:   0x0676,
+                offset_x:       -1,
+                offset_y:       1,
+                link:           Some(Serial::new(0x4000_0101).unwrap()),
+                is_open:        true,
             }),
             container_gump: None,
         };
@@ -2177,7 +2239,7 @@ mod tests {
         let path = temp_db("item-affixes");
         let affixes = vec![
             crate::record::ItemAffixRecord::Slayer {
-                body: 0x0002,
+                body:          0x0002,
                 bonus_percent: 50,
             },
             crate::record::ItemAffixRecord::DamageBonus {
@@ -2185,7 +2247,7 @@ mod tests {
                 maximum: 7,
             },
             crate::record::ItemAffixRecord::HitPoison {
-                level: 2,
+                level:            2,
                 chance_per_mille: 250,
             },
         ];
@@ -2245,24 +2307,24 @@ mod tests {
         // shows up a week later as "my bank runes work and my pack runes don't".
         let path = temp_db("rune-and-book");
         let book = crate::record::RunebookData {
-            entries: vec![
+            entries:       vec![
                 crate::record::RunebookEntryData {
-                    facet: 0,
-                    x: 1336,
-                    y: 1997,
-                    z: 5,
+                    facet:       0,
+                    x:           1336,
+                    y:           1997,
+                    z:           5,
                     description: "Britain".into(),
                 },
                 crate::record::RunebookEntryData {
-                    facet: 1,
-                    x: 2701,
-                    y: 692,
-                    z: 5,
+                    facet:       1,
+                    x:           2701,
+                    y:           692,
+                    z:           5,
                     description: "Minoc".into(),
                 },
             ],
-            charges: 3,
-            max_charges: 10,
+            charges:       3,
+            max_charges:   10,
             default_entry: Some(1),
         };
         {
@@ -2308,7 +2370,7 @@ mod tests {
         let store = SqliteStore::open_in_memory().expect("open");
         let mut item = contained(0x4000_0001, 1, 1);
         item.locked_down = Some(crate::record::LockdownData {
-            house: Serial::new(0x4000_0002).expect("a valid house serial"),
+            house:  Serial::new(0x4000_0002).expect("a valid house serial"),
             secure: Some(3),
         });
         let mut snap = snapshot(vec![character(1, 100)], vec![]);
@@ -2361,16 +2423,16 @@ mod tests {
         // body nobody has touched.
         let path = temp_db("corpse-story");
         let story = crate::record::CorpseData {
-            owner: "a lich".into(),
-            player: None,
-            killer: Some("Rowena".into()),
+            owner:       "a lich".into(),
+            player:      None,
+            killer:      Some("Rowena".into()),
             examined_by: Some("Mordred".into()),
-            looters: vec!["Vesper".into(), "Rowena".into()],
-            carved: true,
+            looters:     vec!["Vesper".into(), "Rowena".into()],
+            carved:      true,
             // And which way it lies: the picture's other half, saved here
             // because the item row's `amount` already carries the body.
-            facing: 6,
-            equipment: Vec::new(),
+            facing:      6,
+            equipment:   Vec::new(),
         };
         {
             let store = SqliteStore::open(&path).expect("open");
@@ -2431,7 +2493,7 @@ mod tests {
                 .expect("save");
             store
                 .put_account(&AccountRecord {
-                    name: AccountName::new("admin"),
+                    name:       AccountName::new("admin"),
                     credential: "x".into(),
                 })
                 .await

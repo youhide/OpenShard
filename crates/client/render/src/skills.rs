@@ -34,16 +34,35 @@
 //! M4 — because the shard sends the whole list at world entry too, and a window
 //! that opened on the packet would open itself at every login.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
 
 use openshard_client_model::Skill as SkillLine;
 use openshard_protocol::skill::SkillLock;
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::{Graphic, Hue};
-use openshard_uofiles::skillgrp::{GroupId, SkillGroups};
-use openshard_uofiles::skills::{Skill, SkillId, Skills};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
+use openshard_uofiles::skillgrp::{
+    GroupId,
+    SkillGroups,
+};
+use openshard_uofiles::skills::{
+    Skill,
+    SkillId,
+    Skills,
+};
 
-use crate::gump::{GumpArt, GumpPixel, Picture, PictureIndex, Scissor};
+use crate::gump::{
+    GumpArt,
+    GumpPixel,
+    Picture,
+    PictureIndex,
+    Scissor,
+};
 use crate::text::GumpLabel;
 
 /// One line of a skill's standing, plus the local lock face drawn over it.
@@ -52,7 +71,7 @@ pub struct Standing {
     /// The wire-derived values, with its id deliberately held by the caller's map.
     pub skill: SkillLine,
     /// Which way the shard is training it.
-    pub lock: SkillLock,
+    pub lock:  SkillLock,
 }
 
 /// A row of the window: a heading, or a skill under one.
@@ -76,7 +95,7 @@ pub struct Tree {
     /// The headings that are shut. Absent means open, so a fresh tree shows
     /// everything — which is what a window nobody has touched should do, and it
     /// means a heading the files gain later needs no entry to appear.
-    shut: BTreeSet<GroupId>,
+    shut:   BTreeSet<GroupId>,
     /// How far down the content the viewport's top edge sits, in gump pixels.
     offset: i32,
     /// Locks the player has clicked since the window last opened, held over
@@ -175,13 +194,13 @@ pub enum Hit {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Line {
     /// Its top-left corner, in the window's own pixels.
-    pub at: GumpPixel,
+    pub at:      GumpPixel,
     /// The text.
-    pub text: String,
+    pub text:    String,
     /// Which face.
-    pub font: Font,
+    pub font:    Font,
     /// The wire hue to draw it in.
-    pub hue: Hue,
+    pub hue:     Hue,
     /// The box it is cut to, or `None` for a line that is part of the frame.
     ///
     /// The same field [`Picture::scissor`] is and for the same reason, arrived
@@ -198,10 +217,10 @@ impl Line {
     #[must_use]
     pub fn label(&self) -> GumpLabel<'_> {
         GumpLabel {
-            at: self.at,
+            at:   self.at,
             text: &self.text,
             font: self.font,
-            hue: self.hue,
+            hue:  self.hue,
             clip: None,
         }
     }
@@ -217,9 +236,9 @@ pub struct Sheet {
     /// The art, in painter's order: the frame, then the rows, then the bar.
     pub pictures: Vec<Picture>,
     /// Which of those pictures means something, by its index.
-    pub hits: BTreeMap<PictureIndex, Hit>,
+    pub hits:     BTreeMap<PictureIndex, Hit>,
     /// Everything written on it.
-    pub lines: Vec<Line>,
+    pub lines:    Vec<Line>,
     /// The box the rows are cut to.
     ///
     /// Every picture and every line in the list carries it already; it is on the
@@ -228,7 +247,7 @@ pub struct Sheet {
     pub viewport: Scissor,
     /// Where the scrollbar is, so that a drag can be turned back into an offset
     /// — see [`Sheet::offset_at`].
-    bar: Scissor,
+    bar:          Scissor,
 }
 
 // -- the frame ------------------------------------------------------------
@@ -521,13 +540,13 @@ pub fn window(
     at: GumpPixel,
 ) -> Sheet {
     let viewport = Scissor {
-        at: at.offset(VIEWPORT_AT),
-        width: VIEWPORT_WIDTH,
+        at:     at.offset(VIEWPORT_AT),
+        width:  VIEWPORT_WIDTH,
         height: VIEWPORT_HEIGHT,
     };
     let bar = Scissor {
-        at: at.offset(BAR_AT),
-        width: BAR_WIDTH,
+        at:     at.offset(BAR_AT),
+        width:  BAR_WIDTH,
         height: VIEWPORT_HEIGHT,
     };
     let mut sheet = Sheet {
@@ -571,13 +590,13 @@ pub fn window(
         // Beside the instruction rather than on it — it is a picture of a
         // sentence, so there is nowhere on it to write. `_bottomComment.X +
         // Width + 5`, five pixels past its right-hand edge.
-        at: at.offset(GumpPixel::new(
+        at:      at.offset(GumpPixel::new(
             BOTTOM_COMMENT_AT.x + BOTTOM_COMMENT_WIDTH + 5,
             BOTTOM_COMMENT_AT.y + 5,
         )),
-        text: tenths(total.min(u32::from(u16::MAX)) as u16),
-        font: TOTAL_FONT,
-        hue: HEADING_HUE,
+        text:    tenths(total.min(u32::from(u16::MAX)) as u16),
+        font:    TOTAL_FONT,
+        hue:     HEADING_HUE,
         // Not cut: it is written on the frame, below where the list stops.
         scissor: None,
     });
@@ -641,10 +660,10 @@ fn heading(
         .hits
         .insert(PictureIndex::new(sheet.pictures.len() - 1), Hit::Heading(group));
     sheet.lines.push(Line {
-        at: at.offset(GumpPixel::new(VIEWPORT_AT.x + HEADING_NAME_X, y)),
-        text: name.to_owned(),
-        font: HEADING_FONT,
-        hue: HEADING_HUE,
+        at:      at.offset(GumpPixel::new(VIEWPORT_AT.x + HEADING_NAME_X, y)),
+        text:    name.to_owned(),
+        font:    HEADING_FONT,
+        hue:     HEADING_HUE,
         scissor: Some(sheet.viewport),
     });
     // `xx = width + 11 + 16`, ruled to the right-hand edge.
@@ -690,10 +709,10 @@ fn skill_row(
             .insert(PictureIndex::new(sheet.pictures.len() - 1), Hit::Use(id));
     }
     sheet.lines.push(Line {
-        at: at.offset(GumpPixel::new(VIEWPORT_AT.x + NAME_X, y)),
-        text: skill.name.clone(),
-        font: ROW_FONT,
-        hue: ROW_HUE,
+        at:      at.offset(GumpPixel::new(VIEWPORT_AT.x + NAME_X, y)),
+        text:    skill.name.clone(),
+        font:    ROW_FONT,
+        hue:     ROW_HUE,
         scissor: Some(sheet.viewport),
     });
     let Some(standing) = standing else {
@@ -702,10 +721,10 @@ fn skill_row(
     let value = tenths(standing.skill.value);
     let width = width_of(&value, ROW_FONT);
     sheet.lines.push(Line {
-        at: at.offset(GumpPixel::new(VIEWPORT_AT.x + VALUE_RIGHT - width, y)),
-        text: value,
-        font: ROW_FONT,
-        hue: ROW_HUE,
+        at:      at.offset(GumpPixel::new(VIEWPORT_AT.x + VALUE_RIGHT - width, y)),
+        text:    value,
+        font:    ROW_FONT,
+        hue:     ROW_HUE,
         scissor: Some(sheet.viewport),
     });
     sheet.pictures.push(
@@ -872,7 +891,7 @@ mod tests {
                 lock: SkillLock::Up,
                 cap: 1000,
             },
-            lock: SkillLock::Up,
+            lock:  SkillLock::Up,
         }
     }
 

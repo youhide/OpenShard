@@ -16,9 +16,16 @@
 //! `crate::panes::split` on the app side, which owns all three.
 
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 
-use crate::gump::{GumpArt, GumpPixel, Picture};
+use crate::gump::{
+    GumpArt,
+    GumpPixel,
+    Picture,
+};
 use crate::text::GumpLabel;
 
 /// The window's background, which carries the slider's trough and the box the
@@ -106,7 +113,7 @@ impl Face {
 /// One line this window writes — the chosen number, and nothing else.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Line {
-    pub at: GumpPixel,
+    pub at:   GumpPixel,
     pub text: String,
 }
 
@@ -116,10 +123,10 @@ impl Line {
     #[must_use]
     pub fn label(&self) -> GumpLabel<'_> {
         GumpLabel {
-            at: self.at,
+            at:   self.at,
             text: &self.text,
             font: FONT,
-            hue: HUE,
+            hue:  HUE,
             clip: Some(NUMBER_SIZE),
         }
     }
@@ -131,7 +138,7 @@ pub struct Window {
     /// The background, the knob and the button, in painter's order.
     pub pictures: Vec<Picture>,
     /// The number, written over them.
-    pub lines: Vec<Line>,
+    pub lines:    Vec<Line>,
 }
 
 /// Every picture this window can draw, so the atlas can be grown for it before
@@ -170,8 +177,8 @@ pub fn window(amount: u16, most: u16, face: Face, at: GumpPixel) -> Window {
             ),
             Picture::plain(GumpArt::Gump(face.graphic()), at.offset(OK_AT)),
         ],
-        lines: vec![Line {
-            at: at.offset(NUMBER_AT),
+        lines:    vec![Line {
+            at:   at.offset(NUMBER_AT),
             text: amount.to_string(),
         }],
     }
@@ -317,7 +324,7 @@ mod tests {
         assert_eq!(
             window.lines,
             vec![Line {
-                at: GumpPixel::new(229, 142),
+                at:   GumpPixel::new(229, 142),
                 text: "50".to_owned(),
             }]
         );

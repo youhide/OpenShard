@@ -9,7 +9,10 @@
 //! different scenes and neither says so.
 
 use openshard_client_render::camera::WorldSpot;
-use openshard_client_render::mesh::{Face, Mesh};
+use openshard_client_render::mesh::{
+    Face,
+    Mesh,
+};
 use openshard_client_render::occlusion::Owner;
 use openshard_client_render::solid::Solid;
 use openshard_protocol::wire::Graphic;
@@ -20,9 +23,9 @@ use openshard_protocol::wire::Graphic;
 /// [`box_mesh`] and the occluder's own `space` are built from — one spec,
 /// so mesh and occlusion cannot disagree about where the box stands.
 pub struct BoxSpec {
-    pub tile: (u16, u16),
-    pub min: (f64, f64, f64),
-    pub max: (f64, f64, f64),
+    pub tile:    (u16, u16),
+    pub min:     (f64, f64, f64),
+    pub max:     (f64, f64, f64),
     /// Whose box this is — the graphic half of its [`Owner`], stated by the
     /// scene rather than taken from its place in a list.
     ///

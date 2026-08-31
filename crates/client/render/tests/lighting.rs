@@ -10,13 +10,24 @@
 //! point of a scene that is a `WorldMap` with three items on it.
 
 use openshard_client_render::cutaway::Cutaway;
-use openshard_client_render::debug;
 use openshard_client_render::facing::Face;
 use openshard_client_render::geometry::Vec2;
 use openshard_client_render::items::GroundItem;
-use openshard_client_render::light::{self, Lighting, Spot};
-use openshard_client_render::occlusion;
-use openshard_client_render::scene::{self, CENTRE, DOORWAY, Scene};
+use openshard_client_render::light::{
+    self,
+    Lighting,
+    Spot,
+};
+use openshard_client_render::scene::{
+    self,
+    CENTRE,
+    DOORWAY,
+    Scene,
+};
+use openshard_client_render::{
+    debug,
+    occlusion,
+};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::Hue;
@@ -613,10 +624,10 @@ fn a_carried_light_reaches_the_raised_floor_it_stands_on() {
     for x in CENTRE.x - scene::ROOM_HALF + 1..=CENTRE.x + scene::ROOM_HALF - 1 {
         for y in CENTRE.y - scene::ROOM_HALF + 1..=CENTRE.y + scene::ROOM_HALF - 1 {
             scene.items.push(GroundItem {
-                amount: ItemAmount::ONE,
-                at: Point::new(x, y, floor_z),
+                amount:  ItemAmount::ONE,
+                at:      Point::new(x, y, floor_z),
                 graphic: scene::FLOOR,
-                hue: Hue::NONE,
+                hue:     Hue::NONE,
             });
         }
     }
@@ -1698,8 +1709,14 @@ fn the_merge_folds_the_scenes_this_crate_draws() {
 #[test]
 fn a_merged_run_answers_every_ray_the_way_its_own_pieces_did() {
     use openshard_client_render::camera::TileBounds;
-    use openshard_client_render::light::{Ambient, Light};
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_client_render::light::{
+        Ambient,
+        Light,
+    };
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
 
     /// The row the wall stands on, and the tiles of it.
     const ROW: u16 = 105;
@@ -1742,25 +1759,27 @@ fn a_merged_run_answers_every_ray_the_way_its_own_pieces_did() {
         "the run of seven graphics merged, so this twin is not a twin",
     );
 
-    let lighting = |occlusion: occlusion::Occlusion, at: Vec2, z: f32| Lighting {
-        ambient: Ambient {
-            sky: [0.0, 0.0, 0.0],
-            ground: [0.0, 0.0, 0.0],
-        },
-        lights: vec![Light {
-            at,
-            z,
-            radius: 24.0,
-            color: [1.0, 1.0, 1.0],
-            intensity: 1.0,
-            beam: None,
-        }],
-        occlusion,
-        sun: None,
-        view: openshard_client_render::debug::View::Lit,
-        flame_radius: openshard_client_render::light::FLAME_RADIUS,
-        shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
-        dead: false,
+    let lighting = |occlusion: occlusion::Occlusion, at: Vec2, z: f32| {
+        Lighting {
+            ambient: Ambient {
+                sky:    [0.0, 0.0, 0.0],
+                ground: [0.0, 0.0, 0.0],
+            },
+            lights: vec![Light {
+                at,
+                z,
+                radius: 24.0,
+                color: [1.0, 1.0, 1.0],
+                intensity: 1.0,
+                beam: None,
+            }],
+            occlusion,
+            sun: None,
+            view: openshard_client_render::debug::View::Lit,
+            flame_radius: openshard_client_render::light::FLAME_RADIUS,
+            shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
+            dead: false,
+        }
     };
 
     // Three flames: one squarely north of the run, one south of it, and one
@@ -1830,8 +1849,14 @@ fn a_merged_run_answers_every_ray_the_way_its_own_pieces_did() {
 #[test]
 fn a_ray_through_the_gap_between_two_walls_on_one_tile_passes() {
     use openshard_client_render::camera::TileBounds;
-    use openshard_client_render::light::{Ambient, Light};
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_client_render::light::{
+        Ambient,
+        Light,
+    };
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
 
     const WALL: (u16, u16) = (105, 105);
     /// The air between the two walls, and the height a ray is asked about.
@@ -1871,26 +1896,26 @@ fn a_ray_through_the_gap_between_two_walls_on_one_tile_passes() {
         occlusion::Shape::UNREAD,
     );
     let lighting = Lighting {
-        ambient: Ambient {
-            sky: [0.0, 0.0, 0.0],
+        ambient:      Ambient {
+            sky:    [0.0, 0.0, 0.0],
             ground: [0.0, 0.0, 0.0],
         },
-        lights: vec![Light {
+        lights:       vec![Light {
             // Due west of the wall, so a ray to it crosses the tile squarely and
             // the only thing deciding it is the height.
-            at: Vec2::new(f32::from(WALL.0) - 1.5, f32::from(WALL.1) + 0.5),
-            z: GAP,
-            radius: 8.0,
-            color: [1.0, 1.0, 1.0],
+            at:        Vec2::new(f32::from(WALL.0) - 1.5, f32::from(WALL.1) + 0.5),
+            z:         GAP,
+            radius:    8.0,
+            color:     [1.0, 1.0, 1.0],
             intensity: 1.0,
-            beam: None,
+            beam:      None,
         }],
-        occlusion: grid.finish(&Cutaway::OPEN),
-        sun: None,
-        view: openshard_client_render::debug::View::Lit,
+        occlusion:    grid.finish(&Cutaway::OPEN),
+        sun:          None,
+        view:         openshard_client_render::debug::View::Lit,
         flame_radius: openshard_client_render::light::FLAME_RADIUS,
-        shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
-        dead: false,
+        shadow_rays:  openshard_client_render::light::ShadowRays::DEFAULT,
+        dead:         false,
     };
 
     // Due east of the wall, level with the flame: the ray runs straight through
@@ -1960,8 +1985,14 @@ fn a_ray_through_the_gap_between_two_walls_on_one_tile_passes() {
 #[test]
 fn a_segment_through_two_panes_on_one_tile_is_dimmed_by_both_of_them() {
     use openshard_client_render::camera::TileBounds;
-    use openshard_client_render::light::{Ambient, Light};
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_client_render::light::{
+        Ambient,
+        Light,
+    };
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
 
     const GLAZING: (u16, u16) = (105, 105);
     const HEIGHT: f32 = 5.0;
@@ -2002,18 +2033,18 @@ fn a_segment_through_two_panes_on_one_tile_is_dimmed_by_both_of_them() {
 
     let lighting = Lighting {
         ambient: Ambient {
-            sky: [0.0, 0.0, 0.0],
+            sky:    [0.0, 0.0, 0.0],
             ground: [0.0, 0.0, 0.0],
         },
         lights: vec![Light {
             // Due west, level with the fragment, so the ray crosses the tile
             // squarely and every one of the flame's own points crosses both.
-            at: Vec2::new(f32::from(GLAZING.0) - 1.5, f32::from(GLAZING.1) + 0.5),
-            z: HEIGHT,
-            radius: 8.0,
-            color: [1.0, 1.0, 1.0],
+            at:        Vec2::new(f32::from(GLAZING.0) - 1.5, f32::from(GLAZING.1) + 0.5),
+            z:         HEIGHT,
+            radius:    8.0,
+            color:     [1.0, 1.0, 1.0],
             intensity: 1.0,
-            beam: None,
+            beam:      None,
         }],
         occlusion,
         sun: None,
@@ -2046,8 +2077,14 @@ fn a_segment_through_two_panes_on_one_tile_is_dimmed_by_both_of_them() {
 /// grid ends up with is the same four numbers placed.
 fn wall_with_hole(hole: openshard_client_render::facing::Hole) -> occlusion::Occlusion {
     use openshard_client_render::camera::TileBounds;
-    use openshard_client_render::facing::{Face, Facing};
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_client_render::facing::{
+        Face,
+        Facing,
+    };
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
 
     let mut grid = occlusion::Builder::new(TileBounds {
         min_x: 95,
@@ -2066,10 +2103,10 @@ fn wall_with_hole(hole: openshard_client_render::facing::Hole) -> occlusion::Occ
             ..StaticTile::default()
         },
         occlusion::Shape {
-            facing: Some(Facing::One(Face::South)),
-            hole: Some(hole),
-            prism: None,
-            blocks: openshard_client_render::facing::Blocks::EMPTY,
+            facing:    Some(Facing::One(Face::South)),
+            hole:      Some(hole),
+            prism:     None,
+            blocks:    openshard_client_render::facing::Blocks::EMPTY,
             footprint: None,
         },
     );
@@ -2088,27 +2125,30 @@ const HOLED_WALL: (u16, u16) = (105, 105);
 /// penumbra two thirds of a tile wide would be a test of the softening rather
 /// than of the hole.
 fn ray(grid: &occlusion::Occlusion, from: (f32, f32, f32), to: (f32, f32, f32)) -> f32 {
-    use openshard_client_render::light::{Ambient, Light};
+    use openshard_client_render::light::{
+        Ambient,
+        Light,
+    };
 
     let lighting = Lighting {
-        ambient: Ambient {
-            sky: [0.0, 0.0, 0.0],
+        ambient:      Ambient {
+            sky:    [0.0, 0.0, 0.0],
             ground: [0.0, 0.0, 0.0],
         },
-        lights: vec![Light {
-            at: Vec2::new(to.0, to.1),
-            z: to.2,
-            radius: 12.0,
-            color: [1.0, 1.0, 1.0],
+        lights:       vec![Light {
+            at:        Vec2::new(to.0, to.1),
+            z:         to.2,
+            radius:    12.0,
+            color:     [1.0, 1.0, 1.0],
             intensity: 1.0,
-            beam: None,
+            beam:      None,
         }],
-        occlusion: grid.clone(),
-        sun: None,
-        view: debug::View::Lit,
+        occlusion:    grid.clone(),
+        sun:          None,
+        view:         debug::View::Lit,
         flame_radius: openshard_client_render::light::FLAME_RADIUS,
-        shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
-        dead: false,
+        shadow_rays:  openshard_client_render::light::ShadowRays::DEFAULT,
+        dead:         false,
     };
     let tile = (from.0.floor() as i32, from.1.floor() as i32);
     light::sample(Spot::at(Vec2::new(from.0, from.1), from.2, tile), &lighting).reaches[0].through
@@ -2132,10 +2172,10 @@ fn a_ray_through_a_hole_in_a_wall_passes_and_one_beside_it_does_not() {
     // it stands, so that the only thing deciding either ray is `v`. The height
     // half is the test below.
     let grid = wall_with_hole(openshard_client_render::facing::Hole {
-        near: 64,
-        far: 191,
+        near:   64,
+        far:    191,
         bottom: 0,
-        top: 255,
+        top:    255,
     });
     // Five tiles north of the wall: far enough that the crossing is a twentieth
     // of the way along the ray, which is the sharpest penumbra the walk draws.
@@ -2174,10 +2214,10 @@ fn a_ray_over_a_hole_in_a_wall_is_stopped_by_the_wall_above_it() {
     // Open across the whole run, so that `v` cannot be what decides either ray,
     // and the bottom half of a twenty-tall wall.
     let grid = wall_with_hole(openshard_client_render::facing::Hole {
-        near: 0,
-        far: 255,
+        near:   0,
+        far:    255,
         bottom: 0,
-        top: 10,
+        top:    10,
     });
 
     // Level rays, so the height a ray crosses at is the height it is asked at.
@@ -2300,9 +2340,15 @@ fn a_hole_in_a_wall_throws_a_fan_of_light_onto_the_ground_behind_it() {
 #[test]
 fn a_point_on_its_own_tiles_far_edge_reads_that_tile_not_the_next_one() {
     use openshard_client_render::facing::Prism;
-    use openshard_client_render::occlusion::{Builder, Shape};
+    use openshard_client_render::occlusion::{
+        Builder,
+        Shape,
+    };
     use openshard_protocol::wire::Graphic;
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
 
     let stair = StaticTile {
         flags: TileFlags::new(TileFlags::NO_SHOOT | TileFlags::CLIMBABLE),
@@ -2342,22 +2388,22 @@ fn a_point_on_its_own_tiles_far_edge_reads_that_tile_not_the_next_one() {
     // is half cut by it. `docs/lighting_rebuild.md` phase 4 took the bias to zero,
     // which is what made that graze visible instead of stepped over.
     let light = light::Light {
-        at: Vec2::new(102.5, 100.5),
-        z: z + light::FLAME_LIFT,
-        radius: 6.0,
-        color: [1.0, 1.0, 1.0],
+        at:        Vec2::new(102.5, 100.5),
+        z:         z + light::FLAME_LIFT,
+        radius:    6.0,
+        color:     [1.0, 1.0, 1.0],
         intensity: 1.0,
-        beam: None,
+        beam:      None,
     };
     let lighting = Lighting {
-        ambient: light::NIGHT,
-        lights: vec![light],
-        occlusion: grid,
-        sun: None,
-        view: debug::View::default(),
+        ambient:      light::NIGHT,
+        lights:       vec![light],
+        occlusion:    grid,
+        sun:          None,
+        view:         debug::View::default(),
         flame_radius: openshard_client_render::light::FLAME_RADIUS,
-        shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
-        dead: false,
+        shadow_rays:  openshard_client_render::light::ShadowRays::DEFAULT,
+        dead:         false,
     };
 
     // The tile's own middle in `y`, and its far edge: both are points of the
@@ -2527,9 +2573,19 @@ fn segment_inside_box(from: [f64; 3], to: [f64; 3], min: [f64; 3], max: [f64; 3]
 #[test]
 fn a_vertical_ray_meets_what_stands_over_it_whatever_shape_it_is() {
     use openshard_client_render::camera::TileBounds;
-    use openshard_client_render::facing::{Blocks, Facing};
-    use openshard_client_render::light::{Ambient, Light, ShadowRays};
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_client_render::facing::{
+        Blocks,
+        Facing,
+    };
+    use openshard_client_render::light::{
+        Ambient,
+        Light,
+        ShadowRays,
+    };
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
 
     // One tile, and one point of it every ray starts from: inside a south
     // panel's own slab, which is the `y` a wall on that edge occupies, so that
@@ -2578,24 +2634,24 @@ fn a_vertical_ray_meets_what_stands_over_it_whatever_shape_it_is() {
         let flame = (AT.0, AT.1, 20.0);
         let spot = Spot::at(Vec2::new(AT.0, AT.1), 0.0, TILE);
         let lighting = Lighting {
-            ambient: Ambient {
-                sky: [0.0, 0.0, 0.0],
+            ambient:      Ambient {
+                sky:    [0.0, 0.0, 0.0],
                 ground: [0.0, 0.0, 0.0],
             },
-            lights: vec![Light {
-                at: Vec2::new(flame.0, flame.1),
-                z: flame.2,
-                radius: 40.0,
-                color: [1.0, 1.0, 1.0],
+            lights:       vec![Light {
+                at:        Vec2::new(flame.0, flame.1),
+                z:         flame.2,
+                radius:    40.0,
+                color:     [1.0, 1.0, 1.0],
                 intensity: 1.0,
-                beam: None,
+                beam:      None,
             }],
-            occlusion: grid.clone(),
-            sun: None,
-            view: debug::View::Lit,
+            occlusion:    grid.clone(),
+            sun:          None,
+            view:         debug::View::Lit,
             flame_radius: 0.0,
-            shadow_rays: ShadowRays::DEFAULT,
-            dead: false,
+            shadow_rays:  ShadowRays::DEFAULT,
+            dead:         false,
         };
 
         // The positive control: every ray actually walked has no horizontal run.
@@ -2858,9 +2914,9 @@ fn deepest_crossing(
 struct Oracles {
     /// [`deepest_crossing`] on every ray: blocked when all of them cross
     /// something. **The property the walks are held to.**
-    exact: bool,
+    exact:           bool,
     /// [`brute_force_blocked`] on the same rays, aggregated the same way.
-    sampled: bool,
+    sampled:         bool,
     /// The thickest crossing on a ray the sampler called open and the exact
     /// test called blocked — `0.0` when there is no such ray. Under
     /// [`BRUTE_STEP`] this is the sampler being blind; over it, the sampler and
@@ -2868,7 +2924,7 @@ struct Oracles {
     thickest_missed: f64,
     /// Rays the sampler called blocked and the exact test called open. Never
     /// excusable; see this struct's own doc.
-    invented: usize,
+    invented:        usize,
 }
 
 impl Oracles {
@@ -2952,9 +3008,15 @@ impl Oracles {
 /// tile at all is open; a grid of positions and heights exercises both.
 #[test]
 fn a_brute_force_oracle_agrees_with_the_walk_over_a_grid_of_lights() {
-    use openshard_client_render::occlusion::{Builder, Shape};
+    use openshard_client_render::occlusion::{
+        Builder,
+        Shape,
+    };
     use openshard_protocol::wire::Graphic;
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
 
     let wall = StaticTile {
         flags: TileFlags::new(TileFlags::NO_SHOOT),
@@ -3022,22 +3084,22 @@ fn a_brute_force_oracle_agrees_with_the_walk_over_a_grid_of_lights() {
     let mut disagreed = Vec::new();
     for &(light_at, light_z) in &lights {
         let light = light::Light {
-            at: light_at,
-            z: light_z,
-            radius: 6.0,
-            color: [1.0, 1.0, 1.0],
+            at:        light_at,
+            z:         light_z,
+            radius:    6.0,
+            color:     [1.0, 1.0, 1.0],
             intensity: 1.0,
-            beam: None,
+            beam:      None,
         };
         let lighting = Lighting {
-            ambient: light::NIGHT,
-            lights: vec![light],
-            occlusion: occlusion.clone(),
-            sun: None,
-            view: debug::View::default(),
+            ambient:      light::NIGHT,
+            lights:       vec![light],
+            occlusion:    occlusion.clone(),
+            sun:          None,
+            view:         debug::View::default(),
             flame_radius: openshard_client_render::light::FLAME_RADIUS,
-            shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
-            dead: false,
+            shadow_rays:  openshard_client_render::light::ShadowRays::DEFAULT,
+            dead:         false,
         };
         for &(at, z) in &spots {
             let spot = Spot::flat(at, z, (100, 100));
@@ -3112,9 +3174,15 @@ fn a_brute_force_oracle_agrees_with_the_walk_over_a_grid_of_lights() {
 /// whatever the fixed grid does not think to ask either.
 #[test]
 fn a_fuzzed_flame_near_a_row_edge_agrees_with_the_brute_force_oracle() {
-    use openshard_client_render::occlusion::{Builder, Shape};
+    use openshard_client_render::occlusion::{
+        Builder,
+        Shape,
+    };
     use openshard_protocol::wire::Graphic;
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
     use proptest::prelude::*;
 
     proptest!(ProptestConfig::with_cases(512), |(
@@ -3236,9 +3304,15 @@ fn a_fuzzed_flame_near_a_row_edge_agrees_with_the_brute_force_oracle() {
 /// independent oracle rather than the walk this doc is trying to replace.
 #[test]
 fn a_brute_force_oracle_agrees_with_the_exact_walk_over_a_grid_of_lights() {
-    use openshard_client_render::occlusion::{Builder, Shape};
+    use openshard_client_render::occlusion::{
+        Builder,
+        Shape,
+    };
     use openshard_protocol::wire::Graphic;
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
 
     let wall = StaticTile {
         flags: TileFlags::new(TileFlags::NO_SHOOT),
@@ -3275,22 +3349,22 @@ fn a_brute_force_oracle_agrees_with_the_exact_walk_over_a_grid_of_lights() {
     let mut disagreed = Vec::new();
     for &(light_at, light_z) in &lights {
         let light = light::Light {
-            at: light_at,
-            z: light_z,
-            radius: 6.0,
-            color: [1.0, 1.0, 1.0],
+            at:        light_at,
+            z:         light_z,
+            radius:    6.0,
+            color:     [1.0, 1.0, 1.0],
             intensity: 1.0,
-            beam: None,
+            beam:      None,
         };
         let lighting = Lighting {
-            ambient: light::NIGHT,
-            lights: vec![light],
-            occlusion: occlusion.clone(),
-            sun: None,
-            view: debug::View::default(),
+            ambient:      light::NIGHT,
+            lights:       vec![light],
+            occlusion:    occlusion.clone(),
+            sun:          None,
+            view:         debug::View::default(),
             flame_radius: openshard_client_render::light::FLAME_RADIUS,
-            shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
-            dead: false,
+            shadow_rays:  openshard_client_render::light::ShadowRays::DEFAULT,
+            dead:         false,
         };
         for &(at, z) in &spots {
             let spot = Spot::flat(at, z, (100, 100));
@@ -3358,9 +3432,15 @@ fn a_brute_force_oracle_agrees_with_the_exact_walk_over_a_grid_of_lights() {
 /// each of them against a third, independent oracle instead.
 #[test]
 fn a_fuzzed_flame_near_a_row_edge_agrees_with_the_brute_force_oracle_through_the_exact_walk() {
-    use openshard_client_render::occlusion::{Builder, Shape};
+    use openshard_client_render::occlusion::{
+        Builder,
+        Shape,
+    };
     use openshard_protocol::wire::Graphic;
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
     use proptest::prelude::*;
 
     proptest!(ProptestConfig::with_cases(512), |(
@@ -3483,7 +3563,11 @@ fn a_fuzzed_flame_near_a_row_edge_agrees_with_the_brute_force_oracle_through_the
 /// three spellings and this is two of them.
 #[test]
 fn a_landing_cut_into_three_primitives_is_not_shadowed_by_its_own_pieces() {
-    use openshard_client_render::occlusion::{Builder, Owner, Part};
+    use openshard_client_render::occlusion::{
+        Builder,
+        Owner,
+        Part,
+    };
     use openshard_protocol::wire::Graphic;
 
     let third = 1.0 / 3.0;
@@ -3555,19 +3639,19 @@ fn a_landing_cut_into_three_primitives_is_not_shadowed_by_its_own_pieces() {
     let mut examined = 0_usize;
     for (flight, storey, id, near, height) in &named {
         let light = light::Light {
-            at: Vec2::new(104.5, (near + third * 0.5) as f32),
-            z: *height as f32,
-            radius: 30.0,
-            color: [1.0, 1.0, 1.0],
+            at:        Vec2::new(104.5, (near + third * 0.5) as f32),
+            z:         *height as f32,
+            radius:    30.0,
+            color:     [1.0, 1.0, 1.0],
             intensity: 1.0,
-            beam: None,
+            beam:      None,
         };
         let lighting = Lighting {
-            ambient: light::NIGHT,
-            lights: vec![light],
-            occlusion: occlusion.clone(),
-            sun: None,
-            view: debug::View::default(),
+            ambient:      light::NIGHT,
+            lights:       vec![light],
+            occlusion:    occlusion.clone(),
+            sun:          None,
+            view:         debug::View::default(),
             // **A point flame, and the reason is the theorem's own precondition.**
             // At the shipped radius the flame is a sphere standing *in* the plane,
             // so half of it lies below: those rays cross the neighbouring piece for
@@ -3578,8 +3662,8 @@ fn a_landing_cut_into_three_primitives_is_not_shadowed_by_its_own_pieces() {
             // and § *Backlog* of `docs/occluders.md` carries it. At radius zero
             // every ray is the one ray lying in the plane, which is D2's own.
             flame_radius: 0.0,
-            shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
-            dead: false,
+            shadow_rays:  openshard_client_render::light::ShadowRays::DEFAULT,
+            dead:         false,
         };
         // Across the tread's own lid, right up to the seam its flight shares with
         // the next: the last hundredth of a tile is where the crossing point of a
@@ -3656,9 +3740,15 @@ fn a_landing_cut_into_three_primitives_is_not_shadowed_by_its_own_pieces() {
 /// while the first two still hold, which is the shape of the day this cost.
 #[test]
 fn the_pinned_corner_graze_is_blocked_and_all_three_oracles_say_so() {
-    use openshard_client_render::occlusion::{Builder, Shape};
+    use openshard_client_render::occlusion::{
+        Builder,
+        Shape,
+    };
     use openshard_protocol::wire::Graphic;
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
 
     // The shrunk seed's own numbers, spelled out: `spot_dx = 3.6040761`,
     // `spot_frac = 0.94628215`, `spot_z = 2.0036669`, `flame_dx = 5.8166175`,
@@ -3685,22 +3775,22 @@ fn the_pinned_corner_graze_is_blocked_and_all_three_oracles_say_so() {
     let spot_tile = (spot_at.x.floor() as i32, spot_at.y.floor() as i32);
     let spot = Spot::flat(spot_at, spot_z, spot_tile);
     let light = light::Light {
-        at: light_at,
-        z: flame_z,
-        radius: 30.0,
-        color: [1.0, 1.0, 1.0],
+        at:        light_at,
+        z:         flame_z,
+        radius:    30.0,
+        color:     [1.0, 1.0, 1.0],
         intensity: 1.0,
-        beam: None,
+        beam:      None,
     };
     let lighting = Lighting {
-        ambient: light::NIGHT,
-        lights: vec![light],
-        occlusion: occlusion.clone(),
-        sun: None,
-        view: debug::View::default(),
+        ambient:      light::NIGHT,
+        lights:       vec![light],
+        occlusion:    occlusion.clone(),
+        sun:          None,
+        view:         debug::View::default(),
         flame_radius: openshard_client_render::light::FLAME_RADIUS,
-        shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
-        dead: false,
+        shadow_rays:  openshard_client_render::light::ShadowRays::DEFAULT,
+        dead:         false,
     };
 
     // 1. The exact answer, per ray, in double precision and over the frame's own
@@ -3805,9 +3895,15 @@ fn the_pinned_corner_graze_is_blocked_and_all_three_oracles_say_so() {
 /// down by fixtures rather than by whichever one a random seed reaches next.
 #[test]
 fn the_second_corner_graze_is_blocked_and_the_sampler_is_the_blind_one() {
-    use openshard_client_render::occlusion::{Builder, Shape};
+    use openshard_client_render::occlusion::{
+        Builder,
+        Shape,
+    };
     use openshard_protocol::wire::Graphic;
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
 
     // The shrunk seed's own numbers, spelled out: `spot_dx = 2.3108275`,
     // `spot_frac = 0.14551114`, `spot_z = 6.487659`, `flame_dx = 2.2574825`,
@@ -3834,22 +3930,22 @@ fn the_second_corner_graze_is_blocked_and_the_sampler_is_the_blind_one() {
     let spot_tile = (spot_at.x.floor() as i32, spot_at.y.floor() as i32);
     let spot = Spot::flat(spot_at, spot_z, spot_tile);
     let light = light::Light {
-        at: light_at,
-        z: flame_z,
-        radius: 30.0,
-        color: [1.0, 1.0, 1.0],
+        at:        light_at,
+        z:         flame_z,
+        radius:    30.0,
+        color:     [1.0, 1.0, 1.0],
         intensity: 1.0,
-        beam: None,
+        beam:      None,
     };
     let lighting = Lighting {
-        ambient: light::NIGHT,
-        lights: vec![light],
-        occlusion: occlusion.clone(),
-        sun: None,
-        view: debug::View::default(),
+        ambient:      light::NIGHT,
+        lights:       vec![light],
+        occlusion:    occlusion.clone(),
+        sun:          None,
+        view:         debug::View::default(),
         flame_radius: openshard_client_render::light::FLAME_RADIUS,
-        shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
-        dead: false,
+        shadow_rays:  openshard_client_render::light::ShadowRays::DEFAULT,
+        dead:         false,
     };
 
     // 1. The exact answer, per ray, in double precision and over the frame's own
@@ -3978,10 +4074,21 @@ fn the_second_corner_graze_is_blocked_and_the_sampler_is_the_blind_one() {
 #[test]
 fn a_segment_through_the_corner_two_leaves_meet_at_finds_what_stands_there() {
     use openshard_client_render::camera::TileBounds;
-    use openshard_client_render::light::{Ambient, Light, ShadowRays};
-    use openshard_client_render::occlusion::{Builder, Shape, SolidId};
+    use openshard_client_render::light::{
+        Ambient,
+        Light,
+        ShadowRays,
+    };
+    use openshard_client_render::occlusion::{
+        Builder,
+        Shape,
+        SolidId,
+    };
     use openshard_protocol::wire::Graphic;
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
 
     // Eight bodies down the diagonal from (100, 100). Eight because the split is
     // by the median of the centres, so an even run splits in the middle and the
@@ -4128,26 +4235,26 @@ fn a_segment_through_the_corner_two_leaves_meet_at_finds_what_stands_there() {
                 (from[0].floor() as i32, from[1].floor() as i32),
             );
             let lighting = Lighting {
-                ambient: Ambient {
-                    sky: [0.0, 0.0, 0.0],
+                ambient:      Ambient {
+                    sky:    [0.0, 0.0, 0.0],
                     ground: [0.0, 0.0, 0.0],
                 },
-                lights: vec![Light {
-                    at: Vec2::new(to[0], to[1]),
-                    z: to[2],
-                    radius: 30.0,
-                    color: [1.0, 1.0, 1.0],
+                lights:       vec![Light {
+                    at:        Vec2::new(to[0], to[1]),
+                    z:         to[2],
+                    radius:    30.0,
+                    color:     [1.0, 1.0, 1.0],
                     intensity: 1.0,
-                    beam: None,
+                    beam:      None,
                 }],
-                occlusion: occlusion.clone(),
-                sun: None,
-                view: debug::View::Lit,
+                occlusion:    occlusion.clone(),
+                sun:          None,
+                view:         debug::View::Lit,
                 // One ray and not eight: a sphere of `FLAME_RADIUS` would put
                 // every sample off the line this whole fixture is about.
                 flame_radius: 0.0,
-                shadow_rays: ShadowRays::DEFAULT,
-                dead: false,
+                shadow_rays:  ShadowRays::DEFAULT,
+                dead:         false,
             };
             // Collected rather than asserted on the spot, so an injection says
             // **which** rungs of the ladder are load-bearing instead of stopping

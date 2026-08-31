@@ -119,7 +119,7 @@ struct Bucket {
     /// The bodies in this sector.
     mobiles: Vec<(EntityId, Point)>,
     /// Everything else in it, which in a decorated town is nearly all of it.
-    items: Vec<(EntityId, Point)>,
+    items:   Vec<(EntityId, Point)>,
 }
 
 impl Bucket {
@@ -127,7 +127,7 @@ impl Bucket {
     const fn empty() -> Self {
         Self {
             mobiles: Vec::new(),
-            items: Vec::new(),
+            items:   Vec::new(),
         }
     }
 
@@ -155,11 +155,11 @@ impl Bucket {
 #[derive(Clone, Copy, Debug)]
 struct Row {
     /// Index into [`Sectors::buckets`].
-    bucket: usize,
+    bucket:   usize,
     /// Which list of that bucket.
     occupant: Occupant,
     /// Where in that list.
-    slot: usize,
+    slot:     usize,
 }
 
 /// A flat grid of buckets over one facet.
@@ -177,9 +177,9 @@ struct Row {
 #[derive(Debug)]
 pub struct Sectors {
     /// Sectors across.
-    across: u32,
+    across:  u32,
     /// Sectors down.
-    down: u32,
+    down:    u32,
     /// Entities per sector, indexed `sector_x * down + sector_y`.
     ///
     /// Column-major to match the map's block order. Not required — nothing
@@ -294,9 +294,9 @@ impl Sectors {
             self.located.insert(
                 moved,
                 Row {
-                    bucket: row.bucket,
+                    bucket:   row.bucket,
                     occupant: row.occupant,
-                    slot: row.slot,
+                    slot:     row.slot,
                 },
             );
         }
@@ -405,8 +405,9 @@ impl Sectors {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_entities::Registry;
+
+    use super::*;
 
     /// A facet-sized grid.
     fn grid() -> Sectors {

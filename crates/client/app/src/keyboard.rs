@@ -419,7 +419,13 @@ pub(crate) const fn egui_may_see(code: KeyCode) -> bool {
 mod tests {
     use winit::keyboard::KeyCode;
 
-    use super::{Edit, Gesture, Hotkey, Owner, egui_may_see};
+    use super::{
+        Edit,
+        Gesture,
+        Hotkey,
+        Owner,
+        egui_may_see,
+    };
 
     #[test]
     fn something_being_typed_into_outranks_the_body() {

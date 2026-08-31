@@ -17,8 +17,19 @@
 //! gate is the server's, and a client that filtered locally would be deciding
 //! what a shard's commands are.
 
-use openshard_protocol::gump::{GumpResponse, RawButtonId, RawGumpId, RawGumpKey, RawSwitchId};
-use openshard_protocol::speech::{Font, RawFont, RawTalkMode, TalkMode};
+use openshard_protocol::gump::{
+    GumpResponse,
+    RawButtonId,
+    RawGumpId,
+    RawGumpKey,
+    RawSwitchId,
+};
+use openshard_protocol::speech::{
+    Font,
+    RawFont,
+    RawTalkMode,
+    TalkMode,
+};
 use openshard_protocol::wire::RawHue;
 
 /// The hue a modern client sends for ordinary speech.
@@ -37,7 +48,7 @@ const SPEECH_HUE: RawHue = RawHue(0x0384);
 pub fn say(text: &str, mode: TalkMode) -> Vec<u8> {
     openshard_protocol::speech::UnicodeTalkRequest {
         mode: RawTalkMode(mode.to_wire()),
-        hue: SPEECH_HUE,
+        hue:  SPEECH_HUE,
         font: RawFont(Font::DEFAULT.0),
         text: text.to_owned(),
     }

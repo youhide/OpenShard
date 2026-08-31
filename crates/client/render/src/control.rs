@@ -14,8 +14,17 @@
 
 use std::time::Duration;
 
-use crate::camera::{Camera, RealPixel, WorldPoint, Zoom};
-use crate::follow::{Follower, Gaze, Rig};
+use crate::camera::{
+    Camera,
+    RealPixel,
+    WorldPoint,
+    Zoom,
+};
+use crate::follow::{
+    Follower,
+    Gaze,
+    Rig,
+};
 
 /// Whether the camera is tied to the body or the mouse.
 ///
@@ -44,7 +53,7 @@ pub enum Follow {
 struct Drag {
     /// Where the cursor was last seen, in physical pixels from the viewport's
     /// top-left. Needed by the wheel, which is told a delta and not a position.
-    cursor: RealPixel,
+    cursor:  RealPixel,
     /// Whether the middle button is down.
     panning: bool,
 }
@@ -58,13 +67,13 @@ struct Drag {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TooLarge {
     /// The zoom that was asked for and refused.
-    pub wanted: Zoom,
+    pub wanted:  Zoom,
     /// The image it would have wanted, in pixels.
-    pub width: u32,
+    pub width:   u32,
     /// Likewise.
-    pub height: u32,
+    pub height:  u32,
     /// What this device allows in either dimension.
-    pub max: u32,
+    pub max:     u32,
     /// The zoom in force now — the old one after a refusal, a tighter one after
     /// [`Control::fit_to_device`] stepped in.
     pub settled: Zoom,
@@ -73,14 +82,14 @@ pub struct TooLarge {
 /// A camera, who is allowed to move it, and where the mouse last was.
 #[derive(Clone, Copy, Debug)]
 pub struct Control {
-    camera: Camera,
-    follow: Follow,
+    camera:      Camera,
+    follow:      Follow,
     /// How the eye follows the body while [`Follow::Body`] holds — the rig and
     /// where it has got to. Arbitrating *who* may move the eye is this type's
     /// job; how it moves is [`crate::follow`]'s, and the two are separated
     /// because only the second one can be put on a bench.
-    follower: Follower,
-    drag: Drag,
+    follower:    Follower,
+    drag:        Drag,
     /// How far the ladder may be walked down before the offscreen texture is
     /// larger than the GPU allows.
     ///
@@ -319,9 +328,11 @@ impl Control {
         }
         // The zoom in force is the one this settled on, not the one the first
         // rung refused.
-        refusal.map(|first| TooLarge {
-            settled: self.camera.zoom(),
-            ..first
+        refusal.map(|first| {
+            TooLarge {
+                settled: self.camera.zoom(),
+                ..first
+            }
         })
     }
 

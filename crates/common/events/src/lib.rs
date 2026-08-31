@@ -53,4 +53,8 @@ mod bus;
 mod queue;
 
 pub use bus::EventBus;
-pub use queue::{Cursor, Event, Events};
+pub use queue::{
+    Cursor,
+    Event,
+    Events,
+};

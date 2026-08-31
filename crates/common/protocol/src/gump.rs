@@ -16,12 +16,23 @@ pub mod layout;
 use std::fmt;
 use std::fmt::Write as _;
 
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+};
 use crate::serial::Serial;
 use crate::version::ClientVersion;
-use crate::wire::{ClilocId, Graphic, Hue};
+use crate::wire::{
+    ClilocId,
+    Graphic,
+    Hue,
+};
 
 /// Which dialog: the id the server gives a gump and the client echoes back in
 /// its `0xB1`, so a reply can be routed to whoever drew the window.
@@ -105,7 +116,10 @@ pub mod id {
 /// The classic gump and the F1 developer panel share these ids, so their
 /// meaning is not duplicated across client and server UI implementations.
 pub mod admin {
-    use super::{ButtonId, SwitchId};
+    use super::{
+        ButtonId,
+        SwitchId,
+    };
 
     pub const ITEM_CREATE: ButtonId = ButtonId(1);
     pub const ITEM_GRAPHIC_FIELD: u16 = 1;
@@ -240,7 +254,7 @@ impl RawSwitchId {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct InvalidSwitchId {
     /// The id the client sent.
-    pub id: u32,
+    pub id:      u32,
     /// How many switches the group actually had.
     pub offered: usize,
 }
@@ -251,7 +265,8 @@ impl fmt::Display for InvalidSwitchId {
     }
 }
 
-impl std::error::Error for InvalidSwitchId {}
+impl std::error::Error for InvalidSwitchId {
+}
 
 /// A point in the client's gump space: pixels, with the origin at the top left
 /// of whatever the coordinate is measured against.
@@ -377,7 +392,7 @@ impl GumpButton {
 #[derive(Clone, Default, Debug)]
 pub struct GumpLayout {
     layout: String,
-    lines: Vec<String>,
+    lines:  Vec<String>,
 }
 
 // A gump element's arguments are the client's, in the client's order — grouping
@@ -813,7 +828,7 @@ pub struct CloseGump {
     pub gump_id: GumpId,
     /// What the closed gump reports as its answer. ServUO passes
     /// [`ButtonId::CLOSE_BOX`], and so does every caller here.
-    pub button: ButtonId,
+    pub button:  ButtonId,
 }
 
 impl CloseGump {
@@ -853,7 +868,7 @@ impl DecodePacket for CloseGump {
         }
         Ok(Self {
             gump_id: GumpId(reader.u32()?),
-            button: ButtonId(reader.u32()?),
+            button:  ButtonId(reader.u32()?),
         })
     }
 }
@@ -868,15 +883,15 @@ impl DecodePacket for CloseGump {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct GumpDisplay {
     /// What the client keys the open window on, and echoes back.
-    pub serial: GumpKey,
+    pub serial:  GumpKey,
     /// Which dialog — echoed back in the `0xB1`.
     pub gump_id: GumpId,
     /// Where the window opens on the screen.
-    pub at: GumpPoint,
+    pub at:      GumpPoint,
     /// The gump command string — see [`GumpLayout::finish`].
-    pub layout: String,
+    pub layout:  String,
     /// The strings the layout refers to by index.
-    pub lines: Vec<String>,
+    pub lines:   Vec<String>,
 }
 
 impl EncodePacket for GumpDisplay {
@@ -963,13 +978,13 @@ impl DecodePacket for GumpDisplay {
 pub struct GumpResponse {
     /// The key the gump was opened under, echoed back. Never read — see
     /// [`RawGumpKey`].
-    pub serial: RawGumpKey,
+    pub serial:       RawGumpKey,
     /// Which dialog answered — the `gump_id` the server sent, as echoed.
-    pub gump_id: RawGumpId,
+    pub gump_id:      RawGumpId,
     /// The button pressed, or the close box. See [`RawButtonId::interpret`].
-    pub button: RawButtonId,
+    pub button:       RawButtonId,
     /// The ids of the switches (checkboxes, radio buttons) left *on*.
-    pub switches: Vec<RawSwitchId>,
+    pub switches:     Vec<RawSwitchId>,
     /// Text fields, as `(field id, contents)`.
     ///
     /// Both halves stay untyped, and the reason is that a field id means nothing
@@ -1077,7 +1092,10 @@ mod tests {
     }
 
     use super::*;
-    use crate::packet::{decode_packet, encode_packet};
+    use crate::packet::{
+        decode_packet,
+        encode_packet,
+    };
 
     fn version() -> ClientVersion {
         ClientVersion::new(7, 0, 45, 65)
@@ -1176,7 +1194,7 @@ mod tests {
         let bytes = encode_packet(
             &CloseGump {
                 gump_id: GumpId(0x0051_0001),
-                button: ButtonId::CLOSE_BOX,
+                button:  ButtonId::CLOSE_BOX,
             },
             version(),
         );
@@ -1198,11 +1216,11 @@ mod tests {
         let (string, lines) = layout.finish();
         let bytes = encode_packet(
             &GumpDisplay {
-                serial: GumpKey::STANDALONE,
+                serial:  GumpKey::STANDALONE,
                 gump_id: GumpId(0x0051_0001),
-                at: GumpPoint::new(75, 25),
-                layout: string.to_owned(),
-                lines: lines.to_vec(),
+                at:      GumpPoint::new(75, 25),
+                layout:  string.to_owned(),
+                lines:   lines.to_vec(),
             },
             version(),
         );
@@ -1241,11 +1259,11 @@ mod tests {
     fn a_gump_declares_its_own_length_and_id() {
         let bytes = encode_packet(
             &GumpDisplay {
-                serial: GumpKey::STANDALONE,
+                serial:  GumpKey::STANDALONE,
                 gump_id: GumpId(0x00AD_0001),
-                at: GumpPoint::new(50, 40),
-                layout: "{ resizepic 0 0 5054 200 200 }{ button 10 10 4005 4007 1 0 1 }".to_owned(),
-                lines: vec!["Spawn".to_owned()],
+                at:      GumpPoint::new(50, 40),
+                layout:  "{ resizepic 0 0 5054 200 200 }{ button 10 10 4005 4007 1 0 1 }".to_owned(),
+                lines:   vec!["Spawn".to_owned()],
             },
             version(),
         );
@@ -1264,11 +1282,11 @@ mod tests {
         // "Ok" is two code units; each is a big-endian u16.
         let bytes = encode_packet(
             &GumpDisplay {
-                serial: GumpKey::STANDALONE,
+                serial:  GumpKey::STANDALONE,
                 gump_id: GumpId(1),
-                at: GumpPoint::new(0, 0),
-                layout: "{ page 0 }".to_owned(),
-                lines: vec!["Ok".to_owned()],
+                at:      GumpPoint::new(0, 0),
+                layout:  "{ page 0 }".to_owned(),
+                lines:   vec!["Ok".to_owned()],
             },
             version(),
         );
@@ -1288,13 +1306,13 @@ mod tests {
     #[test]
     fn a_window_the_server_drew_is_the_window_the_client_reads() {
         let sent = GumpDisplay {
-            serial: GumpKey(0x1234),
+            serial:  GumpKey(0x1234),
             gump_id: GumpId(0x00AD_0001),
-            at: GumpPoint::new(100, 100),
+            at:      GumpPoint::new(100, 100),
             // A negative coordinate on purpose: it rides as unsigned and has to
             // come back signed — see `GumpPoint`.
-            layout: "{ resizepic -16 0 5054 300 270 }{ text 105 14 2100 0 }".to_owned(),
-            lines: vec!["Admin".to_owned(), "Populate Felucca".to_owned()],
+            layout:  "{ resizepic -16 0 5054 300 270 }{ text 105 14 2100 0 }".to_owned(),
+            lines:   vec!["Admin".to_owned(), "Populate Felucca".to_owned()],
         };
         let bytes = encode_packet(&sent, version());
         let read: GumpDisplay = decode_server_packet(&bytes, version());
@@ -1304,10 +1322,10 @@ mod tests {
     #[test]
     fn the_answer_a_client_encodes_is_the_answer_the_server_decodes() {
         let sent = GumpResponse {
-            serial: RawGumpKey(0x1234),
-            gump_id: RawGumpId(0x00AD_0001),
-            button: RawButtonId(13),
-            switches: vec![RawSwitchId(7), RawSwitchId(9)],
+            serial:       RawGumpKey(0x1234),
+            gump_id:      RawGumpId(0x00AD_0001),
+            button:       RawButtonId(13),
+            switches:     vec![RawSwitchId(7), RawSwitchId(9)],
             text_entries: vec![(2, "Hi".to_owned())],
         };
         let bytes = sent.encode();
@@ -1422,7 +1440,10 @@ mod tests {
         assert_eq!(got.switches, vec![RawSwitchId(9)], "the id arrives intact");
         assert_eq!(
             got.switches[0].validate(3),
-            Err(InvalidSwitchId { id: 9, offered: 3 })
+            Err(InvalidSwitchId {
+                id:      9,
+                offered: 3,
+            })
         );
         assert_eq!(
             RawSwitchId(2).validate(3),

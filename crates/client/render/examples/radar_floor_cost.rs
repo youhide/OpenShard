@@ -37,10 +37,20 @@
 //! taken on.
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_client_render::radar::{
-    self, BASE_CHUNK_TILES, RadarCache, RadarChunkCoord, RadarExtent, RadarLod, RadarRegion, SWEEP_LOD,
+    self,
+    BASE_CHUNK_TILES,
+    RadarCache,
+    RadarChunkCoord,
+    RadarExtent,
+    RadarLod,
+    RadarRegion,
+    SWEEP_LOD,
 };
 use openshard_protocol::world::Facet;
 use openshard_uofiles::radarcol::RadarColors;

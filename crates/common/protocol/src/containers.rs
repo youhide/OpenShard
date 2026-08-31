@@ -14,15 +14,29 @@
 //!   classic 2D client positions items by their `x`/`y` and ignores it; a grid
 //!   client reads it and desynchronises if it is missing.
 
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
 use crate::feature::Feature;
 use crate::gump::GumpPoint;
 use crate::items::ItemAmount;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength, frame_body};
-use crate::serial::{RawSerial, Serial};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+    frame_body,
+};
+use crate::serial::{
+    RawSerial,
+    Serial,
+};
 use crate::version::ClientVersion;
-use crate::wire::{Graphic, Hue};
+use crate::wire::{
+    Graphic,
+    Hue,
+};
 
 /// The container-type byte a High Seas client expects in `0x24` for a normal
 /// container (a vendor's is `0x00`, which is not this).
@@ -139,11 +153,11 @@ pub struct GridSlot(pub u8);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ContainedItem {
     /// The item's serial.
-    pub serial: Serial,
+    pub serial:  Serial,
     /// Its graphic.
     pub graphic: Graphic,
     /// Its stack size.
-    pub amount: ItemAmount,
+    pub amount:  ItemAmount,
     /// Where its icon sits inside the container's gump art.
     ///
     /// The pair N4 left on the allowlist for N5 to name: it is a gump
@@ -151,11 +165,11 @@ pub struct ContainedItem {
     /// from the art's top left here, and from the screen's for a window. Two
     /// bytes go out where a window's four do; the value is the server's, and a
     /// container's art is a few hundred pixels wide.
-    pub at: GumpPoint,
+    pub at:      GumpPoint,
     /// Its slot in the enhanced grid view. Sent only to grid clients.
-    pub grid: GridSlot,
+    pub grid:    GridSlot,
     /// Its hue.
-    pub hue: Hue,
+    pub hue:     Hue,
 }
 
 impl ContainedItem {
@@ -237,7 +251,7 @@ pub struct OpenContainer {
     /// The container whose window is opening.
     pub container: Serial,
     /// The gump art its background is drawn from, or [`BOOK_GUMP`] for a book.
-    pub gump: Graphic,
+    pub gump:      Graphic,
 }
 
 impl OpenContainer {
@@ -315,7 +329,7 @@ pub fn open_container_length(version: ClientVersion) -> PacketLength {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct AddToContainer {
     /// The item that has appeared.
-    pub item: ContainedItem,
+    pub item:      ContainedItem,
     /// The container it appeared in.
     pub container: Serial,
 }
@@ -374,7 +388,7 @@ pub struct ContainerContents {
     /// [`encode_body`](EncodePacket::encode_body) says so.
     pub container: Option<Serial>,
     /// Everything inside it.
-    pub items: Vec<ContainedItem>,
+    pub items:     Vec<ContainedItem>,
 }
 
 impl EncodePacket for ContainerContents {
@@ -424,7 +438,7 @@ impl DecodePacket for ContainerContents {
                 Some(_) => {
                     return Err(DecodeError::Unsupported {
                         packet: <Self as DecodePacket>::ID,
-                        form: "one listing naming two containers",
+                        form:   "one listing naming two containers",
                     });
                 }
             }
@@ -437,7 +451,10 @@ impl DecodePacket for ContainerContents {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::{decode_packet, encode_packet};
+    use crate::packet::{
+        decode_packet,
+        encode_packet,
+    };
     use crate::server_packet::ServerPacket;
 
     /// A version with the grid index and the High Seas container type.
@@ -551,12 +568,12 @@ mod tests {
     #[test]
     fn a_classic_container_item_record_has_no_grid_byte() {
         let item = ContainedItem {
-            serial: Serial::new(0x4000_0002).unwrap(),
+            serial:  Serial::new(0x4000_0002).unwrap(),
             graphic: Graphic(0x0EED),
-            amount: ItemAmount(3),
-            at: GumpPoint::new(44, 65),
-            grid: GridSlot(7),
-            hue: Hue::NONE,
+            amount:  ItemAmount(3),
+            at:      GumpPoint::new(44, 65),
+            grid:    GridSlot(7),
+            hue:     Hue::NONE,
         };
         let packet = encode_add_to_container(item, container(), classic());
         // 0x25 + serial + graphic + 0 + amount + x + y + container + hue = 20
@@ -575,12 +592,12 @@ mod tests {
     #[test]
     fn a_grid_client_item_record_carries_the_grid_byte() {
         let item = ContainedItem {
-            serial: Serial::new(0x4000_0002).unwrap(),
+            serial:  Serial::new(0x4000_0002).unwrap(),
             graphic: Graphic(0x0EED),
-            amount: ItemAmount(3),
-            at: GumpPoint::new(44, 65),
-            grid: GridSlot(7),
-            hue: Hue::NONE,
+            amount:  ItemAmount(3),
+            at:      GumpPoint::new(44, 65),
+            grid:    GridSlot(7),
+            hue:     Hue::NONE,
         };
         let packet = encode_add_to_container(item, container(), modern());
         assert_eq!(packet.len(), 21);
@@ -592,26 +609,26 @@ mod tests {
     fn container_contents_counts_its_items_and_patches_its_length() {
         let items = [
             ContainedItem {
-                serial: Serial::new(0x4000_0002).unwrap(),
+                serial:  Serial::new(0x4000_0002).unwrap(),
                 graphic: Graphic(0x0EED),
-                amount: ItemAmount(1),
-                at: GumpPoint::new(10, 10),
-                grid: GridSlot(0),
-                hue: Hue::NONE,
+                amount:  ItemAmount(1),
+                at:      GumpPoint::new(10, 10),
+                grid:    GridSlot(0),
+                hue:     Hue::NONE,
             },
             ContainedItem {
-                serial: Serial::new(0x4000_0003).unwrap(),
+                serial:  Serial::new(0x4000_0003).unwrap(),
                 graphic: Graphic(0x0F0E),
-                amount: ItemAmount(5),
-                at: GumpPoint::new(20, 20),
-                grid: GridSlot(1),
-                hue: Hue(0x21),
+                amount:  ItemAmount(5),
+                at:      GumpPoint::new(20, 20),
+                grid:    GridSlot(1),
+                hue:     Hue(0x21),
             },
         ];
         let packet = encode_packet(
             &ContainerContents {
                 container: Some(container()),
-                items: items.to_vec(),
+                items:     items.to_vec(),
             },
             classic(),
         );
@@ -625,12 +642,12 @@ mod tests {
     /// One item, for the reading tests to send round.
     fn an_item() -> ContainedItem {
         ContainedItem {
-            serial: Serial::new(0x4000_0002).unwrap(),
+            serial:  Serial::new(0x4000_0002).unwrap(),
             graphic: Graphic(0x0EED),
-            amount: ItemAmount(3),
-            at: GumpPoint::new(44, 65),
-            grid: GridSlot(7),
-            hue: Hue(0x21),
+            amount:  ItemAmount(3),
+            at:      GumpPoint::new(44, 65),
+            grid:    GridSlot(7),
+            hue:     Hue(0x21),
         }
     }
 
@@ -715,7 +732,7 @@ mod tests {
         let bytes = encode_packet(
             &ContainerContents {
                 container: Some(container()),
-                items: Vec::new(),
+                items:     Vec::new(),
             },
             modern(),
         );
@@ -758,7 +775,7 @@ mod tests {
         let packet = encode_packet(
             &ContainerContents {
                 container: Some(container()),
-                items: Vec::new(),
+                items:     Vec::new(),
             },
             classic(),
         );

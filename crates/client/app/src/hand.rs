@@ -21,12 +21,11 @@
 //! and that stays [`crate::windows::Windows`] — this module only names what
 //! those fields hold and the one rule for turning a press into a drag.
 
+use openshard_client_render::gump::GumpPixel;
 use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::world::Point;
-
-use openshard_client_render::gump::GumpPixel;
 
 /// A press on an item which becomes a drag only after the pointer actually
 /// moves. Keeping it as an explicit state lets a normal click still
@@ -41,10 +40,10 @@ use openshard_client_render::gump::GumpPixel;
 /// rule for all three: [`ItemPress::dragged`].
 #[derive(Clone, Copy, Debug)]
 pub struct ItemPress {
-    pub item: ContainedItem,
+    pub item:   ContainedItem,
     /// The authoritative place the item is currently projected from.
     pub origin: DragOrigin,
-    pub grab: GumpPixel,
+    pub grab:   GumpPixel,
 }
 
 /// How far the pointer may wander before a press stops being a click.
@@ -139,9 +138,9 @@ impl ItemPress {
             return Dragged::Ask(self.item.amount.0 - 1);
         }
         Dragged::Lift(ItemDrag {
-            item: self.item,
+            item:   self.item,
             origin: self.origin,
-            grab: self.grab,
+            grab:   self.grab,
         })
     }
 
@@ -155,12 +154,12 @@ impl ItemPress {
         let total = self.item.amount.0;
         let amount = (total > 1).then(|| amount.clamp(1, total - 1))?;
         Some(ItemDrag {
-            item: ContainedItem {
+            item:   ContainedItem {
                 amount: openshard_protocol::items::ItemAmount(amount),
                 ..self.item
             },
             origin: self.origin,
-            grab: self.grab,
+            grab:   self.grab,
         })
     }
 }
@@ -174,7 +173,7 @@ pub enum DragOrigin {
     Container(Serial),
     Equipment {
         mobile: Serial,
-        layer: openshard_protocol::wire::Layer,
+        layer:  openshard_protocol::wire::Layer,
     },
 }
 
@@ -189,12 +188,12 @@ pub enum DragOrigin {
 pub enum PendingDrop {
     Container {
         container: Serial,
-        at: GumpPoint,
+        at:        GumpPoint,
     },
     Ground(Point),
     Equipment {
         mobile: Serial,
-        layer: openshard_protocol::wire::Layer,
+        layer:  openshard_protocol::wire::Layer,
     },
 }
 
@@ -210,11 +209,13 @@ impl PendingDrop {
         match self {
             Self::Container { container, at } => Outgoing::DropInto { item, container, at },
             Self::Ground(at) => Outgoing::DropOnGround { item, at },
-            Self::Equipment { mobile, layer } => Outgoing::Equip {
-                item,
-                layer: openshard_protocol::wire::RawLayer(layer.0),
-                mobile,
-            },
+            Self::Equipment { mobile, layer } => {
+                Outgoing::Equip {
+                    item,
+                    layer: openshard_protocol::wire::RawLayer(layer.0),
+                    mobile,
+                }
+            }
         }
     }
 }
@@ -222,10 +223,10 @@ impl PendingDrop {
 /// The item the client has asked the shard to put on its cursor.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ItemDrag {
-    pub item: ContainedItem,
+    pub item:   ContainedItem,
     pub origin: DragOrigin,
     /// Offset from the item's top-left corner where the pointer grabbed it.
-    pub grab: GumpPixel,
+    pub grab:   GumpPixel,
 }
 
 /// What is on the cursor, and where it is on its way to.
@@ -249,7 +250,7 @@ pub enum Hand {
     /// stays subtracted and the destination is drawn until a packet settles it
     /// — see `App::apply_packet`.
     Dropped {
-        drag: ItemDrag,
+        drag:        ItemDrag,
         destination: PendingDrop,
     },
 }
@@ -278,22 +279,25 @@ impl Hand {
 mod tests {
     use openshard_protocol::containers::GridSlot;
     use openshard_protocol::items::ItemAmount;
-    use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
 
     use super::*;
 
     fn press(amount: u16) -> ItemPress {
         ItemPress {
-            item: ContainedItem {
-                serial: Serial::new(0x4000_0001).expect("an item serial"),
+            item:   ContainedItem {
+                serial:  Serial::new(0x4000_0001).expect("an item serial"),
                 graphic: Graphic(0x0EED),
-                amount: ItemAmount(amount),
-                at: GumpPoint::new(0, 0),
-                grid: GridSlot(0),
-                hue: Hue::NONE,
+                amount:  ItemAmount(amount),
+                at:      GumpPoint::new(0, 0),
+                grid:    GridSlot(0),
+                hue:     Hue::NONE,
             },
             origin: DragOrigin::Container(Serial::new(0x4000_0100).expect("a bag serial")),
-            grab: GumpPixel::new(4, 4),
+            grab:   GumpPixel::new(4, 4),
         }
     }
 

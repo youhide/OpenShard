@@ -63,12 +63,12 @@ impl World {
             self.state.registry.insert(
                 entity,
                 Door {
-                    closed: door.closed,
-                    open: door.open,
+                    closed:   door.closed,
+                    open:     door.open,
                     offset_x: door.offset_x,
                     offset_y: door.offset_y,
-                    link: None,
-                    is_open: false,
+                    link:     None,
+                    is_open:  false,
                     close_at: openshard_state::WorldTick::ZERO,
                 },
             );

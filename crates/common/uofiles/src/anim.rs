@@ -33,11 +33,21 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::io::{
+    Read,
+    Seek,
+    SeekFrom,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_protocol::direction::Direction;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 
 use crate::color::Color16;
 use crate::image::Image;
@@ -64,9 +74,9 @@ const NO_ENTRY: u32 = 0xFFFF_FFFF;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct AnimationKey {
     /// The body graphic the file stores.
-    pub body: Graphic,
+    pub body:      Graphic,
     /// The body-specific action group.
-    pub group: AnimationGroup,
+    pub group:     AnimationGroup,
     /// The stored direction, zero through four.
     pub direction: AnimationDirection,
 }
@@ -170,7 +180,7 @@ pub enum AnimError {
     /// A file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
@@ -184,7 +194,7 @@ pub enum AnimError {
     /// An entry's bytes are not a body's frames.
     Malformed {
         /// Which animation's entry was malformed.
-        key: AnimationKey,
+        key:    AnimationKey,
         /// What was wrong.
         detail: String,
     },
@@ -194,17 +204,21 @@ impl fmt::Display for AnimError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
-            Self::NotAnIndex { path, size } => write!(
-                f,
-                "{} is {size} bytes, which is not a whole number of {IDX_ENTRY}-byte entries; \
+            Self::NotAnIndex { path, size } => {
+                write!(
+                    f,
+                    "{} is {size} bytes, which is not a whole number of {IDX_ENTRY}-byte entries; \
                  it is not anim.idx",
-                path.display(),
-            ),
-            Self::Malformed { key, detail } => write!(
-                f,
-                "body {} group {} direction {}: {detail}",
-                key.body.0, key.group, key.direction
-            ),
+                    path.display(),
+                )
+            }
+            Self::Malformed { key, detail } => {
+                write!(
+                    f,
+                    "body {} group {} direction {}: {detail}",
+                    key.body.0, key.group, key.direction
+                )
+            }
         }
     }
 }
@@ -497,7 +511,7 @@ pub const fn animation_body(body: Graphic) -> Graphic {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct BodyAppearance {
     pub body: Graphic,
-    pub hue: Hue,
+    pub hue:  Hue,
 }
 
 /// The visual body redirects in a client's optional `Body.def`.
@@ -549,7 +563,7 @@ impl BodyDef {
                 Graphic(from),
                 BodyAppearance {
                     body: Graphic(to),
-                    hue: Hue(hue),
+                    hue:  Hue(hue),
                 },
             );
         }
@@ -597,14 +611,14 @@ pub struct AnimFrame {
     /// Vertical offset, measured up from the sprite's bottom edge.
     pub center_y: i16,
     /// The picture itself, with everything no run covered transparent.
-    pub image: Image,
+    pub image:    Image,
 }
 
 /// One entry of `anim.idx`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct IdxEntry {
     position: u32,
-    size: u32,
+    size:     u32,
 }
 
 impl IdxEntry {
@@ -622,10 +636,10 @@ impl IdxEntry {
 /// The client's animations, indexed and ready to read from.
 #[derive(Debug)]
 pub struct Anim {
-    entries: Vec<IdxEntry>,
-    mul: File,
+    entries:  Vec<IdxEntry>,
+    mul:      File,
     mul_path: PathBuf,
-    mul_len: u64,
+    mul_len:  u64,
 }
 
 impl Anim {
@@ -644,9 +658,11 @@ impl Anim {
     /// an unverified constant in the one place that must be right.
     pub fn from_files(idx: impl AsRef<Path>, mul: impl AsRef<Path>) -> Result<Self, AnimError> {
         let idx_path = idx.as_ref();
-        let raw = std::fs::read(idx_path).map_err(|source| AnimError::Read {
-            path: idx_path.to_owned(),
-            source,
+        let raw = std::fs::read(idx_path).map_err(|source| {
+            AnimError::Read {
+                path: idx_path.to_owned(),
+                source,
+            }
         })?;
         if raw.is_empty() || !raw.len().is_multiple_of(IDX_ENTRY) {
             return Err(AnimError::NotAnIndex {
@@ -658,22 +674,28 @@ impl Anim {
             .as_chunks::<IDX_ENTRY>()
             .0
             .iter()
-            .map(|entry| IdxEntry {
-                position: u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]),
-                size: u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]]),
+            .map(|entry| {
+                IdxEntry {
+                    position: u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]),
+                    size:     u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]]),
+                }
             })
             .collect();
 
         let mul_path = mul.as_ref().to_owned();
-        let file = File::open(&mul_path).map_err(|source| AnimError::Read {
-            path: mul_path.clone(),
-            source,
+        let file = File::open(&mul_path).map_err(|source| {
+            AnimError::Read {
+                path: mul_path.clone(),
+                source,
+            }
         })?;
         let mul_len = file
             .metadata()
-            .map_err(|source| AnimError::Read {
-                path: mul_path.clone(),
-                source,
+            .map_err(|source| {
+                AnimError::Read {
+                    path: mul_path.clone(),
+                    source,
+                }
             })?
             .len();
 
@@ -726,9 +748,11 @@ impl Anim {
         self.mul
             .seek(SeekFrom::Start(u64::from(entry.position)))
             .and_then(|_| self.mul.read_exact(&mut raw))
-            .map_err(|source| AnimError::Read {
-                path: self.mul_path.clone(),
-                source,
+            .map_err(|source| {
+                AnimError::Read {
+                    path: self.mul_path.clone(),
+                    source,
+                }
             })?;
 
         decode_body(key, &raw).map(Some)
@@ -1196,25 +1220,31 @@ mod tests {
     /// somebody else's body.
     #[test]
     fn an_absent_entry_is_absent_in_three_shapes() {
-        assert!(!IdxEntry { position: 0, size: 0 }.is_present());
+        assert!(
+            !IdxEntry {
+                position: 0,
+                size:     0,
+            }
+            .is_present()
+        );
         assert!(
             !IdxEntry {
                 position: NO_ENTRY,
-                size: 100
+                size:     100,
             }
             .is_present()
         );
         assert!(
             !IdxEntry {
                 position: 512,
-                size: NO_ENTRY
+                size:     NO_ENTRY,
             }
             .is_present()
         );
         assert!(
             IdxEntry {
                 position: 512,
-                size: 100
+                size:     100,
             }
             .is_present()
         );
@@ -1233,14 +1263,14 @@ mod tests {
             body_def.appearance(Graphic(25)),
             BodyAppearance {
                 body: Graphic(225),
-                hue: Hue(946),
+                hue:  Hue(946),
             }
         );
         assert_eq!(
             body_def.appearance(Graphic(46)),
             BodyAppearance {
                 body: Graphic(12),
-                hue: Hue(1106),
+                hue:  Hue(1106),
             },
             "the first client-listed alternate is the deterministic base appearance"
         );
@@ -1248,7 +1278,7 @@ mod tests {
             body_def.appearance(Graphic(400)),
             BodyAppearance {
                 body: Graphic(400),
-                hue: Hue::NONE,
+                hue:  Hue::NONE,
             }
         );
     }

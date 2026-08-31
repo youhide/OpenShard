@@ -22,14 +22,35 @@ use openshard_entities::EntityId;
 use openshard_map::overlay::Doors;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::speech::{Font, TalkMode};
+use openshard_protocol::speech::{
+    Font,
+    TalkMode,
+};
 use openshard_protocol::wire::Hue;
-use openshard_state::components::{Escortable, QuestLog};
-use openshard_state::quest::{ObjectiveKind, QuestKey};
-use openshard_state::{QuestSection, TICKS_PER_SECOND, WorldState};
+use openshard_state::components::{
+    Escortable,
+    QuestLog,
+};
+use openshard_state::quest::{
+    ObjectiveKind,
+    QuestKey,
+};
+use openshard_state::{
+    QuestSection,
+    TICKS_PER_SECOND,
+    WorldState,
+};
 
-use crate::events::{ObjectiveIndex, ObjectiveProgress, QuestFailed, QuestObjectiveUpdated};
-use crate::gump::{self, sound};
+use crate::events::{
+    ObjectiveIndex,
+    ObjectiveProgress,
+    QuestFailed,
+    QuestObjectiveUpdated,
+};
+use crate::gump::{
+    self,
+    sound,
+};
 
 /// How often the obtain pass looks, in ticks. Twice a second, the status bar's
 /// cadence — fast enough that picking an item up feels immediate, slow enough
@@ -272,7 +293,7 @@ pub fn tick_timers(state: &mut WorldState) {
             if let Some(serial) = state.registry.serial_of(player) {
                 state.bus.send(QuestFailed {
                     player: serial,
-                    key: key.clone(),
+                    key:    key.clone(),
                 });
             }
             gump::show(state, player, gump::log_context(&key, QuestSection::Failed, None));

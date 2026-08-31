@@ -1,5 +1,12 @@
-use openshard_protocol::wire::{ClilocId, Graphic, SoundId};
-use openshard_state::components::{Trap, TrapKind};
+use openshard_protocol::wire::{
+    ClilocId,
+    Graphic,
+    SoundId,
+};
+use openshard_state::components::{
+    Trap,
+    TrapKind,
+};
 
 use super::*;
 
@@ -112,16 +119,16 @@ impl World {
             return;
         };
         let packet = openshard_protocol::feedback::GraphicalEffect {
-            kind: openshard_protocol::feedback::EffectKind::FixedXyz,
-            from: None,
-            to: None,
-            art: graphic,
-            from_point: spot,
-            to_point: spot,
-            speed: 9,
-            duration: 20,
+            kind:            openshard_protocol::feedback::EffectKind::FixedXyz,
+            from:            None,
+            to:              None,
+            art:             graphic,
+            from_point:      spot,
+            to_point:        spot,
+            speed:           9,
+            duration:        20,
             fixed_direction: true,
-            explode: false,
+            explode:         false,
         };
         self.state.broadcast_packet(
             at,

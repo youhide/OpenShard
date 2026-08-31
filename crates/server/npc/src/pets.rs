@@ -59,13 +59,13 @@ pub fn tame(
         .get::<openshard_state::components::Brain>(creature)
         .copied()
         .unwrap_or(openshard_state::components::Brain {
-            sight: openshard_protocol::world::Sight(0),
-            wander: false,
-            next_think: state.ticks,
+            sight:       openshard_protocol::world::Sight(0),
+            wander:      false,
+            next_think:  state.ticks,
             guard_until: openshard_state::WorldTick::ZERO,
             opens_doors: false,
-            aggression: openshard_protocol::world::Aggression::Defensive,
-            beat_ticks: 0,
+            aggression:  openshard_protocol::world::Aggression::Defensive,
+            beat_ticks:  0,
         });
     brain.aggression = openshard_protocol::world::Aggression::Defensive;
     brain.wander = false;

@@ -45,7 +45,10 @@
 //! defensible geometry, and it is a **change to where creatures spawn**, so it
 //! belongs in a commit that says so rather than riding in on a data move.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -80,19 +83,19 @@ const SPAWNS_DOC: &str = "\
 #[serde(deny_unknown_fields)]
 struct SpawnFile {
     /// The admin verb that lays it — `world::admin`'s `ROWS` is the other half.
-    verb: String,
+    verb:      String,
     /// Which facet every region in the set belongs to.
     ///
     /// One facet per set, not per region: a set *is* a facet's population, and
     /// the verb says which ("populate:felucca"). A second facet is a second set.
-    facet: u8,
+    facet:     u8,
     /// The distinct creatures, by the name the spawners refer to them by.
     ///
     /// A `BTreeMap` so the generated source does not reorder when serde's map
     /// iteration does — the emitted code is diffed by people.
     creatures: BTreeMap<String, Creature>,
     /// The regions, each listing creature names from the table above.
-    spawners: Vec<SpawnerDef>,
+    spawners:  Vec<SpawnerDef>,
 }
 
 /// One creature a region may put down.
@@ -103,53 +106,53 @@ struct SpawnFile {
 #[serde(deny_unknown_fields)]
 struct Creature {
     /// The body graphic.
-    body: u16,
+    body:        u16,
     /// Its hue. Zero — no hue — for every creature so far.
     #[serde(default)]
-    hue: u16,
+    hue:         u16,
     /// Starting and maximum hit points.
     #[serde(default = "one")]
-    hits: u16,
+    hits:        u16,
     /// The health-bar colour, as the wire value.
     #[serde(default = "innocent")]
-    notoriety: u8,
+    notoriety:   u8,
     /// Melee damage before resistance.
     #[serde(default)]
-    damage: u16,
+    damage:      u16,
     /// Physical resistance, a percentage.
     #[serde(default)]
-    resistance: u8,
+    resistance:  u8,
     /// How widely known it is.
     #[serde(default)]
-    fame: i32,
+    fame:        i32,
     /// Which way. Negative is evil.
     #[serde(default)]
-    karma: i32,
+    karma:       i32,
     /// Swing cadence in ticks; `0` derives it from dexterity.
     #[serde(default)]
-    swing: u64,
+    swing:       u64,
     /// How far it notices a target; `0` for a placid animal.
     #[serde(default)]
-    sight: u8,
+    sight:       u8,
     /// Whether it starts fights. Left out, it is [`natural_aggression`]'s answer
     /// for the body — the rule the script bridge applied, moved here with it.
     #[serde(default)]
-    aggression: Option<u8>,
+    aggression:  Option<u8>,
     /// Ticks between beats while hunting; `0` takes the shard default.
     #[serde(default)]
-    beat: u64,
+    beat:        u64,
     /// Its ranged reach, if it has one.
     #[serde(default)]
-    ranged: Option<u8>,
+    ranged:      Option<u8>,
     /// The ranged attack's damage type, as the wire value.
     #[serde(default)]
     ranged_kind: u8,
     /// Whether it drifts when idle.
     #[serde(default)]
-    wander: bool,
+    wander:      bool,
     /// Trained combat skills, `(skill id, value in tenths)`.
     #[serde(default)]
-    skills: Vec<(u8, u16)>,
+    skills:      Vec<(u8, u16)>,
 }
 
 /// A creature's default hit points: one. `u16`'s own default is zero, which is a
@@ -188,19 +191,19 @@ const fn natural_aggression(body: u16) -> u8 {
 #[serde(deny_unknown_fields)]
 struct SpawnerDef {
     /// West edge.
-    x: u16,
+    x:             u16,
     /// North edge.
-    y: u16,
+    y:             u16,
     /// Width in tiles.
-    width: u16,
+    width:         u16,
     /// Height in tiles.
-    height: u16,
+    height:        u16,
     /// The most live creatures it keeps.
-    max_count: u16,
+    max_count:     u16,
     /// Ticks to wait after a spawn before the next.
     respawn_delay: u64,
     /// Which creatures, by name into the file's table.
-    creatures: Vec<String>,
+    creatures:     Vec<String>,
 }
 
 /// The Rust expression for one creature, fully qualified — the generated file is
@@ -213,10 +216,12 @@ struct SpawnerDef {
 fn creature_expr(name: &str, c: &Creature, indent: &str) -> String {
     let aggression = c.aggression.unwrap_or_else(|| natural_aggression(c.body));
     let ranged = match c.ranged {
-        Some(range) => format!(
-            "Some(openshard_protocol::world::RangedRange::new({range}).expect({:?}))",
-            format!("{name} has a ranged reach of zero, which is no reach at all")
-        ),
+        Some(range) => {
+            format!(
+                "Some(openshard_protocol::world::RangedRange::new({range}).expect({:?}))",
+                format!("{name} has a ranged reach of zero, which is no reach at all")
+            )
+        }
         None => "None".to_owned(),
     };
     let skills: Vec<String> = c
@@ -507,15 +512,15 @@ type DoorRow = (u16, u16, u16, i8);
 #[serde(deny_unknown_fields)]
 struct Container {
     /// The item graphic.
-    graphic: u16,
+    graphic:   u16,
     /// The gump the client opens for it.
-    gump: u16,
-    x: u16,
-    y: u16,
-    z: i8,
+    gump:      u16,
+    x:         u16,
+    y:         u16,
+    z:         i8,
     /// Its hue, or 0.
     #[serde(default)]
-    hue: u16,
+    hue:       u16,
     /// Which key opens it; `0` is unlocked.
     #[serde(default)]
     key_value: u32,
@@ -525,9 +530,9 @@ struct Container {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DoorRegion {
-    x: u16,
-    y: u16,
-    width: u16,
+    x:      u16,
+    y:      u16,
+    width:  u16,
     height: u16,
 }
 
@@ -536,15 +541,15 @@ struct DoorRegion {
 #[serde(deny_unknown_fields)]
 struct DecoFile {
     /// The admin verb that lays it.
-    verb: String,
+    verb:         String,
     /// Which facet all of it belongs to.
-    facet: u8,
+    facet:        u8,
     /// Which way each door graphic's leaf swings, by closed graphic. See
     /// [`DoorRow`].
-    door_hinges: BTreeMap<u16, (i16, i16)>,
-    statics: Vec<StaticRow>,
-    doors: Vec<DoorRow>,
-    containers: Vec<Container>,
+    door_hinges:  BTreeMap<u16, (i16, i16)>,
+    statics:      Vec<StaticRow>,
+    doors:        Vec<DoorRow>,
+    containers:   Vec<Container>,
     door_regions: Vec<DoorRegion>,
 }
 
@@ -571,11 +576,11 @@ struct AddonFile {
 #[serde(deny_unknown_fields)]
 struct Addon {
     /// The ServUO class name, retained so an import remains auditable.
-    name: String,
+    name:       String,
     /// `[graphic, dx, dy, dz]`, exactly as `AddComponent` receives it.
     components: Vec<AddonComponent>,
     /// `[flattened graphic, x, y, z]` rows that the former importer emitted.
-    instances: Vec<AddonInstance>,
+    instances:  Vec<AddonInstance>,
 }
 
 /// `data/deco.json` into four `const` slices and the set that names them.
@@ -804,10 +809,10 @@ struct Worn {
     /// The item graphic.
     graphic: u16,
     /// Which paperdoll layer it goes on.
-    layer: u8,
+    layer:   u8,
     /// Its hue, or 0.
     #[serde(default)]
-    hue: u16,
+    hue:     u16,
 }
 
 /// One line of a shelf in `data/townsfolk.json`.
@@ -818,72 +823,72 @@ struct Stock {
     graphic: u16,
     /// Their hue.
     #[serde(default)]
-    hue: u16,
+    hue:     u16,
     /// How many the vendor holds.
-    amount: u16,
+    amount:  u16,
     /// What one unit costs.
-    price: u32,
+    price:   u32,
     /// The label the client shows.
-    name: String,
+    name:    String,
 }
 
 /// One placed townsperson in `data/townsfolk.json`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Townsperson {
-    x: u16,
-    y: u16,
-    z: i8,
+    x:          u16,
+    y:          u16,
+    z:          i8,
     /// The body graphic. Four hundred of them share body 400, which is why the
     /// de-duplication in `tick.rs` is keyed by the trade and not by this.
-    body: u16,
+    body:       u16,
     /// The trade it plies, ServUO-style ("the blacksmith").
     #[serde(default)]
-    title: Option<String>,
+    title:      Option<String>,
     #[serde(default = "one")]
-    hits: u16,
+    hits:       u16,
     /// The health-bar colour, as the wire value.
     #[serde(default = "innocent")]
-    notoriety: u8,
+    notoriety:  u8,
     /// What it wears on its feet, `ShoeType`'s wire byte.
     #[serde(default)]
-    shoe: u8,
+    shoe:       u8,
     /// Whether it answers "bank".
     #[serde(default)]
-    banker: bool,
+    banker:     bool,
     /// Whether double-clicking it opens a shop.
     #[serde(default)]
-    vendor: bool,
+    vendor:     bool,
     /// Whether it can offer a ghost a free resurrection.
     #[serde(default)]
-    healer: bool,
+    healer:     bool,
     /// Where it sleeps, for the optional daily routine.
     #[serde(default)]
     night_home: Option<(u16, u16, i8)>,
     /// Which outfit it wears, by name into `outfits`.
     #[serde(default)]
-    outfit: Option<String>,
+    outfit:     Option<String>,
     /// Which shelf it sells, by name into `shelves`.
     #[serde(default)]
-    shelf: Option<String>,
+    shelf:      Option<String>,
     /// Where it wants to be escorted. **An empty string is not nothing**: it means
     /// "wherever the quest picks", ServUO's `PickRandomDestination`, while the
     /// field being absent means it is not escortable at all.
     #[serde(default)]
-    escort_to: Option<String>,
+    escort_to:  Option<String>,
     /// The quests it offers, by key.
     #[serde(default)]
-    quests: Vec<String>,
+    quests:     Vec<String>,
 }
 
 /// `data/townsfolk.json`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TownsfolkFile {
-    verb: String,
-    facet: u8,
-    outfits: BTreeMap<String, Vec<Worn>>,
-    shelves: BTreeMap<String, Vec<Stock>>,
+    verb:      String,
+    facet:     u8,
+    outfits:   BTreeMap<String, Vec<Worn>>,
+    shelves:   BTreeMap<String, Vec<Stock>>,
     townsfolk: Vec<Townsperson>,
 }
 
@@ -1126,20 +1131,20 @@ const LOOT_DOC: &str = "\
 #[serde(deny_unknown_fields)]
 struct Drop {
     /// The item tile to drop.
-    graphic: u16,
+    graphic:   u16,
     /// Its colour.
     #[serde(default)]
-    hue: u16,
+    hue:       u16,
     /// A fixed count, or an inclusive `[min, max]` range.
     #[serde(default)]
-    amount: Option<Amount>,
+    amount:    Option<Amount>,
     /// True for gold, reagents and arrows, which merge into a pile; false for a
     /// discrete weapon or piece of armour.
     #[serde(default)]
     stackable: bool,
     /// The chance it drops at all, `0.0`–`1.0`. Absent is always.
     #[serde(default)]
-    chance: Option<f64>,
+    chance:    Option<f64>,
 }
 
 /// A drop's count: one number, or an inclusive range.
@@ -1155,11 +1160,11 @@ enum Amount {
 #[serde(deny_unknown_fields)]
 struct LootTable {
     /// The body it drops for.
-    body: u16,
+    body:     u16,
     /// What that body is, for the reader. Not used at runtime — the engine's own
     /// `creature_name` is the label a player sees.
     creature: String,
-    drops: Vec<Drop>,
+    drops:    Vec<Drop>,
 }
 
 /// `data/loot.json` into a sorted `const` table.

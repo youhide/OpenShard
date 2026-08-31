@@ -8,10 +8,28 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::serial::SerialKind;
-use openshard_protocol::wire::{Graphic, Hue, MultiId};
-use openshard_protocol::world::{Facet, Point};
-use openshard_state::components::{Decoration, Door, Drawn, HouseDoor, Position};
-use openshard_state::{ItemLocation, WorldState, WorldTick, establish_item_location};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    MultiId,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
+use openshard_state::components::{
+    Decoration,
+    Door,
+    Drawn,
+    HouseDoor,
+    Position,
+};
+use openshard_state::{
+    ItemLocation,
+    WorldState,
+    WorldTick,
+    establish_item_location,
+};
 use openshard_uofiles::multi::Component;
 
 #[derive(Clone, Copy)]
@@ -36,15 +54,15 @@ impl Facing {
 
 #[derive(Clone, Copy)]
 struct DoorSpec {
-    dx: i16,
-    dy: i16,
-    dz: i16,
+    dx:     i16,
+    dy:     i16,
+    dz:     i16,
     /// The closed art, directly retained for imported door families.
     closed: Graphic,
     facing: Facing,
     /// The other row of a double door. Both stable serials are assigned before
     /// either component receives this relationship.
-    link: Option<usize>,
+    link:   Option<usize>,
 }
 
 const fn door(dx: i16, dy: i16, dz: i16, material: Material, facing: Facing) -> DoorSpec {
@@ -263,10 +281,12 @@ pub(crate) fn install(state: &mut WorldState, house: EntityId, facet: Facet, ori
         // Turn the recognized leaves into real door entities rather than
         // leaving them as inert art in the `0xD8` picture.
         Some(components) => component_specs(&components),
-        None => match specs(multi) {
-            [] => component_specs(state.multis.components(multi.0)),
-            specs => specs.to_vec(),
-        },
+        None => {
+            match specs(multi) {
+                [] => component_specs(state.multis.components(multi.0)),
+                specs => specs.to_vec(),
+            }
+        }
     };
     let mut installed = Vec::with_capacity(specs.len());
     for spec in &specs {
@@ -287,13 +307,15 @@ pub(crate) fn install(state: &mut WorldState, house: EntityId, facet: Facet, ori
             });
         let entity = match existing {
             Some(entity) => entity,
-            None => match spawn(state, house_serial, facet, at, spec.component()) {
-                Some(entity) => entity,
-                None => {
-                    installed.push(None);
-                    continue;
+            None => {
+                match spawn(state, house_serial, facet, at, spec.component()) {
+                    Some(entity) => entity,
+                    None => {
+                        installed.push(None);
+                        continue;
+                    }
                 }
-            },
+            }
         };
         state.registry.insert(entity, HouseDoor { house: house_serial });
         installed.push(Some(entity));
@@ -325,7 +347,7 @@ fn spawn(
     state.registry.insert(
         entity,
         Drawn {
-            id: component.closed,
+            id:  component.closed,
             hue: Hue::NONE,
         },
     );
@@ -366,9 +388,11 @@ pub(crate) fn is_fixture(state: &WorldState, entity: EntityId, origin: Point, mu
         .and_then(|door| state.registry.entity_of(door.house))
         .and_then(|house| crate::design::shape_of_house(state, house))
         .map_or_else(
-            || match specs(multi) {
-                [] => component_specs(state.multis.components(multi.0)),
-                specs => specs.to_vec(),
+            || {
+                match specs(multi) {
+                    [] => component_specs(state.multis.components(multi.0)),
+                    specs => specs.to_vec(),
+                }
             },
             |components| component_specs(&components),
         );

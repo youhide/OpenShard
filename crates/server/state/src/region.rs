@@ -38,7 +38,7 @@ pub struct RegionId(pub u16);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TooManyRegions {
     /// How many regions were supplied.
-    pub found: usize,
+    pub found:   usize,
     /// How many distinct ids exist.
     pub maximum: usize,
 }
@@ -53,7 +53,8 @@ impl std::fmt::Display for TooManyRegions {
     }
 }
 
-impl std::error::Error for TooManyRegions {}
+impl std::error::Error for TooManyRegions {
+}
 
 const MAX_REGIONS: usize = u16::MAX as usize + 1;
 
@@ -64,17 +65,17 @@ const MAX_REGIONS: usize = u16::MAX as usize + 1;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct RegionRect {
     /// West edge.
-    pub x: u16,
+    pub x:      u16,
     /// North edge.
-    pub y: u16,
+    pub y:      u16,
     /// How far east it reaches.
-    pub width: u16,
+    pub width:  u16,
     /// How far south it reaches.
     pub height: u16,
     /// The lowest height it covers. `i8::MIN` covers everything below.
-    pub z_min: i8,
+    pub z_min:  i8,
     /// The highest height it covers. `i8::MAX` covers everything above.
-    pub z_max: i8,
+    pub z_max:  i8,
 }
 
 impl RegionRect {
@@ -121,18 +122,18 @@ impl RegionRect {
 pub struct RegionFlags {
     /// Guards answer a call here, and hunt a murderer who walks in — ServUO's
     /// `GuardedRegion`.
-    pub guarded: bool,
+    pub guarded:     bool,
     /// No teleporting in, out or within — the staff `.tele` and the Teleport
     /// spell both refuse.
     pub no_teleport: bool,
     /// No Recall or Gate — `magic::travel::may_travel` refuses both, and marking
     /// a rune inside one too.
-    pub no_recall: bool,
+    pub no_recall:   bool,
     /// No house may be placed — `housing::place`'s sixth rule, asked over every
     /// tile the house would cover. Twenty-one of the shipped regions set it.
-    pub no_housing: bool,
+    pub no_housing:  bool,
     /// A safe zone — no player may harm another. Waiting for its consumer too.
-    pub safe: bool,
+    pub safe:        bool,
 }
 
 impl RegionFlags {
@@ -140,11 +141,11 @@ impl RegionFlags {
     #[must_use]
     pub const fn none() -> Self {
         Self {
-            guarded: false,
+            guarded:     false,
             no_teleport: false,
-            no_recall: false,
-            no_housing: false,
-            safe: false,
+            no_recall:   false,
+            no_housing:  false,
+            safe:        false,
         }
     }
 }
@@ -153,22 +154,22 @@ impl RegionFlags {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Region {
     /// Its index in the facet's list, which is also its wire and save id.
-    pub id: RegionId,
+    pub id:       RegionId,
     /// What it is called — "Britain", "Covetous".
-    pub name: String,
+    pub name:     String,
     /// Which region wins where two overlap: the higher number. A nested area is
     /// written with a higher priority than the one that contains it.
     pub priority: u8,
     /// The boxes it covers.
-    pub rects: Vec<RegionRect>,
+    pub rects:    Vec<RegionRect>,
     /// The rules that hold inside it.
-    pub flags: RegionFlags,
+    pub flags:    RegionFlags,
     /// The track the client plays here, as a `MusicName` index (ServUO's enum
     /// order). `None` leaves whatever was playing alone.
-    pub music: Option<u16>,
+    pub music:    Option<u16>,
     /// The light level inside, overriding the time of day — a dungeon is dark at
     /// noon. `None` takes the ambient.
-    pub light: Option<u8>,
+    pub light:    Option<u8>,
 }
 
 impl Region {
@@ -189,9 +190,9 @@ impl Region {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RegionSet {
     /// What the staff menu's button sends: `regions:felucca`.
-    pub verb: String,
+    pub verb:    String,
     /// Which facet these belong to.
-    pub facet: openshard_protocol::world::Facet,
+    pub facet:   openshard_protocol::world::Facet,
     /// The areas, in the order [`Regions::set`] will number them.
     pub regions: Vec<Region>,
 }
@@ -207,11 +208,11 @@ pub struct Regions {
     regions: Vec<Region>,
     /// Candidate region ids per bucket, indexed `bucket_x * down + bucket_y`.
     /// Column-major, matching [`Sectors`](crate::Sectors).
-    grid: Vec<Vec<RegionId>>,
+    grid:    Vec<Vec<RegionId>>,
     /// Buckets across.
-    across: u32,
+    across:  u32,
     /// Buckets down.
-    down: u32,
+    down:    u32,
 }
 
 impl Default for Regions {
@@ -268,7 +269,7 @@ impl Regions {
     pub fn try_set(&mut self, mut regions: Vec<Region>) -> Result<(), TooManyRegions> {
         if regions.len() > MAX_REGIONS {
             return Err(TooManyRegions {
-                found: regions.len(),
+                found:   regions.len(),
                 maximum: MAX_REGIONS,
             });
         }
@@ -518,7 +519,7 @@ mod tests {
         assert_eq!(
             error,
             TooManyRegions {
-                found: MAX_REGIONS + 1,
+                found:   MAX_REGIONS + 1,
                 maximum: MAX_REGIONS,
             }
         );

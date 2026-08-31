@@ -10,47 +10,100 @@
 //! shell draws from — the frame's answer to "what are the panels allowed to
 //! know".
 
-use openshard_client_net::action::{GumpReply, Outgoing};
-use openshard_client_render::bench::{self, Metrics};
-use openshard_client_render::camera::{self, Camera, TileBounds};
+use std::sync::Arc;
+use std::time::{
+    Duration,
+    Instant,
+};
+
+use openshard_client_net::action::{
+    GumpReply,
+    Outgoing,
+};
+use openshard_client_render::bench::{
+    self,
+    Metrics,
+};
+use openshard_client_render::camera::{
+    self,
+    Camera,
+    TileBounds,
+};
 use openshard_client_render::control::Follow;
 use openshard_client_render::cutaway::Cutaway;
-use openshard_client_render::depth;
-use openshard_client_render::mobiles::{self, Mobile};
-use openshard_client_render::{light, occlusion};
+use openshard_client_render::mobiles::{
+    self,
+    Mobile,
+};
+use openshard_client_render::{
+    depth,
+    light,
+    occlusion,
+};
 use openshard_map::grid::Tile;
 use openshard_map::map::WorldMap;
 use openshard_map::overlay::Doors;
-use openshard_movement::{Footing, PLAYER_HEIGHT, arrival_z};
+use openshard_movement::{
+    Footing,
+    PLAYER_HEIGHT,
+    arrival_z,
+};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use crate::app::App;
 use crate::crowd::Who;
 use crate::diagnostics::{
-    ActionBar, CompositeTelemetry, HealthBar, HealthPoints, Height, Hud, InteriorCell, InteriorDoor,
-    InteriorOverlay, OccluderSurface, Pick, PickedItem, PickedMobile, PickedTile, PriorityZ, RadarTelemetry,
-    Route, Selection, SightLine, TerrainOverlay, TileDepth,
+    ActionBar,
+    CompositeTelemetry,
+    HealthBar,
+    HealthPoints,
+    Height,
+    Hud,
+    InteriorCell,
+    InteriorDoor,
+    InteriorOverlay,
+    OccluderSurface,
+    Pick,
+    PickedItem,
+    PickedMobile,
+    PickedTile,
+    PriorityZ,
+    RadarTelemetry,
+    Route,
+    Selection,
+    SightLine,
+    TerrainOverlay,
+    TileDepth,
 };
 use crate::graphics::HighlightTarget;
 use crate::picking::SelectedIdentity;
-use crate::world::{InteriorCache, footing, guide, terrain};
-use crate::{desk, frames, shell, steer, tooltips};
+use crate::world::{
+    InteriorCache,
+    footing,
+    guide,
+    terrain,
+};
+use crate::{
+    desk,
+    frames,
+    shell,
+    steer,
+    tooltips,
+};
 
 /// The expensive sub-queries performed while assembling the development HUD.
 /// These are diagnostic timings only; they deliberately do not change the HUD
 /// snapshot's shape or the order in which its readers see the world.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct HudTimings {
-    pub terrain: Duration,
-    pub route: Duration,
+    pub terrain:   Duration,
+    pub route:     Duration,
     pub occluders: Duration,
-    pub picking: Duration,
-    pub perf: Duration,
+    pub picking:   Duration,
+    pub perf:      Duration,
 }
 
 /// The surface a world cursor means on a tile.
@@ -133,12 +186,14 @@ impl App {
             .drawn_mobiles()
             .into_iter()
             .find(|(_, mobile)| mobile.at.x == x && mobile.at.y == y)
-            .map(|(_, mobile)| depth::Order {
-                tile: match mobile.corpse {
-                    true => depth::corpse_tile(mobile.at),
-                    false => depth::mobile_tile(mobile.at, mobile.from),
-                },
-                priority_z: depth::mobile_priority_z(mobile.at.z),
+            .map(|(_, mobile)| {
+                depth::Order {
+                    tile:       match mobile.corpse {
+                        true => depth::corpse_tile(mobile.at),
+                        false => depth::mobile_tile(mobile.at, mobile.from),
+                    },
+                    priority_z: depth::mobile_priority_z(mobile.at.z),
+                }
             });
         // The height anything drawn *on* this tile belongs at: the surface a body
         // would stand on, not the ground under it. On a pier those are thirteen
@@ -175,10 +230,12 @@ impl App {
             // `land_corners` reads top, right, *left*, bottom, and the facet
             // wants top, right, bottom, left — swapping the pair is what keeps
             // the quad from being a bow tie.
-            true => match self.resources.map().land_corners(x, y) {
-                Some([top, right, left, bottom]) => [top, right, bottom, left],
-                None => [stand_z; 4],
-            },
+            true => {
+                match self.resources.map().land_corners(x, y) {
+                    Some([top, right, left, bottom]) => [top, right, bottom, left],
+                    None => [stand_z; 4],
+                }
+            }
             false => [stand_z; 4],
         };
         // The same clamp, and the same reason: a corrupt block may name a height
@@ -307,69 +364,76 @@ impl App {
     pub(crate) fn resolve_selection(&self, identity: SelectedIdentity) -> Selection {
         match identity {
             SelectedIdentity::Tile { x, y } => Selection::Tile(self.tile_info(Tile::new(x, y))),
-            SelectedIdentity::Static(picked) => Selection::Static {
-                static_: picked,
-                tile: self.tile_info(Tile::new(picked.at.x, picked.at.y)),
-                prism: self
-                    .resources
-                    .surfaces
-                    .as_ref()
-                    .and_then(|surfaces| surfaces.shape(picked.graphic).prism),
-            },
-            SelectedIdentity::Mobile(who) => Selection::Mobile(
-                self.drawn_mobiles()
-                    .into_iter()
-                    .find(|(drawn_who, _)| *drawn_who == who)
-                    .map(|(drawn_who, mobile)| {
-                        let order = depth::Order {
-                            tile: match mobile.corpse {
-                                true => depth::corpse_tile(mobile.at),
-                                false => depth::mobile_tile(mobile.at, mobile.from),
-                            },
-                            priority_z: depth::mobile_priority_z(mobile.at.z),
-                        };
-                        let picked = PickedMobile {
-                            you: drawn_who.is_none(),
-                            serial: match drawn_who {
-                                Some(serial) => Some(serial),
-                                None => self
-                                    .world
-                                    .authoritative
-                                    .view
-                                    .as_ref()
-                                    .map(|view| view.player.serial),
-                            },
-                            body: mobile.body,
-                            hue: mobile.hue,
-                            at: mobile.at,
-                            order,
-                        };
-                        (picked, self.tile_info(Tile::new(mobile.at.x, mobile.at.y)))
-                    }),
-            ),
-            SelectedIdentity::Item(selected) => Selection::Item(
-                self.world
-                    .presentation
-                    .item_serials
-                    .iter()
-                    .zip(self.world.presentation.items.iter())
-                    .position(|(serial, item)| selected.matches(*serial, item.graphic, item.at))
-                    .map(|index| {
-                        let item = self.world.presentation.items[index];
-                        let priority_z = PriorityZ(depth::static_priority_z(
-                            item.at.z,
-                            self.resources.tiledata.static_tile(item.displayed().0),
-                        ));
-                        let picked = PickedItem {
-                            serial: selected.serial,
-                            graphic: item.displayed(),
-                            hue: item.hue,
-                            at: item.at,
-                            priority_z,
-                        };
-                        (picked, self.tile_info(Tile::new(item.at.x, item.at.y)))
-                    }),
-            ),
+            SelectedIdentity::Static(picked) => {
+                Selection::Static {
+                    static_: picked,
+                    tile:    self.tile_info(Tile::new(picked.at.x, picked.at.y)),
+                    prism:   self
+                        .resources
+                        .surfaces
+                        .as_ref()
+                        .and_then(|surfaces| surfaces.shape(picked.graphic).prism),
+                }
+            }
+            SelectedIdentity::Mobile(who) => {
+                Selection::Mobile(
+                    self.drawn_mobiles()
+                        .into_iter()
+                        .find(|(drawn_who, _)| *drawn_who == who)
+                        .map(|(drawn_who, mobile)| {
+                            let order = depth::Order {
+                                tile:       match mobile.corpse {
+                                    true => depth::corpse_tile(mobile.at),
+                                    false => depth::mobile_tile(mobile.at, mobile.from),
+                                },
+                                priority_z: depth::mobile_priority_z(mobile.at.z),
+                            };
+                            let picked = PickedMobile {
+                                you: drawn_who.is_none(),
+                                serial: match drawn_who {
+                                    Some(serial) => Some(serial),
+                                    None => {
+                                        self.world
+                                            .authoritative
+                                            .view
+                                            .as_ref()
+                                            .map(|view| view.player.serial)
+                                    }
+                                },
+                                body: mobile.body,
+                                hue: mobile.hue,
+                                at: mobile.at,
+                                order,
+                            };
+                            (picked, self.tile_info(Tile::new(mobile.at.x, mobile.at.y)))
+                        }),
+                )
+            }
+            SelectedIdentity::Item(selected) => {
+                Selection::Item(
+                    self.world
+                        .presentation
+                        .item_serials
+                        .iter()
+                        .zip(self.world.presentation.items.iter())
+                        .position(|(serial, item)| selected.matches(*serial, item.graphic, item.at))
+                        .map(|index| {
+                            let item = self.world.presentation.items[index];
+                            let priority_z = PriorityZ(depth::static_priority_z(
+                                item.at.z,
+                                self.resources.tiledata.static_tile(item.displayed().0),
+                            ));
+                            let picked = PickedItem {
+                                serial: selected.serial,
+                                graphic: item.displayed(),
+                                hue: item.hue,
+                                at: item.at,
+                                priority_z,
+                            };
+                            (picked, self.tile_info(Tile::new(item.at.x, item.at.y)))
+                        }),
+                )
+            }
         }
     }
 
@@ -513,14 +577,16 @@ impl App {
                     match surface.filter(|&z| openshard_movement::can_stand(&terrain, tile, z, PLAYER_HEIGHT))
                     {
                         Some(z) => open.push(Point { x, y, z: drawn_z(z) }),
-                        None => blocked.push(Point {
-                            x,
-                            y,
-                            z: surface.map_or_else(
-                                || terrain.map.and_then(|map| map.ground_z(tile)).unwrap_or(0),
-                                drawn_z,
-                            ),
-                        }),
+                        None => {
+                            blocked.push(Point {
+                                x,
+                                y,
+                                z: surface.map_or_else(
+                                    || terrain.map.and_then(|map| map.ground_z(tile)).unwrap_or(0),
+                                    drawn_z,
+                                ),
+                            })
+                        }
                     }
                 }
             }
@@ -560,9 +626,9 @@ impl App {
     fn interiors_shown(&mut self, camera: Camera) -> Arc<InteriorOverlay> {
         let Some(graph) = self.resources.interiors.as_ref() else {
             return Arc::new(InteriorOverlay {
-                cells: Vec::new(),
-                doors: Vec::new(),
-                stairs: Vec::new(),
+                cells:     Vec::new(),
+                doors:     Vec::new(),
+                stairs:    Vec::new(),
                 buildings: 0,
             });
         };
@@ -571,9 +637,9 @@ impl App {
             .clamp_to(self.resources.map().width(), self.resources.map().height())
         else {
             return Arc::new(InteriorOverlay {
-                cells: Vec::new(),
-                doors: Vec::new(),
-                stairs: Vec::new(),
+                cells:     Vec::new(),
+                doors:     Vec::new(),
+                stairs:    Vec::new(),
                 buildings: 0,
             });
         };
@@ -586,11 +652,11 @@ impl App {
                 };
                 visible_buildings.insert(building);
                 cells.push(InteriorCell {
-                    at: Point::new(x, y, self.resources.map().land(x, y).map_or(0, |land| land.z)),
+                    at:    Point::new(x, y, self.resources.map().land(x, y).map_or(0, |land| land.z)),
                     // This first artifact identifies a whole house.  The
                     // storey/room graph follows on top of these ids.
                     floor: 0,
-                    room: building,
+                    room:  building,
                     shown: true,
                 });
             }
@@ -612,9 +678,11 @@ impl App {
                             .flags
                             .has(openshard_tiles::TileFlags::DOOR)
                     })
-                    .map(|item| InteriorDoor {
-                        at: Point::new(x, y, item.z),
-                        shown: openshard_client_render::doors::is_open(item.tile),
+                    .map(|item| {
+                        InteriorDoor {
+                            at:    Point::new(x, y, item.z),
+                            shown: openshard_client_render::doors::is_open(item.tile),
+                        }
                     })
             });
         let item_doors = self.world.presentation.items.iter().filter_map(|item| {
@@ -622,7 +690,7 @@ impl App {
             (graph.building_at(item.at.x, item.at.y).is_some()
                 && openshard_client_render::doors::is_door(graphic))
             .then_some(InteriorDoor {
-                at: item.at,
+                at:    item.at,
                 shown: openshard_client_render::doors::is_open(graphic),
             })
         });
@@ -696,8 +764,8 @@ impl App {
                         .position(|point| point.x == from.x && point.y == from.y)
                     {
                         let route = Route {
-                            open: route.open[index..].to_vec(),
-                            barred: route.barred.clone(),
+                            open:    route.open[index..].to_vec(),
+                            barred:  route.barred.clone(),
                             refusal: route.refusal,
                         };
                         let route = Arc::new(route);
@@ -726,12 +794,12 @@ impl App {
             // its step does (`crate::world::walking_doors`). Drawing that route
             // stopped at the door would be a picture of a refusal that is not
             // going to happen — `docs/parity.md`'s whole complaint.
-            live: footing(
+            live:   footing(
                 &self.resources,
                 crate::world::walking_doors(self.world.dead(), false),
             )
             .among(openshard_movement::Bodies::standing(&self.world.bodies)),
-            guide: guide(&self.resources),
+            guide:  guide(&self.resources),
             coarse: self.resources.coarse.as_ref(),
         };
         let route = self.steer.plan_for(ground, from, goal).map(|plan| {
@@ -831,16 +899,18 @@ impl App {
             // The tile's *standing* height, not its land height: a look is aimed
             // at where a body would be, which on a bridge or a shop floor is not
             // the ground under it.
-            None => hover.map(|tile| {
-                (
-                    Point {
-                        x: tile.at.x,
-                        y: tile.at.y,
-                        z: tile.stand_z.0,
-                    },
-                    false,
-                )
-            }),
+            None => {
+                hover.map(|tile| {
+                    (
+                        Point {
+                            x: tile.at.x,
+                            y: tile.at.y,
+                            z: tile.stand_z.0,
+                        },
+                        false,
+                    )
+                })
+            }
         }
     }
 
@@ -883,11 +953,11 @@ impl App {
         let mut surfaces = Vec::new();
         for y in bounds.min_y..=bounds.max_y {
             for x in bounds.min_x..=bounds.max_x {
-                surfaces.extend(occlusion.solids_at(x, y).map(|solid| OccluderSurface {
-                    x,
-                    y,
-                    solid: *solid,
-                }));
+                surfaces.extend(
+                    occlusion
+                        .solids_at(x, y)
+                        .map(|solid| OccluderSurface { x, y, solid: *solid }),
+                );
             }
         }
         // The painter has no depth buffer. Preserve the grid's own back-to-front
@@ -973,14 +1043,14 @@ impl App {
             if authority.allows(openshard_commands::StaffCommand::AUTHORITY) {
                 if let Some(link) = self.world.shard.link() {
                     link.act(Outgoing::AnswerGump(GumpReply {
-                        key: openshard_protocol::gump::RawGumpKey(0),
-                        gump_id: openshard_protocol::gump::RawGumpId(
+                        key:          openshard_protocol::gump::RawGumpKey(0),
+                        gump_id:      openshard_protocol::gump::RawGumpId(
                             openshard_protocol::gump::id::ADMIN_ITEM.0,
                         ),
-                        button: openshard_protocol::gump::RawButtonId(
+                        button:       openshard_protocol::gump::RawButtonId(
                             openshard_protocol::gump::admin::ITEM_CREATE.0,
                         ),
-                        switches: item
+                        switches:     item
                             .stackable
                             .then_some(openshard_protocol::gump::RawSwitchId(
                                 openshard_protocol::gump::admin::ITEM_STACKABLE.0,
@@ -1009,14 +1079,14 @@ impl App {
             if authority.allows(openshard_commands::StaffCommand::AUTHORITY) {
                 if let Some(link) = self.world.shard.link() {
                     link.act(Outgoing::AnswerGump(GumpReply {
-                        key: openshard_protocol::gump::RawGumpKey(0),
-                        gump_id: openshard_protocol::gump::RawGumpId(
+                        key:          openshard_protocol::gump::RawGumpKey(0),
+                        gump_id:      openshard_protocol::gump::RawGumpId(
                             openshard_protocol::gump::id::ADMIN_CREATURE.0,
                         ),
-                        button: openshard_protocol::gump::RawButtonId(
+                        button:       openshard_protocol::gump::RawButtonId(
                             openshard_protocol::gump::admin::CREATURE_CREATE.0,
                         ),
-                        switches: Vec::new(),
+                        switches:     Vec::new(),
                         text_entries: vec![(
                             openshard_protocol::gump::admin::CREATURE_KIND_FIELD,
                             kind.to_string(),
@@ -1395,15 +1465,17 @@ impl App {
             composites: self
                 .window
                 .as_ref()
-                .map_or_else(CompositeTelemetry::default, |window| CompositeTelemetry {
-                    ready: window.composites.len(),
-                    pending: self.composite_work.pending_len(),
-                    prepared: self.composite_work.prepared_len(),
-                    in_flight: self.composite_work.in_flight_len(),
-                    gpu_bytes: window.composites.gpu_bytes(),
-                    gpu_budget_bytes: window.composites.limits().max_gpu_bytes,
-                    quarantined: window.composites.quarantined_len(),
-                    latest_quarantine: window.composites.latest_quarantine(),
+                .map_or_else(CompositeTelemetry::default, |window| {
+                    CompositeTelemetry {
+                        ready:             window.composites.len(),
+                        pending:           self.composite_work.pending_len(),
+                        prepared:          self.composite_work.prepared_len(),
+                        in_flight:         self.composite_work.in_flight_len(),
+                        gpu_bytes:         window.composites.gpu_bytes(),
+                        gpu_budget_bytes:  window.composites.limits().max_gpu_bytes,
+                        quarantined:       window.composites.quarantined_len(),
+                        latest_quarantine: window.composites.latest_quarantine(),
+                    }
                 }),
             radar: RadarTelemetry {
                 // A frame behind, and the only part of this that is — see
@@ -1425,11 +1497,11 @@ impl App {
         (
             hud,
             HudTimings {
-                terrain: terrain_cost,
-                route: route_cost,
+                terrain:   terrain_cost,
+                route:     route_cost,
                 occluders: occluders_cost,
-                picking: picking_cost,
-                perf: perf.1,
+                picking:   picking_cost,
+                perf:      perf.1,
             },
         )
     }
@@ -1446,12 +1518,14 @@ impl App {
             .iter()
             .filter_map(|(who, drawn)| {
                 let (hits, mana, notoriety, targeted) = match who {
-                    Some(serial) if *serial == view.player.serial => (
-                        view.player.hits,
-                        view.player.status.as_ref().map(|status| status.mana),
-                        Notoriety::Innocent,
-                        false,
-                    ),
+                    Some(serial) if *serial == view.player.serial => {
+                        (
+                            view.player.hits,
+                            view.player.status.as_ref().map(|status| status.mana),
+                            Notoriety::Innocent,
+                            false,
+                        )
+                    }
                     Some(serial) => {
                         let mobile = view.mobiles.get(serial)?;
                         (
@@ -1472,9 +1546,11 @@ impl App {
                     estimated: HealthPoints::new(
                         self.world.presentation.estimated_health(serial, hits.current),
                     ),
-                    mana: mana.map(|mana| crate::diagnostics::ResourceBar {
-                        current: HealthPoints::new(mana.current),
-                        max: HealthPoints::new(mana.max),
+                    mana: mana.map(|mana| {
+                        crate::diagnostics::ResourceBar {
+                            current: HealthPoints::new(mana.current),
+                            max:     HealthPoints::new(mana.max),
+                        }
                     }),
                     max: HealthPoints::new(hits.max),
                     notoriety,
@@ -1516,39 +1592,43 @@ impl App {
     /// [`frames::Perf`].
     pub(crate) fn perf(&self) -> frames::Perf {
         frames::Perf {
-            readings: bench::readings(self.scope.samples()),
+            readings:    bench::readings(self.scope.samples()),
             // Two frames is one difference and no derivative of it. Absent
             // rather than a zero, which would read as "the eye was perfectly
             // smooth" on the frame the window opened.
-            metrics: (self.scope.samples().len() > 2).then(|| Metrics::of(self.scope.samples())),
-            scope_span: self.scope.span(),
-            frames: self.frames.frames().to_vec(),
+            metrics:     (self.scope.samples().len() > 2).then(|| Metrics::of(self.scope.samples())),
+            scope_span:  self.scope.span(),
+            frames:      self.frames.frames().to_vec(),
             frames_span: self.frames.span(),
-            worst_fps: self.frames.worst_fps(),
+            worst_fps:   self.frames.worst_fps(),
             // Which pass ate the device's frame. Cloned into the snapshot like
             // everything else here — a dozen short strings a frame — for the
             // reason `Perf` exists: a panel that could reach back into the
             // screen would be reading a frame the screen has moved past.
-            gpu_passes: self
+            gpu_passes:  self
                 .window
                 .as_ref()
                 .and_then(|window| window.gpu.as_ref())
                 .map(|gpu| gpu.passes().to_vec())
                 .unwrap_or_default(),
-            repacks: self.repacks,
+            repacks:     self.repacks,
             // What is currently *asking* for frames, which is the other half of
             // any answer about the frame rate: a picture drawn every 80ms is not
             // a slow frame if the loop is on the animation clock, it is a frame
             // nobody asked for sooner.
-            pacing: self.pacing(),
+            pacing:      self.pacing(),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use openshard_map::overlay::{
+        Cover,
+        Overlay,
+    };
+
     use super::*;
-    use openshard_map::overlay::{Cover, Overlay};
 
     /// A house arrives as live component art rather than map statics. A cursor
     /// over its floor must therefore read the overlay's surface, not the land
@@ -1612,20 +1692,24 @@ impl crate::App {
         // the same answer: a preview this client has no shape for is a preview it
         // cannot show, and the cursor is still up either way.
         let drawn = match preview {
-            crate::editor_mode::HousePreview::Multi(multi) => crate::net_command::multi_pieces(
-                self.resources.multis.as_deref(),
-                None,
-                openshard_protocol::wire::MultiId(multi).graphic(),
-                at,
-                openshard_protocol::wire::Hue::NONE,
-            ),
-            crate::editor_mode::HousePreview::Design(components) => crate::net_command::multi_pieces(
-                None,
-                Some(&components),
-                openshard_protocol::wire::MultiId(0).graphic(),
-                at,
-                openshard_protocol::wire::Hue::NONE,
-            ),
+            crate::editor_mode::HousePreview::Multi(multi) => {
+                crate::net_command::multi_pieces(
+                    self.resources.multis.as_deref(),
+                    None,
+                    openshard_protocol::wire::MultiId(multi).graphic(),
+                    at,
+                    openshard_protocol::wire::Hue::NONE,
+                )
+            }
+            crate::editor_mode::HousePreview::Design(components) => {
+                crate::net_command::multi_pieces(
+                    None,
+                    Some(&components),
+                    openshard_protocol::wire::MultiId(0).graphic(),
+                    at,
+                    openshard_protocol::wire::Hue::NONE,
+                )
+            }
         };
         self.world.presentation.multi_preview = match drawn {
             crate::net_command::MultiDraw::Pieces(pieces) => pieces,
@@ -1682,21 +1766,23 @@ mod sight_tests {
     /// A clear look ten tiles long, and the reach it is read against.
     fn look_ten_tiles(reach: u8) -> SightLine {
         let steps = (11..20)
-            .map(|y| openshard_movement::sight::SightStep {
-                tile: Tile::new(10, y),
-                ray_z: openshard_movement::sight::EYE,
-                stop: None,
+            .map(|y| {
+                openshard_movement::sight::SightStep {
+                    tile:  Tile::new(10, y),
+                    ray_z: openshard_movement::sight::EYE,
+                    stop:  None,
+                }
             })
             .collect();
         SightLine {
-            trace: openshard_movement::sight::SightTrace {
+            trace:     openshard_movement::sight::SightTrace {
                 from: Point::new(10, 10, 0),
                 to: Point::new(10, 20, 0),
                 steps,
                 stopped: None,
             },
             at_quarry: false,
-            reach: openshard_protocol::world::RangedRange::new(reach).expect("a reach of some tiles"),
+            reach:     openshard_protocol::world::RangedRange::new(reach).expect("a reach of some tiles"),
         }
     }
 

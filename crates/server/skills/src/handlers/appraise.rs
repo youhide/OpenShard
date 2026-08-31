@@ -10,13 +10,36 @@
 //! turns a weapon row into a swing, and this turns the same row into a sentence.
 
 use openshard_entities::EntityId;
-use openshard_protocol::wire::{ClilocId, Graphic, Layer};
-use openshard_state::armor::{armor_data, piece_rating};
-use openshard_state::components::{Body, Drawn, ItemKind, Name, PoisonCharges, Price};
-use openshard_state::weapon::{
-    LAYER_TWO_HANDED, WeaponKind, by_era, weapon_data, weapon_data_for_kind, weapon_layer,
+use openshard_protocol::wire::{
+    ClilocId,
+    Graphic,
+    Layer,
 };
-use openshard_state::{Skill, WorldState, item_definition};
+use openshard_state::armor::{
+    armor_data,
+    piece_rating,
+};
+use openshard_state::components::{
+    Body,
+    Drawn,
+    ItemKind,
+    Name,
+    PoisonCharges,
+    Price,
+};
+use openshard_state::weapon::{
+    LAYER_TWO_HANDED,
+    WeaponKind,
+    by_era,
+    weapon_data,
+    weapon_data_for_kind,
+    weapon_layer,
+};
+use openshard_state::{
+    Skill,
+    WorldState,
+    item_definition,
+};
 
 use crate::check::roll_skill_band;
 

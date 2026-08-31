@@ -22,41 +22,126 @@
 use std::fmt;
 
 use crate::codec::PacketWriter;
-use crate::combat::{AttackTarget, HealthBar, WarMode};
+use crate::combat::{
+    AttackTarget,
+    HealthBar,
+    WarMode,
+};
 use crate::containers::{
-    AddToContainer, ContainerContents, OpenContainer, add_to_container_length, open_container_length,
+    AddToContainer,
+    ContainerContents,
+    OpenContainer,
+    add_to_container_length,
+    open_container_length,
 };
 use crate::context::ContextMenu;
-use crate::craft::{CraftCatalogue, CraftWorkbench};
-use crate::error::{DecodeError, expect_id};
+use crate::craft::{
+    CraftCatalogue,
+    CraftWorkbench,
+};
+use crate::error::{
+    DecodeError,
+    expect_id,
+};
 use crate::feature::Feature;
 use crate::feedback::{
-    Animation, CombatActionBalked, CombatActionEnded, CombatActionPhase, CombatActionStage, GraphicalEffect,
-    HarvestCompleted, HarvestPreview, HarvestRefused, HarvestToolVisual, HuedEffect, NewAnimation, PlaySound,
+    Animation,
+    CombatActionBalked,
+    CombatActionEnded,
+    CombatActionPhase,
+    CombatActionStage,
+    GraphicalEffect,
+    HarvestCompleted,
+    HarvestPreview,
+    HarvestRefused,
+    HarvestToolVisual,
+    HuedEffect,
+    NewAnimation,
+    PlaySound,
     SwingTiming,
 };
-use crate::gump::{CloseGump, GumpDisplay};
-use crate::items::{CorpseEquipment, DragCancel, EquipUpdate, WorldItem};
+use crate::gump::{
+    CloseGump,
+    GumpDisplay,
+};
+use crate::items::{
+    CorpseEquipment,
+    DragCancel,
+    EquipUpdate,
+    WorldItem,
+};
 use crate::login::{
-    CharacterList, CharacterListUpdate, DeleteReject, LoginDenied, Relay, ShardList,
+    CharacterList,
+    CharacterListUpdate,
+    DeleteReject,
+    LoginDenied,
+    Relay,
+    ShardList,
     supported_features_length,
 };
-use crate::mobile::{MobileIncoming, MobileMove, MobileStatus, OpenPaperdoll, Remove, StatLocks};
+use crate::mobile::{
+    MobileIncoming,
+    MobileMove,
+    MobileStatus,
+    OpenPaperdoll,
+    Remove,
+    StatLocks,
+};
 use crate::packet::{
-    DecodePacket, EncodePacket, Frame, FrameError, MAX_SERVER_PACKET_SIZE, PacketLength, frame_body,
+    DecodePacket,
+    EncodePacket,
+    Frame,
+    FrameError,
+    MAX_SERVER_PACKET_SIZE,
+    PacketLength,
+    frame_body,
     frame_packet,
 };
-use crate::party::{PartyInvitation, PartyMemberList, PartyRemoveMember, PartyTextMessage};
-use crate::properties::{PropertyListReply, TooltipRevision};
-use crate::skill::{SkillUpdate, SkillsFull, SkillsPacket};
-use crate::speech::{LocalizedMessage, SpokenMessage, UnicodeMessage};
+use crate::party::{
+    PartyInvitation,
+    PartyMemberList,
+    PartyRemoveMember,
+    PartyTextMessage,
+};
+use crate::properties::{
+    PropertyListReply,
+    TooltipRevision,
+};
+use crate::skill::{
+    SkillUpdate,
+    SkillsFull,
+    SkillsPacket,
+};
+use crate::speech::{
+    LocalizedMessage,
+    SpokenMessage,
+    UnicodeMessage,
+};
 use crate::spellbook::SpellbookContent;
-use crate::target::{MultiTargetRequest, TargetCursor};
-use crate::vendor::{BuyList, SellList};
+use crate::target::{
+    MultiTargetRequest,
+    TargetCursor,
+};
+use crate::vendor::{
+    BuyList,
+    SellList,
+};
 use crate::version::ClientVersion;
 use crate::world::{
-    DeathAnimation, DeathStatus, LightLevel, LoginComplete, LogoutAck, MapChange, PlayMusic, PlayerStart,
-    PlayerUpdate, SERVER_CHANGE_LENGTH, SeasonChange, WalkAck, WalkReject, WeatherChange,
+    DeathAnimation,
+    DeathStatus,
+    LightLevel,
+    LoginComplete,
+    LogoutAck,
+    MapChange,
+    PlayMusic,
+    PlayerStart,
+    PlayerUpdate,
+    SERVER_CHANGE_LENGTH,
+    SeasonChange,
+    WalkAck,
+    WalkReject,
+    WeatherChange,
 };
 
 /// A packet the server sends to a client.
@@ -560,69 +645,111 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
         return Ok(None);
     };
     Ok(Some(match subcommand {
-        crate::gump::CloseGump::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::CloseGump)
-            .map_err(ServerDecodeError::CloseGump)?,
-        CraftCatalogue::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::CraftCatalogue)
-            .map_err(ServerDecodeError::CraftCatalogue)?,
-        CraftWorkbench::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::CraftWorkbench)
-            .map_err(ServerDecodeError::CraftWorkbench)?,
-        crate::spellbook::SpellbookContent::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::SpellbookContent)
-            .map_err(ServerDecodeError::SpellbookContent)?,
-        crate::design::DesignRevision::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::DesignRevision)
-            .map_err(ServerDecodeError::DesignRevision)?,
-        crate::access::AuthorityNotice::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::AuthorityNotice)
-            .map_err(ServerDecodeError::AuthorityNotice)?,
-        crate::chunks::ChunkData::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::ChunkData)
-            .map_err(ServerDecodeError::ChunkData)?,
-        crate::chunks::WorldNotice::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::WorldNotice)
-            .map_err(ServerDecodeError::WorldNotice)?,
-        crate::chunks::PublishNotice::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::PublishNotice)
-            .map_err(ServerDecodeError::PublishNotice)?,
-        crate::chunks::ChunkRefused::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::ChunkRefused)
-            .map_err(ServerDecodeError::ChunkRefused)?,
-        crate::chunks::ChangesReply::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::ChangesReply)
-            .map_err(ServerDecodeError::ChangesReply)?,
-        crate::mapedit::MapEditReply::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::MapEditReply)
-            .map_err(ServerDecodeError::MapEditReply)?,
-        SwingTiming::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::SwingTiming)
-            .map_err(ServerDecodeError::SwingTiming)?,
-        HarvestToolVisual::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::HarvestToolVisual)
-            .map_err(ServerDecodeError::HarvestToolVisual)?,
-        HarvestPreview::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::HarvestPreview)
-            .map_err(ServerDecodeError::HarvestPreview)?,
-        HarvestRefused::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::HarvestRefused)
-            .map_err(ServerDecodeError::HarvestRefused)?,
-        HarvestCompleted::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::HarvestCompleted)
-            .map_err(ServerDecodeError::HarvestCompleted)?,
-        CombatActionPhase::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::CombatActionPhase)
-            .map_err(ServerDecodeError::CombatActionPhase)?,
-        CombatActionEnded::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::CombatActionEnded)
-            .map_err(ServerDecodeError::CombatActionEnded)?,
-        CombatActionBalked::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::CombatActionBalked)
-            .map_err(ServerDecodeError::CombatActionBalked)?,
-        CombatActionStage::SUBCOMMAND => decode_server(packet, version)
-            .map(ServerPacket::CombatActionStage)
-            .map_err(ServerDecodeError::CombatActionStage)?,
+        crate::gump::CloseGump::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::CloseGump)
+                .map_err(ServerDecodeError::CloseGump)?
+        }
+        CraftCatalogue::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::CraftCatalogue)
+                .map_err(ServerDecodeError::CraftCatalogue)?
+        }
+        CraftWorkbench::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::CraftWorkbench)
+                .map_err(ServerDecodeError::CraftWorkbench)?
+        }
+        crate::spellbook::SpellbookContent::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::SpellbookContent)
+                .map_err(ServerDecodeError::SpellbookContent)?
+        }
+        crate::design::DesignRevision::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::DesignRevision)
+                .map_err(ServerDecodeError::DesignRevision)?
+        }
+        crate::access::AuthorityNotice::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::AuthorityNotice)
+                .map_err(ServerDecodeError::AuthorityNotice)?
+        }
+        crate::chunks::ChunkData::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::ChunkData)
+                .map_err(ServerDecodeError::ChunkData)?
+        }
+        crate::chunks::WorldNotice::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::WorldNotice)
+                .map_err(ServerDecodeError::WorldNotice)?
+        }
+        crate::chunks::PublishNotice::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::PublishNotice)
+                .map_err(ServerDecodeError::PublishNotice)?
+        }
+        crate::chunks::ChunkRefused::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::ChunkRefused)
+                .map_err(ServerDecodeError::ChunkRefused)?
+        }
+        crate::chunks::ChangesReply::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::ChangesReply)
+                .map_err(ServerDecodeError::ChangesReply)?
+        }
+        crate::mapedit::MapEditReply::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::MapEditReply)
+                .map_err(ServerDecodeError::MapEditReply)?
+        }
+        SwingTiming::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::SwingTiming)
+                .map_err(ServerDecodeError::SwingTiming)?
+        }
+        HarvestToolVisual::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::HarvestToolVisual)
+                .map_err(ServerDecodeError::HarvestToolVisual)?
+        }
+        HarvestPreview::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::HarvestPreview)
+                .map_err(ServerDecodeError::HarvestPreview)?
+        }
+        HarvestRefused::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::HarvestRefused)
+                .map_err(ServerDecodeError::HarvestRefused)?
+        }
+        HarvestCompleted::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::HarvestCompleted)
+                .map_err(ServerDecodeError::HarvestCompleted)?
+        }
+        CombatActionPhase::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::CombatActionPhase)
+                .map_err(ServerDecodeError::CombatActionPhase)?
+        }
+        CombatActionEnded::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::CombatActionEnded)
+                .map_err(ServerDecodeError::CombatActionEnded)?
+        }
+        CombatActionBalked::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::CombatActionBalked)
+                .map_err(ServerDecodeError::CombatActionBalked)?
+        }
+        CombatActionStage::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::CombatActionStage)
+                .map_err(ServerDecodeError::CombatActionStage)?
+        }
         crate::party::SUBCOMMAND => return decode_party(packet, version),
         _ => return Ok(None),
     }))
@@ -633,24 +760,37 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
 /// The byte after it is the type — see [`crate::party`]'s table, and note that
 /// it means different things inbound and outbound.
 fn decode_party(packet: &[u8], version: ClientVersion) -> Result<Option<ServerPacket>, ServerDecodeError> {
-    use crate::party::{PartyInvitation, PartyMemberList, PartyRemoveMember, PartyTextMessage};
+    use crate::party::{
+        PartyInvitation,
+        PartyMemberList,
+        PartyRemoveMember,
+        PartyTextMessage,
+    };
 
     let Some(&kind) = packet.get(5) else {
         return Ok(None);
     };
     Ok(Some(match kind {
-        PartyMemberList::KIND => decode_server(packet, version)
-            .map(ServerPacket::PartyMemberList)
-            .map_err(ServerDecodeError::Party)?,
-        PartyRemoveMember::KIND => decode_server(packet, version)
-            .map(ServerPacket::PartyRemoveMember)
-            .map_err(ServerDecodeError::Party)?,
-        PartyTextMessage::KIND_ALL | PartyTextMessage::KIND_ONE => decode_server(packet, version)
-            .map(ServerPacket::PartyTextMessage)
-            .map_err(ServerDecodeError::Party)?,
-        PartyInvitation::KIND => decode_server(packet, version)
-            .map(ServerPacket::PartyInvitation)
-            .map_err(ServerDecodeError::Party)?,
+        PartyMemberList::KIND => {
+            decode_server(packet, version)
+                .map(ServerPacket::PartyMemberList)
+                .map_err(ServerDecodeError::Party)?
+        }
+        PartyRemoveMember::KIND => {
+            decode_server(packet, version)
+                .map(ServerPacket::PartyRemoveMember)
+                .map_err(ServerDecodeError::Party)?
+        }
+        PartyTextMessage::KIND_ALL | PartyTextMessage::KIND_ONE => {
+            decode_server(packet, version)
+                .map(ServerPacket::PartyTextMessage)
+                .map_err(ServerDecodeError::Party)?
+        }
+        PartyInvitation::KIND => {
+            decode_server(packet, version)
+                .map(ServerPacket::PartyInvitation)
+                .map_err(ServerDecodeError::Party)?
+        }
         _ => return Ok(None),
     }))
 }
@@ -715,24 +855,36 @@ fn decode_session_packet(
     version: ClientVersion,
 ) -> Result<Option<ServerPacket>, ServerDecodeError> {
     let decoded = match id {
-        <LoginDenied as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::LoginDenied)
-            .map_err(ServerDecodeError::LoginDenied)?,
-        <ShardList as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::ShardList)
-            .map_err(ServerDecodeError::ShardList)?,
-        <Relay as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::Relay)
-            .map_err(ServerDecodeError::Relay)?,
-        <CharacterList as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::CharacterList)
-            .map_err(ServerDecodeError::CharacterList)?,
-        <PlayerStart as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::PlayerStart)
-            .map_err(ServerDecodeError::PlayerStart)?,
-        <LoginComplete as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::LoginComplete)
-            .map_err(ServerDecodeError::LoginComplete)?,
+        <LoginDenied as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::LoginDenied)
+                .map_err(ServerDecodeError::LoginDenied)?
+        }
+        <ShardList as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::ShardList)
+                .map_err(ServerDecodeError::ShardList)?
+        }
+        <Relay as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::Relay)
+                .map_err(ServerDecodeError::Relay)?
+        }
+        <CharacterList as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::CharacterList)
+                .map_err(ServerDecodeError::CharacterList)?
+        }
+        <PlayerStart as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::PlayerStart)
+                .map_err(ServerDecodeError::PlayerStart)?
+        }
+        <LoginComplete as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::LoginComplete)
+                .map_err(ServerDecodeError::LoginComplete)?
+        }
         _ => return Ok(None),
     };
     Ok(Some(decoded))
@@ -745,36 +897,56 @@ fn decode_world_packet(
     version: ClientVersion,
 ) -> Result<Option<ServerPacket>, ServerDecodeError> {
     let decoded = match id {
-        <LightLevel as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::LightLevel)
-            .map_err(ServerDecodeError::LightLevel)?,
-        <WeatherChange as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::WeatherChange)
-            .map_err(ServerDecodeError::WeatherChange)?,
-        <Remove as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::Remove)
-            .map_err(ServerDecodeError::Remove)?,
-        <PlayerUpdate as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::PlayerUpdate)
-            .map_err(ServerDecodeError::PlayerUpdate)?,
-        <MobileStatus as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::MobileStatus)
-            .map_err(ServerDecodeError::MobileStatus)?,
-        <MobileMove as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::MobileMove)
-            .map_err(ServerDecodeError::MobileMove)?,
-        <MobileIncoming as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::MobileIncoming)
-            .map_err(ServerDecodeError::MobileIncoming)?,
-        <WorldItem as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::WorldItem)
-            .map_err(ServerDecodeError::WorldItem)?,
-        <WalkAck as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::WalkAck)
-            .map_err(ServerDecodeError::WalkAck)?,
-        <WalkReject as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::WalkReject)
-            .map_err(ServerDecodeError::WalkReject)?,
+        <LightLevel as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::LightLevel)
+                .map_err(ServerDecodeError::LightLevel)?
+        }
+        <WeatherChange as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::WeatherChange)
+                .map_err(ServerDecodeError::WeatherChange)?
+        }
+        <Remove as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::Remove)
+                .map_err(ServerDecodeError::Remove)?
+        }
+        <PlayerUpdate as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::PlayerUpdate)
+                .map_err(ServerDecodeError::PlayerUpdate)?
+        }
+        <MobileStatus as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::MobileStatus)
+                .map_err(ServerDecodeError::MobileStatus)?
+        }
+        <MobileMove as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::MobileMove)
+                .map_err(ServerDecodeError::MobileMove)?
+        }
+        <MobileIncoming as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::MobileIncoming)
+                .map_err(ServerDecodeError::MobileIncoming)?
+        }
+        <WorldItem as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::WorldItem)
+                .map_err(ServerDecodeError::WorldItem)?
+        }
+        <WalkAck as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::WalkAck)
+                .map_err(ServerDecodeError::WalkAck)?
+        }
+        <WalkReject as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::WalkReject)
+                .map_err(ServerDecodeError::WalkReject)?
+        }
         _ => return Ok(None),
     };
     Ok(Some(decoded))
@@ -787,80 +959,114 @@ fn decode_interface_packet(
     version: ClientVersion,
 ) -> Result<Option<ServerPacket>, ServerDecodeError> {
     let decoded = match id {
-        <SpokenMessage as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::SpokenMessage)
-            .map_err(ServerDecodeError::SpokenMessage)?,
+        <SpokenMessage as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::SpokenMessage)
+                .map_err(ServerDecodeError::SpokenMessage)?
+        }
         // Shares `0xC1` with nothing — the id is `LocalizedMessage`'s alone
         // — but had no arm here even though `EncodePacket` for it has stood
         // since `use_skill_button`'s "cannot be used directly" line: a
         // client asking for this cliloc read it as `Unknown` and dropped it
         // silently, which no e2e test had ever sent one over a real socket
         // to catch.
-        <LocalizedMessage as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::LocalizedMessage)
-            .map_err(ServerDecodeError::LocalizedMessage)?,
-        <UnicodeMessage as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::UnicodeMessage)
-            .map_err(ServerDecodeError::UnicodeMessage)?,
-        <GumpDisplay as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::GumpDisplay)
-            .map_err(ServerDecodeError::GumpDisplay)?,
+        <LocalizedMessage as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::LocalizedMessage)
+                .map_err(ServerDecodeError::LocalizedMessage)?
+        }
+        <UnicodeMessage as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::UnicodeMessage)
+                .map_err(ServerDecodeError::UnicodeMessage)?
+        }
+        <GumpDisplay as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::GumpDisplay)
+                .map_err(ServerDecodeError::GumpDisplay)?
+        }
         // The two halves of a tooltip. Both had encoders and neither had an
         // arm, so every property list this engine has ever sent reached its
         // own client as an undecoded id and was dropped — the shard's side
         // has been complete for a long time and nothing on this end asked.
-        <TooltipRevision as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::TooltipRevision)
-            .map_err(ServerDecodeError::TooltipRevision)?,
-        <PropertyListReply as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::PropertyListReply)
-            .map_err(ServerDecodeError::PropertyListReply)?,
-        <OpenContainer as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::OpenContainer)
-            .map_err(ServerDecodeError::OpenContainer)?,
-        <AddToContainer as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::AddToContainer)
-            .map_err(ServerDecodeError::AddToContainer)?,
-        <ContainerContents as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::ContainerContents)
-            .map_err(ServerDecodeError::ContainerContents)?,
-        <OpenPaperdoll as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::OpenPaperdoll)
-            .map_err(ServerDecodeError::OpenPaperdoll)?,
-        <CorpseEquipment as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::CorpseEquipment)
-            .map_err(ServerDecodeError::CorpseEquipment)?,
+        <TooltipRevision as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::TooltipRevision)
+                .map_err(ServerDecodeError::TooltipRevision)?
+        }
+        <PropertyListReply as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::PropertyListReply)
+                .map_err(ServerDecodeError::PropertyListReply)?
+        }
+        <OpenContainer as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::OpenContainer)
+                .map_err(ServerDecodeError::OpenContainer)?
+        }
+        <AddToContainer as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::AddToContainer)
+                .map_err(ServerDecodeError::AddToContainer)?
+        }
+        <ContainerContents as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::ContainerContents)
+                .map_err(ServerDecodeError::ContainerContents)?
+        }
+        <OpenPaperdoll as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::OpenPaperdoll)
+                .map_err(ServerDecodeError::OpenPaperdoll)?
+        }
+        <CorpseEquipment as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::CorpseEquipment)
+                .map_err(ServerDecodeError::CorpseEquipment)?
+        }
         // What a mobile is wearing, one layer at a time. Without this arm a
         // body was dressed once, by the `0x78` that drew it, and never
         // again — and a vendor's stock crate, which arrives as nothing but
         // a `0x2E` on layer `0x1A`, had no way in at all.
-        <EquipUpdate as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::EquipUpdate)
-            .map_err(ServerDecodeError::EquipUpdate)?,
+        <EquipUpdate as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::EquipUpdate)
+                .map_err(ServerDecodeError::EquipUpdate)?
+        }
         // The lift the shard refused. Purely local state depends on it: the
         // item drawn on the cursor is this client's own projection, and
         // nothing else ever says to put it back.
-        <DragCancel as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::DragCancel)
-            .map_err(ServerDecodeError::DragCancel)?,
+        <DragCancel as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::DragCancel)
+                .map_err(ServerDecodeError::DragCancel)?
+        }
         // The crosshair. The client enforces what a cursor may pick, so a
         // client that cannot read the request cannot raise one.
-        <TargetCursor as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::TargetCursor)
-            .map_err(ServerDecodeError::TargetCursor)?,
-        <MultiTargetRequest as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::MultiTarget)
-            .map_err(ServerDecodeError::MultiTarget)?,
+        <TargetCursor as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::TargetCursor)
+                .map_err(ServerDecodeError::TargetCursor)?
+        }
+        <MultiTargetRequest as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::MultiTarget)
+                .map_err(ServerDecodeError::MultiTarget)?
+        }
         // The shop's two halves. Each names a different serial — the buy
         // list names the stock crate, the sell list the vendor — which is
         // why the window that joins them is keyed on neither by accident;
         // see `WorldView::apply`'s `0x24` arm.
-        <BuyList as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::BuyList)
-            .map_err(ServerDecodeError::BuyList)?,
-        <SellList as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::SellList)
-            .map_err(ServerDecodeError::SellList)?,
+        <BuyList as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::BuyList)
+                .map_err(ServerDecodeError::BuyList)?
+        }
+        <SellList as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::SellList)
+                .map_err(ServerDecodeError::SellList)?
+        }
         _ => return Ok(None),
     };
     Ok(Some(decoded))
@@ -877,38 +1083,58 @@ fn decode_feedback_packet(
         // and the same five bytes the client asked with. Decoded through
         // the same type both directions share; there is nothing in the
         // packet to say which way it was travelling.
-        <WarMode as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::WarMode)
-            .map_err(ServerDecodeError::WarMode)?,
-        <AttackTarget as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::AttackTarget)
-            .map_err(ServerDecodeError::AttackTarget)?,
-        <HealthBar as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::Health)
-            .map_err(ServerDecodeError::Health)?,
-        <PlaySound as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::PlaySound)
-            .map_err(ServerDecodeError::PlaySound)?,
+        <WarMode as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::WarMode)
+                .map_err(ServerDecodeError::WarMode)?
+        }
+        <AttackTarget as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::AttackTarget)
+                .map_err(ServerDecodeError::AttackTarget)?
+        }
+        <HealthBar as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::Health)
+                .map_err(ServerDecodeError::Health)?
+        }
+        <PlaySound as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::PlaySound)
+                .map_err(ServerDecodeError::PlaySound)?
+        }
         // The arrow's flight: combat already sends it when a shot lands,
         // NPC or player, so this is the client's other half of that packet.
-        <GraphicalEffect as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::Effect)
-            .map_err(ServerDecodeError::Effect)?,
-        <PlayMusic as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::PlayMusic)
-            .map_err(ServerDecodeError::PlayMusic)?,
-        <Animation as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::Animation)
-            .map_err(ServerDecodeError::Animation)?,
-        <NewAnimation as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::NewAnimation)
-            .map_err(ServerDecodeError::NewAnimation)?,
-        <DeathStatus as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::DeathStatus)
-            .map_err(ServerDecodeError::DeathStatus)?,
-        <DeathAnimation as DecodePacket>::ID => decode_server(packet, version)
-            .map(ServerPacket::DeathAnimation)
-            .map_err(ServerDecodeError::DeathAnimation)?,
+        <GraphicalEffect as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::Effect)
+                .map_err(ServerDecodeError::Effect)?
+        }
+        <PlayMusic as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::PlayMusic)
+                .map_err(ServerDecodeError::PlayMusic)?
+        }
+        <Animation as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::Animation)
+                .map_err(ServerDecodeError::Animation)?
+        }
+        <NewAnimation as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::NewAnimation)
+                .map_err(ServerDecodeError::NewAnimation)?
+        }
+        <DeathStatus as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::DeathStatus)
+                .map_err(ServerDecodeError::DeathStatus)?
+        }
+        <DeathAnimation as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::DeathAnimation)
+                .map_err(ServerDecodeError::DeathAnimation)?
+        }
         // Both `0x3A`s. The id routes them together and the type byte tells
         // them apart, which is why this is the one arm that decodes into a
         // decision rather than into a variant — see `SkillsPacket`.
@@ -921,9 +1147,11 @@ fn decode_feedback_packet(
         // "You may go." A client that could not read this would sit on the
         // paperdoll's Log Out button with nothing happening, which is
         // exactly what the packet exists to prevent.
-        <LogoutAck as DecodePacket>::ID => decode_server(packet, version)
-            .map(|LogoutAck| ServerPacket::LogoutAck(LogoutAck))
-            .map_err(ServerDecodeError::LogoutAck)?,
+        <LogoutAck as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(|LogoutAck| ServerPacket::LogoutAck(LogoutAck))
+                .map_err(ServerDecodeError::LogoutAck)?
+        }
         _ => return Ok(None),
     };
     Ok(Some(decoded))
@@ -1147,7 +1375,8 @@ impl fmt::Display for ServerDecodeError {
     }
 }
 
-impl std::error::Error for ServerDecodeError {}
+impl std::error::Error for ServerDecodeError {
+}
 
 // -- framing, from the client's side --------------------------------------
 
@@ -1321,8 +1550,14 @@ mod tests {
     use super::*;
     use crate::packet::encode_packet;
     use crate::serial::Serial;
-    use crate::target::{MultiOffset, TargetKind};
-    use crate::wire::{AuthKey, CursorId};
+    use crate::target::{
+        MultiOffset,
+        TargetKind,
+    };
+    use crate::wire::{
+        AuthKey,
+        CursorId,
+    };
 
     fn version() -> ClientVersion {
         ClientVersion::new(7, 0, 45, 65)
@@ -1447,34 +1682,34 @@ mod tests {
     fn one_of_each() -> Vec<ServerPacket> {
         let serial = Serial::new(0x0000_002A).unwrap();
         let effect = GraphicalEffect {
-            kind: crate::feedback::EffectKind::Moving,
-            from: Some(serial),
-            to: None,
-            art: crate::wire::Graphic(0x36D4),
-            from_point: crate::world::Point::new(1, 2, 3),
-            to_point: crate::world::Point::new(4, 5, 6),
-            speed: 7,
-            duration: 0,
+            kind:            crate::feedback::EffectKind::Moving,
+            from:            Some(serial),
+            to:              None,
+            art:             crate::wire::Graphic(0x36D4),
+            from_point:      crate::world::Point::new(1, 2, 3),
+            to_point:        crate::world::Point::new(4, 5, 6),
+            speed:           7,
+            duration:        0,
             fixed_direction: false,
-            explode: false,
+            explode:         false,
         };
         vec![
             ServerPacket::TargetCursor(TargetCursor {
                 cursor_id: CursorId(1),
-                kind: TargetKind::Object,
+                kind:      TargetKind::Object,
             }),
             ServerPacket::MultiTarget(MultiTargetRequest {
                 cursor_id: CursorId(2),
-                kind: TargetKind::Location,
-                multi: crate::wire::MultiId(0x0064),
-                offset: MultiOffset::default(),
+                kind:      TargetKind::Location,
+                multi:     crate::wire::MultiId(0x0064),
+                offset:    MultiOffset::default(),
             }),
             ServerPacket::WarMode(WarMode { war: true }),
             ServerPacket::AttackTarget(AttackTarget { target: Some(serial) }),
             ServerPacket::Health(HealthBar::exact(serial, 100, 50)),
             ServerPacket::PlaySound(PlaySound {
                 sound: crate::wire::SoundId(0x28),
-                at: crate::world::Point::new(1, 2, 3),
+                at:    crate::world::Point::new(1, 2, 3),
             }),
             ServerPacket::Animation(Animation {
                 serial,
@@ -1512,22 +1747,22 @@ mod tests {
             ServerPacket::HarvestRefused(HarvestRefused { serial }),
             ServerPacket::HarvestCompleted(HarvestCompleted { serial }),
             ServerPacket::CombatActionPhase(CombatActionPhase {
-                actor: serial,
+                actor:  serial,
                 target: serial,
-                kind: crate::feedback::CombatActionKind::Swing,
-                phase: crate::feedback::ActionPhase::Releasing {
+                kind:   crate::feedback::CombatActionKind::Swing,
+                phase:  crate::feedback::ActionPhase::Releasing {
                     impact_in: crate::feedback::SwingDuration(1_500),
                 },
             }),
             ServerPacket::CombatActionEnded(CombatActionEnded {
-                actor: serial,
+                actor:   serial,
                 outcome: crate::feedback::CombatActionOutcome::Interrupted(
                     crate::feedback::InterruptReason::TargetGone,
                 ),
             }),
             ServerPacket::CombatActionBalked(CombatActionBalked {
                 actor: serial,
-                balk: crate::feedback::BalkState::Blocked(crate::feedback::InterruptReason::OutOfReach),
+                balk:  crate::feedback::BalkState::Blocked(crate::feedback::InterruptReason::OutOfReach),
             }),
             ServerPacket::CombatActionStage(CombatActionStage {
                 actor: serial,
@@ -1544,10 +1779,10 @@ mod tests {
             }),
             ServerPacket::ShardList(ShardList {
                 shards: vec![crate::login::ShardEntry {
-                    name: "Britannia".to_owned(),
+                    name:         "Britannia".to_owned(),
                     percent_full: crate::login::PercentFull::clamped(10),
-                    timezone: 5,
-                    address: std::net::Ipv4Addr::new(127, 0, 0, 1),
+                    timezone:     5,
+                    address:      std::net::Ipv4Addr::new(127, 0, 0, 1),
                 }],
             }),
             ServerPacket::Relay(Relay {
@@ -1558,8 +1793,8 @@ mod tests {
                 characters: vec![crate::login::CharacterEntry {
                     name: crate::identity::CharacterName("Lord British".to_owned()),
                 }],
-                starts: Vec::new(),
-                flags: crate::login::CharacterListFlags::NONE,
+                starts:     Vec::new(),
+                flags:      crate::login::CharacterListFlags::NONE,
             }),
             ServerPacket::DeleteReject(DeleteReject {
                 result: crate::login::DeleteResult::CharNotExist,
@@ -1586,33 +1821,33 @@ mod tests {
             }),
             ServerPacket::DeathStatus(DeathStatus { dead: true }),
             ServerPacket::DeathAnimation(DeathAnimation {
-                killed: serial,
-                corpse: Serial::new(0x4000_0003),
+                killed:  serial,
+                corpse:  Serial::new(0x4000_0003),
                 running: true,
             }),
             ServerPacket::WalkAck(WalkAck {
-                sequence: crate::world::StepSequence(1),
+                sequence:  crate::world::StepSequence(1),
                 notoriety: crate::mobile::Notoriety::Innocent,
             }),
             ServerPacket::WalkReject(WalkReject {
                 sequence: crate::world::StepSequence(1),
                 position: crate::world::Point::new(1475, 1774, 0),
-                facing: crate::direction::Facing::walking(crate::direction::Direction::South),
+                facing:   crate::direction::Facing::walking(crate::direction::Direction::South),
             }),
             ServerPacket::LoginComplete(LoginComplete),
             ServerPacket::LightLevel(LightLevel {
                 level: crate::world::Light(0),
             }),
             ServerPacket::WeatherChange(crate::world::WeatherChange {
-                weather: crate::world::Weather::Rain,
-                intensity: 64,
+                weather:     crate::world::Weather::Rain,
+                intensity:   64,
                 temperature: 12,
             }),
             ServerPacket::PlayMusic(PlayMusic {
                 track: crate::world::MusicId(11),
             }),
             ServerPacket::SeasonChange(SeasonChange {
-                season: crate::world::Season::Spring,
+                season:     crate::world::Season::Spring,
                 play_sound: false,
             }),
             ServerPacket::LogoutAck(LogoutAck),
@@ -1627,9 +1862,9 @@ mod tests {
             }),
             ServerPacket::CorpseEquipment(CorpseEquipment {
                 corpse: serial,
-                items: vec![crate::items::CorpseEquipmentItem {
+                items:  vec![crate::items::CorpseEquipmentItem {
                     layer: crate::wire::Layer::TORSO,
-                    item: Serial::new(0x4000_0001).unwrap(),
+                    item:  Serial::new(0x4000_0001).unwrap(),
                 }],
             }),
             ServerPacket::MobileStatus(MobileStatus {
@@ -1637,14 +1872,20 @@ mod tests {
                 name: "Lord British".to_owned(),
                 hits: crate::mobile::Vitals {
                     current: 100,
-                    max: 100,
+                    max:     100,
                 },
                 female: false,
                 strength: 100,
                 dexterity: 90,
                 intelligence: 80,
-                stamina: crate::mobile::Vitals { current: 90, max: 90 },
-                mana: crate::mobile::Vitals { current: 80, max: 80 },
+                stamina: crate::mobile::Vitals {
+                    current: 90,
+                    max:     90,
+                },
+                mana: crate::mobile::Vitals {
+                    current: 80,
+                    max:     80,
+                },
                 gold: 1234,
                 armor: 0,
                 weight: 14,
@@ -1677,23 +1918,23 @@ mod tests {
                 locks: crate::mobile::StatLockBits::default(),
             }),
             ServerPacket::WorldItem(crate::items::WorldItem {
-                serial: crate::serial::Serial::new(0x4000_0001).unwrap(),
-                graphic: crate::wire::Graphic(0x0EED),
-                payload: crate::items::WorldItemPayload::Stack(crate::items::ItemAmount(1)),
+                serial:   crate::serial::Serial::new(0x4000_0001).unwrap(),
+                graphic:  crate::wire::Graphic(0x0EED),
+                payload:  crate::items::WorldItemPayload::Stack(crate::items::ItemAmount(1)),
                 position: crate::world::Point::new(1000, 2000, 5),
-                hue: crate::wire::Hue::NONE,
-                light: None,
-                flags: crate::items::ItemFlags::NONE,
+                hue:      crate::wire::Hue::NONE,
+                light:    None,
+                flags:    crate::items::ItemFlags::NONE,
             }),
             ServerPacket::DragCancel(crate::items::DragCancel {
                 reason: crate::items::DragCancelReason::OutOfRange,
             }),
             ServerPacket::EquipUpdate(crate::items::EquipUpdate {
-                item: crate::serial::Serial::new(0x4000_0002).unwrap(),
+                item:    crate::serial::Serial::new(0x4000_0002).unwrap(),
                 graphic: crate::wire::Graphic(0x13B9),
-                layer: crate::wire::Layer(1),
-                mobile: crate::serial::Serial::new(0x0000_0001).unwrap(),
-                hue: crate::wire::Hue(0x0021),
+                layer:   crate::wire::Layer(1),
+                mobile:  crate::serial::Serial::new(0x0000_0001).unwrap(),
+                hue:     crate::wire::Hue(0x0021),
             }),
             // `0x24` and `0x25` are two lengths each, and the version picks —
             // which is why neither is an `EncodePacket` and why both being
@@ -1701,58 +1942,58 @@ mod tests {
             // `add_to_container_length` with no oracle at all.
             ServerPacket::OpenContainer(OpenContainer {
                 container: crate::serial::Serial::new(0x4000_0001).unwrap(),
-                gump: crate::wire::Graphic(0x003C),
+                gump:      crate::wire::Graphic(0x003C),
             }),
             ServerPacket::AddToContainer(AddToContainer {
-                item: crate::containers::ContainedItem {
-                    serial: crate::serial::Serial::new(0x4000_0002).unwrap(),
+                item:      crate::containers::ContainedItem {
+                    serial:  crate::serial::Serial::new(0x4000_0002).unwrap(),
                     graphic: crate::wire::Graphic(0x0EED),
-                    amount: crate::items::ItemAmount(3),
-                    at: crate::gump::GumpPoint::new(44, 65),
-                    grid: crate::containers::GridSlot(7),
-                    hue: crate::wire::Hue::NONE,
+                    amount:  crate::items::ItemAmount(3),
+                    at:      crate::gump::GumpPoint::new(44, 65),
+                    grid:    crate::containers::GridSlot(7),
+                    hue:     crate::wire::Hue::NONE,
                 },
                 container: crate::serial::Serial::new(0x4000_0001).unwrap(),
             }),
             ServerPacket::ContainerContents(crate::containers::ContainerContents {
                 container: Some(crate::serial::Serial::new(0x4000_0001).unwrap()),
-                items: Vec::new(),
+                items:     Vec::new(),
             }),
             ServerPacket::BuyList(crate::vendor::BuyList {
                 container: crate::serial::Serial::new(0x4000_0010).unwrap(),
-                lines: vec![crate::vendor::BuyLine {
+                lines:     vec![crate::vendor::BuyLine {
                     price: 3,
-                    name: "black pearl".to_owned(),
+                    name:  "black pearl".to_owned(),
                 }],
             }),
             ServerPacket::SellList(crate::vendor::SellList {
                 vendor: crate::serial::Serial::new(0x0000_0BBB).unwrap(),
-                lines: vec![crate::vendor::SellLine {
-                    serial: crate::serial::Serial::new(0x4000_0033).unwrap(),
+                lines:  vec![crate::vendor::SellLine {
+                    serial:  crate::serial::Serial::new(0x4000_0033).unwrap(),
                     graphic: crate::wire::Graphic(0x0F7A),
-                    hue: crate::wire::Hue::NONE,
-                    amount: crate::items::ItemAmount(20),
-                    price: 2,
-                    name: "black pearl".to_owned(),
+                    hue:     crate::wire::Hue::NONE,
+                    amount:  crate::items::ItemAmount(20),
+                    price:   2,
+                    name:    "black pearl".to_owned(),
                 }],
             }),
             ServerPacket::TooltipRevision(crate::properties::TooltipRevision {
                 serial: crate::serial::Serial::new(0x0000_00AB).unwrap(),
-                hash: 0x1234_5678,
+                hash:   0x1234_5678,
             }),
             // `0xD6` and `0xD8` are both in the framing table because it was
             // short an id twice; this is the half of that pair which has a
             // variant to encode.
             ServerPacket::PropertyListReply(PropertyListReply {
-                serial: crate::serial::Serial::new(0x0000_00AB).unwrap(),
-                hash: 0x1234_5678,
+                serial:  crate::serial::Serial::new(0x0000_00AB).unwrap(),
+                hash:    0x1234_5678,
                 entries: vec![crate::properties::PropertyEntry {
-                    cliloc: crate::wire::ClilocId(1_042_971),
+                    cliloc:    crate::wire::ClilocId(1_042_971),
                     arguments: "a katana".to_owned(),
                 }],
             }),
             ServerPacket::DesignRevision(crate::design::DesignRevision {
-                serial: crate::serial::RawSerial(0x4000_0100),
+                serial:   crate::serial::RawSerial(0x4000_0100),
                 revision: crate::design::Revision(7),
             }),
             ServerPacket::PartyMemberList(PartyMemberList {
@@ -1764,138 +2005,141 @@ mod tests {
             }),
             ServerPacket::PartyTextMessage(PartyTextMessage {
                 to_all: true,
-                from: serial,
-                text: "on my way".to_owned(),
+                from:   serial,
+                text:   "on my way".to_owned(),
             }),
             ServerPacket::PartyInvitation(PartyInvitation { leader: serial }),
             ServerPacket::SkillsFull(crate::skill::SkillsFull {
                 entries: vec![crate::skill::SkillEntry {
-                    id: 0,
+                    id:    0,
                     value: 755,
-                    base: 700,
-                    lock: crate::skill::SkillLock::Locked,
-                    cap: 1000,
+                    base:  700,
+                    lock:  crate::skill::SkillLock::Locked,
+                    cap:   1000,
                 }],
             }),
             ServerPacket::SkillUpdate(crate::skill::SkillUpdate {
                 entry: crate::skill::SkillEntry {
-                    id: 25,
+                    id:    25,
                     value: 501,
-                    base: 501,
-                    lock: crate::skill::SkillLock::Up,
-                    cap: 1000,
+                    base:  501,
+                    lock:  crate::skill::SkillLock::Up,
+                    cap:   1000,
                 },
             }),
             ServerPacket::SpokenMessage(crate::speech::SpokenMessage {
-                serial: crate::serial::Serial::new(0x0000_0002),
+                serial:  crate::serial::Serial::new(0x0000_0002),
                 graphic: Some(crate::wire::Graphic(0x0190)),
-                mode: crate::speech::TalkMode::Regular,
-                hue: crate::wire::Hue(0x0384),
-                font: crate::speech::Font(3),
-                name: "British".to_owned(),
-                text: "hail".to_owned(),
+                mode:    crate::speech::TalkMode::Regular,
+                hue:     crate::wire::Hue(0x0384),
+                font:    crate::speech::Font(3),
+                name:    "British".to_owned(),
+                text:    "hail".to_owned(),
             }),
             ServerPacket::LocalizedMessage(crate::speech::LocalizedMessage {
-                serial: None,
-                graphic: None,
-                mode: crate::speech::TalkMode::Regular,
-                hue: crate::wire::Hue(0x03B2),
-                font: crate::speech::Font(3),
-                cliloc: crate::wire::ClilocId(1_042_764),
-                name: "System".to_owned(),
+                serial:    None,
+                graphic:   None,
+                mode:      crate::speech::TalkMode::Regular,
+                hue:       crate::wire::Hue(0x03B2),
+                font:      crate::speech::Font(3),
+                cliloc:    crate::wire::ClilocId(1_042_764),
+                name:      "System".to_owned(),
                 arguments: "Iolo".to_owned(),
             }),
             ServerPacket::UnicodeMessage(crate::speech::UnicodeMessage {
-                serial: crate::serial::Serial::new(0x0000_0002),
-                graphic: Some(crate::wire::Graphic(0x0190)),
-                mode: crate::speech::TalkMode::Regular,
-                hue: crate::wire::Hue(0x0384),
-                font: crate::speech::Font(3),
+                serial:   crate::serial::Serial::new(0x0000_0002),
+                graphic:  Some(crate::wire::Graphic(0x0190)),
+                mode:     crate::speech::TalkMode::Regular,
+                hue:      crate::wire::Hue(0x0384),
+                font:     crate::speech::Font(3),
                 language: "PTB".to_owned(),
-                name: "Cidadão".to_owned(),
-                text: "olá".to_owned(),
+                name:     "Cidadão".to_owned(),
+                text:     "olá".to_owned(),
             }),
             ServerPacket::ContextMenu(crate::context::ContextMenu {
-                serial: crate::serial::Serial::new(0x0000_00AB).unwrap(),
+                serial:  crate::serial::Serial::new(0x0000_00AB).unwrap(),
                 entries: vec![crate::context::ContextMenuEntry {
                     cliloc: crate::wire::ClilocId(3_000_362),
-                    flags: crate::context::ContextMenuFlags::NONE,
+                    flags:  crate::context::ContextMenuFlags::NONE,
                 }],
             }),
             ServerPacket::SpellbookContent(crate::spellbook::SpellbookContent {
-                serial: crate::serial::Serial::new(0x4000_0001).unwrap(),
+                serial:  crate::serial::Serial::new(0x4000_0001).unwrap(),
                 graphic: crate::wire::Graphic(0x0EFA),
-                offset: 1,
+                offset:  1,
                 content: 1,
             }),
             ServerPacket::CloseGump(crate::gump::CloseGump {
                 gump_id: crate::gump::GumpId(0x0051_0001),
-                button: crate::gump::ButtonId::CLOSE_BOX,
+                button:  crate::gump::ButtonId::CLOSE_BOX,
             }),
             ServerPacket::CraftCatalogue(crate::craft::CraftCatalogue {
                 gump_id: crate::gump::GumpId(0x0051_0001),
-                rows: vec![crate::craft::CraftCatalogueRow {
-                    button: 8,
-                    result: crate::wire::Graphic(0x13EB),
-                    result_hue: crate::wire::Hue::NONE,
+                rows:    vec![crate::craft::CraftCatalogueRow {
+                    button:           8,
+                    result:           crate::wire::Graphic(0x13EB),
+                    result_hue:       crate::wire::Hue::NONE,
                     result_item_kind: Some(crate::item_kind::ItemKindId(4)),
-                    name: crate::wire::ClilocId(1_022_036),
-                    skill: crate::wire::ClilocId(1_044_067),
-                    skill_min: 300,
-                    ready: true,
-                    weapon: None,
-                    components: vec![crate::craft::CraftCatalogueComponent {
+                    name:             crate::wire::ClilocId(1_022_036),
+                    skill:            crate::wire::ClilocId(1_044_067),
+                    skill_min:        300,
+                    ready:            true,
+                    weapon:           None,
+                    components:       vec![crate::craft::CraftCatalogueComponent {
                         item_kind: Some(crate::item_kind::ItemKindId(1)),
-                        material: Some(crate::item_kind::MaterialId(1)),
-                        graphic: crate::wire::Graphic(0x1BF2),
-                        hue: crate::wire::Hue::NONE,
-                        name: crate::wire::ClilocId(1_045_000),
-                        amount: 3,
+                        material:  Some(crate::item_kind::MaterialId(1)),
+                        graphic:   crate::wire::Graphic(0x1BF2),
+                        hue:       crate::wire::Hue::NONE,
+                        name:      crate::wire::ClilocId(1_045_000),
+                        amount:    3,
                     }],
                 }],
             }),
             ServerPacket::CraftWorkbench(crate::craft::CraftWorkbench {
-                gump_id: crate::gump::GumpId(0x0051_0001),
-                title: crate::craft::CraftText::Literal("Blacksmithy".to_owned()),
-                groups: vec![crate::craft::CraftWorkbenchGroup {
-                    button: 1,
-                    name: crate::craft::CraftText::Cliloc(crate::wire::ClilocId(1_044_010)),
+                gump_id:             crate::gump::GumpId(0x0051_0001),
+                title:               crate::craft::CraftText::Literal("Blacksmithy".to_owned()),
+                groups:              vec![crate::craft::CraftWorkbenchGroup {
+                    button:   1,
+                    name:     crate::craft::CraftText::Cliloc(crate::wire::ClilocId(1_044_010)),
                     selected: true,
                 }],
-                selected_material: None,
-                tool_uses: Some(50),
-                tool_carried: true,
+                selected_material:   None,
+                tool_uses:           Some(50),
+                tool_carried:        true,
                 required_facilities: 3,
-                present_facilities: 3,
-                notice: None,
-                materials_button: None,
-                refresh_button: 14,
-                cancel_button: 84,
-                page: crate::craft::CraftWorkbenchPage::Items {
+                present_facilities:  3,
+                notice:              None,
+                materials_button:    None,
+                refresh_button:      14,
+                cancel_button:       84,
+                page:                crate::craft::CraftWorkbenchPage::Items {
                     recipes: vec![crate::craft::CraftWorkbenchRecipe {
-                        make_button: Some(2),
-                        details_button: Some(3),
-                        result: crate::craft::CraftWorkbenchComponent {
+                        make_button:       Some(2),
+                        details_button:    Some(3),
+                        result:            crate::craft::CraftWorkbenchComponent {
                             item_kind: Some(crate::item_kind::ItemKindId(4)),
-                            graphic: crate::wire::Graphic(0x13EB),
-                            hue: crate::wire::Hue::NONE,
-                            name: crate::craft::CraftText::Literal("Longsword".to_owned()),
-                            amount: 1,
-                            carried: None,
+                            graphic:   crate::wire::Graphic(0x13EB),
+                            hue:       crate::wire::Hue::NONE,
+                            name:      crate::craft::CraftText::Literal("Longsword".to_owned()),
+                            amount:    1,
+                            carried:   None,
                         },
-                        skills: vec![(crate::craft::CraftText::Literal("Blacksmithy".to_owned()), 300)],
-                        components: Vec::new(),
+                        skills:            vec![(
+                            crate::craft::CraftText::Literal("Blacksmithy".to_owned()),
+                            300,
+                        )],
+                        components:        Vec::new(),
                         use_all_resources: false,
-                        markable: true,
+                        markable:          true,
                     }],
                 },
             }),
             ServerPacket::GumpDisplay(crate::gump::GumpDisplay {
-                serial: crate::gump::GumpKey::STANDALONE,
+                serial:  crate::gump::GumpKey::STANDALONE,
                 gump_id: crate::gump::GumpId(0x0051_0001),
-                at: crate::gump::GumpPoint::new(75, 25),
-                layout: "{ page 0 }".to_owned(),
-                lines: Vec::new(),
+                at:      crate::gump::GumpPoint::new(75, 25),
+                layout:  "{ page 0 }".to_owned(),
+                lines:   Vec::new(),
             }),
             ServerPacket::AuthorityNotice(crate::access::AuthorityNotice {
                 level: crate::access::AccessLevel::GameMaster,
@@ -1904,44 +2148,44 @@ mod tests {
             // it is here: a fragment's length is its blob's, so the framing
             // oracle below is the only thing that checks the two agree.
             ServerPacket::ChunkData(crate::chunks::ChunkData {
-                facet: crate::world::Facet(0),
-                at: crate::chunks::ChunkAt { x: 12, y: 34 },
+                facet:    crate::world::Facet(0),
+                at:       crate::chunks::ChunkAt { x: 12, y: 34 },
                 revision: crate::chunks::WorldRevision(2),
                 fragment: crate::chunks::Fragment::new(0, 1).expect("one of one"),
                 inflated: crate::chunks::InflatedLength(12_568),
-                blob: vec![0x78, 0x9C, 0x03, 0x00],
+                blob:     vec![0x78, 0x9C, 0x03, 0x00],
             }),
             ServerPacket::WorldNotice(crate::chunks::WorldNotice {
-                facet: crate::world::Facet(0),
-                blocks: crate::chunks::FacetBlocks { wide: 896, down: 512 },
+                facet:    crate::world::Facet(0),
+                blocks:   crate::chunks::FacetBlocks { wide: 896, down: 512 },
                 revision: crate::chunks::WorldRevision(1),
-                world: Some(crate::world::WorldId(0x0123_4567_89AB_CDEF)),
+                world:    Some(crate::world::WorldId(0x0123_4567_89AB_CDEF)),
             }),
             ServerPacket::PublishNotice(crate::chunks::PublishNotice {
-                facet: crate::world::Facet(0),
+                facet:    crate::world::Facet(0),
                 revision: crate::chunks::WorldRevision(2),
-                changes: crate::chunks::Changes::These(vec![crate::chunks::ChunkAt { x: 2, y: 2 }]),
+                changes:  crate::chunks::Changes::These(vec![crate::chunks::ChunkAt { x: 2, y: 2 }]),
             }),
             ServerPacket::ChunkRefused(crate::chunks::ChunkRefused {
-                facet: crate::world::Facet(0),
-                at: crate::chunks::ChunkAt { x: 900, y: 0 },
+                facet:  crate::world::Facet(0),
+                at:     crate::chunks::ChunkAt { x: 900, y: 0 },
                 reason: crate::chunks::Refusal::PastTheEdge,
             }),
             // The second variable-length 0xBF of ours, and named chunks rather
             // than `Everything` for the same reason the fragment above carries a
             // blob: the arm whose length varies is the one worth framing.
             ServerPacket::ChangesReply(crate::chunks::ChangesReply {
-                facet: crate::world::Facet(0),
+                facet:    crate::world::Facet(0),
                 revision: crate::chunks::WorldRevision(3),
-                changes: crate::chunks::Changes::These(vec![
+                changes:  crate::chunks::Changes::These(vec![
                     crate::chunks::ChunkAt { x: 21, y: 25 },
                     crate::chunks::ChunkAt { x: 22, y: 25 },
                 ]),
             }),
             ServerPacket::MapEditReply(crate::mapedit::MapEditReply {
-                facet: crate::world::Facet(0),
+                facet:    crate::world::Facet(0),
                 revision: crate::chunks::WorldRevision(4),
-                outcome: crate::mapedit::MapEditOutcome::Accepted,
+                outcome:  crate::mapedit::MapEditOutcome::Accepted,
             }),
         ]
     }
@@ -2071,7 +2315,7 @@ mod tests {
         let bytes = crate::world::encode_server_change(
             crate::world::Point::new(1, 2, 3),
             crate::world::MapSize {
-                width: 6144,
+                width:  6144,
                 height: 4096,
             },
         );
@@ -2094,34 +2338,34 @@ mod tests {
     fn the_packets_a_shop_is_made_of_decode_as_themselves() {
         for packet in [
             ServerPacket::EquipUpdate(crate::items::EquipUpdate {
-                item: Serial::new(0x4000_0002).unwrap(),
+                item:    Serial::new(0x4000_0002).unwrap(),
                 graphic: crate::wire::Graphic(0x0E3F),
-                layer: crate::wire::Layer(0x1A),
-                mobile: Serial::new(0x0000_002A).unwrap(),
-                hue: crate::wire::Hue(0x0021),
+                layer:   crate::wire::Layer(0x1A),
+                mobile:  Serial::new(0x0000_002A).unwrap(),
+                hue:     crate::wire::Hue(0x0021),
             }),
             ServerPacket::BuyList(crate::vendor::BuyList {
                 container: Serial::new(0x4000_0010).unwrap(),
-                lines: vec![
+                lines:     vec![
                     crate::vendor::BuyLine {
                         price: 3,
-                        name: "black pearl".to_owned(),
+                        name:  "black pearl".to_owned(),
                     },
                     crate::vendor::BuyLine {
                         price: 12,
-                        name: "longsword".to_owned(),
+                        name:  "longsword".to_owned(),
                     },
                 ],
             }),
             ServerPacket::SellList(crate::vendor::SellList {
                 vendor: Serial::new(0x0000_002A).unwrap(),
-                lines: vec![crate::vendor::SellLine {
-                    serial: Serial::new(0x4000_0011).unwrap(),
+                lines:  vec![crate::vendor::SellLine {
+                    serial:  Serial::new(0x4000_0011).unwrap(),
                     graphic: crate::wire::Graphic(0x0F7B),
-                    hue: crate::wire::Hue::NONE,
-                    amount: crate::items::ItemAmount(4),
-                    price: 2,
-                    name: "black pearl".to_owned(),
+                    hue:     crate::wire::Hue::NONE,
+                    amount:  crate::items::ItemAmount(4),
+                    price:   2,
+                    name:    "black pearl".to_owned(),
                 }],
             }),
             ServerPacket::DragCancel(crate::items::DragCancel {
@@ -2129,7 +2373,7 @@ mod tests {
             }),
             ServerPacket::TargetCursor(TargetCursor {
                 cursor_id: CursorId(0x0000_0007),
-                kind: TargetKind::Location,
+                kind:      TargetKind::Location,
             }),
         ] {
             let bytes = packet.encode(version());
@@ -2173,21 +2417,25 @@ mod tests {
     /// table, one id along.
     #[test]
     fn a_design_is_framed_even_though_no_variant_carries_it() {
-        use crate::design::{DesignDetail, DesignTile, Revision};
+        use crate::design::{
+            DesignDetail,
+            DesignTile,
+            Revision,
+        };
         use crate::serial::RawSerial;
         use crate::wire::Graphic;
 
         let tiles = [DesignTile {
             graphic: Graphic(0x0006),
-            dx: 0,
-            dy: 0,
-            dz: 0,
+            dx:      0,
+            dy:      0,
+            dz:      0,
         }];
         let bytes = DesignDetail {
-            serial: RawSerial(0x4000_0001),
+            serial:   RawSerial(0x4000_0001),
             revision: Revision(1),
             response: true,
-            tiles: &tiles,
+            tiles:    &tiles,
         }
         .encode(|_| false);
 
@@ -2258,10 +2506,10 @@ mod tests {
             }),
             ServerPacket::ShardList(ShardList {
                 shards: vec![crate::login::ShardEntry {
-                    name: "OpenShard".to_owned(),
+                    name:         "OpenShard".to_owned(),
                     percent_full: crate::login::PercentFull::clamped(12),
-                    timezone: 5,
-                    address: std::net::Ipv4Addr::new(192, 168, 11, 6),
+                    timezone:     5,
+                    address:      std::net::Ipv4Addr::new(192, 168, 11, 6),
                 }],
             }),
             ServerPacket::Relay(Relay {
@@ -2305,14 +2553,20 @@ mod tests {
                 name: "Lord British".to_owned(),
                 hits: crate::mobile::Vitals {
                     current: 100,
-                    max: 100,
+                    max:     100,
                 },
                 female: false,
                 strength: 100,
                 dexterity: 90,
                 intelligence: 80,
-                stamina: crate::mobile::Vitals { current: 90, max: 90 },
-                mana: crate::mobile::Vitals { current: 80, max: 80 },
+                stamina: crate::mobile::Vitals {
+                    current: 90,
+                    max:     90,
+                },
+                mana: crate::mobile::Vitals {
+                    current: 80,
+                    max:     80,
+                },
                 gold: 1234,
                 armor: 0,
                 weight: 14,
@@ -2339,20 +2593,20 @@ mod tests {
                 flags: crate::mobile::StatusFlags::NONE,
                 notoriety: crate::mobile::Notoriety::Innocent,
                 equipment: vec![crate::mobile::Equipment {
-                    serial: Serial::new(0x4000_0001).unwrap(),
+                    serial:  Serial::new(0x4000_0001).unwrap(),
                     graphic: crate::wire::Graphic(0x1517),
-                    layer: crate::wire::Layer(0x05),
-                    hue: crate::wire::Hue(0x0021),
+                    layer:   crate::wire::Layer(0x05),
+                    hue:     crate::wire::Hue(0x0021),
                 }],
             }),
             ServerPacket::WorldItem(crate::items::WorldItem {
-                serial: Serial::new(0x4000_00AB).unwrap(),
-                graphic: crate::wire::Graphic(0x0EED),
-                payload: crate::items::WorldItemPayload::Stack(crate::items::ItemAmount(500)),
+                serial:   Serial::new(0x4000_00AB).unwrap(),
+                graphic:  crate::wire::Graphic(0x0EED),
+                payload:  crate::items::WorldItemPayload::Stack(crate::items::ItemAmount(500)),
                 position: crate::world::Point::new(1000, 2000, -5),
-                hue: crate::wire::Hue(0x0021),
-                light: None,
-                flags: crate::items::ItemFlags::NONE,
+                hue:      crate::wire::Hue(0x0021),
+                light:    None,
+                flags:    crate::items::ItemFlags::NONE,
             }),
         ];
 
@@ -2375,16 +2629,16 @@ mod tests {
         let serial = Serial::new(0x0000_002A).unwrap();
         let target = Serial::new(0x0000_002B).unwrap();
         let packet = ServerPacket::Effect(GraphicalEffect {
-            kind: crate::feedback::EffectKind::Moving,
-            from: Some(serial),
-            to: Some(target),
-            art: crate::wire::Graphic(0x0F42),
-            from_point: crate::world::Point::new(1000, 1000, 0),
-            to_point: crate::world::Point::new(1005, 1000, 0),
-            speed: 18,
-            duration: 1,
+            kind:            crate::feedback::EffectKind::Moving,
+            from:            Some(serial),
+            to:              Some(target),
+            art:             crate::wire::Graphic(0x0F42),
+            from_point:      crate::world::Point::new(1000, 1000, 0),
+            to_point:        crate::world::Point::new(1005, 1000, 0),
+            speed:           18,
+            duration:        1,
             fixed_direction: false,
-            explode: false,
+            explode:         false,
         });
         let bytes = packet.encode(version());
         assert_eq!(ServerPacket::decode(&bytes, version()), Ok(Some(packet)));
@@ -2397,25 +2651,25 @@ mod tests {
         // was handed, not the one `version()` elsewhere in this module implies.
         let old = ClientVersion::new(7, 0, 33, 0);
         let packet = ServerPacket::MobileIncoming(MobileIncoming {
-            serial: Serial::new(0x0000_0002).unwrap(),
-            body: crate::wire::Graphic(0x0190),
-            position: crate::world::Point::new(1475, 1774, -5),
-            facing: crate::direction::Facing::walking(crate::direction::Direction::South),
-            hue: crate::wire::Hue(0x83EA),
-            flags: crate::mobile::StatusFlags::NONE,
+            serial:    Serial::new(0x0000_0002).unwrap(),
+            body:      crate::wire::Graphic(0x0190),
+            position:  crate::world::Point::new(1475, 1774, -5),
+            facing:    crate::direction::Facing::walking(crate::direction::Direction::South),
+            hue:       crate::wire::Hue(0x83EA),
+            flags:     crate::mobile::StatusFlags::NONE,
             notoriety: crate::mobile::Notoriety::Innocent,
             equipment: vec![
                 crate::mobile::Equipment {
-                    serial: Serial::new(0x4000_0001).unwrap(),
+                    serial:  Serial::new(0x4000_0001).unwrap(),
                     graphic: crate::wire::Graphic(0x1517),
-                    layer: crate::wire::Layer(0x05),
-                    hue: crate::wire::Hue(0x0021),
+                    layer:   crate::wire::Layer(0x05),
+                    hue:     crate::wire::Hue(0x0021),
                 },
                 crate::mobile::Equipment {
-                    serial: Serial::new(0x4000_0002).unwrap(),
+                    serial:  Serial::new(0x4000_0002).unwrap(),
                     graphic: crate::wire::Graphic(0x1F03),
-                    layer: crate::wire::Layer(0x0D),
-                    hue: crate::wire::Hue::NONE,
+                    layer:   crate::wire::Layer(0x0D),
+                    hue:     crate::wire::Hue::NONE,
                 },
             ],
         });
@@ -2431,24 +2685,30 @@ mod tests {
         // that is the honest shape of the packet rather than a decoder gap.
         let ancient = ClientVersion::new(3, 0, 8, 10);
         let sent = MobileStatus {
-            serial: Serial::new(0x0001_2345).unwrap(),
-            name: "Lord British".to_owned(),
-            hits: crate::mobile::Vitals {
+            serial:        Serial::new(0x0001_2345).unwrap(),
+            name:          "Lord British".to_owned(),
+            hits:          crate::mobile::Vitals {
                 current: 100,
-                max: 100,
+                max:     100,
             },
-            female: false,
-            strength: 100,
-            dexterity: 90,
-            intelligence: 80,
-            stamina: crate::mobile::Vitals { current: 90, max: 90 },
-            mana: crate::mobile::Vitals { current: 80, max: 80 },
-            gold: 1234,
-            armor: 0,
-            weight: 14,
-            max_weight: 390,
-            stat_cap: 225,
-            followers: 0,
+            female:        false,
+            strength:      100,
+            dexterity:     90,
+            intelligence:  80,
+            stamina:       crate::mobile::Vitals {
+                current: 90,
+                max:     90,
+            },
+            mana:          crate::mobile::Vitals {
+                current: 80,
+                max:     80,
+            },
+            gold:          1234,
+            armor:         0,
+            weight:        14,
+            max_weight:    390,
+            stat_cap:      225,
+            followers:     0,
             followers_max: 5,
         };
 
@@ -2473,13 +2733,13 @@ mod tests {
         // client that got the sign wrong would snap itself into the ground.
         let packets = [
             ServerPacket::WalkAck(WalkAck {
-                sequence: crate::world::StepSequence(0x2A),
+                sequence:  crate::world::StepSequence(0x2A),
                 notoriety: crate::mobile::Notoriety::Murderer,
             }),
             ServerPacket::WalkReject(WalkReject {
                 sequence: crate::world::StepSequence(0xFF),
                 position: crate::world::Point::new(1475, 1774, -5),
-                facing: crate::direction::Facing::running(crate::direction::Direction::NorthWest),
+                facing:   crate::direction::Facing::running(crate::direction::Direction::NorthWest),
             }),
         ];
 
@@ -2501,13 +2761,13 @@ mod tests {
         // what was actually on the wire rather than what the sender meant.
         let old = ClientVersion::new(3, 0, 8, 10);
         let sent = ServerPacket::WalkAck(WalkAck {
-            sequence: crate::world::StepSequence(1),
+            sequence:  crate::world::StepSequence(1),
             notoriety: crate::mobile::Notoriety::Invulnerable,
         });
         assert_eq!(
             ServerPacket::decode(&sent.encode(old), old),
             Ok(Some(ServerPacket::WalkAck(WalkAck {
-                sequence: crate::world::StepSequence(1),
+                sequence:  crate::world::StepSequence(1),
                 notoriety: crate::mobile::Notoriety::Innocent,
             }))),
         );
@@ -2565,11 +2825,11 @@ mod tests {
         // big-endian i16 puts a character at z = 65,526 instead of -10, and the
         // client draws them somewhere over the map.
         let start = PlayerStart {
-            serial: Serial::new(0x0000_002A).unwrap(),
-            body: crate::wire::Graphic(0x0190),
+            serial:   Serial::new(0x0000_002A).unwrap(),
+            body:     crate::wire::Graphic(0x0190),
             position: crate::world::Point::new(1000, 1200, -10),
-            facing: crate::direction::Facing::running(crate::direction::Direction::SouthEast),
-            map: crate::world::MapSize::BRITANNIA,
+            facing:   crate::direction::Facing::running(crate::direction::Direction::SouthEast),
+            map:      crate::world::MapSize::BRITANNIA,
         };
         let bytes = ServerPacket::PlayerStart(start).encode(version());
         assert_eq!(
@@ -2588,14 +2848,14 @@ mod tests {
             characters: vec![crate::login::CharacterEntry {
                 name: crate::identity::CharacterName::new("Lord British"),
             }],
-            starts: vec![crate::login::StartLocation {
-                area: "Britain".to_owned(),
-                name: "Castle Britannia".to_owned(),
-                position: crate::world::Point::new(1475, 1770, 20),
-                map: crate::world::Facet(0),
+            starts:     vec![crate::login::StartLocation {
+                area:               "Britain".to_owned(),
+                name:               "Castle Britannia".to_owned(),
+                position:           crate::world::Point::new(1475, 1770, 20),
+                map:                crate::world::Facet(0),
                 description_cliloc: crate::wire::ClilocId(1075072),
             }],
-            flags: crate::login::CharacterListFlags::TOOLTIPS,
+            flags:      crate::login::CharacterListFlags::TOOLTIPS,
         };
         let bytes = ServerPacket::CharacterList(list).encode(version());
 
@@ -2622,8 +2882,8 @@ mod tests {
         // would be three numbers that look chosen; this says what happened.
         let bytes = ServerPacket::CharacterList(CharacterList {
             characters: Vec::new(),
-            starts: Vec::new(),
-            flags: crate::login::CharacterListFlags::NONE,
+            starts:     Vec::new(),
+            flags:      crate::login::CharacterListFlags::NONE,
         })
         .encode(version());
         let old = ClientVersion::new(5, 0, 9, 1);
@@ -2660,8 +2920,8 @@ mod tests {
             })))
         );
         let weather = ServerPacket::WeatherChange(crate::world::WeatherChange {
-            weather: crate::world::Weather::Snow,
-            intensity: 80,
+            weather:     crate::world::Weather::Snow,
+            intensity:   80,
             temperature: 3,
         });
         assert_eq!(
@@ -2728,7 +2988,7 @@ mod tests {
 
         let sound = ServerPacket::PlaySound(PlaySound {
             sound: crate::wire::SoundId(0x0137),
-            at: crate::world::Point::new(1475, 1774, -5),
+            at:    crate::world::Point::new(1475, 1774, -5),
         });
         assert_eq!(
             ServerPacket::decode(&sound.encode(version()), version()),

@@ -26,9 +26,9 @@ pub struct Color16(pub u16);
 /// a coordinate or another byte triple.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Rgb8 {
-    pub red: u8,
+    pub red:   u8,
     pub green: u8,
-    pub blue: u8,
+    pub blue:  u8,
 }
 
 impl Color16 {
@@ -76,9 +76,9 @@ impl Color16 {
     /// and lands 31 exactly on 255.
     pub const fn rgb8(self) -> Rgb8 {
         Rgb8 {
-            red: widen(self.red()),
+            red:   widen(self.red()),
             green: widen(self.green()),
-            blue: widen(self.blue()),
+            blue:  widen(self.blue()),
         }
     }
 }

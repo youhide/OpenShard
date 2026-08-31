@@ -26,11 +26,23 @@
 //! them.
 
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 
 use crate::atlas::FontAtlas;
-use crate::gump::{GumpArt, GumpAtlas, GumpPixel, Picture, PictureIndex};
-use crate::text::{self, GumpLabel};
+use crate::gump::{
+    GumpArt,
+    GumpAtlas,
+    GumpPixel,
+    Picture,
+    PictureIndex,
+};
+use crate::text::{
+    self,
+    GumpLabel,
+};
 
 /// The plate every question is written on: 178×108 in the client this app
 /// reads.
@@ -75,7 +87,7 @@ pub enum Hit {
 /// One wrapped line of the question, already placed.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Line {
-    pub at: GumpPixel,
+    pub at:   GumpPixel,
     pub text: String,
 }
 
@@ -85,10 +97,10 @@ impl Line {
     #[must_use]
     pub fn label(&self) -> GumpLabel<'_> {
         GumpLabel {
-            at: self.at,
+            at:   self.at,
             text: &self.text,
             font: FONT,
-            hue: HUE,
+            hue:  HUE,
             clip: None,
         }
     }
@@ -100,13 +112,13 @@ pub struct Window {
     /// The plate and the two buttons, in painter's order.
     pub pictures: Vec<Picture>,
     /// The question written over them.
-    pub lines: Vec<Line>,
+    pub lines:    Vec<Line>,
     /// Which of the pictures answer the mouse.
     ///
     /// [`crate::gump::Window::hits`]'s shape, with a `Vec` instead of a map
     /// because there are two of them: an index into `pictures` and what a press
     /// on it means, so that what is drawn and what is clicked are one list.
-    hits: Vec<(PictureIndex, Hit)>,
+    hits:         Vec<(PictureIndex, Hit)>,
 }
 
 impl Window {
@@ -160,9 +172,11 @@ pub fn window(message: &str, held: Option<Hit>, at: GumpPixel, fonts: &FontAtlas
         lines: wrap(message, fonts)
             .into_iter()
             .enumerate()
-            .map(|(row, text)| Line {
-                at: at.offset(GumpPixel::new(TEXT_AT.x, TEXT_AT.y + row as i32 * step)),
-                text,
+            .map(|(row, text)| {
+                Line {
+                    at: at.offset(GumpPixel::new(TEXT_AT.x, TEXT_AT.y + row as i32 * step)),
+                    text,
+                }
             })
             .collect(),
         // The indices the two buttons were pushed at, above. Written out rather

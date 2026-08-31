@@ -9,12 +9,25 @@
 //! that spoke `0xAD` gets `0xAE` back, so the words it typed survive the round
 //! trip intact.
 
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength, frame_body};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+    frame_body,
+};
 use crate::serial::Serial;
 use crate::version::ClientVersion;
-use crate::wire::{ClilocId, Graphic, Hue, RawHue};
+use crate::wire::{
+    ClilocId,
+    Graphic,
+    Hue,
+    RawHue,
+};
 
 /// The name field in a `0x1C` is a fixed thirty bytes.
 const NAME_LENGTH: usize = 30;
@@ -149,7 +162,7 @@ pub struct TalkRequest {
     /// How it is said.
     pub mode: RawTalkMode,
     /// The colour the client chose.
-    pub hue: RawHue,
+    pub hue:  RawHue,
     /// The font the client chose.
     pub font: RawFont,
     /// What was said.
@@ -195,7 +208,7 @@ pub struct UnicodeTalkRequest {
     /// them, so the byte the client sent survives to whoever wants to log it.
     pub mode: RawTalkMode,
     /// The colour the client chose.
-    pub hue: RawHue,
+    pub hue:  RawHue,
     /// The font the client chose.
     pub font: RawFont,
     /// What was said.
@@ -312,19 +325,19 @@ fn utf16_le_to_string(bytes: &[u8]) -> String {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct SpokenMessage {
     /// The speaker, or `None` for the system.
-    pub serial: Option<Serial>,
+    pub serial:  Option<Serial>,
     /// The speaker's body graphic, or `None` for no mobile behind it.
     pub graphic: Option<Graphic>,
     /// How it is said.
-    pub mode: TalkMode,
+    pub mode:    TalkMode,
     /// The colour to draw it in.
-    pub hue: Hue,
+    pub hue:     Hue,
     /// The font to draw it in.
-    pub font: Font,
+    pub font:    Font,
     /// The speaker's name, clamped to thirty bytes.
-    pub name: String,
+    pub name:    String,
     /// What was said.
-    pub text: String,
+    pub text:    String,
 }
 
 impl EncodePacket for SpokenMessage {
@@ -359,10 +372,12 @@ impl DecodePacket for SpokenMessage {
             SYSTEM_SERIAL => None,
             // A speaker outside the serial ranges is not something to guess at:
             // the sentinel is the *only* legal way to say "nobody said this".
-            raw => Some(Serial::new(raw).ok_or(DecodeError::UnknownValue {
-                field: "0x1C speaker serial",
-                value: raw,
-            })?),
+            raw => {
+                Some(Serial::new(raw).ok_or(DecodeError::UnknownValue {
+                    field: "0x1C speaker serial",
+                    value: raw,
+                })?)
+            }
         };
         let graphic = match reader.u16()? {
             NO_GRAPHIC => None,
@@ -400,19 +415,19 @@ impl DecodePacket for SpokenMessage {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct LocalizedMessage {
     /// The speaker, or `None` for the system.
-    pub serial: Option<Serial>,
+    pub serial:    Option<Serial>,
     /// The speaker's body graphic, or `None` for no mobile behind it.
-    pub graphic: Option<Graphic>,
+    pub graphic:   Option<Graphic>,
     /// How it is said.
-    pub mode: TalkMode,
+    pub mode:      TalkMode,
     /// The colour to draw it in.
-    pub hue: Hue,
+    pub hue:       Hue,
     /// The font to draw it in.
-    pub font: Font,
+    pub font:      Font,
     /// The cliloc the client looks up and draws.
-    pub cliloc: ClilocId,
+    pub cliloc:    ClilocId,
     /// The speaker's name, clamped to thirty bytes.
-    pub name: String,
+    pub name:      String,
     /// The `\t`-separated substitutions for the cliloc's `~1_val~` slots.
     pub arguments: String,
 }
@@ -450,10 +465,12 @@ impl DecodePacket for LocalizedMessage {
     fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
         let serial = match reader.u32()? {
             SYSTEM_SERIAL => None,
-            raw => Some(Serial::new(raw).ok_or(DecodeError::UnknownValue {
-                field: "0xC1 speaker serial",
-                value: raw,
-            })?),
+            raw => {
+                Some(Serial::new(raw).ok_or(DecodeError::UnknownValue {
+                    field: "0xC1 speaker serial",
+                    value: raw,
+                })?)
+            }
         };
         let graphic = match reader.u16()? {
             NO_GRAPHIC => None,
@@ -495,21 +512,21 @@ const DEFAULT_LANGUAGE: &str = "ENU";
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct UnicodeMessage {
     /// The speaker, or `None` for the system.
-    pub serial: Option<Serial>,
+    pub serial:   Option<Serial>,
     /// The speaker's body graphic, or `None` for no mobile behind it.
-    pub graphic: Option<Graphic>,
+    pub graphic:  Option<Graphic>,
     /// How it is said.
-    pub mode: TalkMode,
+    pub mode:     TalkMode,
     /// The colour to draw it in.
-    pub hue: Hue,
+    pub hue:      Hue,
     /// The font to draw it in.
-    pub font: Font,
+    pub font:     Font,
     /// The four-byte language tag, e.g. `"ENU"`. See [`DEFAULT_LANGUAGE_TAG`].
     pub language: String,
     /// The speaker's name, clamped to thirty bytes.
-    pub name: String,
+    pub name:     String,
     /// What was said.
-    pub text: String,
+    pub text:     String,
 }
 
 impl EncodePacket for UnicodeMessage {
@@ -542,10 +559,12 @@ impl DecodePacket for UnicodeMessage {
     fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
         let serial = match reader.u32()? {
             SYSTEM_SERIAL => None,
-            raw => Some(Serial::new(raw).ok_or(DecodeError::UnknownValue {
-                field: "0xAE speaker serial",
-                value: raw,
-            })?),
+            raw => {
+                Some(Serial::new(raw).ok_or(DecodeError::UnknownValue {
+                    field: "0xAE speaker serial",
+                    value: raw,
+                })?)
+            }
         };
         let graphic = match reader.u16()? {
             NO_GRAPHIC => None,
@@ -605,7 +624,10 @@ const fn graphic_or_none(graphic: Option<Graphic>) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::{decode_packet, encode_packet};
+    use crate::packet::{
+        decode_packet,
+        encode_packet,
+    };
     use crate::server_packet::ServerPacket;
 
     fn version() -> ClientVersion {
@@ -617,13 +639,13 @@ mod tests {
         // 1042764 is "~1_NAME~ seems to belong to someone else." — one slot.
         let packet = encode_packet(
             &LocalizedMessage {
-                serial: None,
-                graphic: None,
-                mode: TalkMode::Regular,
-                hue: Hue(0x03B2),
-                font: Font(3),
-                cliloc: ClilocId(1_042_764),
-                name: "System".to_owned(),
+                serial:    None,
+                graphic:   None,
+                mode:      TalkMode::Regular,
+                hue:       Hue(0x03B2),
+                font:      Font(3),
+                cliloc:    ClilocId(1_042_764),
+                name:      "System".to_owned(),
                 arguments: "Iolo".to_owned(),
             },
             version(),
@@ -664,13 +686,13 @@ mod tests {
     #[test]
     fn a_localized_message_decodes_back_through_the_dispatcher() {
         let sent = LocalizedMessage {
-            serial: None,
-            graphic: None,
-            mode: TalkMode::Regular,
-            hue: Hue(0x03B2),
-            font: Font(3),
-            cliloc: ClilocId(500_014),
-            name: "System".to_owned(),
+            serial:    None,
+            graphic:   None,
+            mode:      TalkMode::Regular,
+            hue:       Hue(0x03B2),
+            font:      Font(3),
+            cliloc:    ClilocId(500_014),
+            name:      "System".to_owned(),
             arguments: "Iolo".to_owned(),
         };
         let bytes = encode_packet(&sent, version());
@@ -694,13 +716,13 @@ mod tests {
     #[test]
     fn a_spoken_message_decodes_back_to_what_was_said() {
         let said = SpokenMessage {
-            serial: None,
+            serial:  None,
             graphic: None,
-            mode: TalkMode::Regular,
-            hue: Hue(0x03B2),
-            font: Font(3),
-            name: "System".to_owned(),
-            text: "The shard is shutting down.".to_owned(),
+            mode:    TalkMode::Regular,
+            hue:     Hue(0x03B2),
+            font:    Font(3),
+            name:    "System".to_owned(),
+            text:    "The shard is shutting down.".to_owned(),
         };
         let packet = encode_packet(&said, version());
         assert_eq!(packet[0], 0x1C);
@@ -722,13 +744,13 @@ mod tests {
     #[test]
     fn a_spoken_message_keeps_a_real_speaker() {
         let said = SpokenMessage {
-            serial: Serial::new(0x0000_0123),
+            serial:  Serial::new(0x0000_0123),
             graphic: Some(Graphic(0x0190)),
-            mode: TalkMode::Emote,
-            hue: Hue(0x0022),
-            font: Font(3),
-            name: "Iolo".to_owned(),
-            text: "hail".to_owned(),
+            mode:    TalkMode::Emote,
+            hue:     Hue(0x0022),
+            font:    Font(3),
+            name:    "Iolo".to_owned(),
+            text:    "hail".to_owned(),
         };
         let packet = encode_packet(&said, version());
         let Some(ServerPacket::SpokenMessage(read)) = ServerPacket::decode(&packet, version()).unwrap()
@@ -786,7 +808,7 @@ mod tests {
         // — UTF-16 is the whole reason a modern client sends 0xAD at all.
         let said = UnicodeTalkRequest {
             mode: RawTalkMode(TalkMode::Regular.to_wire()),
-            hue: RawHue(0x0384),
+            hue:  RawHue(0x0384),
             font: RawFont(3),
             text: "привет .admin".to_owned(),
         };
@@ -836,13 +858,13 @@ mod tests {
     fn a_message_lays_out_its_header_and_pads_the_name() {
         let packet = encode_packet(
             &SpokenMessage {
-                serial: Serial::new(0x0000_0002),
+                serial:  Serial::new(0x0000_0002),
                 graphic: Some(Graphic(0x0190)),
-                mode: TalkMode::Regular,
-                hue: Hue(0x0384),
-                font: Font(3),
-                name: "British".to_owned(),
-                text: "hail".to_owned(),
+                mode:    TalkMode::Regular,
+                hue:     Hue(0x0384),
+                font:    Font(3),
+                name:    "British".to_owned(),
+                text:    "hail".to_owned(),
             },
             version(),
         );
@@ -866,14 +888,14 @@ mod tests {
         // Portuguese "olá" comes back with the accented letter intact.
         let packet = encode_packet(
             &UnicodeMessage {
-                serial: Serial::new(0x0000_0002),
-                graphic: Some(Graphic(0x0190)),
-                mode: TalkMode::Regular,
-                hue: Hue(0x0384),
-                font: Font(3),
+                serial:   Serial::new(0x0000_0002),
+                graphic:  Some(Graphic(0x0190)),
+                mode:     TalkMode::Regular,
+                hue:      Hue(0x0384),
+                font:     Font(3),
                 language: "PTB".to_owned(),
-                name: "Cidadão".to_owned(),
-                text: "olá".to_owned(),
+                name:     "Cidadão".to_owned(),
+                text:     "olá".to_owned(),
             },
             version(),
         );
@@ -909,14 +931,14 @@ mod tests {
     #[test]
     fn a_unicode_message_decodes_back_to_what_was_said() {
         let said = UnicodeMessage {
-            serial: Serial::new(0x0000_0123),
-            graphic: Some(Graphic(0x0190)),
-            mode: TalkMode::Regular,
-            hue: Hue(0x0022),
-            font: Font(3),
+            serial:   Serial::new(0x0000_0123),
+            graphic:  Some(Graphic(0x0190)),
+            mode:     TalkMode::Regular,
+            hue:      Hue(0x0022),
+            font:     Font(3),
             language: "RUS".to_owned(),
-            name: "Иванов".to_owned(),
-            text: "привет .admin".to_owned(),
+            name:     "Иванов".to_owned(),
+            text:     "привет .admin".to_owned(),
         };
         let packet = encode_packet(&said, version());
         assert_eq!(packet[0], 0xAE);
@@ -943,14 +965,14 @@ mod tests {
     fn a_system_unicode_message_has_no_mobile_behind_it() {
         let packet = encode_packet(
             &UnicodeMessage {
-                serial: None,
-                graphic: None,
-                mode: TalkMode::Regular,
-                hue: Hue::NONE,
-                font: Font::DEFAULT,
+                serial:   None,
+                graphic:  None,
+                mode:     TalkMode::Regular,
+                hue:      Hue::NONE,
+                font:     Font::DEFAULT,
                 language: DEFAULT_LANGUAGE_TAG.to_owned(),
-                name: "System".to_owned(),
-                text: "welcome".to_owned(),
+                name:     "System".to_owned(),
+                text:     "welcome".to_owned(),
             },
             version(),
         );
@@ -967,13 +989,13 @@ mod tests {
     fn a_system_message_has_no_mobile_behind_it() {
         let packet = encode_packet(
             &SpokenMessage {
-                serial: None,
+                serial:  None,
                 graphic: None,
-                mode: TalkMode::Regular,
-                hue: Hue::NONE,
-                font: Font::DEFAULT,
-                name: "System".to_owned(),
-                text: "welcome".to_owned(),
+                mode:    TalkMode::Regular,
+                hue:     Hue::NONE,
+                font:    Font::DEFAULT,
+                name:    "System".to_owned(),
+                text:    "welcome".to_owned(),
             },
             version(),
         );

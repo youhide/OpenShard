@@ -38,15 +38,31 @@
 use std::fmt;
 use std::sync::Arc;
 
-use openshard_protocol::identity::{AccountName, CharacterName};
+use openshard_protocol::identity::{
+    AccountName,
+    CharacterName,
+};
 use openshard_protocol::serial::Serial;
 use tokio::sync::Mutex;
-use tokio_postgres::{Client, NoTls, Row};
+use tokio_postgres::{
+    Client,
+    NoTls,
+    Row,
+};
 
 use crate::journal::Snapshot;
 use crate::record::{
-    AccountRecord, CharacterRecord, DecorationRecord, GuildRecord, ItemLocation, ItemRecord, MobileRecord,
-    RegionRecord, SCHEMA_VERSION, SpawnerRecord, WorldRecord,
+    AccountRecord,
+    CharacterRecord,
+    DecorationRecord,
+    GuildRecord,
+    ItemLocation,
+    ItemRecord,
+    MobileRecord,
+    RegionRecord,
+    SCHEMA_VERSION,
+    SpawnerRecord,
+    WorldRecord,
 };
 use crate::store::StoreError;
 
@@ -348,7 +364,7 @@ impl PgStore {
             }
             Some(version) if version != i64::from(SCHEMA_VERSION) => {
                 return Err(StoreError::SchemaMismatch {
-                    found: u32::try_from(version).unwrap_or(u32::MAX),
+                    found:      u32::try_from(version).unwrap_or(u32::MAX),
                     understood: SCHEMA_VERSION,
                 });
             }
@@ -376,7 +392,7 @@ impl PgStore {
         // a snapshot from a future schema must not be half-written.
         if snapshot.schema != SCHEMA_VERSION {
             return Err(StoreError::SchemaMismatch {
-                found: snapshot.schema,
+                found:      snapshot.schema,
                 understood: SCHEMA_VERSION,
             });
         }
@@ -837,15 +853,15 @@ impl PgStore {
         rows.iter()
             .map(|row| {
                 Ok(GuildRecord {
-                    id: row.get::<_, i32>(0).cast_unsigned(),
-                    name: row.get::<_, String>(1),
+                    id:           row.get::<_, i32>(0).cast_unsigned(),
+                    name:         row.get::<_, String>(1),
                     abbreviation: row.get::<_, String>(2),
-                    leader: serial_from(row.get::<_, i64>(3))?,
-                    relations: serde_json::from_str(row.get::<_, &str>(4))
+                    leader:       serial_from(row.get::<_, i64>(3))?,
+                    relations:    serde_json::from_str(row.get::<_, &str>(4))
                         .map_err(|e| StoreError::Corrupt(e.to_string()))?,
-                    proposals: serde_json::from_str(row.get::<_, &str>(5))
+                    proposals:    serde_json::from_str(row.get::<_, &str>(5))
                         .map_err(|e| StoreError::Corrupt(e.to_string()))?,
-                    alliance: row.get::<_, Option<i32>>(6).map(i32::cast_unsigned),
+                    alliance:     row.get::<_, Option<i32>>(6).map(i32::cast_unsigned),
                 })
             })
             .collect()
@@ -863,9 +879,9 @@ impl PgStore {
         rows.iter()
             .map(|row| {
                 Ok(crate::record::AllianceRecord {
-                    id: row.get::<_, i32>(0).cast_unsigned(),
-                    name: row.get::<_, String>(1),
-                    leader: row.get::<_, i32>(2).cast_unsigned(),
+                    id:      row.get::<_, i32>(0).cast_unsigned(),
+                    name:    row.get::<_, String>(1),
+                    leader:  row.get::<_, i32>(2).cast_unsigned(),
                     members: serde_json::from_str(row.get::<_, &str>(3))
                         .map_err(|e| StoreError::Corrupt(e.to_string()))?,
                     pending: serde_json::from_str(row.get::<_, &str>(4))
@@ -987,12 +1003,14 @@ impl PgStore {
             .map_err(database)?;
         // No row at all is a world nobody has saved yet, which is not a row of
         // zeroes: see `Store::world`.
-        Ok(rows.first().map(|row| WorldRecord {
-            clock_minutes: row.get::<_, i64>(0).max(0) as u64,
-            // Unsigned again, bit for bit — see the write in `save`.
-            rng_state: row.get::<_, i64>(1).cast_unsigned(),
-            guild_high_water: row.get::<_, i32>(2).cast_unsigned(),
-            alliance_high_water: row.get::<_, i32>(3).cast_unsigned(),
+        Ok(rows.first().map(|row| {
+            WorldRecord {
+                clock_minutes:       row.get::<_, i64>(0).max(0) as u64,
+                // Unsigned again, bit for bit — see the write in `save`.
+                rng_state:           row.get::<_, i64>(1).cast_unsigned(),
+                guild_high_water:    row.get::<_, i32>(2).cast_unsigned(),
+                alliance_high_water: row.get::<_, i32>(3).cast_unsigned(),
+            }
         }))
     }
 
@@ -1017,9 +1035,11 @@ impl PgStore {
             .map_err(database)?;
         Ok(rows
             .iter()
-            .map(|row| AccountRecord {
-                name: AccountName(row.get(0)),
-                credential: row.get(1),
+            .map(|row| {
+                AccountRecord {
+                    name:       AccountName(row.get(0)),
+                    credential: row.get(1),
+                }
             })
             .collect())
     }
@@ -1048,39 +1068,39 @@ impl PgStore {
 /// the wrong place.
 fn character_from_row(row: &Row) -> Result<CharacterRecord, StoreError> {
     Ok(CharacterRecord {
-        serial: u32::try_from(row.get::<_, i64>(0))
+        serial:          u32::try_from(row.get::<_, i64>(0))
             .ok()
             .and_then(Serial::new)
             .ok_or_else(|| corrupt("serial"))?,
-        account: AccountName(row.get(1)),
-        name: CharacterName(row.get(2)),
-        body: u16::try_from(row.get::<_, i32>(3)).map_err(|_| corrupt("body"))?,
-        hue: u16::try_from(row.get::<_, i32>(4)).map_err(|_| corrupt("hue"))?,
-        facet: u8::try_from(row.get::<_, i32>(5)).map_err(|_| corrupt("facet"))?,
-        x: u16::try_from(row.get::<_, i32>(6)).map_err(|_| corrupt("x"))?,
-        y: u16::try_from(row.get::<_, i32>(7)).map_err(|_| corrupt("y"))?,
-        z: i8::try_from(row.get::<_, i32>(8)).map_err(|_| corrupt("z"))?,
-        facing: u8::try_from(row.get::<_, i32>(9)).map_err(|_| corrupt("facing"))?,
-        strength: u16::try_from(row.get::<_, i32>(10)).map_err(|_| corrupt("strength"))?,
-        dexterity: u16::try_from(row.get::<_, i32>(11)).map_err(|_| corrupt("dexterity"))?,
-        intelligence: u16::try_from(row.get::<_, i32>(12)).map_err(|_| corrupt("intelligence"))?,
-        skills: serde_json::from_str(row.get::<_, &str>(13))
+        account:         AccountName(row.get(1)),
+        name:            CharacterName(row.get(2)),
+        body:            u16::try_from(row.get::<_, i32>(3)).map_err(|_| corrupt("body"))?,
+        hue:             u16::try_from(row.get::<_, i32>(4)).map_err(|_| corrupt("hue"))?,
+        facet:           u8::try_from(row.get::<_, i32>(5)).map_err(|_| corrupt("facet"))?,
+        x:               u16::try_from(row.get::<_, i32>(6)).map_err(|_| corrupt("x"))?,
+        y:               u16::try_from(row.get::<_, i32>(7)).map_err(|_| corrupt("y"))?,
+        z:               i8::try_from(row.get::<_, i32>(8)).map_err(|_| corrupt("z"))?,
+        facing:          u8::try_from(row.get::<_, i32>(9)).map_err(|_| corrupt("facing"))?,
+        strength:        u16::try_from(row.get::<_, i32>(10)).map_err(|_| corrupt("strength"))?,
+        dexterity:       u16::try_from(row.get::<_, i32>(11)).map_err(|_| corrupt("dexterity"))?,
+        intelligence:    u16::try_from(row.get::<_, i32>(12)).map_err(|_| corrupt("intelligence"))?,
+        skills:          serde_json::from_str(row.get::<_, &str>(13))
             .map_err(|e| StoreError::Corrupt(e.to_string()))?,
-        effects: serde_json::from_str(row.get::<_, &str>(14))
+        effects:         serde_json::from_str(row.get::<_, &str>(14))
             .map_err(|e| StoreError::Corrupt(e.to_string()))?,
-        dead: row.get::<_, bool>(15),
-        fame: row.get::<_, i32>(16),
-        karma: row.get::<_, i32>(17),
-        murders: u16::try_from(row.get::<_, i32>(18)).map_err(|_| corrupt("murders"))?,
-        quests: serde_json::from_str(row.get::<_, &str>(19))
+        dead:            row.get::<_, bool>(15),
+        fame:            row.get::<_, i32>(16),
+        karma:           row.get::<_, i32>(17),
+        murders:         u16::try_from(row.get::<_, i32>(18)).map_err(|_| corrupt("murders"))?,
+        quests:          serde_json::from_str(row.get::<_, &str>(19))
             .map_err(|e| StoreError::Corrupt(e.to_string()))?,
-        done_quests: serde_json::from_str(row.get::<_, &str>(20))
+        done_quests:     serde_json::from_str(row.get::<_, &str>(20))
             .map_err(|e| StoreError::Corrupt(e.to_string()))?,
-        stat_locks: serde_json::from_str(row.get::<_, &str>(21))
+        stat_locks:      serde_json::from_str(row.get::<_, &str>(21))
             .map_err(|e| StoreError::Corrupt(e.to_string()))?,
-        guild: row.get::<_, Option<i32>>(22).map(i32::cast_unsigned),
-        guild_title: row.get::<_, String>(23),
-        guild_rank: u8::try_from(row.get::<_, i32>(24)).map_err(|_| corrupt("guild_rank"))?,
+        guild:           row.get::<_, Option<i32>>(22).map(i32::cast_unsigned),
+        guild_title:     row.get::<_, String>(23),
+        guild_rank:      u8::try_from(row.get::<_, i32>(24)).map_err(|_| corrupt("guild_rank"))?,
         guild_candidate: row.get::<_, Option<i32>>(25).map(i32::cast_unsigned),
     })
 }
@@ -1103,31 +1123,35 @@ async fn insert_item(
     // are zero, the same flat form the SQLite backend writes.
     let (kind, facet, x, y, z, parent, grid, layer): (i32, i32, i32, i32, i32, i64, i32, i32) =
         match item.location {
-            ItemLocation::Ground { facet, x, y, z } => (
-                0,
-                i32::from(facet),
-                i32::from(x),
-                i32::from(y),
-                i32::from(z),
-                0,
-                0,
-                0,
-            ),
+            ItemLocation::Ground { facet, x, y, z } => {
+                (
+                    0,
+                    i32::from(facet),
+                    i32::from(x),
+                    i32::from(y),
+                    i32::from(z),
+                    0,
+                    0,
+                    0,
+                )
+            }
             ItemLocation::Contained {
                 container,
                 x,
                 y,
                 grid,
-            } => (
-                1,
-                0,
-                i32::from(x),
-                i32::from(y),
-                0,
-                i64::from(container.raw()),
-                i32::from(grid),
-                0,
-            ),
+            } => {
+                (
+                    1,
+                    0,
+                    i32::from(x),
+                    i32::from(y),
+                    0,
+                    i64::from(container.raw()),
+                    i32::from(grid),
+                    0,
+                )
+            }
             ItemLocation::Equipped { mobile, layer } => {
                 (2, 0, 0, 0, 0, i64::from(mobile.raw()), 0, i32::from(layer))
             }
@@ -1244,16 +1268,20 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
         let layer = u8::try_from(row.get::<_, i32>(14)).map_err(|_| corrupt("layer"))?;
         let location = match kind {
             0 => ItemLocation::Ground { facet, x, y, z },
-            1 => ItemLocation::Contained {
-                container: Serial::new(parent).ok_or_else(|| corrupt("parent"))?,
-                x,
-                y,
-                grid,
-            },
-            2 => ItemLocation::Equipped {
-                mobile: Serial::new(parent).ok_or_else(|| corrupt("parent"))?,
-                layer,
-            },
+            1 => {
+                ItemLocation::Contained {
+                    container: Serial::new(parent).ok_or_else(|| corrupt("parent"))?,
+                    x,
+                    y,
+                    grid,
+                }
+            }
+            2 => {
+                ItemLocation::Equipped {
+                    mobile: Serial::new(parent).ok_or_else(|| corrupt("parent"))?,
+                    layer,
+                }
+            }
             _ => return Ok(None),
         };
         // `owner` is `NOT NULL BIGINT`, `0` the sentinel for "no owner" (a ground
@@ -1295,10 +1323,12 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
             spellbook: row.get::<_, Option<i64>>(17).map(|mask| mask as u64),
             corpse: crate::item_json(row.get(18), "corpse")?,
             poison: match (row.get::<_, Option<i32>>(19), row.get::<_, Option<i32>>(20)) {
-                (Some(level), Some(charges)) => Some((
-                    u8::try_from(level).map_err(|_| corrupt("poison_level"))?,
-                    u16::try_from(charges).map_err(|_| corrupt("poison_charges"))?,
-                )),
+                (Some(level), Some(charges)) => {
+                    Some((
+                        u8::try_from(level).map_err(|_| corrupt("poison_level"))?,
+                        u16::try_from(charges).map_err(|_| corrupt("poison_charges"))?,
+                    ))
+                }
                 _ => None,
             },
             trap: match (
@@ -1306,11 +1336,13 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
                 row.get::<_, Option<i32>>(22),
                 row.get::<_, Option<i32>>(23),
             ) {
-                (Some(kind), Some(power), Some(level)) => Some(crate::record::TrapRecord {
-                    kind: u8::try_from(kind).map_err(|_| corrupt("trap_kind"))?,
-                    power: u16::try_from(power).map_err(|_| corrupt("trap_power"))?,
-                    level: u8::try_from(level).map_err(|_| corrupt("trap_level"))?,
-                }),
+                (Some(kind), Some(power), Some(level)) => {
+                    Some(crate::record::TrapRecord {
+                        kind:  u8::try_from(kind).map_err(|_| corrupt("trap_kind"))?,
+                        power: u16::try_from(power).map_err(|_| corrupt("trap_power"))?,
+                        level: u8::try_from(level).map_err(|_| corrupt("trap_level"))?,
+                    })
+                }
                 _ => None,
             },
             uses: row
@@ -1328,12 +1360,14 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
                 row.get::<_, Option<i32>>(29),
                 row.get::<_, Option<i32>>(30),
             ) {
-                (Some(facet), Some(x), Some(y), Some(z)) => Some((
-                    u8::try_from(facet).map_err(|_| corrupt("rune_facet"))?,
-                    u16::try_from(x).map_err(|_| corrupt("rune_x"))?,
-                    u16::try_from(y).map_err(|_| corrupt("rune_y"))?,
-                    i8::try_from(z).map_err(|_| corrupt("rune_z"))?,
-                )),
+                (Some(facet), Some(x), Some(y), Some(z)) => {
+                    Some((
+                        u8::try_from(facet).map_err(|_| corrupt("rune_facet"))?,
+                        u16::try_from(x).map_err(|_| corrupt("rune_x"))?,
+                        u16::try_from(y).map_err(|_| corrupt("rune_y"))?,
+                        i8::try_from(z).map_err(|_| corrupt("rune_z"))?,
+                    ))
+                }
                 _ => None,
             },
             runebook: crate::item_json(row.get(31), "runebook")?,
@@ -1344,9 +1378,11 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
                 .get::<_, Option<i64>>(32)
                 .and_then(|raw| u32::try_from(raw).ok())
                 .and_then(Serial::new)
-                .map(|house| crate::record::LockdownData {
-                    house,
-                    secure: row.get::<_, Option<i16>>(33).and_then(|n| u8::try_from(n).ok()),
+                .map(|house| {
+                    crate::record::LockdownData {
+                        house,
+                        secure: row.get::<_, Option<i16>>(33).and_then(|n| u8::try_from(n).ok()),
+                    }
                 }),
             affixes: crate::item_json(row.get(34), "affixes")?.unwrap_or_default(),
             location,
@@ -1360,16 +1396,18 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
 fn spawner_from_row(row: &Row) -> Result<SpawnerRecord, StoreError> {
     let creatures: String = row.get(9);
     Ok(SpawnerRecord {
-        id: openshard_state::SpawnerId(u32::try_from(row.get::<_, i64>(0)).map_err(|_| corrupt("id"))?),
-        facet: u8::try_from(row.get::<_, i32>(1)).map_err(|_| corrupt("facet"))?,
-        x: u16::try_from(row.get::<_, i32>(2)).map_err(|_| corrupt("x"))?,
-        y: u16::try_from(row.get::<_, i32>(3)).map_err(|_| corrupt("y"))?,
-        width: u16::try_from(row.get::<_, i32>(4)).map_err(|_| corrupt("width"))?,
-        height: u16::try_from(row.get::<_, i32>(5)).map_err(|_| corrupt("height"))?,
-        max_count: u16::try_from(row.get::<_, i32>(6)).map_err(|_| corrupt("max_count"))?,
-        respawn_secs: u64::try_from(row.get::<_, i64>(7)).map_err(|_| corrupt("respawn_secs"))?,
+        id:             openshard_state::SpawnerId(
+            u32::try_from(row.get::<_, i64>(0)).map_err(|_| corrupt("id"))?,
+        ),
+        facet:          u8::try_from(row.get::<_, i32>(1)).map_err(|_| corrupt("facet"))?,
+        x:              u16::try_from(row.get::<_, i32>(2)).map_err(|_| corrupt("x"))?,
+        y:              u16::try_from(row.get::<_, i32>(3)).map_err(|_| corrupt("y"))?,
+        width:          u16::try_from(row.get::<_, i32>(4)).map_err(|_| corrupt("width"))?,
+        height:         u16::try_from(row.get::<_, i32>(5)).map_err(|_| corrupt("height"))?,
+        max_count:      u16::try_from(row.get::<_, i32>(6)).map_err(|_| corrupt("max_count"))?,
+        respawn_secs:   u64::try_from(row.get::<_, i64>(7)).map_err(|_| corrupt("respawn_secs"))?,
         remaining_secs: u64::try_from(row.get::<_, i64>(8)).map_err(|_| corrupt("remaining_secs"))?,
-        creatures: serde_json::from_str(&creatures).map_err(|e| StoreError::Corrupt(e.to_string()))?,
+        creatures:      serde_json::from_str(&creatures).map_err(|e| StoreError::Corrupt(e.to_string()))?,
     })
 }
 
@@ -1558,9 +1596,9 @@ mod tests {
         assert_eq!(store.world().await.expect("read"), None, "nothing has saved yet");
 
         let record = WorldRecord {
-            clock_minutes: 13 * 60,
-            rng_state: 0xFEDC_BA98_7654_3210,
-            guild_high_water: 0,
+            clock_minutes:       13 * 60,
+            rng_state:           0xFEDC_BA98_7654_3210,
+            guild_high_water:    0,
             alliance_high_water: 0,
         };
         assert!(record.rng_state > i64::MAX.cast_unsigned(), "the high bit is set");
@@ -1575,9 +1613,9 @@ mod tests {
 
         // And the upsert replaces the row rather than adding a second one.
         let later = WorldRecord {
-            clock_minutes: 14 * 60,
-            rng_state: 7,
-            guild_high_water: 0,
+            clock_minutes:       14 * 60,
+            rng_state:           7,
+            guild_high_water:    0,
             alliance_high_water: 0,
         };
         store
@@ -1667,7 +1705,7 @@ mod tests {
         };
         store
             .put_account(&AccountRecord {
-                name: AccountName::new("admin"),
+                name:       AccountName::new("admin"),
                 credential: "secret".into(),
             })
             .await
@@ -1675,7 +1713,7 @@ mod tests {
         // And an upsert on the same name updates rather than duplicating.
         store
             .put_account(&AccountRecord {
-                name: AccountName::new("admin"),
+                name:       AccountName::new("admin"),
                 credential: "changed".into(),
             })
             .await
@@ -1697,22 +1735,22 @@ mod tests {
             .await
             .expect("save");
         let future = Snapshot {
-            tick: 2,
-            schema: SCHEMA_VERSION + 1,
-            characters: vec![character(1, 999)],
-            removed: vec![],
+            tick:        2,
+            schema:      SCHEMA_VERSION + 1,
+            characters:  vec![character(1, 999)],
+            removed:     vec![],
             inventories: vec![],
-            ground: None,
-            spawners: None,
-            mobiles: None,
+            ground:      None,
+            spawners:    None,
+            mobiles:     None,
             decorations: None,
-            regions: None,
-            guilds: None,
-            alliances: None,
-            houses: None,
-            designs: None,
-            boats: None,
-            world: None,
+            regions:     None,
+            guilds:      None,
+            alliances:   None,
+            houses:      None,
+            designs:     None,
+            boats:       None,
+            world:       None,
         };
         let error = store.save(&future).await.expect_err("must refuse");
         assert!(matches!(error, StoreError::SchemaMismatch { .. }));
@@ -1737,7 +1775,7 @@ mod tests {
             .expect("save");
         store
             .put_account(&AccountRecord {
-                name: AccountName::new("admin"),
+                name:       AccountName::new("admin"),
                 credential: "x".into(),
             })
             .await

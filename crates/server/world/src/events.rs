@@ -14,10 +14,17 @@ use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::direction::Facing;
-use openshard_protocol::gump::{RawButtonId, RawGumpId, RawSwitchId};
+use openshard_protocol::gump::{
+    RawButtonId,
+    RawGumpId,
+    RawSwitchId,
+};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Graphic;
-use openshard_protocol::world::{Facet, Point};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 
 /// A character entered the world.
 ///
@@ -33,11 +40,11 @@ pub struct PlayerEntered {
     /// to keep in step.
     pub connection: ConnectionId,
     /// The entity.
-    pub entity: EntityId,
+    pub entity:     EntityId,
     /// Its wire identity.
-    pub serial: Serial,
+    pub serial:     Serial,
     /// Where it appeared.
-    pub position: Point,
+    pub position:   Point,
 }
 
 /// A character did not enter the world after all.
@@ -52,7 +59,7 @@ pub struct PlayerRefused {
     /// Which connection asked.
     pub connection: ConnectionId,
     /// Why it was refused.
-    pub reason: RefusedEntry,
+    pub reason:     RefusedEntry,
 }
 
 /// Why a character could not be brought into the world.
@@ -94,7 +101,7 @@ pub struct SpellRequested {
     /// Its wire identity.
     pub serial: Serial,
     /// Which spell, zero-based.
-    pub spell: SpellId,
+    pub spell:  SpellId,
 }
 
 // `MobileSpawned` moved to `openshard-npc` with the spawn rule that emits it.
@@ -122,9 +129,9 @@ pub struct MobileRestored {
     /// Its wire identity — the same serial it had before the restart.
     pub serial: Serial,
     /// Its body, so a listener matches the kind without a lookup.
-    pub body: Graphic,
+    pub body:   Graphic,
     /// Where it stands right now.
-    pub at: Point,
+    pub at:     Point,
     /// The post it belongs to — its [`Npc`] home, or where it stands if it has
     /// none (a creature, a guard, anything without a beat).
     ///
@@ -139,7 +146,7 @@ pub struct MobileRestored {
     /// is itself persisted. A home does not move, which is what makes it a key.
     ///
     /// [`Npc`]: openshard_state::components::Npc
-    pub home: Point,
+    pub home:   Point,
 }
 
 /// A mobile took a step.
@@ -154,9 +161,9 @@ pub struct MobileMoved {
     /// Its wire identity.
     pub serial: Serial,
     /// Where it was.
-    pub from: Point,
+    pub from:   Point,
     /// Where it is.
-    pub to: Point,
+    pub to:     Point,
     /// Which way it now faces.
     pub facing: Facing,
 }
@@ -222,9 +229,9 @@ pub struct PlayerLeft {
     /// character is not "still being played" by a socket the world has let go of.
     pub connection: ConnectionId,
     /// The entity, now despawned.
-    pub entity: EntityId,
+    pub entity:     EntityId,
     /// Its wire identity, now released.
-    pub serial: Serial,
+    pub serial:     Serial,
 }
 
 /// A creature's corpse was laid — the loot hook.
@@ -243,7 +250,7 @@ pub struct CorpseCreated {
     pub corpse: Serial,
     /// The body the creature was, so a pack matches its loot table with no
     /// lookup — the same key `creature_name`/`creature_base_sound` use.
-    pub body: Graphic,
+    pub body:   Graphic,
 }
 
 /// A mobile crossed from one region into another.
@@ -266,14 +273,14 @@ pub struct RegionChanged {
     /// Their wire identity.
     pub serial: Serial,
     /// The facet the crossing happened on.
-    pub facet: Facet,
+    pub facet:  Facet,
     /// The region left, if they were in one.
-    pub from: Option<openshard_state::RegionId>,
+    pub from:   Option<openshard_state::RegionId>,
     /// The region entered, if they are in one now.
-    pub to: Option<openshard_state::RegionId>,
+    pub to:     Option<openshard_state::RegionId>,
     /// The entered region's name, so a reader needs no lookup. Empty when the
     /// crossing was out into unnamed land.
-    pub name: String,
+    pub name:   String,
 }
 
 /// A game master pressed a button in the `.admin` menu — or the shard was asked
@@ -301,7 +308,7 @@ pub struct AdminMenuAction {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct GumpAnswered {
     /// Who answered, by wire identity.
-    pub serial: Serial,
+    pub serial:       Serial,
     /// Which dialog — the `gump_id` the pack sent, exactly as the client
     /// echoed it.
     ///
@@ -310,11 +317,11 @@ pub struct GumpAnswered {
     /// were offered. The pack knows, and the script bridge is where a raw id
     /// becomes a JSON number — the same serialization seam `Command::Speak`
     /// crosses in N3.
-    pub gump_id: RawGumpId,
+    pub gump_id:      RawGumpId,
     /// The button pressed, or the close box.
-    pub button: RawButtonId,
+    pub button:       RawButtonId,
     /// The switch (checkbox/radio) ids left on.
-    pub switches: Vec<RawSwitchId>,
+    pub switches:     Vec<RawSwitchId>,
     /// Any text fields, as `(field id, contents)`.
     pub text_entries: Vec<(u16, String)>,
 }

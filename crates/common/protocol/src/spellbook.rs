@@ -9,9 +9,16 @@
 //! little-endian mask, bit `n` set when the book holds the `offset + n`-th spell.
 //! Ported from ServUO's `NewSpellbookContent`.
 
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+};
 use crate::serial::Serial;
 use crate::version::ClientVersion;
 use crate::wire::Graphic;
@@ -30,7 +37,7 @@ use crate::wire::Graphic;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SpellbookContent {
     /// The book.
-    pub serial: Serial,
+    pub serial:  Serial,
     /// Its graphic. Always `openshard_state::components::SPELLBOOK_GRAPHIC`
     /// today, a server-chosen constant.
     pub graphic: Graphic,
@@ -38,7 +45,7 @@ pub struct SpellbookContent {
     /// only value ever sent is `1` (Magery), and N3 amendment 1's test —
     /// "does something already branch on this byte" — is not met while no
     /// second spell school is wired up. See `docs/protocol_newtypes.md`.
-    pub offset: u16,
+    pub offset:  u16,
     /// Bit `n` set means the book holds the `offset + n`-th spell.
     pub content: u64,
 }
@@ -142,9 +149,9 @@ mod tests {
     #[test]
     fn a_client_reads_the_book_contents_back_out_of_the_extended_envelope() {
         let content = SpellbookContent {
-            serial: Serial::new(0x4000_0001).expect("an item serial"),
+            serial:  Serial::new(0x4000_0001).expect("an item serial"),
             graphic: Graphic(0x0EFA),
-            offset: 1,
+            offset:  1,
             content: 1 | (1 << 17),
         };
         let packet = encode_packet(&content, ClientVersion::new(7, 0, 45, 65));

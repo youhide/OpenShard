@@ -39,9 +39,16 @@
 //! a log line — decision 31.6, a slow first frame rather than a shard that will
 //! not start.
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use openshard_client_render::arttable::{ArtTable, Stamp, TableError};
+use openshard_client_render::arttable::{
+    ArtTable,
+    Stamp,
+    TableError,
+};
 use openshard_client_render::facing;
 use openshard_client_render::occlusion::Shape;
 use openshard_protocol::wire::Graphic;
@@ -91,9 +98,11 @@ const ART_FILE: &str = "artLegacyMUL.uop";
 pub fn stamp_of(client_dir: &Path) -> Result<Stamp, ScanError> {
     let path = client_dir.join(ART_FILE);
     let bytes = std::fs::metadata(&path)
-        .map_err(|source| ScanError::Io {
-            path: path.clone(),
-            source,
+        .map_err(|source| {
+            ScanError::Io {
+                path: path.clone(),
+                source,
+            }
         })?
         .len();
     Ok(Stamp {
@@ -153,19 +162,21 @@ pub fn authored_beside(path: &Path) -> Result<Option<ArtTable>, ScanError> {
             });
         }
     };
-    ArtTable::parse(&text)
-        .map(Some)
-        .map_err(|source| ScanError::Table {
+    ArtTable::parse(&text).map(Some).map_err(|source| {
+        ScanError::Table {
             path: path.to_path_buf(),
             source,
-        })
+        }
+    })
 }
 
 /// Write a table where the client will look for it.
 pub fn save(path: &Path, table: &ArtTable) -> Result<(), ScanError> {
-    std::fs::write(path, table.to_text()).map_err(|source| ScanError::Io {
-        path: path.to_path_buf(),
-        source,
+    std::fs::write(path, table.to_text()).map_err(|source| {
+        ScanError::Io {
+            path: path.to_path_buf(),
+            source,
+        }
     })
 }
 
@@ -181,13 +192,17 @@ pub fn save(path: &Path, table: &ArtTable) -> Result<(), ScanError> {
 pub fn load(client_dir: &Path) -> Result<ArtTable, LoadError> {
     let path = table_path(client_dir);
     let want = stamp_of(client_dir).map_err(LoadError::Install)?;
-    let text = std::fs::read_to_string(&path).map_err(|source| LoadError::Unread {
-        path: path.clone(),
-        source,
+    let text = std::fs::read_to_string(&path).map_err(|source| {
+        LoadError::Unread {
+            path: path.clone(),
+            source,
+        }
     })?;
-    let table = ArtTable::parse(&text).map_err(|source| LoadError::Unparsed {
-        path: path.clone(),
-        source,
+    let table = ArtTable::parse(&text).map_err(|source| {
+        LoadError::Unparsed {
+            path: path.clone(),
+            source,
+        }
     })?;
     // Decision 31.4: staleness is detected, not assumed. A table describing a
     // different install would move every wall's face by a rule nobody could see,
@@ -212,14 +227,14 @@ pub enum LoadError {
     /// the tool has never been run.
     Unread {
         /// Where it was looked for.
-        path: PathBuf,
+        path:   PathBuf,
         /// What the filesystem said.
         source: std::io::Error,
     },
     /// A file that is not a table this build can read.
     Unparsed {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Which line, and what was wanted on it.
         source: TableError,
     },
@@ -227,12 +242,12 @@ pub enum LoadError {
     /// rules.
     Stale {
         /// Which file.
-        path: PathBuf,
+        path:  PathBuf,
         /// What it says it was measured from, or `None` for a sheet of
         /// overrides that was handed to a client by mistake.
         found: Option<Stamp>,
         /// What this install and this build would have stamped it with.
-        want: Stamp,
+        want:  Stamp,
     },
 }
 
@@ -242,30 +257,37 @@ impl std::fmt::Display for LoadError {
             Self::Install(source) => write!(f, "{source}"),
             Self::Unread { path, source } => write!(f, "{}: {source}", path.display()),
             Self::Unparsed { path, source } => write!(f, "{}: {source}", path.display()),
-            Self::Stale { path, found, want } => match found {
-                Some(found) => write!(
-                    f,
-                    "{}: measured from {} of {} bytes by detector {}, and this is {} of {} bytes \
+            Self::Stale { path, found, want } => {
+                match found {
+                    Some(found) => {
+                        write!(
+                            f,
+                            "{}: measured from {} of {} bytes by detector {}, and this is {} of {} bytes \
                      by detector {}",
-                    path.display(),
-                    found.art,
-                    found.bytes,
-                    found.detector,
-                    want.art,
-                    want.bytes,
-                    want.detector,
-                ),
-                None => write!(
-                    f,
-                    "{}: a sheet of overrides, not a measured table",
-                    path.display()
-                ),
-            },
+                            path.display(),
+                            found.art,
+                            found.bytes,
+                            found.detector,
+                            want.art,
+                            want.bytes,
+                            want.detector,
+                        )
+                    }
+                    None => {
+                        write!(
+                            f,
+                            "{}: a sheet of overrides, not a measured table",
+                            path.display()
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
-impl std::error::Error for LoadError {}
+impl std::error::Error for LoadError {
+}
 
 /// Why a measurement could not be made.
 #[derive(Debug)]
@@ -273,7 +295,7 @@ pub enum ScanError {
     /// A file would not open, or a table would not be written.
     Io {
         /// Which one.
-        path: PathBuf,
+        path:   PathBuf,
         /// What the filesystem said.
         source: std::io::Error,
     },
@@ -281,7 +303,7 @@ pub enum ScanError {
     /// authored rows.
     Table {
         /// Which table.
-        path: PathBuf,
+        path:   PathBuf,
         /// Which line, and what was wanted on it.
         source: TableError,
     },
@@ -299,7 +321,8 @@ impl std::fmt::Display for ScanError {
     }
 }
 
-impl std::error::Error for ScanError {}
+impl std::error::Error for ScanError {
+}
 
 /// The overrides this repository ships, parsed.
 ///
@@ -374,8 +397,8 @@ mod tests {
         let path = dir.join(TABLE_FILE);
 
         let stamp = Stamp {
-            art: ART_FILE.to_string(),
-            bytes: 12_345,
+            art:      ART_FILE.to_string(),
+            bytes:    12_345,
             detector: facing::DETECTOR,
         };
         let mut table = ArtTable::measured(stamp.clone());

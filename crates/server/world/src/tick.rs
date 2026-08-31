@@ -24,71 +24,207 @@
 //! rather than calling back. This is the other half: nothing inside
 //! [`World::tick`] awaits, reads a clock, or touches a socket.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::time::{Duration, Instant};
-
-use openshard_entities::{EntityId, Registry};
-use openshard_events::{Cursor, EventBus};
-use openshard_gateway::ConnectionId;
-use openshard_map::grid::Tile;
-use openshard_map::overlay::Doors;
-use openshard_map::snapshot::MapSnapshot;
-use openshard_movement::{Walk, Walker};
-use openshard_persistence::{
-    CharacterRecord, DecorationRecord, DoorState, Inventory, ItemLocation, ItemRecord, Journal, MobileRecord,
-    SCHEMA_VERSION, Snapshot,
+use std::collections::{
+    BTreeMap,
+    HashMap,
+    HashSet,
 };
-use openshard_protocol::containers::UseRequest;
-use openshard_protocol::context::{ContextMenu, ContextMenuEntry};
-use openshard_protocol::gump::{ButtonId, CloseGump, GumpDisplay, GumpId, GumpKey, GumpPoint, GumpResponse};
-use openshard_protocol::identity::{AccountName, CharacterName};
-use openshard_protocol::login::{SupportedFeatures, encode_supported_features};
-use openshard_protocol::mobile::{MobileStatus, Notoriety, Stat, StatLockBits, Vitals};
-use openshard_protocol::serial::{RawSerial, Serial, SerialKind};
-use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::speech::{Font, RawFont, RawTalkMode, SpokenMessage, TalkMode};
-use openshard_protocol::wire::{Graphic, Hue, Layer, RawHue, RawLayer};
-use openshard_protocol::world::{
-    DeathStatus, Facet, Light, LightLevel, LoginComplete, LogoutAck, MapChange, MapSize, PlayerStart,
-    PlayerUpdate, Point, SeasonChange, Sight, TurnRequest, WalkAck, WalkReject, WalkRequest,
-};
-use openshard_protocol::{
-    access::{AccessLevel, AuthorityNotice},
-    direction::{Direction, Facing},
-    feature::Feature,
-    version::ClientVersion,
-};
-use tracing::{debug, info, warn};
-
-use openshard_state::components::{
-    Access, Account, Amount, Body, Brain, Client, Combat, Contained, Container, DamageType, Decoration, Door,
-    Drawn, Equipped, Ghost, Heading, Healer, Hitpoints, LastStep, Mana, MeleeDamage, Movement, Name,
-    Position, Resistance, Ridden, Riding, SpawnedBy, Spellbook, Stackable, Stamina, Stats, Vendor,
-};
-use openshard_state::facet_rules::FacetRules;
-use openshard_state::rng::Rng;
-use openshard_state::sectors::Sectors;
-use openshard_state::{
-    FacetState, Gameplay, ItemLocation as LiveItemLocation, Outbound, TICKS_PER_SECOND, TooltipMode,
-    WorldHome, WorldState, establish_item_location, kind_from_drawn, presentation_of, relocate_item,
+use std::time::{
+    Duration,
+    Instant,
 };
 
 use openshard_ai as ai;
 use openshard_chat as chat;
 use openshard_combat as combat;
 use openshard_crafting as crafting;
+use openshard_entities::{
+    EntityId,
+    Registry,
+};
+use openshard_events::{
+    Cursor,
+    EventBus,
+};
+use openshard_gateway::ConnectionId;
 use openshard_items as items;
 use openshard_magic as magic;
+use openshard_map::grid::Tile;
+use openshard_map::overlay::Doors;
+use openshard_map::snapshot::MapSnapshot;
+use openshard_movement::{
+    Walk,
+    Walker,
+};
 use openshard_npc as npc;
+use openshard_persistence::{
+    CharacterRecord,
+    DecorationRecord,
+    DoorState,
+    Inventory,
+    ItemLocation,
+    ItemRecord,
+    Journal,
+    MobileRecord,
+    SCHEMA_VERSION,
+    Snapshot,
+};
+use openshard_protocol::access::{
+    AccessLevel,
+    AuthorityNotice,
+};
+use openshard_protocol::containers::UseRequest;
+use openshard_protocol::context::{
+    ContextMenu,
+    ContextMenuEntry,
+};
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
+use openshard_protocol::feature::Feature;
+use openshard_protocol::gump::{
+    ButtonId,
+    CloseGump,
+    GumpDisplay,
+    GumpId,
+    GumpKey,
+    GumpPoint,
+    GumpResponse,
+};
+use openshard_protocol::identity::{
+    AccountName,
+    CharacterName,
+};
+use openshard_protocol::login::{
+    SupportedFeatures,
+    encode_supported_features,
+};
+use openshard_protocol::mobile::{
+    MobileStatus,
+    Notoriety,
+    Stat,
+    StatLockBits,
+    Vitals,
+};
+use openshard_protocol::serial::{
+    RawSerial,
+    Serial,
+    SerialKind,
+};
+use openshard_protocol::server_packet::ServerPacket;
+use openshard_protocol::speech::{
+    Font,
+    RawFont,
+    RawTalkMode,
+    SpokenMessage,
+    TalkMode,
+};
+use openshard_protocol::version::ClientVersion;
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+    RawHue,
+    RawLayer,
+};
+use openshard_protocol::world::{
+    DeathStatus,
+    Facet,
+    Light,
+    LightLevel,
+    LoginComplete,
+    LogoutAck,
+    MapChange,
+    MapSize,
+    PlayerStart,
+    PlayerUpdate,
+    Point,
+    SeasonChange,
+    Sight,
+    TurnRequest,
+    WalkAck,
+    WalkReject,
+    WalkRequest,
+};
 use openshard_quests as quests;
 use openshard_skills as skills;
-
-use crate::doorgen;
-use crate::events::{
-    AdminMenuAction, CorpseCreated, MobileMoved, MobileTurned, PlayerEntered, PlayerLeaving, PlayerLeft,
-    PlayerRefused, RefusedEntry, RefusedReason, RegionChanged, StepRefused,
+use openshard_state::components::{
+    Access,
+    Account,
+    Amount,
+    Body,
+    Brain,
+    Client,
+    Combat,
+    Contained,
+    Container,
+    DamageType,
+    Decoration,
+    Door,
+    Drawn,
+    Equipped,
+    Ghost,
+    Heading,
+    Healer,
+    Hitpoints,
+    LastStep,
+    Mana,
+    MeleeDamage,
+    Movement,
+    Name,
+    Position,
+    Resistance,
+    Ridden,
+    Riding,
+    SpawnedBy,
+    Spellbook,
+    Stackable,
+    Stamina,
+    Stats,
+    Vendor,
 };
-use crate::gm;
+use openshard_state::facet_rules::FacetRules;
+use openshard_state::rng::Rng;
+use openshard_state::sectors::Sectors;
+use openshard_state::{
+    FacetState,
+    Gameplay,
+    ItemLocation as LiveItemLocation,
+    Outbound,
+    TICKS_PER_SECOND,
+    TooltipMode,
+    WorldHome,
+    WorldState,
+    establish_item_location,
+    kind_from_drawn,
+    presentation_of,
+    relocate_item,
+};
+use tracing::{
+    debug,
+    info,
+    warn,
+};
+
+use crate::events::{
+    AdminMenuAction,
+    CorpseCreated,
+    MobileMoved,
+    MobileTurned,
+    PlayerEntered,
+    PlayerLeaving,
+    PlayerLeft,
+    PlayerRefused,
+    RefusedEntry,
+    RefusedReason,
+    RegionChanged,
+    StepRefused,
+};
+use crate::{
+    doorgen,
+    gm,
+};
 
 mod ambient;
 mod chunks;
@@ -125,11 +261,24 @@ mod wake;
 
 use command::StoredCharacter;
 pub use command::{
-    Appearance, Character, CharacterSheet, Command, DecorContainer, DecorDoor, Entering, FreshCharacter,
+    Appearance,
+    Character,
+    CharacterSheet,
+    Command,
+    DecorContainer,
+    DecorDoor,
+    Entering,
+    FreshCharacter,
 };
 use defaults::*;
-pub use defaults::{SAVE_EVERY_TICKS, TICK_INTERVAL};
-pub use persist::{RestoredCharacters, RestoredItems};
+pub use defaults::{
+    SAVE_EVERY_TICKS,
+    TICK_INTERVAL,
+};
+pub use persist::{
+    RestoredCharacters,
+    RestoredItems,
+};
 use roster::Roster;
 
 // `Outbound`, `FacetState`, `HeldItem` and `Origin` are the world's runtime
@@ -146,57 +295,57 @@ use roster::Roster;
 /// value: nothing is a static, and a test builds as many as it likes.
 pub struct World {
     /// The runtime state every gameplay system reads and writes.
-    state: WorldState,
+    state:               WorldState,
     /// What has changed since the last save.
-    journal: Journal,
+    journal:             Journal,
     /// How often to offer a snapshot, in ticks. Zero never saves.
-    save_every: u64,
+    save_every:          u64,
     /// Snapshots the tick has taken and nobody has collected yet.
-    saves: Vec<Snapshot>,
+    saves:               Vec<Snapshot>,
     /// Where every stored character was when it was last seen: seeded from the
     /// store at boot, and rewritten by every logout. It is what a re-login reads
     /// to come back where it left rather than where it stood at boot, and the
     /// store cannot answer that — its copy is written by a task nobody waits for,
     /// which a fast re-login can beat. See [`Roster`].
-    roster: Roster,
+    roster:              Roster,
     /// What the character screen offers beside the characters: the starting
     /// cities, and the two client-capability masks. Configuration, handed over at
     /// boot — see [`CharacterScreen`](screen::CharacterScreen).
-    screen: screen::CharacterScreen,
+    screen:              screen::CharacterScreen,
     /// Read to find out what to mark dirty. See `mark_dirty`.
-    entered: Cursor<PlayerEntered>,
+    entered:             Cursor<PlayerEntered>,
     /// Read to find out what to mark dirty. See `mark_dirty`.
-    moved: Cursor<MobileMoved>,
+    moved:               Cursor<MobileMoved>,
     /// The same moves, read to notice who stepped onto a gate. A cursor of its
     /// own, not a second read of `moved`: each consumer needs every event, and
     /// two of them sharing one cursor means whichever runs first eats the other's.
-    gated: Cursor<MobileMoved>,
+    gated:               Cursor<MobileMoved>,
     /// What combat reported hit, for the AI's retaliation.
-    damaged: Cursor<openshard_combat::MobileDamaged>,
+    damaged:             Cursor<openshard_combat::MobileDamaged>,
     /// Poisoners who fumbled a dose onto themselves, for the tick to apply.
-    fumbled: Cursor<openshard_skills::PoisonedSelf>,
+    fumbled:             Cursor<openshard_skills::PoisonedSelf>,
     /// Beggars who were given something, for the tick to put in their pack.
-    begged: Cursor<openshard_skills::Begged>,
+    begged:              Cursor<openshard_skills::Begged>,
     /// Instruments that played their last tune, for the tick to remove.
-    spent_instruments: Cursor<openshard_skills::InstrumentSpent>,
+    spent_instruments:   Cursor<openshard_skills::InstrumentSpent>,
     /// Read to find out what to mark dirty. See `mark_dirty`.
-    turned: Cursor<MobileTurned>,
+    turned:              Cursor<MobileTurned>,
     /// Skill gains this tick, to push the single-line `0x3A` update to the owner.
-    changed: Cursor<openshard_skills::SkillChanged>,
+    changed:             Cursor<openshard_skills::SkillChanged>,
     /// Damage this tick, read to disturb a spell mid-cast (the `spell_disturb`
     /// rule); a separate cursor from `damaged`, which the AI reads for its own.
-    disturbed: Cursor<openshard_combat::MobileDamaged>,
+    disturbed:           Cursor<openshard_combat::MobileDamaged>,
     /// Deaths this tick, read by `reap` to lay a corpse where a creature fell.
-    dead: Cursor<openshard_combat::MobileDied>,
+    dead:                Cursor<openshard_combat::MobileDied>,
     /// Deaths this tick again, read to credit a quest's "slay N". A second cursor
     /// on the same event rather than a shared read: `reap` and the quest tally
     /// want the whole list independently, and a cursor is consumed by reading.
-    slain: Cursor<openshard_combat::MobileDied>,
+    slain:               Cursor<openshard_combat::MobileDied>,
     /// Region crossings this tick, read to set the guards on a murderer who has
     /// just walked into a town.
-    crossed: Cursor<RegionChanged>,
+    crossed:             Cursor<RegionChanged>,
     /// Commands waiting for the next tick.
-    inbox: Vec<Command>,
+    inbox:               Vec<Command>,
     /// The leaves a connection has just opened this tick.
     ///
     /// A diagonal past a double doorway asks both of its shut leaves to open,
@@ -204,7 +353,7 @@ pub struct World {
     /// second `0x06` is the same automatic action, not an instruction to shut
     /// the pair again. This is tick-local on purpose: a later deliberate
     /// double-click still closes an open door normally.
-    opened_door_leaves: HashSet<(ConnectionId, Serial)>,
+    opened_door_leaves:  HashSet<(ConnectionId, Serial)>,
     /// The spawn regions the tick keeps populated. Laid by the `populate:` verb,
     /// maintained here, and persisted — a populated area stays populated across a
     /// restart, and a rare spawn keeps its remaining respawn wait.
@@ -215,7 +364,7 @@ pub struct World {
     /// out. See [`register_spawner`](World::register_spawner).
     ///
     /// [`SpawnedBy`]: openshard_state::components::SpawnedBy
-    spawners: Vec<crate::spawner::Spawner>,
+    spawners:            Vec<crate::spawner::Spawner>,
     /// Saved inventories waiting for their owners to log in, keyed by character
     /// serial. Loaded from the store at boot by [`restore_inventory`]; a character
     /// entering takes its own and equips it, once.
@@ -229,11 +378,11 @@ pub struct World {
     // a map the next one added beside it can be left out of.
     /// Where the world clock started, in UO minutes — restored at boot so a
     /// restart does not put the world back at midnight. See `tick/ambient.rs`.
-    clock_base: u64,
+    clock_base:          u64,
     /// The sector each player was last seen in, the remembered half of the wake
     /// diff. A change means someone has walked into a block of the map that may
     /// be asleep. See `tick/wake.rs`.
-    player_sectors: HashMap<EntityId, (u8, usize)>,
+    player_sectors:      HashMap<EntityId, (u8, usize)>,
 }
 
 impl std::fmt::Debug for World {
@@ -270,7 +419,7 @@ impl World {
             ),
         );
         Self {
-            state: WorldState::new(
+            state:               WorldState::new(
                 facets,
                 Facet(DEFAULT_FACET),
                 // An empty table rather than no table: a shard with no client
@@ -282,30 +431,30 @@ impl World {
                 start,
                 DEFAULT_SEED,
             ),
-            journal: Journal::new(),
-            save_every: SAVE_EVERY_TICKS,
-            saves: Vec::new(),
-            roster: Roster::new(),
-            screen: screen::CharacterScreen::default(),
-            entered: Cursor::default(),
-            moved: Cursor::default(),
-            gated: Cursor::default(),
-            damaged: Cursor::default(),
-            fumbled: Cursor::default(),
-            begged: Cursor::default(),
-            spent_instruments: Cursor::default(),
-            turned: Cursor::default(),
-            changed: Cursor::default(),
-            disturbed: Cursor::default(),
-            dead: Cursor::default(),
-            slain: Cursor::default(),
-            crossed: Cursor::default(),
-            inbox: Vec::new(),
-            opened_door_leaves: HashSet::new(),
-            spawners: Vec::new(),
+            journal:             Journal::new(),
+            save_every:          SAVE_EVERY_TICKS,
+            saves:               Vec::new(),
+            roster:              Roster::new(),
+            screen:              screen::CharacterScreen::default(),
+            entered:             Cursor::default(),
+            moved:               Cursor::default(),
+            gated:               Cursor::default(),
+            damaged:             Cursor::default(),
+            fumbled:             Cursor::default(),
+            begged:              Cursor::default(),
+            spent_instruments:   Cursor::default(),
+            turned:              Cursor::default(),
+            changed:             Cursor::default(),
+            disturbed:           Cursor::default(),
+            dead:                Cursor::default(),
+            slain:               Cursor::default(),
+            crossed:             Cursor::default(),
+            inbox:               Vec::new(),
+            opened_door_leaves:  HashSet::new(),
+            spawners:            Vec::new(),
             pending_inventories: HashMap::new(),
-            clock_base: 0,
-            player_sectors: HashMap::new(),
+            clock_base:          0,
+            player_sectors:      HashMap::new(),
         }
     }
 
@@ -1137,12 +1286,13 @@ impl World {
         // that automatic batch.
         let already_opened = self.opened_door_leaves.contains(&(connection, serial));
         let opened = match self.state.registry.entity_of(serial) {
-            Some(door) => self
-                .state
-                .registry
-                .get::<Door>(door)
-                .filter(|door| !door.is_open)
-                .map(|door| (serial, door.link)),
+            Some(door) => {
+                self.state
+                    .registry
+                    .get::<Door>(door)
+                    .filter(|door| !door.is_open)
+                    .map(|door| (serial, door.link))
+            }
             None => None,
         };
         let equipped_weapon = if !already_opened {
@@ -1276,13 +1426,15 @@ impl World {
                 amount,
                 damage_type,
                 by,
-            } => combat::damage(
-                &mut self.state,
-                serial,
-                amount,
-                DamageType::from_u8(damage_type),
-                by,
-            ),
+            } => {
+                combat::damage(
+                    &mut self.state,
+                    serial,
+                    amount,
+                    DamageType::from_u8(damage_type),
+                    by,
+                )
+            }
             Command::CastSpell {
                 serial,
                 spell,
@@ -1293,34 +1445,38 @@ impl World {
                 skill,
                 pack,
                 reagents,
-            } => magic::cast_spell(
-                &mut self.state,
-                magic::Cast {
-                    serial,
-                    spell,
-                    target,
-                    mana,
-                    skill_band: openshard_skills::SkillBand::new(min_skill, max_skill),
-                    skill: magic::SkillId::new(skill),
-                    pack,
-                    reagents: &reagents,
-                },
-            ),
+            } => {
+                magic::cast_spell(
+                    &mut self.state,
+                    magic::Cast {
+                        serial,
+                        spell,
+                        target,
+                        mana,
+                        skill_band: openshard_skills::SkillBand::new(min_skill, max_skill),
+                        skill: magic::SkillId::new(skill),
+                        pack,
+                        reagents: &reagents,
+                    },
+                )
+            }
             Command::Heal { serial, amount } => magic::heal(&mut self.state, serial, amount),
             Command::SetStats {
                 serial,
                 strength,
                 dexterity,
                 intelligence,
-            } => skills::set_stats(
-                &mut self.state,
-                serial,
-                Stats {
-                    strength,
-                    dexterity,
-                    intelligence,
-                },
-            ),
+            } => {
+                skills::set_stats(
+                    &mut self.state,
+                    serial,
+                    Stats {
+                        strength,
+                        dexterity,
+                        intelligence,
+                    },
+                )
+            }
             Command::SetSkill { serial, skill, value } => {
                 skills::set_skill(&mut self.state, serial, skill, value)
             }

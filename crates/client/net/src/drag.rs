@@ -2,8 +2,18 @@
 
 use openshard_protocol::feature::Feature;
 use openshard_protocol::gump::GumpPoint;
-use openshard_protocol::items::{DROP_TO_GROUND, DropItem, EquipItemRequest, ItemAmount, PickUpItem};
-use openshard_protocol::packet::{DecodePacket, PacketLength, frame_body};
+use openshard_protocol::items::{
+    DROP_TO_GROUND,
+    DropItem,
+    EquipItemRequest,
+    ItemAmount,
+    PickUpItem,
+};
+use openshard_protocol::packet::{
+    DecodePacket,
+    PacketLength,
+    frame_body,
+};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::version::ClientVersion;
 use openshard_protocol::wire::RawLayer;
@@ -98,7 +108,7 @@ mod tests {
             drop.destination(),
             openshard_protocol::items::DropDestination::Item {
                 item: bag,
-                at: GumpPoint::new(42, 73),
+                at:   GumpPoint::new(42, 73),
             }
         );
         let ground = Point::new(100, 200, 7);

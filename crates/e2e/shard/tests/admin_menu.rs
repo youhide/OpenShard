@@ -22,11 +22,21 @@ use openshard_client_net::connection::Event;
 use openshard_client_net::talk;
 use openshard_client_net::transport::enter_world;
 use openshard_client_net::view::OpenGump;
+use openshard_e2e_shard::{
+    ACCOUNT,
+    plan,
+    spawn,
+    stock_config,
+    version,
+};
 use openshard_protocol::gump::layout::Element;
-use openshard_protocol::gump::{GumpButton, RawButtonId, RawGumpId, RawGumpKey};
+use openshard_protocol::gump::{
+    GumpButton,
+    RawButtonId,
+    RawGumpId,
+    RawGumpKey,
+};
 use openshard_protocol::server_packet::ServerPacket;
-
-use openshard_e2e_shard::{ACCOUNT, plan, spawn, stock_config, version};
 
 #[tokio::test]
 async fn saying_dot_admin_opens_the_staff_menu_and_its_buttons_answer() {
@@ -86,28 +96,32 @@ async fn saying_dot_admin_opens_the_staff_menu_and_its_buttons_answer() {
 
     // The layout parsed into something usable — not merely into a window. An
     // empty box is what a client that could not read the layout would show.
-    let heading = menu.elements.iter().find_map(|element| match element {
-        Element::Label { line, .. } => menu.line(*line),
-        _ => None,
+    let heading = menu.elements.iter().find_map(|element| {
+        match element {
+            Element::Label { line, .. } => menu.line(*line),
+            _ => None,
+        }
     });
     assert_eq!(heading, Some("Admin"), "the menu draws its own name");
 
     let (button, label) = menu
         .elements
         .windows(2)
-        .find_map(|pair| match pair {
-            // Every row of this menu is a reply button followed by its label —
-            // the label is what the button *means*, and pairing them is what
-            // says the parse kept the layout's order.
-            [
-                Element::Button {
-                    kind: GumpButton::Reply,
-                    id,
-                    ..
-                },
-                Element::Label { line, .. },
-            ] => Some((*id, menu.line(*line).unwrap_or_default().to_owned())),
-            _ => None,
+        .find_map(|pair| {
+            match pair {
+                // Every row of this menu is a reply button followed by its label —
+                // the label is what the button *means*, and pairing them is what
+                // says the parse kept the layout's order.
+                [
+                    Element::Button {
+                        kind: GumpButton::Reply,
+                        id,
+                        ..
+                    },
+                    Element::Label { line, .. },
+                ] => Some((*id, menu.line(*line).unwrap_or_default().to_owned())),
+                _ => None,
+            }
         })
         .expect("the menu has at least one labelled reply button");
     assert!(

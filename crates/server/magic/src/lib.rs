@@ -11,26 +11,59 @@
 //! mana back on the tick counter, so it needs no clock and stays replayable.
 
 use openshard_entities::EntityId;
-use openshard_items::{count_in_container, take_from_container};
+use openshard_items::{
+    count_in_container,
+    take_from_container,
+};
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Graphic;
 use openshard_skills::SkillBand;
 use openshard_state::components::{
-    BehaviourBuff, BehaviourBuffKind, BehaviourBuffs, Frozen, Hitpoints, Mana, Meditating, Stamina,
-    StatEffectKind, StatMod, StatMods, Stats, stat_shift,
+    BehaviourBuff,
+    BehaviourBuffKind,
+    BehaviourBuffs,
+    Frozen,
+    Hitpoints,
+    Mana,
+    Meditating,
+    Stamina,
+    StatEffectKind,
+    StatMod,
+    StatMods,
+    Stats,
+    stat_shift,
 };
-use openshard_state::{Skill, TICKS_PER_SECOND, WorldState};
+use openshard_state::{
+    Skill,
+    TICKS_PER_SECOND,
+    WorldState,
+};
 
 mod spells;
 pub use spells::{
-    AREA_RADIUS, MAGERY, MAGERY_SKILL, SpellCircle, SpellEffect, SpellInfo, SpellTarget, cast_delay_ticks,
-    cast_skills, info, mana,
+    AREA_RADIUS,
+    MAGERY,
+    MAGERY_SKILL,
+    SpellCircle,
+    SpellEffect,
+    SpellInfo,
+    SpellTarget,
+    cast_delay_ticks,
+    cast_skills,
+    info,
+    mana,
 };
 
 mod travel;
 pub use travel::{
-    PUBLIC_MOONGATES, PublicGate, TravelKind, describe, destination_of, may_travel, public_gate_at,
+    PUBLIC_MOONGATES,
+    PublicGate,
+    TravelKind,
+    describe,
+    destination_of,
+    may_travel,
+    public_gate_at,
     standing_at,
 };
 
@@ -48,13 +81,13 @@ const MEDITATION_SKILL: Skill = Skill::Meditation;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SpellCast {
     /// The caster.
-    pub caster: EntityId,
+    pub caster:  EntityId,
     /// Its wire identity.
-    pub serial: Serial,
+    pub serial:  Serial,
     /// Which spell, by id.
-    pub spell: SpellId,
+    pub spell:   SpellId,
     /// The target, or `None` for a spell that needs none.
-    pub target: Option<Serial>,
+    pub target:  Option<Serial>,
     /// Whether the cast succeeded (mana paid and the skill check passed).
     pub success: bool,
 }
@@ -87,21 +120,21 @@ impl SkillId {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Cast<'a> {
     /// The caster.
-    pub serial: Serial,
+    pub serial:     Serial,
     /// Which spell, by id.
-    pub spell: SpellId,
+    pub spell:      SpellId,
     /// The target, or `None` for a spell that needs none.
-    pub target: Option<Serial>,
+    pub target:     Option<Serial>,
     /// The mana it costs.
-    pub mana: u16,
+    pub mana:       u16,
     /// The skill band it is cast against.
     pub skill_band: SkillBand,
     /// The skill it rolls (Magery).
-    pub skill: SkillId,
+    pub skill:      SkillId,
     /// The container reagents come out of, or `None` for a spell that needs none.
-    pub pack: Option<Serial>,
+    pub pack:       Option<Serial>,
     /// The reagents the spell consumes, as `(graphic, count)`.
-    pub reagents: &'a [(Graphic, u16)],
+    pub reagents:   &'a [(Graphic, u16)],
 }
 
 /// Cast a spell: check the mana and reagents, spend them, roll the skill, and
@@ -288,8 +321,8 @@ fn shift_stats(state: &mut WorldState, entity: EntityId, kind: StatEffectKind, o
         state.registry.insert(
             entity,
             Stats {
-                strength: apply_delta(strength, ds),
-                dexterity: apply_delta(dexterity, dd),
+                strength:     apply_delta(strength, ds),
+                dexterity:    apply_delta(dexterity, dd),
                 intelligence: apply_delta(intelligence, di),
             },
         );

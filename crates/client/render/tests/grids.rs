@@ -25,8 +25,15 @@
 //! `facing`'s copies are pinned in its own module, where they are visible:
 //! `facing::tests::a_tile_is_the_width_the_camera_draws_one_at`.
 
-use openshard_client_render::camera::{TILE_HEIGHT, TILE_WIDTH, Z_STEP};
-use openshard_client_render::impostor::{self, Fringe};
+use openshard_client_render::camera::{
+    TILE_HEIGHT,
+    TILE_WIDTH,
+    Z_STEP,
+};
+use openshard_client_render::impostor::{
+    self,
+    Fringe,
+};
 use openshard_client_render::light::Z_PER_TILE;
 use openshard_client_render::occlusion::Edges;
 

@@ -40,12 +40,24 @@
 //! has only a path — cannot.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_map::grid::LandGrid;
-use openshard_map::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell, StaticItem, WorldMap};
+use openshard_map::map::{
+    BLOCK_SIZE,
+    CELLS_PER_BLOCK,
+    LandCell,
+    StaticItem,
+    WorldMap,
+};
 use openshard_map::snapshot::MapSnapshot;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Facet;
 use openshard_tiles::LandTileId;
 
@@ -67,7 +79,7 @@ pub enum MapError {
     /// A file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
@@ -81,21 +93,21 @@ pub enum MapError {
     /// The block count does not factor into any known facet.
     UnknownFacet {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// How many blocks it holds.
         blocks: usize,
     },
     /// The UOP container could not be read.
     Uop {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: crate::uop::UopError,
     },
     /// `staidx` and `map` disagree about how many blocks there are.
     IndexMismatch {
         /// Blocks in the map.
-        map_blocks: usize,
+        map_blocks:    usize,
         /// Entries in the index.
         index_entries: usize,
     },
@@ -105,25 +117,31 @@ impl fmt::Display for MapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
-            Self::NotABlockMap { path, size } => write!(
-                f,
-                "{} is {size} bytes, which is not a whole number of {BLOCK_BYTES}-byte blocks",
-                path.display()
-            ),
-            Self::UnknownFacet { path, blocks } => write!(
-                f,
-                "{} holds {blocks} blocks, which is not the size of any known facet",
-                path.display()
-            ),
+            Self::NotABlockMap { path, size } => {
+                write!(
+                    f,
+                    "{} is {size} bytes, which is not a whole number of {BLOCK_BYTES}-byte blocks",
+                    path.display()
+                )
+            }
+            Self::UnknownFacet { path, blocks } => {
+                write!(
+                    f,
+                    "{} holds {blocks} blocks, which is not the size of any known facet",
+                    path.display()
+                )
+            }
             Self::Uop { path, source } => write!(f, "cannot read {}: {source}", path.display()),
             Self::IndexMismatch {
                 map_blocks,
                 index_entries,
-            } => write!(
-                f,
-                "the map has {map_blocks} blocks but staidx has {index_entries} entries; \
+            } => {
+                write!(
+                    f,
+                    "the map has {map_blocks} blocks but staidx has {index_entries} entries; \
                  they are from different clients"
-            ),
+                )
+            }
         }
     }
 }
@@ -194,9 +212,11 @@ pub fn read_facet(client_dir: impl AsRef<Path>, facet: u8) -> Result<WorldMap, M
     // Whichever file was actually read is the one an error should name.
     let (source_path, bytes) = if uop.exists() {
         let pattern = |index: usize| format!("build/map{facet}legacymul/{index:08}.dat");
-        let bytes = crate::uop::read_concatenated(&uop, pattern).map_err(|source| MapError::Uop {
-            path: uop.clone(),
-            source,
+        let bytes = crate::uop::read_concatenated(&uop, pattern).map_err(|source| {
+            MapError::Uop {
+                path: uop.clone(),
+                source,
+            }
         })?;
         (uop, bytes)
     } else {
@@ -230,9 +250,11 @@ fn from_bytes(
         });
     }
     let blocks = bytes.len() / BLOCK_BYTES;
-    let (width, height) = facet_size(blocks, facet).ok_or_else(|| MapError::UnknownFacet {
-        path: map_path.to_owned(),
-        blocks,
+    let (width, height) = facet_size(blocks, facet).ok_or_else(|| {
+        MapError::UnknownFacet {
+            path: map_path.to_owned(),
+            blocks,
+        }
     })?;
     let land = LandGrid::from_file_order(width, height, cells_of(&bytes));
 
@@ -262,7 +284,7 @@ fn load_statics(
     let entries = index.len() / STAIDX_ENTRY;
     if entries != blocks {
         return Err(MapError::IndexMismatch {
-            map_blocks: blocks,
+            map_blocks:    blocks,
             index_entries: entries,
         });
     }
@@ -284,10 +306,12 @@ fn load_statics(
         // panic, so both are simply "nothing here".
         let named = offset != u32::MAX && length != u32::MAX && length != 0;
         let chunk = match named {
-            true => match (usize::try_from(offset), usize::try_from(length)) {
-                (Ok(offset), Ok(length)) => data.get(offset..offset + length),
-                _ => None,
-            },
+            true => {
+                match (usize::try_from(offset), usize::try_from(length)) {
+                    (Ok(offset), Ok(length)) => data.get(offset..offset + length),
+                    _ => None,
+                }
+            }
             false => None,
         };
 
@@ -306,10 +330,10 @@ fn load_statics(
                     tile: Graphic(u16::from_le_bytes([entry[0], entry[1]])),
                     // The file stores an offset within the block; a world
                     // coordinate is more use to everyone downstream.
-                    x: (block_x + u32::from(entry[2] & 0x7)) as u16,
-                    y: (block_y + u32::from(entry[3] & 0x7)) as u16,
-                    z: entry[4] as i8,
-                    hue: Hue(u16::from_le_bytes([entry[5], entry[6]])),
+                    x:    (block_x + u32::from(entry[2] & 0x7)) as u16,
+                    y:    (block_y + u32::from(entry[3] & 0x7)) as u16,
+                    z:    entry[4] as i8,
+                    hue:  Hue(u16::from_le_bytes([entry[5], entry[6]])),
                 });
             }
         }
@@ -333,18 +357,22 @@ fn cells_of(bytes: &[u8]) -> impl Iterator<Item = LandCell> + '_ {
             .as_chunks::<CELL_BYTES>()
             .0
             .iter()
-            .map(|cell| LandCell {
-                // Little-endian: the files are, the network is not.
-                tile: LandTileId(u16::from_le_bytes([cell[0], cell[1]])),
-                z: cell[2] as i8,
+            .map(|cell| {
+                LandCell {
+                    // Little-endian: the files are, the network is not.
+                    tile: LandTileId(u16::from_le_bytes([cell[0], cell[1]])),
+                    z:    cell[2] as i8,
+                }
             })
     })
 }
 
 fn read(path: &Path) -> Result<Vec<u8>, MapError> {
-    std::fs::read(path).map_err(|source| MapError::Read {
-        path: path.to_owned(),
-        source,
+    std::fs::read(path).map_err(|source| {
+        MapError::Read {
+            path: path.to_owned(),
+            source,
+        }
     })
 }
 
@@ -435,7 +463,10 @@ mod tests {
 
     impl ScratchDir {
         fn new() -> Self {
-            use std::sync::atomic::{AtomicU32, Ordering};
+            use std::sync::atomic::{
+                AtomicU32,
+                Ordering,
+            };
             static NEXT: AtomicU32 = AtomicU32::new(0);
             let n = NEXT.fetch_add(1, Ordering::Relaxed);
             let dir = std::env::temp_dir().join(format!("openshard-map-test-{}-{n}", std::process::id()));
@@ -554,7 +585,7 @@ mod tests {
             map.land(2 * 8 + 5, 3 * 8 + 6),
             Some(LandCell {
                 tile: LandTileId(0xBEEF),
-                z: -3,
+                z:    -3,
             }),
         );
         // And a facet read with the two orders swapped would have found it at

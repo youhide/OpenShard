@@ -20,11 +20,26 @@ use openshard_entities::EntityId;
 use openshard_protocol::wire::Layer;
 use openshard_state::WorldState;
 use openshard_state::armor::{
-    LAYER_ARMS, LAYER_CHEST, LAYER_GLOVES, LAYER_GORGET, LAYER_HELM, LAYER_LEGS, LAYER_SHIELD, MedAllowance,
-    armor_data, armor_data_for_kind, hit_layer, layer_coverage, piece_rating, worn_armor_rating,
+    LAYER_ARMS,
+    LAYER_CHEST,
+    LAYER_GLOVES,
+    LAYER_GORGET,
+    LAYER_HELM,
+    LAYER_LEGS,
+    LAYER_SHIELD,
+    MedAllowance,
+    armor_data,
+    armor_data_for_kind,
+    hit_layer,
+    layer_coverage,
+    piece_rating,
+    worn_armor_rating,
     worn_on_layer,
 };
-use openshard_state::components::{Drawn, ItemKind};
+use openshard_state::components::{
+    Drawn,
+    ItemKind,
+};
 
 /// How much a mobile's worn armour gets in the way of meditating, in hundredths
 /// of a rating point — ServUO's `RegenRates.GetArmorOffset`.
@@ -47,10 +62,12 @@ pub fn meditation_offset(state: &WorldState, mobile: EntityId) -> u32 {
             let rating = u32::from(piece_rating(state, item)) * 100;
             let meditation = match state.registry.get::<ItemKind>(item) {
                 Some(kind) => armor_data_for_kind(kind.0),
-                None => state
-                    .registry
-                    .get::<Drawn>(item)
-                    .and_then(|graphic| armor_data(graphic.id)),
+                None => {
+                    state
+                        .registry
+                        .get::<Drawn>(item)
+                        .and_then(|graphic| armor_data(graphic.id))
+                }
             }
             .map_or(MedAllowance::All, |armor| armor.meditation);
             match meditation {

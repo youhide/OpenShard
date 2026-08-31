@@ -26,27 +26,27 @@ pub struct SpriteQuad {
     /// Where it goes and how big it is, in viewport pixels. The quad is
     /// exactly this size, so the art is drawn at its own scale and a texel is
     /// a pixel.
-    pub rect: Rect,
+    pub rect:    Rect,
     /// Where its picture lives in whichever atlas this pass is bound to.
     ///
     /// A negative width is a mirrored sprite — see [`SpriteQuad::mirrored`].
-    pub region: Region,
+    pub region:  Region,
     /// What it hides and what hides it: smaller is nearer. See [`crate::depth`].
-    pub depth: f32,
+    pub depth:   f32,
     /// The wire hue to tint this sprite with, or `0` for none.
     ///
     /// Carried raw rather than as [`openshard_protocol::wire::Hue`] — like every
     /// other field here, this is the instance buffer's own layout, and `.0`
     /// belongs at the boundary the value crosses into it. See
     /// [`crate::hue::HueRamp`] for what a nonzero value means to the shader.
-    pub hue: u32,
+    pub hue:     u32,
     /// Which tile in the world these pixels are, for the lighting pass.
     ///
     /// [`Place::NOWHERE`](crate::place::Place::NOWHERE) for a sprite that is not
     /// a thing standing in the street — the letters over a speaker's head are
     /// the case, and they are left unlit rather than dimmed by the night. See
     /// [`crate::place`].
-    pub place: crate::place::Place,
+    pub place:   crate::place::Place,
     /// The row index of this face's other half, or `0` for a row with no
     /// other half — **for a static.**
     ///
@@ -66,7 +66,7 @@ pub struct SpriteQuad {
     /// [`crate::place::Place`] has no bits for that fraction and the lighting
     /// pass needs it to put a walking body's light where its picture actually
     /// is.
-    pub twin: u32,
+    pub twin:    u32,
     /// **Which occluder of its own tile the thing drawn here is**, or
     /// [`OwnerId::NONE`](crate::occlusion::OwnerId::NONE) for one that is no
     /// occluder at all.
@@ -88,7 +88,7 @@ pub struct SpriteQuad {
     /// A `u32` and not a `u8` because this is the instance buffer's own layout
     /// and its unit is a word — the `.raw()` belongs at this boundary, the way
     /// `hue`'s does.
-    pub owner: u32,
+    pub owner:   u32,
     /// **Which boxes this sprite's own pixels are met against** — the run of
     /// `docs/lighting_rebuild.md` phase 6's [`crate::impostor::Volume`] list
     /// belonging to this static, and nothing else's.
@@ -138,8 +138,8 @@ impl SpriteQuad {
     /// costs the shader nothing — it already interpolates `u + corner * du`.
     pub fn mirrored(region: Region) -> Region {
         Region {
-            u: region.u + region.du,
-            v: region.v,
+            u:  region.u + region.du,
+            v:  region.v,
             du: -region.du,
             dv: region.dv,
         }
@@ -238,7 +238,7 @@ impl SpriteQuad {
 #[derive(Debug)]
 pub struct InstanceRows {
     /// What the pass uploads to `SpriteRenderer::instances_buffer`.
-    pub rows: Vec<SpriteQuad>,
+    pub rows:  Vec<SpriteQuad>,
     /// How many of `rows`, from the front, the draw call actually asks for —
     /// see `SpriteRenderer::render`'s own `drawn` parameter.
     pub drawn: u32,
@@ -287,24 +287,27 @@ mod tests {
     #[test]
     fn a_quad_writes_its_stride_and_nothing_more() {
         let quad = SpriteQuad {
-            rect: Rect {
-                x: 1.0,
-                y: 2.0,
-                width: 44.0,
+            rect:    Rect {
+                x:      1.0,
+                y:      2.0,
+                width:  44.0,
                 height: 88.0,
             },
-            region: Region {
-                u: 0.25,
-                v: 0.5,
+            region:  Region {
+                u:  0.25,
+                v:  0.5,
                 du: 0.125,
                 dv: 0.25,
             },
-            depth: 0.75,
-            hue: 0x8021,
-            place: crate::place::Place::of_static(openshard_protocol::world::Point::new(7, 9, -2)),
-            twin: 0xABCD,
-            owner: 5,
-            volumes: crate::impostor::Range { offset: 12, count: 3 },
+            depth:   0.75,
+            hue:     0x8021,
+            place:   crate::place::Place::of_static(openshard_protocol::world::Point::new(7, 9, -2)),
+            twin:    0xABCD,
+            owner:   5,
+            volumes: crate::impostor::Range {
+                offset: 12,
+                count:  3,
+            },
         };
         let mut out = Vec::new();
         quad.write(&mut out);
@@ -331,26 +334,26 @@ mod tests {
     fn split_corners_gives_a_corner_a_shadow_row_and_leaves_a_wall_alone() {
         let at = openshard_protocol::world::Point::new(3, 4, 0);
         let wall = SpriteQuad {
-            rect: Rect {
-                x: 0.0,
-                y: 0.0,
-                width: 44.0,
+            rect:    Rect {
+                x:      0.0,
+                y:      0.0,
+                width:  44.0,
                 height: 44.0,
             },
-            region: Region {
-                u: 0.0,
-                v: 0.0,
+            region:  Region {
+                u:  0.0,
+                v:  0.0,
                 du: 1.0,
                 dv: 1.0,
             },
-            depth: 0.5,
-            hue: 0,
-            place: crate::place::Place {
+            depth:   0.5,
+            hue:     0,
+            place:   crate::place::Place {
                 stance: crate::place::Stance::FaceNorth,
                 ..crate::place::Place::of_static(at)
             },
-            twin: 0,
-            owner: 0,
+            twin:    0,
+            owner:   0,
             volumes: crate::impostor::Range::default(),
         };
         let corner = SpriteQuad {
@@ -381,8 +384,8 @@ mod tests {
     #[test]
     fn a_mirrored_region_samples_the_same_texels_backwards() {
         let region = Region {
-            u: 0.25,
-            v: 0.5,
+            u:  0.25,
+            v:  0.5,
             du: 0.125,
             dv: 0.25,
         };
@@ -399,23 +402,23 @@ mod tests {
     #[test]
     fn static_page_and_cutaway_opacity_share_the_hue_sideband_without_clobbering_each_other() {
         let quad = SpriteQuad {
-            rect: Rect {
-                x: 0.0,
-                y: 0.0,
-                width: 1.0,
+            rect:    Rect {
+                x:      0.0,
+                y:      0.0,
+                width:  1.0,
                 height: 1.0,
             },
-            region: Region {
-                u: 0.0,
-                v: 0.0,
+            region:  Region {
+                u:  0.0,
+                v:  0.0,
                 du: 1.0,
                 dv: 1.0,
             },
-            depth: 0.0,
-            hue: 0x55aa,
-            place: crate::place::Place::NOWHERE,
-            twin: 0,
-            owner: 0,
+            depth:   0.0,
+            hue:     0x55aa,
+            place:   crate::place::Place::NOWHERE,
+            twin:    0,
+            owner:   0,
             volumes: crate::impostor::Range::default(),
         }
         .with_static_atlas_page(crate::atlas::StaticAtlasPage(3))

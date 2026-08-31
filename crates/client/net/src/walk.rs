@@ -39,13 +39,22 @@
 use std::collections::VecDeque;
 
 use openshard_map::grid::Tile;
-use openshard_movement::{Intent, StepCounter, intend};
+use openshard_movement::{
+    Intent,
+    StepCounter,
+    intend,
+};
 use openshard_protocol::direction::Facing;
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::packet::FramedClientPacket;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::world::{
-    Point, RawFastwalkKey, RawStepSequence, StepSequence, TurnRequest, WalkRequest,
+    Point,
+    RawFastwalkKey,
+    RawStepSequence,
+    StepSequence,
+    TurnRequest,
+    WalkRequest,
 };
 
 /// Where this client believes it will be once every step in flight is answered.
@@ -58,7 +67,7 @@ pub struct Predicted {
     /// The tile the last step asked for.
     pub position: Point,
     /// The facing the last step asked for.
-    pub facing: Facing,
+    pub facing:   Facing,
 }
 
 /// One step asked for and not yet answered.
@@ -70,7 +79,7 @@ struct Pending {
     /// already was — a turn moves nobody.
     position: Point,
     /// Which way it will face.
-    facing: Facing,
+    facing:   Facing,
 }
 
 /// What a server packet meant for the walk.
@@ -87,9 +96,9 @@ pub enum Moved {
     /// this is the first moment that is true.
     Stepped {
         /// Where it is.
-        position: Point,
+        position:  Point,
         /// Which way it faces.
-        facing: Facing,
+        facing:    Facing,
         /// The colour of its own health bar, which is the only other thing a
         /// `0x22` carries.
         ///
@@ -108,7 +117,7 @@ pub enum Moved {
         /// Where it really is.
         position: Point,
         /// Which way it really faces.
-        facing: Facing,
+        facing:   Facing,
     },
     /// The shard changed only the direction of a body that remained on its
     /// confirmed tile.  Combat uses this to face an opponent before a swing;
@@ -132,7 +141,7 @@ pub enum Moved {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct UnexpectedAck {
     /// The sequence the server acked.
-    pub got: StepSequence,
+    pub got:      StepSequence,
     /// The step this client was waiting on, or `None` when it was waiting on
     /// nothing at all.
     pub expected: Option<StepSequence>,
@@ -141,17 +150,20 @@ pub struct UnexpectedAck {
 impl std::fmt::Display for UnexpectedAck {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.expected {
-            Some(expected) => write!(
-                f,
-                "0x22 acked step {} while waiting on step {}",
-                self.got.0, expected.0
-            ),
+            Some(expected) => {
+                write!(
+                    f,
+                    "0x22 acked step {} while waiting on step {}",
+                    self.got.0, expected.0
+                )
+            }
             None => write!(f, "0x22 acked step {} with nothing in flight", self.got.0),
         }
     }
 }
 
-impl std::error::Error for UnexpectedAck {}
+impl std::error::Error for UnexpectedAck {
+}
 
 /// A step was asked for that has no tile to land on.
 ///
@@ -163,7 +175,7 @@ impl std::error::Error for UnexpectedAck {}
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct AtTheWorldEdge {
     /// Where the step was from.
-    pub from: Point,
+    pub from:   Point,
     /// Which way it was going.
     pub facing: Facing,
 }
@@ -174,7 +186,8 @@ impl std::fmt::Display for AtTheWorldEdge {
     }
 }
 
-impl std::error::Error for AtTheWorldEdge {}
+impl std::error::Error for AtTheWorldEdge {
+}
 
 /// How many steps may be in flight before this client stops asking for more.
 ///
@@ -252,7 +265,8 @@ impl std::fmt::Display for NotSent {
     }
 }
 
-impl std::error::Error for NotSent {}
+impl std::error::Error for NotSent {
+}
 
 impl From<AtTheWorldEdge> for NotSent {
     fn from(edge: AtTheWorldEdge) -> Self {
@@ -268,15 +282,15 @@ impl From<AtTheWorldEdge> for NotSent {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Walk {
     /// The sequence byte the next `0x02` will carry.
-    counter: StepCounter,
+    counter:     StepCounter,
     /// Where the last step asked to be.
-    predicted: Predicted,
+    predicted:   Predicted,
     /// The last pose the shard explicitly confirmed.  This stays behind
     /// `predicted` while steps are in flight, so a combat turn can be told from
     /// a genuine `0x20` relocation.
-    confirmed: Predicted,
+    confirmed:   Predicted,
     /// Steps sent and not yet answered, oldest first.
-    pending: VecDeque<Pending>,
+    pending:     VecDeque<Pending>,
     /// How many answers are still owed for steps a correction has already
     /// voided.
     ///
@@ -291,7 +305,7 @@ pub struct Walk {
     /// order, so while this is non-zero the next answer is one of the voided
     /// ones and belongs to nobody. Counted rather than guessed at, so a *real*
     /// desync is still reported.
-    draining: usize,
+    draining:    usize,
     /// Whether the two ends have lost track of each other and nothing may be
     /// sent until the server says where this body is.
     ///
@@ -305,11 +319,11 @@ impl Walk {
     #[must_use]
     pub fn new(position: Point, facing: Facing) -> Self {
         Self {
-            counter: StepCounter::new(),
-            predicted: Predicted { position, facing },
-            confirmed: Predicted { position, facing },
-            pending: VecDeque::new(),
-            draining: 0,
+            counter:     StepCounter::new(),
+            predicted:   Predicted { position, facing },
+            confirmed:   Predicted { position, facing },
+            pending:     VecDeque::new(),
+            draining:    0,
             out_of_step: false,
         }
     }
@@ -523,7 +537,7 @@ impl Walk {
         }
         let Some(pending) = self.pending.front().copied() else {
             return Err(self.lost_track(UnexpectedAck {
-                got: sequence,
+                got:      sequence,
                 expected: None,
             }));
         };
@@ -532,14 +546,14 @@ impl Walk {
             // can repair by guessing which step was meant, and dropping the
             // queue would turn a diagnosable desync into a silent one.
             return Err(self.lost_track(UnexpectedAck {
-                got: sequence,
+                got:      sequence,
                 expected: Some(pending.sequence),
             }));
         }
         self.pending.pop_front();
         self.confirmed = Predicted {
             position: pending.position,
-            facing: pending.facing,
+            facing:   pending.facing,
         };
         Ok(Moved::Stepped {
             position: pending.position,
@@ -597,8 +611,17 @@ mod tests {
     use openshard_protocol::direction::Direction;
     use openshard_protocol::extended::ExtendedRequest;
     use openshard_protocol::serial::Serial;
-    use openshard_protocol::wire::{Graphic, Hue};
-    use openshard_protocol::world::{MapSize, PlayerStart, PlayerUpdate, WalkAck, WalkReject};
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
+    use openshard_protocol::world::{
+        MapSize,
+        PlayerStart,
+        PlayerUpdate,
+        WalkAck,
+        WalkReject,
+    };
 
     use super::*;
 
@@ -669,9 +692,9 @@ mod tests {
         assert!(matches!(
             ExtendedRequest::decode(turn.bytes()),
             Ok(ExtendedRequest::Turn(TurnRequest {
-                facing: Facing {
+                facing:   Facing {
                     direction: Direction::East,
-                    running: false,
+                    running:   false,
                 },
                 sequence: RawStepSequence(0),
             }))
@@ -680,7 +703,7 @@ mod tests {
             walk.predicted(),
             Predicted {
                 position: Point::new(100, 100, 0),
-                facing: Facing::walking(Direction::East),
+                facing:   Facing::walking(Direction::East),
             },
             "a turn moves nobody"
         );
@@ -707,12 +730,12 @@ mod tests {
 
         assert_eq!(
             walk.on_packet(&ServerPacket::WalkAck(WalkAck {
-                sequence: StepSequence(0),
+                sequence:  StepSequence(0),
                 notoriety: Notoriety::Innocent,
             })),
             Ok(Moved::Stepped {
-                position: Point::new(100, 99, 0),
-                facing: Facing::walking(Direction::North),
+                position:  Point::new(100, 99, 0),
+                facing:    Facing::walking(Direction::North),
                 notoriety: Notoriety::Innocent,
             })
         );
@@ -720,12 +743,12 @@ mod tests {
 
         assert_eq!(
             walk.on_packet(&ServerPacket::WalkAck(WalkAck {
-                sequence: StepSequence(1),
+                sequence:  StepSequence(1),
                 notoriety: Notoriety::Murderer,
             })),
             Ok(Moved::Stepped {
-                position: Point::new(100, 98, 0),
-                facing: Facing::walking(Direction::North),
+                position:  Point::new(100, 98, 0),
+                facing:    Facing::walking(Direction::North),
                 notoriety: Notoriety::Murderer,
             })
         );
@@ -746,11 +769,11 @@ mod tests {
             walk.on_packet(&ServerPacket::WalkReject(WalkReject {
                 sequence: StepSequence(1),
                 position: Point::new(100, 100, 0),
-                facing: Facing::walking(Direction::North),
+                facing:   Facing::walking(Direction::North),
             })),
             Ok(Moved::Snapped {
                 position: Point::new(100, 100, 0),
-                facing: Facing::walking(Direction::North),
+                facing:   Facing::walking(Direction::North),
             })
         );
         assert_eq!(
@@ -774,18 +797,18 @@ mod tests {
         walk.step(Facing::walking(Direction::North), |_, _| None).unwrap();
 
         let update = PlayerUpdate {
-            serial: Serial::new(0x0000_002A).unwrap(),
-            body: Graphic(0x0190),
-            hue: Hue::NONE,
-            flags: openshard_protocol::mobile::StatusFlags::NONE,
+            serial:   Serial::new(0x0000_002A).unwrap(),
+            body:     Graphic(0x0190),
+            hue:      Hue::NONE,
+            flags:    openshard_protocol::mobile::StatusFlags::NONE,
             position: Point::new(2000, 2000, -5),
-            facing: Facing::walking(Direction::South),
+            facing:   Facing::walking(Direction::South),
         };
         assert_eq!(
             walk.on_packet(&ServerPacket::PlayerUpdate(update)),
             Ok(Moved::Snapped {
                 position: Point::new(2000, 2000, -5),
-                facing: Facing::walking(Direction::South),
+                facing:   Facing::walking(Direction::South),
             })
         );
         assert_eq!(
@@ -800,14 +823,14 @@ mod tests {
         let mut walk = walk();
         walk.step(Facing::walking(Direction::North), |_, _| None).unwrap();
         let turn = PlayerUpdate {
-            serial: Serial::new(0x0000_002A).unwrap(),
-            body: Graphic(0x0190),
-            hue: Hue::NONE,
-            flags: openshard_protocol::mobile::StatusFlags::NONE,
+            serial:   Serial::new(0x0000_002A).unwrap(),
+            body:     Graphic(0x0190),
+            hue:      Hue::NONE,
+            flags:    openshard_protocol::mobile::StatusFlags::NONE,
             // The server sends 0x20 for a combat turn, but the character has
             // not been moved from the last confirmed tile.
             position: Point::new(100, 100, 0),
-            facing: Facing::walking(Direction::East),
+            facing:   Facing::walking(Direction::East),
         };
 
         assert_eq!(
@@ -815,19 +838,19 @@ mod tests {
             Ok(Moved::Turned {
                 confirmed: Predicted {
                     position: Point::new(100, 100, 0),
-                    facing: Facing::walking(Direction::East),
+                    facing:   Facing::walking(Direction::East),
                 },
             })
         );
         assert_eq!(walk.in_flight(), InFlightSteps::new(1));
         assert_eq!(
             walk.on_packet(&ServerPacket::WalkAck(WalkAck {
-                sequence: StepSequence(0),
+                sequence:  StepSequence(0),
                 notoriety: Notoriety::Innocent,
             })),
             Ok(Moved::Stepped {
-                position: Point::new(100, 99, 0),
-                facing: Facing::walking(Direction::North),
+                position:  Point::new(100, 99, 0),
+                facing:    Facing::walking(Direction::North),
                 notoriety: Notoriety::Innocent,
             }),
             "the acknowledgement still belongs to the step sent before the swing"
@@ -838,12 +861,12 @@ mod tests {
     fn a_combat_turn_with_no_pending_steps_becomes_the_next_inputs_facing() {
         let mut walk = walk();
         let turn = PlayerUpdate {
-            serial: Serial::new(0x0000_002A).unwrap(),
-            body: Graphic(0x0190),
-            hue: Hue::NONE,
-            flags: openshard_protocol::mobile::StatusFlags::NONE,
+            serial:   Serial::new(0x0000_002A).unwrap(),
+            body:     Graphic(0x0190),
+            hue:      Hue::NONE,
+            flags:    openshard_protocol::mobile::StatusFlags::NONE,
             position: Point::new(100, 100, 0),
-            facing: Facing::walking(Direction::East),
+            facing:   Facing::walking(Direction::East),
         };
         assert!(matches!(
             walk.on_packet(&ServerPacket::PlayerUpdate(turn)),
@@ -860,17 +883,17 @@ mod tests {
         let mut walk = walk();
         walk.step(Facing::walking(Direction::North), |_, _| None).unwrap();
         let start = PlayerStart {
-            serial: Serial::new(0x0000_002A).unwrap(),
-            body: Graphic(0x0190),
+            serial:   Serial::new(0x0000_002A).unwrap(),
+            body:     Graphic(0x0190),
             position: Point::new(1475, 1770, 20),
-            facing: Facing::walking(Direction::West),
-            map: MapSize::BRITANNIA,
+            facing:   Facing::walking(Direction::West),
+            map:      MapSize::BRITANNIA,
         };
         assert_eq!(
             walk.on_packet(&ServerPacket::PlayerStart(start)),
             Ok(Moved::Snapped {
                 position: Point::new(1475, 1770, 20),
-                facing: Facing::walking(Direction::West),
+                facing:   Facing::walking(Direction::West),
             })
         );
         assert_eq!(walk.in_flight(), InFlightSteps::new(0));
@@ -886,11 +909,11 @@ mod tests {
         let mut nothing_in_flight = walk();
         assert_eq!(
             nothing_in_flight.on_packet(&ServerPacket::WalkAck(WalkAck {
-                sequence: StepSequence(0),
+                sequence:  StepSequence(0),
                 notoriety: Notoriety::Innocent,
             })),
             Err(UnexpectedAck {
-                got: StepSequence(0),
+                got:      StepSequence(0),
                 expected: None,
             })
         );
@@ -899,11 +922,11 @@ mod tests {
         walk.step(Facing::walking(Direction::North), |_, _| None).unwrap();
         assert_eq!(
             walk.on_packet(&ServerPacket::WalkAck(WalkAck {
-                sequence: StepSequence(9),
+                sequence:  StepSequence(9),
                 notoriety: Notoriety::Innocent,
             })),
             Err(UnexpectedAck {
-                got: StepSequence(9),
+                got:      StepSequence(9),
                 expected: Some(StepSequence(0)),
             })
         );
@@ -920,7 +943,7 @@ mod tests {
         assert_eq!(
             walk.step(Facing::walking(Direction::West), |_, _| None),
             Err(NotSent::AtTheWorldEdge(AtTheWorldEdge {
-                from: Point::new(0, 0, 0),
+                from:   Point::new(0, 0, 0),
                 facing: Facing::walking(Direction::West),
             }))
         );
@@ -931,9 +954,11 @@ mod tests {
         );
         assert_eq!(
             walk.step(Facing::walking(Direction::East), |_, _| None)
-                .map(|packet| match ExtendedRequest::decode(packet.bytes()).unwrap() {
-                    ExtendedRequest::Turn(request) => request.sequence.0,
-                    other => panic!("expected the turn away from the edge, got {other:?}"),
+                .map(|packet| {
+                    match ExtendedRequest::decode(packet.bytes()).unwrap() {
+                        ExtendedRequest::Turn(request) => request.sequence.0,
+                        other => panic!("expected the turn away from the edge, got {other:?}"),
+                    }
                 }),
             Ok(0),
             "and the sequence was not spent on it"
@@ -961,7 +986,7 @@ mod tests {
         let reject = ServerPacket::WalkReject(WalkReject {
             sequence: StepSequence(0),
             position: Point::new(100, 100, 0),
-            facing: Facing::walking(Direction::North),
+            facing:   Facing::walking(Direction::North),
         });
         assert!(matches!(walk.on_packet(&reject), Ok(Moved::Snapped { .. })));
         assert_eq!(walk.in_flight(), InFlightSteps::new(0));
@@ -978,7 +1003,7 @@ mod tests {
             let stale = ServerPacket::WalkReject(WalkReject {
                 sequence: StepSequence(sequence),
                 position: Point::new(100, 100, 0),
-                facing: Facing::walking(Direction::North),
+                facing:   Facing::walking(Direction::North),
             });
             assert_eq!(walk.on_packet(&stale), Ok(Moved::Idle), "answer {sequence}");
         }
@@ -991,12 +1016,12 @@ mod tests {
         // And it gets it: the walk carries on with the sequence it restarted at.
         assert_eq!(
             walk.on_packet(&ServerPacket::WalkAck(WalkAck {
-                sequence: StepSequence(0),
+                sequence:  StepSequence(0),
                 notoriety: Notoriety::Innocent,
             })),
             Ok(Moved::Stepped {
-                position: Point::new(100, 99, 0),
-                facing: Facing::walking(Direction::North),
+                position:  Point::new(100, 99, 0),
+                facing:    Facing::walking(Direction::North),
                 notoriety: Notoriety::Innocent,
             })
         );
@@ -1013,17 +1038,17 @@ mod tests {
         let reject = ServerPacket::WalkReject(WalkReject {
             sequence: StepSequence(0),
             position: Point::new(100, 100, 0),
-            facing: Facing::walking(Direction::North),
+            facing:   Facing::walking(Direction::North),
         });
         walk.on_packet(&reject).unwrap();
         // One step, one answer: nothing is owed from before.
         assert_eq!(
             walk.on_packet(&ServerPacket::WalkAck(WalkAck {
-                sequence: StepSequence(7),
+                sequence:  StepSequence(7),
                 notoriety: Notoriety::Innocent,
             })),
             Err(UnexpectedAck {
-                got: StepSequence(7),
+                got:      StepSequence(7),
                 expected: None,
             })
         );
@@ -1046,7 +1071,7 @@ mod tests {
         // real disagreement.
         assert!(
             walk.on_packet(&ServerPacket::WalkAck(WalkAck {
-                sequence: StepSequence(9),
+                sequence:  StepSequence(9),
                 notoriety: Notoriety::Innocent,
             }))
             .is_err()
@@ -1060,18 +1085,18 @@ mod tests {
 
         // The answer to the resync: a `0x20` saying where the body really is.
         let update = PlayerUpdate {
-            serial: Serial::new(0x0000_002A).unwrap(),
-            body: Graphic(0x0190),
-            hue: Hue::NONE,
-            flags: openshard_protocol::mobile::StatusFlags::NONE,
+            serial:   Serial::new(0x0000_002A).unwrap(),
+            body:     Graphic(0x0190),
+            hue:      Hue::NONE,
+            flags:    openshard_protocol::mobile::StatusFlags::NONE,
             position: Point::new(100, 100, 0),
-            facing: Facing::walking(Direction::North),
+            facing:   Facing::walking(Direction::North),
         };
         assert_eq!(
             walk.on_packet(&ServerPacket::PlayerUpdate(update)),
             Ok(Moved::Snapped {
                 position: Point::new(100, 100, 0),
-                facing: Facing::walking(Direction::North),
+                facing:   Facing::walking(Direction::North),
             })
         );
         assert!(!walk.out_of_step(), "and the walk is free again");
@@ -1099,7 +1124,7 @@ mod tests {
         assert_eq!(
             walk.step(Facing::walking(Direction::North), |_, _| None),
             Err(NotSent::Backlogged {
-                in_flight: MAX_IN_FLIGHT
+                in_flight: MAX_IN_FLIGHT,
             })
         );
         assert_eq!(
@@ -1110,7 +1135,7 @@ mod tests {
 
         // One answer is one step of room, and no more.
         walk.on_packet(&ServerPacket::WalkAck(WalkAck {
-            sequence: StepSequence(0),
+            sequence:  StepSequence(0),
             notoriety: Notoriety::Innocent,
         }))
         .unwrap();
@@ -1132,7 +1157,7 @@ mod tests {
             let sequence = sent_sequence(&packet);
             assert!(step == 0 || sequence != 0, "step {step} sent a second zero");
             walk.on_packet(&ServerPacket::WalkAck(WalkAck {
-                sequence: StepSequence(sequence),
+                sequence:  StepSequence(sequence),
                 notoriety: Notoriety::Innocent,
             }))
             .unwrap();

@@ -28,11 +28,22 @@
 //! being asserted: a shard reading a base set must not find the artifact of the
 //! install, and an operator must not have to say where it went.
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use openshard_config::{Config, FacetKey};
+use openshard_config::{
+    Config,
+    FacetKey,
+};
 use openshard_map::map::LandCell;
-use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
+use openshard_map::patch::{
+    Patch,
+    PatchAuthor,
+    PatchOp,
+    PatchTime,
+};
 use openshard_protocol::world::Facet;
 use openshard_tiles::LandTileId;
 
@@ -110,7 +121,7 @@ fn an_artifact_left_behind_by_an_edit_is_caught_up_from_the_log() {
         at.1,
         LandCell {
             tile: LandTileId(0x3FF),
-            z: 7,
+            z:    7,
         },
     )
     .expect("a tile of facet 0");

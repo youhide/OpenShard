@@ -1,21 +1,88 @@
-use super::*;
 use openshard_persistence::{
-    CorpseData, CorpseEquipmentData, DoneQuestRecord, EffectRecord, ItemAffixRecord, PetData, QuestRecord,
-    RestockLineRecord, RestockRecord, RunebookData, RunebookEntryData, WorldRecord,
+    CorpseData,
+    CorpseEquipmentData,
+    DoneQuestRecord,
+    EffectRecord,
+    ItemAffixRecord,
+    PetData,
+    QuestRecord,
+    RestockLineRecord,
+    RestockRecord,
+    RunebookData,
+    RunebookEntryData,
+    WorldRecord,
 };
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::identity::CharacterName;
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-use openshard_protocol::wire::{Graphic, Hue, Layer};
-use openshard_protocol::world::{Aggression, PhysicalResistance};
-use openshard_state::components::{
-    Banker, BehaviourBuff, BehaviourBuffs, Corpse, CraftedBy, DoneQuest, Escortable, Field, Frozen, Healer,
-    ItemAffix, ItemAffixes, ItemKind, Material, Moongate, NightHome, Npc, Pet, PetOrder, PoisonCharges,
-    Poisoned, Price, Quality, QuestGiver, QuestLog, QuestState, RangedAttack, Restock, RuneMark, Runebook,
-    RunebookEntry, Skills, Spellbook, StatMod, StatMods, StockRecord, SwingSpeed, Title, TradeWindow, Trap,
-    TrapKind, Vendor, body_opens_doors, effect,
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
 };
-use openshard_state::{KeyValue, LockKind, QuestKey, WorldTick, kind_from_drawn, presentation_of};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
+use openshard_protocol::world::{
+    Aggression,
+    PhysicalResistance,
+};
+use openshard_state::components::{
+    Banker,
+    BehaviourBuff,
+    BehaviourBuffs,
+    Corpse,
+    CraftedBy,
+    DoneQuest,
+    Escortable,
+    Field,
+    Frozen,
+    Healer,
+    ItemAffix,
+    ItemAffixes,
+    ItemKind,
+    Material,
+    Moongate,
+    NightHome,
+    Npc,
+    Pet,
+    PetOrder,
+    PoisonCharges,
+    Poisoned,
+    Price,
+    Quality,
+    QuestGiver,
+    QuestLog,
+    QuestState,
+    RangedAttack,
+    Restock,
+    RuneMark,
+    Runebook,
+    RunebookEntry,
+    Skills,
+    Spellbook,
+    StatMod,
+    StatMods,
+    StockRecord,
+    SwingSpeed,
+    Title,
+    TradeWindow,
+    Trap,
+    TrapKind,
+    Vendor,
+    body_opens_doors,
+    effect,
+};
+use openshard_state::{
+    KeyValue,
+    LockKind,
+    QuestKey,
+    WorldTick,
+    kind_from_drawn,
+    presentation_of,
+};
+
+use super::*;
 
 /// The serials [`World::restore_characters`] reserved, and the proof it ran.
 ///
@@ -71,15 +138,15 @@ pub struct RestoredItems {
 }
 
 struct RestoringMobile {
-    record: MobileRecord,
-    entity: EntityId,
-    serial: Serial,
-    facet: Facet,
-    position: Point,
-    facing: Facing,
-    boot_ticks: WorldTick,
+    record:      MobileRecord,
+    entity:      EntityId,
+    serial:      Serial,
+    facet:       Facet,
+    position:    Point,
+    facing:      Facing,
+    boot_ticks:  WorldTick,
     first_think: WorldTick,
-    first_beat: WorldTick,
+    first_beat:  WorldTick,
 }
 
 /// Narrow a live contained-item point to the persistence representation.
@@ -180,22 +247,22 @@ impl World {
         // item picked up without a step never marks the character dirty, so the
         // dirty set is not a safe basis for saving what a character holds.
         let mut snapshot = self.journal.drain(ticks.raw(), |_| None).unwrap_or(Snapshot {
-            tick: ticks.raw(),
-            schema: SCHEMA_VERSION,
-            characters: Vec::new(),
-            removed: Vec::new(),
+            tick:        ticks.raw(),
+            schema:      SCHEMA_VERSION,
+            characters:  Vec::new(),
+            removed:     Vec::new(),
             inventories: Vec::new(),
-            ground: None,
-            spawners: None,
-            mobiles: None,
+            ground:      None,
+            spawners:    None,
+            mobiles:     None,
             decorations: None,
-            regions: None,
-            guilds: None,
-            alliances: None,
-            houses: None,
-            designs: None,
-            boats: None,
-            world: None,
+            regions:     None,
+            guilds:      None,
+            alliances:   None,
+            houses:      None,
+            designs:     None,
+            boats:       None,
+            world:       None,
         });
 
         // Every online character, whole: its record and its entire carried
@@ -257,9 +324,9 @@ impl World {
         // And the ships, on the same pass and the same terms.
         snapshot.boats = Some(self.boat_records());
         snapshot.world = Some(WorldRecord {
-            clock_minutes: self.clock_minutes(),
-            rng_state: self.rng_state(),
-            guild_high_water: self.state.guilds.high_water(),
+            clock_minutes:       self.clock_minutes(),
+            rng_state:           self.rng_state(),
+            guild_high_water:    self.state.guilds.high_water(),
             alliance_high_water: self.state.alliances.high_water(),
         });
 
@@ -322,7 +389,7 @@ impl World {
             // ridden creature from it, so the rider logs back in still mounted.
             let location = ItemLocation::Equipped {
                 mobile: owner,
-                layer: worn.layer.0,
+                layer:  worn.layer.0,
             };
             if let Some(record) = Self::item_record(registry, item, Some(owner), location) {
                 if record.container_gump.is_some() {
@@ -417,9 +484,9 @@ impl World {
             }
             let location = ItemLocation::Ground {
                 facet: facet.0,
-                x: at.x,
-                y: at.y,
-                z: at.z,
+                x:     at.x,
+                y:     at.y,
+                z:     at.z,
             };
             if let Some(record) = Self::item_record(registry, item, None, location) {
                 records.push(record);
@@ -466,27 +533,31 @@ impl World {
             // And a corpse carries how it came to be one, so a shard that restarts
             // inside the seven minutes a body lies does not hand the investigator
             // an anonymous one.
-            corpse: registry.get::<Corpse>(item).map(|story| CorpseData {
-                owner: story.owner.clone(),
-                player: story.player,
-                killer: story.killer.clone(),
-                examined_by: story.examined_by.clone(),
-                looters: story.looters.clone(),
-                carved: story.carved,
-                // The half of the picture `amount` cannot carry — see
-                // `CorpseData::facing`. A corpse with no `CorpseBody` is the
-                // bodiless sack `lay_corpse` lays, which faces nowhere.
-                facing: registry
-                    .get::<openshard_state::components::CorpseBody>(item)
-                    .map_or(0, |corpse| corpse.facing.to_bits()),
-                equipment: story
-                    .equipment
-                    .iter()
-                    .map(|item| CorpseEquipmentData {
-                        item: item.item,
-                        layer: item.layer.0,
-                    })
-                    .collect(),
+            corpse: registry.get::<Corpse>(item).map(|story| {
+                CorpseData {
+                    owner:       story.owner.clone(),
+                    player:      story.player,
+                    killer:      story.killer.clone(),
+                    examined_by: story.examined_by.clone(),
+                    looters:     story.looters.clone(),
+                    carved:      story.carved,
+                    // The half of the picture `amount` cannot carry — see
+                    // `CorpseData::facing`. A corpse with no `CorpseBody` is the
+                    // bodiless sack `lay_corpse` lays, which faces nowhere.
+                    facing:      registry
+                        .get::<openshard_state::components::CorpseBody>(item)
+                        .map_or(0, |corpse| corpse.facing.to_bits()),
+                    equipment:   story
+                        .equipment
+                        .iter()
+                        .map(|item| {
+                            CorpseEquipmentData {
+                                item:  item.item,
+                                layer: item.layer.0,
+                            }
+                        })
+                        .collect(),
+                }
             }),
             // And the poison on it, bottled or smeared: all four potions are the
             // same graphic, so an unsaved bottle comes back empty.
@@ -495,13 +566,13 @@ impl World {
                 .map(|poison| (poison.level.get(), poison.charges)),
             // And the trap on it, so a restart does not quietly disarm every chest
             // on the shard.
-            trap: registry
-                .get::<Trap>(item)
-                .map(|trap| openshard_persistence::record::TrapRecord {
-                    kind: trap_kind_code(trap.kind),
+            trap: registry.get::<Trap>(item).map(|trap| {
+                openshard_persistence::record::TrapRecord {
+                    kind:  trap_kind_code(trap.kind),
                     power: trap.power,
                     level: trap.level,
-                }),
+                }
+            }),
             // And how much is left in a thing that wears out — a tool's swings or
             // an instrument's tunes. One field for both, as they are one interface
             // in ServUO; without it a half-played lute comes back full.
@@ -529,30 +600,36 @@ impl World {
             }),
             // And a runebook's whole contents, for the same reason over sixteen
             // times the work.
-            runebook: registry.get::<Runebook>(item).map(|book| RunebookData {
-                entries: book
-                    .entries
-                    .iter()
-                    .map(|entry| RunebookEntryData {
-                        facet: entry.facet.0,
-                        x: entry.destination.x,
-                        y: entry.destination.y,
-                        z: entry.destination.z,
-                        description: entry.description.clone(),
-                    })
-                    .collect(),
-                charges: book.charges,
-                max_charges: book.max_charges,
-                default_entry: book.default_entry,
+            runebook: registry.get::<Runebook>(item).map(|book| {
+                RunebookData {
+                    entries:       book
+                        .entries
+                        .iter()
+                        .map(|entry| {
+                            RunebookEntryData {
+                                facet:       entry.facet.0,
+                                x:           entry.destination.x,
+                                y:           entry.destination.y,
+                                z:           entry.destination.z,
+                                description: entry.description.clone(),
+                            }
+                        })
+                        .collect(),
+                    charges:       book.charges,
+                    max_charges:   book.max_charges,
+                    default_entry: book.default_entry,
+                }
             }),
             // And the house it is pinned in, if any. A `Standing` becomes its
             // hand-written code rather than its discriminant — see
             // `Standing::code`, and the `PetData` order it copies.
             locked_down: registry
                 .get::<openshard_state::components::LockedDown>(item)
-                .map(|pinned| openshard_persistence::record::LockdownData {
-                    house: pinned.house,
-                    secure: pinned.secure.map(|access| access.code()),
+                .map(|pinned| {
+                    openshard_persistence::record::LockdownData {
+                        house:  pinned.house,
+                        secure: pinned.secure.map(|access| access.code()),
+                    }
                 }),
             affixes: registry
                 .get::<ItemAffixes>(item)
@@ -560,20 +637,24 @@ impl World {
                     affixes
                         .0
                         .iter()
-                        .map(|affix| match *affix {
-                            ItemAffix::Slayer { body, bonus_percent } => {
-                                ItemAffixRecord::Slayer { body, bonus_percent }
+                        .map(|affix| {
+                            match *affix {
+                                ItemAffix::Slayer { body, bonus_percent } => {
+                                    ItemAffixRecord::Slayer { body, bonus_percent }
+                                }
+                                ItemAffix::DamageBonus { minimum, maximum } => {
+                                    ItemAffixRecord::DamageBonus { minimum, maximum }
+                                }
+                                ItemAffix::HitPoison {
+                                    level,
+                                    chance_per_mille,
+                                } => {
+                                    ItemAffixRecord::HitPoison {
+                                        level,
+                                        chance_per_mille,
+                                    }
+                                }
                             }
-                            ItemAffix::DamageBonus { minimum, maximum } => {
-                                ItemAffixRecord::DamageBonus { minimum, maximum }
-                            }
-                            ItemAffix::HitPoison {
-                                level,
-                                chance_per_mille,
-                            } => ItemAffixRecord::HitPoison {
-                                level,
-                                chance_per_mille,
-                            },
                         })
                         .collect()
                 })
@@ -593,20 +674,24 @@ impl World {
                 record
                     .affixes
                     .iter()
-                    .map(|affix| match *affix {
-                        ItemAffixRecord::Slayer { body, bonus_percent } => {
-                            ItemAffix::Slayer { body, bonus_percent }
+                    .map(|affix| {
+                        match *affix {
+                            ItemAffixRecord::Slayer { body, bonus_percent } => {
+                                ItemAffix::Slayer { body, bonus_percent }
+                            }
+                            ItemAffixRecord::DamageBonus { minimum, maximum } => {
+                                ItemAffix::DamageBonus { minimum, maximum }
+                            }
+                            ItemAffixRecord::HitPoison {
+                                level,
+                                chance_per_mille,
+                            } => {
+                                ItemAffix::HitPoison {
+                                    level,
+                                    chance_per_mille,
+                                }
+                            }
                         }
-                        ItemAffixRecord::DamageBonus { minimum, maximum } => {
-                            ItemAffix::DamageBonus { minimum, maximum }
-                        }
-                        ItemAffixRecord::HitPoison {
-                            level,
-                            chance_per_mille,
-                        } => ItemAffix::HitPoison {
-                            level,
-                            chance_per_mille,
-                        },
                     })
                     .collect(),
             ),
@@ -646,7 +731,7 @@ impl World {
             self.state.registry.insert(
                 entity,
                 RuneMark {
-                    facet: Facet(facet),
+                    facet:       Facet(facet),
                     destination: Point::new(x, y, z),
                 },
             );
@@ -655,21 +740,23 @@ impl World {
             self.state.registry.insert(
                 entity,
                 Runebook {
-                    entries: book
+                    entries:       book
                         .entries
                         .iter()
-                        .map(|entry| RunebookEntry {
-                            facet: Facet(entry.facet),
-                            destination: Point::new(entry.x, entry.y, entry.z),
-                            description: entry.description.clone(),
+                        .map(|entry| {
+                            RunebookEntry {
+                                facet:       Facet(entry.facet),
+                                destination: Point::new(entry.x, entry.y, entry.z),
+                                description: entry.description.clone(),
+                            }
                         })
                         .collect(),
-                    charges: book.charges,
-                    max_charges: book.max_charges,
+                    charges:       book.charges,
+                    max_charges:   book.max_charges,
                     default_entry: book.default_entry,
                     // Not saved: a couple of seconds' cooldown that a restart
                     // re-arms at zero, which errs the player's way.
-                    next_use: WorldTick::ZERO,
+                    next_use:      WorldTick::ZERO,
                 },
             );
         }
@@ -677,7 +764,7 @@ impl World {
             self.state.registry.insert(
                 entity,
                 openshard_state::components::LockedDown {
-                    house: pinned.house,
+                    house:  pinned.house,
                     // A code this engine did not write reads as a plain lockdown
                     // rather than as a secure open to anybody: the item stays
                     // pinned, which is the recoverable direction, and a container
@@ -708,10 +795,10 @@ impl World {
             let Some(serial) = registry.serial_of(entity) else {
                 continue;
             };
-            let hits = registry
-                .get::<Hitpoints>(entity)
-                .copied()
-                .unwrap_or(Hitpoints { current: 1, max: 1 });
+            let hits = registry.get::<Hitpoints>(entity).copied().unwrap_or(Hitpoints {
+                current: 1,
+                max:     1,
+            });
             // No brain reads back as the values `spawn` builds no brain from.
             let (sight, aggression, beat, wander) = registry
                 .get::<Brain>(entity)
@@ -765,34 +852,40 @@ impl World {
                 night_home: registry.get::<NightHome>(entity).map(|h| (h.0.x, h.0.y, h.0.z)),
                 // A tamed creature is property: a restart that quietly released
                 // every pet on the shard would be the `Murders` lesson again.
-                pet: registry.get::<Pet>(entity).map(|pet| PetData {
-                    owner: pet.owner,
-                    slots: pet.slots,
-                    order: pet_order_code(pet.order),
-                    order_target: pet.order_target,
+                pet: registry.get::<Pet>(entity).map(|pet| {
+                    PetData {
+                        owner:        pet.owner,
+                        slots:        pet.slots,
+                        order:        pet_order_code(pet.order),
+                        order_target: pet.order_target,
+                    }
                 }),
-                restock: registry.get::<Restock>(entity).map(|shelf| RestockRecord {
-                    // Seconds, not the tick: a tick counter restarts at boot, so a
-                    // saved tick comes back either already due or an hour early.
-                    in_seconds: shelf.at.saturating_sub(self.state.ticks) / TICKS_PER_SECOND,
-                    lines: shelf
-                        .lines
-                        .iter()
-                        .map(|l| (l.graphic.0, l.hue.0, l.amount.0, l.price.0, l.name.clone()))
-                        .collect(),
-                    typed_lines: shelf
-                        .lines
-                        .iter()
-                        .map(|line| RestockLineRecord {
-                            graphic: line.graphic.0,
-                            hue: line.hue.0,
-                            item_kind: line.item_kind.map(|kind| kind.0),
-                            material: line.material.map(|material| material.0),
-                            amount: line.amount.0,
-                            price: line.price.0,
-                            name: line.name.clone(),
-                        })
-                        .collect(),
+                restock: registry.get::<Restock>(entity).map(|shelf| {
+                    RestockRecord {
+                        // Seconds, not the tick: a tick counter restarts at boot, so a
+                        // saved tick comes back either already due or an hour early.
+                        in_seconds:  shelf.at.saturating_sub(self.state.ticks) / TICKS_PER_SECOND,
+                        lines:       shelf
+                            .lines
+                            .iter()
+                            .map(|l| (l.graphic.0, l.hue.0, l.amount.0, l.price.0, l.name.clone()))
+                            .collect(),
+                        typed_lines: shelf
+                            .lines
+                            .iter()
+                            .map(|line| {
+                                RestockLineRecord {
+                                    graphic:   line.graphic.0,
+                                    hue:       line.hue.0,
+                                    item_kind: line.item_kind.map(|kind| kind.0),
+                                    material:  line.material.map(|material| material.0),
+                                    amount:    line.amount.0,
+                                    price:     line.price.0,
+                                    name:      line.name.clone(),
+                                }
+                            })
+                            .collect(),
+                    }
                 }),
                 // `SpawnedBy` is an index into the spawner list (0, 1, 2, ...),
                 // not a wire serial — its own namespace starts at zero.
@@ -826,13 +919,15 @@ impl World {
             let Some(&Position(at)) = registry.get::<Position>(entity) else {
                 continue;
             };
-            let door = registry.get::<Door>(entity).map(|door| DoorState {
-                closed_graphic: door.closed.0,
-                open_graphic: door.open.0,
-                offset_x: door.offset_x,
-                offset_y: door.offset_y,
-                link: door.link,
-                is_open: door.is_open,
+            let door = registry.get::<Door>(entity).map(|door| {
+                DoorState {
+                    closed_graphic: door.closed.0,
+                    open_graphic:   door.open.0,
+                    offset_x:       door.offset_x,
+                    offset_y:       door.offset_y,
+                    link:           door.link,
+                    is_open:        door.is_open,
+                }
             });
             let lock = registry.get::<openshard_state::components::Lock>(entity);
             let (locked, key_value) = match lock.map(|lock| lock.kind) {
@@ -871,16 +966,16 @@ impl World {
         let mut effects = Vec::new();
         if let Some(poison) = registry.get::<Poisoned>(entity) {
             effects.push(EffectRecord {
-                kind: effect::POISON,
-                amount: i16::from(poison.level.get()),
+                kind:      effect::POISON,
+                amount:    i16::from(poison.level.get()),
                 remaining: u16::from(poison.pulses_left),
             });
         }
         if let Some(mods) = registry.get::<StatMods>(entity) {
             for m in &mods.active {
                 effects.push(EffectRecord {
-                    kind: m.kind.as_u8(),
-                    amount: m.offset,
+                    kind:      m.kind.as_u8(),
+                    amount:    m.offset,
                     remaining: m.expires_at.saturating_sub(now).min(u64::from(u16::MAX)) as u16,
                 });
             }
@@ -891,8 +986,8 @@ impl World {
         if let Some(buffs) = registry.get::<BehaviourBuffs>(entity) {
             for b in &buffs.active {
                 effects.push(EffectRecord {
-                    kind: b.kind.as_u8(),
-                    amount: b.amount,
+                    kind:      b.kind.as_u8(),
+                    amount:    b.amount,
                     remaining: b.expires_at.saturating_sub(now).min(u64::from(u16::MAX)) as u16,
                 });
             }
@@ -900,8 +995,8 @@ impl World {
         // Paralysis rides the same list — a relog does not thaw it.
         if let Some(frozen) = registry.get::<Frozen>(entity) {
             effects.push(EffectRecord {
-                kind: effect::PARALYZE,
-                amount: 0,
+                kind:      effect::PARALYZE,
+                amount:    0,
                 remaining: frozen.until.saturating_sub(now).min(u64::from(u16::MAX)) as u16,
             });
         }
@@ -929,10 +1024,10 @@ impl World {
                 registry.insert(
                     entity,
                     Poisoned {
-                        level: openshard_protocol::world::PoisonLevel::new(
+                        level:       openshard_protocol::world::PoisonLevel::new(
                             record.amount.clamp(0, i16::from(u8::MAX)) as u8,
                         ),
-                        next_pulse: now + combat::POISON_INTERVAL,
+                        next_pulse:  now + combat::POISON_INTERVAL,
                         pulses_left: record.remaining.min(u16::from(u8::MAX)) as u8,
                     },
                 );
@@ -990,17 +1085,19 @@ impl World {
         let account = registry.get::<Account>(entity)?;
         let facet = registry.get::<Facet>(entity).map_or(DEFAULT_FACET, |f| f.0);
         let stats = registry.get::<Stats>(entity).copied().unwrap_or(Stats {
-            strength: 100,
-            dexterity: 100,
+            strength:     100,
+            dexterity:    100,
             intelligence: 100,
         });
         let skills = registry.get::<Skills>(entity).map_or_else(Vec::new, |s| {
             s.entries()
-                .map(|(skill, value, lock)| openshard_persistence::SkillRecord {
-                    id: skill.id(),
-                    value,
-                    lock: lock.to_bits(),
-                    cap: s.cap(skill),
+                .map(|(skill, value, lock)| {
+                    openshard_persistence::SkillRecord {
+                        id: skill.id(),
+                        value,
+                        lock: lock.to_bits(),
+                        cap: s.cap(skill),
+                    }
                 })
                 .collect()
         });
@@ -1018,11 +1115,11 @@ impl World {
             .unwrap_or_default();
         let age = |then: WorldTick| now.saturating_sub(then);
         let stat_locks = openshard_persistence::StatLockRecord {
-            strength: locks.strength.to_bits(),
-            dexterity: locks.dexterity.to_bits(),
-            intelligence: locks.intelligence.to_bits(),
-            strength_age: age(last.strength),
-            dexterity_age: age(last.dexterity),
+            strength:         locks.strength.to_bits(),
+            dexterity:        locks.dexterity.to_bits(),
+            intelligence:     locks.intelligence.to_bits(),
+            strength_age:     age(last.strength),
+            dexterity_age:    age(last.dexterity),
             intelligence_age: age(last.intelligence),
         };
         Some(CharacterRecord {
@@ -1086,12 +1183,14 @@ impl World {
         };
         log.active
             .iter()
-            .map(|quest| QuestRecord {
-                key: quest.key.as_str().to_owned(),
-                progress: quest.progress.clone(),
-                seconds: quest.seconds_left.clone(),
-                failed: quest.failed,
-                giver: quest.giver,
+            .map(|quest| {
+                QuestRecord {
+                    key:      quest.key.as_str().to_owned(),
+                    progress: quest.progress.clone(),
+                    seconds:  quest.seconds_left.clone(),
+                    failed:   quest.failed,
+                    giver:    quest.giver,
+                }
             })
             .collect()
     }
@@ -1108,14 +1207,16 @@ impl World {
         };
         log.done
             .iter()
-            .map(|done| DoneQuestRecord {
-                key: done.key.as_str().to_owned(),
-                restart_in_secs: if done.restart_at == WorldTick::MAX {
-                    u32::MAX // never again
-                } else {
-                    let ticks = done.restart_at.saturating_sub(now);
-                    u32::try_from(ticks / TICKS_PER_SECOND).unwrap_or(u32::MAX)
-                },
+            .map(|done| {
+                DoneQuestRecord {
+                    key:             done.key.as_str().to_owned(),
+                    restart_in_secs: if done.restart_at == WorldTick::MAX {
+                        u32::MAX // never again
+                    } else {
+                        let ticks = done.restart_at.saturating_sub(now);
+                        u32::try_from(ticks / TICKS_PER_SECOND).unwrap_or(u32::MAX)
+                    },
+                }
             })
             .collect()
     }
@@ -1135,23 +1236,27 @@ impl World {
         let log = QuestLog {
             active: quests
                 .iter()
-                .map(|record| QuestState {
-                    key: QuestKey::new(record.key.clone()),
-                    progress: record.progress.clone(),
-                    seconds_left: record.seconds.clone(),
-                    failed: record.failed,
-                    giver: record.giver,
+                .map(|record| {
+                    QuestState {
+                        key:          QuestKey::new(record.key.clone()),
+                        progress:     record.progress.clone(),
+                        seconds_left: record.seconds.clone(),
+                        failed:       record.failed,
+                        giver:        record.giver,
+                    }
                 })
                 .collect(),
-            done: done
+            done:   done
                 .iter()
-                .map(|record| DoneQuest {
-                    key: QuestKey::new(record.key.clone()),
-                    restart_at: if record.restart_in_secs == u32::MAX {
-                        WorldTick::MAX
-                    } else {
-                        now + u64::from(record.restart_in_secs) * TICKS_PER_SECOND
-                    },
+                .map(|record| {
+                    DoneQuest {
+                        key:        QuestKey::new(record.key.clone()),
+                        restart_at: if record.restart_in_secs == u32::MAX {
+                            WorldTick::MAX
+                        } else {
+                            now + u64::from(record.restart_in_secs) * TICKS_PER_SECOND
+                        },
+                    }
                 })
                 .collect(),
         };
@@ -1265,7 +1370,7 @@ impl World {
         }
         let position = Point::new(x, y, z);
         let drawn = Drawn {
-            id: Graphic(record.graphic),
+            id:  Graphic(record.graphic),
             hue: Hue(record.hue),
         };
         self.state.registry.insert(entity, drawn);
@@ -1276,7 +1381,7 @@ impl World {
             self.state.registry.insert(
                 entity,
                 openshard_state::components::CorpseBody {
-                    body: Graphic(record.amount),
+                    body:   Graphic(record.amount),
                     facing: restored_facing(record),
                 },
             );
@@ -1319,7 +1424,7 @@ impl World {
             self.state.registry.insert(
                 entity,
                 Trap {
-                    kind: trap_kind_from(trap.kind),
+                    kind:  trap_kind_from(trap.kind),
                     power: trap.power,
                     level: trap.level,
                 },
@@ -1418,7 +1523,7 @@ impl World {
             }
             restored.insert(serial, entity);
             let drawn = Drawn {
-                id: Graphic(record.graphic),
+                id:  Graphic(record.graphic),
                 hue: Hue(record.hue),
             };
             self.state.registry.insert(entity, drawn);
@@ -1427,7 +1532,7 @@ impl World {
                 self.state.registry.insert(
                     entity,
                     openshard_state::components::CorpseBody {
-                        body: Graphic(record.amount),
+                        body:   Graphic(record.amount),
                         facing: restored_facing(record),
                     },
                 );
@@ -1469,7 +1574,7 @@ impl World {
                 self.state.registry.insert(
                     entity,
                     Trap {
-                        kind: trap_kind_from(trap.kind),
+                        kind:  trap_kind_from(trap.kind),
                         power: trap.power,
                         level: trap.level,
                     },
@@ -1610,7 +1715,7 @@ impl World {
         registry.insert(
             mobile.entity,
             Body {
-                id: Graphic(record.body),
+                id:  Graphic(record.body),
                 hue: openshard_protocol::wire::Hue(record.hue),
             },
         );
@@ -1621,7 +1726,7 @@ impl World {
             mobile.entity,
             Hitpoints {
                 current: record.hits_current.max(1),
-                max: record.hits_max.max(1),
+                max:     record.hits_max.max(1),
             },
         );
         registry.insert(mobile.entity, record.notoriety);
@@ -1640,10 +1745,10 @@ impl World {
             mobile.entity,
             Resistance {
                 physical: record.resistance.get(),
-                fire: 0,
-                cold: 0,
-                poison: 0,
-                energy: 0,
+                fire:     0,
+                cold:     0,
+                poison:   0,
+                energy:   0,
             },
         );
         if record.swing != 0 {
@@ -1703,9 +1808,9 @@ impl World {
             registry.insert(
                 mobile.entity,
                 Pet {
-                    owner: pet.owner,
-                    slots: pet.slots,
-                    order: pet_order_from(pet.order),
+                    owner:        pet.owner,
+                    slots:        pet.slots,
+                    order:        pet_order_from(pet.order),
                     order_target: pet.order_target,
                 },
             );
@@ -1722,7 +1827,7 @@ impl World {
             registry.insert(
                 mobile.entity,
                 Restock {
-                    at: mobile.boot_ticks + shelf.in_seconds * TICKS_PER_SECOND,
+                    at:    mobile.boot_ticks + shelf.in_seconds * TICKS_PER_SECOND,
                     lines: Self::restore_restock_lines(shelf),
                 },
             );
@@ -1731,9 +1836,9 @@ impl World {
             registry.insert(
                 mobile.entity,
                 Npc {
-                    home: Point::new(x, y, z),
-                    wander: record.npc_wander,
-                    next_beat: mobile.first_beat,
+                    home:       Point::new(x, y, z),
+                    wander:     record.npc_wander,
+                    next_beat:  mobile.first_beat,
                     // Eligible to greet at once; `attend` still rolls for it.
                     next_greet: WorldTick::ZERO,
                 },
@@ -1806,20 +1911,22 @@ impl World {
                     let material = line.material.map(MaterialId);
                     let drawn = match kind {
                         Some(kind) => presentation_of(kind, material)?,
-                        None => Drawn {
-                            id: Graphic(line.graphic),
-                            hue: Hue(line.hue),
-                        },
+                        None => {
+                            Drawn {
+                                id:  Graphic(line.graphic),
+                                hue: Hue(line.hue),
+                            }
+                        }
                     };
                     let legacy_identity = kind_from_drawn(drawn);
                     Some(StockRecord {
-                        graphic: drawn.id,
-                        hue: drawn.hue,
+                        graphic:   drawn.id,
+                        hue:       drawn.hue,
                         item_kind: kind.or_else(|| legacy_identity.map(|(kind, _)| kind)),
-                        material: material.or_else(|| legacy_identity.and_then(|(_, material)| material)),
-                        amount: Amount(line.amount),
-                        price: Price(line.price),
-                        name: line.name,
+                        material:  material.or_else(|| legacy_identity.and_then(|(_, material)| material)),
+                        amount:    Amount(line.amount),
+                        price:     Price(line.price),
+                        name:      line.name,
                     })
                 })
                 .collect();
@@ -1829,7 +1936,7 @@ impl World {
             .into_iter()
             .map(|(graphic, hue, amount, price, name)| {
                 let drawn = Drawn {
-                    id: Graphic(graphic),
+                    id:  Graphic(graphic),
                     hue: Hue(hue),
                 };
                 let identity = kind_from_drawn(drawn);
@@ -1853,10 +1960,10 @@ impl World {
         self.state.bus.send(crate::events::MobileRestored {
             entity: mobile.entity,
             serial: mobile.serial,
-            body: Graphic(mobile.record.body),
-            at: mobile.position,
+            body:   Graphic(mobile.record.body),
+            at:     mobile.position,
             // A pack binds to the post, not wherever the NPC wandered to.
-            home: mobile
+            home:   mobile
                 .record
                 .npc_home
                 .map_or(mobile.position, |(x, y, z)| Point::new(x, y, z)),
@@ -1885,7 +1992,7 @@ impl World {
             self.state.registry.insert(
                 entity,
                 Drawn {
-                    id: Graphic(record.graphic),
+                    id:  Graphic(record.graphic),
                     hue: Hue(record.hue),
                 },
             );
@@ -1898,11 +2005,11 @@ impl World {
                 self.state.registry.insert(
                     entity,
                     openshard_state::components::Lock {
-                        kind: KeyValue::new(record.key_value)
+                        kind:           KeyValue::new(record.key_value)
                             .map(LockKind::Key)
                             .unwrap_or(LockKind::Unopenable),
                         required_skill: 0,
-                        max_skill: 0,
+                        max_skill:      0,
                     },
                 );
             }
@@ -1916,12 +2023,12 @@ impl World {
                     self.state.registry.insert(
                         entity,
                         Door {
-                            closed: Graphic(door.closed_graphic),
-                            open: Graphic(door.open_graphic),
+                            closed:   Graphic(door.closed_graphic),
+                            open:     Graphic(door.open_graphic),
                             offset_x: door.offset_x,
                             offset_y: door.offset_y,
-                            link: door.link,
-                            is_open: door.is_open,
+                            link:     door.link,
+                            is_open:  door.is_open,
                             close_at: WorldTick::ZERO,
                         },
                     );
@@ -1997,18 +2104,20 @@ fn restored_facing(record: &ItemRecord) -> Direction {
 /// separate types (see `persistence::record`), so one conversion, in one place.
 fn corpse_from(story: &CorpseData) -> Corpse {
     Corpse {
-        owner: story.owner.clone(),
-        player: story.player,
-        killer: story.killer.clone(),
+        owner:       story.owner.clone(),
+        player:      story.player,
+        killer:      story.killer.clone(),
         examined_by: story.examined_by.clone(),
-        looters: story.looters.clone(),
-        carved: story.carved,
-        equipment: story
+        looters:     story.looters.clone(),
+        carved:      story.carved,
+        equipment:   story
             .equipment
             .iter()
-            .map(|item| openshard_protocol::items::CorpseEquipmentItem {
-                item: item.item,
-                layer: Layer(item.layer),
+            .map(|item| {
+                openshard_protocol::items::CorpseEquipmentItem {
+                    item:  item.item,
+                    layer: Layer(item.layer),
+                }
             })
             .collect(),
     }

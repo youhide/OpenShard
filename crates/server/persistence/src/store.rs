@@ -17,13 +17,24 @@ use std::sync::Mutex;
 use openshard_protocol::identity::AccountName;
 use openshard_protocol::serial::Serial;
 #[cfg(test)]
-use openshard_protocol::world::{Aggression, DamageType};
+use openshard_protocol::world::{
+    Aggression,
+    DamageType,
+};
 
 use crate::journal::Snapshot;
 use crate::pg::PgStore;
 use crate::record::{
-    AccountRecord, CharacterRecord, DecorationRecord, GuildRecord, ItemRecord, MobileRecord, RegionRecord,
-    SCHEMA_VERSION, SpawnerRecord, WorldRecord,
+    AccountRecord,
+    CharacterRecord,
+    DecorationRecord,
+    GuildRecord,
+    ItemRecord,
+    MobileRecord,
+    RegionRecord,
+    SCHEMA_VERSION,
+    SpawnerRecord,
+    WorldRecord,
 };
 use crate::sqlite::SqliteStore;
 
@@ -39,7 +50,7 @@ pub enum StoreError {
     #[error("save is schema v{found}, this build understands v{understood}")]
     SchemaMismatch {
         /// What the data claims to be.
-        found: u32,
+        found:      u32,
         /// What this build can read.
         understood: u32,
     },
@@ -156,30 +167,30 @@ impl Store {
 #[derive(Debug, Default)]
 pub struct MemoryStore {
     /// Keyed by serial, which is the identity that outlives a restart.
-    characters: Mutex<HashMap<Serial, CharacterRecord>>,
+    characters:  Mutex<HashMap<Serial, CharacterRecord>>,
     /// Items keyed by serial: inventory (owner is a character) and ground
     /// (`owner` is `None`).
-    items: Mutex<HashMap<Serial, ItemRecord>>,
+    items:       Mutex<HashMap<Serial, ItemRecord>>,
     /// Spawn regions keyed by id.
-    spawners: Mutex<HashMap<openshard_state::SpawnerId, SpawnerRecord>>,
+    spawners:    Mutex<HashMap<openshard_state::SpawnerId, SpawnerRecord>>,
     /// NPC mobiles keyed by serial.
-    mobiles: Mutex<HashMap<Serial, MobileRecord>>,
+    mobiles:     Mutex<HashMap<Serial, MobileRecord>>,
     /// Placed decorations keyed by serial.
     decorations: Mutex<HashMap<Serial, DecorationRecord>>,
     /// Named regions, keyed by `(facet, id)`.
-    regions: Mutex<HashMap<(u8, u16), RegionRecord>>,
+    regions:     Mutex<HashMap<(u8, u16), RegionRecord>>,
     /// Guilds, keyed by id.
-    guilds: Mutex<HashMap<u32, GuildRecord>>,
-    alliances: Mutex<HashMap<u32, crate::record::AllianceRecord>>,
-    houses: Mutex<HashMap<u32, crate::record::HouseRecord>>,
-    designs: Mutex<Vec<crate::record::HouseDesignRecord>>,
-    boats: Mutex<HashMap<u32, crate::record::BoatRecord>>,
+    guilds:      Mutex<HashMap<u32, GuildRecord>>,
+    alliances:   Mutex<HashMap<u32, crate::record::AllianceRecord>>,
+    houses:      Mutex<HashMap<u32, crate::record::HouseRecord>>,
+    designs:     Mutex<Vec<crate::record::HouseDesignRecord>>,
+    boats:       Mutex<HashMap<u32, crate::record::BoatRecord>>,
     /// The world's own scalars: the clock, and where the rolls got to. `None` until
     /// a snapshot carries them.
-    world: Mutex<Option<WorldRecord>>,
-    accounts: Mutex<HashMap<AccountName, AccountRecord>>,
+    world:       Mutex<Option<WorldRecord>>,
+    accounts:    Mutex<HashMap<AccountName, AccountRecord>>,
     /// How many saves have landed. What a test asserts on.
-    saves: Mutex<u64>,
+    saves:       Mutex<u64>,
 }
 
 impl MemoryStore {
@@ -203,7 +214,7 @@ impl MemoryStore {
     async fn save(&self, snapshot: &Snapshot) -> Result<(), StoreError> {
         if snapshot.schema != SCHEMA_VERSION {
             return Err(StoreError::SchemaMismatch {
-                found: snapshot.schema,
+                found:      snapshot.schema,
                 understood: SCHEMA_VERSION,
             });
         }
@@ -478,10 +489,11 @@ impl MemoryStore {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::record::StatLockRecord;
     use openshard_protocol::identity::CharacterName;
     use openshard_protocol::world::Sight;
+
+    use super::*;
+    use crate::record::StatLockRecord;
 
     fn character(serial: u32, x: u16) -> CharacterRecord {
         CharacterRecord {
@@ -602,22 +614,22 @@ mod tests {
             .expect("save");
 
         let future = Snapshot {
-            tick: 2,
-            schema: SCHEMA_VERSION + 1,
-            characters: vec![character(1, 999)],
-            removed: vec![],
+            tick:        2,
+            schema:      SCHEMA_VERSION + 1,
+            characters:  vec![character(1, 999)],
+            removed:     vec![],
             inventories: vec![],
-            ground: None,
-            spawners: None,
-            mobiles: None,
+            ground:      None,
+            spawners:    None,
+            mobiles:     None,
             decorations: None,
-            regions: None,
-            guilds: None,
-            alliances: None,
-            houses: None,
-            designs: None,
-            boats: None,
-            world: None,
+            regions:     None,
+            guilds:      None,
+            alliances:   None,
+            houses:      None,
+            designs:     None,
+            boats:       None,
+            world:       None,
         };
         let error = store.save(&future).await.expect_err("must refuse");
         assert!(matches!(error, StoreError::SchemaMismatch { .. }));
@@ -628,64 +640,64 @@ mod tests {
 
     fn contained(serial: u32, owner: u32, container: u32) -> ItemRecord {
         ItemRecord {
-            serial: Serial::new(serial).expect("a valid test serial"),
-            owner: Some(Serial::new(owner).expect("a valid test serial")),
-            graphic: 0x0EED,
-            hue: 0,
-            kind: None,
-            material: None,
-            amount: 1,
-            stackable: false,
+            serial:         Serial::new(serial).expect("a valid test serial"),
+            owner:          Some(Serial::new(owner).expect("a valid test serial")),
+            graphic:        0x0EED,
+            hue:            0,
+            kind:           None,
+            material:       None,
+            amount:         1,
+            stackable:      false,
             container_gump: None,
-            price: None,
-            name: None,
-            spellbook: None,
-            corpse: None,
-            poison: None,
-            trap: None,
-            uses: None,
-            crafted: None,
-            rune: None,
-            runebook: None,
-            locked_down: None,
-            affixes: Vec::new(),
-            location: crate::record::ItemLocation::Contained {
+            price:          None,
+            name:           None,
+            spellbook:      None,
+            corpse:         None,
+            poison:         None,
+            trap:           None,
+            uses:           None,
+            crafted:        None,
+            rune:           None,
+            runebook:       None,
+            locked_down:    None,
+            affixes:        Vec::new(),
+            location:       crate::record::ItemLocation::Contained {
                 container: Serial::new(container).expect("a valid test serial"),
-                x: 0,
-                y: 0,
-                grid: 0,
+                x:         0,
+                y:         0,
+                grid:      0,
             },
         }
     }
 
     fn ground(serial: u32) -> ItemRecord {
         ItemRecord {
-            serial: Serial::new(serial).expect("a valid test serial"),
-            owner: None,
-            graphic: 0x1BFB,
-            hue: 0,
-            kind: None,
-            material: None,
-            amount: 1,
-            stackable: false,
+            serial:         Serial::new(serial).expect("a valid test serial"),
+            owner:          None,
+            graphic:        0x1BFB,
+            hue:            0,
+            kind:           None,
+            material:       None,
+            amount:         1,
+            stackable:      false,
             container_gump: None,
-            price: None,
-            name: None,
-            spellbook: None,
-            corpse: None,
-            poison: None,
-            trap: None,
-            uses: None,
-            crafted: None,
-            rune: None,
-            runebook: None,
-            locked_down: None,
-            affixes: Vec::new(),
-            location: crate::record::ItemLocation::Ground {
+            price:          None,
+            name:           None,
+            spellbook:      None,
+            corpse:         None,
+            poison:         None,
+            trap:           None,
+            uses:           None,
+            crafted:        None,
+            rune:           None,
+            runebook:       None,
+            locked_down:    None,
+            affixes:        Vec::new(),
+            location:       crate::record::ItemLocation::Ground {
                 facet: 0,
-                x: 1400,
-                y: 1600,
-                z: 0,
+                x:     1400,
+                y:     1600,
+                z:     0,
             },
         }
     }
@@ -697,49 +709,49 @@ mod tests {
         let store = MemoryStore::new();
         store
             .save(&Snapshot {
-                tick: 1,
-                schema: SCHEMA_VERSION,
-                characters: vec![character(1, 100)],
-                removed: vec![],
+                tick:        1,
+                schema:      SCHEMA_VERSION,
+                characters:  vec![character(1, 100)],
+                removed:     vec![],
                 inventories: vec![crate::record::Inventory {
                     owner: Serial::new(1).expect("a valid test serial"),
                     items: vec![contained(0x4000_0001, 1, 1), contained(0x4000_0002, 1, 1)],
                 }],
-                ground: None,
-                spawners: None,
-                mobiles: None,
+                ground:      None,
+                spawners:    None,
+                mobiles:     None,
                 decorations: None,
-                regions: None,
-                guilds: None,
-                alliances: None,
-                houses: None,
-                designs: None,
-                boats: None,
-                world: None,
+                regions:     None,
+                guilds:      None,
+                alliances:   None,
+                houses:      None,
+                designs:     None,
+                boats:       None,
+                world:       None,
             })
             .await
             .expect("save");
         store
             .save(&Snapshot {
-                tick: 2,
-                schema: SCHEMA_VERSION,
-                characters: vec![character(1, 100)],
-                removed: vec![],
+                tick:        2,
+                schema:      SCHEMA_VERSION,
+                characters:  vec![character(1, 100)],
+                removed:     vec![],
                 inventories: vec![crate::record::Inventory {
                     owner: Serial::new(1).expect("a valid test serial"),
                     items: vec![contained(0x4000_0001, 1, 1)],
                 }],
-                ground: None,
-                spawners: None,
-                mobiles: None,
+                ground:      None,
+                spawners:    None,
+                mobiles:     None,
                 decorations: None,
-                regions: None,
-                guilds: None,
-                alliances: None,
-                houses: None,
-                designs: None,
-                boats: None,
-                world: None,
+                regions:     None,
+                guilds:      None,
+                alliances:   None,
+                houses:      None,
+                designs:     None,
+                boats:       None,
+                world:       None,
             })
             .await
             .expect("save");
@@ -797,25 +809,25 @@ mod tests {
         let store = MemoryStore::new();
         store
             .save(&Snapshot {
-                tick: 1,
-                schema: SCHEMA_VERSION,
-                characters: vec![],
-                removed: vec![],
+                tick:        1,
+                schema:      SCHEMA_VERSION,
+                characters:  vec![],
+                removed:     vec![],
                 inventories: vec![crate::record::Inventory {
                     owner: Serial::new(2).expect("a valid test serial"),
                     items: vec![contained(0x4000_0001, 2, 2)],
                 }],
-                ground: None,
-                spawners: None,
-                mobiles: Some(vec![mobile(2, 30), mobile(3, 30)]),
+                ground:      None,
+                spawners:    None,
+                mobiles:     Some(vec![mobile(2, 30), mobile(3, 30)]),
                 decorations: None,
-                regions: None,
-                guilds: None,
-                alliances: None,
-                houses: None,
-                designs: None,
-                boats: None,
-                world: None,
+                regions:     None,
+                guilds:      None,
+                alliances:   None,
+                houses:      None,
+                designs:     None,
+                boats:       None,
+                world:       None,
             })
             .await
             .expect("save");
@@ -823,22 +835,22 @@ mod tests {
         // mobile 3 lives on wounded.
         store
             .save(&Snapshot {
-                tick: 2,
-                schema: SCHEMA_VERSION,
-                characters: vec![],
-                removed: vec![],
+                tick:        2,
+                schema:      SCHEMA_VERSION,
+                characters:  vec![],
+                removed:     vec![],
                 inventories: vec![],
-                ground: None,
-                spawners: None,
-                mobiles: Some(vec![mobile(3, 7)]),
+                ground:      None,
+                spawners:    None,
+                mobiles:     Some(vec![mobile(3, 7)]),
                 decorations: None,
-                regions: None,
-                guilds: None,
-                alliances: None,
-                houses: None,
-                designs: None,
-                boats: None,
-                world: None,
+                regions:     None,
+                guilds:      None,
+                alliances:   None,
+                houses:      None,
+                designs:     None,
+                boats:       None,
+                world:       None,
             })
             .await
             .expect("save");
@@ -858,47 +870,47 @@ mod tests {
         let store = MemoryStore::new();
         store
             .save(&Snapshot {
-                tick: 1,
-                schema: SCHEMA_VERSION,
-                characters: vec![character(1, 100)],
-                removed: vec![],
+                tick:        1,
+                schema:      SCHEMA_VERSION,
+                characters:  vec![character(1, 100)],
+                removed:     vec![],
                 inventories: vec![crate::record::Inventory {
                     owner: Serial::new(1).expect("a valid test serial"),
                     items: vec![contained(0x4000_0001, 1, 1)],
                 }],
-                ground: Some(vec![ground(0x4000_0010)]),
-                spawners: None,
-                mobiles: None,
+                ground:      Some(vec![ground(0x4000_0010)]),
+                spawners:    None,
+                mobiles:     None,
                 decorations: None,
-                regions: None,
-                guilds: None,
-                alliances: None,
-                houses: None,
-                designs: None,
-                boats: None,
-                world: None,
+                regions:     None,
+                guilds:      None,
+                alliances:   None,
+                houses:      None,
+                designs:     None,
+                boats:       None,
+                world:       None,
             })
             .await
             .expect("save");
         // A later ground sweep leaves the inventory alone.
         store
             .save(&Snapshot {
-                tick: 2,
-                schema: SCHEMA_VERSION,
-                characters: vec![],
-                removed: vec![],
+                tick:        2,
+                schema:      SCHEMA_VERSION,
+                characters:  vec![],
+                removed:     vec![],
                 inventories: vec![],
-                ground: Some(vec![ground(0x4000_0011)]),
-                spawners: None,
-                mobiles: None,
+                ground:      Some(vec![ground(0x4000_0011)]),
+                spawners:    None,
+                mobiles:     None,
                 decorations: None,
-                regions: None,
-                guilds: None,
-                alliances: None,
-                houses: None,
-                designs: None,
-                boats: None,
-                world: None,
+                regions:     None,
+                guilds:      None,
+                alliances:   None,
+                houses:      None,
+                designs:     None,
+                boats:       None,
+                world:       None,
             })
             .await
             .expect("save");

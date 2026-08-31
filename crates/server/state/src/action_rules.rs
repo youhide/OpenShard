@@ -24,7 +24,11 @@
 //!   per-tick spender in the model is `Drain`, which is levied by the sustain
 //!   pass against a held condition rather than pushed at an event, and is Ф5.
 
-use openshard_config::{ActionEffectConfig, ActionRulesConfig, ConditionRulesConfig};
+use openshard_config::{
+    ActionEffectConfig,
+    ActionRulesConfig,
+    ConditionRulesConfig,
+};
 use openshard_protocol::feedback::InterruptReason;
 
 use crate::components::ActionKind;
@@ -153,7 +157,7 @@ pub struct ConditionEffects {
     /// What being mounted does, charged at the step.
     pub mounted: Option<ActionEffect>,
     /// What a wound taken mid-action does.
-    pub struck: Option<ActionEffect>,
+    pub struck:  Option<ActionEffect>,
     /// What losing the line to the target does.
     pub blinded: Option<ActionEffect>,
 }
@@ -166,7 +170,7 @@ impl ConditionEffects {
             running: None,
             walking: None,
             mounted: None,
-            struck: None,
+            struck:  None,
             blinded: None,
         }
     }
@@ -182,7 +186,7 @@ impl ConditionEffects {
             running: row.running.map(ActionEffect::from_config),
             walking: row.walking.map(ActionEffect::from_config),
             mounted: row.mounted.map(ActionEffect::from_config),
-            struck: row.struck.map(ActionEffect::from_config),
+            struck:  row.struck.map(ActionEffect::from_config),
             blinded: row.blinded.map(ActionEffect::from_config),
         }
     }
@@ -209,9 +213,9 @@ impl ConditionEffects {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ActionRules {
     /// A blow's rules.
-    pub swing: ConditionEffects,
+    pub swing:  ConditionEffects,
     /// A shot's rules.
-    pub shot: ConditionEffects,
+    pub shot:   ConditionEffects,
     /// An innate ranged attack's rules.
     pub breath: ConditionEffects,
 }
@@ -239,27 +243,27 @@ impl ActionRules {
     #[must_use]
     pub const fn shipped() -> Self {
         Self {
-            swing: ConditionEffects {
+            swing:  ConditionEffects {
                 running: None,
                 walking: None,
                 mounted: None,
-                struck: None,
+                struck:  None,
                 blinded: Some(ActionEffect::Break),
             },
-            shot: ConditionEffects {
+            shot:   ConditionEffects {
                 running: Some(ActionEffect::Sway {
                     penalty: Self::RUNNING_SHOT_SWAY,
                 }),
                 walking: None,
                 mounted: None,
-                struck: None,
+                struck:  None,
                 blinded: Some(ActionEffect::Break),
             },
             breath: ConditionEffects {
                 running: None,
                 walking: None,
                 mounted: None,
-                struck: None,
+                struck:  None,
                 blinded: Some(ActionEffect::Break),
             },
         }
@@ -269,8 +273,8 @@ impl ActionRules {
     #[must_use]
     pub fn from_config(rules: &ActionRulesConfig) -> Self {
         Self {
-            swing: ConditionEffects::from_config(&rules.swing),
-            shot: ConditionEffects::from_config(&rules.shot),
+            swing:  ConditionEffects::from_config(&rules.swing),
+            shot:   ConditionEffects::from_config(&rules.shot),
             breath: ConditionEffects::from_config(&rules.breath),
         }
     }
@@ -294,8 +298,12 @@ impl ActionRules {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionRules, ActorCondition};
     use openshard_config::ActionRulesConfig;
+
+    use super::{
+        ActionRules,
+        ActorCondition,
+    };
 
     /// The shipped table is written twice — once in the operator's vocabulary
     /// and once in the systems' — and the two halves are read by different
@@ -313,21 +321,22 @@ mod tests {
     /// described: walking is free, running sways a shot, a mount is neutral.
     #[test]
     fn walking_is_free_running_sways_a_shot_and_a_mount_is_neutral() {
-        use crate::components::ActionKind;
         use openshard_protocol::world::RangedRange;
+
+        use crate::components::ActionKind;
 
         let rules = ActionRules::shipped();
         let shot = ActionKind::Shot {
-            reach: RangedRange::new(10).unwrap(),
+            reach:  RangedRange::new(10).unwrap(),
             nocked: openshard_protocol::wire::Graphic(0x0F3F),
-            art: openshard_protocol::wire::Graphic(0x0F42),
+            art:    openshard_protocol::wire::Graphic(0x0F42),
         };
         assert_eq!(rules.effect(shot, ActorCondition::Walking), None);
         assert_eq!(rules.effect(shot, ActorCondition::Mounted), None);
         assert_eq!(
             rules.effect(shot, ActorCondition::Running),
             Some(super::ActionEffect::Sway {
-                penalty: ActionRules::RUNNING_SHOT_SWAY
+                penalty: ActionRules::RUNNING_SHOT_SWAY,
             }),
         );
     }

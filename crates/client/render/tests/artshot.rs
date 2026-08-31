@@ -30,7 +30,10 @@ use std::path::PathBuf;
 
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
-use openshard_uofiles::color::{Color16, Rgb8};
+use openshard_uofiles::color::{
+    Color16,
+    Rgb8,
+};
 use openshard_uofiles::image::Image;
 
 /// The graphics this was written for: the two stair statics standing at

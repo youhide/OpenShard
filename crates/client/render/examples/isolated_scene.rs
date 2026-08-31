@@ -191,20 +191,48 @@
 use std::path::PathBuf;
 
 use openshard_client_render::animate::StaticAnimations;
-use openshard_client_render::atlas::{LandAtlas, StaticAtlas, TexmapAtlas};
-use openshard_client_render::blit::{Blit, ViewportRect};
-use openshard_client_render::camera::{Camera, RealPixel, Zoom};
+use openshard_client_render::atlas::{
+    LandAtlas,
+    StaticAtlas,
+    TexmapAtlas,
+};
+use openshard_client_render::blit::{
+    Blit,
+    ViewportRect,
+};
+use openshard_client_render::camera::{
+    Camera,
+    RealPixel,
+    Zoom,
+};
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::geometry::Vec2;
-use openshard_client_render::ground;
-use openshard_client_render::items::{self, GroundItem};
-use openshard_client_render::renderer::{GroundRenderer, MeshFaceRenderer, SpriteRenderer, Target};
-use openshard_client_render::{light, renderer};
+use openshard_client_render::items::{
+    self,
+    GroundItem,
+};
+use openshard_client_render::renderer::{
+    GroundRenderer,
+    MeshFaceRenderer,
+    SpriteRenderer,
+    Target,
+};
+use openshard_client_render::{
+    ground,
+    light,
+    renderer,
+};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, WorldMap};
+use openshard_map::map::{
+    LandCell,
+    WorldMap,
+};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::multi::Multis;
@@ -274,19 +302,19 @@ fn env_tuning() -> light::Tuning {
         })
     };
     light::Tuning {
-        flame_radius: number("OPENSHARD_FLAME_RADIUS", light::Tuning::DEFAULT.flame_radius),
-        shadow_rays: light::ShadowRays::new(number(
+        flame_radius:    number("OPENSHARD_FLAME_RADIUS", light::Tuning::DEFAULT.flame_radius),
+        shadow_rays:     light::ShadowRays::new(number(
             "OPENSHARD_SHADOW_RAYS",
             light::Tuning::DEFAULT.shadow_rays.raw() as f32,
         ) as u32),
-        brightness: number("OPENSHARD_LIGHT_BRIGHTNESS", 1.0),
-        reach: number("OPENSHARD_LIGHT_REACH", 1.0),
-        sky: number("OPENSHARD_LIGHT_SKY", 1.0),
-        ground: number("OPENSHARD_LIGHT_GROUND", 1.0),
-        sun: light::Tuning::DEFAULT.sun,
+        brightness:      number("OPENSHARD_LIGHT_BRIGHTNESS", 1.0),
+        reach:           number("OPENSHARD_LIGHT_REACH", 1.0),
+        sky:             number("OPENSHARD_LIGHT_SKY", 1.0),
+        ground:          number("OPENSHARD_LIGHT_GROUND", 1.0),
+        sun:             light::Tuning::DEFAULT.sun,
         headlight_color: light::Tuning::DEFAULT.headlight_color,
-        lantern_color: light::Tuning::DEFAULT.lantern_color,
-        ambient_color: light::Tuning::DEFAULT.ambient_color,
+        lantern_color:   light::Tuning::DEFAULT.lantern_color,
+        ambient_color:   light::Tuning::DEFAULT.ambient_color,
     }
     .clamped()
 }
@@ -359,14 +387,14 @@ fn parse_extra_item(spec: &str) -> GroundItem {
         _ => panic!("OPENSHARD_SCENE_EXTRA item wants `x,y,z,graphic[,hue]`, got {spec:?}"),
     };
     GroundItem {
-        amount: ItemAmount::ONE,
-        at: Point::new(
+        amount:  ItemAmount::ONE,
+        at:      Point::new(
             x.trim().parse().unwrap_or_else(|_| panic!("x: {x:?}")),
             y.trim().parse().unwrap_or_else(|_| panic!("y: {y:?}")),
             z.trim().parse().unwrap_or_else(|_| panic!("z: {z:?}")),
         ),
         graphic: Graphic(parse_tile_id(graphic)),
-        hue: Hue(hue.trim().parse().unwrap_or_else(|_| panic!("hue: {hue:?}"))),
+        hue:     Hue(hue.trim().parse().unwrap_or_else(|_| panic!("hue: {hue:?}"))),
     }
 }
 
@@ -467,12 +495,14 @@ fn run_profile(anchor: (u16, u16), lighting: &light::Lighting) {
             match (reach.within, reach.stopped_by) {
                 (false, _) => print!("  | light {}: outside radius", reach.light.position()),
                 (true, Some(stopper)) => print!("  | light {}: stopped by {stopper}", reach.light.position()),
-                (true, None) => print!(
-                    "  | light {}: visible {:.3} delivers {:.3}",
-                    reach.light.position(),
-                    reach.through,
-                    reach.delivered
-                ),
+                (true, None) => {
+                    print!(
+                        "  | light {}: visible {:.3} delivers {:.3}",
+                        reach.light.position(),
+                        reach.through,
+                        reach.delivered
+                    )
+                }
             }
         }
         println!();
@@ -575,9 +605,9 @@ fn dump_frame(
         queue,
         surface,
         ViewportRect {
-            x: 0,
-            y: 0,
-            width: w,
+            x:      0,
+            y:      0,
+            width:  w,
             height: h,
         },
     );
@@ -691,13 +721,13 @@ fn main() {
             if !want_ground {
                 return LandCell {
                     tile: openshard_tiles::LandTileId(0),
-                    z: at.z,
+                    z:    at.z,
                 };
             }
             let (rx, ry) = unshift(anchor, (sx, sy));
             real_map.land(rx, ry).unwrap_or(LandCell {
                 tile: openshard_tiles::LandTileId(0),
-                z: at.z,
+                z:    at.z,
             })
         },
     );
@@ -721,10 +751,10 @@ fn main() {
                     }
                     let (sx, sy) = shift(anchor, (x, y));
                     items.push(GroundItem {
-                        amount: ItemAmount::ONE,
-                        at: Point::new(sx, sy, s.z),
+                        amount:  ItemAmount::ONE,
+                        at:      Point::new(sx, sy, s.z),
                         graphic: s.tile,
-                        hue: s.hue,
+                        hue:     s.hue,
                     });
                 }
             }
@@ -757,9 +787,11 @@ fn main() {
     let from_the_shard = if env_flag("OPENSHARD_SCENE_SHARD", true) {
         let database = match env_opt("OPENSHARD_SCENE_SHARD_DB") {
             Some(path) => PathBuf::from(path),
-            None => shard::database_in(&PathBuf::from(
-                env_opt("OPENSHARD_SCENE_CONFIG").unwrap_or_else(|| "openshard.toml".to_owned()),
-            )),
+            None => {
+                shard::database_in(&PathBuf::from(
+                    env_opt("OPENSHARD_SCENE_CONFIG").unwrap_or_else(|| "openshard.toml".to_owned()),
+                ))
+            }
         };
         let light_radius =
             radius.saturating_add(u16::try_from(light::light_margin_tiles(&tuning)).unwrap_or(u16::MAX));
@@ -787,10 +819,10 @@ fn main() {
             }
             let (sx, sy) = shift(anchor, (one.x, one.y));
             items.push(GroundItem {
-                amount: ItemAmount::ONE,
-                at: Point::new(sx, sy, one.z),
+                amount:  ItemAmount::ONE,
+                at:      Point::new(sx, sy, one.z),
                 graphic: Graphic(one.graphic),
-                hue: Hue(one.hue),
+                hue:     Hue(one.hue),
             });
         }
         format!(
@@ -806,9 +838,11 @@ fn main() {
             .unwrap_or_else(|_| panic!("OPENSHARD_SCENE_HOUSE: {serial:?}"));
         let database = match env_opt("OPENSHARD_SCENE_SHARD_DB") {
             Some(path) => PathBuf::from(path),
-            None => shard::database_in(&PathBuf::from(
-                env_opt("OPENSHARD_SCENE_CONFIG").unwrap_or_else(|| "openshard.toml".to_owned()),
-            )),
+            None => {
+                shard::database_in(&PathBuf::from(
+                    env_opt("OPENSHARD_SCENE_CONFIG").unwrap_or_else(|| "openshard.toml".to_owned()),
+                ))
+            }
         };
         let house = shard::house(&database, serial)
             .unwrap_or_else(|| panic!("house {serial} is not in {}", database.display()));
@@ -832,10 +866,10 @@ fn main() {
             };
             let (sx, sy) = shift(anchor, (at.x, at.y));
             items.push(GroundItem {
-                amount: ItemAmount::ONE,
-                at: Point::new(sx, sy, at.z),
+                amount:  ItemAmount::ONE,
+                at:      Point::new(sx, sy, at.z),
                 graphic: component.graphic,
-                hue: Hue::NONE,
+                hue:     Hue::NONE,
             });
         }
         format!(
@@ -1119,8 +1153,8 @@ fn main() {
     let surface = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("surface"),
         size: wgpu::Extent3d {
-            width: viewport.0,
-            height: viewport.1,
+            width:                 viewport.0,
+            height:                viewport.1,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -1214,11 +1248,11 @@ fn main() {
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("solids-only clear"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &surface_view,
-                depth_slice: None,
+                view:           &surface_view,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                ops:            wgpu::Operations {
+                    load:  wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -1228,9 +1262,9 @@ fn main() {
             multiview_mask: None,
         });
         let rect = ViewportRect {
-            x: 0,
-            y: 0,
-            width: viewport.0,
+            x:      0,
+            y:      0,
+            width:  viewport.0,
             height: viewport.1,
         };
         // On by default, like the live F5 overlay — off to see the fills alone,
@@ -1248,7 +1282,7 @@ fn main() {
         // translucency, and on for the question that overlay was never asked —
         // whether a face is genuinely hidden or only tinted through.
         let style = openshard_client_render::solids::Style {
-            edges: env_flag("OPENSHARD_SCENE_SOLIDS_EDGES", true),
+            edges:  env_flag("OPENSHARD_SCENE_SOLIDS_EDGES", true),
             opaque: env_flag("OPENSHARD_SCENE_SOLIDS_OPAQUE", false),
         };
         match mode.as_str() {
@@ -1317,19 +1351,19 @@ fn main() {
         &queue,
         &mut encoder,
         openshard_client_render::blit::Frame {
-            target: &surface_view,
-            world: &world_view,
-            gbuffer: &gbuffer_views,
-            face_instances: &dummy_instances,
-            item_instances: items_pass.instances_buffer(),
+            target:           &surface_view,
+            world:            &world_view,
+            gbuffer:          &gbuffer_views,
+            face_instances:   &dummy_instances,
+            item_instances:   items_pass.instances_buffer(),
             mobile_instances: &dummy_instances,
-            mesh_instances: mesh_pass.rows_buffer(),
+            mesh_instances:   mesh_pass.rows_buffer(),
             ground_instances: ground_pass.instances_buffer(),
-            zoom: Zoom::ONE,
-            rect: ViewportRect {
-                x: 0,
-                y: 0,
-                width: viewport.0,
+            zoom:             Zoom::ONE,
+            rect:             ViewportRect {
+                x:      0,
+                y:      0,
+                width:  viewport.0,
                 height: viewport.1,
             },
         },

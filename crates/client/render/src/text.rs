@@ -16,7 +16,11 @@ use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 use openshard_uofiles::hues::full;
 
-use crate::atlas::{FontAtlas, TextSize, TtfAtlas};
+use crate::atlas::{
+    FontAtlas,
+    TextSize,
+    TtfAtlas,
+};
 use crate::camera::ViewPixel;
 use crate::geometry::Rect;
 use crate::gump::GumpPixel;
@@ -41,13 +45,13 @@ pub struct Label<'a> {
     /// [`openshard_uofiles::font::CHARS_PER_FONT`] entries starting at code
     /// point `0x20`; [`legacy_byte`] encodes Unicode Cyrillic into the
     /// file's CP1251 slots before looking a glyph up.
-    pub text: &'a str,
+    pub text:   &'a str,
     /// Which face to draw it in.
-    pub font: Font,
+    pub font:   Font,
     /// The wire hue to tint it with, or [`Hue::NONE`].
-    pub hue: Hue,
+    pub hue:    Hue,
     /// Where it sorts. See [`crate::depth`].
-    pub depth: f32,
+    pub depth:  f32,
 }
 
 /// One Unicode character as `fonts.mul` stores it.
@@ -109,20 +113,20 @@ pub fn collect_scaled(labels: &[Label<'_>], atlas: &FontAtlas, scale: f32) -> Ve
         for sprite in glyphs {
             if sprite.width > 0 && sprite.height > 0 {
                 quads.push(SpriteQuad {
-                    rect: Rect {
+                    rect:    Rect {
                         x,
                         y: label.anchor.y as f32 - f32::from(sprite.height) * scale,
                         width: f32::from(sprite.width) * scale,
                         height: f32::from(sprite.height) * scale,
                     },
-                    region: sprite.region,
-                    depth: label.depth,
-                    hue: u32::from(hue.0),
+                    region:  sprite.region,
+                    depth:   label.depth,
+                    hue:     u32::from(hue.0),
                     // Letters over a head are a message, not a thing standing
                     // in the street: no place, and so never dimmed by night.
-                    place: crate::place::Place::NOWHERE,
-                    twin: 0,
-                    owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
+                    place:   crate::place::Place::NOWHERE,
+                    twin:    0,
+                    owner:   u32::from(crate::occlusion::OwnerId::NONE.raw()),
                     volumes: crate::impostor::Range::default(),
                 });
             }
@@ -164,18 +168,18 @@ pub fn collect_ttf(labels: &[Label<'_>], atlas: &TtfAtlas, size: TextSize) -> Ve
         for glyph in glyphs {
             if glyph.sprite.width > 0 && glyph.sprite.height > 0 {
                 quads.push(SpriteQuad {
-                    rect: Rect {
-                        x: x as f32,
-                        y: (label.anchor.y - glyph.baseline_from_top) as f32,
-                        width: f32::from(glyph.sprite.width),
+                    rect:    Rect {
+                        x:      x as f32,
+                        y:      (label.anchor.y - glyph.baseline_from_top) as f32,
+                        width:  f32::from(glyph.sprite.width),
                         height: f32::from(glyph.sprite.height),
                     },
-                    region: glyph.sprite.region,
-                    depth: label.depth,
-                    hue: u32::from(label.hue.0),
-                    place: crate::place::Place::NOWHERE,
-                    twin: 0,
-                    owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
+                    region:  glyph.sprite.region,
+                    depth:   label.depth,
+                    hue:     u32::from(label.hue.0),
+                    place:   crate::place::Place::NOWHERE,
+                    twin:    0,
+                    owner:   u32::from(crate::occlusion::OwnerId::NONE.raw()),
                     volumes: crate::impostor::Range::default(),
                 });
             }
@@ -215,9 +219,9 @@ pub struct ScreenLabel<'a> {
     /// that with.
     pub anchor: GumpPixel,
     /// The line itself.
-    pub text: &'a str,
+    pub text:   &'a str,
     /// The wire hue to tint it with, or [`Hue::NONE`].
-    pub hue: Hue,
+    pub hue:    Hue,
 }
 
 /// [`collect_ttf`]'s screen-space twin — see [`ScreenLabel`]'s doc for why one
@@ -239,21 +243,21 @@ pub fn collect_screen_ttf(labels: &[ScreenLabel<'_>], atlas: &TtfAtlas, size: Te
         for glyph in glyphs {
             if glyph.sprite.width > 0 && glyph.sprite.height > 0 {
                 quads.push(SpriteQuad {
-                    rect: Rect {
-                        x: x as f32,
-                        y: (label.anchor.y - glyph.baseline_from_top) as f32,
-                        width: f32::from(glyph.sprite.width),
+                    rect:    Rect {
+                        x:      x as f32,
+                        y:      (label.anchor.y - glyph.baseline_from_top) as f32,
+                        width:  f32::from(glyph.sprite.width),
                         height: f32::from(glyph.sprite.height),
                     },
-                    region: glyph.sprite.region,
+                    region:  glyph.sprite.region,
                     // No depth test in this pass, the same reason `collect_gump`
                     // has none: it runs after the blit, over the finished
                     // picture.
-                    depth: 0.0,
-                    hue: u32::from(label.hue.0),
-                    place: crate::place::Place::NOWHERE,
-                    twin: 0,
-                    owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
+                    depth:   0.0,
+                    hue:     u32::from(label.hue.0),
+                    place:   crate::place::Place::NOWHERE,
+                    twin:    0,
+                    owner:   u32::from(crate::occlusion::OwnerId::NONE.raw()),
                     volumes: crate::impostor::Range::default(),
                 });
             }
@@ -274,13 +278,13 @@ pub fn collect_screen_ttf(labels: &[ScreenLabel<'_>], atlas: &TtfAtlas, size: Te
 #[derive(Clone, Copy, Debug)]
 pub struct GumpLabel<'a> {
     /// The line's top-left corner, in gump pixels.
-    pub at: GumpPixel,
+    pub at:   GumpPixel,
     /// The line itself — see [`Label::text`] for the CP1251-table contract.
     pub text: &'a str,
     /// Which face to draw it in.
     pub font: Font,
     /// The wire hue to tint it with, or [`Hue::NONE`].
-    pub hue: Hue,
+    pub hue:  Hue,
     /// The box the line is cropped to, or `None` to let it overflow.
     ///
     /// `{ croppedtext }` and a paperdoll's name plate are the two things that
@@ -358,20 +362,20 @@ pub fn collect_gump(labels: &[GumpLabel<'_>], atlas: &FontAtlas) -> Vec<SpriteQu
             }
             if sprite.width > 0 && sprite.height > 0 {
                 quads.push(SpriteQuad {
-                    rect: Rect {
-                        x: x as f32,
-                        y: (label.at.y + drop) as f32,
-                        width: f32::from(sprite.width),
+                    rect:    Rect {
+                        x:      x as f32,
+                        y:      (label.at.y + drop) as f32,
+                        width:  f32::from(sprite.width),
                         height: f32::from(sprite.height),
                     },
-                    region: sprite.region,
+                    region:  sprite.region,
                     // No depth test in this pass; see `crate::gump`'s module
                     // docs for why an interface has none.
-                    depth: 0.0,
-                    hue: u32::from(hue.0),
-                    place: crate::place::Place::NOWHERE,
-                    twin: 0,
-                    owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
+                    depth:   0.0,
+                    hue:     u32::from(hue.0),
+                    place:   crate::place::Place::NOWHERE,
+                    twin:    0,
+                    owner:   u32::from(crate::occlusion::OwnerId::NONE.raw()),
                     volumes: crate::impostor::Range::default(),
                 });
             }
@@ -428,18 +432,18 @@ pub fn collect_gump_ttf(labels: &[GumpLabel<'_>], atlas: &TtfAtlas, size: TextSi
             }
             if glyph.sprite.width > 0 && glyph.sprite.height > 0 {
                 quads.push(SpriteQuad {
-                    rect: Rect {
-                        x: x as f32,
-                        y: y as f32,
-                        width: f32::from(glyph.sprite.width),
+                    rect:    Rect {
+                        x:      x as f32,
+                        y:      y as f32,
+                        width:  f32::from(glyph.sprite.width),
                         height: f32::from(glyph.sprite.height),
                     },
-                    region: glyph.sprite.region,
-                    depth: 0.0,
-                    hue: u32::from(label.hue.0),
-                    place: crate::place::Place::NOWHERE,
-                    twin: 0,
-                    owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
+                    region:  glyph.sprite.region,
+                    depth:   0.0,
+                    hue:     u32::from(label.hue.0),
+                    place:   crate::place::Place::NOWHERE,
+                    twin:    0,
+                    owner:   u32::from(crate::occlusion::OwnerId::NONE.raw()),
                     volumes: crate::impostor::Range::default(),
                 });
             }
@@ -472,11 +476,11 @@ pub fn gump_width(text: &str, font: Font, atlas: &FontAtlas) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use crate::atlas::GlyphKey;
     use openshard_uofiles::color::Color16;
     use openshard_uofiles::image::Image;
 
     use super::*;
+    use crate::atlas::GlyphKey;
 
     fn glyph(width: u16, height: u16) -> Image {
         Image::new(
@@ -515,10 +519,10 @@ mod tests {
         let quads = collect(
             &[Label {
                 anchor: ViewPixel { x: 100, y: 50 },
-                text: "Hi",
-                font: Font(0),
-                hue: Hue::NONE,
-                depth: 0.5,
+                text:   "Hi",
+                font:   Font(0),
+                hue:    Hue::NONE,
+                depth:  0.5,
             }],
             &atlas,
         );
@@ -541,10 +545,10 @@ mod tests {
         let quads = collect(
             &[Label {
                 anchor: ViewPixel { x: 100, y: 50 },
-                text: "Hi",
-                font: Font(0),
-                hue: Hue::NONE,
-                depth: 0.5,
+                text:   "Hi",
+                font:   Font(0),
+                hue:    Hue::NONE,
+                depth:  0.5,
             }],
             &atlas,
         );
@@ -558,10 +562,10 @@ mod tests {
         let quads = collect_scaled(
             &[Label {
                 anchor: ViewPixel { x: 100, y: 50 },
-                text: "Hi",
-                font: Font(0),
-                hue: Hue::NONE,
-                depth: 0.5,
+                text:   "Hi",
+                font:   Font(0),
+                hue:    Hue::NONE,
+                depth:  0.5,
             }],
             &atlas,
             1.5,
@@ -582,10 +586,10 @@ mod tests {
         let quads = collect(
             &[Label {
                 anchor: ViewPixel { x: 100, y: 50 },
-                text: "H",
-                font: Font(0),
-                hue: Hue(0x8000 | 42),
-                depth: 0.5,
+                text:   "H",
+                font:   Font(0),
+                hue:    Hue(0x8000 | 42),
+                depth:  0.5,
             }],
             &atlas,
         );
@@ -627,10 +631,10 @@ mod tests {
         .expect("four CP1251 glyphs fit");
         let label = Label {
             anchor: ViewPixel { x: 50, y: 10 },
-            text: "АяЁё",
-            font: Font(0),
-            hue: Hue::NONE,
-            depth: 0.0,
+            text:   "АяЁё",
+            font:   Font(0),
+            hue:    Hue::NONE,
+            depth:  0.0,
         };
         let quads = collect(&[label], &atlas);
         assert_eq!(
@@ -649,20 +653,20 @@ mod tests {
         let with_gap = collect(
             &[Label {
                 anchor: ViewPixel { x: 100, y: 50 },
-                text: "H!i",
-                font: Font(0),
-                hue: Hue::NONE,
-                depth: 0.5,
+                text:   "H!i",
+                font:   Font(0),
+                hue:    Hue::NONE,
+                depth:  0.5,
             }],
             &atlas,
         );
         let without = collect(
             &[Label {
                 anchor: ViewPixel { x: 100, y: 50 },
-                text: "Hi",
-                font: Font(0),
-                hue: Hue::NONE,
-                depth: 0.5,
+                text:   "Hi",
+                font:   Font(0),
+                hue:    Hue::NONE,
+                depth:  0.5,
             }],
             &atlas,
         );
@@ -679,17 +683,17 @@ mod tests {
             &[
                 Label {
                     anchor: ViewPixel { x: 100, y: 50 },
-                    text: "H",
-                    font: Font(0),
-                    hue: Hue::NONE,
-                    depth: 0.5,
+                    text:   "H",
+                    font:   Font(0),
+                    hue:    Hue::NONE,
+                    depth:  0.5,
                 },
                 Label {
                     anchor: ViewPixel { x: 300, y: 80 },
-                    text: "i",
-                    font: Font(0),
-                    hue: Hue::NONE,
-                    depth: 0.5,
+                    text:   "i",
+                    font:   Font(0),
+                    hue:    Hue::NONE,
+                    depth:  0.5,
                 },
             ],
             &atlas,
@@ -892,8 +896,8 @@ mod tests {
         let font = font_of([(b'A', 6, 10), (b'b', 5, 8)]);
         let quads = collect_gump(
             &[GumpLabel {
-                at: GumpPixel::new(10, 20),
-                hue: Hue::NONE,
+                at:   GumpPixel::new(10, 20),
+                hue:  Hue::NONE,
                 clip: None,
                 text: "Ab",
                 font: GUMP_FACE,
@@ -918,8 +922,8 @@ mod tests {
         let font = font_of([(b'A', 6, 10)]);
         let quads = collect_gump(
             &[GumpLabel {
-                at: GumpPixel::default(),
-                hue: Hue(0x8000 | 42),
+                at:   GumpPixel::default(),
+                hue:  Hue(0x8000 | 42),
                 clip: None,
                 text: "A",
                 font: GUMP_FACE,
@@ -934,12 +938,14 @@ mod tests {
     #[test]
     fn a_cropped_line_loses_its_tail_at_the_box() {
         let font = font_of([(b'M', 8, 10)]);
-        let line = |clip| GumpLabel {
-            at: GumpPixel::new(0, 0),
-            hue: Hue::NONE,
-            clip,
-            text: "MMMM",
-            font: GUMP_FACE,
+        let line = |clip| {
+            GumpLabel {
+                at: GumpPixel::new(0, 0),
+                hue: Hue::NONE,
+                clip,
+                text: "MMMM",
+                font: GUMP_FACE,
+            }
         };
         assert_eq!(
             collect_gump(&[line(None)], &font).len(),
@@ -965,8 +971,8 @@ mod tests {
         let font = font_of([(b'A', 6, 10)]);
         let quads = collect_gump(
             &[GumpLabel {
-                at: GumpPixel::default(),
-                hue: Hue::NONE,
+                at:   GumpPixel::default(),
+                hue:  Hue::NONE,
                 clip: None,
                 // The middle byte is a UTF-8 lead, which `fonts.mul` has no
                 // entry for at all.

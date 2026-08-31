@@ -5,7 +5,10 @@
 //! `0x91`. That is the only thing linking the two TCP connections.
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_protocol::identity::AccountName;
 use openshard_protocol::version::ClientVersion;
@@ -15,7 +18,7 @@ use openshard_protocol::wire::AuthKey;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct PendingLogin {
     /// The account that was verified on the login connection.
-    pub account: AccountName,
+    pub account:   AccountName,
     /// What the client said it was, back on the login connection.
     ///
     /// # Why the version rides on the key
@@ -37,7 +40,7 @@ pub struct PendingLogin {
     /// The key is already the only thing that links the two connections — it
     /// says so at the top of this file. Anything else that must cross the gap
     /// belongs on it too.
-    pub version: ClientVersion,
+    pub version:   ClientVersion,
     /// When the key was issued.
     pub issued_at: Instant,
 }
@@ -58,7 +61,7 @@ pub struct PendingLogin {
 #[derive(Debug)]
 pub struct AuthKeys {
     issued: HashMap<AuthKey, PendingLogin>,
-    ttl: Duration,
+    ttl:    Duration,
 }
 
 /// How long a key stays valid.
@@ -161,14 +164,15 @@ fn random_u32() -> u32 {
     // A failure here means the OS has no entropy source, which is not a thing
     // this process can recover from or paper over — issuing a predictable key
     // would be worse than not starting.
-    getrandom::getrandom(&mut bytes).expect("the OS entropy pool is unavailable");
+    getrandom::fill(&mut bytes).expect("the OS entropy pool is unavailable");
     u32::from_be_bytes(bytes)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_protocol::version::ClientVersion;
+
+    use super::*;
 
     #[test]
     fn a_key_round_trips() {

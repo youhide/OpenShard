@@ -4,21 +4,35 @@
 //! map block's cells. Rooms, portals and a frame-specific view are built on
 //! those cells later; ordinary frame assembly does not consult this module yet.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque, btree_map::Entry};
+use std::collections::btree_map::Entry;
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+    VecDeque,
+};
 use std::sync::Arc;
 
 use openshard_map::grid::BlockCoord;
-use openshard_map::map::{BLOCK_SIZE, WorldMap};
-use openshard_movement::{MapTerrain, PLAYER_HEIGHT};
+use openshard_map::map::{
+    BLOCK_SIZE,
+    WorldMap,
+};
+use openshard_movement::{
+    MapTerrain,
+    PLAYER_HEIGHT,
+};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_tiles::{StaticTile, TileFlags};
+use openshard_tiles::{
+    StaticTile,
+    TileFlags,
+};
 
 /// The stable identity of a cell within a baked map block.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CellId {
     pub block: BlockCoord,
-    pub slot: u32,
+    pub slot:  u32,
 }
 
 /// The stable identity of a room local to a baked map block.
@@ -29,7 +43,7 @@ pub struct CellId {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct RoomId {
     pub block: BlockCoord,
-    pub slot: u32,
+    pub slot:  u32,
 }
 
 /// The stable representative of a room after the selected block bakes have
@@ -72,7 +86,7 @@ impl BuildingId {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct FloorId {
     building: BuildingId,
-    slot: u32,
+    slot:     u32,
 }
 
 impl FloorId {
@@ -91,9 +105,9 @@ impl FloorId {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Floor {
     pub id: FloorId,
-    cells: Vec<CellId>,
-    min_z: i32,
-    max_z: i32,
+    cells:  Vec<CellId>,
+    min_z:  i32,
+    max_z:  i32,
 }
 
 impl Floor {
@@ -136,10 +150,10 @@ pub enum RoomNodeId {
 /// One node of a building's recursive room tree.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RoomNode {
-    id: RoomNodeId,
-    parent: Option<RoomNodeId>,
+    id:       RoomNodeId,
+    parent:   Option<RoomNodeId>,
     children: Vec<RoomNodeId>,
-    floor: Option<FloorId>,
+    floor:    Option<FloorId>,
 }
 
 impl RoomNode {
@@ -179,10 +193,10 @@ impl RoomTree {
         let mut nodes = BTreeMap::new();
         for &building in building_of.values() {
             nodes.entry(RoomNodeId::Building(building)).or_insert(RoomNode {
-                id: RoomNodeId::Building(building),
-                parent: None,
+                id:       RoomNodeId::Building(building),
+                parent:   None,
                 children: Vec::new(),
-                floor: None,
+                floor:    None,
             });
         }
 
@@ -330,7 +344,7 @@ impl RoomTree {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Stair {
     pub from: CellId,
-    pub to: CellId,
+    pub to:   CellId,
 }
 
 impl Building {
@@ -344,36 +358,36 @@ impl Building {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct DoorId {
     pub block: BlockCoord,
-    pub slot: u32,
+    pub slot:  u32,
 }
 
 /// A door's immutable map position and graphic.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Door {
-    pub id: DoorId,
-    pub at: Point,
+    pub id:      DoorId,
+    pub at:      Point,
     pub graphic: Graphic,
 }
 
 /// The two rooms a door joins when its leaf is open.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Portal {
-    pub door: DoorId,
+    pub door:  DoorId,
     pub rooms: [RoomId; 2],
 }
 
 /// A door portal after its two sides have been resolved across block seams.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct StitchedPortal {
-    pub door: DoorId,
+    pub door:  DoorId,
     pub rooms: [StitchedRoomId; 2],
 }
 
 /// One connected set of cells on a structural floor band, bounded by walls.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Room {
-    pub id: RoomId,
-    cells: Vec<CellId>,
+    pub id:   RoomId,
+    cells:    Vec<CellId>,
     outdoors: bool,
 }
 
@@ -392,8 +406,8 @@ impl Room {
 /// One closed-door room after the chosen block bakes have been stitched.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct StitchedRoom {
-    pub id: StitchedRoomId,
-    cells: Vec<CellId>,
+    pub id:   StitchedRoomId,
+    cells:    Vec<CellId>,
     outdoors: bool,
 }
 
@@ -416,8 +430,8 @@ impl StitchedRoom {
 /// coordinates are the same.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Cell {
-    pub id: CellId,
-    pub tile: (u16, u16),
+    pub id:      CellId,
+    pub tile:    (u16, u16),
     pub floor_z: i32,
     pub ceiling: Option<i32>,
 }
@@ -447,8 +461,8 @@ impl Cell {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct BlockCells {
     pub id: BlockCoord,
-    cells: Vec<Cell>,
-    doors: Vec<Door>,
+    cells:  Vec<Cell>,
+    doors:  Vec<Door>,
 }
 
 impl BlockCells {
@@ -516,8 +530,8 @@ impl BlockCells {
                     }
                     let slot = u32::try_from(doors.len()).expect("one map block has too many doors");
                     doors.push(Door {
-                        id: DoorId { block: id, slot },
-                        at: Point::new(x, y, item.z),
+                        id:      DoorId { block: id, slot },
+                        at:      Point::new(x, y, item.z),
                         graphic: item.tile,
                     });
                 }
@@ -552,8 +566,8 @@ impl BlockCells {
 /// this type deliberately makes no off-block inference.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct BlockRooms {
-    cells: BlockCells,
-    rooms: Vec<Room>,
+    cells:   BlockCells,
+    rooms:   Vec<Room>,
     room_of: Vec<Option<RoomId>>,
     portals: Vec<Portal>,
 }
@@ -600,7 +614,7 @@ impl BlockRooms {
             }
             let id = RoomId {
                 block: cells.id,
-                slot: u32::try_from(rooms.len()).expect("one map block has too many rooms"),
+                slot:  u32::try_from(rooms.len()).expect("one map block has too many rooms"),
             };
             let mut members = Vec::new();
             let mut pending = vec![start];
@@ -645,7 +659,7 @@ impl BlockRooms {
             }
             if let [first, second] = joined.as_slice() {
                 portals.push(Portal {
-                    door: door.id,
+                    door:  door.id,
                     rooms: [*first, *second],
                 });
             }
@@ -745,10 +759,10 @@ impl BlockRooms {
 /// [`Self::shown_rooms`]'s small per-frame walk.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct StitchedRooms {
-    cells: BTreeMap<CellId, Cell>,
-    rooms: Vec<StitchedRoom>,
+    cells:   BTreeMap<CellId, Cell>,
+    rooms:   Vec<StitchedRoom>,
     room_of: BTreeMap<CellId, StitchedRoomId>,
-    doors: BTreeMap<DoorId, Door>,
+    doors:   BTreeMap<DoorId, Door>,
     portals: Vec<StitchedPortal>,
 }
 
@@ -876,7 +890,7 @@ impl StitchedRooms {
                 if let [first, second] = joined.as_slice() {
                     if first != second {
                         portals.push(StitchedPortal {
-                            door: door.id,
+                            door:  door.id,
                             rooms: [*first, *second],
                         });
                     }
@@ -992,11 +1006,11 @@ impl StitchedRooms {
 /// building index, so the open world stays "not applicable" to R2.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Buildings {
-    buildings: Vec<Building>,
+    buildings:   Vec<Building>,
     building_of: BTreeMap<CellId, BuildingId>,
-    floor_of: BTreeMap<CellId, FloorId>,
-    stairs: Vec<Stair>,
-    rooms: RoomTree,
+    floor_of:    BTreeMap<CellId, FloorId>,
+    stairs:      Vec<Stair>,
+    rooms:       RoomTree,
 }
 
 /// A facet-wide, baked answer to the first interior question: which ground
@@ -1016,7 +1030,7 @@ pub struct Buildings {
 /// stable building ids.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct BuildingMap {
-    width: u32,
+    width:  u32,
     height: u32,
     labels: Arc<[u32]>,
 }
@@ -1331,9 +1345,9 @@ impl BuildingMap {
 
 /// Planar wall and door facts shared by the bake and its offline inspector.
 struct PlanarTopology {
-    walls: Vec<u8>,
+    walls:      Vec<u8>,
     wall_tiles: Vec<bool>,
-    doors: Vec<bool>,
+    doors:      Vec<bool>,
 }
 
 impl PlanarTopology {
@@ -1653,14 +1667,16 @@ impl Buildings {
             let floors: Vec<_> = floors
                 .into_iter()
                 .enumerate()
-                .map(|(slot, (cells, min_z, max_z))| Floor {
-                    id: FloorId {
-                        building: id,
-                        slot: u32::try_from(slot).expect("one building has too many floors"),
-                    },
-                    cells,
-                    min_z,
-                    max_z,
+                .map(|(slot, (cells, min_z, max_z))| {
+                    Floor {
+                        id: FloorId {
+                            building: id,
+                            slot:     u32::try_from(slot).expect("one building has too many floors"),
+                        },
+                        cells,
+                        min_z,
+                        max_z,
+                    }
                 })
                 .collect();
             for floor in &floors {
@@ -1680,9 +1696,11 @@ impl Buildings {
                     && building_of.contains_key(&cells[one].id)
                     && building_of.contains_key(&cells[other].id)
             })
-            .map(|(one, other)| Stair {
-                from: cells[one].id,
-                to: cells[other].id,
+            .map(|(one, other)| {
+                Stair {
+                    from: cells[one].id,
+                    to:   cells[other].id,
+                }
             })
             .collect();
         stairs.sort_unstable();
@@ -1754,22 +1772,22 @@ pub enum ZSliceView {
 /// diagnostic constructor supplies an aggressive global z band instead.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct InteriorFrame {
-    building: BuildingId,
+    building:        BuildingId,
     selected_floors: BTreeSet<FloorId>,
-    shown_rooms: BTreeSet<StitchedRoomId>,
-    building_cells: BTreeSet<CellId>,
-    shown_cells: BTreeSet<CellId>,
+    shown_rooms:     BTreeSet<StitchedRoomId>,
+    building_cells:  BTreeSet<CellId>,
+    shown_cells:     BTreeSet<CellId>,
     /// The app and the render collectors meet at a world point, whereas the
     /// policy itself names cells.  Keep this private translation table in the
     /// resolved frame so no collector has to reconstruct room topology.
-    cells_by_tile: BTreeMap<(u16, u16), Vec<Cell>>,
-    z_range: Option<(i8, i8)>,
+    cells_by_tile:   BTreeMap<(u16, u16), Vec<Cell>>,
+    z_range:         Option<(i8, i8)>,
     /// The facet-wide positive-space map. Outside, every labelled tile is
     /// hidden; inside, only labels other than `visible_label` are hidden.
-    building_map: Option<BuildingMap>,
+    building_map:    Option<BuildingMap>,
     /// The positive-space label of the building whose room/floor picture this
     /// frame shows. `None` denotes an exterior frame.
-    visible_label: Option<u32>,
+    visible_label:   Option<u32>,
 }
 
 impl InteriorFrame {
@@ -1870,18 +1888,18 @@ impl InteriorFrame {
     pub fn outside(buildings: BuildingMap) -> Self {
         let root = CellId {
             block: BlockCoord { x: 0, y: 0 },
-            slot: 0,
+            slot:  0,
         };
         Self {
-            building: BuildingId { root },
+            building:        BuildingId { root },
             selected_floors: BTreeSet::new(),
-            shown_rooms: BTreeSet::new(),
-            building_cells: BTreeSet::new(),
-            shown_cells: BTreeSet::new(),
-            cells_by_tile: BTreeMap::new(),
-            z_range: None,
-            building_map: Some(buildings),
-            visible_label: None,
+            shown_rooms:     BTreeSet::new(),
+            building_cells:  BTreeSet::new(),
+            shown_cells:     BTreeSet::new(),
+            cells_by_tile:   BTreeMap::new(),
+            z_range:         None,
+            building_map:    Some(buildings),
+            visible_label:   None,
         }
     }
 
@@ -1895,18 +1913,18 @@ impl InteriorFrame {
     pub fn z_slice(player: Point, view: ZSliceView) -> Self {
         let root = CellId {
             block: BlockCoord { x: 0, y: 0 },
-            slot: 0,
+            slot:  0,
         };
         Self {
-            building: BuildingId { root },
+            building:        BuildingId { root },
             selected_floors: BTreeSet::new(),
-            shown_rooms: BTreeSet::new(),
-            building_cells: BTreeSet::new(),
-            shown_cells: BTreeSet::new(),
-            cells_by_tile: BTreeMap::new(),
-            z_range: None,
-            building_map: None,
-            visible_label: None,
+            shown_rooms:     BTreeSet::new(),
+            building_cells:  BTreeSet::new(),
+            shown_cells:     BTreeSet::new(),
+            cells_by_tile:   BTreeMap::new(),
+            z_range:         None,
+            building_map:    None,
+            visible_label:   None,
         }
         .with_z_slice(player, view)
     }
@@ -2445,19 +2463,31 @@ impl Index {
 #[cfg(test)]
 mod tests {
     use openshard_map::grid::BlockExtent;
-    use openshard_map::map::{LandCell, StaticItem};
-    use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_map::map::{
+        LandCell,
+        StaticItem,
+    };
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
     use openshard_tiles::LandTileId;
     // The table itself is a fixture's to build; the bakes above read it through
     // the terrain they are handed.
-    use openshard_tiles::{StaticTile, TileData, TileFlags};
+    use openshard_tiles::{
+        StaticTile,
+        TileData,
+        TileFlags,
+    };
 
     use super::*;
 
     fn walled_block(open: &[(u16, u16)]) -> (WorldMap, TileData) {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
@@ -2497,10 +2527,10 @@ mod tests {
         );
         map.place_static(StaticItem {
             tile: Graphic(2),
-            x: 1,
-            y: 1,
-            z: 0,
-            hue: Hue(0),
+            x:    1,
+            y:    1,
+            z:    0,
+            hue:  Hue(0),
         });
 
         let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
@@ -2524,9 +2554,11 @@ mod tests {
 
     #[test]
     fn an_upper_floor_makes_two_cells_in_one_column() {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
@@ -2539,10 +2571,10 @@ mod tests {
         );
         map.place_static(StaticItem {
             tile: Graphic(1),
-            x: 2,
-            y: 3,
-            z: 0,
-            hue: Hue(0),
+            x:    2,
+            y:    3,
+            z:    0,
+            hue:  Hue(0),
         });
 
         let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
@@ -2566,9 +2598,11 @@ mod tests {
 
     #[test]
     fn a_roof_is_the_ceiling_of_the_house_cell_below_it() {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
@@ -2581,10 +2615,10 @@ mod tests {
         );
         map.place_static(StaticItem {
             tile: Graphic(1),
-            x: 2,
-            y: 3,
-            z: 20,
-            hue: Hue(0),
+            x:    2,
+            y:    3,
+            z:    20,
+            hue:  Hue(0),
         });
 
         let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
@@ -2603,9 +2637,11 @@ mod tests {
 
     #[test]
     fn a_roofed_enclosure_is_an_indexed_building_area() {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
@@ -2640,10 +2676,10 @@ mod tests {
         }
         map.place_static(StaticItem {
             tile: Graphic(2),
-            x: 2,
-            y: 2,
-            z: 20,
-            hue: Hue(0),
+            x:    2,
+            y:    2,
+            z:    20,
+            hue:  Hue(0),
         });
 
         let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
@@ -2671,14 +2707,14 @@ mod tests {
     fn open_sky_and_a_negative_floor_can_join_without_overflowing() {
         let block = BlockCoord { x: 0, y: 0 };
         let low = Cell {
-            id: CellId { block, slot: 0 },
-            tile: (0, 0),
+            id:      CellId { block, slot: 0 },
+            tile:    (0, 0),
             floor_z: i32::MIN,
             ceiling: None,
         };
         let high = Cell {
-            id: CellId { block, slot: 1 },
-            tile: (1, 0),
+            id:      CellId { block, slot: 1 },
+            tile:    (1, 0),
             floor_z: 0,
             ceiling: None,
         };
@@ -2688,9 +2724,11 @@ mod tests {
 
     #[test]
     fn a_measured_wall_blocks_only_its_named_shared_edge() {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
@@ -2703,27 +2741,27 @@ mod tests {
         );
         map.place_static(StaticItem {
             tile: Graphic(1),
-            x: 1,
-            y: 1,
-            z: 0,
-            hue: Hue(0),
+            x:    1,
+            y:    1,
+            z:    0,
+            hue:  Hue(0),
         });
         let block = BlockCoord { x: 0, y: 0 };
         let here = Cell {
-            id: CellId { block, slot: 0 },
-            tile: (1, 1),
+            id:      CellId { block, slot: 0 },
+            tile:    (1, 1),
             floor_z: 0,
             ceiling: None,
         };
         let north = Cell {
-            id: CellId { block, slot: 1 },
-            tile: (1, 0),
+            id:      CellId { block, slot: 1 },
+            tile:    (1, 0),
             floor_z: 0,
             ceiling: None,
         };
         let east = Cell {
-            id: CellId { block, slot: 2 },
-            tile: (2, 1),
+            id:      CellId { block, slot: 2 },
+            tile:    (2, 1),
             floor_z: 0,
             ceiling: None,
         };
@@ -2738,9 +2776,11 @@ mod tests {
 
     #[test]
     fn facet_bake_marks_space_unreachable_from_the_world_as_a_building() {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
@@ -2797,9 +2837,11 @@ mod tests {
 
     #[test]
     fn a_short_wall_on_a_stage_is_not_a_room_or_building_boundary() {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 20,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    20,
+            }
         });
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
@@ -2820,17 +2862,17 @@ mod tests {
         );
         map.place_static(StaticItem {
             tile: Graphic(0x003E),
-            x: 1,
-            y: 1,
-            z: 20,
-            hue: Hue(0),
+            x:    1,
+            y:    1,
+            z:    20,
+            hue:  Hue(0),
         });
         map.place_static(StaticItem {
             tile: Graphic(1240),
-            x: 1,
-            y: 1,
-            z: 30,
-            hue: Hue(0),
+            x:    1,
+            y:    1,
+            z:    30,
+            hue:  Hue(0),
         });
 
         let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
@@ -2838,11 +2880,11 @@ mod tests {
         let topology = PlanarTopology::bake(&terrain, &|_| crate::occlusion::Shape::UNREAD);
         assert!(!topology.wall_tiles[9], "a stage riser is not a house contour");
         let cell = Cell {
-            id: CellId {
+            id:      CellId {
                 block: BlockCoord { x: 0, y: 0 },
-                slot: 9,
+                slot:  9,
             },
-            tile: (1, 1),
+            tile:    (1, 1),
             floor_z: 20,
             ceiling: Some(56),
         };
@@ -2855,9 +2897,11 @@ mod tests {
 
     #[test]
     fn a_doorway_is_coloured_as_part_of_its_positive_building() {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
@@ -2901,9 +2945,11 @@ mod tests {
 
     #[test]
     fn a_double_gap_between_wall_frames_is_a_door_anchor() {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
@@ -2959,9 +3005,11 @@ mod tests {
 
     #[test]
     fn blocking_furniture_does_not_split_a_room() {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
@@ -2974,10 +3022,10 @@ mod tests {
         );
         map.place_static(StaticItem {
             tile: Graphic(1),
-            x: 1,
-            y: 1,
-            z: 0,
-            hue: Hue(0),
+            x:    1,
+            y:    1,
+            z:    0,
+            hue:  Hue(0),
         });
 
         let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
@@ -3014,9 +3062,11 @@ mod tests {
 
     #[test]
     fn an_off_map_block_is_not_baked() {
-        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let tiledata = TileData::empty();
         let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
@@ -3026,9 +3076,11 @@ mod tests {
 
     #[test]
     fn a_point_bakes_its_block_once() {
-        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let tiledata = TileData::empty();
         let mut index = Index::default();
@@ -3042,9 +3094,11 @@ mod tests {
 
     #[test]
     fn an_open_block_is_not_indexed_as_a_building() {
-        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let tiledata = TileData::empty();
         let mut index = Index::default();
@@ -3061,9 +3115,11 @@ mod tests {
 
     #[test]
     fn a_low_ceiling_is_not_a_cell() {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
@@ -3076,10 +3132,10 @@ mod tests {
         );
         map.place_static(StaticItem {
             tile: Graphic(1),
-            x: 2,
-            y: 3,
-            z: 0,
-            hue: Hue(0),
+            x:    2,
+            y:    3,
+            z:    0,
+            hue:  Hue(0),
         });
 
         let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
@@ -3099,9 +3155,11 @@ mod tests {
 
     #[test]
     fn a_door_is_a_closed_wall_and_a_portal_between_its_two_rooms() {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
@@ -3164,31 +3222,31 @@ mod tests {
         let outside = RoomId { block, slot: 0 };
         let sealed = RoomId { block, slot: 1 };
         let door = Door {
-            id: DoorId { block, slot: 0 },
-            at: Point::new(1, 0, 0),
+            id:      DoorId { block, slot: 0 },
+            at:      Point::new(1, 0, 0),
             graphic: Graphic(2),
         };
         let rooms = BlockRooms {
-            cells: BlockCells {
-                id: block,
+            cells:   BlockCells {
+                id:    block,
                 cells: Vec::new(),
                 doors: vec![door],
             },
-            rooms: vec![
+            rooms:   vec![
                 Room {
-                    id: outside,
-                    cells: Vec::new(),
+                    id:       outside,
+                    cells:    Vec::new(),
                     outdoors: true,
                 },
                 Room {
-                    id: sealed,
-                    cells: Vec::new(),
+                    id:       sealed,
+                    cells:    Vec::new(),
                     outdoors: false,
                 },
             ],
             room_of: Vec::new(),
             portals: vec![Portal {
-                door: door.id,
+                door:  door.id,
                 rooms: [outside, sealed],
             }],
         };
@@ -3202,9 +3260,11 @@ mod tests {
 
     #[test]
     fn a_door_and_its_rooms_cross_an_eight_tile_block_seam() {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
@@ -3258,10 +3318,10 @@ mod tests {
         }
         map.place_static(StaticItem {
             tile: Graphic(2),
-            x: 7,
-            y: 3,
-            z: 0,
-            hue: Hue(0),
+            x:    7,
+            y:    3,
+            z:    0,
+            hue:  Hue(0),
         });
 
         let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
@@ -3278,7 +3338,7 @@ mod tests {
         let left = rooms
             .room_at(CellId {
                 block: BlockCoord { x: 0, y: 0 },
-                slot: 30,
+                slot:  30,
             })
             .expect("left ground cell");
         // Resolve this from the baked data rather than treating a block-local
@@ -3320,12 +3380,12 @@ mod tests {
         let ground = FloorId { building, slot: 0 };
         let raised = FloorId { building, slot: 1 };
         let rooms = StitchedRooms {
-            cells: BTreeMap::from([
+            cells:   BTreeMap::from([
                 (
                     base,
                     Cell {
-                        id: base,
-                        tile: (2, 3),
+                        id:      base,
+                        tile:    (2, 3),
                         floor_z: 20,
                         ceiling: Some(30),
                     },
@@ -3333,27 +3393,27 @@ mod tests {
                 (
                     platform,
                     Cell {
-                        id: platform,
-                        tile: (2, 3),
+                        id:      platform,
+                        tile:    (2, 3),
                         floor_z: 30,
                         ceiling: Some(65),
                     },
                 ),
             ]),
-            rooms: vec![
+            rooms:   vec![
                 StitchedRoom {
-                    id: base_room,
-                    cells: vec![base],
+                    id:       base_room,
+                    cells:    vec![base],
                     outdoors: false,
                 },
                 StitchedRoom {
-                    id: platform_room,
-                    cells: vec![platform],
+                    id:       platform_room,
+                    cells:    vec![platform],
                     outdoors: false,
                 },
             ],
             room_of: BTreeMap::from([(base, base_room), (platform, platform_room)]),
-            doors: BTreeMap::new(),
+            doors:   BTreeMap::new(),
             portals: Vec::new(),
         };
         let tree = RoomTree::bake(
@@ -3375,17 +3435,17 @@ mod tests {
         assert_eq!(visible, BTreeSet::from([base_room, platform_room]));
 
         let buildings = Buildings {
-            buildings: vec![Building {
-                id: building,
+            buildings:   vec![Building {
+                id:     building,
                 floors: vec![
                     Floor {
-                        id: ground,
+                        id:    ground,
                         cells: vec![base],
                         min_z: 20,
                         max_z: 20,
                     },
                     Floor {
-                        id: raised,
+                        id:    raised,
                         cells: vec![platform],
                         min_z: 30,
                         max_z: 30,
@@ -3393,9 +3453,9 @@ mod tests {
                 ],
             }],
             building_of: BTreeMap::from([(base, building), (platform, building)]),
-            floor_of: BTreeMap::from([(base, ground), (platform, raised)]),
-            stairs: Vec::new(),
-            rooms: tree,
+            floor_of:    BTreeMap::from([(base, ground), (platform, raised)]),
+            stairs:      Vec::new(),
+            rooms:       tree,
         };
         let frame = InteriorFrame::at(&buildings, &rooms, Some(platform), FloorView::Auto, |_| false)
             .expect("the platform is inside the indexed building");
@@ -3420,17 +3480,17 @@ mod tests {
             root: RoomId { block, slot: 1 },
         };
         let door = Door {
-            id: DoorId { block, slot: 0 },
-            at: Point::new(1, 0, 0),
+            id:      DoorId { block, slot: 0 },
+            at:      Point::new(1, 0, 0),
             graphic: Graphic(1),
         };
         let rooms = StitchedRooms {
-            cells: BTreeMap::from([
+            cells:   BTreeMap::from([
                 (
                     outside,
                     Cell {
-                        id: outside,
-                        tile: (0, 0),
+                        id:      outside,
+                        tile:    (0, 0),
                         floor_z: 0,
                         ceiling: None,
                     },
@@ -3438,8 +3498,8 @@ mod tests {
                 (
                     sealed,
                     Cell {
-                        id: sealed,
-                        tile: (2, 0),
+                        id:      sealed,
+                        tile:    (2, 0),
                         floor_z: 0,
                         ceiling: Some(20),
                     },
@@ -3447,22 +3507,22 @@ mod tests {
                 (
                     upper,
                     Cell {
-                        id: upper,
-                        tile: (2, 0),
+                        id:      upper,
+                        tile:    (2, 0),
                         floor_z: 20,
                         ceiling: None,
                     },
                 ),
             ]),
-            rooms: vec![
+            rooms:   vec![
                 StitchedRoom {
-                    id: outside_room,
-                    cells: vec![outside],
+                    id:       outside_room,
+                    cells:    vec![outside],
                     outdoors: true,
                 },
                 StitchedRoom {
-                    id: sealed_room,
-                    cells: vec![sealed, upper],
+                    id:       sealed_room,
+                    cells:    vec![sealed, upper],
                     outdoors: false,
                 },
             ],
@@ -3471,9 +3531,9 @@ mod tests {
                 (sealed, sealed_room),
                 (upper, sealed_room),
             ]),
-            doors: BTreeMap::from([(door.id, door)]),
+            doors:   BTreeMap::from([(door.id, door)]),
             portals: vec![StitchedPortal {
-                door: door.id,
+                door:  door.id,
                 rooms: [outside_room, sealed_room],
             }],
         };
@@ -3481,17 +3541,17 @@ mod tests {
         let ground = FloorId { building, slot: 0 };
         let first = FloorId { building, slot: 1 };
         let buildings = Buildings {
-            buildings: vec![Building {
-                id: building,
+            buildings:   vec![Building {
+                id:     building,
                 floors: vec![
                     Floor {
-                        id: ground,
+                        id:    ground,
                         cells: vec![outside, sealed],
                         min_z: 0,
                         max_z: 0,
                     },
                     Floor {
-                        id: first,
+                        id:    first,
                         cells: vec![upper],
                         min_z: 20,
                         max_z: 20,
@@ -3499,9 +3559,9 @@ mod tests {
                 ],
             }],
             building_of: BTreeMap::from([(outside, building), (sealed, building), (upper, building)]),
-            floor_of: BTreeMap::from([(outside, ground), (sealed, ground), (upper, first)]),
-            stairs: Vec::new(),
-            rooms: RoomTree::default(),
+            floor_of:    BTreeMap::from([(outside, ground), (sealed, ground), (upper, first)]),
+            stairs:      Vec::new(),
+            rooms:       RoomTree::default(),
         };
         (buildings, rooms, outside, sealed, upper)
     }

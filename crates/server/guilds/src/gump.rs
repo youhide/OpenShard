@@ -24,12 +24,32 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::gump::{
-    ButtonId, CloseGump, GUMP_WHITE, GumpButton, GumpDisplay, GumpId, GumpKey, GumpLayout, GumpPoint,
+    ButtonId,
+    CloseGump,
+    GUMP_WHITE,
+    GumpButton,
+    GumpDisplay,
+    GumpId,
+    GumpKey,
+    GumpLayout,
+    GumpPoint,
 };
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_state::{Client, GuildGumpContext, GuildMember, GuildPage, Name, Rank, WorldState};
+use openshard_state::{
+    Client,
+    GuildGumpContext,
+    GuildMember,
+    GuildPage,
+    Name,
+    Rank,
+    WorldState,
+};
 
-use crate::{RankFlags, may_lead, roster};
+use crate::{
+    RankFlags,
+    may_lead,
+    roster,
+};
 
 /// The gump id the guild window answers under. Distinct from the quest window's
 /// `0x0051_0001` and the admin menu's `0x00AD_0001`, so a reply is never
@@ -127,7 +147,7 @@ pub(crate) const FIELD_ALLIANCE: u32 = 3;
 /// accidentally pair a roster base with diplomacy's stride.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct RowButtons {
-    base: ButtonId,
+    base:   ButtonId,
     stride: u32,
 }
 
@@ -194,14 +214,14 @@ pub fn show(state: &mut WorldState, player: EntityId, page: GuildPage) {
 
     let close = ServerPacket::CloseGump(CloseGump {
         gump_id: GUILD_GUMP,
-        button: ButtonId::CLOSE_BOX,
+        button:  ButtonId::CLOSE_BOX,
     });
     let draw = ServerPacket::GumpDisplay(GumpDisplay {
-        serial: GumpKey::on(serial),
+        serial:  GumpKey::on(serial),
         gump_id: GUILD_GUMP,
-        at: GumpPoint::new(WINDOW.0, WINDOW.1),
-        layout: string.to_owned(),
-        lines: lines.to_vec(),
+        at:      GumpPoint::new(WINDOW.0, WINDOW.1),
+        layout:  string.to_owned(),
+        lines:   lines.to_vec(),
     });
     state.send_packet(connection, &close);
     state.send_packet(connection, &draw);
@@ -533,8 +553,15 @@ fn cut_notice(layout: &mut GumpLayout, total: usize, shown: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{DIPLOMACY_ACTIONS, DIPLOMACY_BUTTONS, MAX_ROWS, ROSTER_ACTIONS, ROSTER_BUTTONS};
     use openshard_protocol::gump::ButtonId;
+
+    use super::{
+        DIPLOMACY_ACTIONS,
+        DIPLOMACY_BUTTONS,
+        MAX_ROWS,
+        ROSTER_ACTIONS,
+        ROSTER_BUTTONS,
+    };
 
     #[test]
     fn a_row_button_reads_back_as_the_row_it_was_drawn_for() {

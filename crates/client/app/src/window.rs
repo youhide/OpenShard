@@ -15,31 +15,71 @@ use std::sync::Arc;
 
 use openshard_client_render::animate::StaticAnimations;
 use openshard_client_render::atlas::{
-    AnimAtlas, AnimationKey, AtlasError, LandAtlas, StaticAtlas, StaticAtlasPages, TexmapAtlas, TtfAtlas,
+    AnimAtlas,
+    AnimationKey,
+    AtlasError,
+    LandAtlas,
+    StaticAtlas,
+    StaticAtlasPages,
+    TexmapAtlas,
+    TtfAtlas,
 };
-use openshard_client_render::blit::{self, Blit};
-use openshard_client_render::camera::{Camera, TileBounds};
+use openshard_client_render::blit::{
+    self,
+    Blit,
+};
+use openshard_client_render::camera::{
+    Camera,
+    TileBounds,
+};
 use openshard_client_render::composite::{
-    COMPOSITE_SOURCE_SIDE, CompositeCache, CompositeKey, CompositeQuarantineReason, CompositeRenderer,
+    COMPOSITE_SOURCE_SIDE,
+    CompositeCache,
+    CompositeKey,
+    CompositeQuarantineReason,
+    CompositeRenderer,
     FlatGroundBlock,
 };
 use openshard_client_render::gbuffer::Gbuffer;
 use openshard_client_render::gump::GumpRenderer;
 use openshard_client_render::hue::HueRamp;
-use openshard_client_render::items::{self, GroundItem};
-use openshard_client_render::mobiles::{self, Mobile};
-use openshard_client_render::outline::{self, Outline};
-use openshard_client_render::radar_pass::{
-    RADAR_CHUNK_CACHE_BUDGET, RadarChunkRenderer, RadarOverlayRenderer, radar_chunk_array_layers,
+use openshard_client_render::items::{
+    self,
+    GroundItem,
 };
-use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, SpriteRenderer};
+use openshard_client_render::mobiles::{
+    self,
+    Mobile,
+};
+use openshard_client_render::outline::{
+    self,
+    Outline,
+};
+use openshard_client_render::radar_pass::{
+    RADAR_CHUNK_CACHE_BUDGET,
+    RadarChunkRenderer,
+    RadarOverlayRenderer,
+    radar_chunk_array_layers,
+};
+use openshard_client_render::renderer::{
+    self,
+    GroundRenderer,
+    MeshFaceRenderer,
+    SpriteRenderer,
+};
 use openshard_client_render::select::Select;
 use openshard_client_render::solids::SolidsRenderer;
-use openshard_client_render::{ground, light, statics};
+use openshard_client_render::{
+    ground,
+    light,
+    statics,
+};
 use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
-use openshard_tiles::LandTileId;
-use openshard_tiles::TileData;
+use openshard_tiles::{
+    LandTileId,
+    TileData,
+};
 use openshard_uofiles::anim::Anim;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::equipconv::EquipConv;
@@ -49,7 +89,14 @@ use winit::window::Window;
 
 use crate::app::App;
 use crate::crowd::Who;
-use crate::{desk, graphics, profile, resources, shell, world};
+use crate::{
+    desk,
+    graphics,
+    profile,
+    resources,
+    shell,
+    world,
+};
 
 /// Why the client could not start.
 ///
@@ -77,10 +124,12 @@ impl fmt::Display for StartupError {
             Self::Window(source) => write!(f, "creating a window: {source}"),
             Self::Surface(source) => write!(f, "creating a surface: {source}"),
             Self::NoDevice(detail) => write!(f, "no GPU to draw with: {detail}"),
-            Self::OnlySrgb => write!(
-                f,
-                "this surface offers only sRGB formats, which would alter the art's colours",
-            ),
+            Self::OnlySrgb => {
+                write!(
+                    f,
+                    "this surface offers only sRGB formats, which would alter the art's colours",
+                )
+            }
             Self::Atlas(source) => write!(f, "packing land art: {source}"),
         }
     }
@@ -103,7 +152,7 @@ impl fmt::Display for StartupError {
 /// The rebuild survives as the answer to *full* — see [`Atlases::grow`]'s note —
 /// which is the one thing growing cannot do for itself.
 pub(crate) struct Atlases {
-    pub(crate) land: LandAtlas,
+    pub(crate) land:    LandAtlas,
     pub(crate) texmaps: TexmapAtlas,
     /// Bounded immutable pages. `StaticAtlas` remains available to tests and
     /// embedders that deliberately select the one-page baseline.
@@ -122,7 +171,7 @@ pub(crate) struct AtlasWork {
     /// bands, including their deliberately conservative over-coverage.
     pub(crate) uploaded_bytes: u64,
     /// The atlas that ran out of room, when this frame had to rebuild it.
-    pub(crate) overflow: Option<AtlasOverflow>,
+    pub(crate) overflow:       Option<AtlasOverflow>,
 }
 
 /// The state at the point a growing atlas could no longer accept graphics.
@@ -141,10 +190,10 @@ pub(crate) struct AtlasOverflow {
 /// positional argument list would accept in silence.
 pub(crate) struct Wanted {
     /// Land graphics, which feed the land atlas and the texture atlas both.
-    pub(crate) land: BTreeSet<LandTileId>,
+    pub(crate) land:       BTreeSet<LandTileId>,
     /// Static graphics: what the map has standing on the ground, and what the
     /// server has dropped on top of it.
-    pub(crate) statics: BTreeSet<Graphic>,
+    pub(crate) statics:    BTreeSet<Graphic>,
     /// Body, group and stored direction for everyone on screen.
     pub(crate) animations: BTreeSet<AnimationKey>,
 }
@@ -156,8 +205,8 @@ impl Wanted {
     /// answered for in one place instead of arriving empty by itself.
     pub(crate) fn empty() -> Self {
         Self {
-            land: BTreeSet::new(),
-            statics: BTreeSet::new(),
+            land:       BTreeSet::new(),
+            statics:    BTreeSet::new(),
             animations: BTreeSet::new(),
         }
     }
@@ -180,7 +229,7 @@ impl Atlases {
         wanted: &Wanted,
     ) -> Result<Self, AtlasError> {
         Ok(Self {
-            land: LandAtlas::build(art, wanted.land.iter().copied())?,
+            land:    LandAtlas::build(art, wanted.land.iter().copied())?,
             texmaps: TexmapAtlas::build(texmaps, tiledata, wanted.land.iter().copied())?,
             // The table is cloned into the atlas rather than borrowed: an atlas
             // outlives the frame it was built in and packs more art on every
@@ -564,16 +613,16 @@ pub(crate) fn ready_atlases(
 /// keeping the targets here now makes that separation explicit rather than
 /// letting an implementation accidentally sample [`Screen::world`].
 pub(crate) struct CompositeProducerTargets {
-    pub(crate) world: wgpu::Texture,
-    pub(crate) depth: wgpu::Texture,
+    pub(crate) world:   wgpu::Texture,
+    pub(crate) depth:   wgpu::Texture,
     pub(crate) gbuffer: Gbuffer,
 }
 
 impl CompositeProducerTargets {
     fn new(device: &wgpu::Device) -> Self {
         Self {
-            world: blit::world_texture(device, COMPOSITE_SOURCE_SIDE, COMPOSITE_SOURCE_SIDE),
-            depth: renderer::depth_texture(device, COMPOSITE_SOURCE_SIDE, COMPOSITE_SOURCE_SIDE),
+            world:   blit::world_texture(device, COMPOSITE_SOURCE_SIDE, COMPOSITE_SOURCE_SIDE),
+            depth:   renderer::depth_texture(device, COMPOSITE_SOURCE_SIDE, COMPOSITE_SOURCE_SIDE),
             gbuffer: Gbuffer::new(device, COMPOSITE_SOURCE_SIDE, COMPOSITE_SOURCE_SIDE),
         }
     }
@@ -589,46 +638,46 @@ impl CompositeProducerTargets {
             label: Some("map block composite producer clear"),
             color_attachments: &[
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &world,
-                    depth_slice: None,
+                    view:           &world,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &gbuffer.ids,
-                    depth_slice: None,
+                    view:           &gbuffer.ids,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(openshard_client_render::gbuffer::IDS_CLEAR),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(openshard_client_render::gbuffer::IDS_CLEAR),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &gbuffer.position,
-                    depth_slice: None,
+                    view:           &gbuffer.position,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(openshard_client_render::gbuffer::POSITION_CLEAR),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(openshard_client_render::gbuffer::POSITION_CLEAR),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &gbuffer.normal,
-                    depth_slice: None,
+                    view:           &gbuffer.normal,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(openshard_client_render::gbuffer::NORMAL_CLEAR),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(openshard_client_render::gbuffer::NORMAL_CLEAR),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
             ],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
+                view:        &depth,
+                depth_ops:   Some(wgpu::Operations {
+                    load:  wgpu::LoadOp::Clear(1.0),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -927,9 +976,9 @@ impl App {
                 let position = monitor.position();
                 let size = monitor.size();
                 desk::Monitor {
-                    x: position.x,
-                    y: position.y,
-                    width: size.width,
+                    x:      position.x,
+                    y:      position.y,
+                    width:  size.width,
                     height: size.height,
                 }
             })
@@ -939,26 +988,32 @@ impl App {
             .window
             .filter(|frame| desk::Desk::fits(frame, &monitors));
         let attributes = match restored {
-            Some(frame) => attributes
-                .with_position(winit::dpi::PhysicalPosition::new(frame.x, frame.y))
-                .with_inner_size(winit::dpi::PhysicalSize::new(
-                    frame.width.max(1),
-                    frame.height.max(1),
-                ))
-                .with_maximized(frame.maximized),
-            // No saved frame: the first run, or one whose screen is gone.
-            None => match event_loop.primary_monitor().map(|monitor| monitor.size()) {
-                Some(size) if size.width > 0 && size.height > 0 => {
-                    attributes.with_inner_size(winit::dpi::PhysicalSize::new(
-                        (size.width as f32 * 0.9) as u32,
-                        (size.height as f32 * 0.9) as u32,
+            Some(frame) => {
+                attributes
+                    .with_position(winit::dpi::PhysicalPosition::new(frame.x, frame.y))
+                    .with_inner_size(winit::dpi::PhysicalSize::new(
+                        frame.width.max(1),
+                        frame.height.max(1),
                     ))
+                    .with_maximized(frame.maximized)
+            }
+            // No saved frame: the first run, or one whose screen is gone.
+            None => {
+                match event_loop.primary_monitor().map(|monitor| monitor.size()) {
+                    Some(size) if size.width > 0 && size.height > 0 => {
+                        attributes.with_inner_size(winit::dpi::PhysicalSize::new(
+                            (size.width as f32 * 0.9) as u32,
+                            (size.height as f32 * 0.9) as u32,
+                        ))
+                    }
+                    _ => {
+                        attributes.with_inner_size(winit::dpi::LogicalSize::new(
+                            self.control.camera().width,
+                            self.control.camera().height,
+                        ))
+                    }
                 }
-                _ => attributes.with_inner_size(winit::dpi::LogicalSize::new(
-                    self.control.camera().width,
-                    self.control.camera().height,
-                )),
-            },
+            }
         };
         let window = Arc::new(
             event_loop

@@ -12,9 +12,16 @@ use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 
 use crate::atlas::StaticArt;
-use crate::camera::{Camera, WorldSpot, project_exact};
+use crate::camera::{
+    Camera,
+    WorldSpot,
+    project_exact,
+};
 use crate::depth;
-use crate::geometry::{Rect, Vec2};
+use crate::geometry::{
+    Rect,
+    Vec2,
+};
 use crate::occlusion::OwnerId;
 use crate::place::Place;
 use crate::sprite::SpriteQuad;
@@ -30,11 +37,11 @@ const FLIGHT_Z_OFFSET: f64 = 8.0;
 #[derive(Clone, Copy, Debug)]
 pub struct FlyingArrow {
     /// The shot's own sprite.
-    pub art: Graphic,
+    pub art:      Graphic,
     /// Where it left from.
-    pub from: Point,
+    pub from:     Point,
     /// Where it is bound.
-    pub to: Point,
+    pub to:       Point,
     /// `0.0` at `from`, `1.0` once it has arrived.
     pub progress: f32,
 }
@@ -85,7 +92,7 @@ fn quad_for(effect: &FlyingArrow, camera: &Camera, atlas: StaticArt<'_>, base: i
         at.y + (crate::camera::TILE_HEIGHT / 2) as f32 - f32::from(sprite.sprite.height) / 2.0,
     );
     let order = depth::Order {
-        tile: spot.x.floor() as i32 + spot.y.floor() as i32,
+        tile:       spot.x.floor() as i32 + spot.y.floor() as i32,
         // A shot in the air rises one above the ground under it, the same
         // reason a mobile does (`depth::mobile_priority_z`) — it is a thing
         // standing over the tile, not a marking on it.
@@ -93,18 +100,18 @@ fn quad_for(effect: &FlyingArrow, camera: &Camera, atlas: StaticArt<'_>, base: i
     };
     Some(
         SpriteQuad {
-            rect: Rect {
-                x: centre.x - size.x / 2.0,
-                y: centre.y - size.y / 2.0,
-                width: size.x,
+            rect:    Rect {
+                x:      centre.x - size.x / 2.0,
+                y:      centre.y - size.y / 2.0,
+                width:  size.x,
                 height: size.y,
             },
-            region: sprite.sprite.region,
-            depth: order.to_depth(base),
-            hue: 0,
-            place: Place::NOWHERE,
-            twin: 0,
-            owner: u32::from(OwnerId::NONE.raw()),
+            region:  sprite.sprite.region,
+            depth:   order.to_depth(base),
+            hue:     0,
+            place:   Place::NOWHERE,
+            twin:    0,
+            owner:   u32::from(OwnerId::NONE.raw()),
             volumes: crate::impostor::Range { offset: 0, count: 0 },
         }
         .with_static_atlas_page(sprite.page)
@@ -154,9 +161,9 @@ mod tests {
     #[test]
     fn flight_is_raised_from_the_actors_feet() {
         let effect = FlyingArrow {
-            art: Graphic(0x0F42),
-            from: Point::new(10, 20, 3),
-            to: Point::new(15, 24, 7),
+            art:      Graphic(0x0F42),
+            from:     Point::new(10, 20, 3),
+            to:       Point::new(15, 24, 7),
             progress: 0.5,
         };
 

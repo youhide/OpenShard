@@ -15,8 +15,17 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::wire::ClilocId;
-use openshard_state::components::{Body, BodyType, Mana, Stamina, Stats};
-use openshard_state::{Skill, WorldState};
+use openshard_state::components::{
+    Body,
+    BodyType,
+    Mana,
+    Stamina,
+    Stats,
+};
+use openshard_state::{
+    Skill,
+    WorldState,
+};
 
 use crate::check::roll_skill_band;
 
@@ -158,8 +167,8 @@ pub(super) fn eval_int(state: &mut WorldState, actor: EntityId, target: EntityId
 fn mobile_stats(state: &WorldState, entity: EntityId) -> Option<Stats> {
     state.registry.get::<Body>(entity)?;
     Some(state.registry.get::<Stats>(entity).copied().unwrap_or(Stats {
-        strength: STAT_WITHOUT_A_SHEET,
-        dexterity: STAT_WITHOUT_A_SHEET,
+        strength:     STAT_WITHOUT_A_SHEET,
+        dexterity:    STAT_WITHOUT_A_SHEET,
         intelligence: STAT_WITHOUT_A_SHEET,
     }))
 }

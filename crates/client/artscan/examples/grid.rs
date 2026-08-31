@@ -4,7 +4,10 @@
 use openshard_client_render::atlas::StaticAtlas;
 use openshard_client_render::camera::Camera;
 use openshard_client_render::cutaway::Cutaway;
-use openshard_client_render::occlusion::{self, Edges};
+use openshard_client_render::occlusion::{
+    self,
+    Edges,
+};
 use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
 

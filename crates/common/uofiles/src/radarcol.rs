@@ -32,12 +32,18 @@
 //! been wrong to.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
+
+use openshard_protocol::wire::Graphic;
+use openshard_tiles::{
+    LAND_TILE_COUNT,
+    LandTileId,
+};
 
 use crate::color::Color16;
-use openshard_protocol::wire::Graphic;
-use openshard_tiles::LAND_TILE_COUNT;
-use openshard_tiles::LandTileId;
 
 /// `radarcol.mul` could not be read.
 #[derive(Debug)]
@@ -46,7 +52,7 @@ pub enum RadarColorsError {
     /// The file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
@@ -64,12 +70,14 @@ impl fmt::Display for RadarColorsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
-            Self::NotRadarColors { path, size } => write!(
-                f,
-                "{} is {size} bytes, which is not a whole number of 16-bit colours covering the \
+            Self::NotRadarColors { path, size } => {
+                write!(
+                    f,
+                    "{} is {size} bytes, which is not a whole number of 16-bit colours covering the \
                  {LAND_TILE_COUNT} land tiles; it is not radarcol.mul",
-                path.display()
-            ),
+                    path.display()
+                )
+            }
         }
     }
 }
@@ -93,13 +101,17 @@ impl RadarColors {
     /// Read the file at `path`.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, RadarColorsError> {
         let path = path.as_ref();
-        let bytes = std::fs::read(path).map_err(|source| RadarColorsError::Read {
-            path: path.to_path_buf(),
-            source,
+        let bytes = std::fs::read(path).map_err(|source| {
+            RadarColorsError::Read {
+                path: path.to_path_buf(),
+                source,
+            }
         })?;
-        Self::parse(&bytes).ok_or_else(|| RadarColorsError::NotRadarColors {
-            path: path.to_path_buf(),
-            size: bytes.len(),
+        Self::parse(&bytes).ok_or_else(|| {
+            RadarColorsError::NotRadarColors {
+                path: path.to_path_buf(),
+                size: bytes.len(),
+            }
         })
     }
 

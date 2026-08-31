@@ -248,19 +248,6 @@ mod oracle;
 
 use std::path::PathBuf;
 
-use openshard_client_render::atlas::{LandAtlas, TexmapAtlas};
-use openshard_client_render::blit::Frame as BlitFrame;
-use openshard_client_render::camera::{Camera, RealPixel, WorldSpot, Zoom, project_exact};
-use openshard_client_render::cutaway::Cutaway;
-use openshard_client_render::debug::View;
-use openshard_client_render::depth;
-use openshard_client_render::facing::Face as WallFace;
-use openshard_client_render::geometry::Vec2;
-use openshard_client_render::light::{self, Light, Lighting, NIGHT};
-use openshard_client_render::mesh_face::{MeshFaceRow, MeshFaceVertex};
-use openshard_client_render::occlusion::{Builder, Part, SolidId};
-use openshard_client_render::place::Stance;
-use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, Target};
 // The reference tracer, under short names because this file's own `light`,
 // `Light` and `camera` are already the renderer's. Aliased at the import and
 // never re-exported: `pt_light::Light` says which crate's light it is at every
@@ -268,10 +255,61 @@ use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, 
 // distinction that matters most.
 use openshard_client_pathtrace::light as pt_light;
 use openshard_client_pathtrace::trace as pt_trace;
+use openshard_client_render::atlas::{
+    LandAtlas,
+    TexmapAtlas,
+};
+use openshard_client_render::blit::Frame as BlitFrame;
+use openshard_client_render::camera::{
+    Camera,
+    RealPixel,
+    WorldSpot,
+    Zoom,
+    project_exact,
+};
+use openshard_client_render::cutaway::Cutaway;
+use openshard_client_render::debug::View;
+use openshard_client_render::depth;
+use openshard_client_render::facing::Face as WallFace;
+use openshard_client_render::geometry::Vec2;
+use openshard_client_render::light::{
+    self,
+    Light,
+    Lighting,
+    NIGHT,
+};
+use openshard_client_render::mesh_face::{
+    MeshFaceRow,
+    MeshFaceVertex,
+};
+use openshard_client_render::occlusion::{
+    Builder,
+    Part,
+    SolidId,
+};
+use openshard_client_render::place::Stance;
+use openshard_client_render::renderer::{
+    self,
+    GroundRenderer,
+    MeshFaceRenderer,
+    Target,
+};
 use openshard_map::grid::BlockExtent;
-use openshard_tiles::{StaticTile, TileFlags};
-use oracle::boxes::{BoxSpec, box_mesh, box_owner};
-use oracle::{Shade, dump, read_gbuffer, segment_clear_of_box};
+use openshard_tiles::{
+    StaticTile,
+    TileFlags,
+};
+use oracle::boxes::{
+    BoxSpec,
+    box_mesh,
+    box_owner,
+};
+use oracle::{
+    Shade,
+    dump,
+    read_gbuffer,
+    segment_clear_of_box,
+};
 
 fn env_opt(name: &str) -> Option<String> {
     std::env::var(name).ok()
@@ -316,15 +354,15 @@ fn scene_tree() -> Vec<BoxSpec> {
     let w2: f64 = env_or("OPENSHARD_TREE_W2", "0.33333").parse().expect("a number");
     vec![
         BoxSpec {
-            tile: (tx, ty),
-            min: (cx - w1 / 2.0, cy - w1 / 2.0, 0.0),
-            max: (cx + w1 / 2.0, cy + w1 / 2.0, h1),
+            tile:    (tx, ty),
+            min:     (cx - w1 / 2.0, cy - w1 / 2.0, 0.0),
+            max:     (cx + w1 / 2.0, cy + w1 / 2.0, h1),
             graphic: 0,
         },
         BoxSpec {
-            tile: (tx, ty),
-            min: (cx - w2 / 2.0, cy - w2 / 2.0, h1),
-            max: (cx + w2 / 2.0, cy + w2 / 2.0, h1 + h2),
+            tile:    (tx, ty),
+            min:     (cx - w2 / 2.0, cy - w2 / 2.0, h1),
+            max:     (cx + w2 / 2.0, cy + w2 / 2.0, h1 + h2),
             graphic: 1,
         },
     ]
@@ -358,16 +396,16 @@ fn scene_pair() -> Vec<BoxSpec> {
         // The far one, north-west along the tile's diagonal: the face under
         // test is its own `east`.
         BoxSpec {
-            tile: (tx, ty),
-            min: (x0 + 0.05, y0 + 0.65, 0.0),
-            max: (x0 + 0.05 + w, y0 + 0.65 + w, h),
+            tile:    (tx, ty),
+            min:     (x0 + 0.05, y0 + 0.65, 0.0),
+            max:     (x0 + 0.05 + w, y0 + 0.65 + w, h),
             graphic: 0,
         },
         // And the near one, south-east, standing between it and the flame.
         BoxSpec {
-            tile: (tx, ty),
-            min: (x0 + 0.65, y0 + 0.05, 0.0),
-            max: (x0 + 0.65 + w, y0 + 0.05 + w, h),
+            tile:    (tx, ty),
+            min:     (x0 + 0.65, y0 + 0.05, 0.0),
+            max:     (x0 + 0.65 + w, y0 + 0.05 + w, h),
             graphic: 1,
         },
     ]
@@ -382,15 +420,15 @@ fn scene_line() -> Vec<BoxSpec> {
     let h = 4.0;
     vec![
         BoxSpec {
-            tile: (ax, ay),
-            min: (f64::from(ax), f64::from(ay), 0.0),
-            max: (f64::from(ax) + 1.0, f64::from(ay) + 1.0, h),
+            tile:    (ax, ay),
+            min:     (f64::from(ax), f64::from(ay), 0.0),
+            max:     (f64::from(ax) + 1.0, f64::from(ay) + 1.0, h),
             graphic: 0,
         },
         BoxSpec {
-            tile: (bx, by),
-            min: (f64::from(bx), f64::from(by), 0.0),
-            max: (f64::from(bx) + 1.0, f64::from(by) + 1.0, h),
+            tile:    (bx, by),
+            min:     (f64::from(bx), f64::from(by), 0.0),
+            max:     (f64::from(bx) + 1.0, f64::from(by) + 1.0, h),
             // Two graphics and not one: these are two statics standing in a
             // line, and `occlusion::merge` would fold one graphic's run into a
             // single primitive — which is a scene of its own and not this one.
@@ -469,9 +507,9 @@ fn scene_stair() -> Vec<BoxSpec> {
                 // order here.
                 let (lo, hi) = (i as f64 / n, (i as f64 + 1.0) / n);
                 BoxSpec {
-                    tile: (tx + flight, ty),
-                    min: (x0, y0 + 1.0 - hi, 0.0),
-                    max: (x0 + 1.0, y0 + 1.0 - lo, h),
+                    tile:    (tx + flight, ty),
+                    min:     (x0, y0 + 1.0 - hi, 0.0),
+                    max:     (x0 + 1.0, y0 + 1.0 - lo, h),
                     // One graphic per tread of per flight: every tread of this
                     // scene is its own static, so a landing continuous across
                     // the run stays three primitives — which is the geometry
@@ -748,7 +786,7 @@ fn main() {
     for (box_index, b) in boxes.iter().enumerate() {
         let solid = b.solid();
         let d = depth::Order {
-            tile: i32::from(b.tile.0) + i32::from(b.tile.1),
+            tile:       i32::from(b.tile.0) + i32::from(b.tile.1),
             priority_z: depth::static_priority_z(solid.min.z.round() as i8, &cube_tile),
         }
         .to_depth(base_tile);
@@ -854,9 +892,11 @@ fn main() {
             wide: blocks,
             down: blocks,
         },
-        |_x, _y| openshard_map::map::LandCell {
-            tile: FLOOR_TILE,
-            z: 0,
+        |_x, _y| {
+            openshard_map::map::LandCell {
+                tile: FLOOR_TILE,
+                z:    0,
+            }
         },
     );
     let land = LandAtlas::pack([(FLOOR_TILE, floor_image)]).expect("one flat tile always fits");
@@ -936,21 +976,23 @@ fn main() {
     // renderer's own ambient model, restated inside the thing that checks this
     // renderer, which is the one shape an oracle may not have.
     let ambient = match scene_name.as_str() {
-        "flat" => light::Ambient {
-            sky: [0.0; 3],
-            ground: [0.0; 3],
-        },
+        "flat" => {
+            light::Ambient {
+                sky:    [0.0; 3],
+                ground: [0.0; 3],
+            }
+        }
         _ => NIGHT,
     };
     let mut lighting = Lighting {
         ambient,
         lights: vec![Light {
-            at: Vec2::new(f32::from(anchor.0) + ldx, f32::from(anchor.1) + ldy),
-            z: light_z,
-            radius: light_radius,
-            color: [1.0, 1.0, 1.0],
+            at:        Vec2::new(f32::from(anchor.0) + ldx, f32::from(anchor.1) + ldy),
+            z:         light_z,
+            radius:    light_radius,
+            color:     [1.0, 1.0, 1.0],
             intensity: 1.0,
-            beam: None,
+            beam:      None,
         }],
         occlusion,
         sun: None,
@@ -1113,16 +1155,16 @@ fn main() {
             &queue,
             &mut encoder,
             BlitFrame {
-                target: &surface_view,
-                world: &world_view,
-                gbuffer: &gbuffer_views,
-                face_instances: &dummy_instances,
-                item_instances: &dummy_instances,
+                target:           &surface_view,
+                world:            &world_view,
+                gbuffer:          &gbuffer_views,
+                face_instances:   &dummy_instances,
+                item_instances:   &dummy_instances,
                 mobile_instances: &dummy_instances,
-                mesh_instances: mesh_pass.rows_buffer(),
+                mesh_instances:   mesh_pass.rows_buffer(),
                 ground_instances: ground_pass.instances_buffer(),
-                zoom: Zoom::ONE,
-                rect: openshard_client_render::blit::ViewportRect {
+                zoom:             Zoom::ONE,
+                rect:             openshard_client_render::blit::ViewportRect {
                     x: 0,
                     y: 0,
                     width,
@@ -1505,7 +1547,7 @@ fn main() {
                 // mesh pass a colour target — except on `scene_flat`, whose
                 // whole point is that it has no boxes, so there is nothing on
                 // the engine's side to read one off.
-                body: match boxes.is_empty() {
+                body:   match boxes.is_empty() {
                     true => oracle::pathtrace::Albedos::INVENTED.body,
                     false => oracle::body_albedo(&drawn, &world_pixels),
                 },
@@ -1518,33 +1560,33 @@ fn main() {
 /// Everything [`pathtrace_comparison`] needs, in one struct because a function
 /// of ten positional arguments is a function whose call site nobody can read.
 struct PathtraceInputs<'a> {
-    boxes: &'a [BoxSpec],
-    light_at: WorldSpot,
-    light_radius: f64,
+    boxes:         &'a [BoxSpec],
+    light_at:      WorldSpot,
+    light_radius:  f64,
     /// The frame's own world-to-pixel map — the *renderer's*, handed over as a
     /// black box for [`Parallel::measure`] to recover. This is the one thing the
     /// tracer takes from this crate, and taking it as values rather than as a
     /// formula is what stops the reference camera from drifting into being
     /// nobody's camera.
-    to_pixel: &'a dyn Fn(WorldSpot) -> (f64, f64),
-    width: u32,
-    height: u32,
-    drawn: &'a [oracle::Drawn],
+    to_pixel:      &'a dyn Fn(WorldSpot) -> (f64, f64),
+    width:         u32,
+    height:        u32,
+    drawn:         &'a [oracle::Drawn],
     shadow_pixels: &'a [u8],
-    face_rows: &'a [(usize, Stance, u32)],
-    base: &'a str,
+    face_rows:     &'a [(usize, Stance, u32)],
+    base:          &'a str,
     /// The flame this scene is actually lit by — the engine's own `Light`, so
     /// the reference emits what the renderer emits rather than a brightness
     /// picked to make its own picture readable.
-    flame: &'a Light,
+    flame:         &'a Light,
     /// What the surfaces reflect. The ground's is read off the frame the world
     /// passes just drew; see [`ground_albedo`].
-    albedos: oracle::pathtrace::Albedos,
+    albedos:       oracle::pathtrace::Albedos,
     /// The engine's own lit frame, `RGBA8`, for the shaded comparison — the
     /// picture `docs/lighting_rebuild.md`'s phase 0 is *about*. Empty when the
     /// run did not dump `View::Lit`, and the comparison then says so rather
     /// than drawing half of itself.
-    lit_pixels: &'a [u8],
+    lit_pixels:    &'a [u8],
 }
 
 /// Render the scene a second time with [`openshard_client_pathtrace`], lay the
@@ -1585,13 +1627,15 @@ fn pathtrace_comparison(inputs: PathtraceInputs<'_>) {
     // the comparison.
     let body = match boxes.is_empty() || flame_radius() == 0.0 {
         true => oracle::pathtrace::Body::Point,
-        false => oracle::pathtrace::Body::Sphere {
-            radius: f64::from(flame_radius()),
-            samples: match oracle::pathtrace::ENGINE_FLAME {
-                oracle::pathtrace::Body::Sphere { samples, .. } => samples,
-                oracle::pathtrace::Body::Point => 1,
-            },
-        },
+        false => {
+            oracle::pathtrace::Body::Sphere {
+                radius:  f64::from(flame_radius()),
+                samples: match oracle::pathtrace::ENGINE_FLAME {
+                    oracle::pathtrace::Body::Sphere { samples, .. } => samples,
+                    oracle::pathtrace::Body::Point => 1,
+                },
+            }
+        }
     };
     let mirror = oracle::pathtrace::Mirror::of(oracle::pathtrace::Mirrored {
         boxes,

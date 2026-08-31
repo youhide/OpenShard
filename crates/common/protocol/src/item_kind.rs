@@ -103,7 +103,7 @@ pub enum ItemSelector {
     Exact(ItemKindId),
     /// One kind constrained by a material rule.
     KindWithMaterial {
-        kind: ItemKindId,
+        kind:     ItemKindId,
         material: MaterialRule,
     },
     /// Any kind carrying this closed semantic category.
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn a_selector_names_domain_identity_not_presentation() {
         let selector = ItemSelector::KindWithMaterial {
-            kind: ItemKindId(1),
+            kind:     ItemKindId(1),
             material: MaterialRule::Exact(MaterialId(9)),
         };
         assert!(matches!(selector, ItemSelector::KindWithMaterial { .. }));

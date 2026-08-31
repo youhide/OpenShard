@@ -24,10 +24,18 @@
 //! it from there so the bar over the player's head and the line on this frame
 //! cannot disagree.
 
-use openshard_client_render::gump::{GumpArt, GumpPixel};
+use openshard_client_render::gump::{
+    GumpArt,
+    GumpPixel,
+};
 use openshard_client_render::status;
 
-use crate::panes::{Input, PaneCtx, PaneFrame, Response};
+use crate::panes::{
+    Input,
+    PaneCtx,
+    PaneFrame,
+    Response,
+};
 use crate::windows::Drawn;
 
 /// This character's status frame, open.
@@ -85,9 +93,11 @@ impl StatusPane {
 mod tests {
     use openshard_protocol::serial::Serial;
 
-    use crate::panes::{Button, fixture};
-
     use super::*;
+    use crate::panes::{
+        Button,
+        fixture,
+    };
 
     /// **S3's `None` gap, closed through `AnyPane::layout`.** A `0x1B` opens no
     /// window (see the module docs), so the Status button's own path opens one

@@ -1,8 +1,17 @@
-use super::*;
-use openshard_protocol::wire::{Graphic, Hue};
-use openshard_state::weapon::{
-    LAYER_ONE_HANDED, LAYER_TWO_HANDED, WeaponData, weapon_data, weapon_data_for_kind, weapon_layer,
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
 };
+use openshard_state::weapon::{
+    LAYER_ONE_HANDED,
+    LAYER_TWO_HANDED,
+    WeaponData,
+    weapon_data,
+    weapon_data_for_kind,
+    weapon_layer,
+};
+
+use super::*;
 
 /// The highest layer an item can be worn on: 1–25 are the body; higher numbers
 /// are the backpack and bank, not "worn".
@@ -133,8 +142,8 @@ pub fn equip_item(
         }
         let contained = Contained {
             container: backpack,
-            position: GumpPoint::new(0, 0),
-            grid: GridSlot(item_count(state, backpack)),
+            position:  GumpPoint::new(0, 0),
+            grid:      GridSlot(item_count(state, backpack)),
         };
         relocate_item(state, displaced, ItemLocation::contained(contained))
             .expect("replacing a worn item frees its paperdoll layer");
@@ -233,8 +242,8 @@ pub fn equip_weapon_from_backpack(
         };
         let contained = Contained {
             container: backpack,
-            position: GumpPoint::new(0, 0),
-            grid: GridSlot(item_count(state, backpack)),
+            position:  GumpPoint::new(0, 0),
+            grid:      GridSlot(item_count(state, backpack)),
         };
         relocate_item(state, item, ItemLocation::contained(contained))
             .expect("replaced hand gear has one valid backpack parent");
@@ -330,10 +339,12 @@ fn hands_conflict(state: &WorldState, mobile: Serial, item: EntityId, layer: Lay
 fn weapon_for_item(state: &WorldState, item: EntityId) -> Option<&'static WeaponData> {
     match state.registry.get::<ItemKind>(item) {
         Some(kind) => weapon_data_for_kind(kind.0),
-        None => state
-            .registry
-            .get::<Drawn>(item)
-            .and_then(|drawn| weapon_data(drawn.id)),
+        None => {
+            state
+                .registry
+                .get::<Drawn>(item)
+                .and_then(|drawn| weapon_data(drawn.id))
+        }
     }
 }
 

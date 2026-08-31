@@ -10,7 +10,10 @@ use openshard_client_render::camera::Camera;
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::facing::Face;
 use openshard_client_render::geometry::Vec2;
-use openshard_client_render::light::{self, Spot};
+use openshard_client_render::light::{
+    self,
+    Spot,
+};
 use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
 

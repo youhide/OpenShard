@@ -10,13 +10,32 @@
 use std::net::Ipv4Addr;
 use std::time::Instant;
 
-use openshard_gateway::{OutboxRx, outbox_channel, version_channel};
-use openshard_login::{DevAccounts, LoginServer, LoginSession, Outcome, Response, single_shard};
+use openshard_gateway::{
+    OutboxRx,
+    outbox_channel,
+    version_channel,
+};
+use openshard_login::{
+    DevAccounts,
+    LoginServer,
+    LoginSession,
+    Outcome,
+    Response,
+    single_shard,
+};
 use openshard_protocol::identity::{
-    AccountName, CharacterName, PlaintextPassword, RawAccountName, RawPlaintextPassword,
+    AccountName,
+    CharacterName,
+    PlaintextPassword,
+    RawAccountName,
+    RawPlaintextPassword,
 };
 use openshard_protocol::login::{
-    AccountLogin, GameServerLogin, LoginStagePacket, RawShardIndex, SelectShard,
+    AccountLogin,
+    GameServerLogin,
+    LoginStagePacket,
+    RawShardIndex,
+    SelectShard,
 };
 use openshard_protocol::version::ClientVersion;
 use openshard_protocol::wire::AuthKey;
@@ -80,7 +99,7 @@ fn drive(
 pub(crate) fn at_character_screen(login: &mut LoginServer, now: Instant) -> (Session, OutboxRx) {
     let mut auth = LoginSession::new();
     let account_login = AccountLogin {
-        account: RawAccountName::new("admin"),
+        account:  RawAccountName::new("admin"),
         password: RawPlaintextPassword::new("hunter2"),
     };
     let Response::Send(_) = drive(login, &mut auth, pkt(&account_login.encode()), now) else {
@@ -104,7 +123,7 @@ pub(crate) fn at_character_screen(login: &mut LoginServer, now: Instant) -> (Ses
     let mut session = Session::new(outbox, control);
     let game_login = GameServerLogin {
         auth_key: key,
-        account: RawAccountName::new("admin"),
+        account:  RawAccountName::new("admin"),
         password: RawPlaintextPassword::new("hunter2"),
     };
     assert_eq!(

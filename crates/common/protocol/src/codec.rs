@@ -21,7 +21,7 @@ pub enum CodecError {
     /// The packet ended before the field did.
     UnexpectedEnd {
         /// How many bytes the read needed.
-        needed: usize,
+        needed:    usize,
         /// How many were left.
         available: usize,
     },
@@ -40,7 +40,8 @@ impl fmt::Display for CodecError {
     }
 }
 
-impl std::error::Error for CodecError {}
+impl std::error::Error for CodecError {
+}
 
 /// Result of a read.
 pub type CodecResult<T> = Result<T, CodecError>;
@@ -65,7 +66,7 @@ pub type CodecResult<T> = Result<T, CodecError>;
 /// ```
 #[derive(Clone, Debug)]
 pub struct PacketReader<'a> {
-    bytes: &'a [u8],
+    bytes:    &'a [u8],
     position: usize,
 }
 
@@ -101,7 +102,7 @@ impl<'a> PacketReader<'a> {
             .checked_add(count)
             .filter(|end| *end <= self.bytes.len())
             .ok_or(CodecError::UnexpectedEnd {
-                needed: count,
+                needed:    count,
                 available: self.remaining(),
             })?;
         let slice = &self.bytes[self.position..end];
@@ -197,7 +198,7 @@ impl<'a> PacketReader<'a> {
             .iter()
             .position(|b| *b == 0)
             .ok_or(CodecError::UnexpectedEnd {
-                needed: rest.len() + 1,
+                needed:    rest.len() + 1,
                 available: rest.len(),
             })?;
         let text: String = rest[..end].iter().map(|b| *b as char).collect();
@@ -422,8 +423,8 @@ mod tests {
         assert_eq!(
             reader.u32(),
             Err(CodecError::UnexpectedEnd {
-                needed: 4,
-                available: 1
+                needed:    4,
+                available: 1,
             })
         );
         assert_eq!(reader.position(), 0, "a failed read must not consume");

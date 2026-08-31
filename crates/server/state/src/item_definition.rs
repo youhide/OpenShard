@@ -6,9 +6,17 @@
 //! [`kind_from_drawn`] only at that compatibility boundary.
 
 use openshard_protocol::item_kind::{
-    ItemKindId, ItemSelector, ItemTag, MaterialFamilyId, MaterialId, MaterialRule,
+    ItemKindId,
+    ItemSelector,
+    ItemTag,
+    MaterialFamilyId,
+    MaterialId,
+    MaterialRule,
 };
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 
 use crate::Drawn;
 
@@ -23,37 +31,37 @@ pub const LEATHER: MaterialFamilyId = MaterialFamilyId(3);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ItemDefinition {
     /// Stable identity written to saves and selected by recipes.
-    pub id: ItemKindId,
+    pub id:              ItemKindId,
     /// Developer-readable name until localization is moved behind this table.
-    pub name: &'static str,
+    pub name:            &'static str,
     /// The client tile for every presentation variant of this kind.
-    pub graphic: Graphic,
+    pub graphic:         Graphic,
     /// Legacy client art aliases for this kind, such as a flipped tool. The
     /// canonical [`Self::graphic`] is what new semantic construction projects.
     pub legacy_graphics: &'static [Graphic],
     /// The gump that makes this semantic container usable. `None` means this
     /// kind is not a container.
-    pub container_gump: Option<Graphic>,
+    pub container_gump:  Option<Graphic>,
     /// Which material family may determine its hue, if any.
     pub material_family: Option<MaterialFamilyId>,
     /// Base protection for a piece of armour. This is a fact of its semantic
     /// kind; `None` says the item is not armour.
-    pub armor_rating: Option<u16>,
+    pub armor_rating:    Option<u16>,
     /// Closed semantic categories this kind belongs to.
-    pub tags: &'static [ItemTag],
+    pub tags:            &'static [ItemTag],
 }
 
 /// One material grade and how the classic client represents it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MaterialDefinition {
     /// Stable identity written to saves and selected by recipes.
-    pub id: MaterialId,
+    pub id:          MaterialId,
     /// The family that may use this material.
-    pub family: MaterialFamilyId,
+    pub family:      MaterialFamilyId,
     /// Developer-readable name until localization is moved behind this table.
-    pub name: &'static str,
+    pub name:        &'static str,
     /// The legacy hue projection for this material.
-    pub hue: Hue,
+    pub hue:         Hue,
     /// The bonus a material lends a base armour rating. Zero for materials that
     /// do not modify armour; the value belongs to the material, not its hue.
     pub armor_bonus: u16,
@@ -83,14 +91,16 @@ pub fn selector_matches(kind: ItemKindId, material: Option<MaterialId>, selector
         ItemSelector::KindWithMaterial {
             kind: expected,
             material: rule,
-        } if kind == expected => match rule {
-            MaterialRule::Any => true,
-            MaterialRule::Exact(expected) => material == Some(expected),
-            MaterialRule::InFamily(family) => {
-                material_definition_opt(material).is_some_and(|definition| definition.family == family)
+        } if kind == expected => {
+            match rule {
+                MaterialRule::Any => true,
+                MaterialRule::Exact(expected) => material == Some(expected),
+                MaterialRule::InFamily(family) => {
+                    material_definition_opt(material).is_some_and(|definition| definition.family == family)
+                }
+                MaterialRule::SameAsInput(_) => false,
             }
-            MaterialRule::SameAsInput(_) => false,
-        },
+        }
         ItemSelector::Tag(tag) => has_tag(kind, tag),
         _ => false,
     }
@@ -163,12 +173,14 @@ pub fn kind_from_drawn(drawn: Drawn) -> Option<(ItemKindId, Option<MaterialId>)>
     })?;
     let material = match item.material_family {
         None if drawn.hue == Hue::NONE => None,
-        Some(family) => Some(
-            MATERIAL_DEFINITIONS
-                .iter()
-                .find(|definition| definition.family == family && definition.hue == drawn.hue)?
-                .id,
-        ),
+        Some(family) => {
+            Some(
+                MATERIAL_DEFINITIONS
+                    .iter()
+                    .find(|definition| definition.family == family && definition.hue == drawn.hue)?
+                    .id,
+            )
+        }
         None => return None,
     };
     Some((item.id, material))
@@ -186,8 +198,8 @@ mod tests {
         assert_eq!(
             drawn,
             Drawn {
-                id: Graphic(0x0F61),
-                hue: Hue(0x08AB)
+                id:  Graphic(0x0F61),
+                hue: Hue(0x08AB),
             }
         );
         assert_eq!(kind_from_drawn(drawn), Some((longsword, Some(valorite))));
@@ -219,7 +231,7 @@ mod tests {
     fn a_flipped_tool_art_is_an_alias_for_the_same_semantic_kind() {
         assert_eq!(
             kind_from_drawn(Drawn {
-                id: Graphic(0x0E85),
+                id:  Graphic(0x0E85),
                 hue: Hue(0x08AB),
             }),
             Some((ItemKindId(9), Some(MaterialId(9))))
@@ -235,7 +247,7 @@ mod tests {
     fn metal_tools_keep_their_material_as_part_of_their_identity() {
         assert_eq!(
             kind_from_drawn(Drawn {
-                id: Graphic(0x0FBB),
+                id:  Graphic(0x0FBB),
                 hue: Hue(0x08AB),
             }),
             Some((ItemKindId(10), Some(MaterialId(9))))
@@ -243,7 +255,7 @@ mod tests {
         assert_eq!(
             presentation_of(ItemKindId(10), Some(MaterialId(9))),
             Some(Drawn {
-                id: Graphic(0x0FBB),
+                id:  Graphic(0x0FBB),
                 hue: Hue(0x08AB),
             })
         );
@@ -263,7 +275,7 @@ mod tests {
             };
             assert_eq!(
                 kind_from_drawn(Drawn {
-                    id: definition.graphic,
+                    id:  definition.graphic,
                     hue: Hue::NONE,
                 }),
                 Some((definition.id, Some(material))),
@@ -310,7 +322,7 @@ mod tests {
             ItemKindId(1),
             Some(MaterialId(9)),
             ItemSelector::KindWithMaterial {
-                kind: ItemKindId(1),
+                kind:     ItemKindId(1),
                 material: MaterialRule::InFamily(METAL),
             }
         ));
@@ -323,7 +335,7 @@ mod tests {
             ItemKindId(1),
             Some(MaterialId(1)),
             ItemSelector::KindWithMaterial {
-                kind: ItemKindId(1),
+                kind:     ItemKindId(1),
                 material: MaterialRule::Exact(MaterialId(9)),
             }
         ));
@@ -333,14 +345,14 @@ mod tests {
     fn craft_axis_resources_have_typed_material_identity() {
         assert_eq!(
             kind_from_drawn(Drawn {
-                id: Graphic(0x1BD7),
+                id:  Graphic(0x1BD7),
                 hue: Hue(0x07DA),
             }),
             Some((ItemKindId(36), Some(MaterialId(21))))
         );
         assert_eq!(
             kind_from_drawn(Drawn {
-                id: Graphic(0x1081),
+                id:  Graphic(0x1081),
                 hue: Hue(0x0845),
             }),
             Some((ItemKindId(37), Some(MaterialId(42))))
@@ -351,14 +363,14 @@ mod tests {
     fn common_craft_ingredients_are_exact_kinds() {
         assert_eq!(
             kind_from_drawn(Drawn {
-                id: Graphic(0x1766),
+                id:  Graphic(0x1766),
                 hue: Hue::NONE,
             }),
             Some((ItemKindId(38), None))
         );
         assert_eq!(
             kind_from_drawn(Drawn {
-                id: Graphic(0x0F0E),
+                id:  Graphic(0x0F0E),
                 hue: Hue::NONE,
             }),
             Some((ItemKindId(39), None))

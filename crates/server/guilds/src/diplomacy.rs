@@ -16,9 +16,20 @@
 //! See [`Alliance`](openshard_state::Alliance).
 
 use openshard_entities::EntityId;
-use openshard_state::{AllianceId, GuildId, Removal, WorldState};
+use openshard_state::{
+    AllianceId,
+    GuildId,
+    Removal,
+    WorldState,
+};
 
-use crate::{RankFlags, Refusal, announce, may, recolour_guild};
+use crate::{
+    RankFlags,
+    Refusal,
+    announce,
+    may,
+    recolour_guild,
+};
 
 /// The longest an alliance may call itself. ServUO's own prompt takes the same
 /// as a guild name.

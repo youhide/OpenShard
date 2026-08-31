@@ -34,11 +34,15 @@
 //! the client draws such a tile flat even where the ground slopes.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
+
+use openshard_tiles::TextureId;
 
 use crate::color::Color16;
 use crate::image::Image;
-use openshard_tiles::TextureId;
 
 /// How many textures the index has room for. The same 0x4000 as the land half
 /// of the art, and not the same index space.
@@ -61,7 +65,7 @@ pub enum TexMapError {
     /// A file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
@@ -76,7 +80,7 @@ pub enum TexMapError {
     /// is neither of the two square textures.
     Malformed {
         /// Which texture.
-        id: TextureId,
+        id:     TextureId,
         /// What went wrong.
         detail: String,
     },
@@ -86,11 +90,13 @@ impl fmt::Display for TexMapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
-            Self::NotAnIndex { path, size } => write!(
-                f,
-                "{} is {size} bytes, which is not a whole number of {INDEX_ENTRY}-byte entries",
-                path.display()
-            ),
+            Self::NotAnIndex { path, size } => {
+                write!(
+                    f,
+                    "{} is {size} bytes, which is not a whole number of {INDEX_ENTRY}-byte entries",
+                    path.display()
+                )
+            }
             Self::Malformed { id, detail } => {
                 write!(f, "texture {} is malformed: {detail}", id.0)
             }
@@ -119,7 +125,7 @@ pub struct TexMaps {
     entries: Vec<Option<Entry>>,
     /// All of `texmaps.mul`, about 45MB of it. The same shape every reader in
     /// this crate has — see the backlog in `docs/client.md`.
-    data: Vec<u8>,
+    data:    Vec<u8>,
 }
 
 impl fmt::Debug for TexMaps {
@@ -231,9 +237,11 @@ impl TexMaps {
 }
 
 fn read(path: &Path) -> Result<Vec<u8>, TexMapError> {
-    std::fs::read(path).map_err(|source| TexMapError::Read {
-        path: path.to_owned(),
-        source,
+    std::fs::read(path).map_err(|source| {
+        TexMapError::Read {
+            path: path.to_owned(),
+            source,
+        }
     })
 }
 

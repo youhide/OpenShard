@@ -15,16 +15,28 @@
 //! caller with a shard of its own can start the same client without an
 //! environment or a command line at all. `crates/e2e/playground` is that caller.
 
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{
+    Ipv4Addr,
+    SocketAddrV4,
+};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, ValueEnum};
+use clap::{
+    Parser,
+    ValueEnum,
+};
 use openshard_client_app::WorldSource;
-use openshard_client_net::session::{Pick, Plan};
+use openshard_client_net::session::{
+    Pick,
+    Plan,
+};
 use openshard_client_net::transport::Tcp;
 use openshard_map::grid::Tile;
-use openshard_protocol::identity::{RawAccountName, RawPlaintextPassword};
+use openshard_protocol::identity::{
+    RawAccountName,
+    RawPlaintextPassword,
+};
 use tracing_subscriber::EnvFilter;
 
 /// Where a shard is, when one is asked for and no address is given.
@@ -173,9 +185,9 @@ fn tile(text: &str) -> Result<Tile, String> {
 fn plan(cli: &Cli) -> Option<Plan> {
     let account = cli.account.clone()?;
     Some(Plan {
-        account: RawAccountName(account),
-        password: RawPlaintextPassword(cli.password.clone()),
-        shard: Pick::First,
+        account:   RawAccountName(account),
+        password:  RawPlaintextPassword(cli.password.clone()),
+        shard:     Pick::First,
         character: cli.character.clone().map_or(Pick::First, Pick::Named),
     })
 }
@@ -196,15 +208,17 @@ fn main() -> ExitCode {
         (Tcp::at(cli.server), plan)
     });
     let opening = openshard_client_app::Opening {
-        at: cli.at,
-        solids: cli.solids,
+        at:              cli.at,
+        solids:          cli.solids,
         stall_on_update: None,
-        scenario: cli.scenario.map(|scenario| match scenario {
-            Scenario::LodSweep => openshard_client_app::Scenario::LodSweep,
-            Scenario::AtlasSoak => openshard_client_app::Scenario::AtlasSoak,
-            Scenario::ZoomSoak => openshard_client_app::Scenario::ZoomSoak,
-            Scenario::ZoomSoakFreezeServer => openshard_client_app::Scenario::ZoomSoakFreezeServer,
-            Scenario::LiveOracle => openshard_client_app::Scenario::LiveOracle,
+        scenario:        cli.scenario.map(|scenario| {
+            match scenario {
+                Scenario::LodSweep => openshard_client_app::Scenario::LodSweep,
+                Scenario::AtlasSoak => openshard_client_app::Scenario::AtlasSoak,
+                Scenario::ZoomSoak => openshard_client_app::Scenario::ZoomSoak,
+                Scenario::ZoomSoakFreezeServer => openshard_client_app::Scenario::ZoomSoakFreezeServer,
+                Scenario::LiveOracle => openshard_client_app::Scenario::LiveOracle,
+            }
         }),
     };
     // Where the ground comes out of. `Install` is the arm every run before base

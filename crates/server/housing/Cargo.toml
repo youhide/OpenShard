@@ -35,4 +35,4 @@ serde_json.workspace = true
 openshard-events.workspace = true
 # `house_stair_audit --saved-step` opens a shard save read-only and asks the
 # production footing about the character's next tile.
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }

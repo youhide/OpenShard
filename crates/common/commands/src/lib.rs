@@ -341,7 +341,10 @@ impl StaffCommand {
 mod tests {
     use openshard_protocol::access::AccessLevel;
 
-    use super::{PREFIX, StaffCommand};
+    use super::{
+        PREFIX,
+        StaffCommand,
+    };
 
     #[test]
     fn every_command_is_in_all_exactly_once() {

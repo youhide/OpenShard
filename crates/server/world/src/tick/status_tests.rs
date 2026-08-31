@@ -6,14 +6,27 @@
 //! file should be: this slice's tests read private world state, so they stay
 //! inside the module, but they do not have to pile into the same file.
 
-use super::tests::{START, enter, enter_gm, packets_for, world};
-use super::*;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::packet::EncodePacket;
 use openshard_protocol::serial::RawSerial;
 use openshard_protocol::wire::Graphic;
-use openshard_state::components::{Amount, Contained, Drawn, Equipped, Stackable};
+use openshard_state::components::{
+    Amount,
+    Contained,
+    Drawn,
+    Equipped,
+    Stackable,
+};
+
+use super::tests::{
+    START,
+    enter,
+    enter_gm,
+    packets_for,
+    world,
+};
+use super::*;
 
 /// The gold graphic, and the backpack layer a character wears one on.
 const GOLD: u16 = 0x0EED;
@@ -44,7 +57,7 @@ fn put_in(world: &mut World, container: Serial, graphic: u16, amount: u16) -> En
     world.state.registry.insert(
         item,
         Drawn {
-            id: openshard_protocol::wire::Graphic(graphic),
+            id:  openshard_protocol::wire::Graphic(graphic),
             hue: openshard_protocol::wire::Hue(0),
         },
     );
@@ -72,7 +85,7 @@ fn wear(world: &mut World, connection: ConnectionId, graphic: u16, layer: Layer)
     world.state.registry.insert(
         item,
         Drawn {
-            id: openshard_protocol::wire::Graphic(graphic),
+            id:  openshard_protocol::wire::Graphic(graphic),
             hue: openshard_protocol::wire::Hue(0),
         },
     );
@@ -106,7 +119,7 @@ fn the_status_bar_counts_the_gold_in_the_pack() {
     world.state.registry.insert(
         pouch,
         Drawn {
-            id: openshard_protocol::wire::Graphic(0x0E79),
+            id:  openshard_protocol::wire::Graphic(0x0E79),
             hue: openshard_protocol::wire::Hue(0),
         },
     );
@@ -121,8 +134,8 @@ fn the_status_bar_counts_the_gold_in_the_pack() {
         pouch,
         openshard_state::ItemLocation::contained(Contained {
             container: pack,
-            position: GumpPoint::new(10, 10),
-            grid: GridSlot(1),
+            position:  GumpPoint::new(10, 10),
+            grid:      GridSlot(1),
         }),
     )
     .unwrap();
@@ -185,8 +198,8 @@ fn the_bank_box_is_not_carried() {
         purse,
         openshard_state::ItemLocation::contained(Contained {
             container: bank,
-            position: GumpPoint::new(40, 65),
-            grid: GridSlot(0),
+            position:  GumpPoint::new(40, 65),
+            grid:      GridSlot(0),
         }),
     )
     .unwrap();
@@ -220,8 +233,8 @@ fn a_lifted_pile_is_still_carried() {
     // Onto the cursor: out of the container, into the drag.
     let origin = Contained {
         container: pack,
-        position: GumpPoint::new(40, 65),
-        grid: GridSlot(0),
+        position:  GumpPoint::new(40, 65),
+        grid:      GridSlot(0),
     };
     openshard_state::relocate_item(
         &mut world.state,
@@ -386,8 +399,8 @@ fn a_wound_closes_on_its_own_and_poison_stops_it() {
     world.state.registry.insert(
         player,
         openshard_state::components::Poisoned {
-            level: openshard_protocol::world::PoisonLevel::new(1),
-            next_pulse: openshard_state::WorldTick::MAX,
+            level:       openshard_protocol::world::PoisonLevel::new(1),
+            next_pulse:  openshard_state::WorldTick::MAX,
             pulses_left: 10,
         },
     );
@@ -643,7 +656,7 @@ fn a_purse_inside_the_bank_is_still_banked() {
     world.state.registry.insert(
         pouch,
         Drawn {
-            id: openshard_protocol::wire::Graphic(0x0E79),
+            id:  openshard_protocol::wire::Graphic(0x0E79),
             hue: openshard_protocol::wire::Hue(0),
         },
     );
@@ -658,8 +671,8 @@ fn a_purse_inside_the_bank_is_still_banked() {
         pouch,
         openshard_state::ItemLocation::contained(Contained {
             container: bank,
-            position: GumpPoint::new(10, 10),
-            grid: GridSlot(0),
+            position:  GumpPoint::new(10, 10),
+            grid:      GridSlot(0),
         }),
     )
     .unwrap();

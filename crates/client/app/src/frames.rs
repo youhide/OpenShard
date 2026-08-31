@@ -57,7 +57,10 @@
 
 use std::time::Duration;
 
-use openshard_client_render::bench::{Metrics, Reading};
+use openshard_client_render::bench::{
+    Metrics,
+    Reading,
+};
 
 /// The CPU or GPU time a 60 Hz frame has available before it misses the next
 /// refresh. Kept below the actual 16.67 ms period so a frame that merely waits
@@ -77,20 +80,20 @@ pub struct Perf {
     /// Owned rather than borrowed because this is a snapshot and not a view of
     /// the app; a few hundred `f64`s a frame is what that costs, and it is what
     /// keeps the panels unable to reach back into the camera.
-    pub readings: Vec<Reading>,
+    pub readings:    Vec<Reading>,
     /// What those frames come to, and `None` before there are enough of them to
     /// difference. Absent rather than zeroed: a metric over one frame is not a
     /// small number, it is not a number.
-    pub metrics: Option<Metrics>,
+    pub metrics:     Option<Metrics>,
     /// How long a window the scope keeps, for the chart's own axis.
-    pub scope_span: Duration,
+    pub scope_span:  Duration,
     /// The last few seconds of the event loop, one entry per drawn frame.
-    pub frames: Vec<Frame>,
+    pub frames:      Vec<Frame>,
     /// How long a window those cover, for that chart's own axis.
     pub frames_span: Duration,
     /// The worst frame rate in that window, and `None` before there is a frame
     /// to have a rate.
-    pub worst_fps: Option<f64>,
+    pub worst_fps:   Option<f64>,
     /// What the device spent on the last frame it finished, pass by pass — the
     /// answer to "which pass" once [`Frame::gpu`] has said the device is where
     /// the frame went.
@@ -99,17 +102,17 @@ pub struct Perf {
     /// first frame's queries have come back; the panel tells those two apart by
     /// asking the ring, which carries `None` for the first and a number for the
     /// second. See [`crate::profile`].
-    pub gpu_passes: Vec<crate::profile::Pass>,
+    pub gpu_passes:  Vec<crate::profile::Pass>,
     /// How many full atlas repacks this session has paid for. See
     /// [`Frame::repacked`] for which frame in the window below was one of them.
-    pub repacks: u64,
+    pub repacks:     u64,
     /// What is currently asking for frames.
     ///
     /// Shown beside the rate because it is the *reason* for it: a client paced
     /// by the display and one paced by the animation clock report the same kind
     /// of number and mean opposite things by it, and a panel that only showed
     /// the rate would read the second as a fault.
-    pub pacing: Pacing,
+    pub pacing:      Pacing,
 }
 
 /// What is deciding when the next frame is drawn.
@@ -133,15 +136,15 @@ pub enum Pacing {
 #[derive(Clone, Copy, Debug)]
 pub struct Frame {
     /// When it landed, on this ring's own clock.
-    pub at: Duration,
+    pub at:       Duration,
     /// The gap since the frame before it — the *interval*, which is what a frame
     /// rate is the reciprocal of. Never zero: the ring will not record one, so
     /// [`Frame::fps`] can divide.
     pub interval: Duration,
     /// What `egui` cost: laying the panels out, and turning them into a mesh.
-    pub ui: Duration,
+    pub ui:       Duration,
     /// What the world cost: atlases, quads, and the passes that draw them.
-    pub scene: Duration,
+    pub scene:    Duration,
     /// Time blocked acquiring the surface texture.
     ///
     /// **Two things wear this number.** Under `PresentMode::Fifo` the acquire
@@ -152,7 +155,7 @@ pub struct Frame {
     /// arriving one frame late and wearing the pacer's clothes.
     ///
     /// Nothing about the number distinguishes them. [`Frame::gpu`] is what does.
-    pub wait: Duration,
+    pub wait:     Duration,
     /// What the device spent on this client's commands, if it can say.
     ///
     /// Not a clock on this thread: `queue.submit` hands the driver a command
@@ -165,7 +168,7 @@ pub struct Frame {
     /// `None` when the adapter has no timestamp queries. Absent and not zero: a
     /// GPU whose cost is unknown is not a GPU that cost nothing, and the whole
     /// point of the field is to be believed.
-    pub gpu: Option<Duration>,
+    pub gpu:      Option<Duration>,
     /// Whether this frame paid for a full atlas repack — the synchronous
     /// eviction `AtlasError::Full` triggers, rebuilding every pass from
     /// scratch. Its cost lands inside [`Frame::scene`] like any other world
@@ -209,8 +212,8 @@ impl Frame {
 /// be handed a cadence by a test.
 #[derive(Clone, Debug)]
 pub struct Frames {
-    span: Duration,
-    at: Duration,
+    span:   Duration,
+    at:     Duration,
     frames: Vec<Frame>,
 }
 
@@ -454,12 +457,12 @@ mod tests {
     #[test]
     fn a_frame_is_jank_only_when_cpu_or_gpu_work_misses_the_budget() {
         let on_budget = Frame {
-            at: Duration::ZERO,
+            at:       Duration::ZERO,
             interval: Duration::from_millis(17),
-            ui: Duration::from_millis(8),
-            scene: Duration::from_millis(8),
-            wait: Duration::from_millis(20),
-            gpu: Some(Duration::from_millis(16)),
+            ui:       Duration::from_millis(8),
+            scene:    Duration::from_millis(8),
+            wait:     Duration::from_millis(20),
+            gpu:      Some(Duration::from_millis(16)),
             repacked: false,
         };
         assert!(!on_budget.janks(), "VSync wait is not rendering work");

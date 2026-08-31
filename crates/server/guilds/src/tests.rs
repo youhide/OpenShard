@@ -11,18 +11,37 @@ use std::collections::BTreeMap;
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::access::AccessLevel;
-use openshard_protocol::gump::{ButtonId, GumpResponse, RawButtonId, RawGumpId, RawGumpKey};
+use openshard_protocol::gump::{
+    ButtonId,
+    GumpResponse,
+    RawButtonId,
+    RawGumpId,
+    RawGumpKey,
+};
 use openshard_protocol::identity::AccountName;
 use openshard_protocol::serial::SerialKind;
 use openshard_protocol::version::ClientVersion;
 use openshard_protocol::world::Facet;
 use openshard_state::connection::Connection;
 use openshard_state::{
-    Client, FacetState, GuildCandidate, GuildGumpContext, GuildId, GuildMember, GuildPage, Rank,
-    TargetPurpose, WorldState,
+    Client,
+    FacetState,
+    GuildCandidate,
+    GuildGumpContext,
+    GuildId,
+    GuildMember,
+    GuildPage,
+    Rank,
+    TargetPurpose,
+    WorldState,
 };
 
-use crate::{Outcome, Refusal, may_lead, roster};
+use crate::{
+    Outcome,
+    Refusal,
+    may_lead,
+    roster,
+};
 
 /// One tile of nothing, which is all any rule here needs to stand on.
 const SIZE: u32 = 8;
@@ -91,10 +110,10 @@ fn player(state: &mut WorldState, id: u64) -> (EntityId, ConnectionId) {
 /// typed into the fields.
 fn reply(button: ButtonId, fields: &[(u16, &str)]) -> GumpResponse {
     GumpResponse {
-        serial: RawGumpKey(0),
-        gump_id: RawGumpId(crate::GUILD_GUMP.0),
-        button: RawButtonId(button.0),
-        switches: Vec::new(),
+        serial:       RawGumpKey(0),
+        gump_id:      RawGumpId(crate::GUILD_GUMP.0),
+        button:       RawButtonId(button.0),
+        switches:     Vec::new(),
         text_entries: fields.iter().map(|&(id, text)| (id, text.to_owned())).collect(),
     }
 }

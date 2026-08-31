@@ -17,16 +17,27 @@
 //! Serialising components directly deletes the seam and welds the simulation's
 //! internal shape to the on-disk format forever.
 
-use openshard_protocol::identity::{AccountName, CharacterName};
+use openshard_protocol::identity::{
+    AccountName,
+    CharacterName,
+};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::Serial;
 #[cfg(test)]
 use openshard_protocol::world::PoisonLevel;
 use openshard_protocol::world::{
-    Aggression, DamageType, FollowerSlots, PhysicalResistance, RangedRange, Sight,
+    Aggression,
+    DamageType,
+    FollowerSlots,
+    PhysicalResistance,
+    RangedRange,
+    Sight,
 };
 use openshard_state::SpawnerId;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 /// The persisted state of a container trap.
 ///
@@ -36,16 +47,24 @@ use serde::{Deserialize, Serialize};
 /// representation stable.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TrapRecord {
-    pub kind: u8,
+    pub kind:  u8,
     pub power: u16,
     pub level: u8,
 }
 
 mod trap {
-    use serde::de::{Error, SeqAccess, Visitor};
-    use serde::ser::SerializeSeq;
-    use serde::{Deserializer, Serializer};
     use std::fmt;
+
+    use serde::de::{
+        Error,
+        SeqAccess,
+        Visitor,
+    };
+    use serde::ser::SerializeSeq;
+    use serde::{
+        Deserializer,
+        Serializer,
+    };
 
     use super::TrapRecord;
 
@@ -112,7 +131,11 @@ mod trap {
 /// small `serialize_with`/`deserialize_with` pair itself — see
 /// `openshard_config`'s identical `account_name` module for the same reasoning.
 mod account_name {
-    use serde::{Deserialize, Deserializer, Serializer};
+    use serde::{
+        Deserialize,
+        Deserializer,
+        Serializer,
+    };
 
     use super::AccountName;
 
@@ -127,7 +150,11 @@ mod account_name {
 
 /// (De)serialize a [`CharacterName`] as the bare string. See [`account_name`].
 mod character_name {
-    use serde::{Deserialize, Deserializer, Serializer};
+    use serde::{
+        Deserialize,
+        Deserializer,
+        Serializer,
+    };
 
     use super::CharacterName;
 
@@ -151,7 +178,11 @@ mod character_name {
 /// that would address a different object.
 mod serial {
     use serde::de::Error as _;
-    use serde::{Deserialize, Deserializer, Serializer};
+    use serde::{
+        Deserialize,
+        Deserializer,
+        Serializer,
+    };
 
     use super::Serial;
 
@@ -173,7 +204,11 @@ mod serial {
 /// the Rust-side type changes, from a magic number to an absent [`Serial`].
 mod optional_serial {
     use serde::de::Error as _;
-    use serde::{Deserialize, Deserializer, Serializer};
+    use serde::{
+        Deserialize,
+        Deserializer,
+        Serializer,
+    };
 
     use super::Serial;
 
@@ -390,25 +425,25 @@ pub const SCHEMA_VERSION: u32 = 35;
 pub struct HouseDesignRecord {
     /// Which house, by its item serial.
     #[serde(with = "serial")]
-    pub house: Serial,
+    pub house:    Serial,
     /// Bumped on every commit, so a client can cache the design by
     /// `(serial, revision)`. Repeated on every row of one house rather than kept
     /// beside the house, because the design is what it versions and a house with
     /// no design has no revision to store.
     pub revision: u32,
     /// The static this component draws as.
-    pub graphic: u16,
+    pub graphic:  u16,
     /// East of the house's origin.
-    pub dx: i16,
+    pub dx:       i16,
     /// South of it.
-    pub dy: i16,
+    pub dy:       i16,
     /// And above.
-    pub dz: i16,
+    pub dz:       i16,
     /// Whether the client draws it. A `u64` because the two multi formats
     /// disagree about the field's width *and* its sense — see
     /// `openshard_uofiles::multi` — and the reader has already normalised both
     /// into "non-zero is drawn" by the time a design is built from one.
-    pub flags: u64,
+    pub flags:    u64,
 }
 
 /// A ship, as saved.
@@ -429,18 +464,18 @@ pub struct BoatRecord {
     #[serde(with = "serial")]
     pub serial: Serial,
     /// Which multi, `0x4000` below the graphic on the wire.
-    pub multi: u16,
+    pub multi:  u16,
     /// Where its origin floats — not the corner of its box.
-    pub x: u16,
+    pub x:      u16,
     /// The same, south.
-    pub y: u16,
+    pub y:      u16,
     /// And its height, which for a moored ship is the waterline.
-    pub z: i8,
+    pub z:      i8,
     /// Which facet it is on.
-    pub facet: u8,
+    pub facet:  u8,
     /// Who owns it.
     #[serde(with = "serial")]
-    pub owner: Serial,
+    pub owner:  Serial,
 }
 
 /// A player's house, as saved.
@@ -455,37 +490,37 @@ pub struct HouseRecord {
     /// Its item serial, so the entity comes back as the same thing to a client
     /// that had it on screen.
     #[serde(with = "serial")]
-    pub serial: Serial,
+    pub serial:    Serial,
     /// Which multi, `0x4000` below the graphic on the wire.
-    pub multi: u16,
+    pub multi:     u16,
     /// Where its origin stands — not the corner of its box. See
     /// `openshard_uofiles::multi::Multi::center`.
-    pub x: u16,
+    pub x:         u16,
     /// The same, south.
-    pub y: u16,
+    pub y:         u16,
     /// And its height.
-    pub z: i8,
+    pub z:         i8,
     /// Which facet it is on.
-    pub facet: u8,
+    pub facet:     u8,
     /// Who owns it.
     #[serde(with = "serial")]
-    pub owner: Serial,
+    pub owner:     Serial,
     /// Everyone trusted short of owning it.
     #[serde(default)]
     pub co_owners: Vec<u32>,
     /// Everyone who may come in.
     #[serde(default)]
-    pub friends: Vec<u32>,
+    pub friends:   Vec<u32>,
     /// Everyone turned away.
     #[serde(default)]
-    pub bans: Vec<u32>,
+    pub bans:      Vec<u32>,
     /// How many ticks it has stood unrefreshed.
     ///
     /// The one timer in this engine saved as an elapsed count rather than as a
     /// deadline, because it is the one that has to cross a restart: the tick
     /// counter is not saved, so an absolute tick would read as zero on the way
     /// back in and every house on the shard would come up freshly refreshed.
-    pub age: u64,
+    pub age:       u64,
     /// How many items may be locked down here.
     ///
     /// Saved rather than recomputed, unlike the walls and the sign, and the
@@ -511,7 +546,7 @@ pub struct HouseRecord {
 pub struct AccountRecord {
     /// The login name. Unique; this is the key.
     #[serde(with = "account_name")]
-    pub name: AccountName,
+    pub name:       AccountName,
     /// The credential — an argon2 PHC hash of the password.
     pub credential: String,
 }
@@ -532,59 +567,59 @@ pub struct AccountRecord {
 pub struct CharacterRecord {
     /// The wire serial. Stable across restarts; see the type docs.
     #[serde(with = "serial")]
-    pub serial: Serial,
+    pub serial:          Serial,
     /// Which account it belongs to.
     #[serde(with = "account_name")]
-    pub account: AccountName,
+    pub account:         AccountName,
     /// The character's name.
     #[serde(with = "character_name")]
-    pub name: CharacterName,
+    pub name:            CharacterName,
     /// The body graphic.
-    pub body: u16,
+    pub body:            u16,
     /// The body hue.
-    pub hue: u16,
+    pub hue:             u16,
     /// Which facet.
-    pub facet: u8,
+    pub facet:           u8,
     /// Where it stands.
-    pub x: u16,
+    pub x:               u16,
     /// Where it stands.
-    pub y: u16,
+    pub y:               u16,
     /// How high it stands. Signed: UO has basements.
-    pub z: i8,
+    pub z:               i8,
     /// Which way it faces, as the wire byte.
-    pub facing: u8,
+    pub facing:          u8,
     /// Strength — caps hit points.
     #[serde(default = "default_stat")]
-    pub strength: u16,
+    pub strength:        u16,
     /// Dexterity — the stamina pool and swing pace.
     #[serde(default = "default_stat")]
-    pub dexterity: u16,
+    pub dexterity:       u16,
     /// Intelligence — caps mana.
     #[serde(default = "default_stat")]
-    pub intelligence: u16,
+    pub intelligence:    u16,
     /// Every trained skill, as `(id, value in tenths, lock byte, cap)`. Empty for
     /// a character that has none yet.
     #[serde(default)]
-    pub skills: Vec<SkillRecord>,
+    pub skills:          Vec<SkillRecord>,
     /// Which way the three stats are set to train, and how long since each rose.
     #[serde(default)]
-    pub stat_locks: StatLockRecord,
+    pub stat_locks:      StatLockRecord,
     /// Every timed effect working through it — poison, buffs, debuffs — so a
     /// relog cannot wash them off. Empty for a clean character.
     #[serde(default)]
-    pub effects: Vec<EffectRecord>,
+    pub effects:         Vec<EffectRecord>,
     /// Whether it logged out dead. A ghost that relogs comes back a ghost — the
     /// grey body and death shroud are re-derived on login; only the fact of death
     /// rides here. The `body`/`hue` above stay the *living* ones, so resurrection
     /// restores the character exactly. `false` for the living, the common case.
     #[serde(default)]
-    pub dead: bool,
+    pub dead:            bool,
     /// How widely known the character is — ServUO's `Mobile.Fame`.
     #[serde(default)]
-    pub fame: i32,
+    pub fame:            i32,
     /// Which way it is known — ServUO's `Mobile.Karma`.
     #[serde(default)]
-    pub karma: i32,
+    pub karma:           i32,
     /// How many innocents this character has killed.
     ///
     /// Saved because it is a **standing**, and it was not: the fifth murder makes a
@@ -593,15 +628,15 @@ pub struct CharacterRecord {
     /// clock, the notoriety it forces — was already right; the number underneath it
     /// simply went missing at the door.
     #[serde(default)]
-    pub murders: u16,
+    pub murders:         u16,
     /// Every quest in progress, with how far each objective has got.
     #[serde(default)]
-    pub quests: Vec<QuestRecord>,
+    pub quests:          Vec<QuestRecord>,
     /// Every quest already finished, with the cooldown before it may be taken
     /// again. Kept separately from [`quests`](Self::quests) because a finished
     /// quest has no progress left to save — only a date.
     #[serde(default)]
-    pub done_quests: Vec<DoneQuestRecord>,
+    pub done_quests:     Vec<DoneQuestRecord>,
     /// Which guild it belongs to, by [`GuildRecord::id`], or `None` for the
     /// unguilded — which is most characters.
     ///
@@ -612,12 +647,12 @@ pub struct CharacterRecord {
     /// [`WorldState::guild_of`](openshard_state::WorldState::guild_of) — so a
     /// guild dropped by hand from the database orphans nobody.
     #[serde(default)]
-    pub guild: Option<u32>,
+    pub guild:           Option<u32>,
     /// The title the guild knows it by — "Master of Arms". Free text a leader
     /// typed. Empty for a member the guild has not named and for anyone in no
     /// guild, and **not** the rank — see [`guild_rank`](Self::guild_rank).
     #[serde(default)]
-    pub guild_title: String,
+    pub guild_title:     String,
     /// Where it stands in the guild, as
     /// [`Rank::number`](openshard_state::Rank::number) — 0 Ronin through 4
     /// Leader.
@@ -630,7 +665,7 @@ pub struct CharacterRecord {
     /// which is the safe direction — an unreadable rank should not be able to
     /// grant anything.
     #[serde(default)]
-    pub guild_rank: u8,
+    pub guild_rank:      u8,
     /// A guild that has asked it to join and is waiting on an answer.
     ///
     /// Saved, and worth saying why: an invitation left for a player who was
@@ -659,7 +694,7 @@ pub struct CharacterRecord {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct GuildStanding {
     /// The other guild, by [`GuildRecord::id`].
-    pub other: u32,
+    pub other:  u32,
     /// At war, rather than allied.
     pub at_war: bool,
 }
@@ -675,29 +710,29 @@ pub struct GuildStanding {
 pub struct GuildRecord {
     /// Its id, which is the key every member record names it by. Never reused —
     /// see [`WorldRecord::guild_high_water`].
-    pub id: u32,
+    pub id:           u32,
     /// What it calls itself.
-    pub name: String,
+    pub name:         String,
     /// The short form drawn in brackets after a member's name.
     pub abbreviation: String,
     /// Who leads it, by serial. A serial and not an entity: an entity id does not
     /// survive a restart, and the leader is the one member a guild cannot lose
     /// track of.
     #[serde(with = "serial")]
-    pub leader: Serial,
+    pub leader:       Serial,
     /// Every war and alliance it has declared.
     #[serde(default)]
-    pub relations: Vec<GuildStanding>,
+    pub relations:    Vec<GuildStanding>,
     /// Every one it has offered and the other has not yet matched. Saved because
     /// a declaration is *half* of a war, and losing it at a restart would quietly
     /// undo it — the other guild's leader would answer a declaration that no
     /// longer existed and start a fresh one nobody had answered.
     #[serde(default)]
-    pub proposals: Vec<GuildStanding>,
+    pub proposals:    Vec<GuildStanding>,
     /// Which alliance it belongs to, by [`AllianceRecord::id`]. `None` for most
     /// guilds.
     #[serde(default)]
-    pub alliance: Option<u32>,
+    pub alliance:     Option<u32>,
 }
 
 /// A named alliance, as saved.
@@ -713,11 +748,11 @@ pub struct GuildRecord {
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct AllianceRecord {
     /// Its id, never reused — see [`WorldRecord::alliance_high_water`].
-    pub id: u32,
+    pub id:      u32,
     /// What it calls itself.
-    pub name: String,
+    pub name:    String,
     /// Which member guild leads it, by [`GuildRecord::id`].
-    pub leader: u32,
+    pub leader:  u32,
     /// Every guild in it, the leader included.
     pub members: Vec<u32>,
     /// Every guild asked in that has not answered. Saved for the same reason a
@@ -738,7 +773,7 @@ pub struct AllianceRecord {
 pub struct QuestRecord {
     /// Which quest, by the pack's key. A key the pack no longer defines is
     /// dropped on load rather than failing the character.
-    pub key: String,
+    pub key:      String,
     /// How far each objective has got.
     pub progress: Vec<u16>,
     /// Seconds left on each timed objective; `0` on the untimed ones. A *remaining
@@ -746,20 +781,20 @@ pub struct QuestRecord {
     /// a saved absolute tick would mean something different every restart — the
     /// same rule [`EffectRecord::remaining`] follows.
     #[serde(default)]
-    pub seconds: Vec<u32>,
+    pub seconds:  Vec<u32>,
     /// Whether a timer ran out on it.
     #[serde(default)]
-    pub failed: bool,
+    pub failed:   bool,
     /// The serial of the NPC that gave it, if it is still known.
     #[serde(default, with = "optional_serial")]
-    pub giver: Option<Serial>,
+    pub giver:    Option<Serial>,
 }
 
 /// A finished quest and its cooldown.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct DoneQuestRecord {
     /// Which quest, by the pack's key.
-    pub key: String,
+    pub key:             String,
     /// Seconds until it may be taken again — again a remaining span, not a
     /// deadline. [`u32::MAX`] means never (a once-only quest).
     pub restart_in_secs: u32,
@@ -776,9 +811,9 @@ pub struct DoneQuestRecord {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct EffectRecord {
     /// What kind of effect: `0` poison, and future buffs/debuffs beyond it.
-    pub kind: u8,
+    pub kind:      u8,
     /// Its magnitude — a poison level, or a stat offset (signed for a debuff).
-    pub amount: i16,
+    pub amount:    i16,
     /// How much it has left — poison pulses, or a timed buff's seconds.
     pub remaining: u16,
 }
@@ -791,15 +826,15 @@ pub const EFFECT_POISON: u8 = 0;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct SkillRecord {
     /// The skill id, zero-based.
-    pub id: u8,
+    pub id:    u8,
     /// The trained value, in tenths.
     pub value: u16,
     /// The lock arrow as its wire byte (0 up, 1 down, 2 locked).
-    pub lock: u8,
+    pub lock:  u8,
     /// The ceiling on this skill, in tenths. Defaulted so a pre-v16 save reads as
     /// the ordinary 100.0 rather than as a skill capped at nothing.
     #[serde(default = "default_skill_cap")]
-    pub cap: u16,
+    pub cap:   u16,
 }
 
 /// The cap a pre-v16 save (which stored none) loads each skill with — the classic
@@ -816,18 +851,18 @@ fn default_skill_cap() -> u16 {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct StatLockRecord {
     /// Strength's arrow as its wire bits (0 up, 1 down, 2 locked).
-    pub strength: u8,
+    pub strength:         u8,
     /// Dexterity's arrow.
-    pub dexterity: u8,
+    pub dexterity:        u8,
     /// Intelligence's arrow.
-    pub intelligence: u8,
+    pub intelligence:     u8,
     /// How many ticks ago strength last rose. Stored as an *age* and not as the
     /// absolute tick it happened on, because the tick counter restarts with the
     /// shard: an absolute stamp from the last run would sit in the future of this
     /// one and freeze the stat for ever.
-    pub strength_age: u64,
+    pub strength_age:     u64,
     /// The same for dexterity.
-    pub dexterity_age: u64,
+    pub dexterity_age:    u64,
     /// The same for intelligence.
     pub intelligence_age: u64,
 }
@@ -848,11 +883,11 @@ pub enum ItemLocation {
         /// Which facet.
         facet: u8,
         /// Where.
-        x: u16,
+        x:     u16,
         /// Where.
-        y: u16,
+        y:     u16,
         /// How high. Signed: UO has basements.
-        z: i8,
+        z:     i8,
     },
     /// Inside a container, by the container's serial and the slot in its gump.
     Contained {
@@ -860,11 +895,11 @@ pub enum ItemLocation {
         #[serde(with = "serial")]
         container: Serial,
         /// Column in the gump.
-        x: u16,
+        x:         u16,
         /// Row in the gump.
-        y: u16,
+        y:         u16,
         /// Slot in the grid view.
-        grid: u8,
+        grid:      u8,
     },
     /// Worn on a mobile, at a layer.
     Equipped {
@@ -872,7 +907,7 @@ pub enum ItemLocation {
         #[serde(with = "serial")]
         mobile: Serial,
         /// The equipment layer.
-        layer: u8,
+        layer:  u8,
     },
 }
 
@@ -894,66 +929,66 @@ pub enum ItemLocation {
 pub struct ItemRecord {
     /// The wire serial. Stable across restarts; see the type docs.
     #[serde(with = "serial")]
-    pub serial: Serial,
+    pub serial:         Serial,
     /// The character whose inventory this is in, or `None` for a ground item.
     #[serde(with = "optional_serial")]
-    pub owner: Option<Serial>,
+    pub owner:          Option<Serial>,
     /// The item graphic.
-    pub graphic: u16,
+    pub graphic:        u16,
     /// The item hue.
-    pub hue: u16,
+    pub hue:            u16,
     /// The stable semantic item-definition id. `None` means a pre-ItemKind
     /// record and is migrated through its audited graphic/hue mapping on load.
     #[serde(default)]
-    pub kind: Option<u32>,
+    pub kind:           Option<u32>,
     /// The stable semantic material id, when this kind has a material axis.
     /// Defaulted with `kind` for pre-ItemKind records.
     #[serde(default)]
-    pub material: Option<u16>,
+    pub material:       Option<u16>,
     /// The stack amount; `1` for a single item. For a corpse marker, its body
     /// graphic instead — the historical on-disk representation of `CorpseBody`.
-    pub amount: u16,
+    pub amount:         u16,
     /// Whether it stacks — a pile of gold merges with another, a sword does not.
     /// Saved so a restored pile still stacks; without it a lone gold coin would
     /// stop merging until re-lifted.
-    pub stackable: bool,
+    pub stackable:      bool,
     /// The container gump if this item is itself a container, else `None`.
     pub container_gump: Option<u16>,
     /// What one unit costs at a vendor, if this is priced stock. Defaulted so a
     /// v4 save loads.
     #[serde(default)]
-    pub price: Option<u32>,
+    pub price:          Option<u32>,
     /// The item's label, if it carries one — vendor stock names its wares.
     /// Defaulted so a v4 save loads.
     #[serde(default)]
-    pub name: Option<String>,
+    pub name:           Option<String>,
     /// The learned-spell bitmask if this item is a spellbook, else `None`. Saved
     /// so a bought book still opens to its spells after a relog; without it a
     /// restored spellbook is a graphic with no `Spellbook` component and refuses
     /// to open. Defaulted so a pre-v8 save loads.
     #[serde(default)]
-    pub spellbook: Option<u64>,
+    pub spellbook:      Option<u64>,
     /// How this corpse came to be one, if it is a corpse — what Forensic
     /// Evaluation reads. `None` for every other item, and defaulted so a pre-v17
     /// save loads.
     #[serde(default)]
-    pub corpse: Option<CorpseData>,
+    pub corpse:         Option<CorpseData>,
     /// The poison on it, if any — `(level, charges)`. A bottled dose or a coating
     /// the Poisoning skill put on a blade; `None` for a clean item. Defaulted so a
     /// pre-v18 save loads.
     #[serde(default)]
-    pub poison: Option<(u8, u16)>,
+    pub poison:         Option<(u8, u16)>,
     /// The trap on it, if it is a trapped container.
     /// `None` for everything else, and defaulted so a pre-v19 save loads.
     #[serde(default, with = "trap")]
-    pub trap: Option<TrapRecord>,
+    pub trap:           Option<TrapRecord>,
     /// How many uses are left in it, if it is a thing that wears out — a
     /// harvesting tool's swings or an instrument's tunes. One field for both,
     /// because ServUO gives both the one `IUsesRemaining` interface, and the
     /// *graphic* decides which component it comes back as. Defaulted so a pre-v20
     /// save loads.
     #[serde(default)]
-    pub uses: Option<u16>,
+    pub uses:           Option<u16>,
     /// Whether it came out of a craft exceptional, and whose name is on it —
     /// `(exceptional, maker)`. `None` for everything a player did not make, which
     /// is nearly every item on a shard, so the column is empty far more often
@@ -962,7 +997,7 @@ pub struct ItemRecord {
     /// The maker is a **name and not a serial**, for the reason the corpse's
     /// killer is one: the smith logs out and the sword outlives the session.
     #[serde(default)]
-    pub crafted: Option<(bool, Option<String>)>,
+    pub crafted:        Option<(bool, Option<String>)>,
     /// Where a recall rune points — `(facet, x, y, z)`. `None` for a blank rune
     /// and for everything that is not one, and defaulted so a pre-v22 save
     /// loads.
@@ -970,12 +1005,12 @@ pub struct ItemRecord {
     /// The absence *is* "unmarked": the world has no `marked` flag either, so
     /// there is no pair of halves to keep in step.
     #[serde(default)]
-    pub rune: Option<(u8, u16, u16, i8)>,
+    pub rune:           Option<(u8, u16, u16, i8)>,
     /// What a runebook holds. `None` for everything that is not one. One column
     /// for the whole book — the [`CorpseData`] shape — because its entries are a
     /// list and a list does not become sixteen columns.
     #[serde(default)]
-    pub runebook: Option<RunebookData>,
+    pub runebook:       Option<RunebookData>,
     /// The house this item is locked down in, and the access level if it is a
     /// secure. `None` for everything loose, which is nearly everything.
     ///
@@ -983,14 +1018,14 @@ pub struct ItemRecord {
     /// own `LockedDown` component, and for its reason: a lockdown is asked about
     /// one at a time, by a lift that already has the item in hand.
     #[serde(default)]
-    pub locked_down: Option<LockdownData>,
+    pub locked_down:    Option<LockdownData>,
     /// Shard-defined properties of this particular item. A list rather than a
     /// column per property: a sword carries only a few, while new affix kinds
     /// should not force a database redesign. Empty is the ordinary item.
     #[serde(default)]
-    pub affixes: Vec<ItemAffixRecord>,
+    pub affixes:        Vec<ItemAffixRecord>,
     /// Where it is.
-    pub location: ItemLocation,
+    pub location:       ItemLocation,
 }
 
 /// One saved custom property on an item.
@@ -1000,9 +1035,18 @@ pub struct ItemRecord {
 /// serialization of the simulation's internals.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum ItemAffixRecord {
-    Slayer { body: u16, bonus_percent: u8 },
-    DamageBonus { minimum: i16, maximum: i16 },
-    HitPoison { level: u8, chance_per_mille: u16 },
+    Slayer {
+        body:          u16,
+        bonus_percent: u8,
+    },
+    DamageBonus {
+        minimum: i16,
+        maximum: i16,
+    },
+    HitPoison {
+        level:            u8,
+        chance_per_mille: u16,
+    },
 }
 
 /// An item pinned inside a house, as saved — a plain mirror of the world's
@@ -1011,7 +1055,7 @@ pub enum ItemAffixRecord {
 pub struct LockdownData {
     /// Which house, by its item serial.
     #[serde(with = "serial")]
-    pub house: Serial,
+    pub house:  Serial,
     /// The least standing that may open it, if this is a secure container, as
     /// `Standing::code`. `None` for a plain lockdown.
     ///
@@ -1031,11 +1075,11 @@ pub struct LockdownData {
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct RunebookData {
     /// The destinations bound, in order.
-    pub entries: Vec<RunebookEntryData>,
+    pub entries:       Vec<RunebookEntryData>,
     /// Charges left.
-    pub charges: u8,
+    pub charges:       u8,
     /// The ceiling recharging fills to.
-    pub max_charges: u8,
+    pub max_charges:   u8,
     /// Which entry is the default, if any.
     #[serde(default)]
     pub default_entry: Option<u8>,
@@ -1045,13 +1089,13 @@ pub struct RunebookData {
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct RunebookEntryData {
     /// Which facet it is on.
-    pub facet: u8,
+    pub facet:       u8,
     /// East-west tile.
-    pub x: u16,
+    pub x:           u16,
     /// North-south tile.
-    pub y: u16,
+    pub y:           u16,
     /// Height.
-    pub z: i8,
+    pub z:           i8,
     /// What to call it in the window.
     pub description: String,
 }
@@ -1062,13 +1106,13 @@ pub struct RunebookEntryData {
 pub struct PetData {
     /// Whose it is, by wire serial.
     #[serde(with = "serial")]
-    pub owner: Serial,
+    pub owner:        Serial,
     /// How many follower slots it fills.
-    pub slots: FollowerSlots,
+    pub slots:        FollowerSlots,
     /// What it was last told: 0 follow, 1 come, 2 stay, 3 guard, 4 attack, 5 stop.
     /// Numbered by hand, like the effect kinds, so the on-disk meaning cannot drift
     /// when the enum gains a variant.
-    pub order: u8,
+    pub order:        u8,
     /// Whom that order was about, for an attack.
     #[serde(default, with = "optional_serial")]
     pub order_target: Option<Serial>,
@@ -1083,24 +1127,24 @@ pub struct PetData {
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct CorpseData {
     /// Who this was.
-    pub owner: String,
+    pub owner:       String,
     /// The player whose death made this corpse. Older saves and creature
     /// corpses have no such link.
     #[serde(default, with = "optional_serial")]
-    pub player: Option<Serial>,
+    pub player:      Option<Serial>,
     /// Who struck the killing blow, by name.
     #[serde(default)]
-    pub killer: Option<String>,
+    pub killer:      Option<String>,
     /// The first forensicist to read it.
     #[serde(default)]
     pub examined_by: Option<String>,
     /// Everyone who has taken something off it.
     #[serde(default)]
-    pub looters: Vec<String>,
+    pub looters:     Vec<String>,
     /// Whether the animal resources have already been carved from this body.
     /// Defaulted so a corpse from before carving existed remains uncarved.
     #[serde(default)]
-    pub carved: bool,
+    pub carved:      bool,
     /// Which way it fell, as the wire's direction byte — `0` north, running
     /// clockwise, exactly `Direction::to_bits`.
     ///
@@ -1111,12 +1155,12 @@ pub struct CorpseData {
     /// corpses come back lying north — the same thing every corpse on the shard
     /// did before this was carried at all.
     #[serde(default)]
-    pub facing: u8,
+    pub facing:      u8,
     /// The item/layer pairs the corpse equipment packet needs after a restart.
     /// The contained item records retain the pictures; this retains the one
     /// relationship those records do not encode.
     #[serde(default)]
-    pub equipment: Vec<CorpseEquipmentData>,
+    pub equipment:   Vec<CorpseEquipmentData>,
 }
 
 /// One saved `0x89` relationship. It is nested in [`CorpseData`] because both
@@ -1125,7 +1169,7 @@ pub struct CorpseData {
 pub struct CorpseEquipmentData {
     /// The contained item's stable wire serial.
     #[serde(with = "serial")]
-    pub item: Serial,
+    pub item:  Serial,
     /// The layer it occupied on the living body.
     pub layer: u8,
 }
@@ -1137,47 +1181,47 @@ pub struct CorpseEquipmentData {
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct CreatureData {
     /// The body graphic.
-    pub body: u16,
+    pub body:        u16,
     /// Its hue.
-    pub hue: u16,
+    pub hue:         u16,
     /// Starting and maximum hit points.
-    pub hits: u16,
+    pub hits:        u16,
     /// Health-bar colour, the notoriety wire value.
-    pub notoriety: Notoriety,
+    pub notoriety:   Notoriety,
     /// Melee damage before resistance.
-    pub damage: u16,
+    pub damage:      u16,
     /// Physical resistance, a percentage.
-    pub resistance: PhysicalResistance,
+    pub resistance:  PhysicalResistance,
     /// How widely known it is — what its killer inherits. Defaulted, so an older
     /// saved region restores creatures that give up no standing.
     #[serde(default)]
-    pub fame: i32,
+    pub fame:        i32,
     /// Which way it is known. Negative is evil.
     #[serde(default)]
-    pub karma: i32,
+    pub karma:       i32,
     /// Swing cadence in ticks; `0` derives it from dexterity.
-    pub swing: u64,
+    pub swing:       u64,
     /// How far it notices a target.
-    pub sight: Sight,
+    pub sight:       Sight,
     /// Whether it starts fights (2), answers them (1), or only runs (0).
     /// Defaults to aggressive, the only behaviour that existed before it.
     #[serde(default)]
-    pub aggression: Aggression,
+    pub aggression:  Aggression,
     /// Ticks between its beats while hunting; 0 takes the shard default.
     #[serde(default)]
-    pub beat: u64,
+    pub beat:        u64,
     /// Its optional ranged attack reach. JSON `0` means no ranged attack.
     #[serde(default, with = "openshard_protocol::world::ranged")]
-    pub ranged: Option<RangedRange>,
+    pub ranged:      Option<RangedRange>,
     /// The ranged attack's damage type.
     #[serde(default)]
     pub ranged_kind: DamageType,
     /// Whether it drifts when idle.
-    pub wander: bool,
+    pub wander:      bool,
     /// Trained combat skills, `(skill id, value in tenths)`. Defaulted so an older
     /// save (no skills) restores as a skill-less creature.
     #[serde(default)]
-    pub skills: Vec<(u8, u16)>,
+    pub skills:      Vec<(u8, u16)>,
 }
 
 /// A spawn region, as saved.
@@ -1193,25 +1237,25 @@ pub struct CreatureData {
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct SpawnerRecord {
     /// Its stable id, the key it is replaced by.
-    pub id: SpawnerId,
+    pub id:             SpawnerId,
     /// Which facet.
-    pub facet: u8,
+    pub facet:          u8,
     /// The region's north-west corner and size.
-    pub x: u16,
+    pub x:              u16,
     /// North-west corner y.
-    pub y: u16,
+    pub y:              u16,
     /// Region width.
-    pub width: u16,
+    pub width:          u16,
     /// Region height.
-    pub height: u16,
+    pub height:         u16,
     /// The most live creatures it keeps.
-    pub max_count: u16,
+    pub max_count:      u16,
     /// The respawn delay, in seconds.
-    pub respawn_secs: u64,
+    pub respawn_secs:   u64,
     /// Seconds still to wait before the next spawn; `0` is ready now.
     pub remaining_secs: u64,
     /// The creatures it may put down.
-    pub creatures: Vec<CreatureData>,
+    pub creatures:      Vec<CreatureData>,
 }
 
 /// An NPC mobile, as saved — the townsperson, the vendor, the creature on the
@@ -1354,13 +1398,13 @@ pub struct MobileRecord {
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct RestockRecord {
     /// How many seconds until the shelf next refills.
-    pub in_seconds: u64,
+    pub in_seconds:  u64,
     /// The full shelf: `(graphic, hue, amount, price, name)` per line.
     ///
     /// Kept for snapshots written before semantic restock lines existed. New
     /// records also write [`Self::typed_lines`], which is authoritative when
     /// present.
-    pub lines: Vec<(u16, u16, u16, u32, String)>,
+    pub lines:       Vec<(u16, u16, u16, u32, String)>,
     /// Durable full-shelf identities, added without changing the old tuple so
     /// historical snapshot JSON remains readable.
     #[serde(default)]
@@ -1371,13 +1415,13 @@ pub struct RestockRecord {
 /// the client presentation. See [`RestockRecord::typed_lines`].
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct RestockLineRecord {
-    pub graphic: u16,
-    pub hue: u16,
+    pub graphic:   u16,
+    pub hue:       u16,
     pub item_kind: Option<u32>,
-    pub material: Option<u16>,
-    pub amount: u16,
-    pub price: u32,
-    pub name: String,
+    pub material:  Option<u16>,
+    pub amount:    u16,
+    pub price:     u32,
+    pub name:      String,
 }
 
 /// A shut-and-openable door's live state, inside a [`DecorationRecord`].
@@ -1386,16 +1430,16 @@ pub struct DoorState {
     /// The graphic it shows shut.
     pub closed_graphic: u16,
     /// The graphic it shows open.
-    pub open_graphic: u16,
+    pub open_graphic:   u16,
     /// How far the leaf swings east-west when opened.
-    pub offset_x: i16,
+    pub offset_x:       i16,
     /// How far the leaf swings north-south when opened.
-    pub offset_y: i16,
+    pub offset_y:       i16,
     /// The other leaf of a generated double door. Older saves had no link.
     #[serde(default, with = "optional_serial")]
-    pub link: Option<Serial>,
+    pub link:           Option<Serial>,
     /// Whether it stood open at the save — a door left open stays open.
-    pub is_open: bool,
+    pub is_open:        bool,
 }
 
 /// A placed decoration, as saved — the statics, doors and town containers a pack
@@ -1405,32 +1449,32 @@ pub struct DoorState {
 pub struct DecorationRecord {
     /// The wire serial. Stable across restarts.
     #[serde(with = "serial")]
-    pub serial: Serial,
+    pub serial:         Serial,
     /// The graphic as it stands now (a door's current leaf).
-    pub graphic: u16,
+    pub graphic:        u16,
     /// Its hue.
-    pub hue: u16,
+    pub hue:            u16,
     /// Which facet.
-    pub facet: u8,
+    pub facet:          u8,
     /// Where it stands.
-    pub x: u16,
+    pub x:              u16,
     /// Where it stands.
-    pub y: u16,
+    pub y:              u16,
     /// How high. Signed: UO has basements.
-    pub z: i8,
+    pub z:              i8,
     /// Door state, if this decoration is a door.
-    pub door: Option<DoorState>,
+    pub door:           Option<DoorState>,
     /// The container gump if this decoration opens as one, else `None`.
     pub container_gump: Option<u16>,
     /// Which key opens it; `0` is the unlocked/no-key boundary representation. On the record rather than inside
     /// [`DoorState`] because a container locks too, and a lock is the same thing on
     /// either — ServUO's `ILockable`. Defaulted, so an older save reads as unlocked.
     #[serde(default)]
-    pub key_value: u32,
+    pub key_value:      u32,
     /// Whether a lock is present. Separates an unlocked legacy `key_value: 0`
     /// from a deliberately unopenable lock.
     #[serde(default)]
-    pub locked: bool,
+    pub locked:         bool,
 }
 
 /// One named area of a facet, as saved.
@@ -1447,29 +1491,29 @@ pub struct DecorationRecord {
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct RegionRecord {
     /// Which facet it belongs to.
-    pub facet: u8,
+    pub facet:       u8,
     /// Its index on that facet, which is its id.
-    pub id: u16,
+    pub id:          u16,
     /// What the place is called.
-    pub name: String,
+    pub name:        String,
     /// Which region wins where two overlap.
-    pub priority: u8,
+    pub priority:    u8,
     /// Its boxes: `(x, y, width, height, z_min, z_max)`.
-    pub rects: Vec<(u16, u16, u16, u16, i8, i8)>,
+    pub rects:       Vec<(u16, u16, u16, u16, i8, i8)>,
     /// Guards answer a call here.
-    pub guarded: bool,
+    pub guarded:     bool,
     /// No teleporting in, out or within.
     pub no_teleport: bool,
     /// No Recall or Gate.
-    pub no_recall: bool,
+    pub no_recall:   bool,
     /// No house may be placed.
-    pub no_housing: bool,
+    pub no_housing:  bool,
     /// No player may harm another.
-    pub safe: bool,
+    pub safe:        bool,
     /// The client music track, as a `MusicName` index.
-    pub music: Option<u16>,
+    pub music:       Option<u16>,
     /// The light level inside, overriding the hour.
-    pub light: Option<u8>,
+    pub light:       Option<u8>,
 }
 
 /// The world's own scalars, as saved — one row, not one per anything.
@@ -1487,7 +1531,7 @@ pub struct RegionRecord {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct WorldRecord {
     /// The world clock, in UO minutes.
-    pub clock_minutes: u64,
+    pub clock_minutes:       u64,
     /// Where the world's roll generator had got to. `openshard_state::rng::Rng`'s
     /// whole state, and the reason it is one `u64` rather than a seed plus a
     /// count: `xorshift64*` *is* its state, so resuming needs nothing else.
@@ -1496,7 +1540,7 @@ pub struct WorldRecord {
     /// 64-bit column — the sign is reinterpreted, never clamped. See
     /// `SqliteStore::save`.
     #[serde(default)]
-    pub rng_state: u64,
+    pub rng_state:           u64,
     /// The highest guild id ever handed out.
     ///
     /// Here rather than derived from the saved guilds at boot, and that is the
@@ -1507,7 +1551,7 @@ pub struct WorldRecord {
     /// offline when it disbanded, and so was never swept — would silently find
     /// itself in the new guild.
     #[serde(default)]
-    pub guild_high_water: u32,
+    pub guild_high_water:    u32,
     /// The same for alliances, and for the same reason: a guild record names its
     /// alliance by id, and a restart that reissued one would put a guild into a
     /// body it never joined.
@@ -1650,19 +1694,19 @@ mod tests {
         for location in [
             ItemLocation::Ground {
                 facet: 0,
-                x: 1400,
-                y: 1600,
-                z: -5,
+                x:     1400,
+                y:     1600,
+                z:     -5,
             },
             ItemLocation::Contained {
                 container: Serial::new(0x4000_0001).unwrap(),
-                x: 40,
-                y: 65,
-                grid: 3,
+                x:         40,
+                y:         65,
+                grid:      3,
             },
             ItemLocation::Equipped {
                 mobile: Serial::new(0x0000_0001).unwrap(),
-                layer: 0x15,
+                layer:  0x15,
             },
         ] {
             let record = ItemRecord {
@@ -1679,21 +1723,21 @@ mod tests {
                 name: Some("scissors".into()),
                 spellbook: Some(0x0000_0000_00FF_00FF),
                 corpse: Some(CorpseData {
-                    owner: "Reginald".into(),
-                    player: Some(Serial::new(0x0000_0001).unwrap()),
-                    killer: Some("an orc".into()),
+                    owner:       "Reginald".into(),
+                    player:      Some(Serial::new(0x0000_0001).unwrap()),
+                    killer:      Some("an orc".into()),
                     examined_by: Some("Mordred".into()),
-                    looters: vec!["Vesper".into()],
-                    carved: true,
-                    facing: 6,
-                    equipment: vec![CorpseEquipmentData {
-                        item: Serial::new(0x4000_0003).unwrap(),
+                    looters:     vec!["Vesper".into()],
+                    carved:      true,
+                    facing:      6,
+                    equipment:   vec![CorpseEquipmentData {
+                        item:  Serial::new(0x4000_0003).unwrap(),
                         layer: 0x0D,
                     }],
                 }),
                 poison: Some((2, 14)),
                 trap: Some(TrapRecord {
-                    kind: 3,
+                    kind:  3,
                     power: 40,
                     level: 2,
                 }),
@@ -1701,23 +1745,23 @@ mod tests {
                 crafted: Some((true, Some("Rowena".into()))),
                 rune: Some((0, 1495, 1629, -20)),
                 locked_down: Some(LockdownData {
-                    house: Serial::new(0x4000_0001).unwrap(),
+                    house:  Serial::new(0x4000_0001).unwrap(),
                     secure: Some(3),
                 }),
                 runebook: Some(RunebookData {
-                    entries: vec![RunebookEntryData {
-                        facet: 0,
-                        x: 1336,
-                        y: 1997,
-                        z: 5,
+                    entries:       vec![RunebookEntryData {
+                        facet:       0,
+                        x:           1336,
+                        y:           1997,
+                        z:           5,
                         description: "Britain".into(),
                     }],
-                    charges: 4,
-                    max_charges: 10,
+                    charges:       4,
+                    max_charges:   10,
                     default_entry: Some(0),
                 }),
                 affixes: vec![ItemAffixRecord::Slayer {
-                    body: 0x0009,
+                    body:          0x0009,
                     bonus_percent: 100,
                 }],
                 location,
@@ -1739,68 +1783,68 @@ mod tests {
         // accident is a field that comes back as its default, and a character
         // that loads with a default position is standing in the ocean.
         let record = CharacterRecord {
-            serial: Serial::new(0x0000_0001).unwrap(),
-            account: AccountName::new("admin"),
-            name: CharacterName::new("Alpha"),
-            body: 0x0190,
-            hue: 0,
-            facet: 0,
-            x: 1363,
-            y: 1600,
-            z: 30,
-            facing: 3,
-            strength: 55,
-            dexterity: 40,
-            intelligence: 25,
-            skills: vec![
+            serial:          Serial::new(0x0000_0001).unwrap(),
+            account:         AccountName::new("admin"),
+            name:            CharacterName::new("Alpha"),
+            body:            0x0190,
+            hue:             0,
+            facet:           0,
+            x:               1363,
+            y:               1600,
+            z:               30,
+            facing:          3,
+            strength:        55,
+            dexterity:       40,
+            intelligence:    25,
+            skills:          vec![
                 SkillRecord {
-                    id: 25, // Magery
+                    id:    25, // Magery
                     value: 501,
-                    lock: 1, // down
-                    cap: 1000,
+                    lock:  1, // down
+                    cap:   1000,
                 },
                 SkillRecord {
-                    id: 45, // Mining
+                    id:    45, // Mining
                     value: 300,
-                    lock: 0,
-                    cap: 1200, // a raised cap: the field has to survive the trip
+                    lock:  0,
+                    cap:   1200, // a raised cap: the field has to survive the trip
                 },
             ],
-            effects: vec![EffectRecord {
-                kind: EFFECT_POISON,
-                amount: 2,
+            effects:         vec![EffectRecord {
+                kind:      EFFECT_POISON,
+                amount:    2,
                 remaining: 5,
             }],
-            dead: true,
-            fame: 0,
-            karma: 0,
-            murders: 0,
-            quests: vec![QuestRecord {
-                key: "rat_cull".into(),
+            dead:            true,
+            fame:            0,
+            karma:           0,
+            murders:         0,
+            quests:          vec![QuestRecord {
+                key:      "rat_cull".into(),
                 progress: vec![3],
-                seconds: vec![0],
-                failed: false,
-                giver: Some(Serial::new(0x4000_0001).unwrap()),
+                seconds:  vec![0],
+                failed:   false,
+                giver:    Some(Serial::new(0x4000_0001).unwrap()),
             }],
-            done_quests: vec![DoneQuestRecord {
-                key: "silk_gather".into(),
+            done_quests:     vec![DoneQuestRecord {
+                key:             "silk_gather".into(),
                 restart_in_secs: 3600,
             }],
-            stat_locks: StatLockRecord {
-                strength: 0,     // up
-                dexterity: 1,    // down
-                intelligence: 2, // locked
-                strength_age: 40,
-                dexterity_age: 0,
+            stat_locks:      StatLockRecord {
+                strength:         0, // up
+                dexterity:        1, // down
+                intelligence:     2, // locked
+                strength_age:     40,
+                dexterity_age:    0,
                 intelligence_age: 900,
             },
             // A member with a title, and an invitation from a second guild that
             // has not been answered. Both non-default, which is the point of the
             // test: a field that comes back as its default is a field nobody
             // saved.
-            guild: Some(7),
-            guild_title: "Warlord".to_owned(),
-            guild_rank: 0,
+            guild:           Some(7),
+            guild_title:     "Warlord".to_owned(),
+            guild_rank:      0,
             guild_candidate: Some(9),
         };
         let json = serde_json::to_string(&record).expect("a record must serialise");
@@ -1814,32 +1858,32 @@ mod tests {
         // dungeons at negative heights, and a character saved at z=-40 that
         // loads at z=216 is somewhere else entirely.
         let record = CharacterRecord {
-            serial: Serial::new(1).unwrap(),
-            account: AccountName::new("admin"),
-            name: CharacterName::new("Alpha"),
-            body: 0x0190,
-            hue: 0,
-            facet: 0,
-            x: 5000,
-            y: 500,
-            z: -40,
-            facing: 0,
-            strength: 100,
-            dexterity: 100,
-            intelligence: 100,
-            skills: Vec::new(),
-            effects: Vec::new(),
-            dead: false,
-            fame: 0,
-            karma: 0,
-            murders: 0,
-            quests: Vec::new(),
-            done_quests: Vec::new(),
-            guild: None,
-            guild_title: String::new(),
-            guild_rank: 0,
+            serial:          Serial::new(1).unwrap(),
+            account:         AccountName::new("admin"),
+            name:            CharacterName::new("Alpha"),
+            body:            0x0190,
+            hue:             0,
+            facet:           0,
+            x:               5000,
+            y:               500,
+            z:               -40,
+            facing:          0,
+            strength:        100,
+            dexterity:       100,
+            intelligence:    100,
+            skills:          Vec::new(),
+            effects:         Vec::new(),
+            dead:            false,
+            fame:            0,
+            karma:           0,
+            murders:         0,
+            quests:          Vec::new(),
+            done_quests:     Vec::new(),
+            guild:           None,
+            guild_title:     String::new(),
+            guild_rank:      0,
             guild_candidate: None,
-            stat_locks: StatLockRecord::default(),
+            stat_locks:      StatLockRecord::default(),
         };
         let json = serde_json::to_string(&record).expect("a record must serialise");
         let back: CharacterRecord = serde_json::from_str(&json).expect("and come back");

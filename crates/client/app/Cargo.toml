@@ -40,23 +40,23 @@ openshard-uofiles.workspace = true
 # a shard of its own — `crates/e2e/playground` — parses nothing.
 clap.workspace = true
 dotenvy.workspace = true
-pollster = "0.4"
+pollster = "1.0"
 # The dev HUD. `egui-wgpu` is the vendored port to wgpu 30 — see vendor/README.md
 # — and `default-features = false` because its default pulls `wgpu/default`,
 # which is every backend and the opposite of the explicit lists below.
-egui = "0.35"
+egui = "0.36"
 # `egui-winit`'s default set is dropped for the same reason, but three of its
 # features have to come back by name: `clipboard` is what carries a
 # `Context::copy_text` through to the system clipboard (without it the text is
 # put in `platform_output` and silently dropped — the Tile panel's copy buttons
 # did nothing), and it needs `wayland`/`x11` because the Linux backend it uses
 # is chosen by which of those is compiled in.
-egui-winit = { version = "0.35", default-features = false, features = [
+egui-winit = { version = "0.36", default-features = false, features = [
     "clipboard",
     "wayland",
     "x11",
 ] }
-egui-wgpu = { version = "0.35", default-features = false }
+egui-wgpu = { version = "0.36", default-features = false }
 # `rt` for the shard thread's own current-thread runtime, `macros` for the
 # select! that reads the socket and the keyboard at once, `sync` for the channel
 # between them. No `net`: the sockets belong to `client/net`.

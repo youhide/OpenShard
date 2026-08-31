@@ -78,10 +78,10 @@ impl WorldPhase {
 
 /// Per-connection state this loop owns.
 pub(crate) struct Session {
-    pub(crate) login: LoginSession,
+    pub(crate) login:   LoginSession,
     /// Where this connection stands with respect to the world.
-    phase: WorldPhase,
-    pub(crate) outbox: OutboxTx,
+    phase:              WorldPhase,
+    pub(crate) outbox:  OutboxTx,
     /// Tells the gateway framer this connection's client version. A game
     /// connection sends no version of its own, so the framer defaults to the older
     /// dialect until this carries the real one across — needed for the packets
@@ -254,7 +254,7 @@ impl Sessions {
 pub(crate) struct PhaseSync {
     entered: Cursor<PlayerEntered>,
     leaving: Cursor<PlayerLeaving>,
-    left: Cursor<PlayerLeft>,
+    left:    Cursor<PlayerLeft>,
     refused: Cursor<PlayerRefused>,
 }
 
@@ -265,7 +265,7 @@ impl PhaseSync {
         Self {
             entered: world.bus().cursor(),
             leaving: world.bus().cursor(),
-            left: world.bus().cursor(),
+            left:    world.bus().cursor(),
             refused: world.bus().cursor(),
         }
     }
@@ -323,13 +323,24 @@ impl PhaseSync {
 
 #[cfg(test)]
 mod tests {
-    use openshard_gateway::{OutboxRx, outbox_channel, version_channel};
+    use openshard_gateway::{
+        OutboxRx,
+        outbox_channel,
+        version_channel,
+    };
     use openshard_protocol::version::ClientVersion;
-
-    use openshard_world::{Character, Entering};
+    use openshard_world::{
+        Character,
+        Entering,
+    };
 
     use super::*;
-    use crate::testing::{admin, at_character_screen, login_server, lord_british};
+    use crate::testing::{
+        admin,
+        at_character_screen,
+        login_server,
+        lord_british,
+    };
 
     /// A connection that has said nothing yet: not a game socket, so not
     /// compressed. A game one has to be logged in for real — see

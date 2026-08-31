@@ -27,10 +27,17 @@
 
 use std::collections::BTreeMap;
 
-use openshard_client_render::facing::{self, Face, Facing};
+use openshard_client_render::facing::{
+    self,
+    Face,
+    Facing,
+};
 use openshard_client_render::occlusion::Shape;
 use openshard_protocol::wire::Graphic;
-use openshard_tiles::{TileData, TileFlags};
+use openshard_tiles::{
+    TileData,
+    TileFlags,
+};
 use openshard_uofiles::art::Art;
 
 /// How much of the install's wall *art* this has to be able to read.
@@ -299,7 +306,7 @@ fn britain_s_walls_are_read_where_they_stand() {
 /// isometric camera can see.
 const CORNER: Facing = Facing::Corner {
     right: Face::East,
-    left: Face::South,
+    left:  Face::South,
 };
 
 /// One verdict, as the key a count is tallied under. A corner is one bucket and

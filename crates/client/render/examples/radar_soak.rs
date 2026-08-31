@@ -49,10 +49,23 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use openshard_client_render::radar::{
-    self, BASE_CHUNK_TILES, RadarBuildScratch, RadarCache, RadarExtent, RadarLod, RadarLodSelector,
-    RadarStep, RadarTile, RadarView, RadarWorkQueue, SWEEP_LOD,
+    self,
+    BASE_CHUNK_TILES,
+    RadarBuildScratch,
+    RadarCache,
+    RadarExtent,
+    RadarLod,
+    RadarLodSelector,
+    RadarStep,
+    RadarTile,
+    RadarView,
+    RadarWorkQueue,
+    SWEEP_LOD,
 };
-use openshard_client_render::radar_pass::{Placement, RADAR_CHUNK_CACHE_LAYERS};
+use openshard_client_render::radar_pass::{
+    Placement,
+    RADAR_CHUNK_CACHE_LAYERS,
+};
 use openshard_protocol::world::Facet;
 use openshard_uofiles::radarcol::RadarColors;
 
@@ -97,7 +110,7 @@ const PRINT_EVERY: usize = 16;
 #[derive(Clone, Copy, Debug)]
 struct Scale {
     window: f32,
-    gump: f32,
+    gump:   f32,
 }
 
 impl Scale {
@@ -124,12 +137,12 @@ fn facet_map_view(extent: RadarExtent, centre: RadarTile, zoom_steps: i8, scale:
         extent,
         facet_map_tiles_per_gump_pixel(extent, zoom_steps) / scale.product(),
         Placement {
-            origin: (0.0, 0.0),
-            extent: (
+            origin:   (0.0, 0.0),
+            extent:   (
                 FACET_MAP_CONTENT.0 as f32 * scale.window,
                 FACET_MAP_CONTENT.1 as f32 * scale.window,
             ),
-            circle: false,
+            circle:   false,
             rotation: 0.0,
         },
         scale.gump,
@@ -148,12 +161,12 @@ fn minimap_view(extent: RadarExtent, player: RadarTile, zoom_steps: i8, scale: S
         extent,
         1.0 / zoom,
         Placement {
-            origin: (700.0, 0.0),
-            extent: (
+            origin:   (700.0, 0.0),
+            extent:   (
                 MINIMAP_CONTENT.0 as f32 * scale.window,
                 MINIMAP_CONTENT.1 as f32 * scale.window,
             ),
-            circle: true,
+            circle:   true,
             rotation: FRAC_PI_4,
         },
         scale.gump,
@@ -415,7 +428,7 @@ fn the_bounds(extent: RadarExtent) {
     for physical_per_gump in [1.0_f32, 2.0, 4.0, 8.0] {
         let scale = Scale {
             window: 1.0,
-            gump: physical_per_gump,
+            gump:   physical_per_gump,
         };
         println!();
         println!(
@@ -493,7 +506,7 @@ fn main() {
     // likely to be.
     let scale = Scale {
         window: parse(args.next(), 2.0),
-        gump: parse(args.next(), 2.0),
+        gump:   parse(args.next(), 2.0),
     };
 
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("facet 0");

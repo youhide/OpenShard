@@ -1,5 +1,6 @@
-use super::*;
 use openshard_protocol::wire::Hue;
+
+use super::*;
 
 impl World {
     /// A player's speech, with staff commands split off the front. A
@@ -142,13 +143,13 @@ impl World {
         // two different things.
         if let Some(label) = self.state.guild_label(target) {
             let packet = ServerPacket::SpokenMessage(SpokenMessage {
-                serial: Some(serial),
+                serial:  Some(serial),
                 graphic: self.state.registry.get::<Body>(target).map(|body| body.id),
-                mode: TalkMode::Label,
-                hue: TEXT_HUE,
-                font: Font::DEFAULT,
-                name: String::new(),
-                text: label,
+                mode:    TalkMode::Label,
+                hue:     TEXT_HUE,
+                font:    Font::DEFAULT,
+                name:    String::new(),
+                text:    label,
             });
             self.state.send_packet(connection, &packet);
         }

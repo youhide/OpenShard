@@ -12,9 +12,23 @@
 //! so a replay repopulates identically.
 
 use openshard_protocol::mobile::Notoriety;
-use openshard_protocol::wire::{Graphic, Hue};
-use openshard_protocol::world::{Aggression, DamageType, Facet, PhysicalResistance, RangedRange, Sight};
-use openshard_state::{Skill, SpawnerId, WorldTick};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
+use openshard_protocol::world::{
+    Aggression,
+    DamageType,
+    Facet,
+    PhysicalResistance,
+    RangedRange,
+    Sight,
+};
+use openshard_state::{
+    Skill,
+    SpawnerId,
+    WorldTick,
+};
 
 /// One creature a spawn region may put down. The fields a spawn needs beyond the
 /// where — mirrors [`crate::tick::Command::SpawnMobile`] minus the position, which
@@ -22,53 +36,53 @@ use openshard_state::{Skill, SpawnerId, WorldTick};
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CreatureTemplate {
     /// The body graphic (a chicken, a skeleton).
-    pub body: Graphic,
+    pub body:        Graphic,
     /// Its hue.
-    pub hue: Hue,
+    pub hue:         Hue,
     /// Starting and maximum hit points.
-    pub hits: u16,
+    pub hits:        u16,
     /// Health-bar colour: the [`openshard_protocol::Notoriety`] wire value.
-    pub notoriety: Notoriety,
+    pub notoriety:   Notoriety,
     /// Melee damage before the target's resistance.
-    pub damage: u16,
+    pub damage:      u16,
     /// Physical resistance, a percentage.
-    pub resistance: PhysicalResistance,
+    pub resistance:  PhysicalResistance,
     /// How widely known it is — what its killer inherits.
-    pub fame: i32,
+    pub fame:        i32,
     /// Which way it is known. **Negative is evil**, so killing it earns karma.
-    pub karma: i32,
+    pub karma:       i32,
     /// Swing cadence in ticks; `0` derives it from dexterity.
-    pub swing: u64,
+    pub swing:       u64,
     /// How far it notices a target; `0` for a placid animal.
-    pub sight: Sight,
+    pub sight:       Sight,
     /// Whether it starts fights (2), answers them (1), or only runs (0).
-    pub aggression: Aggression,
+    pub aggression:  Aggression,
     /// Ticks between its beats while hunting; 0 takes the shard default.
-    pub beat: u64,
+    pub beat:        u64,
     /// Its optional ranged attack reach.
-    pub ranged: Option<RangedRange>,
+    pub ranged:      Option<RangedRange>,
     /// The ranged attack's damage type.
     pub ranged_kind: DamageType,
     /// Whether it drifts when idle.
-    pub wander: bool,
+    pub wander:      bool,
     /// Trained combat skills, `(skill id, value in tenths)` — what makes a
     /// spawner's monsters roll to hit and scale damage like a player.
-    pub skills: Vec<(Skill, u16)>,
+    pub skills:      Vec<(Skill, u16)>,
 }
 
 /// The box a region spawns within: a top-left tile, a size, and a facet.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SpawnArea {
     /// West edge.
-    pub x: u16,
+    pub x:      u16,
     /// North edge.
-    pub y: u16,
+    pub y:      u16,
     /// Width in tiles; a spawn lands somewhere in `x .. x + width`.
-    pub width: u16,
+    pub width:  u16,
     /// Height in tiles.
     pub height: u16,
     /// Which facet.
-    pub facet: Facet,
+    pub facet:  Facet,
 }
 
 /// A region the tick keeps populated.
@@ -84,20 +98,20 @@ pub struct Spawner {
     /// [`Spawner::new`] is a placeholder the world overwrites.
     ///
     /// [`SpawnedBy`]: openshard_state::components::SpawnedBy
-    pub id: SpawnerId,
+    pub id:            SpawnerId,
     /// Where it spawns.
-    pub area: SpawnArea,
+    pub area:          SpawnArea,
     /// The creatures it may put down; each spawn picks one at random.
-    pub creatures: Vec<CreatureTemplate>,
+    pub creatures:     Vec<CreatureTemplate>,
     /// The most live creatures it keeps.
-    pub max_count: u16,
+    pub max_count:     u16,
     /// Ticks to wait after a spawn before the next one — the respawn pace.
     pub respawn_delay: u64,
     /// The earliest tick the next spawn may happen. Advanced past a spawn so a
     /// region refills at its own pace, not all at once. Persisted as the *seconds*
     /// still to wait, so a rare spawn's timer survives a restart (see the tick's
     /// `spawner_records`).
-    pub next_spawn: WorldTick,
+    pub next_spawn:    WorldTick,
 }
 
 impl Spawner {
@@ -144,7 +158,7 @@ impl Spawner {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct SpawnSet {
     /// What the staff menu's button sends: `populate:felucca`.
-    pub verb: String,
+    pub verb:     String,
     /// The regions, each with the placeholder id `register_spawner` overwrites.
     pub spawners: Vec<Spawner>,
 }
@@ -158,11 +172,11 @@ mod tests {
     #[test]
     fn a_new_spawner_can_spawn_at_once() {
         let area = SpawnArea {
-            x: 1,
-            y: 2,
-            width: 3,
+            x:      1,
+            y:      2,
+            width:  3,
             height: 3,
-            facet: Facet(0),
+            facet:  Facet(0),
         };
         let spawner = Spawner::new(SpawnerId(1), area, Vec::new(), 5, 40);
         assert_eq!(spawner.next_spawn, WorldTick::ZERO, "ready from tick zero");

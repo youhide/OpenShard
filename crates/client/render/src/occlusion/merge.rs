@@ -108,8 +108,13 @@
 //! reading. So the claim this module may make is the narrow one: a merged run is
 //! exempt from itself **only where nothing was going to be lit anyway**.
 
-use crate::occlusion::{Edges, Solid, SolidId};
 use openshard_protocol::wire::Graphic;
+
+use crate::occlusion::{
+    Edges,
+    Solid,
+    SolidId,
+};
 
 /// A primitive's place in the frame's own list — what `parent` and `space`
 /// are keyed by below, and equally what a union-find group's name is: a
@@ -219,13 +224,13 @@ fn mergeable(solid: &Solid) -> bool {
 /// constant.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct Surface {
-    edges: Edges,
-    roof: bool,
+    edges:   Edges,
+    roof:    bool,
     /// The owner, spelled out: a `(z, graphic)` pair — see the header.
-    z: i8,
+    z:       i8,
     graphic: Graphic,
-    part: u8,
-    across: [u64; 4],
+    part:    u8,
+    across:  [u64; 4],
 }
 
 /// What one primitive's key is for a merge along `axis` (see the header).
@@ -235,12 +240,12 @@ fn surface(axis: Axis, solid: &Solid, space: &crate::solid::Solid) -> Surface {
         Axis::Y => [space.min.x, space.max.x, space.min.z, space.max.z],
     };
     Surface {
-        edges: solid.edges,
-        roof: solid.roof,
-        z: solid.owner.z,
+        edges:   solid.edges,
+        roof:    solid.roof,
+        z:       solid.owner.z,
         graphic: solid.owner.graphic,
-        part: solid.part.ordinal(),
-        across: across.map(f64::to_bits),
+        part:    solid.part.ordinal(),
+        across:  across.map(f64::to_bits),
     }
 }
 
@@ -345,7 +350,14 @@ mod tests {
     use openshard_protocol::wire::Graphic;
 
     use super::*;
-    use crate::occlusion::{Aperture, Edges, OPAQUE, Owner, PANE, Part};
+    use crate::occlusion::{
+        Aperture,
+        Edges,
+        OPAQUE,
+        Owner,
+        PANE,
+        Part,
+    };
 
     /// One primitive as a test here states one: where it stands, what shape it is,
     /// and **whose** it is.
@@ -481,9 +493,11 @@ mod tests {
     #[test]
     fn a_run_of_panes_is_never_folded() {
         let run: Vec<Solid> = (100..104)
-            .map(|x| Solid {
-                opacity: PANE,
-                ..stands_at(x, 100, 20, Edges::SOUTH, 7)
+            .map(|x| {
+                Solid {
+                    opacity: PANE,
+                    ..stands_at(x, 100, 20, Edges::SOUTH, 7)
+                }
             })
             .collect();
         let (solids, _) = merged(run);
@@ -501,18 +515,20 @@ mod tests {
     #[test]
     fn a_run_of_windows_is_never_folded() {
         let run: Vec<Solid> = (100..104)
-            .map(|x| Solid {
-                aperture: Some(Aperture::placed(
-                    0,
-                    x,
-                    crate::facing::Hole {
-                        near: 64,
-                        far: 191,
-                        bottom: 5,
-                        top: 15,
-                    },
-                )),
-                ..stands_at(x, 100, 20, Edges::SOUTH, 7)
+            .map(|x| {
+                Solid {
+                    aperture: Some(Aperture::placed(
+                        0,
+                        x,
+                        crate::facing::Hole {
+                            near:   64,
+                            far:    191,
+                            bottom: 5,
+                            top:    15,
+                        },
+                    )),
+                    ..stands_at(x, 100, 20, Edges::SOUTH, 7)
+                }
             })
             .collect();
         let (solids, _) = merged(run);

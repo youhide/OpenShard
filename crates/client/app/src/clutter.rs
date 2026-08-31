@@ -87,7 +87,10 @@ use openshard_client_net::view::WorldView;
 use openshard_client_render::doors;
 use openshard_client_render::items::GroundItem;
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Cover, Overlay};
+use openshard_map::overlay::{
+    Cover,
+    Overlay,
+};
 use openshard_protocol::mobile::StatusFlags;
 use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
@@ -344,16 +347,34 @@ fn placed(blockers: &[(openshard_protocol::world::Point, u8)]) -> Overlay {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use openshard_map::overlay::{Body, Doors};
-    use openshard_movement::{
-        Around, Detour, Footing, Heading, Lean, Leeway, Step, predict_step, step_allowed,
+    use openshard_map::overlay::{
+        Body,
+        Doors,
     };
-    use openshard_protocol::direction::{Direction, Facing};
+    use openshard_movement::{
+        Around,
+        Detour,
+        Footing,
+        Heading,
+        Lean,
+        Leeway,
+        Step,
+        predict_step,
+        step_allowed,
+    };
+    use openshard_protocol::direction::{
+        Direction,
+        Facing,
+    };
     use openshard_protocol::items::ItemAmount;
     use openshard_protocol::serial::Serial;
-    use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
     use openshard_protocol::world::Point;
+
+    use super::*;
 
     /// A body with its feet at `z`, as the shard asks about one — a whole
     /// [`PLAYER_HEIGHT`](openshard_movement::PLAYER_HEIGHT) of it, because these
@@ -395,11 +416,11 @@ mod tests {
     /// A world this client has entered and nobody else is in yet.
     fn viewed() -> WorldView {
         WorldView::entered(openshard_protocol::world::PlayerStart {
-            serial: Serial::new(0x0000_002A).unwrap(),
-            body: LIVING,
+            serial:   Serial::new(0x0000_002A).unwrap(),
+            body:     LIVING,
             position: HERE,
-            facing: Facing::walking(Direction::South),
-            map: openshard_protocol::world::MapSize::BRITANNIA,
+            facing:   Facing::walking(Direction::South),
+            map:      openshard_protocol::world::MapSize::BRITANNIA,
         })
     }
 
@@ -615,11 +636,19 @@ mod tests {
     /// shard had put it on the stairs.
     #[test]
     fn a_walk_prediction_climbs_a_multi_projected_into_the_live_layer() {
-        use crate::net_command::{MultiDraw, multi_pieces};
         use openshard_client_net::walk::Walk;
         use openshard_movement::scene::Scene;
         use openshard_tiles::TileFlags;
-        use openshard_uofiles::multi::{Component, Multi, Multis};
+        use openshard_uofiles::multi::{
+            Component,
+            Multi,
+            Multis,
+        };
+
+        use crate::net_command::{
+            MultiDraw,
+            multi_pieces,
+        };
 
         const STAIR: Graphic = Graphic(0x0751);
         const FLOOR: Graphic = Graphic(0x04AC);
@@ -632,24 +661,24 @@ mod tests {
             vec![
                 Component {
                     graphic: Graphic(1),
-                    dx: 0,
-                    dy: 0,
-                    dz: 0,
-                    flags: 0,
+                    dx:      0,
+                    dy:      0,
+                    dz:      0,
+                    flags:   0,
                 },
                 Component {
                     graphic: STAIR,
-                    dx: 0,
-                    dy: -1,
-                    dz: 2,
-                    flags: 1,
+                    dx:      0,
+                    dy:      -1,
+                    dz:      2,
+                    flags:   1,
                 },
                 Component {
                     graphic: FLOOR,
-                    dx: 0,
-                    dy: -2,
-                    dz: 7,
-                    flags: 1,
+                    dx:      0,
+                    dy:      -2,
+                    dz:      7,
+                    flags:   1,
                 },
             ],
         );
@@ -703,7 +732,7 @@ mod tests {
         let terrain = Footing::new(None, &clutter, Doors::AsTheyStand);
         let intent = Heading {
             direction: Direction::NorthEast,
-            lean: Lean::Centred,
+            lean:      Lean::Centred,
         };
         assert!(
             step_allowed(&terrain, HERE, Direction::NorthEast).is_none(),

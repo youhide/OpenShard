@@ -35,7 +35,7 @@ pub struct Appearance {
     /// *component* an item is drawn by, and the two must not be confused.
     pub body: Graphic,
     /// The skin hue.
-    pub hue: openshard_protocol::wire::Hue,
+    pub hue:  openshard_protocol::wire::Hue,
 }
 
 impl Appearance {
@@ -48,7 +48,7 @@ impl Appearance {
     pub fn default_human() -> Self {
         Self {
             body: BODY_HUMAN_MALE,
-            hue: openshard_protocol::wire::Hue(DEFAULT_HUE),
+            hue:  openshard_protocol::wire::Hue(DEFAULT_HUE),
         }
     }
 }
@@ -58,41 +58,41 @@ impl Appearance {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CharacterSheet {
     /// Strength.
-    pub strength: u16,
+    pub strength:        u16,
     /// Dexterity.
-    pub dexterity: u16,
+    pub dexterity:       u16,
     /// Intelligence.
-    pub intelligence: u16,
+    pub intelligence:    u16,
     /// Trained skills as `(id, value in tenths, lock, cap in tenths)`. A cap of
     /// zero means "the shard's own", and `enter` fills it from `[gameplay]
     /// skill_cap` — so a newly created character does not have to know the knob.
-    pub skills: Vec<(u8, u16, openshard_protocol::skill::SkillLock, u16)>,
+    pub skills:          Vec<(u8, u16, openshard_protocol::skill::SkillLock, u16)>,
     /// Which way the three stats train, and how long ago each last rose (in
     /// ticks, counted back from the moment the character enters). Both halves are
     /// inputs the stat gain reads, and both used to reset at every login.
-    pub stat_locks: openshard_persistence::StatLockRecord,
+    pub stat_locks:      openshard_persistence::StatLockRecord,
     /// Active effects — a poison a relog must not wash off, and the buffs and
     /// debuffs that will join it. Empty for a clean character.
-    pub effects: Vec<openshard_persistence::EffectRecord>,
+    pub effects:         Vec<openshard_persistence::EffectRecord>,
     /// Whether the character logged out dead — a ghost relogs a ghost. `false`
     /// for a new character and for any living one.
-    pub dead: bool,
+    pub dead:            bool,
     /// How widely known the character is, and which way — ServUO's fame and karma.
-    pub fame: i32,
+    pub fame:            i32,
     /// Which way it is known. Negative is infamy.
-    pub karma: i32,
+    pub karma:           i32,
     /// How many innocents it has killed. A **standing**, and one that used not to
     /// survive a restart: the fifth murder makes a character red for good, and a count
     /// held only in memory washed every murderer blue at the next boot.
-    pub murders: u16,
+    pub murders:         u16,
     /// Quests in progress, with their per-objective progress. Empty for a new
     /// character.
-    pub quests: Vec<openshard_persistence::QuestRecord>,
+    pub quests:          Vec<openshard_persistence::QuestRecord>,
     /// Quests already finished, with the wait before each may be taken again.
-    pub done_quests: Vec<openshard_persistence::DoneQuestRecord>,
+    pub done_quests:     Vec<openshard_persistence::DoneQuestRecord>,
     /// Where it stands in a guild, if it is in one. `None` for the unguilded,
     /// which is most characters.
-    pub guild: Option<GuildSeat>,
+    pub guild:           Option<GuildSeat>,
     /// A guild that asked it to join while it was away, still waiting on an
     /// answer.
     pub guild_candidate: Option<u32>,
@@ -112,7 +112,7 @@ pub struct GuildSeat {
     /// The title it wears there. Often empty.
     pub title: String,
     /// Where it stands.
-    pub rank: openshard_state::Rank,
+    pub rank:  openshard_state::Rank,
 }
 
 impl CharacterSheet {
@@ -125,19 +125,19 @@ impl CharacterSheet {
     /// not appear in this crate's public API.)
     pub fn starting() -> Self {
         Self {
-            strength: DEFAULT_HITPOINTS,
-            dexterity: DEFAULT_DEXTERITY,
-            intelligence: DEFAULT_MANA,
-            skills: Vec::new(),
-            stat_locks: openshard_persistence::StatLockRecord::default(),
-            effects: Vec::new(),
-            dead: false,
-            fame: 0,
-            karma: 0,
-            murders: 0,
-            quests: Vec::new(),
-            done_quests: Vec::new(),
-            guild: None,
+            strength:        DEFAULT_HITPOINTS,
+            dexterity:       DEFAULT_DEXTERITY,
+            intelligence:    DEFAULT_MANA,
+            skills:          Vec::new(),
+            stat_locks:      openshard_persistence::StatLockRecord::default(),
+            effects:         Vec::new(),
+            dead:            false,
+            fame:            0,
+            karma:           0,
+            murders:         0,
+            quests:          Vec::new(),
+            done_quests:     Vec::new(),
+            guild:           None,
             guild_candidate: None,
         }
     }
@@ -154,9 +154,9 @@ impl CharacterSheet {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FreshCharacter {
     /// Which facet to spawn on.
-    pub facet: Facet,
+    pub facet:      Facet,
     /// Where on it. Absent takes the world's configured start for the facet.
-    pub start: Option<Point>,
+    pub start:      Option<Point>,
     /// The look chosen on the creation screen. Absent for a character that
     /// reached the world without one, which takes the world's default body.
     pub appearance: Option<Appearance>,
@@ -168,7 +168,7 @@ pub struct FreshCharacter {
     /// far and away the biggest thing on any of them — fifty-eight skills, the
     /// effects, the quest log. Behind a pointer it costs one word on the queue
     /// and its own allocation once per login, which is the right way round.
-    pub sheet: Option<Box<CharacterSheet>>,
+    pub sheet:      Option<Box<CharacterSheet>>,
 }
 
 /// A character coming back from the save, exactly as it left.
@@ -189,17 +189,17 @@ pub(crate) struct StoredCharacter {
     /// The wire serial it was saved under. It comes back on this one and no
     /// other: it is what every packet ever sent about this character said, and
     /// what its containers' contents point at.
-    pub serial: Serial,
+    pub serial:     Serial,
     /// Which facet it stood on.
-    pub facet: Facet,
+    pub facet:      Facet,
     /// Where on it, its own z included.
-    pub position: Point,
+    pub position:   Point,
     /// Which way it was facing, and whether it was running.
-    pub facing: Facing,
+    pub facing:     Facing,
     /// How it looked.
     pub appearance: Appearance,
     /// Its stats, skills, effects and quest log.
-    pub sheet: CharacterSheet,
+    pub sheet:      CharacterSheet,
 }
 
 impl StoredCharacter {
@@ -215,19 +215,19 @@ impl StoredCharacter {
     /// the same whether the record came from a lookup that could itself miss.
     pub(crate) fn from_record(record: &openshard_persistence::CharacterRecord) -> Option<Self> {
         Some(Self {
-            serial: record.serial,
-            facet: Facet(record.facet),
-            position: Point::new(record.x, record.y, record.z),
-            facing: Facing::from_bits(record.facing),
+            serial:     record.serial,
+            facet:      Facet(record.facet),
+            position:   Point::new(record.x, record.y, record.z),
+            facing:     Facing::from_bits(record.facing),
             appearance: Appearance {
                 body: Graphic(record.body),
-                hue: openshard_protocol::wire::Hue(record.hue),
+                hue:  openshard_protocol::wire::Hue(record.hue),
             },
-            sheet: CharacterSheet {
-                strength: record.strength,
-                dexterity: record.dexterity,
-                intelligence: record.intelligence,
-                skills: record
+            sheet:      CharacterSheet {
+                strength:        record.strength,
+                dexterity:       record.dexterity,
+                intelligence:    record.intelligence,
+                skills:          record
                     .skills
                     .iter()
                     .map(|skill| {
@@ -239,25 +239,25 @@ impl StoredCharacter {
                         )
                     })
                     .collect(),
-                stat_locks: record.stat_locks,
-                effects: record.effects.clone(),
-                dead: record.dead,
-                fame: record.fame,
-                karma: record.karma,
-                murders: record.murders,
-                quests: record.quests.clone(),
-                done_quests: record.done_quests.clone(),
+                stat_locks:      record.stat_locks,
+                effects:         record.effects.clone(),
+                dead:            record.dead,
+                fame:            record.fame,
+                karma:           record.karma,
+                murders:         record.murders,
+                quests:          record.quests.clone(),
+                done_quests:     record.done_quests.clone(),
                 // The three ride together: a title or a rank with no guild is a
                 // fact about nothing, so the `Option` is over all of them.
                 guild:           record.guild.map(|id| {
                     GuildSeat {
-                    guild: openshard_state::GuildId(id),
-                    title: record.guild_title.clone(),
-                    // The floor, for a number the five ranks do not name. A
-                    // saved row this engine did not write must not be able to
-                    // grant a permission — see `CharacterRecord::guild_rank`.
-                    rank: openshard_state::Rank::from_number(record.guild_rank)
-                        .unwrap_or(openshard_state::Rank::Ronin),
+                        guild: openshard_state::GuildId(id),
+                        title: record.guild_title.clone(),
+                        // The floor, for a number the five ranks do not name. A
+                        // saved row this engine did not write must not be able to
+                        // grant a permission — see `CharacterRecord::guild_rank`.
+                        rank:  openshard_state::Rank::from_number(record.guild_rank)
+                            .unwrap_or(openshard_state::Rank::Ronin),
                     }
                 }),
                 guild_candidate: record.guild_candidate,
@@ -320,17 +320,17 @@ pub struct Entering {
     pub connection: ConnectionId,
     /// What the client claims to be. The game socket never says, so this is the
     /// version the login socket carried across on the auth key.
-    pub version: ClientVersion,
+    pub version:    ClientVersion,
     /// The account the character belongs to. Saved with it, so a load knows
     /// whose it is.
-    pub account: AccountName,
+    pub account:    AccountName,
     /// The character's name.
-    pub name: CharacterName,
+    pub name:       CharacterName,
     /// The staff authority the account plays with. Re-derived from the account
     /// each login, never saved with the character.
-    pub access: AccessLevel,
+    pub access:     AccessLevel,
     /// Whether it has been here before, and what it brings.
-    pub character: Character,
+    pub character:  Character,
 }
 
 /// One door in a [`Command::Decorate`] batch. The closed/open graphics and the
@@ -339,11 +339,11 @@ pub struct Entering {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DecorDoor {
     /// Its lock, if it starts locked.
-    pub lock: Option<LockKind>,
+    pub lock:     Option<LockKind>,
     /// The shut graphic.
-    pub closed: Graphic,
+    pub closed:   Graphic,
     /// The open graphic.
-    pub open: Graphic,
+    pub open:     Graphic,
     /// East/west hinge swing.
     pub offset_x: i16,
     /// North/south hinge swing.
@@ -357,13 +357,13 @@ pub struct DecorDoor {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DecorContainer {
     /// Its lock, if it starts locked.
-    pub lock: Option<LockKind>,
+    pub lock:     Option<LockKind>,
     /// The item graphic.
-    pub graphic: Graphic,
+    pub graphic:  Graphic,
     /// The gump the client opens for it.
-    pub gump: Graphic,
+    pub gump:     Graphic,
     /// Its hue, or 0.
-    pub hue: Hue,
+    pub hue:      Hue,
     /// Where.
     pub position: Point,
 }
@@ -394,11 +394,11 @@ pub enum Command {
         /// Which connection.
         connection: ConnectionId,
         /// What its client claims to be.
-        version: ClientVersion,
+        version:    ClientVersion,
         /// Whose account it authenticated as.
-        account: AccountName,
+        account:    AccountName,
         /// The staff authority that account plays with.
-        access: AccessLevel,
+        access:     AccessLevel,
     },
     /// A client asked to create a character (`0x00`/`0xF8`) and play it.
     ///
@@ -416,7 +416,7 @@ pub enum Command {
         /// Which connection.
         connection: ConnectionId,
         /// What the client filled in on the creation screen.
-        create: openshard_protocol::world::CreateCharacter,
+        create:     openshard_protocol::world::CreateCharacter,
     },
     /// A client picked a character off the list and wants to play it (`0x5D`).
     ///
@@ -428,7 +428,7 @@ pub enum Command {
         /// Which connection.
         connection: ConnectionId,
         /// The name the client echoed off the list it was sent.
-        name: RawCharacterName,
+        name:       RawCharacterName,
     },
     /// A client picked a character. One field, because [`Entering`] is what the
     /// world's own `enter` takes: the command used to spell out the same seven
@@ -440,14 +440,14 @@ pub enum Command {
         /// Which connection.
         connection: ConnectionId,
         /// The request.
-        request: WalkRequest,
+        request:    WalkRequest,
     },
     /// An OpenShard client explicitly asked to turn without stepping.
     Turn {
         /// Which connection.
         connection: ConnectionId,
         /// The typed request.
-        request: openshard_protocol::world::TurnRequest,
+        request:    openshard_protocol::world::TurnRequest,
     },
     /// A client asked for its own status again — a `0x34` type `0x04`, sent when
     /// the paperdoll opens. The status went out at world entry; this resends it so
@@ -488,7 +488,7 @@ pub enum Command {
         /// Which connection answered.
         connection: ConnectionId,
         /// The decoded response: which gump, which button, and any fields.
-        response: GumpResponse,
+        response:   GumpResponse,
     },
     /// A client answered a targeting cursor — a `0x6C`. Routed to whatever raised
     /// the cursor; today that is the `.tele` command.
@@ -496,7 +496,7 @@ pub enum Command {
         /// Which connection answered.
         connection: ConnectionId,
         /// The decoded response: what was clicked, or a cancel.
-        response: openshard_protocol::target::TargetResponse,
+        response:   openshard_protocol::target::TargetResponse,
     },
     /// Register a spawn region — an area the tick then keeps
     /// populated. See [`crate::spawner`].
@@ -517,7 +517,7 @@ pub enum Command {
     /// [`openshard_state::Region`].
     RegisterRegions {
         /// Which facet the areas belong to.
-        facet: Facet,
+        facet:   Facet,
         /// The whole set.
         regions: Vec<openshard_state::Region>,
     },
@@ -532,11 +532,11 @@ pub enum Command {
     /// [`Decoration`], [`Door`] and [`Container`].
     Decorate {
         /// Which facet.
-        facet: Facet,
+        facet:      Facet,
         /// The plain statics to place, as `(graphic, hue, position)`.
-        statics: Vec<(Graphic, Hue, Point)>,
+        statics:    Vec<(Graphic, Hue, Point)>,
         /// The doors to place.
-        doors: Vec<DecorDoor>,
+        doors:      Vec<DecorDoor>,
         /// The containers to place.
         containers: Vec<DecorContainer>,
     },
@@ -546,13 +546,13 @@ pub enum Command {
     /// shop doors a building's art only implies. See [`crate::doorgen`].
     GenerateDoors {
         /// Which facet.
-        facet: Facet,
+        facet:  Facet,
         /// The region's north-west corner and size, in tiles.
-        x: u16,
+        x:      u16,
         /// North-west corner y.
-        y: u16,
+        y:      u16,
         /// Region width.
-        width: u16,
+        width:  u16,
         /// Region height.
         height: u16,
     },
@@ -568,7 +568,7 @@ pub enum Command {
     /// animate the turn and the move the same way whoever ordered it.
     Step {
         /// Which mobile.
-        serial: Serial,
+        serial:    Serial,
         /// Which way: the low three bits of a facing byte (0 N, clockwise).
         direction: u8,
     },
@@ -580,96 +580,96 @@ pub enum Command {
     /// this spot", the item counterpart of a mobile entering.
     SpawnItem {
         /// The tiledata graphic id.
-        graphic: Graphic,
+        graphic:   Graphic,
         /// Its hue, or 0 for none.
-        hue: Hue,
+        hue:       Hue,
         /// How many, for a stackable item; 0 or 1 is a single.
-        amount: u16,
+        amount:    u16,
         /// Whether it merges with an identical pile when dropped onto one.
         stackable: bool,
         /// Where it lies.
-        position: Point,
+        position:  Point,
         /// Which facet.
-        facet: Facet,
+        facet:     Facet,
     },
     /// The server puts a container on the ground — a script decree, like
     /// [`SpawnItem`](Self::SpawnItem) but the thing can hold others.
     SpawnContainer {
         /// The tiledata graphic id (a chest, a backpack).
-        graphic: Graphic,
+        graphic:  Graphic,
         /// The gump the client opens when it is double-clicked.
-        gump: Graphic,
+        gump:     Graphic,
         /// Its hue, or 0 for none.
-        hue: Hue,
+        hue:      Hue,
         /// Where it lies.
         position: Point,
         /// Which facet.
-        facet: Facet,
+        facet:    Facet,
     },
     /// The server puts a mobile in the world — a script decree. A creature to
     /// fight, a shopkeeper to stand there: an entity with a body and hit points
     /// but no client driving it.
     SpawnMobile {
         /// The body graphic (a creature id, or a human body).
-        body: Graphic,
+        body:        Graphic,
         /// Its hue.
-        hue: Hue,
+        hue:         Hue,
         /// Its starting and maximum hit points.
-        hits: u16,
+        hits:        u16,
         /// Its standing — the health-bar colour — as a wire byte (1 innocent, 5
         /// enemy, 7 invulnerable). Zero, or anything unknown, is innocent.
-        notoriety: Notoriety,
+        notoriety:   Notoriety,
         /// How hard it hits in melee, before the target's armour.
-        damage: u16,
+        damage:      u16,
         /// Its physical resistance, 0–100.
-        resistance: PhysicalResistance,
+        resistance:  PhysicalResistance,
         /// Ticks between its swings; 0 takes the default.
-        swing: u64,
+        swing:       u64,
         /// How far it notices a foe, in tiles; 0 hunts nothing.
-        sight: Sight,
+        sight:       Sight,
         /// Whether it starts fights (2), answers them (1), or only runs (0).
-        aggression: Aggression,
+        aggression:  Aggression,
         /// Ticks between its beats while hunting; 0 takes the shard default.
-        beat: u64,
+        beat:        u64,
         /// Its optional ranged attack reach.
-        ranged: Option<RangedRange>,
+        ranged:      Option<RangedRange>,
         /// The ranged attack's damage type.
         ranged_kind: DamageType,
         /// Whether it wanders when idle.
-        wander: bool,
+        wander:      bool,
         /// Where it stands.
-        position: Point,
+        position:    Point,
         /// Which facet.
-        facet: Facet,
+        facet:       Facet,
         /// A name shown on single-click, if any — a townsperson has one. Overrides
         /// `title`.
-        name: Option<String>,
+        name:        Option<String>,
         /// The trade it plies, ServUO-style ("the blacksmith"). `None` for a
         /// creature. The key its dress, its generated name and its speech all hang
         /// off, so it is kept on the mobile and saved with it.
-        title: Option<String>,
+        title:       Option<String>,
         /// What the trade wears on its feet, `ShoeType`'s wire byte. Read only when
         /// the core does the dressing.
-        shoe: u8,
+        shoe:        u8,
         /// How widely known it is; a killer inherits it.
-        fame: i32,
+        fame:        i32,
         /// Which way it is known. Negative is evil.
-        karma: i32,
+        karma:       i32,
         /// Where it sleeps, for the optional daily routine.
-        night_home: Option<Point>,
+        night_home:  Option<Point>,
         /// Whether it is a banker (answers "bank").
-        banker: bool,
+        banker:      bool,
         /// Whether it is a shopkeeper — double-click opens its shop.
-        vendor: bool,
+        vendor:      bool,
         /// Whether it is a healer — a ghost that comes near or double-clicks it is
         /// offered a free resurrection.
-        healer: bool,
+        healer:      bool,
         /// Worn clothing and gear, as `(graphic, layer, hue)` — so an NPC is not
         /// naked. Drawn in its `0x78`.
-        equipment: Vec<(Graphic, Layer, Hue)>,
+        equipment:   Vec<(Graphic, Layer, Hue)>,
         /// Trained combat skills, `(skill id, value in tenths)` — what turns on the
         /// to-hit roll and damage scaling for the creature.
-        skills: Vec<(Skill, u16)>,
+        skills:      Vec<(Skill, u16)>,
         /// What it sells, if it is a shopkeeper. Applied the moment it exists.
         ///
         /// # Why this rides on the spawn
@@ -681,13 +681,13 @@ pub enum Command {
         /// for something that is simply a fact about this shopkeeper. Content that
         /// knows the shop knows it at placement time; `Command::StockVendor` stays
         /// for a shop whose stock changes later.
-        stock: Vec<openshard_npc::StockLine>,
+        stock:       Vec<openshard_npc::StockLine>,
         /// Where it wants to be escorted to, if it is a traveller waiting for one.
         ///
         /// Empty means "wherever the quest picks" — ServUO's
         /// `PickRandomDestination` — which is not the same as `None`, meaning it
         /// is not escortable at all. Rides on the spawn for `stock`'s reason.
-        escort_to: Option<String>,
+        escort_to:   Option<String>,
         /// The quests it offers, by key. Rides on the spawn for `stock`'s reason;
         /// [`BindQuestGiver`](Command::BindQuestGiver) stays for binding one to an
         /// NPC that already exists.
@@ -695,47 +695,47 @@ pub enum Command {
         /// An escortable traveller gets `escort` added to whatever is here,
         /// because an escort *is* a quest — the offer, the log entry and the
         /// reward all come from one.
-        quests: Vec<openshard_state::QuestKey>,
+        quests:      Vec<openshard_state::QuestKey>,
     },
     /// Deal damage to a mobile — a script or another mobile's blow.
     Damage {
         /// Whom.
-        serial: Serial,
+        serial:      Serial,
         /// How much, before armour.
-        amount: u16,
+        amount:      u16,
         /// What kind, as a wire byte (0 physical, 1 fire, …). The target's
         /// resistance to that kind takes its cut.
         damage_type: u8,
         /// Who dealt it, or `None` for unattributed damage — the caster a script
         /// blames a spell's damage on, so killing a blue with it is a murder the
         /// same as a sword.
-        by: Option<Serial>,
+        by:          Option<Serial>,
     },
     /// Cast a spell: pay mana, roll the casting skill, and say what happened with
     /// a [`SpellCast`](openshard_magic::SpellCast). The spell's *effect* is a
     /// script's — this is only the mana-and-skill gate every spell passes.
     CastSpell {
         /// The caster.
-        serial: Serial,
+        serial:    Serial,
         /// Which spell, by id.
-        spell: SpellId,
+        spell:     SpellId,
         /// The target, or `None` for a spell that needs none.
-        target: Option<Serial>,
+        target:    Option<Serial>,
         /// The mana it costs.
-        mana: u16,
+        mana:      u16,
         /// The lower edge of the skill band it is cast against, in tenths: below
         /// it the cast cannot succeed.
         min_skill: i32,
         /// The upper edge, in tenths: at or above it the cast cannot fail.
         max_skill: i32,
         /// The skill it rolls (Magery, and its id is the caller's to name).
-        skill: u8,
+        skill:     u8,
         /// The container to draw reagents from, or `None` for a spell that needs
         /// none. The caster's pack, in the usual case.
-        pack: Option<Serial>,
+        pack:      Option<Serial>,
         /// The reagents the spell consumes, as `(graphic, count)`. All must be in
         /// the pack or the spell fizzles, spending nothing.
-        reagents: Vec<(Graphic, u16)>,
+        reagents:  Vec<(Graphic, u16)>,
     },
     /// Heal a mobile — a spell's or a script's mending. Raises hit points toward
     /// the maximum and never past it.
@@ -749,11 +749,11 @@ pub enum Command {
     /// Strength and intelligence re-cap hit points and mana as they change.
     SetStats {
         /// Whose.
-        serial: Serial,
+        serial:       Serial,
         /// Strength.
-        strength: u16,
+        strength:     u16,
         /// Dexterity.
-        dexterity: u16,
+        dexterity:    u16,
         /// Intelligence.
         intelligence: u16,
     },
@@ -763,20 +763,20 @@ pub enum Command {
         /// Whose.
         serial: Serial,
         /// Which skill, by id.
-        skill: u8,
+        skill:  u8,
         /// The value in tenths.
-        value: u16,
+        value:  u16,
     },
     /// Override a weapon item's speed and damage — a shard's magic sword.
     SetWeapon {
         /// The weapon item.
         serial: Serial,
         /// Swing-speed base (higher swings faster).
-        speed: u16,
+        speed:  u16,
         /// Minimum damage before resistance.
-        min: u16,
+        min:    u16,
         /// Maximum damage before resistance.
-        max: u16,
+        max:    u16,
     },
     /// Put poison on an item — a dose in a bottle, or a coating on a blade.
     ///
@@ -787,9 +787,9 @@ pub enum Command {
     /// `charges` of zero removes any poison instead.
     SetPoison {
         /// The item.
-        serial: Serial,
+        serial:  Serial,
         /// The poison level, 0 (lesser) .. 4 (lethal).
-        level: PoisonLevel,
+        level:   PoisonLevel,
         /// Doses. One for a bottle; zero clears the poison.
         charges: u16,
     },
@@ -803,9 +803,9 @@ pub enum Command {
     /// edges are in tenths, like the skill, and may be negative.
     UseSkill {
         /// Whose.
-        serial: Serial,
+        serial:    Serial,
         /// Which skill, by id.
-        skill: u8,
+        skill:     u8,
         /// The lower edge of the band, in tenths.
         min_skill: i32,
         /// The upper edge, in tenths.
@@ -823,7 +823,7 @@ pub enum Command {
         /// Which skill, by id, exactly as sent — unchecked until
         /// `openshard_skills::use_skill_button` looks it up; the queue is a
         /// delivery, not a checkpoint.
-        skill: openshard_protocol::wire::RawSkillId,
+        skill:      openshard_protocol::wire::RawSkillId,
     },
     /// Open the tool-free craft catalogue. The request has no body: recipes,
     /// pack, tool and workbench are all authoritative world state.
@@ -837,9 +837,9 @@ pub enum Command {
         connection: ConnectionId,
         /// Which stat's arrow moved — one the status bar actually has, checked
         /// where the packet was read.
-        stat: openshard_protocol::mobile::Stat,
+        stat:       openshard_protocol::mobile::Stat,
         /// The new arrow.
-        lock: openshard_state::StatLock,
+        lock:       openshard_state::StatLock,
     },
     /// A client moved a skill's up/down/lock arrow (`0x3A`).
     SetSkillLock {
@@ -848,23 +848,23 @@ pub enum Command {
         /// Which skill, by id, exactly as sent — unchecked until
         /// `World::set_skill_lock` looks it up; the queue is a delivery, not a
         /// checkpoint.
-        skill: openshard_protocol::wire::RawSkillId,
+        skill:      openshard_protocol::wire::RawSkillId,
         /// The new lock state.
-        lock: openshard_protocol::skill::SkillLock,
+        lock:       openshard_protocol::skill::SkillLock,
     },
     /// A client toggled war mode (`0x72`).
     WarMode {
         /// Which connection.
         connection: ConnectionId,
         /// True for war, false for peace.
-        war: bool,
+        war:        bool,
     },
     /// A client asked to attack a mobile (`0x05`).
     Attack {
         /// Which connection.
         connection: ConnectionId,
         /// The target's serial, or none to clear the aim.
-        target: Option<openshard_protocol::serial::Serial>,
+        target:     Option<openshard_protocol::serial::Serial>,
     },
     /// A client said something (`0x03`).
     ///
@@ -874,22 +874,22 @@ pub enum Command {
         /// Which connection.
         connection: ConnectionId,
         /// How it is said, as the client sent it.
-        mode: RawTalkMode,
+        mode:       RawTalkMode,
         /// The colour the client chose.
-        hue: RawHue,
+        hue:        RawHue,
         /// The font the client chose.
-        font: RawFont,
+        font:       RawFont,
         /// The words.
-        text: String,
+        text:       String,
     },
     /// A mobile speaks by decree — a script's NPC, or a keyword answer.
     Speak {
         /// Who.
         serial: Serial,
         /// The colour.
-        hue: Hue,
+        hue:    Hue,
         /// The words.
-        text: String,
+        text:   String,
     },
     /// A client double-clicked an object (`0x06`) — for now, to open a container.
     DoubleClick {
@@ -899,7 +899,7 @@ pub enum Command {
         /// still the client's — the queue is a delivery, not a checkpoint, so
         /// [`RawSerial::validate`](openshard_protocol::serial::RawSerial::validate)
         /// runs where the command is acted on.
-        request: UseRequest,
+        request:    UseRequest,
     },
     /// A client single-clicked something and wants its name (`0x09`).
     SingleClick {
@@ -907,21 +907,21 @@ pub enum Command {
         connection: ConnectionId,
         /// The clicked object, by serial — checked where the packet was read, so
         /// this addresses something or the command was never queued.
-        serial: Serial,
+        serial:     Serial,
     },
     /// A client asked for the AoS tooltip of one or more objects (`0xD6`).
     QueryProperties {
         /// Which connection asked.
         connection: ConnectionId,
         /// The objects whose tooltips are wanted, by serial.
-        serials: Vec<RawSerial>,
+        serials:    Vec<RawSerial>,
     },
     /// A client asked to open an object's context menu (`0xBF` `0x13`).
     ContextMenuRequest {
         /// Which connection asked.
         connection: ConnectionId,
         /// The object, as the client named it.
-        serial: RawSerial,
+        serial:     RawSerial,
     },
     /// A client asked for a designed house's picture (`0xBF` `0x1E`).
     ///
@@ -931,7 +931,7 @@ pub enum Command {
         /// Which connection asked.
         connection: ConnectionId,
         /// The house, as the client named it.
-        serial: RawSerial,
+        serial:     RawSerial,
     },
     /// A client of ours asked for some of the ground (`0xBF` `0xE002`).
     ///
@@ -945,11 +945,11 @@ pub enum Command {
         /// Which facet's ground, as the client named it. Not checked here: a
         /// facet this shard does not hold is a refusal the tick sends, and the
         /// queue is a delivery rather than a checkpoint.
-        facet: Facet,
+        facet:      Facet,
         /// Which chunks of it, already capped at
         /// [`MAX_CHUNKS`](openshard_protocol::chunks::MAX_CHUNKS) by the
         /// decoder — a request over the cap never became a command.
-        chunks: Vec<openshard_protocol::chunks::ChunkAt>,
+        chunks:     Vec<openshard_protocol::chunks::ChunkAt>,
     },
     /// A client of ours asked what has moved since it last held this facet
     /// (`0xBF` `0xE007`).
@@ -962,11 +962,11 @@ pub enum Command {
         connection: ConnectionId,
         /// Which facet's ground, as the client named it. Not checked here, for
         /// [`RequestChunks`](Self::RequestChunks)'s reason.
-        facet: Facet,
+        facet:      Facet,
         /// The revision the client says it already holds. An input and not an
         /// invariant: a revision this shard never published is one of the things
         /// the answer accounts for.
-        revision: openshard_protocol::chunks::WorldRevision,
+        revision:   openshard_protocol::chunks::WorldRevision,
     },
     /// A client of ours asked to commit a map-editor draft (`0xBF` `0xE009`).
     ///
@@ -977,18 +977,18 @@ pub enum Command {
         /// Which authenticated connection submitted the draft.
         connection: ConnectionId,
         /// Facet, exact parent and bounded canonical operations.
-        request: openshard_protocol::mapedit::MapEditRequest,
+        request:    openshard_protocol::mapedit::MapEditRequest,
     },
     /// A client picked a context-menu entry (`0xBF` `0x15`).
     ContextMenuSelect {
         /// Which connection asked.
         connection: ConnectionId,
         /// The object the menu was opened on, as the client named it.
-        serial: RawSerial,
+        serial:     RawSerial,
         /// The chosen entry, by the tag the menu gave it. Checked against the
         /// entries the object offers in the tick, not here: the queue is a
         /// delivery, not a checkpoint.
-        index: openshard_protocol::context::RawContextMenuIndex,
+        index:      openshard_protocol::context::RawContextMenuIndex,
     },
     /// A client asked its party to do something (`0xBF` `0x06`).
     ///
@@ -1000,19 +1000,19 @@ pub enum Command {
         /// Which connection asked.
         connection: ConnectionId,
         /// What it asked for.
-        request: openshard_protocol::party::PartyRequest,
+        request:    openshard_protocol::party::PartyRequest,
     },
     /// A client asked to wear the item on its cursor (`0x13`).
     EquipItem {
         /// Which connection.
         connection: ConnectionId,
         /// The item to wear, as the client names it.
-        item: RawSerial,
+        item:       RawSerial,
         /// The layer the client proposes. Which slots may be worn into is
         /// `openshard_items`' rule, and it is applied there.
-        layer: RawLayer,
+        layer:      RawLayer,
         /// The mobile to wear it — usually the player's own.
-        mobile: RawSerial,
+        mobile:     RawSerial,
     },
     /// A client asked to pick an item up onto its cursor (`0x07`).
     PickUpItem {
@@ -1020,18 +1020,18 @@ pub enum Command {
         connection: ConnectionId,
         /// The item's serial, as the client names it. A lift the server refuses
         /// is answered with a `0x27`, so the check is at the seam and not here.
-        serial: RawSerial,
+        serial:     RawSerial,
         /// How many of a stack to lift. Honoured for a ground pile — part is
         /// taken, the remainder left as a new dupe — and ignored for a contained
         /// or worn item, which lifts whole (the split there is still roadmap).
-        amount: u16,
+        amount:     u16,
     },
     /// A client asked to put the item on its cursor down (`0x08`).
     DropItem {
         /// Which connection.
-        connection: ConnectionId,
+        connection:  ConnectionId,
         /// The item's serial, as the client names it.
-        serial: RawSerial,
+        serial:      RawSerial,
         /// Where it is going, already read as the destination means it — a world
         /// tile for the ground, a gump offset for a container, nothing at all
         /// for a mobile. The packet has one position field for all three; the
@@ -1053,17 +1053,17 @@ pub enum Command {
         /// The escrow container the window is drawn on, as the client names it.
         /// Checked against the trades this side remembers opening — the queue is
         /// a delivery and not a checkpoint.
-        container: RawSerial,
+        container:  RawSerial,
         /// Whether the checkbox is now ticked. Cancelling is
         /// [`TradeCancel`](Self::TradeCancel).
-        accepted: bool,
+        accepted:   bool,
     },
     /// A client closed its secure trade window (`0x6F` action 1).
     TradeCancel {
         /// Which connection.
         connection: ConnectionId,
         /// The escrow container the window is drawn on, as the client names it.
-        container: RawSerial,
+        container:  RawSerial,
     },
     /// A connection went away.
     Disconnect {
@@ -1093,23 +1093,23 @@ pub enum Command {
         /// Which connection asked.
         connection: ConnectionId,
         /// Which slot of the list it was last sent.
-        slot: RawCharacterSlot,
+        slot:       RawCharacterSlot,
     },
     /// Show a gump to a mobile's client — a content-built dialog (a quest offer). The
     /// reply comes back as a [`GumpAnswered`](crate::events::GumpAnswered) event.
     ShowGump {
         /// Who sees it.
-        serial: Serial,
+        serial:  Serial,
         /// The gump id the reply is keyed on. A [`GumpId`] and not a raw one:
         /// the pack chose it, and the script bridge is where its JSON number
         /// became a type — the same seam `Command::Speak` crosses.
         gump_id: openshard_protocol::gump::GumpId,
         /// Where the window opens on the screen.
-        at: openshard_protocol::gump::GumpPoint,
+        at:      openshard_protocol::gump::GumpPoint,
         /// The gump layout string.
-        layout: String,
+        layout:  String,
         /// The text lines the layout indexes into.
-        lines: Vec<String>,
+        lines:   Vec<String>,
     },
     /// Replace every trade's speech.
     /// Queued at load time.
@@ -1128,12 +1128,12 @@ pub enum Command {
         /// Which NPC.
         serial: Serial,
         /// Which quests, by key. Empty un-binds it.
-        keys: Vec<openshard_state::QuestKey>,
+        keys:   Vec<openshard_state::QuestKey>,
     },
     /// Mark an NPC as escortable, and save that with it.
     MakeEscortable {
         /// Which NPC.
-        serial: Serial,
+        serial:      Serial,
         /// The region it wants to reach; empty lets the quest decide.
         destination: String,
     },
@@ -1153,7 +1153,7 @@ pub enum Command {
     /// replacing.
     CloseGump {
         /// Whose client.
-        serial: Serial,
+        serial:  Serial,
         /// Which dialog, by the id it was opened under.
         gump_id: openshard_protocol::gump::GumpId,
     },
@@ -1162,7 +1162,7 @@ pub enum Command {
         /// Who reads it.
         serial: Serial,
         /// The words.
-        text: String,
+        text:   String,
     },
     /// Play a sound for one player.
     PlaySound {
@@ -1170,18 +1170,18 @@ pub enum Command {
         serial: Serial,
         /// The sound id. The script bridge is where the raw JSON number becomes
         /// this type — the same seam `Command::Speak` crosses for its `Hue`.
-        sound: openshard_protocol::wire::SoundId,
+        sound:  openshard_protocol::wire::SoundId,
     },
     /// Put an item into a player's backpack — a quest reward.
     GiveItem {
         /// Whose backpack.
-        serial: Serial,
+        serial:    Serial,
         /// The item graphic.
-        graphic: Graphic,
+        graphic:   Graphic,
         /// Its hue, or 0.
-        hue: Hue,
+        hue:       Hue,
         /// How many.
-        amount: u16,
+        amount:    u16,
         /// Whether it merges onto a like pile.
         stackable: bool,
     },
@@ -1189,13 +1189,13 @@ pub enum Command {
     /// this instead of selecting a classic graphic/hue projection.
     GiveItemKind {
         /// Whose backpack.
-        serial: Serial,
+        serial:    Serial,
         /// The item type to award.
         item_kind: ItemKindId,
         /// Its material, when the item kind declares a material family.
-        material: Option<MaterialId>,
+        material:  Option<MaterialId>,
         /// How many.
-        amount: u16,
+        amount:    u16,
         /// Whether compatible piles merge.
         stackable: bool,
     },
@@ -1204,11 +1204,11 @@ pub enum Command {
     /// [`ItemsTaken`](crate::ItemsTaken) event.
     TakeItem {
         /// Whose backpack.
-        serial: Serial,
+        serial:  Serial,
         /// The item graphic to take.
         graphic: Graphic,
         /// How many to take.
-        amount: u16,
+        amount:  u16,
     },
     /// Take an exact semantic item identity from a player's backpack — the
     /// migration-safe counterpart of [`Self::TakeItem`]. The request accepts a
@@ -1216,13 +1216,13 @@ pub enum Command {
     /// same kind/material pair.
     TakeItemKind {
         /// Whose backpack.
-        serial: Serial,
+        serial:    Serial,
         /// The semantic item kind to take.
         item_kind: ItemKindId,
         /// The required material, if this kind is materialized.
-        material: Option<MaterialId>,
+        material:  Option<MaterialId>,
         /// How many to take.
-        amount: u16,
+        amount:    u16,
     },
     /// A client asked to cast a spell (from its spellbook or a macro). The world
     /// only says it happened, via [`SpellRequested`]; a script does the casting.
@@ -1230,14 +1230,14 @@ pub enum Command {
         /// Which connection asked.
         connection: ConnectionId,
         /// Which spell, zero-based.
-        spell: SpellId,
+        spell:      SpellId,
     },
     /// Fill a vendor's stock crate with priced goods.
     StockVendor {
         /// The vendor mobile.
         serial: Serial,
         /// The goods, priced and labelled.
-        stock: Vec<npc::StockLine>,
+        stock:  Vec<npc::StockLine>,
     },
     /// Put an item into a container — a pack filling a corpse with loot off a
     /// [`CorpseCreated`](crate::events::CorpseCreated) event.
@@ -1245,11 +1245,11 @@ pub enum Command {
         /// The container — a corpse, a chest.
         container: Serial,
         /// The item graphic.
-        graphic: Graphic,
+        graphic:   Graphic,
         /// Its hue, or 0.
-        hue: Hue,
+        hue:       Hue,
         /// How many; a stackable merges, a single is one item.
-        amount: u16,
+        amount:    u16,
         /// Whether it stacks (gold, reagents, arrows) or is a discrete piece
         /// (a weapon, a suit of armour).
         stackable: bool,
@@ -1262,9 +1262,9 @@ pub enum Command {
         /// The semantic item kind to place.
         item_kind: ItemKindId,
         /// Its material, when the item kind declares one.
-        material: Option<MaterialId>,
+        material:  Option<MaterialId>,
         /// How many.
-        amount: u16,
+        amount:    u16,
         /// Whether compatible piles merge.
         stackable: bool,
     },
@@ -1284,9 +1284,9 @@ pub enum Command {
         /// The vendor mobile, as the client named it — checked in
         /// `openshard_npc::vendor::buy`, which is the seam. The queue is a
         /// delivery and not a checkpoint; see `docs/protocol_newtypes.md`.
-        vendor: openshard_protocol::serial::RawSerial,
+        vendor:     openshard_protocol::serial::RawSerial,
         /// What it took, by stock serial and amount.
-        purchases: Vec<openshard_protocol::vendor::Purchase>,
+        purchases:  Vec<openshard_protocol::vendor::Purchase>,
     },
     /// A client sold to a vendor (`0x9F`).
     Sell {
@@ -1294,9 +1294,9 @@ pub enum Command {
         connection: ConnectionId,
         /// The vendor mobile, as the client named it — checked in
         /// `openshard_npc::vendor::sell`.
-        vendor: openshard_protocol::serial::RawSerial,
+        vendor:     openshard_protocol::serial::RawSerial,
         /// What it let go, by item serial and amount.
-        sales: Vec<openshard_protocol::vendor::Sale>,
+        sales:      Vec<openshard_protocol::vendor::Sale>,
     },
 }
 

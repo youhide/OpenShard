@@ -31,10 +31,20 @@
 //! is not a second kind of world, though: it is an empty overlay, which every
 //! reader already handles because a facet starts that way.
 
-use crate::chunk::{AssemblyError, Chunk};
+use crate::chunk::{
+    AssemblyError,
+    Chunk,
+};
 use crate::overlay::Overlay;
-use crate::patch::{Patch, PatchError, Undo};
-use crate::snapshot::{MapRevision, MapSnapshot};
+use crate::patch::{
+    Patch,
+    PatchError,
+    Undo,
+};
+use crate::snapshot::{
+    MapRevision,
+    MapSnapshot,
+};
 
 /// One facet as its owner holds it.
 ///
@@ -206,20 +216,28 @@ impl std::error::Error for ChunksError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::grid::{BlockExtent, Tile};
-    use crate::map::LandCell;
-    use crate::map::WorldMap;
-    use crate::overlay::Cover;
     use openshard_protocol::world::Facet;
     use openshard_tiles::LandTileId;
+
+    use super::*;
+    use crate::grid::{
+        BlockExtent,
+        Tile,
+    };
+    use crate::map::{
+        LandCell,
+        WorldMap,
+    };
+    use crate::overlay::Cover;
 
     fn facet() -> MapSnapshot {
         MapSnapshot::new(
             Facet(0),
-            WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-                tile: LandTileId(0),
-                z: 0,
+            WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+                LandCell {
+                    tile: LandTileId(0),
+                    z:    0,
+                }
             }),
         )
     }
@@ -253,16 +271,18 @@ mod tests {
 
         // The same one-block facet, one tile of it moved, cut at the next
         // revision — which is exactly what a shard would send after a `.setland`.
-        let mut moved = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(0),
-            z: 0,
+        let mut moved = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z:    0,
+            }
         });
         moved.set_land(
             3,
             4,
             LandCell {
                 tile: LandTileId(9),
-                z: 40,
+                z:    40,
             },
         );
         let published = MapSnapshot::restored(Facet(0), was.after(), moved);
@@ -275,7 +295,7 @@ mod tests {
             world.snapshot().expect("it still has ground").map().land(3, 4),
             Some(LandCell {
                 tile: LandTileId(9),
-                z: 40
+                z:    40,
             }),
         );
         assert!(

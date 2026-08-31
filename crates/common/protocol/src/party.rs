@@ -33,10 +33,20 @@
 //! removed slot — the same layout `PartyRemoveMember` writes, with the list
 //! empty. So one type serves both, and the caller says who left.
 
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
-use crate::serial::{RawSerial, Serial};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+};
+use crate::serial::{
+    RawSerial,
+    Serial,
+};
 use crate::version::ClientVersion;
 
 /// The subcommand every party packet rides, in both directions.
@@ -65,7 +75,7 @@ pub enum PartyRequest {
     /// `0x03` — say this to one member.
     PrivateMessage {
         /// Who it is for.
-        to: RawSerial,
+        to:   RawSerial,
         /// What was typed.
         text: String,
     },
@@ -98,10 +108,12 @@ impl PartyRequest {
         Ok(match kind {
             0x01 => Self::Add,
             0x02 => Self::Remove(RawSerial(reader.u32()?)),
-            0x03 => Self::PrivateMessage {
-                to: RawSerial(reader.u32()?),
-                text: utf16_be_to_end(reader),
-            },
+            0x03 => {
+                Self::PrivateMessage {
+                    to:   RawSerial(reader.u32()?),
+                    text: utf16_be_to_end(reader),
+                }
+            }
             0x04 => Self::PublicMessage(utf16_be_to_end(reader)),
             0x06 => Self::SetCanLoot(reader.bool()?),
             0x08 => Self::Accept(RawSerial(reader.u32()?)),
@@ -273,9 +285,9 @@ pub struct PartyTextMessage {
     /// client draws differently.
     pub to_all: bool,
     /// Who said it.
-    pub from: Serial,
+    pub from:   Serial,
     /// What they said.
-    pub text: String,
+    pub text:   String,
 }
 
 impl PartyTextMessage {
@@ -443,7 +455,7 @@ mod tests {
         assert_eq!(
             request(&private),
             PartyRequest::PrivateMessage {
-                to: RawSerial(0x2A),
+                to:   RawSerial(0x2A),
                 // No terminator, and it still reads: ServUO's own reader runs to
                 // the end of the packet.
                 text: "hi".to_owned(),
@@ -517,13 +529,13 @@ mod tests {
             }),
             ServerPacket::PartyTextMessage(PartyTextMessage {
                 to_all: true,
-                from: leader,
-                text: "regroup".to_owned(),
+                from:   leader,
+                text:   "regroup".to_owned(),
             }),
             ServerPacket::PartyTextMessage(PartyTextMessage {
                 to_all: false,
-                from: leader,
-                text: "you first".to_owned(),
+                from:   leader,
+                text:   "you first".to_owned(),
             }),
             ServerPacket::PartyInvitation(PartyInvitation { leader }),
         ] {
@@ -567,8 +579,8 @@ mod tests {
                 encode_packet(
                     &PartyTextMessage {
                         to_all: true,
-                        from: leader,
-                        text: "hi".to_owned(),
+                        from:   leader,
+                        text:   "hi".to_owned(),
                     },
                     version(),
                 ),
@@ -578,8 +590,8 @@ mod tests {
                 encode_packet(
                     &PartyTextMessage {
                         to_all: false,
-                        from: leader,
-                        text: "hi".to_owned(),
+                        from:   leader,
+                        text:   "hi".to_owned(),
                     },
                     version(),
                 ),

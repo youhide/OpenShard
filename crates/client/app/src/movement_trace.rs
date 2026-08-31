@@ -1,32 +1,48 @@
 //! Line-oriented trace for diagnosing prediction/presentation drift.
 
-use std::fs::{File, OpenOptions};
+use std::fs::{
+    File,
+    OpenOptions,
+};
 use std::io::Write;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{
+    AtomicU64,
+    Ordering,
+};
+use std::time::{
+    SystemTime,
+    UNIX_EPOCH,
+};
 
-use openshard_client_render::camera::{Camera, RealPoint, WorldPoint};
+use openshard_client_render::camera::{
+    Camera,
+    RealPoint,
+    WorldPoint,
+};
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::world::Point;
 
-use crate::world::{MotionSnapshot, WorldState};
+use crate::world::{
+    MotionSnapshot,
+    WorldState,
+};
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 struct Snapshot {
-    view: Option<Point>,
-    motion: MotionSnapshot,
-    camera_eye: WorldPoint,
+    view:        Option<Point>,
+    motion:      MotionSnapshot,
+    camera_eye:  WorldPoint,
     body_screen: RealPoint,
 }
 
 pub(crate) struct MovementTrace {
-    file: File,
-    last: Option<Snapshot>,
-    pid: u32,
-    session: String,
+    file:     File,
+    last:     Option<Snapshot>,
+    pid:      u32,
+    session:  String,
     event_id: u64,
 }
 

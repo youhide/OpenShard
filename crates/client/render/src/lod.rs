@@ -15,7 +15,10 @@
 
 use openshard_map::map::BLOCK_SIZE;
 
-use crate::camera::{Camera, TILE_WIDTH};
+use crate::camera::{
+    Camera,
+    TILE_WIDTH,
+};
 
 /// The physical-pixel width and height of one map block's ground footprint.
 ///
@@ -187,7 +190,7 @@ impl LodThresholds {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BlockLodSelector {
     thresholds: LodThresholds,
-    current: BlockLod,
+    current:    BlockLod,
 }
 
 impl BlockLodSelector {
@@ -218,9 +221,13 @@ impl BlockLodSelector {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::camera::{RealPixel, Zoom};
     use openshard_protocol::world::Point;
+
+    use super::*;
+    use crate::camera::{
+        RealPixel,
+        Zoom,
+    };
 
     fn size(pixels: f32) -> ProjectedBlockSize {
         ProjectedBlockSize::new(pixels).expect("a positive test size")

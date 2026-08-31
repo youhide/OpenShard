@@ -25,11 +25,16 @@
 //! weapons override that byte in code, and only those six carry a [`WeaponData::hands`];
 //! see [`weapon_layer`].
 
-use crate::Skill;
 use openshard_config::CombatEra;
 use openshard_protocol::item_kind::ItemKindId;
-use openshard_protocol::wire::{Graphic, Layer, SoundId};
+use openshard_protocol::wire::{
+    Graphic,
+    Layer,
+    SoundId,
+};
 use openshard_protocol::world::RangedRange;
+
+use crate::Skill;
 
 /// The paperdoll layer a one-handed weapon sits on (UO layer 1).
 pub const LAYER_ONE_HANDED: Layer = Layer(1);
@@ -158,35 +163,35 @@ impl WeaponAnimation {
 pub struct WeaponData {
     /// The durable item kind for a registered weapon. Most legacy rows have no
     /// registry entry yet and remain reachable through [`weapon_data`].
-    pub item_kind: Option<ItemKindId>,
+    pub item_kind:  Option<ItemKindId>,
     /// The item graphic this row describes.
-    pub graphic: Graphic,
+    pub graphic:    Graphic,
     /// The skill it trains and strikes with.
-    pub skill: WeaponSkill,
+    pub skill:      WeaponSkill,
     /// How it wounds — which family of Arms Lore lines describes it.
-    pub kind: WeaponKind,
+    pub kind:       WeaponKind,
     /// Pre-AoS (era 1) speed constant — the `base` in Sphere's swing formula.
-    pub old_speed: u16,
+    pub old_speed:  u16,
     /// Pre-AoS minimum damage, before resistance.
-    pub old_min: u16,
+    pub old_min:    u16,
     /// Pre-AoS maximum damage, before resistance.
-    pub old_max: u16,
+    pub old_max:    u16,
     /// AoS (era 2) speed constant.
-    pub aos_speed: u16,
+    pub aos_speed:  u16,
     /// AoS minimum damage.
-    pub aos_min: u16,
+    pub aos_min:    u16,
     /// AoS maximum damage.
-    pub aos_max: u16,
+    pub aos_max:    u16,
     /// ML (era 4) swing speed, in hundredths of a second (ServUO's `MlSpeed`).
-    pub ml_speed: u16,
+    pub ml_speed:   u16,
     /// The sound a whiff makes — ServUO's `DefMissSound` for this weapon class.
     pub miss_sound: SoundId,
     /// Whether Lumberjacking lends this weapon a damage bonus (an axe).
-    pub is_axe: bool,
+    pub is_axe:     bool,
     /// The ammunition this weapon fires, one graphic per shot. `None` for every
     /// melee row — a melee weapon has no ammunition concept at all, which is the
     /// case `Option` exists for, not "unknown."
-    pub ammo: Option<Graphic>,
+    pub ammo:       Option<Graphic>,
     /// The graphic the shot itself is drawn with while it crosses the gap —
     /// ServUO's per-weapon `EffectID` (the bow fires `0x0F42`, both crossbows fire
     /// `0x1BFE`). `None` for melee, matching [`ammo`](Self::ammo).
@@ -194,7 +199,7 @@ pub struct WeaponData {
     /// How far this weapon reaches — ServUO's `DefMaxRange` (the bow's ten tiles,
     /// eight for both crossbows: a bow outranges a crossbow, so this is not one
     /// shared constant). `None` for melee, matching [`ammo`](Self::ammo).
-    pub range: Option<RangedRange>,
+    pub range:      Option<RangedRange>,
     /// The paperdoll layer this weapon class insists on, where it does not trust
     /// `tiledata.mul` — `None` for the great majority, which take the client's
     /// byte.
@@ -205,7 +210,7 @@ pub struct WeaponData {
     /// crossbow, the heavy crossbow, the battle axe and the war hammer as
     /// one-handed. Everyone knows you do not fire a bow one-handed, so ServUO says
     /// so in code and so does this. Read through [`weapon_layer`], never directly.
-    pub hands: Option<Layer>,
+    pub hands:      Option<Layer>,
 }
 
 /// Pick the era-appropriate damage value: the AoS family (eras 2 AoS, 3 SE, 4 ML)

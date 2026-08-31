@@ -83,7 +83,11 @@ use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 
 use crate::footing::Footing;
-use crate::walk::{Heading, Lean, step_allowed};
+use crate::walk::{
+    Heading,
+    Lean,
+    step_allowed,
+};
 
 /// What is open around a body, as far as one step in one intended direction can
 /// tell: the intended tile and the two flanks that could take its place.
@@ -97,7 +101,7 @@ pub struct Around {
     /// flanks that are both open — see [`Detour::step`].
     intent: Heading,
     /// Whether the tile [`Around::intent`] points at can be stepped onto.
-    ahead: bool,
+    ahead:  bool,
     /// The two directions the body could slide onto instead, clockwise of the
     /// intent first, and whether each is open. Which two they are is
     /// [`flanks`]'s answer, and it depends on the intent.
@@ -330,9 +334,14 @@ const fn flanks(intent: Direction) -> [Direction; 2] {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_map::grid::Tile;
-    use openshard_map::overlay::{Cover, Doors, Overlay};
+    use openshard_map::overlay::{
+        Cover,
+        Doors,
+        Overlay,
+    };
+
+    use super::*;
 
     /// Every state the machine can be in, for the enumerations below: the two
     /// slides are both flanks, because which one is remembered is exactly what
@@ -360,10 +369,12 @@ mod tests {
                 let (ahead, clockwise, counter) = (scene & 1 != 0, scene & 2 != 0, scene & 4 != 0);
                 let around = Around::new(Heading::centred(intent), ahead, clockwise, counter);
                 for mut detour in every_state(intent) {
-                    let open = |direction| match direction {
-                        d if d == intent => ahead,
-                        d if d == cw => clockwise,
-                        _ => counter,
+                    let open = |direction| {
+                        match direction {
+                            d if d == intent => ahead,
+                            d if d == cw => clockwise,
+                            _ => counter,
+                        }
                     };
                     match detour.step(&around, Leeway::Quarter) {
                         Step::Ahead(direction) => {
@@ -378,10 +389,12 @@ mod tests {
                             assert!(open(direction), "{intent:?}/{scene}: slid onto a shut tile");
                             assert!(!ahead, "{intent:?}/{scene}: slid aside with the way open");
                         }
-                        Step::Stuck => assert!(
-                            !ahead && !clockwise && !counter,
-                            "{intent:?}/{scene}: gave up with somewhere to go"
-                        ),
+                        Step::Stuck => {
+                            assert!(
+                                !ahead && !clockwise && !counter,
+                                "{intent:?}/{scene}: gave up with somewhere to go"
+                            )
+                        }
                     }
                 }
             }
@@ -458,14 +471,18 @@ mod tests {
                         (false, _) => (Some(Step::Stuck), None),
                     };
                     match expected {
-                        (Some(exact), _) => assert_eq!(
-                            step, exact,
-                            "{intent:?}/{scene} from {was:?}: an eighth of leeway is a corner, not a wall"
-                        ),
-                        (None, flank) => assert!(
-                            taken == flank || taken == Some(if flank == Some(cw) { ccw } else { cw }),
-                            "{intent:?}/{scene} from {was:?}: {step:?} is not a flank of the corner"
-                        ),
+                        (Some(exact), _) => {
+                            assert_eq!(
+                                step, exact,
+                                "{intent:?}/{scene} from {was:?}: an eighth of leeway is a corner, not a wall"
+                            )
+                        }
+                        (None, flank) => {
+                            assert!(
+                                taken == flank || taken == Some(if flank == Some(cw) { ccw } else { cw }),
+                                "{intent:?}/{scene} from {was:?}: {step:?} is not a flank of the corner"
+                            )
+                        }
                     }
                     // And whichever it was, it was open.
                     if let Some(direction) = taken {

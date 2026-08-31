@@ -13,10 +13,24 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::wire::Graphic;
-use openshard_state::components::{Drawn, ItemKind, Weapon};
-use openshard_state::weapon::{LAYER_ONE_HANDED, WeaponData, WeaponSkill, weapon_data, weapon_data_for_kind};
-use openshard_state::weapon::{LAYER_TWO_HANDED, WeaponKind};
-use openshard_state::{Skill, WorldState};
+use openshard_state::components::{
+    Drawn,
+    ItemKind,
+    Weapon,
+};
+use openshard_state::weapon::{
+    LAYER_ONE_HANDED,
+    LAYER_TWO_HANDED,
+    WeaponData,
+    WeaponKind,
+    WeaponSkill,
+    weapon_data,
+    weapon_data_for_kind,
+};
+use openshard_state::{
+    Skill,
+    WorldState,
+};
 
 use crate::MELEE_MISS_SOUND;
 
@@ -65,37 +79,41 @@ pub fn equipped_weapon(state: &WorldState, mobile: EntityId) -> Option<WeaponDat
         Some(kind) => weapon_data_for_kind(kind.0),
         // Older world data has no semantic identity yet. It remains supported
         // until it is migrated, but a declared kind always wins over its art.
-        None => state
-            .registry
-            .get::<Drawn>(item)
-            .and_then(|graphic| weapon_data(graphic.id)),
+        None => {
+            state
+                .registry
+                .get::<Drawn>(item)
+                .and_then(|graphic| weapon_data(graphic.id))
+        }
     }
     .copied();
     match state.registry.get::<Weapon>(item) {
         // An override stands the item's stats up, keeping the base graphic's skill
         // (a magic longsword is still a Swords weapon); same numbers either era.
-        Some(&Weapon { speed, min, max }) => Some(WeaponData {
-            item_kind: base.and_then(|weapon| weapon.item_kind),
-            graphic: Graphic(0),
-            skill: base.map_or(WeaponSkill::Wrestling, |weapon| weapon.skill),
-            kind: base.map_or(WeaponKind::Bashing, |weapon| weapon.kind),
-            old_speed: speed,
-            old_min: min,
-            old_max: max,
-            aos_speed: speed,
-            aos_min: min,
-            aos_max: max,
-            // ML speed in hundredths-of-a-second is a different unit from the swing
-            // base; lacking a better value, mirror the base's, and inherit the
-            // graphic's miss sound and axe flag.
-            ml_speed: base.map_or(speed, |weapon| weapon.ml_speed),
-            miss_sound: base.map_or(MELEE_MISS_SOUND, |weapon| weapon.miss_sound),
-            is_axe: base.is_some_and(|weapon| weapon.is_axe),
-            hands: base.and_then(|weapon| weapon.hands),
-            ammo: base.and_then(|weapon| weapon.ammo),
-            effect_art: base.and_then(|weapon| weapon.effect_art),
-            range: base.and_then(|weapon| weapon.range),
-        }),
+        Some(&Weapon { speed, min, max }) => {
+            Some(WeaponData {
+                item_kind:  base.and_then(|weapon| weapon.item_kind),
+                graphic:    Graphic(0),
+                skill:      base.map_or(WeaponSkill::Wrestling, |weapon| weapon.skill),
+                kind:       base.map_or(WeaponKind::Bashing, |weapon| weapon.kind),
+                old_speed:  speed,
+                old_min:    min,
+                old_max:    max,
+                aos_speed:  speed,
+                aos_min:    min,
+                aos_max:    max,
+                // ML speed in hundredths-of-a-second is a different unit from the swing
+                // base; lacking a better value, mirror the base's, and inherit the
+                // graphic's miss sound and axe flag.
+                ml_speed:   base.map_or(speed, |weapon| weapon.ml_speed),
+                miss_sound: base.map_or(MELEE_MISS_SOUND, |weapon| weapon.miss_sound),
+                is_axe:     base.is_some_and(|weapon| weapon.is_axe),
+                hands:      base.and_then(|weapon| weapon.hands),
+                ammo:       base.and_then(|weapon| weapon.ammo),
+                effect_art: base.and_then(|weapon| weapon.effect_art),
+                range:      base.and_then(|weapon| weapon.range),
+            })
+        }
         None => base,
     }
 }
@@ -122,7 +140,10 @@ pub fn equipped_weapon_item(state: &WorldState, mobile: EntityId) -> Option<Enti
 mod tests {
     use openshard_config::CombatEra;
     use openshard_protocol::wire::Graphic;
-    use openshard_state::weapon::{swing_base, weapon_data};
+    use openshard_state::weapon::{
+        swing_base,
+        weapon_data,
+    };
 
     /// A count of tenths of a second, as the ticks it comes to.
     ///

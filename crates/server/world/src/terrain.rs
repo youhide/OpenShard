@@ -6,7 +6,11 @@
 //! client may not depend on `openshard-world`. This module keeps only the tests
 //! that need something a client crate does not have.
 
-pub use openshard_movement::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
+pub use openshard_movement::{
+    MAX_STEP_UP,
+    MapTerrain,
+    PLAYER_HEIGHT,
+};
 
 #[cfg(test)]
 mod tests {
@@ -22,7 +26,7 @@ mod tests {
     /// Only the table is read here, but it is read *through a terrain*, because
     /// what this pins is what a shard's own ground would answer.
     struct Install {
-        map: openshard_map::map::WorldMap,
+        map:   openshard_map::map::WorldMap,
         tiles: TileData,
         /// A terrain borrows one — see [`MapTerrain::new`]. Nothing in this
         /// file reads a surface, but a terrain is what the table is read

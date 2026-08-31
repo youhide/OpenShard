@@ -30,9 +30,15 @@
 //! would, and zero coverage is [`Color16::TRANSPARENT`] — nothing to draw.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use fontdue::{Font, FontSettings};
+use fontdue::{
+    Font,
+    FontSettings,
+};
 
 use crate::color::Color16;
 use crate::image::Image;
@@ -68,14 +74,14 @@ pub enum TtfFontError {
     /// The file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
     /// The bytes are not a TrueType or OpenType face `fontdue` recognises.
     Parse {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// What `fontdue` said, which is a `&str` rather than an
         /// `std::error::Error` on its side — kept as owned text here so this
         /// type does not borrow from a buffer nothing keeps around it.
@@ -107,7 +113,7 @@ pub struct TtfGlyph {
     /// The glyph's own ink, cropped to its bounding box — not a fixed cell,
     /// the way a `fonts.mul` character's stored width and height are not one
     /// either.
-    pub image: Image,
+    pub image:             Image,
     /// How far below the image's top edge the baseline sits, in pixels.
     /// Positive for a descender (a "g", a "y") sitting partly below the
     /// baseline, and it can exceed the image's own height when a glyph draws
@@ -118,7 +124,7 @@ pub struct TtfGlyph {
     /// rounded up: `fonts.mul`'s own per-character width is a whole byte, and
     /// a fractional advance here would place two glyphs a sub-pixel apart on
     /// one side and flush on the other, one line at a time.
-    pub advance: u16,
+    pub advance:           u16,
 }
 
 /// The measured vertical grid a TrueType face asks text lines to use.
@@ -132,7 +138,7 @@ pub struct TtfLineMetrics {
     /// Pixels from a line's top to its baseline.
     pub baseline_from_top: i32,
     /// Pixels to advance to the next line, including the face's designed gap.
-    pub line_height: i32,
+    pub line_height:       i32,
 }
 
 /// An operator-supplied TrueType face, ready to rasterize.
@@ -161,13 +167,17 @@ impl TtfFont {
     /// Read and parse a TrueType or OpenType face from `path`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, TtfFontError> {
         let path = path.as_ref();
-        let bytes = std::fs::read(path).map_err(|source| TtfFontError::Read {
-            path: path.to_owned(),
-            source,
+        let bytes = std::fs::read(path).map_err(|source| {
+            TtfFontError::Read {
+                path: path.to_owned(),
+                source,
+            }
         })?;
-        Self::from_bytes(bytes).map_err(|reason| TtfFontError::Parse {
-            path: path.to_owned(),
-            reason,
+        Self::from_bytes(bytes).map_err(|reason| {
+            TtfFontError::Parse {
+                path: path.to_owned(),
+                reason,
+            }
         })
     }
 
@@ -209,9 +219,11 @@ impl TtfFont {
     /// per-character approximation.
     #[must_use]
     pub fn line_metrics(&self, pixel_height: f32) -> TtfLineMetrics {
-        let fallback = || TtfLineMetrics {
-            baseline_from_top: (pixel_height * 0.8).round() as i32,
-            line_height: pixel_height.round() as i32,
+        let fallback = || {
+            TtfLineMetrics {
+                baseline_from_top: (pixel_height * 0.8).round() as i32,
+                line_height:       pixel_height.round() as i32,
+            }
         };
         let Some(metrics) = self.font.horizontal_line_metrics(pixel_height) else {
             return fallback();
@@ -220,10 +232,12 @@ impl TtfFont {
         let line_height = metrics.new_line_size.ceil() as i32;
         // A broken metric table must not create a zero-height input field.
         match (baseline_from_top > 0, line_height > 0) {
-            (true, true) => TtfLineMetrics {
-                baseline_from_top,
-                line_height,
-            },
+            (true, true) => {
+                TtfLineMetrics {
+                    baseline_from_top,
+                    line_height,
+                }
+            }
             _ => fallback(),
         }
     }
@@ -349,11 +363,9 @@ mod tests {
         assert!(glyph.image.width() > 0 && glyph.image.height() > 0);
         assert!(glyph.advance > 0);
         assert!(
-            (0..glyph.image.width()).any(|x| (0..glyph.image.height()).any(|y| !glyph
-                .image
-                .pixel(x, y)
-                .unwrap()
-                .is_transparent())),
+            (0..glyph.image.width()).any(|x| {
+                (0..glyph.image.height()).any(|y| !glyph.image.pixel(x, y).unwrap().is_transparent())
+            }),
             "a capital letter draws at least one pixel",
         );
     }

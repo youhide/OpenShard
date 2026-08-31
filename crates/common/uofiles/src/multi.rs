@@ -64,9 +64,15 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use openshard_protocol::wire::{Graphic, MultiId};
+use openshard_protocol::wire::{
+    Graphic,
+    MultiId,
+};
 use openshard_protocol::world::Point;
 
 /// How many multi ids a client's index can name.
@@ -190,17 +196,17 @@ pub struct Component {
     /// for its height and whether it blocks.
     pub graphic: Graphic,
     /// East, from the multi's origin.
-    pub dx: i16,
+    pub dx:      i16,
     /// South, from the multi's origin.
-    pub dy: i16,
+    pub dy:      i16,
     /// Up, from the ground the multi stands on.
-    pub dz: i16,
+    pub dz:      i16,
     /// The raw flag word, widened to 64 bits whichever layout it was read from.
     ///
     /// Kept whole rather than reduced to a `bool`, because the bits above the
     /// first are High Seas' own and nothing here yet knows what they mean —
     /// throwing them away would make that unknowable from a save.
-    pub flags: u64,
+    pub flags:   u64,
 }
 
 impl Component {
@@ -241,7 +247,7 @@ impl Component {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Multi {
     /// Its id, `0x4000` below the graphic the wire carries.
-    pub id: u16,
+    pub id:         u16,
     /// Every component, in file order, the undrawn ones included.
     ///
     /// The whole list rather than the drawn subset: what a *renderer* skips and
@@ -252,9 +258,9 @@ pub struct Multi {
     /// and south of the box's north-west corner.
     ///
     /// ServUO's `m_Center`, and the number a placement is measured from.
-    pub center: (i16, i16),
+    pub center:     (i16, i16),
     /// The bounding box, in tiles.
-    pub size: (u16, u16),
+    pub size:       (u16, u16),
 }
 
 impl Multi {
@@ -378,13 +384,17 @@ impl Multis {
     pub fn load_mul(index: impl AsRef<Path>, data: impl AsRef<Path>) -> Result<Self, MultiError> {
         let index_path = index.as_ref().to_path_buf();
         let data_path = data.as_ref().to_path_buf();
-        let index_bytes = std::fs::read(&index_path).map_err(|source| MultiError::Read {
-            path: index_path.clone(),
-            source,
+        let index_bytes = std::fs::read(&index_path).map_err(|source| {
+            MultiError::Read {
+                path: index_path.clone(),
+                source,
+            }
         })?;
-        let data_bytes = std::fs::read(&data_path).map_err(|source| MultiError::Read {
-            path: data_path.clone(),
-            source,
+        let data_bytes = std::fs::read(&data_path).map_err(|source| {
+            MultiError::Read {
+                path: data_path.clone(),
+                source,
+            }
         })?;
 
         // Two passes over the index: the first only to settle the layout, because
@@ -405,7 +415,7 @@ impl Multis {
         let format =
             MultiFormat::detect(entries.iter().map(|&(_, _, length)| length as u32)).ok_or_else(|| {
                 MultiError::Malformed {
-                    path: index_path,
+                    path:   index_path,
                     detail: format!(
                         "an entry length fits neither {COMPONENT_OLD}-byte legacy nor \
                      {COMPONENT_NEW}-byte High Seas components"
@@ -445,16 +455,20 @@ impl Multis {
     /// comes out of either reader means the same thing.
     pub fn load_uop(path: impl AsRef<Path>) -> Result<Self, MultiError> {
         let path = path.as_ref().to_path_buf();
-        let uop = crate::uop::Uop::open(&path).map_err(|source| MultiError::Container {
-            path: path.clone(),
-            source,
+        let uop = crate::uop::Uop::open(&path).map_err(|source| {
+            MultiError::Container {
+                path: path.clone(),
+                source,
+            }
         })?;
         let mut multis = BTreeMap::new();
         for id in 0..=MAX_MULTI_ID {
             let name = UOP_ENTRY.replace("{:06}", &format!("{id:06}"));
-            let Some(raw) = uop.raw_entry(&name).map_err(|source| MultiError::Container {
-                path: path.clone(),
-                source,
+            let Some(raw) = uop.raw_entry(&name).map_err(|source| {
+                MultiError::Container {
+                    path: path.clone(),
+                    source,
+                }
             })?
             else {
                 continue;
@@ -472,19 +486,23 @@ impl Multis {
                     raw.bytes,
                     raw.decompressed_length,
                 )
-                .map_err(|error| MultiError::Malformed {
-                    path: path.clone(),
-                    detail: format!(
-                        "multi {id:#06x} did not inflate ({:?} after {} bytes)",
-                        error.status,
-                        error.output.len()
-                    ),
+                .map_err(|error| {
+                    MultiError::Malformed {
+                        path:   path.clone(),
+                        detail: format!(
+                            "multi {id:#06x} did not inflate ({:?} after {} bytes)",
+                            error.status,
+                            error.output.len()
+                        ),
+                    }
                 })?;
                 &inflated[..]
             };
-            let components = read_uop_multi(bytes).ok_or_else(|| MultiError::Malformed {
-                path: path.clone(),
-                detail: format!("multi {id:#06x} ends mid-component"),
+            let components = read_uop_multi(bytes).ok_or_else(|| {
+                MultiError::Malformed {
+                    path:   path.clone(),
+                    detail: format!("multi {id:#06x} ends mid-component"),
+                }
             })?;
             multis.insert(id, Multi::new(id, components));
         }
@@ -551,9 +569,11 @@ fn read_component(bytes: &[u8], format: MultiFormat) -> Component {
     let word = |at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]);
     let flags = match format {
         MultiFormat::Legacy => u64::from(u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]])),
-        MultiFormat::HighSeas => u64::from_le_bytes([
-            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
-        ]),
+        MultiFormat::HighSeas => {
+            u64::from_le_bytes([
+                bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+            ])
+        }
     };
     Component {
         graphic: Graphic(word(0)),
@@ -610,34 +630,34 @@ pub enum MultiError {
     /// A file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
     /// The UOP container would not open.
     Container {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: crate::uop::UopError,
     },
     /// An entry could not be made sense of.
     Malformed {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// What was wrong.
         detail: String,
     },
     /// The index points past the end of the data file.
     Truncated {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Whose entry.
-        id: u16,
+        id:     u16,
         /// Where the index said the multi ended.
         wanted: usize,
         /// How long the file actually is.
-        had: usize,
+        had:    usize,
     },
 }
 
@@ -654,11 +674,13 @@ impl fmt::Display for MultiError {
                 id,
                 wanted,
                 had,
-            } => write!(
-                f,
-                "{}: multi {id:#06x} ends at {wanted} but the file is {had} bytes",
-                path.display()
-            ),
+            } => {
+                write!(
+                    f,
+                    "{}: multi {id:#06x} ends at {wanted} but the file is {had} bytes",
+                    path.display()
+                )
+            }
         }
     }
 }
@@ -800,20 +822,20 @@ mod tests {
     fn a_component_off_the_map_is_refused_rather_than_wrapped() {
         let west = Component {
             graphic: Graphic(0x0006),
-            dx: -3,
-            dy: 0,
-            dz: 0,
-            flags: 1,
+            dx:      -3,
+            dy:      0,
+            dz:      0,
+            flags:   1,
         };
         assert_eq!(west.placed_at(Point::new(10, 10, 0)), Some(Point::new(7, 10, 0)));
         assert_eq!(west.placed_at(Point::new(1, 10, 0)), None, "it wrapped east");
 
         let high = Component {
             graphic: Graphic(0x0006),
-            dx: 0,
-            dy: 0,
-            dz: 100,
-            flags: 1,
+            dx:      0,
+            dy:      0,
+            dz:      100,
+            flags:   1,
         };
         assert_eq!(high.placed_at(Point::new(10, 10, 100)), None, "the z was clamped");
     }

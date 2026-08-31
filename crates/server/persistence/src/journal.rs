@@ -67,8 +67,19 @@ use openshard_entities::EntityId;
 use openshard_protocol::serial::Serial;
 
 use crate::record::{
-    BoatRecord, CharacterRecord, DecorationRecord, GuildRecord, HouseDesignRecord, HouseRecord, Inventory,
-    ItemRecord, MobileRecord, RegionRecord, SCHEMA_VERSION, SpawnerRecord, WorldRecord,
+    BoatRecord,
+    CharacterRecord,
+    DecorationRecord,
+    GuildRecord,
+    HouseDesignRecord,
+    HouseRecord,
+    Inventory,
+    ItemRecord,
+    MobileRecord,
+    RegionRecord,
+    SCHEMA_VERSION,
+    SpawnerRecord,
+    WorldRecord,
 };
 
 /// A consistent picture of everything that changed, taken at one tick.
@@ -79,35 +90,35 @@ use crate::record::{
 pub struct Snapshot {
     /// The tick it was taken at. For logging, and for spotting a store that has
     /// fallen behind.
-    pub tick: u64,
+    pub tick:        u64,
     /// The shape the records are in. Travels with the data, so a store can
     /// refuse a save it does not understand rather than write it anyway.
-    pub schema: u32,
+    pub schema:      u32,
     /// Characters that changed.
-    pub characters: Vec<CharacterRecord>,
+    pub characters:  Vec<CharacterRecord>,
     /// Serials that are gone and must be deleted.
-    pub removed: Vec<u32>,
+    pub removed:     Vec<u32>,
     /// The full carried inventory of each character in this snapshot: the store
     /// replaces everything under each `owner` rather than diffing item by item.
     pub inventories: Vec<Inventory>,
     /// Every loose item on the ground, when this snapshot swept it. `Some(_)`
     /// replaces the whole ground; `None` leaves the stored ground untouched (this
     /// snapshot only carried character changes).
-    pub ground: Option<Vec<ItemRecord>>,
+    pub ground:      Option<Vec<ItemRecord>>,
     /// Every spawn region and its respawn timer, when this snapshot swept them.
     /// `Some(_)` replaces the whole set; `None` leaves the stored spawners be.
-    pub spawners: Option<Vec<SpawnerRecord>>,
+    pub spawners:    Option<Vec<SpawnerRecord>>,
     /// Every NPC mobile in the world, when this snapshot swept them. `Some(_)`
     /// replaces the whole set — a creature killed since the last save is simply
     /// absent, which is what makes its death stick across a restart.
-    pub mobiles: Option<Vec<MobileRecord>>,
+    pub mobiles:     Option<Vec<MobileRecord>>,
     /// Every placed decoration, when this snapshot swept them. Same replace-all
     /// semantics as the mobiles.
     pub decorations: Option<Vec<DecorationRecord>>,
     /// Every facet's named regions, when this snapshot swept them. Replace-all
     /// again — a snapshot is the whole map of the world, so a partial write would
     /// be worse than none.
-    pub regions: Option<Vec<RegionRecord>>,
+    pub regions:     Option<Vec<RegionRecord>>,
     /// Every guild on the shard, when this snapshot swept them. Replace-all, and
     /// that is what makes a disbanding stick: a guild dissolved since the last
     /// save is simply absent, the same way a killed creature is.
@@ -116,11 +127,11 @@ pub struct Snapshot {
     /// [`CharacterRecord`] field, written with the character — so the two halves
     /// are saved on their own schedules and a roster is only ever the sum of who
     /// names the guild.
-    pub guilds: Option<Vec<GuildRecord>>,
+    pub guilds:      Option<Vec<GuildRecord>>,
     /// Every named alliance, or `None` when none changed. Replace-all like the
     /// guilds and for the same reason: an alliance dissolved since the last save
     /// is absent from this list, and only a sweep makes that stick.
-    pub alliances: Option<Vec<crate::record::AllianceRecord>>,
+    pub alliances:   Option<Vec<crate::record::AllianceRecord>>,
     /// Every house on the shard, or `None` for a snapshot that did not sweep them.
     ///
     /// Replace-all, for the guilds' reason: a house demolished since the last
@@ -129,20 +140,20 @@ pub struct Snapshot {
     /// The *components* do not ride here. A multi's shape is a pure function of
     /// its id and lives in the client's files, so what is saved is where the
     /// house stands and which multi it is; the footprint is recomputed at boot.
-    pub houses: Option<Vec<HouseRecord>>,
+    pub houses:      Option<Vec<HouseRecord>>,
     /// Every component of every *designed* house, keyed by the house's serial.
     ///
     /// The one place components are saved, and [`HouseDesignRecord`] says why:
     /// a design has no file behind it to go stale against. `None` in a snapshot
     /// that swept no houses; empty on a shard where every house is a classic
     /// multi, which is every shard until somebody designs one.
-    pub designs: Option<Vec<HouseDesignRecord>>,
+    pub designs:     Option<Vec<HouseDesignRecord>>,
     /// Every ship on the water. `None` in a snapshot that swept no boats.
     ///
     /// No component list beside it, unlike the houses: a boat's shape is a pure
     /// function of its multi id with no designed case, so it is exactly what
     /// that rule was written for.
-    pub boats: Option<Vec<BoatRecord>>,
+    pub boats:       Option<Vec<BoatRecord>>,
     /// The world's own scalars — the clock and the roll generator's position — when
     /// this snapshot swept them. `None` in a snapshot that carried only character
     /// changes; the stored row stands.
@@ -150,7 +161,7 @@ pub struct Snapshot {
     /// One field for the whole row, rather than one per scalar, so the next thing
     /// the world alone knows costs a [`WorldRecord`] field and touches no caller
     /// here.
-    pub world: Option<WorldRecord>,
+    pub world:       Option<WorldRecord>,
 }
 
 impl Snapshot {
@@ -207,10 +218,10 @@ impl Snapshot {
 /// that suspects it is dropping writes can fall back to one.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct Journal {
-    dirty: HashSet<EntityId>,
-    kept: Vec<CharacterRecord>,
+    dirty:            HashSet<EntityId>,
+    kept:             Vec<CharacterRecord>,
     kept_inventories: Vec<Inventory>,
-    removed: HashSet<u32>,
+    removed:          HashSet<u32>,
 }
 
 impl Journal {
@@ -359,11 +370,15 @@ impl Journal {
 
 #[cfg(test)]
 mod tests {
+    use openshard_entities::Registry;
+    use openshard_protocol::identity::{
+        AccountName,
+        CharacterName,
+    };
+    use openshard_protocol::serial::SerialKind;
+
     use super::*;
     use crate::record::StatLockRecord;
-    use openshard_entities::Registry;
-    use openshard_protocol::identity::{AccountName, CharacterName};
-    use openshard_protocol::serial::SerialKind;
 
     fn character(serial: u32, x: u16) -> CharacterRecord {
         CharacterRecord {

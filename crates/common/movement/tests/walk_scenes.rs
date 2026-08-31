@@ -16,8 +16,15 @@
 //! An oracle that asked the code what the answer should be would agree with it
 //! always, including when it is wrong.
 
-use openshard_movement::scene::{SIDE, Scene};
-use openshard_movement::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
+use openshard_movement::scene::{
+    SIDE,
+    Scene,
+};
+use openshard_movement::{
+    MAX_STEP_UP,
+    MapTerrain,
+    PLAYER_HEIGHT,
+};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 use openshard_tiles::TileFlags;
@@ -453,8 +460,15 @@ fn a_random_scene_is_walked_the_way_the_rules_say() {
 #[test]
 fn the_live_world_adds_takes_away_and_hangs_a_door_over_baked_spans() {
     use openshard_map::grid::Tile;
-    use openshard_map::overlay::{Cover, Doors, Overlay};
-    use openshard_movement::{Footing, can_step};
+    use openshard_map::overlay::{
+        Cover,
+        Doors,
+        Overlay,
+    };
+    use openshard_movement::{
+        Footing,
+        can_step,
+    };
 
     // Flat ground at zero with nothing on it: every column here is the *bare*
     // tier of the bake — no span is stored for it at all — which is the tier
@@ -530,7 +544,10 @@ fn the_live_world_adds_takes_away_and_hangs_a_door_over_baked_spans() {
 /// rule that climbs it, one for the search that plans the climb.
 fn a_villa() -> (Scene, openshard_map::overlay::Overlay) {
     use openshard_map::grid::Tile;
-    use openshard_map::overlay::{Cover, Overlay};
+    use openshard_map::overlay::{
+        Cover,
+        Overlay,
+    };
 
     const STAIR: u16 = 0x0751;
     const BOARDS: u16 = 0x04AC;
@@ -563,7 +580,10 @@ fn a_villa() -> (Scene, openshard_map::overlay::Overlay) {
 #[test]
 fn a_villa_stair_carries_a_body_to_its_first_floor() {
     use openshard_map::overlay::Doors;
-    use openshard_movement::{Footing, can_step};
+    use openshard_movement::{
+        Footing,
+        can_step,
+    };
 
     let (scene, live) = a_villa();
     let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
@@ -627,7 +647,10 @@ fn a_villa_stair_carries_a_body_to_its_first_floor() {
 fn a_client_predicts_the_height_of_a_placed_villas_stair_and_floor() {
     use openshard_map::grid::Tile;
     use openshard_map::overlay::Doors;
-    use openshard_movement::{Footing, predict_step};
+    use openshard_movement::{
+        Footing,
+        predict_step,
+    };
 
     let (scene, live) = a_villa();
     let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
@@ -662,7 +685,12 @@ fn a_client_predicts_the_height_of_a_placed_villas_stair_and_floor() {
 #[test]
 fn a_route_climbs_from_a_villas_ground_floor_to_its_first_floor() {
     use openshard_map::overlay::Doors;
-    use openshard_movement::{Footing, Weight, find_path, step_allowed};
+    use openshard_movement::{
+        Footing,
+        Weight,
+        find_path,
+        step_allowed,
+    };
 
     let (scene, live) = a_villa();
     let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);

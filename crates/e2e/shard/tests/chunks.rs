@@ -42,28 +42,64 @@
 
 use std::time::Duration;
 
-use openshard_client_net::chunks::{Fetch, Fetched};
+use openshard_client_net::chunks::{
+    Fetch,
+    Fetched,
+};
 use openshard_client_net::connection::Event;
 use openshard_client_net::talk;
-use openshard_client_net::transport::{Socket, enter_world};
-use openshard_map::chunk::{Chunk, ChunkCoord, assemble, chunks_of};
+use openshard_client_net::transport::{
+    Socket,
+    enter_world,
+};
+use openshard_e2e_shard::{
+    plan,
+    spawn,
+    version,
+};
+use openshard_map::chunk::{
+    Chunk,
+    ChunkCoord,
+    assemble,
+    chunks_of,
+};
 use openshard_map::codec;
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, StaticItem, WorldMap};
+use openshard_map::map::{
+    LandCell,
+    StaticItem,
+    WorldMap,
+};
 use openshard_protocol::chunks::{
-    Changes, ChangesRequest, ChunkAt, ChunkData, ChunkRequest, Refusal, WorldRevision, join,
+    Changes,
+    ChangesRequest,
+    ChunkAt,
+    ChunkData,
+    ChunkRequest,
+    Refusal,
+    WorldRevision,
+    join,
 };
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::speech::TalkMode;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_tiles::LandTileId;
 use tokio::net::TcpStream;
 
-use openshard_e2e_shard::{plan, spawn, version};
-
 mod common;
 
-use common::{FACET, START, config_over, install, say_and_hear, scratch, world_of_ours};
+use common::{
+    FACET,
+    START,
+    config_over,
+    install,
+    say_and_hear,
+    scratch,
+    world_of_ours,
+};
 
 /// 32 blocks square — 256×256 tiles, which is sixteen chunks and bakes in well
 /// under a second.
@@ -89,21 +125,23 @@ fn statics(blocks: u32) -> Vec<StaticItem> {
     let mut items: Vec<StaticItem> = [(0, 0), (63, 30), (64, 30), (30, 63), (30, 64), (last, last)]
         .into_iter()
         .enumerate()
-        .map(|(n, (x, y))| StaticItem {
-            tile: Graphic(0x4000 + u16::try_from(n).unwrap()),
-            x,
-            y,
-            z: i8::try_from(n).unwrap(),
-            hue: Hue(0),
+        .map(|(n, (x, y))| {
+            StaticItem {
+                tile: Graphic(0x4000 + u16::try_from(n).unwrap()),
+                x,
+                y,
+                z: i8::try_from(n).unwrap(),
+                hue: Hue(0),
+            }
         })
         .collect();
     for n in 0..2u16 {
         items.push(StaticItem {
             tile: Graphic(0x4100 + n),
-            x: 20,
-            y: 21,
-            z: 5,
-            hue: Hue(n),
+            x:    20,
+            y:    21,
+            z:    5,
+            hue:  Hue(n),
         });
     }
     items
@@ -141,9 +179,11 @@ fn every_chunk(blocks: u32) -> Vec<ChunkAt> {
         wide: blocks,
         down: blocks,
     })
-    .map(|at| ChunkAt {
-        x: u16::try_from(at.x).unwrap(),
-        y: u16::try_from(at.y).unwrap(),
+    .map(|at| {
+        ChunkAt {
+            x: u16::try_from(at.x).unwrap(),
+            y: u16::try_from(at.y).unwrap(),
+        }
     })
     .collect()
 }
@@ -159,7 +199,7 @@ fn every_chunk(blocks: u32) -> Vec<ChunkAt> {
 async fn drive(socket: &mut Socket<TcpStream>, fetch: &mut Fetch) -> Asked {
     let mut asked = Asked {
         requests: 0,
-        chunks: 0,
+        chunks:   0,
     };
     let fetching = async {
         loop {
@@ -198,7 +238,7 @@ async fn drive(socket: &mut Socket<TcpStream>, fetch: &mut Fetch) -> Asked {
 /// with a cache asked for a *count* nobody had to pace at all.
 struct Asked {
     requests: usize,
-    chunks: usize,
+    chunks:   usize,
 }
 
 /// Every tile of one world answers what the other's does.
@@ -252,7 +292,7 @@ async fn a_client_asks_for_the_ground_and_gets_the_shards_own_bytes() {
     socket
         .send(
             &ChunkRequest {
-                facet: FACET,
+                facet:  FACET,
                 chunks: wanted.clone(),
             }
             .encode(),
@@ -275,9 +315,11 @@ async fn a_client_asks_for_the_ground_and_gets_the_shards_own_bytes() {
     for at in &wanted {
         let pieces: Vec<ChunkData> = heard
             .iter()
-            .filter_map(|packet| match packet {
-                ServerPacket::ChunkData(data) if data.at == *at => Some(data.clone()),
-                _ => None,
+            .filter_map(|packet| {
+                match packet {
+                    ServerPacket::ChunkData(data) if data.at == *at => Some(data.clone()),
+                    _ => None,
+                }
             })
             .collect();
         assert!(!pieces.is_empty(), "chunk ({}, {}) never arrived", at.x, at.y);
@@ -330,7 +372,7 @@ async fn a_client_asks_for_the_ground_and_gets_the_shards_own_bytes() {
     socket
         .send(
             &ChunkRequest {
-                facet: FACET,
+                facet:  FACET,
                 chunks: vec![past],
             }
             .encode(),
@@ -345,9 +387,11 @@ async fn a_client_asks_for_the_ground_and_gets_the_shards_own_bytes() {
     .await;
     let refusal = refused
         .iter()
-        .find_map(|packet| match packet {
-            ServerPacket::ChunkRefused(refused) => Some(*refused),
-            _ => None,
+        .find_map(|packet| {
+            match packet {
+                ServerPacket::ChunkRefused(refused) => Some(*refused),
+                _ => None,
+            }
         })
         .expect("a chunk off the facet is refused rather than left unanswered");
     assert_eq!(refusal.at, past);
@@ -481,7 +525,7 @@ async fn a_client_that_kept_the_ground_asks_only_for_what_moved() {
     socket
         .send(
             &ChangesRequest {
-                facet: FACET,
+                facet:    FACET,
                 revision: WorldRevision(held.revision().get()),
             }
             .encode(),
@@ -496,9 +540,11 @@ async fn a_client_that_kept_the_ground_asks_only_for_what_moved() {
     .await;
     let reply = heard
         .iter()
-        .find_map(|packet| match packet {
-            ServerPacket::ChangesReply(reply) => Some(reply.clone()),
-            _ => None,
+        .find_map(|packet| {
+            match packet {
+                ServerPacket::ChangesReply(reply) => Some(reply.clone()),
+                _ => None,
+            }
         })
         .expect("what moved is answered exactly once");
     assert_eq!(reply.facet, FACET);
@@ -539,7 +585,7 @@ async fn a_client_that_kept_the_ground_asks_only_for_what_moved() {
         caught_up.map().land(START.0, START.1),
         Some(LandCell {
             tile: LandTileId(3),
-            z: 40
+            z:    40,
         }),
         "the tile the operator moved arrived over the wire"
     );
@@ -672,9 +718,11 @@ async fn a_publish_reaches_a_client_that_is_already_standing_on_the_ground() {
     }
     let published = heard
         .iter()
-        .find_map(|packet| match packet {
-            ServerPacket::PublishNotice(published) => Some(published.clone()),
-            _ => None,
+        .find_map(|packet| {
+            match packet {
+                ServerPacket::PublishNotice(published) => Some(published.clone()),
+                _ => None,
+            }
         })
         .unwrap_or_else(|| {
             let said: Vec<String> = view.journal.iter().map(|line| line.text.clone()).collect();
@@ -733,7 +781,7 @@ async fn a_publish_reaches_a_client_that_is_already_standing_on_the_ground() {
         caught_up.map().land(START.0, START.1),
         Some(LandCell {
             tile: LandTileId(3),
-            z: 40
+            z:    40,
         }),
         "the tile the operator moved arrived over the same connection"
     );

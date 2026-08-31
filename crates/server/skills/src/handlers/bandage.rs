@@ -13,9 +13,25 @@
 //! counter.
 
 use openshard_entities::EntityId;
-use openshard_protocol::wire::{ClilocId, CursorId, Graphic};
-use openshard_state::components::{Bandaging, Ghost, Hitpoints, Lock, Poisoned, Stats};
-use openshard_state::{Skill, TICKS_PER_SECOND, TargetPurpose, WorldState};
+use openshard_protocol::wire::{
+    ClilocId,
+    CursorId,
+    Graphic,
+};
+use openshard_state::components::{
+    Bandaging,
+    Ghost,
+    Hitpoints,
+    Lock,
+    Poisoned,
+    Stats,
+};
+use openshard_state::{
+    Skill,
+    TICKS_PER_SECOND,
+    TargetPurpose,
+    WorldState,
+};
 
 use crate::check::roll_skill_band;
 
@@ -147,11 +163,11 @@ pub struct BandageStarted {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct BandageFinished {
     /// Who was patched up.
-    pub patient: EntityId,
+    pub patient:     EntityId,
     /// Hit points to give back. Zero when the attempt only cured or resurrected.
-    pub healed: u16,
+    pub healed:      u16,
     /// Whether the poison was drawn out.
-    pub cured: bool,
+    pub cured:       bool,
     /// Whether the patient was brought back.
     pub resurrected: bool,
 }
@@ -315,8 +331,9 @@ pub struct LockpickBroke {
 
 #[cfg(test)]
 mod tests {
-    use super::bandage_ticks;
     use openshard_state::TICKS_PER_SECOND;
+
+    use super::bandage_ticks;
 
     #[test]
     fn bandage_delays_are_total_and_keep_the_pre_aos_boundaries() {

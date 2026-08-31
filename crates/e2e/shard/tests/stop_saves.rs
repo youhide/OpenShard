@@ -20,15 +20,29 @@
 //! back in through the shard's own opener would make the assertion partly about
 //! the shard's own code path.
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::time::Duration;
 
 use openshard_client_net::transport::enter_world_with;
-use openshard_client_net::walk::{Moved, Walk};
-use openshard_persistence::{SqliteStore, Store};
+use openshard_client_net::walk::{
+    Moved,
+    Walk,
+};
+use openshard_e2e_shard::{
+    CHARACTER,
+    in_process,
+    plan,
+    stock_config,
+    version,
+};
+use openshard_persistence::{
+    SqliteStore,
+    Store,
+};
 use openshard_protocol::direction::Facing;
-
-use openshard_e2e_shard::{CHARACTER, in_process, plan, stock_config, version};
 
 /// Generous, and only ever paid by a failure. What it bounds is a hang.
 const WAIT: Duration = Duration::from_secs(20);

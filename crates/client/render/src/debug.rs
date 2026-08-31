@@ -16,9 +16,14 @@
 
 use std::fmt::Write;
 
-use crate::camera::TileBounds;
-use crate::light::{self, Lighting, Spot};
 use openshard_map::grid::Tile;
+
+use crate::camera::TileBounds;
+use crate::light::{
+    self,
+    Lighting,
+    Spot,
+};
 
 /// What the blit puts on the screen.
 ///

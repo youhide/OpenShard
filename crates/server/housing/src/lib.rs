@@ -37,7 +37,17 @@ pub mod wsc;
 
 mod access;
 mod classic_doors;
-pub use access::{ListRefusal, MAX_BANS, MAX_CO_OWNERS, MAX_FRIENDS, Standing, ban, distrust, trust, unban};
+pub use access::{
+    ListRefusal,
+    MAX_BANS,
+    MAX_CO_OWNERS,
+    MAX_FRIENDS,
+    Standing,
+    ban,
+    distrust,
+    trust,
+    unban,
+};
 
 #[cfg(test)]
 mod tests;
@@ -46,12 +56,32 @@ use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::Cover;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::{Graphic, Hue, MultiId};
-use openshard_protocol::world::{Facet, Point};
-use openshard_state::components::{Drawn, House, Position};
-use openshard_state::{FacetState, ItemLocation, WorldState, establish_item_location};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    MultiId,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
+use openshard_state::components::{
+    Drawn,
+    House,
+    Position,
+};
+use openshard_state::{
+    FacetState,
+    ItemLocation,
+    WorldState,
+    establish_item_location,
+};
 use openshard_tiles::TileFlags;
-use openshard_uofiles::multi::{Component, Multis, bounds};
+use openshard_uofiles::multi::{
+    Component,
+    Multis,
+    bounds,
+};
 
 /// The first customisable-house foundation id, and the last.
 ///
@@ -208,7 +238,7 @@ fn shape_of<'a>(design: Option<&'a [Component]>, state: &'a WorldState, multi: M
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Footprint {
     /// Where.
-    pub tile: Tile,
+    pub tile:  Tile,
     /// What the house puts there, based at the house's own z plus the
     /// component's.
     pub cover: Cover,
@@ -342,7 +372,7 @@ fn place_with_design(
     state.registry.insert(
         entity,
         Drawn {
-            id: multi.graphic(),
+            id:  multi.graphic(),
             hue: Hue(0),
         },
     );
@@ -582,7 +612,7 @@ fn spawn_sign(
     state.registry.insert(
         sign,
         Drawn {
-            id: graphic,
+            id:  graphic,
             hue: Hue(0),
         },
     );
@@ -829,16 +859,18 @@ pub fn footprint_of(
         let flags = static_tile.flags;
         let covers = Cover::of_static(static_tile).based_at(spot.z);
         let tile = Tile::new(spot.x, spot.y);
-        out.extend(covers.into_iter().map(|cover| Footprint {
-            tile,
-            // Match `MapTerrain::sight_stop`: a wall-like component lends a
-            // storey to zero-height art, while a platform retains its real
-            // height. A loose crate still takes neither route.
-            cover: match flags.has(TileFlags::WALL | TileFlags::BLOCK | TileFlags::NO_SHOOT) {
-                true => cover.as_sight_wall(),
-                false if flags.is_platform() => cover.as_sight_blocker(),
-                false => cover,
-            },
+        out.extend(covers.into_iter().map(|cover| {
+            Footprint {
+                tile,
+                // Match `MapTerrain::sight_stop`: a wall-like component lends a
+                // storey to zero-height art, while a platform retains its real
+                // height. A loose crate still takes neither route.
+                cover: match flags.has(TileFlags::WALL | TileFlags::BLOCK | TileFlags::NO_SHOOT) {
+                    true => cover.as_sight_wall(),
+                    false if flags.is_platform() => cover.as_sight_blocker(),
+                    false => cover,
+                },
+            }
         }));
     }
     Ok(out)

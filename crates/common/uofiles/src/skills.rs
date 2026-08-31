@@ -28,7 +28,10 @@
 //! not read here. This is the English table the client ships in `skills.mul`.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 /// Which skill, in the numbering the client's own files and the `0x3A` packets
 /// share: Alchemy is 0, Mining is 45.
@@ -51,7 +54,7 @@ pub struct Skill {
     /// is a table of single-byte strings, and so is the `fonts.mul` face this
     /// is drawn in. Every name in the shipped English file is ASCII, where the
     /// two agree exactly.
-    pub name: String,
+    pub name:       String,
     /// Whether the client's window offers a button that *uses* this skill —
     /// the record's first byte. Passive skills (Tactics), item-driven ones
     /// (Mining) and the ones another window opens (Magery) have it clear.
@@ -79,7 +82,7 @@ pub enum SkillsError {
     /// A file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
@@ -98,11 +101,13 @@ impl fmt::Display for SkillsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
-            Self::NotAnIndex { path, size } => write!(
-                f,
-                "{} is {size} bytes, not a whole number of {INDEX_ENTRY}-byte entries",
-                path.display()
-            ),
+            Self::NotAnIndex { path, size } => {
+                write!(
+                    f,
+                    "{} is {size} bytes, not a whole number of {INDEX_ENTRY}-byte entries",
+                    path.display()
+                )
+            }
         }
     }
 }
@@ -130,18 +135,24 @@ impl Skills {
     /// Open a named pair, for tests.
     pub fn from_files(idx: impl AsRef<Path>, mul: impl AsRef<Path>) -> Result<Self, SkillsError> {
         let idx_path = idx.as_ref();
-        let index = std::fs::read(idx_path).map_err(|source| SkillsError::Read {
-            path: idx_path.to_owned(),
-            source,
+        let index = std::fs::read(idx_path).map_err(|source| {
+            SkillsError::Read {
+                path: idx_path.to_owned(),
+                source,
+            }
         })?;
         let mul_path = mul.as_ref();
-        let records = std::fs::read(mul_path).map_err(|source| SkillsError::Read {
-            path: mul_path.to_owned(),
-            source,
+        let records = std::fs::read(mul_path).map_err(|source| {
+            SkillsError::Read {
+                path: mul_path.to_owned(),
+                source,
+            }
         })?;
-        Self::parse(&index, &records).ok_or_else(|| SkillsError::NotAnIndex {
-            path: idx_path.to_owned(),
-            size: index.len(),
+        Self::parse(&index, &records).ok_or_else(|| {
+            SkillsError::NotAnIndex {
+                path: idx_path.to_owned(),
+                size: index.len(),
+            }
         })
     }
 

@@ -90,10 +90,12 @@ impl Falloff {
             // exactly on an emitter — but a scene can be authored with one, and
             // an infinity that propagates into an averaged pixel destroys the
             // whole image rather than one sample.
-            Self::InverseSquare => match d > 0.0 {
-                true => Some(1.0 / (d * d)),
-                false => None,
-            },
+            Self::InverseSquare => {
+                match d > 0.0 {
+                    true => Some(1.0 / (d * d)),
+                    false => None,
+                }
+            }
         }
     }
 }
@@ -101,11 +103,11 @@ impl Falloff {
 /// One emitter in the scene.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Light {
-    pub at: Vec3,
-    pub emitter: Emitter,
-    pub falloff: Falloff,
+    pub at:        Vec3,
+    pub emitter:   Emitter,
+    pub falloff:   Falloff,
     /// Its colour, per channel, as a plain multiplier.
-    pub colour: [f64; 3],
+    pub colour:    [f64; 3],
     /// Radiant intensity: brightness at unit distance before the falloff curve
     /// is applied.
     pub intensity: f64,
@@ -117,7 +119,7 @@ pub struct Light {
 pub struct Sample {
     /// The point on the emitter this sample is about — where the shadow ray
     /// goes.
-    pub at: Vec3,
+    pub at:       Vec3,
     /// Irradiance arriving per unit of the receiving surface's own cosine, per
     /// channel. The receiver's `n · l` is not in here: this type does not know
     /// what it is lighting.
@@ -204,7 +206,11 @@ impl Light {
 
 #[cfg(test)]
 mod tests {
-    use super::{Emitter, Falloff, Light};
+    use super::{
+        Emitter,
+        Falloff,
+        Light,
+    };
     use crate::rng::Stream;
     use crate::vector::Vec3;
 

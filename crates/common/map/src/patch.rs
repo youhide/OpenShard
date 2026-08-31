@@ -61,7 +61,11 @@
 use openshard_protocol::world::Facet;
 
 use crate::chunk::ChunkCoord;
-use crate::map::{LandCell, StaticItem, WorldMap};
+use crate::map::{
+    LandCell,
+    StaticItem,
+    WorldMap,
+};
 use crate::snapshot::MapRevision;
 
 /// Which static standing on a tile, counted in the order the world hands them
@@ -104,9 +108,9 @@ pub enum PatchOp {
     /// Replace the ground at one tile.
     SetLand {
         /// Where.
-        x: u16,
+        x:   u16,
         /// Where.
-        y: u16,
+        y:   u16,
         /// What is there now, checked before anything is written.
         was: LandCell,
         /// What to put there.
@@ -127,7 +131,7 @@ pub enum PatchOp {
         which: StaticId,
         /// What is standing there, checked before it is taken away. Its own
         /// coordinates are the tile.
-        was: StaticItem,
+        was:   StaticItem,
     },
 }
 
@@ -219,7 +223,7 @@ pub struct Undo {
     /// The inverses, in the order they apply.
     ops: Vec<PatchOp>,
     /// The revision the world was at before the publish.
-    to: MapRevision,
+    to:  MapRevision,
 }
 
 impl Undo {
@@ -261,11 +265,11 @@ impl Undo {
 /// never checked against.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Patch {
-    facet: Facet,
+    facet:  Facet,
     parent: MapRevision,
     author: PatchAuthor,
-    at: PatchTime,
-    ops: Vec<PatchOp>,
+    at:     PatchTime,
+    ops:    Vec<PatchOp>,
 }
 
 impl Patch {
@@ -381,7 +385,7 @@ pub enum PatchError {
         /// The facet the snapshot is.
         wanted: Facet,
         /// The facet the patch names.
-        found: Facet,
+        found:  Facet,
     },
     /// The world moved under the edit.
     ///
@@ -391,7 +395,7 @@ pub enum PatchError {
         /// The revision the snapshot is at.
         holding: MapRevision,
         /// The revision the patch was made against.
-        parent: MapRevision,
+        parent:  MapRevision,
     },
     /// An op names a tile the facet does not have.
     OffMap {
@@ -403,24 +407,24 @@ pub enum PatchError {
     /// An op names a static past the end of what stands on its tile.
     NoSuchStatic {
         /// Where.
-        x: u16,
+        x:        u16,
         /// Where.
-        y: u16,
+        y:        u16,
         /// Which one it asked for.
-        which: StaticId,
+        which:    StaticId,
         /// How many are actually standing there.
         standing: usize,
     },
     /// The ground an op recorded is not the ground that is there.
     LandNotAsRecorded {
         /// Where.
-        x: u16,
+        x:        u16,
         /// Where.
-        y: u16,
+        y:        u16,
         /// What the op says was there.
         recorded: LandCell,
         /// What is there.
-        found: LandCell,
+        found:    LandCell,
     },
     /// The facet has no map at all, so there is nothing to change.
     ///
@@ -433,28 +437,32 @@ pub enum PatchError {
     /// The static an op recorded is not the static that is there.
     StaticNotAsRecorded {
         /// Which one on its tile.
-        which: StaticId,
+        which:    StaticId,
         /// What the op says was standing there.
         recorded: StaticItem,
         /// What is standing there.
-        found: StaticItem,
+        found:    StaticItem,
     },
 }
 
 impl std::fmt::Display for PatchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::WrongFacet { wanted, found } => write!(
-                f,
-                "a patch to facet {} was published to facet {}",
-                found.0, wanted.0
-            ),
-            Self::Conflict { holding, parent } => write!(
-                f,
-                "the patch was made against revision {} and the world is at revision {}",
-                parent.get(),
-                holding.get()
-            ),
+            Self::WrongFacet { wanted, found } => {
+                write!(
+                    f,
+                    "a patch to facet {} was published to facet {}",
+                    found.0, wanted.0
+                )
+            }
+            Self::Conflict { holding, parent } => {
+                write!(
+                    f,
+                    "the patch was made against revision {} and the world is at revision {}",
+                    parent.get(),
+                    holding.get()
+                )
+            }
             Self::OffMap { x, y } => write!(f, "tile ({x}, {y}) is not on this facet"),
             Self::NoGround => write!(f, "this facet has no map, so there is nothing to patch"),
             Self::NoSuchStatic {
@@ -462,36 +470,43 @@ impl std::fmt::Display for PatchError {
                 y,
                 which,
                 standing,
-            } => write!(
-                f,
-                "tile ({x}, {y}) has {standing} statics on it, and the patch names number {}",
-                which.0
-            ),
+            } => {
+                write!(
+                    f,
+                    "tile ({x}, {y}) has {standing} statics on it, and the patch names number {}",
+                    which.0
+                )
+            }
             Self::LandNotAsRecorded {
                 x,
                 y,
                 recorded,
                 found,
-            } => write!(
-                f,
-                "tile ({x}, {y}) holds land {} at z {}, and the patch was made against land {} at z {}",
-                found.tile.0, found.z, recorded.tile.0, recorded.z
-            ),
+            } => {
+                write!(
+                    f,
+                    "tile ({x}, {y}) holds land {} at z {}, and the patch was made against land {} at z {}",
+                    found.tile.0, found.z, recorded.tile.0, recorded.z
+                )
+            }
             Self::StaticNotAsRecorded {
                 which,
                 recorded,
                 found,
-            } => write!(
-                f,
-                "static {} on tile ({}, {}) is graphic {} at z {}, and the patch was made against \
+            } => {
+                write!(
+                    f,
+                    "static {} on tile ({}, {}) is graphic {} at z {}, and the patch was made against \
                  graphic {} at z {}",
-                which.0, found.x, found.y, found.tile.0, found.z, recorded.tile.0, recorded.z
-            ),
+                    which.0, found.x, found.y, found.tile.0, found.z, recorded.tile.0, recorded.z
+                )
+            }
         }
     }
 }
 
-impl std::error::Error for PatchError {}
+impl std::error::Error for PatchError {
+}
 
 /// Apply a patch's ops to a map, or leave the map exactly as it was.
 ///
@@ -616,20 +631,25 @@ fn apply_op(map: &mut WorldMap, op: &PatchOp) -> Result<PatchOp, PatchError> {
 
 #[cfg(test)]
 mod tests {
-    use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
+    use openshard_tiles::LandTileId;
 
     use super::*;
     use crate::grid::BlockExtent;
     use crate::snapshot::MapSnapshot;
-    use openshard_tiles::LandTileId;
 
     /// A facet of two chunks by two chunks, all of it one flat land tile.
     fn flat() -> MapSnapshot {
         MapSnapshot::new(
             Facet(0),
-            WorldMap::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
-                tile: LandTileId(3),
-                z: 0,
+            WorldMap::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| {
+                LandCell {
+                    tile: LandTileId(3),
+                    z:    0,
+                }
             }),
         )
     }
@@ -654,7 +674,7 @@ mod tests {
         let was = world.map().land(10, 10).expect("on the map");
         let now = LandCell {
             tile: LandTileId(9),
-            z: 40,
+            z:    40,
         };
         world
             .publish(&patch(
@@ -697,12 +717,12 @@ mod tests {
                 before,
                 vec![
                     PatchOp::SetLand {
-                        x: 4,
-                        y: 4,
+                        x:   4,
+                        y:   4,
                         was: land,
                         now: LandCell {
                             tile: LandTileId(1),
-                            z: 60,
+                            z:    60,
                         },
                     },
                     PatchOp::AddStatic { item: rock(4, 4, 60) },
@@ -739,19 +759,19 @@ mod tests {
                 7,
                 LandCell {
                     tile: LandTileId(5),
-                    z: 9
+                    z:    9,
                 }
             ),
             Ok(PatchOp::SetLand {
-                x: 7,
-                y: 7,
+                x:   7,
+                y:   7,
                 was: LandCell {
                     tile: LandTileId(3),
-                    z: 0
+                    z:    0,
                 },
                 now: LandCell {
                     tile: LandTileId(5),
-                    z: 9
+                    z:    9,
                 },
             })
         );
@@ -759,15 +779,15 @@ mod tests {
             PatchOp::remove_static(map, 7, 7, StaticId(0)),
             Ok(PatchOp::RemoveStatic {
                 which: StaticId(0),
-                was: rock(7, 7, 3),
+                was:   rock(7, 7, 3),
             })
         );
         assert_eq!(
             PatchOp::remove_static(map, 7, 7, StaticId(1)),
             Err(PatchError::NoSuchStatic {
-                x: 7,
-                y: 7,
-                which: StaticId(1),
+                x:        7,
+                y:        7,
+                which:    StaticId(1),
                 standing: 1,
             })
         );
@@ -784,11 +804,13 @@ mod tests {
     fn a_patch_against_a_revision_the_world_has_left_is_refused() {
         let mut world = flat();
         let was = world.map().land(1, 1).expect("on the map");
-        let step = |z| PatchOp::SetLand {
-            x: 1,
-            y: 1,
-            was,
-            now: LandCell { tile: was.tile, z },
+        let step = |z| {
+            PatchOp::SetLand {
+                x: 1,
+                y: 1,
+                was,
+                now: LandCell { tile: was.tile, z },
+            }
         };
         world
             .publish(&patch(MapRevision::INITIAL, vec![step(5)]))
@@ -798,7 +820,7 @@ mod tests {
             world.publish(&patch(MapRevision::INITIAL, vec![step(7)])),
             Err(PatchError::Conflict {
                 holding: MapRevision::INITIAL.after(),
-                parent: MapRevision::INITIAL,
+                parent:  MapRevision::INITIAL,
             })
         );
         // And the world is untouched by the refusal, not half of it.
@@ -819,7 +841,7 @@ mod tests {
             world.publish(&stray),
             Err(PatchError::WrongFacet {
                 wanted: Facet(0),
-                found: Facet(1),
+                found:  Facet(1),
             })
         );
     }
@@ -845,7 +867,7 @@ mod tests {
                 world.revision(),
                 vec![PatchOp::RemoveStatic {
                     which: StaticId(1),
-                    was: rock(4, 4, 0),
+                    was:   rock(4, 4, 0),
                 }],
             ))
             .expect("the middle rock");
@@ -867,7 +889,7 @@ mod tests {
                     // against.
                     PatchOp::RemoveStatic {
                         which: StaticId(0),
-                        was: rock(6, 6, 1),
+                        was:   rock(6, 6, 1),
                     },
                 ],
             ))
@@ -891,13 +913,13 @@ mod tests {
                     was,
                     now: LandCell {
                         tile: LandTileId(1),
-                        z: 20,
+                        z:    20,
                     },
                 },
                 // Nothing stands on this tile, so the patch cannot finish.
                 PatchOp::RemoveStatic {
                     which: StaticId(0),
-                    was: rock(3, 3, 0),
+                    was:   rock(3, 3, 0),
                 },
             ],
         );
@@ -905,9 +927,9 @@ mod tests {
         assert_eq!(
             world.publish(&doomed),
             Err(PatchError::NoSuchStatic {
-                x: 3,
-                y: 3,
-                which: StaticId(0),
+                x:        3,
+                y:        3,
+                which:    StaticId(0),
                 standing: 0,
             })
         );
@@ -924,28 +946,28 @@ mod tests {
         let mut world = flat();
         let elsewhere = LandCell {
             tile: LandTileId(77),
-            z: -3,
+            z:    -3,
         };
         assert_eq!(
             world.publish(&patch(
                 world.revision(),
                 vec![PatchOp::SetLand {
-                    x: 5,
-                    y: 5,
+                    x:   5,
+                    y:   5,
                     was: elsewhere,
                     now: LandCell {
                         tile: LandTileId(1),
-                        z: 0,
+                        z:    0,
                     },
                 }],
             )),
             Err(PatchError::LandNotAsRecorded {
-                x: 5,
-                y: 5,
+                x:        5,
+                y:        5,
                 recorded: elsewhere,
-                found: LandCell {
+                found:    LandCell {
                     tile: LandTileId(3),
-                    z: 0,
+                    z:    0,
                 },
             })
         );
@@ -970,11 +992,11 @@ mod tests {
     fn touched_chunks_are_the_chunks_the_ops_are_in_each_once() {
         let was = LandCell {
             tile: LandTileId(3),
-            z: 0,
+            z:    0,
         };
         let now = LandCell {
             tile: LandTileId(4),
-            z: 0,
+            z:    0,
         };
         let ops = vec![
             PatchOp::SetLand {

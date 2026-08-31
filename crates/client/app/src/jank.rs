@@ -6,14 +6,28 @@
 //! records without enabling every warning from the client. A caller that needs
 //! a persistent trace can initialise [`start_log`] before starting the app.
 
-use crate::frames::{Frame, JANK_BUDGET};
+use std::fs::{
+    File,
+    OpenOptions,
+};
+use std::io::{
+    self,
+    BufWriter,
+    Write,
+};
+use std::path::Path;
+use std::sync::{
+    Mutex,
+    OnceLock,
+};
+use std::time::Duration;
+
+use crate::frames::{
+    Frame,
+    JANK_BUDGET,
+};
 use crate::profile::Pass;
 use crate::window::AtlasWork;
-use std::fs::{File, OpenOptions};
-use std::io::{self, BufWriter, Write};
-use std::path::Path;
-use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
 
 static LOG: OnceLock<Mutex<BufWriter<File>>> = OnceLock::new();
 

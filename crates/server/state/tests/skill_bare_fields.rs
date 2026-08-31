@@ -10,7 +10,10 @@
 //! here rather than in `protocol` because `Skill` is defined in this crate.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 /// Every file with a bare `skill: u8` left, how many times, and why. A file
 /// not on this list with a hit is a violation; a listed count that no longer

@@ -19,7 +19,10 @@
 use std::path::PathBuf;
 
 use openshard_client_artscan as artscan;
-use openshard_client_render::arttable::{ArtTable, Stamp};
+use openshard_client_render::arttable::{
+    ArtTable,
+    Stamp,
+};
 use openshard_client_render::facing;
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
@@ -136,10 +139,10 @@ fn a_written_table_says_what_a_live_measurement_says() {
     assert_eq!(
         window.hole,
         Some(facing::Hole {
-            near: 93,
-            far: 185,
+            near:   93,
+            far:    185,
             bottom: 10,
-            top: 15,
+            top:    15,
         }),
         "0x003C's window moved",
     );

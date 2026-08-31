@@ -44,7 +44,13 @@ use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
 use openshard_protocol::serial::Serial;
 use openshard_state::WorldState;
-use openshard_state::components::{Container, House, LockedDown, Position, Standing};
+use openshard_state::components::{
+    Container,
+    House,
+    LockedDown,
+    Position,
+    Standing,
+};
 
 /// How many lockdowns a house gets per tile of its own footprint. See the module
 /// header for where the 4 comes from.
@@ -60,7 +66,7 @@ pub struct Allowance {
     /// How many items may be locked down, secures included.
     pub lockdowns: usize,
     /// How many items may sit inside the secures, between them.
-    pub storage: usize,
+    pub storage:   usize,
 }
 
 /// Why a lockdown or a secure was refused.

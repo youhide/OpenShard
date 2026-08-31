@@ -10,11 +10,17 @@
 //!   Marble-Bungalow.wsc --origin 5455 1178 0 --output marble-bungalow.json
 //! ```
 
-use std::fs::{File, read_to_string};
+use std::fs::{
+    File,
+    read_to_string,
+};
 use std::io::Write;
 use std::path::PathBuf;
 
-use openshard_housing::wsc::{Origin, design_at};
+use openshard_housing::wsc::{
+    Origin,
+    design_at,
+};
 use serde_json::json;
 
 struct Cli {

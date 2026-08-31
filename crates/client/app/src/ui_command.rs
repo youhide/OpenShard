@@ -15,13 +15,35 @@
 
 use std::time::Instant;
 
-use openshard_client_render::camera::{self, Camera};
-use openshard_client_render::{doors, items, mobiles};
-use openshard_movement::{Bodies, Footing, Heading, Lean, PLAYER_HEIGHT, arrival_z};
-use openshard_protocol::direction::{Direction, Facing};
-use openshard_protocol::target::{TargetKind, TargetResponse};
-use openshard_protocol::wire::Graphic;
-use openshard_protocol::wire::Layer;
+use openshard_client_render::camera::{
+    self,
+    Camera,
+};
+use openshard_client_render::{
+    doors,
+    items,
+    mobiles,
+};
+use openshard_movement::{
+    Bodies,
+    Footing,
+    Heading,
+    Lean,
+    PLAYER_HEIGHT,
+    arrival_z,
+};
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
+use openshard_protocol::target::{
+    TargetKind,
+    TargetResponse,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Layer,
+};
 use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
 use winit::window::CursorIcon;
@@ -29,8 +51,16 @@ use winit::window::CursorIcon;
 use crate::app::App;
 use crate::diagnostics::PickedTile;
 use crate::net_command::project_motion;
-use crate::world::{advance_presentation_to, footing, guide};
-use crate::{DEAD_ZONE, TURN_ZONE, steer};
+use crate::world::{
+    advance_presentation_to,
+    footing,
+    guide,
+};
+use crate::{
+    DEAD_ZONE,
+    TURN_ZONE,
+    steer,
+};
 
 /// Whether an art pick names a surface whose own height is meaningful for a
 /// route destination.
@@ -259,9 +289,9 @@ impl App {
             }
             link.target(TargetResponse {
                 cursor_id: cursor.cursor.cursor_id,
-                object: None,
-                location: Point::new(0, 0, 0),
-                graphic: None,
+                object:    None,
+                location:  Point::new(0, 0, 0),
+                graphic:   None,
                 cancelled: true,
             });
         }
@@ -588,8 +618,9 @@ impl App {
         // `Vec` and a sort per move. A route planned through a body is one the
         // shard refuses a step at a time.
         let ground = steer::Readings {
-            live: footing(&self.resources, self.walking_doors()).among(Bodies::standing(&self.world.bodies)),
-            guide: guide(&self.resources),
+            live:   footing(&self.resources, self.walking_doors())
+                .among(Bodies::standing(&self.world.bodies)),
+            guide:  guide(&self.resources),
             coarse: self.resources.coarse.as_ref(),
         };
         let motion = self.world.motion.planning_state();
@@ -922,7 +953,11 @@ pub(crate) fn on_screen(direction: Direction) -> (i32, i32) {
 #[cfg(test)]
 mod tests {
     use openshard_map::grid::Tile;
-    use openshard_map::overlay::{Cover, Doors, Overlay};
+    use openshard_map::overlay::{
+        Cover,
+        Doors,
+        Overlay,
+    };
     use openshard_movement::scene::Scene;
     use openshard_tiles::TileFlags;
 

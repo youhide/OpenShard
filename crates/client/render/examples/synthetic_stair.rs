@@ -169,22 +169,64 @@ mod oracle;
 
 use std::path::PathBuf;
 
-use openshard_client_render::blit::{Blit, ViewportRect};
-use openshard_client_render::camera::{Camera, RealPixel, WorldSpot, Zoom, project_exact};
+use openshard_client_render::blit::{
+    Blit,
+    ViewportRect,
+};
+use openshard_client_render::camera::{
+    Camera,
+    RealPixel,
+    WorldSpot,
+    Zoom,
+    project_exact,
+};
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::debug::View;
-use openshard_client_render::facing::{Face, Prism};
+use openshard_client_render::facing::{
+    Face,
+    Prism,
+};
 use openshard_client_render::geometry::Vec2;
-use openshard_client_render::light::{self, Light, Lighting, Surface};
-use openshard_client_render::mesh_face::{MeshFaceRow, MeshFaceVertex};
-use openshard_client_render::occlusion::{self as grid, Builder, Occlusion, Owner, Shape, SolidId};
-use openshard_client_render::place::{Kind, Stance};
-use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, Target};
+use openshard_client_render::light::{
+    self,
+    Light,
+    Lighting,
+    Surface,
+};
+use openshard_client_render::mesh_face::{
+    MeshFaceRow,
+    MeshFaceVertex,
+};
+use openshard_client_render::occlusion::{
+    self as grid,
+    Builder,
+    Occlusion,
+    Owner,
+    Shape,
+    SolidId,
+};
+use openshard_client_render::place::{
+    Kind,
+    Stance,
+};
+use openshard_client_render::renderer::{
+    self,
+    GroundRenderer,
+    MeshFaceRenderer,
+    Target,
+};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_tiles::{StaticTile, TileFlags};
-
-use oracle::{Shade, dump, read_gbuffer, segment_clear_of_box};
+use openshard_tiles::{
+    StaticTile,
+    TileFlags,
+};
+use oracle::{
+    Shade,
+    dump,
+    read_gbuffer,
+    segment_clear_of_box,
+};
 
 /// The graphic every flight of the run is built from — a real climbable
 /// staircase's own number, and the key [`Occlusion::owner_at`] joins on.
@@ -280,10 +322,10 @@ struct Slab {
     /// Which flight of the run, indexing `flights`.
     flight: usize,
     /// Which tread of that flight, in climb order.
-    tread: usize,
-    part: Part,
-    min: (f64, f64, f64),
-    max: (f64, f64, f64),
+    tread:  usize,
+    part:   Part,
+    min:    (f64, f64, f64),
+    max:    (f64, f64, f64),
 }
 
 impl Slab {
@@ -422,18 +464,22 @@ impl Slab {
     /// diagonals, and the two choices differ by a pixel at the corners.
     fn quad(&self) -> [(f64, f64, f64); 4] {
         match self.part {
-            Part::Top => [
-                (self.min.0, self.min.1, self.min.2),
-                (self.max.0, self.min.1, self.min.2),
-                (self.max.0, self.max.1, self.min.2),
-                (self.min.0, self.max.1, self.min.2),
-            ],
-            Part::Riser => [
-                (self.min.0, self.min.1, self.max.2),
-                (self.max.0, self.max.1, self.max.2),
-                (self.max.0, self.max.1, self.min.2),
-                (self.min.0, self.min.1, self.min.2),
-            ],
+            Part::Top => {
+                [
+                    (self.min.0, self.min.1, self.min.2),
+                    (self.max.0, self.min.1, self.min.2),
+                    (self.max.0, self.max.1, self.min.2),
+                    (self.min.0, self.max.1, self.min.2),
+                ]
+            }
+            Part::Riser => {
+                [
+                    (self.min.0, self.min.1, self.max.2),
+                    (self.max.0, self.max.1, self.max.2),
+                    (self.max.0, self.max.1, self.min.2),
+                    (self.min.0, self.min.1, self.min.2),
+                ]
+            }
         }
     }
 
@@ -462,9 +508,9 @@ impl Slab {
 /// face of, so the two derivations cannot drift apart quietly.
 struct Body {
     /// Which flight of the run, indexing `flights`.
-    flight: usize,
+    flight:    usize,
     /// Which tread of that flight, in climb order.
-    tread: usize,
+    tread:     usize,
     /// Which **primitive of the grid** this tread is a piece of.
     ///
     /// A tread of one flight stopped being a primitive when `occlusion::merge`
@@ -481,8 +527,8 @@ struct Body {
     /// grid`] holds the fold against the solids the grid really pushed, corners
     /// and identity both.
     primitive: usize,
-    min: (f64, f64, f64),
-    max: (f64, f64, f64),
+    min:       (f64, f64, f64),
+    max:       (f64, f64, f64),
 }
 
 /// One **primitive of the grid**: a tread of the run, whole — every flight's
@@ -491,8 +537,8 @@ struct Primitive {
     /// Which tread of the profile, which is also this primitive's index in the
     /// list [`merged`] hands back.
     tread: usize,
-    min: (f64, f64, f64),
-    max: (f64, f64, f64),
+    min:   (f64, f64, f64),
+    max:   (f64, f64, f64),
 }
 
 /// A corner as an array, so an axis can be an index: the tuples above read
@@ -852,22 +898,26 @@ fn gate_plane_of_body(slab: &Slab, body: &Body, up: Face) {
         Part::Riser => {
             let [dx, dy] = descends_towards(up).outward();
             let (low, high, face) = match climbs_along_y(up) {
-                true => (
-                    slab.min.1,
-                    slab.max.1,
-                    match dy > 0.0 {
-                        true => body.max.1,
-                        false => body.min.1,
-                    },
-                ),
-                false => (
-                    slab.min.0,
-                    slab.max.0,
-                    match dx > 0.0 {
-                        true => body.max.0,
-                        false => body.min.0,
-                    },
-                ),
+                true => {
+                    (
+                        slab.min.1,
+                        slab.max.1,
+                        match dy > 0.0 {
+                            true => body.max.1,
+                            false => body.min.1,
+                        },
+                    )
+                }
+                false => {
+                    (
+                        slab.min.0,
+                        slab.max.0,
+                        match dx > 0.0 {
+                            true => body.max.0,
+                            false => body.min.0,
+                        },
+                    )
+                }
             };
             same(low, face, "the plane");
             same(high, face, "the plane");
@@ -1045,7 +1095,7 @@ struct Covered {
     /// triangle. The projection is affine and a plane is planar, so this is
     /// exact rather than approximate — the same property `MeshFaceVertex::world`
     /// rests on.
-    at: (f64, f64, f64),
+    at:    (f64, f64, f64),
 }
 
 /// **The scene rasterised a second time, from the geometry alone** — which plane
@@ -1115,7 +1165,10 @@ fn cover(slabs: &[Slab], camera: &Camera, width: u32, height: u32) -> Vec<Option
                         p.1 + (q.1 - p.1) * u + (r.1 - p.1) * v,
                         p.2 + (q.2 - p.2) * u + (r.2 - p.2) * v,
                     );
-                    covered[(y * width + x) as usize] = Some(Covered { plane: id, at: point });
+                    covered[(y * width + x) as usize] = Some(Covered {
+                        plane: id,
+                        at:    point,
+                    });
                 }
             }
         }
@@ -1204,7 +1257,7 @@ struct Lit {
     /// What the flames add there, linear and per channel, before the frame's own
     /// clamp — the quantity `blit.wesl`'s `flames` accumulates and `View::Flames`
     /// writes.
-    added: [f32; 3],
+    added:     [f32; 3],
     /// How far the nearest flame stands off this fragment's own plane, in tiles —
     /// [`Slab::off_plane`]. Not part of the answer: it is what says whether the
     /// pixel sits inside the band the engine softens `faces` over, and therefore
@@ -1214,7 +1267,7 @@ struct Lit {
     /// **named**. A count with no address is a count nobody can chase: every
     /// wrong attribution on this track came from reading a number and guessing
     /// which surface it was about.
-    covered: Covered,
+    covered:   Covered,
 }
 
 /// **The light itself, from the geometry** — the oracle this track has never had.
@@ -1662,9 +1715,11 @@ fn main() {
     // treads at one `z` are different statics, therefore different owners, so
     // identity does not answer for them and `own_run`'s mask is what does.
     let flights: Vec<Point> = (0..run)
-        .map(|step| match up {
-            Face::North | Face::South => Point::new(at.x + step, at.y, at.z),
-            Face::East | Face::West => Point::new(at.x, at.y + step, at.z),
+        .map(|step| {
+            match up {
+                Face::North | Face::South => Point::new(at.x + step, at.y, at.z),
+                Face::East | Face::West => Point::new(at.x, at.y + step, at.z),
+            }
         })
         .collect();
     let bounds = openshard_client_render::camera::TileBounds {
@@ -1795,9 +1850,9 @@ fn main() {
                 )
                 .expect("a flight's own solid per tread");
             rows.push(MeshFaceRow {
-                tile: (stands.x, stands.y),
+                tile:   (stands.x, stands.y),
                 stance: Stance::of_normal(face.normal).expect("a stair's own normals are all recognized"),
-                solid: solid.raw(),
+                solid:  solid.raw(),
             });
             for corner in face.fan() {
                 let screen = camera.to_view_exact(project_exact(corner));
@@ -1907,12 +1962,12 @@ fn main() {
     let mut lighting = Lighting {
         ambient: openshard_client_render::light::NIGHT,
         lights: vec![Light {
-            at: flame_at,
-            z: light_z,
-            radius: light_radius,
-            color: [1.0, 1.0, 1.0],
+            at:        flame_at,
+            z:         light_z,
+            radius:    light_radius,
+            color:     [1.0, 1.0, 1.0],
             intensity: 1.0,
-            beam: None,
+            beam:      None,
         }],
         occlusion,
         sun: None,
@@ -2037,16 +2092,16 @@ fn main() {
             &queue,
             &mut encoder,
             openshard_client_render::blit::Frame {
-                target: &surface_view,
-                world: &world_view,
-                gbuffer: &gbuffer_views,
-                face_instances: &dummy_instances,
-                item_instances: &dummy_instances,
+                target:           &surface_view,
+                world:            &world_view,
+                gbuffer:          &gbuffer_views,
+                face_instances:   &dummy_instances,
+                item_instances:   &dummy_instances,
                 mobile_instances: &dummy_instances,
-                mesh_instances: mesh_pass.rows_buffer(),
+                mesh_instances:   mesh_pass.rows_buffer(),
                 ground_instances: &dummy_ground_instances,
-                zoom: Zoom::ONE,
-                rect: ViewportRect {
+                zoom:             Zoom::ONE,
+                rect:             ViewportRect {
                     x: 0,
                     y: 0,
                     width,

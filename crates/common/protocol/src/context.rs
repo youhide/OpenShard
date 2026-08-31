@@ -16,10 +16,19 @@
 
 use std::fmt;
 
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
-use crate::packet::{EncodePacket, PacketLength};
-use crate::serial::{RawSerial, Serial};
+use crate::packet::{
+    EncodePacket,
+    PacketLength,
+};
+use crate::serial::{
+    RawSerial,
+    Serial,
+};
 use crate::version::ClientVersion;
 use crate::wire::ClilocId;
 
@@ -63,7 +72,7 @@ impl RawContextMenuIndex {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct InvalidContextMenuIndex {
     /// The tag the client sent.
-    pub tag: u16,
+    pub tag:     u16,
     /// How many entries the menu actually offered.
     pub offered: usize,
 }
@@ -78,7 +87,8 @@ impl fmt::Display for InvalidContextMenuIndex {
     }
 }
 
-impl std::error::Error for InvalidContextMenuIndex {}
+impl std::error::Error for InvalidContextMenuIndex {
+}
 
 /// What a context-menu entry may be beyond a plain, enabled line: greyed out,
 /// coloured, drawn in the AoS style.
@@ -123,7 +133,7 @@ pub struct ContextMenuSelect {
     /// The object the menu was opened on, as the client named it.
     pub serial: RawSerial,
     /// Which entry, by the tag the menu gave it — its position in the list.
-    pub index: RawContextMenuIndex,
+    pub index:  RawContextMenuIndex,
 }
 
 impl ContextMenuSelect {
@@ -135,7 +145,7 @@ impl ContextMenuSelect {
     pub(crate) fn decode_body(reader: &mut PacketReader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
             serial: RawSerial(reader.u32()?),
-            index: RawContextMenuIndex(reader.u16()?),
+            index:  RawContextMenuIndex(reader.u16()?),
         })
     }
 }
@@ -147,7 +157,7 @@ pub struct ContextMenuEntry {
     /// The cliloc the client looks up and shows.
     pub cliloc: ClilocId,
     /// [`ContextMenuFlags::NONE`] for a plain enabled entry.
-    pub flags: ContextMenuFlags,
+    pub flags:  ContextMenuFlags,
 }
 
 /// `0xBF` subcommand `0x14` — draw a context menu on an object. Variable length.
@@ -165,7 +175,7 @@ pub struct ContextMenuEntry {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ContextMenu {
     /// The object the menu was opened on.
-    pub serial: Serial,
+    pub serial:  Serial,
     /// The entries to show, in the order the client tags them from zero.
     pub entries: Vec<ContextMenuEntry>,
 }
@@ -204,7 +214,7 @@ mod tests {
         assert_eq!(
             request,
             ExtendedRequest::ContextMenuRequest(ContextMenuRequest {
-                serial: RawSerial(0x0000_1234)
+                serial: RawSerial(0x0000_1234),
             })
         );
     }
@@ -223,7 +233,7 @@ mod tests {
             select,
             ExtendedRequest::ContextMenuSelect(ContextMenuSelect {
                 serial: RawSerial(0x0000_5678),
-                index: RawContextMenuIndex(2),
+                index:  RawContextMenuIndex(2),
             })
         );
     }
@@ -232,15 +242,15 @@ mod tests {
     fn a_menu_tags_each_entry_with_its_position() {
         let packet = crate::packet::encode_packet(
             &ContextMenu {
-                serial: Serial::new(0x0000_00AB).unwrap(),
+                serial:  Serial::new(0x0000_00AB).unwrap(),
                 entries: vec![
                     ContextMenuEntry {
                         cliloc: ClilocId(3_000_362),
-                        flags: ContextMenuFlags::NONE,
+                        flags:  ContextMenuFlags::NONE,
                     },
                     ContextMenuEntry {
                         cliloc: ClilocId(6_103),
-                        flags: ContextMenuFlags::NONE,
+                        flags:  ContextMenuFlags::NONE,
                     },
                 ],
             },
@@ -279,7 +289,10 @@ mod tests {
         assert_eq!(select.index, RawContextMenuIndex(7), "the tag arrives intact");
         assert_eq!(
             select.index.validate(2),
-            Err(InvalidContextMenuIndex { tag: 7, offered: 2 }),
+            Err(InvalidContextMenuIndex {
+                tag:     7,
+                offered: 2,
+            }),
             "and names nothing the menu offered"
         );
     }

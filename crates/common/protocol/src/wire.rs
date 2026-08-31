@@ -16,7 +16,10 @@
 
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 /// An art id: what the client draws. Tiles, items, effect sprites and gump art
 /// all index the same `art.mul`, so they share one type.
@@ -343,7 +346,8 @@ impl fmt::Display for InvalidCharacterSlot {
     }
 }
 
-impl std::error::Error for InvalidCharacterSlot {}
+impl std::error::Error for InvalidCharacterSlot {
+}
 
 /// A client's self-reported IPv4 address, exactly as sent. Never trusted,
 /// never read — the server already knows the real address from the socket.

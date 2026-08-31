@@ -26,17 +26,30 @@ use std::path::Path;
 use std::time::Duration;
 
 use openshard_client_render::atlas::TextSize;
-use openshard_client_render::follow::FLOOR;
-use openshard_client_render::follow::Rig;
-use openshard_client_render::light;
+use openshard_client_render::follow::{
+    FLOOR,
+    Rig,
+};
 use openshard_client_render::solid::Cut;
-use openshard_client_render::{frame, interiors};
+use openshard_client_render::{
+    frame,
+    interiors,
+    light,
+};
 use openshard_protocol::speech::Font;
 use openshard_protocol::world::RangedRange;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 use crate::crowd::Ease;
-use crate::graphics::{GraphicsSettings, HighlightStyle, HighlightTarget, MELEE_SIGHT_REACH};
+use crate::graphics::{
+    GraphicsSettings,
+    HighlightStyle,
+    HighlightTarget,
+    MELEE_SIGHT_REACH,
+};
 
 /// Where the state lives: beside `openshard.toml`, in the working directory.
 ///
@@ -140,26 +153,26 @@ impl Tab {
 #[serde(default)]
 pub struct Light {
     /// How big a flame's body is, in tiles — the softness of every shadow.
-    pub flame_radius: f32,
+    pub flame_radius:    f32,
     /// How many rays each fragment casts at each flame.
-    pub shadow_rays: u32,
+    pub shadow_rays:     u32,
     /// What every flame's brightness is multiplied by.
-    pub brightness: f32,
+    pub brightness:      f32,
     /// And its reach.
-    pub reach: f32,
+    pub reach:           f32,
     /// What the ambient's sky term is multiplied by,
-    pub sky: f32,
+    pub sky:             f32,
     /// and its floor.
-    pub ground: f32,
+    pub ground:          f32,
     /// Where the sun stands, in degrees around the map's own axes,
-    pub sun_azimuth: f32,
+    pub sun_azimuth:     f32,
     /// how steeply it climbs, in tiles up per tile along,
-    pub sun_rise: f32,
+    pub sun_rise:        f32,
     /// how much it adds where it reaches,
-    pub sun_intensity: f32,
+    pub sun_intensity:   f32,
     /// and its colour — [`light::SunTuning::color`], a literal rather than a
     /// tint, for the reason stated there.
-    pub sun_color: [f32; 3],
+    pub sun_color:       [f32; 3],
     /// A tint the player's own light is multiplied through — see
     /// [`light::Tuning::headlight_color`]. `[1.0, 1.0, 1.0]` leaves it whatever
     /// colour it was built as.
@@ -167,11 +180,11 @@ pub struct Light {
     /// A tint every lantern the map itself burns is multiplied through — see
     /// [`light::Tuning::lantern_color`]. `[1.0, 1.0, 1.0]` leaves torches and
     /// campfires their own colour.
-    pub lantern_color: [f32; 3],
+    pub lantern_color:   [f32; 3],
     /// A tint the sky and the floor under a roof are each multiplied through
     /// — see [`light::Tuning::ambient_color`]. `[1.0, 1.0, 1.0]` leaves the
     /// ambient the colour it was authored as.
-    pub ambient_color: [f32; 3],
+    pub ambient_color:   [f32; 3],
 }
 
 impl Light {
@@ -191,21 +204,21 @@ impl Light {
     /// itself, and the struct itself is never read except through here.
     pub fn tuning(self) -> light::Tuning {
         light::Tuning {
-            flame_radius: self.flame_radius,
-            shadow_rays: light::ShadowRays::new(self.shadow_rays),
-            brightness: self.brightness,
-            reach: self.reach,
-            sky: self.sky,
-            ground: self.ground,
-            sun: light::SunTuning {
+            flame_radius:    self.flame_radius,
+            shadow_rays:     light::ShadowRays::new(self.shadow_rays),
+            brightness:      self.brightness,
+            reach:           self.reach,
+            sky:             self.sky,
+            ground:          self.ground,
+            sun:             light::SunTuning {
                 azimuth_degrees: self.sun_azimuth,
-                rise_per_tile: self.sun_rise,
-                color: self.sun_color,
-                intensity: self.sun_intensity,
+                rise_per_tile:   self.sun_rise,
+                color:           self.sun_color,
+                intensity:       self.sun_intensity,
             },
             headlight_color: self.headlight_color,
-            lantern_color: self.lantern_color,
-            ambient_color: self.ambient_color,
+            lantern_color:   self.lantern_color,
+            ambient_color:   self.ambient_color,
         }
         .clamped()
     }
@@ -213,19 +226,19 @@ impl Light {
     /// And back: what the file writes, from the renderer's own numbers.
     fn from_tuning(tuning: light::Tuning) -> Self {
         Self {
-            flame_radius: tuning.flame_radius,
-            shadow_rays: tuning.shadow_rays.raw(),
-            brightness: tuning.brightness,
-            reach: tuning.reach,
-            sky: tuning.sky,
-            ground: tuning.ground,
-            sun_azimuth: tuning.sun.azimuth_degrees,
-            sun_rise: tuning.sun.rise_per_tile,
-            sun_intensity: tuning.sun.intensity,
-            sun_color: tuning.sun.color,
+            flame_radius:    tuning.flame_radius,
+            shadow_rays:     tuning.shadow_rays.raw(),
+            brightness:      tuning.brightness,
+            reach:           tuning.reach,
+            sky:             tuning.sky,
+            ground:          tuning.ground,
+            sun_azimuth:     tuning.sun.azimuth_degrees,
+            sun_rise:        tuning.sun.rise_per_tile,
+            sun_intensity:   tuning.sun.intensity,
+            sun_color:       tuning.sun.color,
             headlight_color: tuning.headlight_color,
-            lantern_color: tuning.lantern_color,
-            ambient_color: tuning.ambient_color,
+            lantern_color:   tuning.lantern_color,
+            ambient_color:   tuning.ambient_color,
         }
     }
 }
@@ -397,19 +410,19 @@ pub struct FontSizes {
     /// A line over a head, and the HUD chat box — the same voice in two
     /// places, so one size.
     #[serde(with = "text_size")]
-    pub speech: TextSize,
+    pub speech:      TextSize,
     /// Captions inside this client's own windows: a button's word, a shop's
     /// row, a sheet's column.
     #[serde(with = "text_size")]
-    pub window: TextSize,
+    pub window:      TextSize,
     /// Captions in server-supplied forms (`0xB0` gumps).  Unlike a window
     /// caption this stays at one real size while the form's artwork is
     /// magnified, so a legacy layout does not overflow its fields.
     #[serde(with = "text_size")]
-    pub form: TextSize,
+    pub form:        TextSize,
     /// The shard's hover text.
     #[serde(with = "text_size")]
-    pub tooltip: TextSize,
+    pub tooltip:     TextSize,
     /// The digits written on a pile — see `openshard_client_render`'s
     /// `items::stack_label`. Smaller than the rest on purpose: it sits in the
     /// corner of a 30-pixel icon, and it is a number *about* a thing rather
@@ -508,10 +521,10 @@ impl Default for FontSizes {
     /// and a count has an icon's corner to fit into.
     fn default() -> Self {
         Self {
-            speech: TextSize::new(16.0),
-            window: TextSize::new(14.0),
-            form: TextSize::new(13.0),
-            tooltip: TextSize::new(14.0),
+            speech:      TextSize::new(16.0),
+            window:      TextSize::new(14.0),
+            form:        TextSize::new(13.0),
+            tooltip:     TextSize::new(14.0),
             stack_count: TextSize::new(11.0),
         }
     }
@@ -558,7 +571,12 @@ impl FontSizes {
 /// this file clamps.
 mod text_size {
     use openshard_client_render::atlas::TextSize;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{
+        Deserialize,
+        Deserializer,
+        Serialize,
+        Serializer,
+    };
 
     pub fn serialize<S: Serializer>(size: &TextSize, serializer: S) -> Result<S::Ok, S::Error> {
         size.pixels().serialize(serializer)
@@ -596,14 +614,14 @@ pub struct Audio {
     /// Positional effects such as strikes, spells and creature voices.
     pub effects: f32,
     /// Region and combat music.
-    pub music: f32,
+    pub music:   f32,
 }
 
 impl Default for Audio {
     fn default() -> Self {
         Self {
             effects: 0.8,
-            music: 0.45,
+            music:   0.45,
         }
     }
 }
@@ -619,7 +637,7 @@ impl Audio {
                 defaults.effects
             }
             .clamp(0.0, 1.0),
-            music: if self.music.is_finite() {
+            music:   if self.music.is_finite() {
                 self.music
             } else {
                 defaults.music
@@ -632,9 +650,9 @@ impl Audio {
 /// Where the dev window sits inside the HUD, in egui's logical points.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Panel {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
+    pub x:      f32,
+    pub y:      f32,
+    pub width:  f32,
     pub height: f32,
 }
 
@@ -647,11 +665,11 @@ pub struct Panel {
 pub struct Frame {
     /// Outer position — the frame the compositor draws, which is what
     /// `Window::outer_position` answers and `with_position` takes.
-    pub x: i32,
-    pub y: i32,
+    pub x:         i32,
+    pub y:         i32,
     /// Inner size — the surface, which is what `with_inner_size` takes.
-    pub width: u32,
-    pub height: u32,
+    pub width:     u32,
+    pub height:    u32,
     pub maximized: bool,
 }
 
@@ -663,9 +681,9 @@ pub struct Frame {
 /// restore check say which one it is reading.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Monitor {
-    pub x: i32,
-    pub y: i32,
-    pub width: u32,
+    pub x:      i32,
+    pub y:      i32,
+    pub width:  u32,
     pub height: u32,
 }
 
@@ -680,24 +698,24 @@ pub struct Monitor {
 #[serde(default)]
 pub struct Desk {
     /// Which page of the dev window is in front.
-    pub tab: Tab,
+    pub tab:                Tab,
     /// Whether the dev window is shown at all. Closed, it is reopened from the
     /// status strip's toggle or with F1.
-    pub open: bool,
+    pub open:               bool,
     /// Where the dev window was left. `None` before it has ever been drawn.
-    pub panel: Option<Panel>,
+    pub panel:              Option<Panel>,
     /// The HUD's scale.
-    pub zoom: Zoom,
+    pub zoom:               Zoom,
     /// How big the client's own windows draw — [`WindowScale`].
     ///
     /// Remembered for [`Light`]'s reason two fields down: a person who has
     /// found the size they can read a bag at should not have to find it again
     /// every launch.
-    pub window_scale: WindowScale,
+    pub window_scale:       WindowScale,
     /// Where the operating system's window was left. `None` on a first run, and
     /// ignored when it names a screen that is no longer there — see
     /// [`Desk::fits`].
-    pub window: Option<Frame>,
+    pub window:             Option<Frame>,
     /// What the lighting has been turned to — [`Light`].
     ///
     /// Remembered for the same reason the window's own place is: a person who
@@ -705,9 +723,9 @@ pub struct Desk {
     /// every launch. It is also what makes the file the honest record of *why*
     /// a frame looks the way it does — a screenshot of a client with the sky
     /// turned to nothing is otherwise indistinguishable from a bug report.
-    pub light: Light,
+    pub light:              Light,
     /// What the HUD chat box has been turned to — [`Chat`].
-    pub chat: Chat,
+    pub chat:               Chat,
     /// How big each text role draws — [`FontSizes`].
     ///
     /// On [`Desk`] rather than on [`Chat`], where the old multiplier lived,
@@ -715,33 +733,33 @@ pub struct Desk {
     /// box: a window's caption, a tooltip, the count on a pile. Remembered for
     /// the same reason the window's own place is — a person who has found the
     /// size they can read should not have to find it again every launch.
-    pub fonts: FontSizes,
+    pub fonts:              FontSizes,
     /// Which face draws text when this run has an operator-supplied TTF.
-    pub font_face: FontFace,
+    pub font_face:          FontFace,
     /// Replace every bitmap font requested by the shard or one of this
     /// client's windows with [`Desk::bitmap_font`].  This is the reference
     /// client's "override all fonts" setting; off preserves the packet's
     /// chosen face exactly.
     pub override_all_fonts: bool,
     /// The classic face used while [`Desk::override_all_fonts`] is on.
-    pub bitmap_font: BitmapFont,
+    pub bitmap_font:        BitmapFont,
     /// What the audio mixer has been turned to — [`Audio`].
-    pub audio: Audio,
+    pub audio:              Audio,
     /// Movement preferences, saved beside the rest of the client UI state.
-    pub movement: Movement,
+    pub movement:           Movement,
     /// Values retained by F1's staff item creator.
-    pub admin_item: AdminItem,
+    pub admin_item:         AdminItem,
     /// The skill and value last used by F1's staff skill tester.
-    pub admin_skill: AdminSkill,
+    pub admin_skill:        AdminSkill,
     /// Where the full item-art browser was left in F1.
-    pub admin_catalogue: AdminCatalogue,
+    pub admin_catalogue:    AdminCatalogue,
     /// What F1's combat recorder page was left showing.
-    pub combat_recorder: CombatRecorder,
+    pub combat_recorder:    CombatRecorder,
     /// The F1 controls whose live state belongs to the app rather than to an
     /// egui widget. `None` is a RON file written before this set existed;
     /// keeping that distinct lets its first launch retain the command-line
     /// diagnostic defaults.
-    pub f1: Option<F1Settings>,
+    pub f1:                 Option<F1Settings>,
 }
 
 /// Persistent controls from F1 that are applied outside the HUD itself.
@@ -867,8 +885,8 @@ impl F1Settings {
         let defaults = Self::default();
         Rig {
             plane_tau: Self::finite(self.rig_plane_tau, defaults.rig_plane_tau, 0.0, 0.5),
-            lift_tau: Self::finite(self.rig_lift_tau, defaults.rig_lift_tau, 0.0, 0.5),
-            lift_cut: match self.rig_never_cut {
+            lift_tau:  Self::finite(self.rig_lift_tau, defaults.rig_lift_tau, 0.0, 0.5),
+            lift_cut:  match self.rig_never_cut {
                 true => f32::INFINITY,
                 false => Self::finite(self.rig_lift_cut, 0.0, 0.0, 256.0),
             },
@@ -893,10 +911,10 @@ impl F1Settings {
     /// Apply the settings that are owned by the graphics subsystem.
     pub fn apply_to_graphics(self, graphics: &mut GraphicsSettings) {
         graphics.drawing = frame::Draw {
-            land: self.draw_land,
+            land:    self.draw_land,
             statics: self.draw_statics,
-            items: self.draw_items,
-            houses: self.draw_houses,
+            items:   self.draw_items,
+            houses:  self.draw_houses,
             mobiles: self.draw_mobiles,
         };
         graphics.cutaway_disabled = self.cutaway_disabled;
@@ -1080,7 +1098,7 @@ impl F1Settings {
 #[serde(default)]
 pub struct Movement {
     /// Move at running pace unless shift is held.
-    pub always_run: bool,
+    pub always_run:      bool,
     /// Use a closed door when the next movement step meets it.
     pub auto_open_doors: bool,
 }
@@ -1088,7 +1106,7 @@ pub struct Movement {
 impl Default for Movement {
     fn default() -> Self {
         Self {
-            always_run: true,
+            always_run:      true,
             auto_open_doors: true,
         }
     }
@@ -1102,9 +1120,9 @@ impl Default for Movement {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AdminItem {
-    pub graphic: String,
-    pub hue: String,
-    pub amount: String,
+    pub graphic:   String,
+    pub hue:       String,
+    pub amount:    String,
     pub stackable: bool,
 }
 
@@ -1118,7 +1136,7 @@ pub struct AdminItem {
 #[serde(default)]
 pub struct AdminSkill {
     /// The installed client's spelling of the selected skill.
-    pub name: String,
+    pub name:  String,
     /// Whole points with an optional single decimal place.
     pub value: String,
 }
@@ -1133,12 +1151,12 @@ pub struct AdminSkill {
 #[serde(default)]
 pub struct CombatRecorder {
     /// What the next mark will say.
-    pub note: String,
+    pub note:    String,
     /// Show only this client's own body, rather than everyone in sight.
     pub only_me: bool,
     /// How many of the newest lines the page draws. The log keeps far more; this
     /// is what fits on a screen without turning the panel into the whole file.
-    pub shown: usize,
+    pub shown:   usize,
 }
 
 impl Default for CombatRecorder {
@@ -1146,9 +1164,9 @@ impl Default for CombatRecorder {
     /// what somebody who has just seen their own character stop is looking at.
     fn default() -> Self {
         Self {
-            note: String::new(),
+            note:    String::new(),
             only_me: true,
-            shown: 60,
+            shown:   60,
         }
     }
 }
@@ -1160,11 +1178,11 @@ impl Default for CombatRecorder {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AdminCatalogue {
-    pub query: String,
-    pub category: AdminItemCategory,
+    pub query:     String,
+    pub category:  AdminItemCategory,
     /// Kept as text so an incomplete edit does not get rewritten while typing.
     /// It is validated only when an item from the browser is created.
-    pub amount: String,
+    pub amount:    String,
     /// Whether the selected graphic is put in the backpack as one mergeable
     /// pile, rather than as an ordinary discrete item.
     pub stackable: bool,
@@ -1185,9 +1203,9 @@ pub enum AdminItemCategory {
 impl Default for AdminCatalogue {
     fn default() -> Self {
         Self {
-            query: String::new(),
-            category: AdminItemCategory::All,
-            amount: "1".to_owned(),
+            query:     String::new(),
+            category:  AdminItemCategory::All,
+            amount:    "1".to_owned(),
             stackable: false,
         }
     }
@@ -1196,9 +1214,9 @@ impl Default for AdminCatalogue {
 impl Default for AdminItem {
     fn default() -> Self {
         Self {
-            graphic: "0x0eed".to_owned(),
-            hue: "0".to_owned(),
-            amount: "100".to_owned(),
+            graphic:   "0x0eed".to_owned(),
+            hue:       "0".to_owned(),
+            amount:    "100".to_owned(),
             stackable: true,
         }
     }
@@ -1207,7 +1225,7 @@ impl Default for AdminItem {
 impl Default for AdminSkill {
     fn default() -> Self {
         Self {
-            name: "Mining".to_owned(),
+            name:  "Mining".to_owned(),
             value: "100.0".to_owned(),
         }
     }
@@ -1216,27 +1234,27 @@ impl Default for AdminSkill {
 impl Default for Desk {
     fn default() -> Self {
         Self {
-            tab: Tab::default(),
+            tab:                Tab::default(),
             // Shown until closed: a dev client whose panels are hidden by
             // default is a dev client that looks broken on a first run.
-            open: true,
-            panel: None,
-            zoom: Zoom::default(),
-            window_scale: WindowScale::default(),
-            fonts: FontSizes::default(),
-            font_face: FontFace::default(),
+            open:               true,
+            panel:              None,
+            zoom:               Zoom::default(),
+            window_scale:       WindowScale::default(),
+            fonts:              FontSizes::default(),
+            font_face:          FontFace::default(),
             override_all_fonts: false,
-            bitmap_font: BitmapFont::default(),
-            light: Light::new(),
-            window: None,
-            chat: Chat::default(),
-            audio: Audio::default(),
-            movement: Movement::default(),
-            admin_item: AdminItem::default(),
-            admin_skill: AdminSkill::default(),
-            admin_catalogue: AdminCatalogue::default(),
-            combat_recorder: CombatRecorder::default(),
-            f1: None,
+            bitmap_font:        BitmapFont::default(),
+            light:              Light::new(),
+            window:             None,
+            chat:               Chat::default(),
+            audio:              Audio::default(),
+            movement:           Movement::default(),
+            admin_item:         AdminItem::default(),
+            admin_skill:        AdminSkill::default(),
+            admin_catalogue:    AdminCatalogue::default(),
+            combat_recorder:    CombatRecorder::default(),
+            f1:                 None,
         }
     }
 }
@@ -1266,7 +1284,8 @@ impl std::fmt::Display for DeskError {
     }
 }
 
-impl std::error::Error for DeskError {}
+impl std::error::Error for DeskError {
+}
 
 impl Desk {
     /// Read the file, or the defaults if there is no file yet.
@@ -1390,79 +1409,79 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("client_ui.ron");
         let desk = Desk {
-            tab: Tab::Frames,
-            open: false,
-            panel: Some(Panel {
-                x: 12.0,
-                y: 34.0,
-                width: 320.0,
+            tab:                Tab::Frames,
+            open:               false,
+            panel:              Some(Panel {
+                x:      12.0,
+                y:      34.0,
+                width:  320.0,
                 height: 240.0,
             }),
-            zoom: Zoom::new(1.25),
-            window_scale: WindowScale::new(1.5),
-            window: Some(Frame {
-                x: -1920,
-                y: 40,
-                width: 1600,
-                height: 900,
+            zoom:               Zoom::new(1.25),
+            window_scale:       WindowScale::new(1.5),
+            window:             Some(Frame {
+                x:         -1920,
+                y:         40,
+                width:     1600,
+                height:    900,
                 maximized: true,
             }),
-            light: Light {
-                flame_radius: 0.25,
-                shadow_rays: 16,
-                brightness: 1.5,
-                reach: 0.5,
-                sky: 2.0,
-                ground: 0.0,
-                sun_azimuth: 90.0,
-                sun_rise: 0.5,
-                sun_intensity: 0.4,
-                sun_color: [1.0, 0.9, 0.7],
+            light:              Light {
+                flame_radius:    0.25,
+                shadow_rays:     16,
+                brightness:      1.5,
+                reach:           0.5,
+                sky:             2.0,
+                ground:          0.0,
+                sun_azimuth:     90.0,
+                sun_rise:        0.5,
+                sun_intensity:   0.4,
+                sun_color:       [1.0, 0.9, 0.7],
                 headlight_color: [1.0, 0.8, 0.6],
-                lantern_color: [1.0, 0.5, 0.2],
-                ambient_color: [0.8, 0.9, 1.0],
+                lantern_color:   [1.0, 0.5, 0.2],
+                ambient_color:   [0.8, 0.9, 1.0],
             },
-            chat: Chat { hue: 33 },
-            fonts: FontSizes {
-                speech: TextSize::new(18.5),
-                window: TextSize::new(13.0),
-                form: TextSize::new(12.0),
-                tooltip: TextSize::new(12.5),
+            chat:               Chat { hue: 33 },
+            fonts:              FontSizes {
+                speech:      TextSize::new(18.5),
+                window:      TextSize::new(13.0),
+                form:        TextSize::new(12.0),
+                tooltip:     TextSize::new(12.5),
                 stack_count: TextSize::new(9.5),
             },
-            font_face: FontFace::Classic,
+            font_face:          FontFace::Classic,
             override_all_fonts: true,
-            bitmap_font: BitmapFont::new(7),
-            audio: Audio {
+            bitmap_font:        BitmapFont::new(7),
+            audio:              Audio {
                 effects: 0.25,
-                music: 0.75,
+                music:   0.75,
             },
-            movement: Movement {
-                always_run: false,
+            movement:           Movement {
+                always_run:      false,
                 auto_open_doors: true,
             },
-            admin_item: AdminItem {
-                graphic: "0x0f0e".to_owned(),
-                hue: "0x0481".to_owned(),
-                amount: "25".to_owned(),
+            admin_item:         AdminItem {
+                graphic:   "0x0f0e".to_owned(),
+                hue:       "0x0481".to_owned(),
+                amount:    "25".to_owned(),
                 stackable: false,
             },
-            admin_skill: AdminSkill {
-                name: "Mining".to_owned(),
+            admin_skill:        AdminSkill {
+                name:  "Mining".to_owned(),
                 value: "95.5".to_owned(),
             },
-            admin_catalogue: AdminCatalogue {
-                query: "0x0f52".to_owned(),
-                category: AdminItemCategory::Weapons,
-                amount: "25".to_owned(),
+            admin_catalogue:    AdminCatalogue {
+                query:     "0x0f52".to_owned(),
+                category:  AdminItemCategory::Weapons,
+                amount:    "25".to_owned(),
                 stackable: true,
             },
-            combat_recorder: CombatRecorder {
-                note: "he stops here".to_owned(),
+            combat_recorder:    CombatRecorder {
+                note:    "he stops here".to_owned(),
                 only_me: false,
-                shown: 120,
+                shown:   120,
             },
-            f1: Some(F1Settings {
+            f1:                 Some(F1Settings {
                 show_terrain: true,
                 sight_reach: 10,
                 z_slice: true,
@@ -1702,10 +1721,10 @@ mod tests {
     #[test]
     fn bitmap_roles_use_the_same_sizes_with_fractional_scales() {
         let fonts = FontSizes {
-            speech: TextSize::new(12.0),
-            window: TextSize::new(17.5),
-            form: TextSize::new(14.0),
-            tooltip: TextSize::new(10.5),
+            speech:      TextSize::new(12.0),
+            window:      TextSize::new(17.5),
+            form:        TextSize::new(14.0),
+            tooltip:     TextSize::new(10.5),
             stack_count: TextSize::new(13.75),
         };
         assert_eq!(fonts.bitmap_speech_scale(), 1.5);
@@ -1742,18 +1761,18 @@ mod tests {
     #[test]
     fn a_frame_on_a_vanished_screen_does_not_fit() {
         let frame = Frame {
-            x: -1920,
-            y: 0,
-            width: 800,
-            height: 600,
+            x:         -1920,
+            y:         0,
+            width:     800,
+            height:    600,
             maximized: false,
         };
         assert!(!Desk::fits(
             &frame,
             &[Monitor {
-                x: 0,
-                y: 0,
-                width: 2560,
+                x:      0,
+                y:      0,
+                width:  2560,
                 height: 1440,
             }],
         ));
@@ -1761,15 +1780,15 @@ mod tests {
             &frame,
             &[
                 Monitor {
-                    x: -1920,
-                    y: 0,
-                    width: 1920,
+                    x:      -1920,
+                    y:      0,
+                    width:  1920,
                     height: 1080,
                 },
                 Monitor {
-                    x: 0,
-                    y: 0,
-                    width: 2560,
+                    x:      0,
+                    y:      0,
+                    width:  2560,
                     height: 1440,
                 },
             ],
@@ -1781,18 +1800,18 @@ mod tests {
     #[test]
     fn a_frame_hanging_off_an_edge_still_fits() {
         let frame = Frame {
-            x: 2400,
-            y: 1400,
-            width: 800,
-            height: 600,
+            x:         2400,
+            y:         1400,
+            width:     800,
+            height:    600,
             maximized: false,
         };
         assert!(Desk::fits(
             &frame,
             &[Monitor {
-                x: 0,
-                y: 0,
-                width: 2560,
+                x:      0,
+                y:      0,
+                width:  2560,
                 height: 1440,
             }],
         ));

@@ -23,10 +23,15 @@
 
 use std::collections::HashMap;
 
-use crate::boat::Boats;
 use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Body, Cover, Overlay};
+use openshard_map::overlay::{
+    Body,
+    Cover,
+    Overlay,
+};
+
+use crate::boat::Boats;
 
 /// A mobile's body height in z-units, for deciding what overlaps it. Matches the
 /// step check's `PLAYER_HEIGHT` in `world::terrain`.
@@ -53,7 +58,7 @@ pub struct Obstacle {
     /// that floor and *not* the ground beneath it: without it, a placed
     /// multi-storey building sealed every floor below its highest impassable
     /// piece.
-    pub cover: Cover,
+    pub cover:  Cover,
 }
 
 impl Obstacle {
@@ -275,8 +280,6 @@ mod tests {
         assert!(covers.contains(&Cover::standing(7, 0)));
     }
 
-    use super::*;
-    use crate::boat::{Boats, Plank};
     use openshard_entities::Registry;
     use openshard_map::overlay::Doors;
     use openshard_movement::Footing;
@@ -284,6 +287,12 @@ mod tests {
     use openshard_protocol::direction::Direction;
     use openshard_protocol::world::Point;
     use openshard_tiles::TileFlags;
+
+    use super::*;
+    use crate::boat::{
+        Boats,
+        Plank,
+    };
 
     /// The land id a scene paves with, which these fixtures declare to be water.
     ///

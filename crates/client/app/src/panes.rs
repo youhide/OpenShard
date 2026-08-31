@@ -34,16 +34,29 @@
 
 use std::time::Instant;
 
-use openshard_client_net::action::{GumpReply, Outgoing};
+use openshard_client_net::action::{
+    GumpReply,
+    Outgoing,
+};
 use openshard_client_net::view::WorldView;
-use openshard_client_render::gump::{GumpArt, GumpPixel};
+use openshard_client_render::gump::{
+    GumpArt,
+    GumpPixel,
+};
 use openshard_client_render::text::GumpLabel;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 
-use crate::hand::{Hand, ItemDrag, PendingDrop};
+use crate::hand::{
+    Hand,
+    ItemDrag,
+    PendingDrop,
+};
 use crate::resources::Resources;
-use crate::windows::{Drawn, WindowSubject};
+use crate::windows::{
+    Drawn,
+    WindowSubject,
+};
 
 pub(crate) mod confirm;
 pub(crate) mod container;
@@ -181,7 +194,7 @@ pub enum Key {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Modifiers {
     pub shift: bool,
-    pub ctrl: bool,
+    pub ctrl:  bool,
 }
 
 /// The client's own files, narrowed to what a window actually reads.
@@ -206,29 +219,29 @@ pub struct Modifiers {
 pub struct PaneFiles<'a> {
     /// The gump pictures packed so far. Every kind reads it: it is what a hit
     /// test picks against and what a layout measures a window's frame by.
-    pub gump_atlas: &'a openshard_client_render::gump::GumpAtlas,
+    pub gump_atlas:   &'a openshard_client_render::gump::GumpAtlas,
     /// The `fonts.mul` glyphs, for the two kinds that measure their own text —
     /// a dialog's caret and a skill row's columns.
-    pub font_atlas: &'a openshard_client_render::atlas::FontAtlas,
+    pub font_atlas:   &'a openshard_client_render::atlas::FontAtlas,
     /// The item art, read for one thing only: the centre of an icon that is
     /// grabbed somewhere other than its own picture — see
     /// [`centre_of`](crate::hand::centre_of).
-    pub art: &'a openshard_uofiles::art::Art,
+    pub art:          &'a openshard_uofiles::art::Art,
     /// What a graphic *is*: its name for a label, and its layer for a drop onto
     /// a body.
-    pub tiledata: &'a openshard_tiles::TileData,
+    pub tiledata:     &'a openshard_tiles::TileData,
     /// The client's gump art, or `None` for an install this build could not
     /// open it from — the paperdoll is the one kind that reads the file itself,
     /// because a doll's body is drawn from a gump rather than from the atlas.
-    pub gumps: Option<&'a openshard_uofiles::gumpart::Gumps>,
+    pub gumps:        Option<&'a openshard_uofiles::gumpart::Gumps>,
     /// The client's own text table, or `None` when `Cliloc.enu` could not be
     /// read. A dialog line that named a cliloc draws nothing without it, which
     /// is the tolerance a missing gump or a missing glyph already gets.
-    pub cliloc: Option<&'a openshard_uofiles::cliloc::Cliloc>,
+    pub cliloc:       Option<&'a openshard_uofiles::cliloc::Cliloc>,
     /// What a worn item's graphic resolves to for drawing, for the paperdoll.
-    pub equip_conv: &'a openshard_uofiles::equipconv::EquipConv,
+    pub equip_conv:   &'a openshard_uofiles::equipconv::EquipConv,
     /// What the client's files call each skill, for the sheet.
-    pub skill_names: &'a openshard_uofiles::skills::Skills,
+    pub skill_names:  &'a openshard_uofiles::skills::Skills,
     /// Which heading each skill is filed under, for the sheet.
     pub skill_groups: &'a openshard_uofiles::skillgrp::SkillGroups,
 }
@@ -241,14 +254,14 @@ impl<'a> PaneFiles<'a> {
     /// reach for through a `&Resources`.
     pub fn of(resources: &'a Resources) -> Self {
         Self {
-            gump_atlas: &resources.gump_atlas,
-            font_atlas: &resources.font_atlas,
-            art: &resources.art,
-            tiledata: &resources.tiledata,
-            gumps: resources.gumps.as_ref(),
-            cliloc: resources.cliloc.as_ref(),
-            equip_conv: &resources.equip_conv,
-            skill_names: &resources.skill_names,
+            gump_atlas:   &resources.gump_atlas,
+            font_atlas:   &resources.font_atlas,
+            art:          &resources.art,
+            tiledata:     &resources.tiledata,
+            gumps:        resources.gumps.as_ref(),
+            cliloc:       resources.cliloc.as_ref(),
+            equip_conv:   &resources.equip_conv,
+            skill_names:  &resources.skill_names,
             skill_groups: &resources.skill_groups,
         }
     }
@@ -272,11 +285,11 @@ pub struct PaneFrame<'a> {
     /// The authoritative picture. A pane holds no copy of what is in the bag or
     /// on the body; it looks both up here every time it is asked, which is why
     /// a window can never draw or click a stale item.
-    pub view: &'a WorldView,
+    pub view:         &'a WorldView,
     /// The client's own files, narrowed to the nine a window reads — see
     /// [`PaneFiles`], and step 8 of `docs/window_components.md` for why that
     /// narrowing is the step's whole content.
-    pub files: PaneFiles<'a>,
+    pub files:        PaneFiles<'a>,
     /// The pointer, in this window's own gump pixels — the origin is the
     /// window's own top-left corner, not the screen's.
     ///
@@ -295,7 +308,7 @@ pub struct PaneFrame<'a> {
     /// in — once each, which is decision 2's "one place that measures a
     /// cursor" made real. A pane itself never sees that placement: it has no
     /// `at` field to read or forget to subtract.
-    pub cursor: GumpPixel,
+    pub cursor:       GumpPixel,
     /// What is on the cursor, if anything, and where it is on its way to.
     ///
     /// Readonly, and the whole of decision 7: the hand is a **slot** and not a
@@ -309,7 +322,7 @@ pub struct PaneFrame<'a> {
     /// The whole [`Hand`] and not just what is in it, because a bag has to draw
     /// a drop it is *waiting* on: the item sits where it was let go until the
     /// shard's answer lands, and which bag that is, is the pending drop's.
-    pub hand: Option<Hand>,
+    pub hand:         Option<Hand>,
     /// The keys are coming to this window.
     ///
     /// The manager's answer and not the pane's, for
@@ -329,7 +342,7 @@ pub struct PaneFrame<'a> {
     /// A pane reads this to leave that press alone — a move must not lift it
     /// out from under the number the player is choosing, and the release that
     /// dismissed the prompt's own window must not put it down.
-    pub has_prompt: bool,
+    pub has_prompt:   bool,
 }
 
 /// Everything a pane may read while it answers one input, and nothing it may
@@ -340,7 +353,7 @@ pub struct PaneFrame<'a> {
 pub struct PaneCtx<'a> {
     /// What this pane would be packed and laid out with, were the frame being
     /// drawn now.
-    pub frame: PaneFrame<'a>,
+    pub frame:         PaneFrame<'a>,
     /// How this window was laid out on the last frame, or `None` for a window
     /// that has not been drawn yet.
     ///
@@ -351,7 +364,7 @@ pub struct PaneCtx<'a> {
     /// [`Windows::drawn_windows`](crate::windows::Windows::drawn_windows)
     /// exists for, and the one that used to make a paperdoll whose two answers
     /// disagreed a window that could not be closed.
-    pub drawn: Option<&'a Drawn>,
+    pub drawn:         Option<&'a Drawn>,
     /// This window is the one the pointer is on: it covers the cursor and no
     /// window above it does.
     ///
@@ -370,14 +383,14 @@ pub struct PaneCtx<'a> {
     ///
     /// One reader, which is the one the field was added for: a bag's Shift-drag
     /// divides the stack it is pulling out instead of lifting the whole pile.
-    pub modifiers: Modifiers,
+    pub modifiers:     Modifiers,
     /// Now, for every double-click pair.
     ///
     /// Passed rather than read from `Instant::now()` inside a pane, for the
     /// reason the tick's `Rng` is owned rather than ambient: a pair of clicks
     /// is a *timing* rule, and a rule that reads an ambient clock cannot be
     /// exercised by a test.
-    pub now: Instant,
+    pub now:           Instant,
     /// The pointer has left the press it is carrying: far enough from where
     /// the button went down that a press is no longer a click.
     ///
@@ -396,7 +409,7 @@ pub struct PaneCtx<'a> {
     /// for three times the hand movement that the same icon on the ground
     /// did. See [`hand::past_slop`](crate::hand::past_slop) and
     /// `docs/window_components.md`'s Backlog entry of that name.
-    pub past_slop: bool,
+    pub past_slop:     bool,
 }
 
 /// What a pane says about one input.
@@ -415,11 +428,11 @@ pub struct PaneCtx<'a> {
 pub struct Response {
     /// The event stops here: neither the camera, nor the world, nor a window
     /// under this one ever sees it.
-    pub taken: bool,
+    pub taken:  bool,
     /// The frame is stale and has to be drawn again.
     pub redraw: bool,
     /// What the pane is asking the manager to do, in order.
-    pub out: Vec<Effect>,
+    pub out:    Vec<Effect>,
 }
 
 impl Response {
@@ -427,36 +440,36 @@ impl Response {
     /// an input this kind of window has no use for.
     pub const fn ignored() -> Self {
         Self {
-            taken: false,
+            taken:  false,
             redraw: false,
-            out: Vec::new(),
+            out:    Vec::new(),
         }
     }
 
     /// Mine, and the frame still stands. The end-of-list wheel notch.
     pub const fn consumed() -> Self {
         Self {
-            taken: true,
+            taken:  true,
             redraw: false,
-            out: Vec::new(),
+            out:    Vec::new(),
         }
     }
 
     /// Mine, and it changed what is on the screen. The ordinary click.
     pub const fn changed() -> Self {
         Self {
-            taken: true,
+            taken:  true,
             redraw: true,
-            out: Vec::new(),
+            out:    Vec::new(),
         }
     }
 
     /// Not mine, but it changed what is on the screen. A hover tint.
     pub const fn stale() -> Self {
         Self {
-            taken: false,
+            taken:  false,
             redraw: true,
-            out: Vec::new(),
+            out:    Vec::new(),
         }
     }
 
@@ -674,11 +687,11 @@ impl LocalWindow {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Line {
     /// Its top-left corner, in absolute gump pixels.
-    pub at: GumpPixel,
+    pub at:   GumpPixel,
     /// The face it is written in.
     pub font: Font,
     /// The hue the layout asked for.
-    pub hue: Hue,
+    pub hue:  Hue,
     /// The box it is cropped to, or `None` for a line that overflows rather
     /// than clipping.
     pub clip: Option<(i32, i32)>,
@@ -690,10 +703,10 @@ impl Line {
     /// Draw it.
     pub fn label(&self) -> GumpLabel<'_> {
         GumpLabel {
-            at: self.at,
+            at:   self.at,
             text: &self.text,
             font: self.font,
-            hue: self.hue,
+            hue:  self.hue,
             clip: self.clip,
         }
     }

@@ -7,10 +7,19 @@
 use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::Font;
-use openshard_protocol::vendor::{BuyLine, SellLine};
+use openshard_protocol::vendor::{
+    BuyLine,
+    SellLine,
+};
 use openshard_protocol::wire::Hue;
 
-use crate::gump::{self, GumpArt, GumpAtlas, GumpPixel, Picture};
+use crate::gump::{
+    self,
+    GumpArt,
+    GumpAtlas,
+    GumpPixel,
+    Picture,
+};
 use crate::text::GumpLabel;
 
 /// ClassicUO's two overlapping shop panels are 283 pixels wide, with the
@@ -71,20 +80,20 @@ pub enum Action {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Line {
-    pub at: GumpPixel,
+    pub at:   GumpPixel,
     pub text: String,
     pub font: Font,
-    pub hue: Hue,
+    pub hue:  Hue,
     pub clip: Option<(i32, i32)>,
 }
 
 impl Line {
     pub fn label(&self) -> GumpLabel<'_> {
         GumpLabel {
-            at: self.at,
+            at:   self.at,
             text: &self.text,
             font: self.font,
-            hue: self.hue,
+            hue:  self.hue,
             clip: self.clip,
         }
     }
@@ -92,14 +101,14 @@ impl Line {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Window {
-    pub vendor: Serial,
-    pub sell: bool,
-    pub at: GumpPixel,
-    pub scroll: CatalogueIndex,
-    pub rows: usize,
-    selected: Vec<CatalogueIndex>,
+    pub vendor:   Serial,
+    pub sell:     bool,
+    pub at:       GumpPixel,
+    pub scroll:   CatalogueIndex,
+    pub rows:     usize,
+    selected:     Vec<CatalogueIndex>,
     pub pictures: Vec<Picture>,
-    pub lines: Vec<Line>,
+    pub lines:    Vec<Line>,
 }
 
 impl Window {
@@ -141,9 +150,11 @@ impl Window {
                 return Some(Hit::Remove(*row));
             }
         }
-        self.action_at(cursor).map(|action| match action {
-            Action::Confirm => Hit::Confirm,
-            Action::Clear => Hit::Clear,
+        self.action_at(cursor).map(|action| {
+            match action {
+                Action::Confirm => Hit::Confirm,
+                Action::Clear => Hit::Clear,
+            }
         })
     }
 
@@ -176,12 +187,12 @@ pub fn art_of() -> impl Iterator<Item = GumpArt> {
 }
 
 struct Row {
-    name: String,
-    price: u32,
-    amount: u16,
+    name:     String,
+    price:    u32,
+    amount:   u16,
     quantity: String,
-    graphic: Option<openshard_protocol::wire::Graphic>,
-    hue: Hue,
+    graphic:  Option<openshard_protocol::wire::Graphic>,
+    hue:      Hue,
 }
 
 // `sell` below takes seven of these eight, and for the same reason as
@@ -201,13 +212,15 @@ pub fn buy(
     window(
         vendor,
         false,
-        lines.iter().enumerate().map(|(i, line)| Row {
-            name: line.name.clone(),
-            price: line.price,
-            amount: amounts.get(i).copied().unwrap_or(0),
-            quantity: format!("x{}", amounts.get(i).copied().unwrap_or(0)),
-            graphic: items.get(i).map(|item| item.graphic),
-            hue: items.get(i).map_or(Hue::NONE, |item| item.hue),
+        lines.iter().enumerate().map(|(i, line)| {
+            Row {
+                name:     line.name.clone(),
+                price:    line.price,
+                amount:   amounts.get(i).copied().unwrap_or(0),
+                quantity: format!("x{}", amounts.get(i).copied().unwrap_or(0)),
+                graphic:  items.get(i).map(|item| item.graphic),
+                hue:      items.get(i).map_or(Hue::NONE, |item| item.hue),
+            }
         }),
         scroll,
         at,
@@ -228,15 +241,17 @@ pub fn sell(
     window(
         vendor,
         true,
-        lines.iter().enumerate().map(|(i, line)| Row {
-            name: line.name.clone(),
-            // A real widening: `SellLine::price` is a `u16` where `BuyLine`'s is
-            // already a `u32`.
-            price: u32::from(line.price),
-            amount: amounts.get(i).copied().unwrap_or(0),
-            quantity: format!("{}/{}", amounts.get(i).copied().unwrap_or(0), line.amount.0),
-            graphic: Some(line.graphic),
-            hue: line.hue,
+        lines.iter().enumerate().map(|(i, line)| {
+            Row {
+                name:     line.name.clone(),
+                // A real widening: `SellLine::price` is a `u16` where `BuyLine`'s is
+                // already a `u32`.
+                price:    u32::from(line.price),
+                amount:   amounts.get(i).copied().unwrap_or(0),
+                quantity: format!("{}/{}", amounts.get(i).copied().unwrap_or(0), line.amount.0),
+                graphic:  Some(line.graphic),
+                hue:      line.hue,
+            }
         }),
         scroll,
         at,
@@ -284,17 +299,17 @@ fn catalogue_lines(rows: &[Row], scroll: usize, at: GumpPixel) -> Vec<Line> {
             let y = ROW_TOP + i as i32 * ROW_HEIGHT;
             [
                 Line {
-                    at: at.offset(GumpPixel::new(92, y + 15)),
+                    at:   at.offset(GumpPixel::new(92, y + 15)),
                     text: format!("{}: {} gp", row.name, row.price),
                     font: ROW_FONT,
-                    hue: ROW_HUE,
+                    hue:  ROW_HUE,
                     clip: Some((108, ROW_HEIGHT)),
                 },
                 Line {
-                    at: at.offset(GumpPixel::new(200, y + 15)),
+                    at:   at.offset(GumpPixel::new(200, y + 15)),
                     text: row.quantity.clone(),
                     font: ROW_FONT,
-                    hue: ROW_HUE,
+                    hue:  ROW_HUE,
                     clip: Some((35, ROW_HEIGHT)),
                 },
             ]
@@ -317,17 +332,17 @@ fn order_panel(rows: &[Row], at: GumpPixel, hover: Option<Action>) -> (Vec<Catal
             let y = 185 + i as i32 * 28;
             [
                 Line {
-                    at: at.offset(GumpPixel::new(277, y)),
+                    at:   at.offset(GumpPixel::new(277, y)),
                     text: row.amount.to_string(),
                     font: ROW_FONT,
-                    hue: ROW_HUE,
+                    hue:  ROW_HUE,
                     clip: Some((22, 22)),
                 },
                 Line {
-                    at: at.offset(GumpPixel::new(302, y)),
+                    at:   at.offset(GumpPixel::new(302, y)),
                     text: row.name.clone(),
                     font: ROW_FONT,
-                    hue: ROW_HUE,
+                    hue:  ROW_HUE,
                     clip: Some((145, 22)),
                 },
             ]
@@ -338,18 +353,18 @@ fn order_panel(rows: &[Row], at: GumpPixel, hover: Option<Action>) -> (Vec<Catal
         .map(|row| row.price.saturating_mul(u32::from(row.amount)))
         .sum();
     lines.push(Line {
-        at: at.offset(GumpPixel::new(287, 302)),
+        at:   at.offset(GumpPixel::new(287, 302)),
         text: format!("TOTAL: {total} gp"),
         font: ROW_FONT,
-        hue: ROW_HUE,
+        hue:  ROW_HUE,
         clip: Some((135, 22)),
     });
     for (action, x, text) in [(Action::Confirm, 302, "ACCEPT"), (Action::Clear, 456, "CLEAR")] {
         lines.push(Line {
-            at: at.offset(GumpPixel::new(x, 328)),
+            at:   at.offset(GumpPixel::new(x, 328)),
             text: text.to_owned(),
             font: ROW_FONT,
-            hue: if hover == Some(action) {
+            hue:  if hover == Some(action) {
                 Hue(0x0035)
             } else {
                 ROW_HUE
@@ -393,8 +408,8 @@ fn pictures(rows: &[Row], scroll: usize, sell: bool, at: GumpPixel, atlas: &Gump
                     Picture::plain(GumpArt::Item(graphic), icon_at)
                         .hued(row.hue)
                         .inside(gump::Scissor {
-                            at: cell_at,
-                            width: ICON_CELL_WIDTH,
+                            at:     cell_at,
+                            width:  ICON_CELL_WIDTH,
                             height: ROW_HEIGHT,
                         })
                 })
@@ -412,7 +427,7 @@ mod tests {
             Serial::new(42).unwrap(),
             &[BuyLine {
                 price: 5,
-                name: "apple".into(),
+                name:  "apple".into(),
             }],
             &[],
             &[1],
@@ -440,9 +455,11 @@ mod tests {
     #[test]
     fn a_long_catalogue_has_a_fixed_viewport_and_offsets_its_row_hits() {
         let lines: Vec<BuyLine> = (0..13)
-            .map(|price| BuyLine {
-                price,
-                name: format!("item {price}"),
+            .map(|price| {
+                BuyLine {
+                    price,
+                    name: format!("item {price}"),
+                }
             })
             .collect();
         let window = buy(
@@ -472,11 +489,11 @@ mod tests {
             &[
                 BuyLine {
                     price: 5,
-                    name: "apple".into(),
+                    name:  "apple".into(),
                 },
                 BuyLine {
                     price: 7,
-                    name: "pear".into(),
+                    name:  "pear".into(),
                 },
             ],
             &[],

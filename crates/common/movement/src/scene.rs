@@ -45,18 +45,35 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, StaticItem, WorldMap};
+use openshard_map::map::{
+    LandCell,
+    StaticItem,
+    WorldMap,
+};
+use openshard_map::overlay::{
+    Doors,
+    Overlay,
+};
 use openshard_map::snapshot::MapSnapshot;
-use openshard_protocol::wire::{Graphic, Hue};
-use openshard_protocol::world::{Facet, Point};
-use openshard_tiles::LandTileId;
-use openshard_tiles::{StaticTile, TileData, TileFlags};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
+use openshard_tiles::{
+    LandTileId,
+    StaticTile,
+    TileData,
+    TileFlags,
+};
 
 use crate::footing::Footing;
 use crate::reach::Reach;
 use crate::spans::SpanIndex;
 use crate::terrain::MapTerrain;
-use openshard_map::overlay::{Doors, Overlay};
 
 /// The side of the square [`Scene::flat`] covers, in tiles.
 ///
@@ -75,8 +92,8 @@ pub const SIDE: u16 = 8;
 /// a shard with [`Scene::into_shard`].
 #[derive(Debug)]
 pub struct Scene {
-    map: WorldMap,
-    tiles: TileData,
+    map:            WorldMap,
+    tiles:          TileData,
     /// The next graphic id to hand out. Each distinct kind-and-height of static
     /// gets its own entry in the tiledata, because that is where a static's
     /// height and flags actually live — the same indirection the real files
@@ -87,7 +104,7 @@ pub struct Scene {
     /// table and do not move this: a fixture that has to be *this* graphic —
     /// a forge, a door frame, an ore vein — is matching a domain table against
     /// the id, and an id chosen by a counter would match nothing.
-    next_graphic: u16,
+    next_graphic:   u16,
     /// Nothing live on this ground.
     ///
     /// A scene is the *map* half of a fixture, and a footing needs all three —
@@ -102,7 +119,7 @@ pub struct Scene {
     /// through `&self`: there is nowhere to notice staleness later, and a bake
     /// one static behind its map is a fixture that tests the wrong world. It
     /// costs a walk of the scene's own blocks, which is one for most of them.
-    spans: SpanIndex,
+    spans:          SpanIndex,
 }
 
 impl Scene {
@@ -121,9 +138,11 @@ impl Scene {
     pub fn flat_over(extent: BlockExtent, z: i8) -> Self {
         // Land tile 0 with the default (empty) tiledata: not water, not
         // blocking, so it is ordinary walkable ground.
-        let map = WorldMap::from_blocks(extent, |_, _| LandCell {
-            tile: LandTileId(0),
-            z,
+        let map = WorldMap::from_blocks(extent, |_, _| {
+            LandCell {
+                tile: LandTileId(0),
+                z,
+            }
         });
         let tiles = TileData::empty();
         Self {
@@ -287,7 +306,7 @@ impl Scene {
     fn cell(&self, x: u16, y: u16) -> LandCell {
         self.map.land(x, y).unwrap_or(LandCell {
             tile: LandTileId(0),
-            z: 0,
+            z:    0,
         })
     }
 
@@ -434,9 +453,10 @@ impl Scene {
 
 #[cfg(test)]
 mod tests {
+    use openshard_map::grid::Tile;
+
     use super::*;
     use crate::terrain::PLAYER_HEIGHT;
-    use openshard_map::grid::Tile;
 
     /// The scene machinery itself: ground at the height it was asked for, and a
     /// static whose flags and height came back out of the tiledata.

@@ -14,7 +14,10 @@
 //! way the plan's own survey did.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 /// Every file with a bare `facet: u8` left, how many times, and why —
 /// `docs/facet_newtype.md`'s F2 and F4 carve-outs, plus the two examples that

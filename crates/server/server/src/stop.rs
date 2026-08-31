@@ -103,7 +103,10 @@ pub struct Signals {
 #[cfg(unix)]
 impl Signals {
     fn install() -> io::Result<Self> {
-        use tokio::signal::unix::{SignalKind, signal};
+        use tokio::signal::unix::{
+            SignalKind,
+            signal,
+        };
 
         Ok(Self {
             interrupt: signal(SignalKind::interrupt())?,

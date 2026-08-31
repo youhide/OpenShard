@@ -24,13 +24,19 @@
 //! of `docs/lighting.md`'s backlog entry, a plain wall for contrast, and the
 //! floor lid that stands over both.
 
-use openshard_client_render::facing::{Face, PRISM_FITS, Prism, best_prism, interiors_agree};
+use std::path::PathBuf;
+
+use openshard_client_render::facing::{
+    Face,
+    PRISM_FITS,
+    Prism,
+    best_prism,
+    interiors_agree,
+};
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::color::Color16;
 use openshard_uofiles::image::Image;
-
-use std::path::PathBuf;
 
 /// What to fit, and why each one is in the list:
 ///
@@ -412,10 +418,10 @@ const FLIGHT: &[Recorded] = &[
 /// and what its own art agrees with — `None` for a box, which has no interior to
 /// agree about.
 struct Recorded {
-    graphic: u16,
-    up: Face,
-    treads: &'static [u8],
-    score: f32,
+    graphic:   u16,
+    up:        Face,
+    treads:    &'static [u8],
+    score:     f32,
     interiors: Option<f32>,
 }
 
@@ -478,10 +484,12 @@ fn the_flight_this_track_opened_on_still_measures_the_same() {
             "0x{id:04X} fits at {score}, recorded {score_was}"
         );
         match (agree, agree_was) {
-            (Some(agree), Some(was)) => assert!(
-                (agree - was).abs() < GOLDEN_SLACK,
-                "0x{id:04X} agrees with its own art at {agree}, recorded {was}"
-            ),
+            (Some(agree), Some(was)) => {
+                assert!(
+                    (agree - was).abs() < GOLDEN_SLACK,
+                    "0x{id:04X} agrees with its own art at {agree}, recorded {was}"
+                )
+            }
             (None, None) => {}
             (agree, was) => panic!("0x{id:04X} has an interior to check now ({agree:?}), recorded {was:?}"),
         }

@@ -11,13 +11,31 @@
 
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
-use openshard_protocol::gump::{GumpAnswer, GumpResponse};
-use openshard_state::{GuildGumpContext, GuildPage, TargetPurpose, WorldState};
+use openshard_protocol::gump::{
+    GumpAnswer,
+    GumpResponse,
+};
+use openshard_state::{
+    GuildGumpContext,
+    GuildPage,
+    TargetPurpose,
+    WorldState,
+};
 
 use crate::gump::{
-    self, DIPLOMACY_BUTTONS, FIELD_ABBREVIATION, FIELD_NAME, GUILD_GUMP, ROSTER_BUTTONS, RowAction, button,
+    self,
+    DIPLOMACY_BUTTONS,
+    FIELD_ABBREVIATION,
+    FIELD_NAME,
+    GUILD_GUMP,
+    ROSTER_BUTTONS,
+    RowAction,
+    button,
 };
-use crate::{RankFlags, Refusal};
+use crate::{
+    RankFlags,
+    Refusal,
+};
 
 /// The paperdoll's Guild button: open the window.
 pub fn open(state: &mut WorldState, connection: ConnectionId) {

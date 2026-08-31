@@ -5,9 +5,16 @@
 //! corpse. The corpse retains a `carved` bit so taking its contents cannot make
 //! the same body yield resources again.
 
+use openshard_protocol::target::{
+    TargetCursor,
+    TargetKind,
+};
+use openshard_state::components::{
+    CorpseBody,
+    Drawn,
+};
+
 use super::*;
-use openshard_protocol::target::{TargetCursor, TargetKind};
-use openshard_state::components::{CorpseBody, Drawn};
 
 /// A dagger, butcher knife, cleaver, or skinning knife may carve a carcass.
 #[must_use]
@@ -29,10 +36,10 @@ const FEATHERS: Graphic = Graphic(0x1BD1);
 /// player's chosen name must never turn their corpse into a resource table.
 #[derive(Clone, Copy)]
 struct Yield {
-    ribs: u16,
-    hides: u16,
+    ribs:     u16,
+    hides:    u16,
     feathers: u16,
-    bird: bool,
+    bird:     bool,
 }
 
 const fn yield_of(body: Graphic) -> Option<Yield> {
@@ -88,7 +95,7 @@ pub fn use_carving_tool(state: &mut WorldState, carver: EntityId, tool: EntityId
         connection,
         &ServerPacket::TargetCursor(TargetCursor {
             cursor_id: CursorId(serial.raw()),
-            kind: TargetKind::Object,
+            kind:      TargetKind::Object,
         }),
     );
     true

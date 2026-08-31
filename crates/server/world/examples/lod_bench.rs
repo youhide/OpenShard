@@ -19,15 +19,40 @@
 //! within `lod_radius` of the player cluster, the set LOD keeps thinking at full
 //! rate; the rest doze.
 
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_gateway::ConnectionId;
-use openshard_protocol::identity::{AccountName, CharacterName};
+use openshard_protocol::access::AccessLevel;
+use openshard_protocol::identity::{
+    AccountName,
+    CharacterName,
+};
 use openshard_protocol::mobile::Notoriety;
-use openshard_protocol::wire::{Graphic, Hue};
-use openshard_protocol::world::{Aggression, DamageType, Facet, Point, Sight};
-use openshard_protocol::{access::AccessLevel, version::ClientVersion};
-use openshard_world::{Brain, Character, Command, Entering, FreshCharacter, Gameplay, TICK_INTERVAL, World};
+use openshard_protocol::version::ClientVersion;
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
+use openshard_protocol::world::{
+    Aggression,
+    DamageType,
+    Facet,
+    Point,
+    Sight,
+};
+use openshard_world::{
+    Brain,
+    Character,
+    Command,
+    Entering,
+    FreshCharacter,
+    Gameplay,
+    TICK_INTERVAL,
+    World,
+};
 
 /// Britain, the same spot the tests use — a real, walkable patch of the map is
 /// not needed here (dev mode allows every step), only a plausible coordinate.
@@ -66,15 +91,15 @@ fn populate(gameplay: Gameplay, creatures: u32, players: u32) -> (World, u32) {
     for i in 0..players {
         world.queue(Command::Enter(Entering {
             connection: ConnectionId::from_raw(u64::from(i + 1)),
-            version: ClientVersion::TOL,
-            account: AccountName("bench".to_owned()),
-            name: CharacterName(format!("Player{i}")),
-            access: AccessLevel::Player,
-            character: Character::Fresh(FreshCharacter {
-                facet: Facet(0),
-                start: Some(Point::new(START.x + (i % 4) as u16, START.y, 0)),
+            version:    ClientVersion::TOL,
+            account:    AccountName("bench".to_owned()),
+            name:       CharacterName(format!("Player{i}")),
+            access:     AccessLevel::Player,
+            character:  Character::Fresh(FreshCharacter {
+                facet:      Facet(0),
+                start:      Some(Point::new(START.x + (i % 4) as u16, START.y, 0)),
                 appearance: None,
-                sheet: None,
+                sheet:      None,
             }),
         }));
     }
@@ -96,35 +121,35 @@ fn populate(gameplay: Gameplay, creatures: u32, players: u32) -> (World, u32) {
                 awake += 1;
             }
             world.queue(Command::SpawnMobile {
-                body: Graphic(0x00D1), // a wandering creature that does not work door handles
-                hue: Hue(0),
-                hits: 50,
-                notoriety: Notoriety::from_bits(5),
-                damage: 5,
-                resistance: openshard_protocol::world::PhysicalResistance::new(0),
-                swing: 0,
-                sight: Sight(10),
-                aggression: Aggression::from_bits(2),
-                beat: 0,
-                ranged: None,
+                body:        Graphic(0x00D1), // a wandering creature that does not work door handles
+                hue:         Hue(0),
+                hits:        50,
+                notoriety:   Notoriety::from_bits(5),
+                damage:      5,
+                resistance:  openshard_protocol::world::PhysicalResistance::new(0),
+                swing:       0,
+                sight:       Sight(10),
+                aggression:  Aggression::from_bits(2),
+                beat:        0,
+                ranged:      None,
                 ranged_kind: DamageType::Physical,
-                wander: true,
-                position: Point::new(x, y, 0),
-                facet: Facet(0),
-                name: None,
-                title: None,
-                shoe: 0,
-                fame: 0,
-                karma: 0,
-                night_home: None,
-                banker: false,
-                vendor: false,
-                healer: false,
-                equipment: Vec::new(),
-                skills: Vec::new(),
-                stock: Vec::new(),
-                escort_to: None,
-                quests: Vec::new(),
+                wander:      true,
+                position:    Point::new(x, y, 0),
+                facet:       Facet(0),
+                name:        None,
+                title:       None,
+                shoe:        0,
+                fame:        0,
+                karma:       0,
+                night_home:  None,
+                banker:      false,
+                vendor:      false,
+                healer:      false,
+                equipment:   Vec::new(),
+                skills:      Vec::new(),
+                stock:       Vec::new(),
+                escort_to:   None,
+                quests:      Vec::new(),
             });
             placed += 1;
         }

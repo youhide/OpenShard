@@ -5,12 +5,30 @@
 //! in a container that is deliberately never saved, so every path out of one is
 //! a path an item can vanish down, and each has a test named for it.
 
-use super::tests::{backpack_serial, connection, enter_as, serial_of, teleport, world};
-use super::*;
-use openshard_items::{TRADE_CONTAINER_GRAPHIC, TRADE_LAYER};
-use openshard_protocol::items::{DropDestination, DropItem};
+use openshard_items::{
+    TRADE_CONTAINER_GRAPHIC,
+    TRADE_LAYER,
+};
+use openshard_protocol::items::{
+    DropDestination,
+    DropItem,
+};
 use openshard_protocol::trade::SECURE_TRADE;
-use openshard_state::components::{Contained, Drawn, Equipped};
+use openshard_state::components::{
+    Contained,
+    Drawn,
+    Equipped,
+};
+
+use super::tests::{
+    backpack_serial,
+    connection,
+    enter_as,
+    serial_of,
+    teleport,
+    world,
+};
+use super::*;
 
 const GOLD: u16 = 0x0EED;
 
@@ -40,10 +58,10 @@ fn give(world: &mut World, connection: ConnectionId, graphic: u16, now: Instant)
     let pack = backpack_serial(world, connection);
     let before = contained_serials(world, pack);
     world.queue(Command::GiveItem {
-        serial: owner,
-        graphic: openshard_protocol::wire::Graphic(graphic),
-        hue: openshard_protocol::wire::Hue(0),
-        amount: 1,
+        serial:    owner,
+        graphic:   openshard_protocol::wire::Graphic(graphic),
+        hue:       openshard_protocol::wire::Hue(0),
+        amount:    1,
         stackable: false,
     });
     world.tick(now);
@@ -87,8 +105,8 @@ fn drop_onto(world: &mut World, connection: ConnectionId, item: Serial, target: 
         connection,
         serial: RawSerial(item.raw()),
         destination: DropItem {
-            serial: RawSerial(item.raw()),
-            position: Point::default(),
+            serial:    RawSerial(item.raw()),
+            position:  Point::default(),
             container: RawSerial(target.raw()),
         }
         .destination(),
@@ -242,8 +260,8 @@ fn one_checkbox_alone_moves_nothing() {
 
     world.queue(Command::TradeAction {
         connection: first,
-        container: RawSerial(escrow.raw()),
-        accepted: true,
+        container:  RawSerial(escrow.raw()),
+        accepted:   true,
     });
     world.tick(now);
 
@@ -272,8 +290,8 @@ fn adding_an_item_after_a_checkbox_unticks_both() {
     // at that moment is what the tick then watches.
     world.queue(Command::TradeAction {
         connection: first,
-        container: RawSerial(escrow.raw()),
-        accepted: true,
+        container:  RawSerial(escrow.raw()),
+        accepted:   true,
     });
     world.tick(now);
     assert!(world.state.trades[0].from.accepted);
@@ -306,7 +324,7 @@ fn a_cancel_returns_both_sides_offerings() {
 
     world.queue(Command::TradeCancel {
         connection: first,
-        container: RawSerial(escrow.raw()),
+        container:  RawSerial(escrow.raw()),
     });
     world.tick(now);
 
@@ -433,8 +451,8 @@ fn the_escrow_container_itself_cannot_be_lifted() {
 
     world.queue(Command::PickUpItem {
         connection: first,
-        serial: RawSerial(escrow.raw()),
-        amount: 1,
+        serial:     RawSerial(escrow.raw()),
+        amount:     1,
     });
     world.tick(now);
 
@@ -528,16 +546,16 @@ fn taking_an_offer_back_out_of_the_window_is_an_ordinary_lift() {
 
     world.queue(Command::PickUpItem {
         connection: first,
-        serial: RawSerial(sword.raw()),
-        amount: 1,
+        serial:     RawSerial(sword.raw()),
+        amount:     1,
     });
     world.tick(now);
     world.queue(Command::DropItem {
-        connection: first,
-        serial: RawSerial(sword.raw()),
+        connection:  first,
+        serial:      RawSerial(sword.raw()),
         destination: DropDestination::Item {
             item: pack,
-            at: GumpPoint::new(0, 0),
+            at:   GumpPoint::new(0, 0),
         },
     });
     world.tick(now);
@@ -557,8 +575,8 @@ fn a_partner_cannot_take_an_item_from_the_other_half_of_a_trade() {
 
     world.queue(Command::PickUpItem {
         connection: second,
-        serial: RawSerial(sword.raw()),
-        amount: 1,
+        serial:     RawSerial(sword.raw()),
+        amount:     1,
     });
     world.tick(now);
 
@@ -594,15 +612,15 @@ fn trade_actions_must_name_the_senders_own_escrow() {
 
     world.queue(Command::TradeAction {
         connection: first,
-        container: RawSerial(second_escrow.raw()),
-        accepted: true,
+        container:  RawSerial(second_escrow.raw()),
+        accepted:   true,
     });
     world.tick(now);
     assert!(!world.state.trades[0].from.accepted);
 
     world.queue(Command::TradeCancel {
         connection: first,
-        container: RawSerial(second_escrow.raw()),
+        container:  RawSerial(second_escrow.raw()),
     });
     world.tick(now);
     assert_eq!(world.state.trades.len(), 1);

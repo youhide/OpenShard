@@ -18,18 +18,44 @@ use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_npc as npc;
 use openshard_protocol::gump::admin::{
-    CREATURE_CREATE, CREATURE_KIND_FIELD, ITEM_AMOUNT_FIELD, ITEM_CREATE, ITEM_GRAPHIC_FIELD, ITEM_HUE_FIELD,
+    CREATURE_CREATE,
+    CREATURE_KIND_FIELD,
+    ITEM_AMOUNT_FIELD,
+    ITEM_CREATE,
+    ITEM_GRAPHIC_FIELD,
+    ITEM_HUE_FIELD,
     ITEM_STACKABLE,
 };
 use openshard_protocol::gump::{
-    ButtonId, CloseGump, GumpAnswer, GumpButton, GumpDisplay, GumpId, GumpKey, GumpLayout, GumpPoint,
+    ButtonId,
+    CloseGump,
+    GumpAnswer,
+    GumpButton,
+    GumpDisplay,
+    GumpId,
+    GumpKey,
+    GumpLayout,
+    GumpPoint,
     GumpResponse,
 };
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::target::{TargetCursor, TargetKind};
-use openshard_protocol::wire::{CursorId, Graphic, Hue};
-use openshard_protocol::world::{Aggression, DamageType, PhysicalResistance, Point, Sight};
+use openshard_protocol::target::{
+    TargetCursor,
+    TargetKind,
+};
+use openshard_protocol::wire::{
+    CursorId,
+    Graphic,
+    Hue,
+};
+use openshard_protocol::world::{
+    Aggression,
+    DamageType,
+    PhysicalResistance,
+    Point,
+    Sight,
+};
 use openshard_state::WorldState;
 use openshard_state::components::Client;
 
@@ -55,16 +81,16 @@ const OPEN_ITEM_CREATOR: ButtonId = ButtonId(40);
 struct Row {
     /// What the `0xB1` comes back with. Never [`ButtonId::CLOSE_BOX`] — this menu
     /// offers no button of its own under the client's close box.
-    id: ButtonId,
+    id:     ButtonId,
     /// The button's top edge. The label sits two pixels lower, which is what
     /// makes the two look level.
-    y: i32,
+    y:      i32,
     /// Gump art: unpressed, then pressed.
-    art: (u32, u32),
+    art:    (u32, u32),
     /// The label's hue. One for the verbs that lay a facet's worth of world
     /// down, another for the ones that take it away again.
-    hue: u32,
-    label: &'static str,
+    hue:    u32,
+    label:  &'static str,
     action: RowAction,
 }
 
@@ -80,59 +106,59 @@ enum RowAction {
 /// clear them.
 const ROWS: [Row; 7] = [
     Row {
-        id: ButtonId(13),
-        y: 54,
-        art: (4005, 4007),
-        hue: 1153,
-        label: "Populate Felucca",
+        id:     ButtonId(13),
+        y:      54,
+        art:    (4005, 4007),
+        hue:    1153,
+        label:  "Populate Felucca",
         action: RowAction::Verb("populate:felucca"),
     },
     Row {
-        id: ButtonId(22),
-        y: 88,
-        art: (4005, 4007),
-        hue: 1153,
-        label: "Decorate Felucca",
+        id:     ButtonId(22),
+        y:      88,
+        art:    (4005, 4007),
+        hue:    1153,
+        label:  "Decorate Felucca",
         action: RowAction::Verb("decorate:felucca"),
     },
     Row {
-        id: ButtonId(31),
-        y: 122,
-        art: (4005, 4007),
-        hue: 1153,
-        label: "Regions: Felucca",
+        id:     ButtonId(31),
+        y:      122,
+        art:    (4005, 4007),
+        hue:    1153,
+        label:  "Regions: Felucca",
         action: RowAction::Verb("regions:felucca"),
     },
     Row {
-        id: ButtonId(12),
-        y: 164,
-        art: (4017, 4019),
-        hue: 33,
-        label: "Clear spawns",
+        id:     ButtonId(12),
+        y:      164,
+        art:    (4017, 4019),
+        hue:    33,
+        label:  "Clear spawns",
         action: RowAction::Verb("clear"),
     },
     Row {
-        id: ButtonId(21),
-        y: 198,
-        art: (4017, 4019),
-        hue: 33,
-        label: "Clear deco",
+        id:     ButtonId(21),
+        y:      198,
+        art:    (4017, 4019),
+        hue:    33,
+        label:  "Clear deco",
         action: RowAction::Verb("clear:deco"),
     },
     Row {
-        id: ButtonId(30),
-        y: 232,
-        art: (4017, 4019),
-        hue: 33,
-        label: "Clear regions",
+        id:     ButtonId(30),
+        y:      232,
+        art:    (4017, 4019),
+        hue:    33,
+        label:  "Clear regions",
         action: RowAction::Verb("clear:regions"),
     },
     Row {
-        id: OPEN_ITEM_CREATOR,
-        y: 266,
-        art: (4005, 4007),
-        hue: 89,
-        label: "Create item in backpack",
+        id:     OPEN_ITEM_CREATOR,
+        y:      266,
+        art:    (4005, 4007),
+        hue:    89,
+        label:  "Create item in backpack",
         action: RowAction::OpenItemCreator,
     },
 ];
@@ -197,7 +223,7 @@ pub fn open_menu(state: &mut WorldState, actor: EntityId) {
         connection,
         &ServerPacket::CloseGump(CloseGump {
             gump_id: ADMIN_GUMP,
-            button: ButtonId::CLOSE_BOX,
+            button:  ButtonId::CLOSE_BOX,
         }),
     );
     let packet = ServerPacket::GumpDisplay(GumpDisplay {
@@ -225,7 +251,7 @@ pub fn open_item_creator(state: &mut WorldState, actor: EntityId) {
         connection,
         &ServerPacket::CloseGump(CloseGump {
             gump_id: ADMIN_ITEM_GUMP,
-            button: ButtonId::CLOSE_BOX,
+            button:  ButtonId::CLOSE_BOX,
         }),
     );
     state.send_packet(
@@ -285,103 +311,103 @@ pub enum ButtonAction {
 /// stats and behaviour stay on the server; the client may only select one id.
 #[derive(Clone, Copy)]
 struct CreaturePreset {
-    id: u16,
-    body: Graphic,
-    hits: u16,
+    id:     u16,
+    body:   Graphic,
+    hits:   u16,
     damage: u16,
-    fame: i32,
-    karma: i32,
+    fame:   i32,
+    karma:  i32,
 }
 
 const CREATURES: [CreaturePreset; 10] = [
     CreaturePreset {
-        id: 1,
-        body: Graphic(200),
-        hits: 37,
+        id:     1,
+        body:   Graphic(200),
+        hits:   37,
         damage: 4,
-        fame: 300,
-        karma: 300,
+        fame:   300,
+        karma:  300,
     },
     CreaturePreset {
-        id: 2,
-        body: Graphic(217),
-        hits: 20,
+        id:     2,
+        body:   Graphic(217),
+        hits:   20,
         damage: 6,
-        fame: 0,
-        karma: 300,
+        fame:   0,
+        karma:  300,
     },
     CreaturePreset {
-        id: 3,
-        body: Graphic(201),
-        hits: 6,
+        id:     3,
+        body:   Graphic(201),
+        hits:   6,
         damage: 5,
-        fame: 0,
-        karma: 150,
+        fame:   0,
+        karma:  150,
     },
     CreaturePreset {
-        id: 4,
-        body: Graphic(216),
-        hits: 18,
+        id:     4,
+        body:   Graphic(216),
+        hits:   18,
         damage: 3,
-        fame: 300,
-        karma: 0,
+        fame:   300,
+        karma:  0,
     },
     CreaturePreset {
-        id: 5,
-        body: Graphic(207),
-        hits: 12,
+        id:     5,
+        body:   Graphic(207),
+        hits:   12,
         damage: 2,
-        fame: 300,
-        karma: 0,
+        fame:   300,
+        karma:  0,
     },
     CreaturePreset {
-        id: 6,
-        body: Graphic(208),
-        hits: 3,
+        id:     6,
+        body:   Graphic(208),
+        hits:   3,
         damage: 5,
-        fame: 150,
-        karma: 0,
+        fame:   150,
+        karma:  0,
     },
     CreaturePreset {
-        id: 7,
-        body: Graphic(205),
-        hits: 5,
+        id:     7,
+        body:   Graphic(205),
+        hits:   5,
         damage: 2,
-        fame: 150,
-        karma: 0,
+        fame:   150,
+        karma:  0,
     },
     CreaturePreset {
-        id: 8,
-        body: Graphic(220),
-        hits: 21,
+        id:     8,
+        body:   Graphic(220),
+        hits:   21,
         damage: 4,
-        fame: 300,
-        karma: 0,
+        fame:   300,
+        karma:  0,
     },
     CreaturePreset {
-        id: 9,
-        body: Graphic(25),
-        hits: 41,
+        id:     9,
+        body:   Graphic(25),
+        hits:   41,
         damage: 5,
-        fame: 450,
-        karma: 0,
+        fame:   450,
+        karma:  0,
     },
     CreaturePreset {
-        id: 10,
-        body: Graphic(167),
-        hits: 53,
+        id:     10,
+        body:   Graphic(167),
+        hits:   53,
         damage: 9,
-        fame: 450,
-        karma: 0,
+        fame:   450,
+        karma:  0,
     },
 ];
 
 /// The data the item form makes into an item.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ItemRequest {
-    pub graphic: Graphic,
-    pub hue: Hue,
-    pub amount: u16,
+    pub graphic:   Graphic,
+    pub hue:       Hue,
+    pub amount:    u16,
     pub stackable: bool,
 }
 
@@ -444,7 +470,7 @@ pub fn begin_creature_placement(state: &mut WorldState, actor: EntityId, kind: u
         connection,
         &ServerPacket::TargetCursor(TargetCursor {
             cursor_id: CursorId(serial),
-            kind: TargetKind::Location,
+            kind:      TargetKind::Location,
         }),
     );
     state.system_message(actor, "Choose where to place the animal.");
@@ -539,8 +565,13 @@ fn parse_u16(text: &str) -> Option<u16> {
 
 #[cfg(test)]
 mod tests {
+    use openshard_protocol::gump::{
+        ButtonId,
+        GumpAnswer,
+        RawButtonId,
+    };
+
     use super::*;
-    use openshard_protocol::gump::{ButtonId, GumpAnswer, RawButtonId};
 
     /// The layout as it was written by hand, before [`menu`] built it from
     /// [`ROWS`]. The client parses this string positionally and says nothing
@@ -617,10 +648,10 @@ mod tests {
     #[test]
     fn item_form_accepts_hex_fields_and_the_stack_switch() {
         let response = openshard_protocol::gump::GumpResponse {
-            serial: openshard_protocol::gump::RawGumpKey(0),
-            gump_id: openshard_protocol::gump::RawGumpId(ADMIN_ITEM_GUMP.0),
-            button: openshard_protocol::gump::RawButtonId(ITEM_CREATE.0),
-            switches: vec![openshard_protocol::gump::RawSwitchId(ITEM_STACKABLE.0)],
+            serial:       openshard_protocol::gump::RawGumpKey(0),
+            gump_id:      openshard_protocol::gump::RawGumpId(ADMIN_ITEM_GUMP.0),
+            button:       openshard_protocol::gump::RawButtonId(ITEM_CREATE.0),
+            switches:     vec![openshard_protocol::gump::RawSwitchId(ITEM_STACKABLE.0)],
             text_entries: vec![
                 (ITEM_GRAPHIC_FIELD, "0x0eed".to_owned()),
                 (ITEM_HUE_FIELD, "0x0481".to_owned()),
@@ -631,9 +662,9 @@ mod tests {
         assert_eq!(
             item_request(&response),
             Ok(ItemRequest {
-                graphic: openshard_protocol::wire::Graphic(0x0eed),
-                hue: openshard_protocol::wire::Hue(0x0481),
-                amount: 25,
+                graphic:   openshard_protocol::wire::Graphic(0x0eed),
+                hue:       openshard_protocol::wire::Hue(0x0481),
+                amount:    25,
                 stackable: true,
             })
         );
@@ -642,10 +673,10 @@ mod tests {
     #[test]
     fn item_form_rejects_a_zero_amount() {
         let response = openshard_protocol::gump::GumpResponse {
-            serial: openshard_protocol::gump::RawGumpKey(0),
-            gump_id: openshard_protocol::gump::RawGumpId(ADMIN_ITEM_GUMP.0),
-            button: openshard_protocol::gump::RawButtonId(ITEM_CREATE.0),
-            switches: Vec::new(),
+            serial:       openshard_protocol::gump::RawGumpKey(0),
+            gump_id:      openshard_protocol::gump::RawGumpId(ADMIN_ITEM_GUMP.0),
+            button:       openshard_protocol::gump::RawButtonId(ITEM_CREATE.0),
+            switches:     Vec::new(),
             text_entries: vec![
                 (ITEM_GRAPHIC_FIELD, "0x0eed".to_owned()),
                 (ITEM_HUE_FIELD, "0".to_owned()),

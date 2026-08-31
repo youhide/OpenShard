@@ -23,8 +23,9 @@
 //! of every container up the chain. Filling a pack with bags of bags is the trick
 //! that closes off, and it is why neither half of this is a one-level scan.
 
-use super::*;
 use openshard_state::components::Container;
+
+use super::*;
 
 /// How many items a container holds — ServUO's `Container.GlobalMaxItems`.
 ///
@@ -100,13 +101,12 @@ pub fn check_hold(
         if let Some(full) = holds_one_more(state, serial, plus_items, plus_weight) {
             return Some(full);
         }
-        at = state
-            .registry
-            .entity_of(serial)
-            .and_then(|entity| match item_location(state, entity) {
+        at = state.registry.entity_of(serial).and_then(|entity| {
+            match item_location(state, entity) {
                 Some(ItemLocation::Settled(SettledItemLocation::Contained(held))) => Some(held.container),
                 _ => None,
-            });
+            }
+        });
     }
     None
 }
@@ -138,13 +138,15 @@ fn weight_ceiling(state: &WorldState, container: Serial) -> u16 {
     let is_player_backpack = state
         .registry
         .entity_of(container)
-        .and_then(|entity| match item_location(state, entity) {
-            Some(ItemLocation::Settled(SettledItemLocation::Equipped(worn)))
-                if worn.layer == BACKPACK_LAYER =>
-            {
-                Some(worn.mobile)
+        .and_then(|entity| {
+            match item_location(state, entity) {
+                Some(ItemLocation::Settled(SettledItemLocation::Equipped(worn)))
+                    if worn.layer == BACKPACK_LAYER =>
+                {
+                    Some(worn.mobile)
+                }
+                _ => None,
             }
-            _ => None,
         })
         .and_then(|mobile| state.registry.entity_of(mobile))
         .is_some_and(|owner| state.registry.has::<openshard_state::components::Client>(owner));

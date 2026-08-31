@@ -13,17 +13,52 @@
 //! animation for a craft that was never possible.
 
 use openshard_entities::EntityId;
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-use openshard_protocol::wire::{ClilocId, Graphic, Hue, SoundId};
-use openshard_state::components::{CraftedBy, Crafting, Name, Position, Quality, Tool};
-use openshard_state::{Drawn, WorldState, presentation_of};
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
+use openshard_protocol::wire::{
+    ClilocId,
+    Graphic,
+    Hue,
+    SoundId,
+};
+use openshard_state::components::{
+    CraftedBy,
+    Crafting,
+    Name,
+    Position,
+    Quality,
+    Tool,
+};
+use openshard_state::{
+    Drawn,
+    WorldState,
+    presentation_of,
+};
 
-use crate::chance::{roll, train_per_item};
-use crate::consume::{self, Refusal, Share};
-use crate::defs::{SYSTEMS, system};
+use crate::chance::{
+    roll,
+    train_per_item,
+};
+use crate::consume::{
+    self,
+    Refusal,
+    Share,
+};
+use crate::defs::{
+    SYSTEMS,
+    system,
+};
 use crate::environment;
-use crate::recipe::{OutputMaterial, Recipe};
-use crate::system::{CraftSystemDef, SystemId};
+use crate::recipe::{
+    OutputMaterial,
+    Recipe,
+};
+use crate::system::{
+    CraftSystemDef,
+    SystemId,
+};
 
 /// "You have worn out your tool!"
 const TOOL_WORN_OUT: ClilocId = ClilocId(1_044_038);
@@ -49,7 +84,7 @@ const MARK_AT: u16 = 1000;
 /// An inclusive craft-beat range, stored as the non-zero bound the RNG needs.
 #[derive(Clone, Copy, Debug)]
 struct BeatRange {
-    min: u8,
+    min:   u8,
     width: std::num::NonZeroU16,
 }
 
@@ -77,23 +112,23 @@ impl BeatRange {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ItemCrafted {
     /// Who made it.
-    pub crafter: EntityId,
+    pub crafter:     EntityId,
     /// The item that came out, or `None` for a batch that could not be placed.
-    pub item: Option<EntityId>,
+    pub item:        Option<EntityId>,
     /// Its art.
-    pub graphic: Graphic,
+    pub graphic:     Graphic,
     /// Its hue, which for most materials is the material.
-    pub hue: Hue,
+    pub hue:         Hue,
     /// Stable semantic kind when this was a migrated recipe row.
-    pub item_kind: Option<ItemKindId>,
+    pub item_kind:   Option<ItemKindId>,
     /// Semantic material when the result has one.
-    pub material: Option<MaterialId>,
+    pub material:    Option<MaterialId>,
     /// How many.
-    pub amount: u16,
+    pub amount:      u16,
     /// Whether it came out exceptional.
     pub exceptional: bool,
     /// Which system made it, so a pack can key a table on the trade.
-    pub system: SystemId,
+    pub system:      SystemId,
 }
 
 /// Why a craft cannot be begun at all. The tool half of ServUO's `CanCraft`.
@@ -161,10 +196,12 @@ fn say_materials(state: &mut WorldState, crafter: EntityId, refusal: Refusal) {
         // a mobile with no backpack is a creature or a corpse, not a player who
         // needs telling.
         Refusal::NoPack => {}
-        Refusal::NotEnough(text) | Refusal::CannotWork(text) => match text {
-            crate::system::Text::Cliloc(cliloc) => state.localized_message(crafter, cliloc, ""),
-            crate::system::Text::Str(line) => state.system_message(crafter, line),
-        },
+        Refusal::NotEnough(text) | Refusal::CannotWork(text) => {
+            match text {
+                crate::system::Text::Cliloc(cliloc) => state.localized_message(crafter, cliloc, ""),
+                crate::system::Text::Str(line) => state.system_message(crafter, line),
+            }
+        }
     }
 }
 
@@ -445,13 +482,15 @@ fn output_identity(
         OutputMaterial::Legacy => return Err(()),
         OutputMaterial::None => None,
         OutputMaterial::Fixed(material) => Some(material),
-        OutputMaterial::InheritInput(input) => materials
-            .lines
-            .get(usize::from(input))
-            .and_then(|line| line.semantic)
-            .and_then(|(_, material)| material)
-            .ok_or(())
-            .map(Some)?,
+        OutputMaterial::InheritInput(input) => {
+            materials
+                .lines
+                .get(usize::from(input))
+                .and_then(|line| line.semantic)
+                .and_then(|(_, material)| material)
+                .ok_or(())
+                .map(Some)?
+        }
     };
     presentation_of(kind, material)
         .map(|drawn| Some((kind, material, drawn)))

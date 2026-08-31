@@ -1,10 +1,20 @@
 //! Combat packets: war mode, attacking, and a mobile's health.
 
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
 use crate::mobile::Vitals;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
-use crate::serial::{Serial, raw_or_none};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+};
+use crate::serial::{
+    Serial,
+    raw_or_none,
+};
 use crate::version::ClientVersion;
 
 /// `0x72` — enter or leave war mode. 5 bytes, the same shape both ways.
@@ -187,7 +197,7 @@ impl HealthBar {
             serial,
             vitals: Vitals {
                 current: percent,
-                max: 100,
+                max:     100,
             },
         }
     }
@@ -217,7 +227,7 @@ impl DecodePacket for HealthBar {
                 })?
             },
             vitals: Vitals {
-                max: reader.u16()?,
+                max:     reader.u16()?,
                 current: reader.u16()?,
             },
         })
@@ -227,7 +237,10 @@ impl DecodePacket for HealthBar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::{decode_packet, encode_packet};
+    use crate::packet::{
+        decode_packet,
+        encode_packet,
+    };
 
     fn version() -> ClientVersion {
         ClientVersion::new(7, 0, 45, 65)
@@ -346,7 +359,7 @@ mod tests {
         assert_eq!(
             encode_packet(
                 &AttackTarget {
-                    target: Serial::new(0x2A)
+                    target: Serial::new(0x2A),
                 },
                 version()
             ),

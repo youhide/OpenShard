@@ -34,7 +34,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use openshard_client_artscan::{self as artscan, ScanError};
+use openshard_client_artscan::{
+    self as artscan,
+    ScanError,
+};
 use openshard_client_render::arttable::ArtTable;
 use openshard_client_render::facing::Facing;
 use openshard_protocol::wire::Graphic;

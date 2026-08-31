@@ -16,7 +16,10 @@
 //! right now — and owns no timer, because the mouse asks for steps at the same
 //! rate and two clocks would take two steps per beat.
 
-use openshard_protocol::direction::{Direction, Facing};
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
 use winit::keyboard::KeyCode;
 
 /// The arrow keys currently down, and whether shift is.
@@ -28,9 +31,9 @@ pub struct Held {
     /// up walks east, and letting go of right again walks north-west rather than
     /// stopping. The last one pressed is the one obeyed, which is what every
     /// game does with a keyboard that reports two keys.
-    down: Vec<Direction>,
+    down:           Vec<Direction>,
     /// Whether either shift is down. The whole of "run" on this keyboard.
-    running: bool,
+    running:        bool,
     /// Run unless shift is held. This is the player's "always run" preference;
     /// shift reverses it, so walking deliberately remains possible.
     always_running: bool,

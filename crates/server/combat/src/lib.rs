@@ -34,34 +34,104 @@ use std::collections::HashSet;
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_map::overlay::Doors;
-use openshard_protocol::combat::{AttackTarget, WarMode};
+use openshard_protocol::combat::{
+    AttackTarget,
+    WarMode,
+};
 use openshard_protocol::feedback::{
-    ActionStage, BalkState, CombatActionOutcome, EffectKind, GraphicalEffect, InterruptReason,
+    ActionStage,
+    BalkState,
+    CombatActionOutcome,
+    EffectKind,
+    GraphicalEffect,
+    InterruptReason,
 };
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::wire::{Graphic, SoundId};
-use openshard_protocol::world::{Point, PoisonLevel, RangedRange};
-use openshard_state::action_rules::{ActionEffect, ActorCondition, ConditionSet};
+use openshard_protocol::wire::{
+    Graphic,
+    SoundId,
+};
+use openshard_protocol::world::{
+    Point,
+    PoisonLevel,
+    RangedRange,
+};
+use openshard_state::action_rules::{
+    ActionEffect,
+    ActorCondition,
+    ConditionSet,
+};
 use openshard_state::components::{
-    ActionKind, Balked, BehaviourBuffs, Body, Client, Combat, CombatAction, CriminalUntil, DamageType,
-    Frozen, Ghost, Guard, Hidden, Hitpoints, ItemAffix, ItemAffixes, LastStep, MeleeDamage, MurderDecay,
-    Murders, Phase, PoisonCharges, Poisoned, Position, RangedAttack, Resistance, Skills, Stamina, Stats,
-    SwingSpeed, Watch, WrestlingAmbushCooldown, WrestlingCombo, WrestlingInterceptCooldown, WrestlingOpener,
-    WrestlingStride, body_is_female, body_opens_doors, creature_base_sound,
+    ActionKind,
+    Balked,
+    BehaviourBuffs,
+    Body,
+    Client,
+    Combat,
+    CombatAction,
+    CriminalUntil,
+    DamageType,
+    Frozen,
+    Ghost,
+    Guard,
+    Hidden,
+    Hitpoints,
+    ItemAffix,
+    ItemAffixes,
+    LastStep,
+    MeleeDamage,
+    MurderDecay,
+    Murders,
+    Phase,
+    PoisonCharges,
+    Poisoned,
+    Position,
+    RangedAttack,
+    Resistance,
+    Skills,
+    Stamina,
+    Stats,
+    SwingSpeed,
+    Watch,
+    WrestlingAmbushCooldown,
+    WrestlingCombo,
+    WrestlingInterceptCooldown,
+    WrestlingOpener,
+    WrestlingStride,
+    body_is_female,
+    body_opens_doors,
+    creature_base_sound,
 };
 use openshard_state::sectors::in_range;
-use openshard_state::weapon::{ARROW, LAYER_ONE_HANDED, LAYER_TWO_HANDED, WeaponKind};
-use openshard_state::{Action, Skill, TICKS_PER_SECOND, WorldState, WorldTick};
+use openshard_state::weapon::{
+    ARROW,
+    LAYER_ONE_HANDED,
+    LAYER_TWO_HANDED,
+    WeaponKind,
+};
+use openshard_state::{
+    Action,
+    Skill,
+    TICKS_PER_SECOND,
+    WorldState,
+    WorldTick,
+};
 
 pub mod armor;
 mod vitals;
 pub mod weapons;
 
 pub use vitals::{
-    HITS_REGEN_TICKS, MOUNTED_STEPS_PER_STAMINA, OVERLOAD_ALLOWANCE, STAMINA_REGEN_TICKS, STEPS_PER_STAMINA,
-    regen_hits, regen_stamina, spend_step_stamina,
+    HITS_REGEN_TICKS,
+    MOUNTED_STEPS_PER_STAMINA,
+    OVERLOAD_ALLOWANCE,
+    STAMINA_REGEN_TICKS,
+    STEPS_PER_STAMINA,
+    regen_hits,
+    regen_stamina,
+    spend_step_stamina,
 };
 
 /// How near, in tiles (Chebyshev), a mobile must be to land a melee blow: the
@@ -179,15 +249,15 @@ const RANGED_EFFECT_SPEED: u8 = 18;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct MobileDamaged {
     /// The mobile.
-    pub entity: EntityId,
+    pub entity:    EntityId,
     /// Its wire identity.
-    pub serial: Serial,
+    pub serial:    Serial,
     /// How much it lost.
-    pub amount: u16,
+    pub amount:    u16,
     /// What it has left.
     pub remaining: u16,
     /// Who dealt it, when the blow had an author — what retaliation reads.
-    pub by: Option<Serial>,
+    pub by:        Option<Serial>,
 }
 
 /// A mobile died — its hit points reached zero.
@@ -204,7 +274,7 @@ pub struct MobileDied {
     pub serial: Serial,
     /// Its body — so a pack can tell *what* died (a rat, an orc) for a kill quest
     /// without a second lookup. `0` if it somehow has none.
-    pub body: Graphic,
+    pub body:   Graphic,
     /// Who dealt the killing blow, if known — carried so a pack can attribute a
     /// kill (a quest's "slay N", a bounty). `None` for a death with no attacker: a
     /// field or a reflected blow, a script's unattributed damage.
@@ -457,12 +527,12 @@ pub fn war_mode(state: &mut WorldState, connection: ConnectionId, war: bool) {
 /// The target-bound timing and wrestling opener decisions for one new aim.
 #[derive(Clone, Copy, Debug)]
 struct AttackPlan {
-    target: EntityId,
-    serial: Serial,
-    now: WorldTick,
-    next: WorldTick,
-    renewing: bool,
-    ambush: bool,
+    target:    EntityId,
+    serial:    Serial,
+    now:       WorldTick,
+    next:      WorldTick,
+    renewing:  bool,
+    ambush:    bool,
     intercept: bool,
 }
 
@@ -536,7 +606,7 @@ impl AttackPlan {
             state.registry.insert(
                 player,
                 WrestlingOpener {
-                    target: self.serial,
+                    target:     self.serial,
                     expires_at: self.now + WRESTLING_OPENER_TICKS,
                 },
             );
@@ -698,9 +768,9 @@ pub fn retaliate_players(state: &mut WorldState, blows: &[MobileDamaged]) {
 fn ranged_action(state: &WorldState, attacker: EntityId) -> Option<ActionKind> {
     if let Some(ranged) = state.registry.get::<RangedAttack>(attacker) {
         return Some(ActionKind::Breath {
-            reach: ranged.range,
+            reach:  ranged.range,
             damage: ranged.kind,
-            art: ARROW_GRAPHIC,
+            art:    ARROW_GRAPHIC,
         });
     }
     let weapon = weapons::equipped_weapon(state, attacker)?;
@@ -712,9 +782,9 @@ fn ranged_action(state: &WorldState, attacker: EntityId) -> Option<ActionKind> {
     // kind and none of them is a hole in the table rather than a weapon that
     // shoots for free, and its bearer falls back on clubbing with it.
     Some(ActionKind::Shot {
-        reach: weapon.range?,
+        reach:  weapon.range?,
         nocked: weapon.ammo?,
-        art: weapon.effect_art.unwrap_or(ARROW_GRAPHIC),
+        art:    weapon.effect_art.unwrap_or(ARROW_GRAPHIC),
     })
 }
 
@@ -1340,7 +1410,8 @@ fn debug_assert_accounted_for(state: &WorldState) {
 }
 
 #[cfg(not(debug_assertions))]
-const fn debug_assert_accounted_for(_state: &WorldState) {}
+const fn debug_assert_accounted_for(_state: &WorldState) {
+}
 
 /// End `attacker`'s action because something spoiled it, and put the next one a
 /// **whole fresh interval** away.
@@ -1945,7 +2016,7 @@ pub const POISON_PULSES: u8 = 8;
 /// RNG roll.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct HitPoisonProc {
-    level: PoisonLevel,
+    level:            PoisonLevel,
     chance_per_mille: u16,
 }
 
@@ -2030,12 +2101,14 @@ fn deliver_affix_poison(state: &mut WorldState, attacker: EntityId, target: Seri
             affixes
                 .0
                 .iter()
-                .filter_map(|affix| match *affix {
-                    ItemAffix::HitPoison {
-                        level,
-                        chance_per_mille,
-                    } => Some(HitPoisonProc::new(level, chance_per_mille)),
-                    _ => None,
+                .filter_map(|affix| {
+                    match *affix {
+                        ItemAffix::HitPoison {
+                            level,
+                            chance_per_mille,
+                        } => Some(HitPoisonProc::new(level, chance_per_mille)),
+                        _ => None,
+                    }
                 })
                 .collect()
         })
@@ -2399,7 +2472,7 @@ fn skill_scaled_damage(state: &WorldState, attacker: EntityId, base: f64, aos_fa
 /// (Tactics its own ±50% about parity, then Str and Anatomy summed), era 2 the AoS
 /// bonuses. At least 1, so a heavily-nerfed blow still stings.
 struct Blow {
-    amount: u16,
+    amount:   u16,
     critical: bool,
 }
 
@@ -2471,12 +2544,14 @@ fn slayer_bonus_percent(state: &WorldState, attacker: EntityId, defender: Entity
             affixes
                 .0
                 .iter()
-                .filter_map(|affix| match *affix {
-                    ItemAffix::Slayer {
-                        body: target,
-                        bonus_percent,
-                    } if target == body => Some(u16::from(bonus_percent)),
-                    _ => None,
+                .filter_map(|affix| {
+                    match *affix {
+                        ItemAffix::Slayer {
+                            body: target,
+                            bonus_percent,
+                        } if target == body => Some(u16::from(bonus_percent)),
+                        _ => None,
+                    }
                 })
                 .sum()
         })

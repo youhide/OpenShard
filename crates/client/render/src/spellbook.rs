@@ -8,9 +8,19 @@ use std::collections::BTreeMap;
 
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 
-use crate::gump::{self, GumpArt, GumpPixel, Picture, PictureIndex, Scissor};
+use crate::gump::{
+    self,
+    GumpArt,
+    GumpPixel,
+    Picture,
+    PictureIndex,
+    Scissor,
+};
 use crate::text::GumpLabel;
 
 /// The window's fixed dimensions, shared by layout and its owner.
@@ -41,7 +51,7 @@ const ROW_HUE: Hue = Hue(0x0288);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Entry {
     pub spell: SpellId,
-    pub name: &'static str,
+    pub name:  &'static str,
 }
 
 /// What an opaque picture in the window means.
@@ -53,10 +63,10 @@ pub enum Hit {
 /// One text line that the application pass draws after the art.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Line {
-    pub at: GumpPixel,
-    pub text: String,
-    pub font: Font,
-    pub hue: Hue,
+    pub at:      GumpPixel,
+    pub text:    String,
+    pub font:    Font,
+    pub hue:     Hue,
     pub scissor: Option<Scissor>,
 }
 
@@ -64,10 +74,10 @@ impl Line {
     #[must_use]
     pub fn label(&self) -> GumpLabel<'_> {
         GumpLabel {
-            at: self.at,
+            at:   self.at,
             text: &self.text,
             font: self.font,
-            hue: self.hue,
+            hue:  self.hue,
             clip: None,
         }
     }
@@ -77,10 +87,10 @@ impl Line {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Window {
     pub pictures: Vec<Picture>,
-    pub hits: BTreeMap<PictureIndex, Hit>,
-    pub lines: Vec<Line>,
+    pub hits:     BTreeMap<PictureIndex, Hit>,
+    pub lines:    Vec<Line>,
     pub viewport: Scissor,
-    entries: usize,
+    entries:      usize,
 }
 
 impl Window {
@@ -198,8 +208,8 @@ pub fn entries(offset: u16, content: u64) -> Vec<Entry> {
 pub fn window(offset: u16, content: u64, scroll: i32, at: GumpPixel) -> Window {
     let entries = entries(offset, content);
     let viewport = Scissor {
-        at: at.offset(VIEWPORT_AT),
-        width: VIEWPORT_WIDTH,
+        at:     at.offset(VIEWPORT_AT),
+        width:  VIEWPORT_WIDTH,
         height: VIEWPORT_HEIGHT,
     };
     let mut window = Window {
@@ -211,18 +221,18 @@ pub fn window(offset: u16, content: u64, scroll: i32, at: GumpPixel) -> Window {
     };
     frame(&mut window, at);
     window.lines.push(Line {
-        at: at.offset(GumpPixel::new(142, 17)),
-        text: "Spellbook".to_owned(),
-        font: TITLE_FONT,
-        hue: TITLE_HUE,
+        at:      at.offset(GumpPixel::new(142, 17)),
+        text:    "Spellbook".to_owned(),
+        font:    TITLE_FONT,
+        hue:     TITLE_HUE,
         scissor: None,
     });
     if entries.is_empty() {
         window.lines.push(Line {
-            at: at.offset(GumpPixel::new(VIEWPORT_AT.x + 16, VIEWPORT_AT.y + 8)),
-            text: "No spells in this book".to_owned(),
-            font: ROW_FONT,
-            hue: ROW_HUE,
+            at:      at.offset(GumpPixel::new(VIEWPORT_AT.x + 16, VIEWPORT_AT.y + 8)),
+            text:    "No spells in this book".to_owned(),
+            font:    ROW_FONT,
+            hue:     ROW_HUE,
             scissor: Some(viewport),
         });
         return window;
@@ -241,10 +251,10 @@ pub fn window(offset: u16, content: u64, scroll: i32, at: GumpPixel) -> Window {
             Hit::Cast(entry.spell),
         );
         window.lines.push(Line {
-            at: at.offset(GumpPixel::new(VIEWPORT_AT.x + 28, y)),
-            text: format!("{}. {}", entry.spell.0 + 1, entry.name),
-            font: ROW_FONT,
-            hue: ROW_HUE,
+            at:      at.offset(GumpPixel::new(VIEWPORT_AT.x + 28, y)),
+            text:    format!("{}. {}", entry.spell.0 + 1, entry.name),
+            font:    ROW_FONT,
+            hue:     ROW_HUE,
             scissor: Some(viewport),
         });
     }
@@ -290,15 +300,15 @@ mod tests {
             vec![
                 Entry {
                     spell: SpellId(0),
-                    name: "Clumsy",
+                    name:  "Clumsy",
                 },
                 Entry {
                     spell: SpellId(17),
-                    name: "Fireball",
+                    name:  "Fireball",
                 },
                 Entry {
                     spell: SpellId(63),
-                    name: "Water Elemental",
+                    name:  "Water Elemental",
                 },
             ]
         );
@@ -310,7 +320,7 @@ mod tests {
             entries(18, 1),
             vec![Entry {
                 spell: SpellId(17),
-                name: "Fireball"
+                name:  "Fireball",
             }]
         );
     }

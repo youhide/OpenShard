@@ -20,7 +20,10 @@
 //! cargo run --release -p openshard-client-render --example speck_probe
 //! ```
 
-use openshard_client_render::impostor::{self, VIEW};
+use openshard_client_render::impostor::{
+    self,
+    VIEW,
+};
 use openshard_client_render::light::WorldVec;
 
 /// Which axis a meeting's normal names.

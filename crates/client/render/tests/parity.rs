@@ -35,24 +35,58 @@
 //! own files, and a no-op without it.
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_client_render::animate::StaticAnimations;
-use openshard_client_render::atlas::{LandAtlas, StaticAtlas, TexmapAtlas};
-use openshard_client_render::blit::{self, Blit, ViewportRect};
+use openshard_client_render::atlas::{
+    LandAtlas,
+    StaticAtlas,
+    TexmapAtlas,
+};
+use openshard_client_render::blit::{
+    self,
+    Blit,
+    ViewportRect,
+};
 use openshard_client_render::camera::Camera;
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::debug::View;
-use openshard_client_render::frame::{self, Impostor};
+use openshard_client_render::frame::{
+    self,
+    Impostor,
+};
 use openshard_client_render::geometry::Vec2;
 use openshard_client_render::hue::HueRamp;
-use openshard_client_render::items::{self, GroundItem};
-use openshard_client_render::light::{self, Lighting, Tuning};
-use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, SpriteRenderer, Target};
+use openshard_client_render::items::{
+    self,
+    GroundItem,
+};
+use openshard_client_render::light::{
+    self,
+    Lighting,
+    Tuning,
+};
+use openshard_client_render::renderer::{
+    self,
+    GroundRenderer,
+    MeshFaceRenderer,
+    SpriteRenderer,
+    Target,
+};
 use openshard_client_render::statics::StaticGeometry;
-use openshard_client_render::{dump, ground, statics};
+use openshard_client_render::{
+    dump,
+    ground,
+    statics,
+};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, WorldMap};
+use openshard_map::map::{
+    LandCell,
+    WorldMap,
+};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::Graphic;
@@ -145,7 +179,7 @@ fn synthetic_map_covering(real: &WorldMap, places: &[Point], tuning: &Tuning) ->
         |x, y| {
             real.land(x, y).unwrap_or(LandCell {
                 tile: openshard_tiles::LandTileId(0),
-                z: 0,
+                z:    0,
             })
         },
     )
@@ -174,10 +208,10 @@ fn pull_map_statics(real: &WorldMap, camera: &Camera, tuning: &Tuning) -> Vec<Gr
         for x in xs.clone() {
             for s in real.statics_at(x, y) {
                 items.push(GroundItem {
-                    amount: ItemAmount::ONE,
-                    at: Point::new(x, y, s.z),
+                    amount:  ItemAmount::ONE,
+                    at:      Point::new(x, y, s.z),
                     graphic: s.tile,
-                    hue: s.hue,
+                    hue:     s.hue,
                 });
             }
         }
@@ -189,19 +223,19 @@ fn pull_map_statics(real: &WorldMap, camera: &Camera, tuning: &Tuning) -> Vec<Gr
 /// one copy per `docs/parity.md`'s own backlog item about the GPU test
 /// scaffolding every file here keeps separately.
 struct Drawn {
-    world: wgpu::Texture,
-    gbuffer: openshard_client_render::gbuffer::Gbuffer,
+    world:    wgpu::Texture,
+    gbuffer:  openshard_client_render::gbuffer::Gbuffer,
     lighting: Lighting,
-    ground: GroundRenderer,
-    statics: SpriteRenderer,
-    mesh: MeshFaceRenderer,
+    ground:   GroundRenderer,
+    statics:  SpriteRenderer,
+    mesh:     MeshFaceRenderer,
     /// What this frame was asked for, as [`frame::Inputs::summary`] states it.
     ///
     /// Kept because a picture on its own cannot be reproduced and because P5's
     /// G3 is about this string: two frames that differ by the window's width
     /// have to *diff* here, or the summary is not naming an input that decides
     /// the picture.
-    summary: String,
+    summary:  String,
 }
 
 /// Assemble one frame — `map`'s own statics if `items` is empty, `items` if
@@ -352,9 +386,9 @@ fn dump_all_planes(
     let world_view = drawn.world.create_view(&wgpu::TextureViewDescriptor::default());
     let gbuffer_views = drawn.gbuffer.views();
     let rect = ViewportRect {
-        x: 0,
-        y: 0,
-        width: viewport.0,
+        x:      0,
+        y:      0,
+        width:  viewport.0,
         height: viewport.1,
     };
     dump::plane_bytes(
@@ -524,13 +558,13 @@ fn gate_at(
 /// The client's own files, loaded once: `docs/parity.md`'s P3 is a comparison,
 /// not a load, and every place gated here reads the same tables.
 struct Client {
-    dir: PathBuf,
-    art: Art,
-    tiledata: TileData,
-    animations: StaticAnimations,
-    hue_ramp: HueRamp,
-    tuning: Tuning,
-    real_map: WorldMap,
+    dir:           PathBuf,
+    art:           Art,
+    tiledata:      TileData,
+    animations:    StaticAnimations,
+    hue_ramp:      HueRamp,
+    tuning:        Tuning,
+    real_map:      WorldMap,
     synthetic_map: WorldMap,
 }
 

@@ -13,9 +13,12 @@
 use std::time::Duration;
 
 use openshard_client_net::transport::enter_world;
+use openshard_e2e_shard::{
+    plan,
+    shard,
+    version,
+};
 use openshard_protocol::identity::RawPlaintextPassword;
-
-use openshard_e2e_shard::{plan, shard, version};
 
 #[tokio::test]
 async fn a_client_logs_in_and_stands_in_the_world() {

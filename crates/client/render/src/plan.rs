@@ -30,11 +30,17 @@
 //! grid, each flame's position and the rim of its radius. What is left dark after
 //! that has a visible cause or it is a bug.
 
-use crate::camera::{TileBounds, Zoom};
+use crate::camera::{
+    TileBounds,
+    Zoom,
+};
 use crate::debug::View;
 use crate::facing::Face;
 use crate::light::Lighting;
-use crate::occlusion::{self, Cell};
+use crate::occlusion::{
+    self,
+    Cell,
+};
 
 /// One instance row an instrument built, and what it claimed about the world.
 ///
@@ -51,12 +57,12 @@ use crate::occlusion::{self, Cell};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Named {
     /// The tile the row is for.
-    pub tile: (u16, u16),
+    pub tile:  (u16, u16),
     /// Which pass's row it is: [`crate::place::Kind::Static`] for a face row,
     /// [`crate::place::Kind::Land`] for a ground one. Nothing else has a row
     /// here — see [`drawn`], where a kind with no instance buffer takes row
     /// zero and is never named.
-    pub kind: crate::place::Kind,
+    pub kind:  crate::place::Kind,
     /// **Which occluder of that tile the row named**, straight out of the grid
     /// — or [`occlusion::OwnerId::NONE`] for a surface that is a point of no
     /// occluder, which is the ground's honest answer and was the elevation's
@@ -73,9 +79,9 @@ pub struct Picture {
     /// The tiles it covers, inclusive.
     pub bounds: TileBounds,
     /// How many pixels one tile is, on both axes.
-    pub scale: u32,
+    pub scale:  u32,
     /// Its width in pixels: `bounds.width() * scale`.
-    pub width: u32,
+    pub width:  u32,
     /// Its height.
     pub height: u32,
     /// The pixels, RGBA8.
@@ -85,7 +91,7 @@ pub struct Picture {
     /// Carried rather than discarded because it is the only place an
     /// instrument's claim about the world is stated, and a picture is not one:
     /// `tests/attachment.rs` compares these against the grid.
-    pub named: Vec<Named>,
+    pub named:  Vec<Named>,
 }
 
 impl Picture {
@@ -338,16 +344,16 @@ pub fn draw(
         owner_of,
         |px, py| {
             crate::gbuffer::Fragment {
-                tile: (
+                tile:   (
                     (bounds.min_x + (px / scale) as i32) as u16,
                     (bounds.min_y + (py / scale) as i32) as u16,
                 ),
-                sub: (
+                sub:    (
                     (px % scale) as f32 / scale as f32,
                     (py % scale) as f32 / scale as f32,
                 ),
-                z: 0.0,
-                kind: crate::place::Kind::Land,
+                z:      0.0,
+                kind:   crate::place::Kind::Land,
                 // A floor **says** it is one, in the stance above the height. It said
                 // `Upright` while this comment said "flat ground" — which cost
                 // nothing while a stance was only read for a wall's facing, and
@@ -359,7 +365,7 @@ pub fn draw(
                 // And a point of no solid: this view's every pixel is the
                 // ground, which is no occluder and exempt from nothing — the
                 // same answer `ground.wesl` writes in a real frame.
-                solid: None,
+                solid:  None,
             }
         },
     );
@@ -520,14 +526,14 @@ pub fn elevation(
 pub struct Wall {
     /// The tile the run starts at — its lowest `x` for a north or south face, its
     /// lowest `y` for an east or west one.
-    pub from: (u16, u16),
+    pub from:  (u16, u16),
     /// Which edge of its tiles it stands on, and therefore which way it runs: a
     /// north or south face runs along `+x`, an east or west face along `+y`.
-    pub face: Face,
+    pub face:  Face,
     /// How many tiles of it to draw.
     pub tiles: u32,
     /// The height at the top of the picture. The bottom is `z = 0`.
-    pub top: i32,
+    pub top:   i32,
     /// **The static the run is made of** — the `z` it stands at and its graphic,
     /// which is the key [`crate::occlusion::Occlusion::owner_at`] turns into the
     /// number the grid gave that static on each of the run's tiles.
@@ -537,7 +543,7 @@ pub struct Wall {
     /// "the one that looks like a wall" out of a cell would be this instrument
     /// deciding what it is a picture *of* — which is the caller's fact, and the
     /// caller is drawing a run it built.
-    pub of: crate::occlusion::Owner,
+    pub of:    crate::occlusion::Owner,
 }
 
 /// Run the blit over a G-buffer this caller writes, and read the surface back.
@@ -605,75 +611,79 @@ fn drawn(
         // closures this function is given produce no others.
         let id = match fragment.kind {
             // `Kind::Static` — [`elevation`]'s pixels, never [`draw`]'s.
-            crate::place::Kind::Static => *face_ids.entry(tile).or_insert_with(|| {
-                let id = (face_rows.len() as u64 / crate::sprite::SpriteQuad::STRIDE) as u32;
-                let owner = owner_of(tile);
-                named.push(Named {
-                    tile,
-                    kind: crate::place::Kind::Static,
-                    owner,
-                });
-                crate::sprite::SpriteQuad {
-                    rect: crate::geometry::Rect {
-                        x: 0.0,
-                        y: 0.0,
-                        width: 0.0,
-                        height: 0.0,
-                    },
-                    region: crate::atlas::Region {
-                        u: 0.0,
-                        v: 0.0,
-                        du: 0.0,
-                        dv: 0.0,
-                    },
-                    depth: 0.0,
-                    hue: 0,
-                    place: crate::place::Place::land(tile.0, tile.1),
-                    // No `place_of` closure this function is given ever asks for
-                    // a corner `Stance` today, so there is never a second half to
-                    // point at — see `crate::sprite::split_corners` for the real
-                    // pass's version of this row, which does set it.
-                    twin: 0,
-                    // **Which occluder of this tile the picture is of**, from the
-                    // caller — see [`elevation`]'s `owner_of`, and the comment
-                    // there for what this said before and what it cost.
-                    owner: u32::from(owner.raw()),
-                    volumes: crate::impostor::Range::default(),
-                }
-                .write(&mut face_rows);
-                id
-            }),
+            crate::place::Kind::Static => {
+                *face_ids.entry(tile).or_insert_with(|| {
+                    let id = (face_rows.len() as u64 / crate::sprite::SpriteQuad::STRIDE) as u32;
+                    let owner = owner_of(tile);
+                    named.push(Named {
+                        tile,
+                        kind: crate::place::Kind::Static,
+                        owner,
+                    });
+                    crate::sprite::SpriteQuad {
+                        rect:    crate::geometry::Rect {
+                            x:      0.0,
+                            y:      0.0,
+                            width:  0.0,
+                            height: 0.0,
+                        },
+                        region:  crate::atlas::Region {
+                            u:  0.0,
+                            v:  0.0,
+                            du: 0.0,
+                            dv: 0.0,
+                        },
+                        depth:   0.0,
+                        hue:     0,
+                        place:   crate::place::Place::land(tile.0, tile.1),
+                        // No `place_of` closure this function is given ever asks for
+                        // a corner `Stance` today, so there is never a second half to
+                        // point at — see `crate::sprite::split_corners` for the real
+                        // pass's version of this row, which does set it.
+                        twin:    0,
+                        // **Which occluder of this tile the picture is of**, from the
+                        // caller — see [`elevation`]'s `owner_of`, and the comment
+                        // there for what this said before and what it cost.
+                        owner:   u32::from(owner.raw()),
+                        volumes: crate::impostor::Range::default(),
+                    }
+                    .write(&mut face_rows);
+                    id
+                })
+            }
             // `Kind::Land` — [`draw`]'s pixels, never [`elevation`]'s.
-            crate::place::Kind::Land => *ground_ids.entry(tile).or_insert_with(|| {
-                let id = (ground_rows.len() as u64 / crate::ground::GroundQuad::STRIDE) as u32;
-                // A [`crate::ground::GroundQuad`] has no owner field at all, and
-                // that is the honest exception rather than a fourth place a
-                // number could be forgotten: `occlusion::Builder` is only ever
-                // handed statics and ground items — see `occlusion::place` — so
-                // no land tile is ever a solid, and a field that could only hold
-                // `NONE` is a field a later writer could get wrong.
-                named.push(Named {
-                    tile,
-                    kind: crate::place::Kind::Land,
-                    owner: crate::occlusion::OwnerId::NONE,
-                });
-                crate::ground::GroundQuad {
-                    x: 0.0,
-                    y: 0.0,
-                    corners: [0.0; 4],
-                    region: crate::atlas::Region {
-                        u: 0.0,
-                        v: 0.0,
-                        du: 0.0,
-                        dv: 0.0,
-                    },
-                    texmap: None,
-                    depth: 0.0,
-                    place: crate::place::Place::land(tile.0, tile.1),
-                }
-                .write(&mut ground_rows);
-                id
-            }),
+            crate::place::Kind::Land => {
+                *ground_ids.entry(tile).or_insert_with(|| {
+                    let id = (ground_rows.len() as u64 / crate::ground::GroundQuad::STRIDE) as u32;
+                    // A [`crate::ground::GroundQuad`] has no owner field at all, and
+                    // that is the honest exception rather than a fourth place a
+                    // number could be forgotten: `occlusion::Builder` is only ever
+                    // handed statics and ground items — see `occlusion::place` — so
+                    // no land tile is ever a solid, and a field that could only hold
+                    // `NONE` is a field a later writer could get wrong.
+                    named.push(Named {
+                        tile,
+                        kind: crate::place::Kind::Land,
+                        owner: crate::occlusion::OwnerId::NONE,
+                    });
+                    crate::ground::GroundQuad {
+                        x:       0.0,
+                        y:       0.0,
+                        corners: [0.0; 4],
+                        region:  crate::atlas::Region {
+                            u:  0.0,
+                            v:  0.0,
+                            du: 0.0,
+                            dv: 0.0,
+                        },
+                        texmap:  None,
+                        depth:   0.0,
+                        place:   crate::place::Place::land(tile.0, tile.1),
+                    }
+                    .write(&mut ground_rows);
+                    id
+                })
+            }
             crate::place::Kind::Nothing | crate::place::Kind::Mobile => 0,
         };
         ids.push(fragment.ids(id));
@@ -691,8 +701,8 @@ fn drawn(
             },
             bytes,
             wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * stride),
+                offset:         0,
+                bytes_per_row:  Some(width * stride),
                 rows_per_image: Some(height),
             },
             wgpu::Extent3d {
@@ -710,18 +720,18 @@ fn drawn(
     upload(gbuffer.normal(), &bytes, 4);
 
     let surface = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("plan"),
-        size: wgpu::Extent3d {
+        label:           Some("plan"),
+        size:            wgpu::Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: crate::blit::WORLD_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        sample_count:    1,
+        dimension:       wgpu::TextureDimension::D2,
+        format:          crate::blit::WORLD_FORMAT,
+        usage:           wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats:    &[],
     });
     let surface_view = surface.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -731,11 +741,11 @@ fn drawn(
     encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("plan world"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: &world_view,
-            depth_slice: None,
+            view:           &world_view,
+            depth_slice:    None,
             resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+            ops:            wgpu::Operations {
+                load:  wgpu::LoadOp::Clear(wgpu::Color::WHITE),
                 store: wgpu::StoreOp::Store,
             },
         })],
@@ -761,9 +771,9 @@ fn drawn(
         None
     } else {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("plan face instances"),
-            size: face_rows.len() as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            label:              Some("plan face instances"),
+            size:               face_rows.len() as u64,
+            usage:              wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         queue.write_buffer(&buffer, 0, &face_rows);
@@ -773,9 +783,9 @@ fn drawn(
         None
     } else {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("plan ground instances"),
-            size: ground_rows.len() as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            label:              Some("plan ground instances"),
+            size:               ground_rows.len() as u64,
+            usage:              wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         queue.write_buffer(&buffer, 0, &ground_rows);
@@ -786,16 +796,16 @@ fn drawn(
         queue,
         &mut encoder,
         crate::blit::Frame {
-            target: &surface_view,
-            world: &world_view,
-            gbuffer: &views,
-            face_instances: face_instances.as_ref().unwrap_or(&dummy_instances),
-            item_instances: &dummy_instances,
+            target:           &surface_view,
+            world:            &world_view,
+            gbuffer:          &views,
+            face_instances:   face_instances.as_ref().unwrap_or(&dummy_instances),
+            item_instances:   &dummy_instances,
             mobile_instances: &dummy_instances,
-            mesh_instances: &dummy_mesh_instances,
+            mesh_instances:   &dummy_mesh_instances,
             ground_instances: ground_instances.as_ref().unwrap_or(&dummy_ground_instances),
-            zoom: Zoom::ONE,
-            rect: crate::blit::ViewportRect {
+            zoom:             Zoom::ONE,
+            rect:             crate::blit::ViewportRect {
                 x: 0,
                 y: 0,
                 width,

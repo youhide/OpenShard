@@ -20,8 +20,16 @@
 
 use openshard_client_render::blit::ViewportRect;
 use openshard_client_render::gbuffer;
-use openshard_client_render::place::{Kind, Place, Stance};
-use openshard_client_render::select::{Frame as SelectFrame, Select, Selection};
+use openshard_client_render::place::{
+    Kind,
+    Place,
+    Stance,
+};
+use openshard_client_render::select::{
+    Frame as SelectFrame,
+    Select,
+    Selection,
+};
 use openshard_client_render::sprite::SpriteQuad;
 
 /// The world image, and the surface: one size, so the pass's `uv` mapping is the
@@ -71,23 +79,23 @@ fn static_texel(id: u32, stance: Stance) -> u32 {
 fn face_rows() -> Vec<u8> {
     let mut bytes = Vec::new();
     SpriteQuad {
-        rect: openshard_client_render::geometry::Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 0.0,
+        rect:    openshard_client_render::geometry::Rect {
+            x:      0.0,
+            y:      0.0,
+            width:  0.0,
             height: 0.0,
         },
-        region: openshard_client_render::atlas::Region {
-            u: 0.0,
-            v: 0.0,
+        region:  openshard_client_render::atlas::Region {
+            u:  0.0,
+            v:  0.0,
             du: 0.0,
             dv: 0.0,
         },
-        depth: 0.0,
-        hue: 0,
-        place: Place::land(SELECTED.0, SELECTED.1),
-        twin: 0,
-        owner: 0,
+        depth:   0.0,
+        hue:     0,
+        place:   Place::land(SELECTED.0, SELECTED.1),
+        twin:    0,
+        owner:   0,
         volumes: openshard_client_render::impostor::Range::default(),
     }
     .write(&mut bytes);
@@ -105,18 +113,18 @@ fn ground_rows() -> Vec<u8> {
     let mut bytes = Vec::new();
     for tile in [SELECTED, NEIGHBOUR] {
         openshard_client_render::ground::GroundQuad {
-            x: 0.0,
-            y: 0.0,
+            x:       0.0,
+            y:       0.0,
             corners: [0.0; 4],
-            region: openshard_client_render::atlas::Region {
-                u: 0.0,
-                v: 0.0,
+            region:  openshard_client_render::atlas::Region {
+                u:  0.0,
+                v:  0.0,
                 du: 0.0,
                 dv: 0.0,
             },
-            texmap: None,
-            depth: 0.0,
-            place: Place::land(tile.0, tile.1),
+            texmap:  None,
+            depth:   0.0,
+            place:   Place::land(tile.0, tile.1),
         }
         .write(&mut bytes);
     }
@@ -179,13 +187,13 @@ fn wash(device: &wgpu::Device, queue: &wgpu::Queue, selection: Selection) -> Vec
         gbuffer.ids().as_image_copy(),
         &ids_bytes,
         wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(SIZE * 4),
+            offset:         0,
+            bytes_per_row:  Some(SIZE * 4),
             rows_per_image: Some(SIZE),
         },
         wgpu::Extent3d {
-            width: SIZE,
-            height: SIZE,
+            width:                 SIZE,
+            height:                SIZE,
             depth_or_array_layers: 1,
         },
     );
@@ -194,18 +202,18 @@ fn wash(device: &wgpu::Device, queue: &wgpu::Queue, selection: Selection) -> Vec
     // `COPY_DST` on top of it: `outline::mask_texture` does not ask for that
     // usage, because nothing but a test ever writes one from the CPU.
     let mask = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("selection mask"),
-        size: wgpu::Extent3d {
-            width: SIZE,
-            height: SIZE,
+        label:           Some("selection mask"),
+        size:            wgpu::Extent3d {
+            width:                 SIZE,
+            height:                SIZE,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: openshard_client_render::outline::MASK_FORMAT,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
+        sample_count:    1,
+        dimension:       wgpu::TextureDimension::D2,
+        format:          openshard_client_render::outline::MASK_FORMAT,
+        usage:           wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats:    &[],
     });
     let ids: Vec<u8> = (0..SIZE)
         .flat_map(|y| (0..SIZE).map(move |x| mask_id(x, y)))
@@ -214,13 +222,13 @@ fn wash(device: &wgpu::Device, queue: &wgpu::Queue, selection: Selection) -> Vec
         mask.as_image_copy(),
         &ids,
         wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(SIZE),
+            offset:         0,
+            bytes_per_row:  Some(SIZE),
             rows_per_image: Some(SIZE),
         },
         wgpu::Extent3d {
-            width: SIZE,
-            height: SIZE,
+            width:                 SIZE,
+            height:                SIZE,
             depth_or_array_layers: 1,
         },
     );
@@ -229,8 +237,8 @@ fn wash(device: &wgpu::Device, queue: &wgpu::Queue, selection: Selection) -> Vec
     let surface = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("surface"),
         size: wgpu::Extent3d {
-            width: SIZE,
-            height: SIZE,
+            width:                 SIZE,
+            height:                SIZE,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -249,11 +257,11 @@ fn wash(device: &wgpu::Device, queue: &wgpu::Queue, selection: Selection) -> Vec
         .begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("under"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &surface_view,
-                depth_slice: None,
+                view:           &surface_view,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                ops:            wgpu::Operations {
+                    load:  wgpu::LoadOp::Clear(wgpu::Color {
                         r: f64::from(UNDER[0]) / 255.0,
                         g: f64::from(UNDER[1]) / 255.0,
                         b: f64::from(UNDER[2]) / 255.0,
@@ -274,9 +282,9 @@ fn wash(device: &wgpu::Device, queue: &wgpu::Queue, selection: Selection) -> Vec
     // frame binds.
     let rows = face_rows();
     let face_instances = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("select test face instances"),
-        size: rows.len() as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        label:              Some("select test face instances"),
+        size:               rows.len() as u64,
+        usage:              wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
     queue.write_buffer(&face_instances, 0, &rows);
@@ -286,9 +294,9 @@ fn wash(device: &wgpu::Device, queue: &wgpu::Queue, selection: Selection) -> Vec
     // real frame binds.
     let ground_rows = ground_rows();
     let ground_instances = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("select test ground instances"),
-        size: ground_rows.len() as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        label:              Some("select test ground instances"),
+        size:               ground_rows.len() as u64,
+        usage:              wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
     queue.write_buffer(&ground_instances, 0, &ground_rows);
@@ -298,16 +306,16 @@ fn wash(device: &wgpu::Device, queue: &wgpu::Queue, selection: Selection) -> Vec
         queue,
         &mut encoder,
         SelectFrame {
-            target: &surface_view,
-            mask: &mask.create_view(&wgpu::TextureViewDescriptor::default()),
-            ids: &gbuffer.views().ids,
-            face_instances: &face_instances,
+            target:           &surface_view,
+            mask:             &mask.create_view(&wgpu::TextureViewDescriptor::default()),
+            ids:              &gbuffer.views().ids,
+            face_instances:   &face_instances,
             ground_instances: &ground_instances,
-            size: (SIZE, SIZE),
-            rect: ViewportRect {
-                x: 0,
-                y: 0,
-                width: SIZE,
+            size:             (SIZE, SIZE),
+            rect:             ViewportRect {
+                x:      0,
+                y:      0,
+                width:  SIZE,
                 height: SIZE,
             },
         },
@@ -316,9 +324,9 @@ fn wash(device: &wgpu::Device, queue: &wgpu::Queue, selection: Selection) -> Vec
     queue.submit([encoder.finish()]);
 
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("readback"),
-        size: u64::from(SIZE) * u64::from(SIZE) * 4,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("readback"),
+        size:               u64::from(SIZE) * u64::from(SIZE) * 4,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -327,14 +335,14 @@ fn wash(device: &wgpu::Device, queue: &wgpu::Queue, selection: Selection) -> Vec
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(SIZE * 4),
+                offset:         0,
+                bytes_per_row:  Some(SIZE * 4),
                 rows_per_image: Some(SIZE),
             },
         },
         wgpu::Extent3d {
-            width: SIZE,
-            height: SIZE,
+            width:                 SIZE,
+            height:                SIZE,
             depth_or_array_layers: 1,
         },
     );

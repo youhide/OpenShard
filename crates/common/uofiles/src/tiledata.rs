@@ -14,10 +14,20 @@
 //! another and the world becomes quietly unwalkable.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_tiles::{
-    AnimId, LAND_TILE_COUNT, LandTile, STATIC_TILE_COUNT, StaticTile, TextureId, TileData, TileFlags,
+    AnimId,
+    LAND_TILE_COUNT,
+    LandTile,
+    STATIC_TILE_COUNT,
+    StaticTile,
+    TextureId,
+    TileData,
+    TileFlags,
 };
 
 /// Tiles per group, in both tables. Each group has a 4-byte header.
@@ -91,7 +101,7 @@ pub enum TileDataError {
     /// The file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
@@ -108,11 +118,13 @@ impl fmt::Display for TileDataError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
-            Self::UnknownFormat { path, size } => write!(
-                f,
-                "{} is {size} bytes, which is neither tiledata layout; it is not tiledata.mul",
-                path.display()
-            ),
+            Self::UnknownFormat { path, size } => {
+                write!(
+                    f,
+                    "{} is {size} bytes, which is neither tiledata layout; it is not tiledata.mul",
+                    path.display()
+                )
+            }
         }
     }
 }
@@ -136,7 +148,7 @@ impl std::error::Error for TileDataError {
 #[derive(Debug)]
 pub struct Reading {
     /// Every tile definition the file defined.
-    pub tiles: TileData,
+    pub tiles:  TileData,
     /// The layout it was in.
     pub format: TileDataFormat,
 }
@@ -144,13 +156,17 @@ pub struct Reading {
 /// Read `tiledata.mul`, working out its layout from its size.
 pub fn load(path: impl AsRef<Path>) -> Result<Reading, TileDataError> {
     let path = path.as_ref();
-    let bytes = std::fs::read(path).map_err(|source| TileDataError::Read {
-        path: path.to_owned(),
-        source,
+    let bytes = std::fs::read(path).map_err(|source| {
+        TileDataError::Read {
+            path: path.to_owned(),
+            source,
+        }
     })?;
-    parse(&bytes).ok_or_else(|| TileDataError::UnknownFormat {
-        path: path.to_owned(),
-        size: bytes.len(),
+    parse(&bytes).ok_or_else(|| {
+        TileDataError::UnknownFormat {
+            path: path.to_owned(),
+            size: bytes.len(),
+        }
     })
 }
 
@@ -260,9 +276,11 @@ fn parse_static(bytes: &[u8], format: TileDataFormat, index: usize) -> Option<St
 fn read_flags(raw: &[u8], format: TileDataFormat) -> TileFlags {
     match format {
         TileDataFormat::Legacy => TileFlags::new(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]).into()),
-        TileDataFormat::HighSeas => TileFlags::new(u64::from_le_bytes([
-            raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7],
-        ])),
+        TileDataFormat::HighSeas => {
+            TileFlags::new(u64::from_le_bytes([
+                raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7],
+            ]))
+        }
     }
 }
 

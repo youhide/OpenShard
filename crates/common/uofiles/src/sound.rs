@@ -11,9 +11,19 @@
 
 use std::fmt;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-use std::num::{NonZeroU16, NonZeroU32};
-use std::path::{Path, PathBuf};
+use std::io::{
+    Read,
+    Seek,
+    SeekFrom,
+};
+use std::num::{
+    NonZeroU16,
+    NonZeroU32,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_protocol::wire::SoundId;
 
@@ -26,9 +36,9 @@ const DEFAULT_RATE: NonZeroU32 = NonZeroU32::new(22_050).expect("the classic sam
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sound {
     /// Samples in Rodio's normal -1.0 to 1.0 range.
-    pub samples: Vec<f32>,
+    pub samples:     Vec<f32>,
     /// Number of interleaved channels in [`samples`](Self::samples).
-    pub channels: NonZeroU16,
+    pub channels:    NonZeroU16,
     /// Samples per second.
     pub sample_rate: NonZeroU32,
 }
@@ -42,8 +52,8 @@ pub struct SoundArchive {
 #[derive(Debug)]
 enum Backing {
     Mul {
-        index: Vec<Entry>,
-        data: File,
+        index:     Vec<Entry>,
+        data:      File,
         data_path: PathBuf,
     },
     Uop(crate::uop::Uop),
@@ -73,11 +83,13 @@ impl fmt::Display for SoundError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
-            Self::NotAnIndex { path, size } => write!(
-                f,
-                "{} is {size} bytes, not a whole number of {INDEX_ENTRY}-byte sound entries",
-                path.display()
-            ),
+            Self::NotAnIndex { path, size } => {
+                write!(
+                    f,
+                    "{} is {size} bytes, not a whole number of {INDEX_ENTRY}-byte sound entries",
+                    path.display()
+                )
+            }
             Self::Malformed { sound, detail } => write!(f, "sound {:04X}: {detail}", sound.0),
             Self::Uop(error) => error.fmt(f),
         }
@@ -110,9 +122,11 @@ impl SoundArchive {
     /// Open a named pair, principally for tests.
     pub fn from_files(idx_path: impl AsRef<Path>, data_path: impl AsRef<Path>) -> Result<Self, SoundError> {
         let idx_path = idx_path.as_ref();
-        let bytes = std::fs::read(idx_path).map_err(|source| SoundError::Read {
-            path: idx_path.to_owned(),
-            source,
+        let bytes = std::fs::read(idx_path).map_err(|source| {
+            SoundError::Read {
+                path: idx_path.to_owned(),
+                source,
+            }
         })?;
         if !bytes.len().is_multiple_of(INDEX_ENTRY) {
             return Err(SoundError::NotAnIndex {
@@ -124,15 +138,19 @@ impl SoundArchive {
             .as_chunks::<INDEX_ENTRY>()
             .0
             .iter()
-            .map(|entry| Entry {
-                offset: u32::from_le_bytes(entry[0..4].try_into().expect("four bytes")),
-                length: u32::from_le_bytes(entry[4..8].try_into().expect("four bytes")),
+            .map(|entry| {
+                Entry {
+                    offset: u32::from_le_bytes(entry[0..4].try_into().expect("four bytes")),
+                    length: u32::from_le_bytes(entry[4..8].try_into().expect("four bytes")),
+                }
             })
             .collect();
         let data_path = data_path.as_ref().to_owned();
-        let data = File::open(&data_path).map_err(|source| SoundError::Read {
-            path: data_path.clone(),
-            source,
+        let data = File::open(&data_path).map_err(|source| {
+            SoundError::Read {
+                path: data_path.clone(),
+                source,
+            }
         })?;
         Ok(Self {
             backing: Backing::Mul {
@@ -157,19 +175,25 @@ impl SoundArchive {
                 if entry.offset == NO_ENTRY || entry.length == NO_ENTRY || entry.length == 0 {
                     return Ok(None);
                 }
-                let length = usize::try_from(entry.length).map_err(|_| SoundError::Malformed {
-                    sound,
-                    detail: "entry length does not fit this platform".to_owned(),
+                let length = usize::try_from(entry.length).map_err(|_| {
+                    SoundError::Malformed {
+                        sound,
+                        detail: "entry length does not fit this platform".to_owned(),
+                    }
                 })?;
                 data.seek(SeekFrom::Start(u64::from(entry.offset)))
-                    .map_err(|source| SoundError::Read {
-                        path: data_path.clone(),
-                        source,
+                    .map_err(|source| {
+                        SoundError::Read {
+                            path: data_path.clone(),
+                            source,
+                        }
                     })?;
                 let mut bytes = vec![0; length];
-                data.read_exact(&mut bytes).map_err(|source| SoundError::Read {
-                    path: data_path.clone(),
-                    source,
+                data.read_exact(&mut bytes).map_err(|source| {
+                    SoundError::Read {
+                        path: data_path.clone(),
+                        source,
+                    }
                 })?;
                 bytes
             }
@@ -187,9 +211,11 @@ impl SoundArchive {
 
 fn decode(sound: SoundId, bytes: &[u8]) -> Result<Sound, SoundError> {
     let wave = if bytes.get(0..4) == Some(b"RIFF") {
-        Some(wave_data(bytes).ok_or_else(|| SoundError::Malformed {
-            sound,
-            detail: "invalid RIFF/WAVE header".to_owned(),
+        Some(wave_data(bytes).ok_or_else(|| {
+            SoundError::Malformed {
+                sound,
+                detail: "invalid RIFF/WAVE header".to_owned(),
+            }
         })?)
     } else {
         None
@@ -208,9 +234,11 @@ fn decode(sound: SoundId, bytes: &[u8]) -> Result<Sound, SoundError> {
             detail: "entry has no PCM samples after its header".to_owned(),
         });
     }
-    let samples = pcm_samples(pcm, bits_per_sample).ok_or_else(|| SoundError::Malformed {
-        sound,
-        detail: format!("unsupported PCM sample width {bits_per_sample}"),
+    let samples = pcm_samples(pcm, bits_per_sample).ok_or_else(|| {
+        SoundError::Malformed {
+            sound,
+            detail: format!("unsupported PCM sample width {bits_per_sample}"),
+        }
     })?;
     Ok(Sound {
         samples,
@@ -232,9 +260,9 @@ fn wave_data(bytes: &[u8]) -> Option<Wave<'_>> {
         let chunk = bytes.get(data..end)?;
         if kind == b"fmt " && chunk.len() >= 16 {
             format = Some(WaveFormat {
-                encoding: u16::from_le_bytes(chunk[0..2].try_into().ok()?),
-                channels: u16::from_le_bytes(chunk[2..4].try_into().ok()?),
-                sample_rate: u32::from_le_bytes(chunk[4..8].try_into().ok()?),
+                encoding:        u16::from_le_bytes(chunk[0..2].try_into().ok()?),
+                channels:        u16::from_le_bytes(chunk[2..4].try_into().ok()?),
+                sample_rate:     u32::from_le_bytes(chunk[4..8].try_into().ok()?),
                 bits_per_sample: u16::from_le_bytes(chunk[14..16].try_into().ok()?),
             });
         }
@@ -244,9 +272,9 @@ fn wave_data(bytes: &[u8]) -> Option<Wave<'_>> {
                 return None;
             }
             return Some(Wave {
-                data: chunk,
-                channels: NonZeroU16::new(format.channels)?,
-                sample_rate: NonZeroU32::new(format.sample_rate)?,
+                data:            chunk,
+                channels:        NonZeroU16::new(format.channels)?,
+                sample_rate:     NonZeroU32::new(format.sample_rate)?,
                 bits_per_sample: format.bits_per_sample,
             });
         }
@@ -256,36 +284,40 @@ fn wave_data(bytes: &[u8]) -> Option<Wave<'_>> {
 }
 
 struct Wave<'a> {
-    data: &'a [u8],
-    channels: NonZeroU16,
-    sample_rate: NonZeroU32,
+    data:            &'a [u8],
+    channels:        NonZeroU16,
+    sample_rate:     NonZeroU32,
     bits_per_sample: u16,
 }
 
 struct WaveFormat {
-    encoding: u16,
-    channels: u16,
-    sample_rate: u32,
+    encoding:        u16,
+    channels:        u16,
+    sample_rate:     u32,
     bits_per_sample: u16,
 }
 
 /// Convert interleaved little-endian PCM samples to Rodio's normalized range.
 fn pcm_samples(bytes: &[u8], bits_per_sample: u16) -> Option<Vec<f32>> {
     match bits_per_sample {
-        8 => Some(
-            bytes
-                .iter()
-                .map(|sample| (f32::from(*sample) - 128.0) / 128.0)
-                .collect(),
-        ),
-        16 if bytes.len().is_multiple_of(2) => Some(
-            bytes
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|sample| f32::from(i16::from_le_bytes(*sample)) / 32768.0)
-                .collect(),
-        ),
+        8 => {
+            Some(
+                bytes
+                    .iter()
+                    .map(|sample| (f32::from(*sample) - 128.0) / 128.0)
+                    .collect(),
+            )
+        }
+        16 if bytes.len().is_multiple_of(2) => {
+            Some(
+                bytes
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|sample| f32::from(i16::from_le_bytes(*sample)) / 32768.0)
+                    .collect(),
+            )
+        }
         _ => None,
     }
 }

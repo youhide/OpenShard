@@ -8,15 +8,22 @@
 use openshard_client_model::Status;
 use openshard_protocol::mobile::Vitals;
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 
-use crate::gump::{GumpArt, GumpPixel, Picture};
+use crate::gump::{
+    GumpArt,
+    GumpPixel,
+    Picture,
+};
 use crate::text::GumpLabel;
 
 /// One line the status window writes, already placed in gump pixels.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Line {
-    pub at: GumpPixel,
+    pub at:   GumpPixel,
     pub text: String,
 }
 
@@ -25,10 +32,10 @@ impl Line {
     #[must_use]
     pub fn label(&self) -> GumpLabel<'_> {
         GumpLabel {
-            at: self.at,
+            at:   self.at,
             text: &self.text,
             font: FONT,
-            hue: HUE,
+            hue:  HUE,
             clip: None,
         }
     }
@@ -40,7 +47,7 @@ pub struct Window {
     /// The background art, behind every label.
     pub pictures: Vec<Picture>,
     /// The name and ten values written over that art.
-    pub lines: Vec<Line>,
+    pub lines:    Vec<Line>,
 }
 
 /// The old status frame. It is 282×151 in the post-ML client files this app
@@ -60,13 +67,15 @@ const HUE: Hue = Hue(0x0386);
 pub fn window(status: &Status, hits: Vitals, at: GumpPixel) -> Window {
     let left = 86;
     let right = 171;
-    let row = |x, y, text: String| Line {
-        at: at.offset(GumpPixel::new(x, y)),
-        text,
+    let row = |x, y, text: String| {
+        Line {
+            at: at.offset(GumpPixel::new(x, y)),
+            text,
+        }
     };
     Window {
         pictures: vec![Picture::plain(GumpArt::Gump(FRAME), at)],
-        lines: vec![
+        lines:    vec![
             row(left, 42, status.name.clone()),
             row(left, 62, status.strength.to_string()),
             row(left, 74, status.dexterity.to_string()),
@@ -92,19 +101,25 @@ mod tests {
 
     fn status() -> Status {
         Status {
-            name: "Lord British".to_owned(),
-            female: false,
-            strength: 100,
-            dexterity: 50,
-            intelligence: 75,
-            stamina: Vitals { current: 49, max: 50 },
-            mana: Vitals { current: 72, max: 75 },
-            gold: 1_234,
-            armor: 42,
-            weight: 12,
-            max_weight: 450,
-            stat_cap: 225,
-            followers: 0,
+            name:          "Lord British".to_owned(),
+            female:        false,
+            strength:      100,
+            dexterity:     50,
+            intelligence:  75,
+            stamina:       Vitals {
+                current: 49,
+                max:     50,
+            },
+            mana:          Vitals {
+                current: 72,
+                max:     75,
+            },
+            gold:          1_234,
+            armor:         42,
+            weight:        12,
+            max_weight:    450,
+            stat_cap:      225,
+            followers:     0,
             followers_max: 5,
         }
     }
@@ -115,7 +130,7 @@ mod tests {
             &status(),
             Vitals {
                 current: 98,
-                max: 100,
+                max:     100,
             },
             GumpPixel::new(300, 200),
         );

@@ -15,12 +15,31 @@
 //! without combat, magic or the AI knowing what a lute is.
 
 use openshard_entities::EntityId;
-use openshard_protocol::wire::{ClilocId, CursorId};
-use openshard_state::components::{
-    Discorded, Drawn, Hitpoints, Instrument, ItemKind, Mana, Pacified, Skills, Stamina,
+use openshard_protocol::wire::{
+    ClilocId,
+    CursorId,
 };
-use openshard_state::instrument::{instrument_data, instrument_data_for_kind};
-use openshard_state::{Skill, TICKS_PER_SECOND, TargetPurpose, WorldState};
+use openshard_state::components::{
+    Discorded,
+    Drawn,
+    Hitpoints,
+    Instrument,
+    ItemKind,
+    Mana,
+    Pacified,
+    Skills,
+    Stamina,
+};
+use openshard_state::instrument::{
+    instrument_data,
+    instrument_data_for_kind,
+};
+use openshard_state::{
+    Skill,
+    TICKS_PER_SECOND,
+    TargetPurpose,
+    WorldState,
+};
 
 use crate::check::roll_skill_band;
 
@@ -121,12 +140,16 @@ fn instrument_in_pack(state: &WorldState, bard: EntityId) -> Option<EntityId> {
     let backpack = openshard_items::backpack_of(state, serial)?;
     openshard_state::contained_items(state, backpack)
         .map(|(entity, _)| entity)
-        .find(|&entity| match state.registry.get::<ItemKind>(entity) {
-            Some(kind) => instrument_data_for_kind(kind.0).is_some(),
-            None => state
-                .registry
-                .get::<Drawn>(entity)
-                .is_some_and(|graphic| instrument_data(graphic.id).is_some()),
+        .find(|&entity| {
+            match state.registry.get::<ItemKind>(entity) {
+                Some(kind) => instrument_data_for_kind(kind.0).is_some(),
+                None => {
+                    state
+                        .registry
+                        .get::<Drawn>(entity)
+                        .is_some_and(|graphic| instrument_data(graphic.id).is_some())
+                }
+            }
         })
 }
 
@@ -138,10 +161,12 @@ fn instrument_in_pack(state: &WorldState, bard: EntityId) -> Option<EntityId> {
 fn play(state: &mut WorldState, bard: EntityId, item: EntityId, well: bool) {
     let sound = match state.registry.get::<ItemKind>(item) {
         Some(kind) => instrument_data_for_kind(kind.0),
-        None => state
-            .registry
-            .get::<Drawn>(item)
-            .and_then(|graphic| instrument_data(graphic.id)),
+        None => {
+            state
+                .registry
+                .get::<Drawn>(item)
+                .and_then(|graphic| instrument_data(graphic.id))
+        }
     }
     .map(|data| if well { data.well } else { data.badly });
     if let Some(sound) = sound {

@@ -12,9 +12,16 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::{ClilocId, RawSkillId};
+use openshard_protocol::wire::{
+    ClilocId,
+    RawSkillId,
+};
 use openshard_state::WorldState;
-use openshard_state::components::{Casting, Ghost, SkillCooldown};
+use openshard_state::components::{
+    Casting,
+    Ghost,
+    SkillCooldown,
+};
 use openshard_state::skill::Skill;
 
 /// "That skill cannot be used directly." — the client's own line for a skill with
@@ -38,7 +45,7 @@ pub struct SkillRequested {
     /// Their wire identity.
     pub serial: Serial,
     /// Which skill.
-    pub skill: Skill,
+    pub skill:  Skill,
 }
 
 /// How long a use of a skill with no handler of its own holds the button, in

@@ -14,9 +14,15 @@
 //! Ignored and gated on `OPENSHARD_CLIENT`: no client files live in this
 //! repository, ever.
 
-use openshard_client_render::{doors, occlusion};
+use openshard_client_render::{
+    doors,
+    occlusion,
+};
 use openshard_protocol::wire::Graphic;
-use openshard_tiles::{TileData, TileFlags};
+use openshard_tiles::{
+    TileData,
+    TileFlags,
+};
 
 fn tiledata() -> Option<TileData> {
     let dir = std::env::var_os("OPENSHARD_CLIENT").map(std::path::PathBuf::from)?;

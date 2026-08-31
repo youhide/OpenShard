@@ -23,9 +23,16 @@
 #[path = "../examples/shard/mod.rs"]
 mod shard;
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use shard::{Placed, Source, Window};
+use shard::{
+    Placed,
+    Source,
+    Window,
+};
 
 /// The two tables as `crates/server/persistence/src/sqlite.rs` declares them,
 /// cut down to the columns this reader names.
@@ -62,14 +69,14 @@ fn scratch(tag: &str) -> PathBuf {
 
 /// One `items` row of the fixture.
 struct ItemRow {
-    serial: i64,
-    graphic: u16,
-    hue: u16,
+    serial:   i64,
+    graphic:  u16,
+    hue:      u16,
     loc_kind: u8,
-    facet: u8,
-    x: u16,
-    y: u16,
-    z: i8,
+    facet:    u8,
+    x:        u16,
+    y:        u16,
+    z:        i8,
 }
 
 /// One `decorations` row: the same without `loc_kind`, which a decoration has
@@ -133,73 +140,73 @@ fn reads_both_tables_and_keeps_out_what_the_window_does_not_hold() {
         &[
             // Inside: a dropped item, which is what `loc_kind = 0` means.
             ItemRow {
-                serial: 1,
-                graphic: 0x0EED,
-                hue: 0,
+                serial:   1,
+                graphic:  0x0EED,
+                hue:      0,
                 loc_kind: 0,
-                facet: 0,
-                x: 1504,
-                y: 1655,
-                z: 27,
+                facet:    0,
+                x:        1504,
+                y:        1655,
+                z:        27,
             },
             // Inside the rectangle and inside a *container* — a barrel's
             // contents are not on the street, and a reader that dropped the
             // `loc_kind` filter would draw them there.
             ItemRow {
-                serial: 2,
-                graphic: 0x0EED,
-                hue: 0,
+                serial:   2,
+                graphic:  0x0EED,
+                hue:      0,
                 loc_kind: 1,
-                facet: 0,
-                x: 1504,
-                y: 1655,
-                z: 27,
+                facet:    0,
+                x:        1504,
+                y:        1655,
+                z:        27,
             },
             // Worn, likewise: on a body, not on the ground.
             ItemRow {
-                serial: 3,
-                graphic: 0x1F03,
-                hue: 0,
+                serial:   3,
+                graphic:  0x1F03,
+                hue:      0,
                 loc_kind: 2,
-                facet: 0,
-                x: 1504,
-                y: 1655,
-                z: 27,
+                facet:    0,
+                x:        1504,
+                y:        1655,
+                z:        27,
             },
             // Another facet, at the same coordinates. Trammel is Britain's twin
             // tile for tile, so a reader that forgot the facet would find a
             // plausible thing at a plausible place.
             ItemRow {
-                serial: 4,
-                graphic: 0x0EED,
-                hue: 0,
+                serial:   4,
+                graphic:  0x0EED,
+                hue:      0,
                 loc_kind: 0,
-                facet: 1,
-                x: 1504,
-                y: 1655,
-                z: 27,
+                facet:    1,
+                x:        1504,
+                y:        1655,
+                z:        27,
             },
             // One tile east of the window's edge.
             ItemRow {
-                serial: 5,
-                graphic: 0x0EED,
-                hue: 0,
+                serial:   5,
+                graphic:  0x0EED,
+                hue:      0,
                 loc_kind: 0,
-                facet: 0,
-                x: 1509,
-                y: 1655,
-                z: 27,
+                facet:    0,
+                x:        1509,
+                y:        1655,
+                z:        27,
             },
             // One tile north of it.
             ItemRow {
-                serial: 6,
-                graphic: 0x0EED,
-                hue: 0,
+                serial:   6,
+                graphic:  0x0EED,
+                hue:      0,
                 loc_kind: 0,
-                facet: 0,
-                x: 1504,
-                y: 1650,
-                z: 27,
+                facet:    0,
+                x:        1504,
+                y:        1650,
+                z:        27,
             },
         ],
         &[
@@ -220,36 +227,36 @@ fn reads_both_tables_and_keeps_out_what_the_window_does_not_hold() {
         read,
         vec![
             Placed {
-                source: Source::Ground,
-                x: 1504,
-                y: 1655,
-                z: 27,
+                source:  Source::Ground,
+                x:       1504,
+                y:       1655,
+                z:       27,
                 graphic: 0x0EED,
-                hue: 0
+                hue:     0,
             },
             Placed {
-                source: Source::Decoration,
-                x: 1505,
-                y: 1656,
-                z: 27,
+                source:  Source::Decoration,
+                x:       1505,
+                y:       1656,
+                z:       27,
                 graphic: 0x0A97,
-                hue: 0
+                hue:     0,
             },
             Placed {
-                source: Source::Decoration,
-                x: 1506,
-                y: 1656,
-                z: 27,
+                source:  Source::Decoration,
+                x:       1506,
+                y:       1656,
+                z:       27,
                 graphic: 0x0A98,
-                hue: 0
+                hue:     0,
             },
             Placed {
-                source: Source::Decoration,
-                x: 1508,
-                y: 1659,
-                z: 0,
+                source:  Source::Decoration,
+                x:       1508,
+                y:       1659,
+                z:       0,
                 graphic: 0x0B1D,
-                hue: 33
+                hue:     33,
             },
         ],
         "the ground item, both halves of the cabinet, and the corner — and nothing contained, \
@@ -267,14 +274,14 @@ fn a_basement_comes_back_below_the_ground() {
     write(
         &path,
         &[ItemRow {
-            serial: 1,
-            graphic: 0x0EED,
-            hue: 0,
+            serial:   1,
+            graphic:  0x0EED,
+            hue:      0,
             loc_kind: 0,
-            facet: 0,
-            x: 1504,
-            y: 1655,
-            z: -60,
+            facet:    0,
+            x:        1504,
+            y:        1655,
+            z:        -60,
         }],
         &[(2, 0x0A97, 0, 0, 1505, 1656, -128)],
     );

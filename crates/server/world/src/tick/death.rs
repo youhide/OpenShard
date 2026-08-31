@@ -244,7 +244,7 @@ impl World {
         // The living body, remembered so resurrection can restore it exactly —
         // colour and race included.
         let living = self.state.registry.get::<Body>(entity).copied().unwrap_or(Body {
-            id: BODY_HUMAN_MALE,
+            id:  BODY_HUMAN_MALE,
             hue: openshard_protocol::wire::Hue(0),
         });
 
@@ -257,7 +257,7 @@ impl World {
         self.clear_attackers_of(serial);
         // Rise in the ghost body.
         let ghost = Body {
-            id: ghost_body(living.id),
+            id:  ghost_body(living.id),
             hue: openshard_protocol::wire::Hue(0),
         };
         self.state.registry.insert(entity, ghost);
@@ -393,7 +393,7 @@ impl World {
                 entity,
                 Hitpoints {
                     current: revived,
-                    max: hits.max,
+                    max:     hits.max,
                 },
             );
         }
@@ -501,7 +501,7 @@ impl World {
         self.state.registry.insert(
             item,
             Drawn {
-                id: DEATH_SHROUD_GRAPHIC,
+                id:  DEATH_SHROUD_GRAPHIC,
                 hue: Hue(0),
             },
         );
@@ -847,8 +847,8 @@ impl World {
                 if let Some(item) = item {
                     let contained = Contained {
                         container: corpse,
-                        position: GumpPoint::new(x, y),
-                        grid: GridSlot(0),
+                        position:  GumpPoint::new(x, y),
+                        grid:      GridSlot(0),
                     };
                     relocate_item(&mut self.state, item, LiveItemLocation::contained(contained))
                         .expect("arranging corpse loot preserves its one owner");

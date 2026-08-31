@@ -38,7 +38,10 @@
 //!   that depended on anything else — a hash order, a float tie broken by sort
 //!   stability — would make them two trees that agree most of the time.
 
-use crate::occlusion::{Solid, SolidId};
+use crate::occlusion::{
+    Solid,
+    SolidId,
+};
 
 /// Which axis a node's box is measured or split on. A number here is a choice
 /// of three where the reader has to remember which — see the split's own
@@ -170,7 +173,7 @@ pub struct Node {
     /// `wire_box`, and the slab test converts either to `f32` before it does
     /// anything — `wire_box` is `space` through that same conversion, so the two
     /// walks test bit-identical boxes and this contains both.
-    pub space: crate::solid::Solid,
+    pub space:  crate::solid::Solid,
     /// Where a ray that misses this node continues: the first node **after**
     /// this whole subtree, in the depth-first order.
     ///
@@ -185,7 +188,7 @@ pub struct Node {
     /// [`Option`] in the sense `docs/style.md` asks for: an inner node having no
     /// primitives is a fact about what it is, not a value the build has not got
     /// round to filling in.
-    pub leaf: Option<Leaf>,
+    pub leaf:   Option<Leaf>,
 }
 
 /// A frame's primitives, arranged so a ray can skip most of them.
@@ -404,19 +407,23 @@ fn split(nodes: &mut Vec<Node>, order: &mut [SolidId], range: std::ops::Range<us
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::occlusion::{Edges, Owner, Part};
+    use crate::occlusion::{
+        Edges,
+        Owner,
+        Part,
+    };
 
     /// A body filling one tile, from `z` 0 to 10 — the shape a built scene's
     /// occluders mostly are, and enough to give a build something to sort.
     fn body(x: i32, y: i32, z: i32) -> Solid {
         Solid {
-            space: crate::occlusion::Solid::box_of(x, y, z, z + 10, Edges::ANY),
-            opacity: crate::occlusion::OPAQUE,
-            edges: Edges::ANY,
+            space:    crate::occlusion::Solid::box_of(x, y, z, z + 10, Edges::ANY),
+            opacity:  crate::occlusion::OPAQUE,
+            edges:    Edges::ANY,
             aperture: None,
-            roof: false,
-            owner: Owner::new(z as i8, openshard_protocol::wire::Graphic(1)),
-            part: Part::ONLY,
+            roof:     false,
+            owner:    Owner::new(z as i8, openshard_protocol::wire::Graphic(1)),
+            part:     Part::ONLY,
         }
     }
 
@@ -585,10 +592,12 @@ mod tests {
         // That is the fixture's second version — the first one split on `z`,
         // failed for that reason, and would have been read as the tie-break
         // working.
-        let lid = |x: i32| Solid {
-            space: crate::occlusion::Solid::box_of(x, 0, 0, 0, Edges::NONE),
-            edges: Edges::NONE,
-            ..body(x, 0, 0)
+        let lid = |x: i32| {
+            Solid {
+                space: crate::occlusion::Solid::box_of(x, 0, 0, 0, Edges::NONE),
+                edges: Edges::NONE,
+                ..body(x, 0, 0)
+            }
         };
         let solids: Vec<Solid> = (0..40).map(|at| lid(at % 2)).collect();
         let bvh = Bvh::of(&solids);

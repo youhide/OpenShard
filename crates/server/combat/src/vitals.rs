@@ -2,7 +2,13 @@
 
 use openshard_entities::EntityId;
 use openshard_state::WorldState;
-use openshard_state::components::{Ghost, Hitpoints, Poisoned, Stamina, Steps};
+use openshard_state::components::{
+    Ghost,
+    Hitpoints,
+    Poisoned,
+    Stamina,
+    Steps,
+};
 
 /// How far over its carry cap a mobile may be before fatigue begins.
 pub const OVERLOAD_ALLOWANCE: u16 = 4;

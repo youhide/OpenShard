@@ -37,13 +37,33 @@
 
 use std::fmt;
 
-use openshard_map::chunk::{BLOCKS_PER_CHUNK, ChunkCoord};
-use openshard_map::grid::{BlockCoord, BlockExtent, BlockIndex};
-use openshard_map::map::{BLOCK_SIZE, CELLS_PER_BLOCK, StaticItem, WorldMap};
+use openshard_map::chunk::{
+    BLOCKS_PER_CHUNK,
+    ChunkCoord,
+};
+use openshard_map::grid::{
+    BlockCoord,
+    BlockExtent,
+    BlockIndex,
+};
+use openshard_map::map::{
+    BLOCK_SIZE,
+    CELLS_PER_BLOCK,
+    StaticItem,
+    WorldMap,
+};
 use openshard_map::overlay::Cover;
-use openshard_tiles::{LAND_TILE_COUNT, LandTileId, TileData};
+use openshard_tiles::{
+    LAND_TILE_COUNT,
+    LandTileId,
+    TileData,
+};
 
-use crate::terrain::{MAX_STEP_UP, PLAYER_HEIGHT, static_top};
+use crate::terrain::{
+    MAX_STEP_UP,
+    PLAYER_HEIGHT,
+    static_top,
+};
 
 /// One place a body can put its feet, and what is above it.
 ///
@@ -52,7 +72,7 @@ use crate::terrain::{MAX_STEP_UP, PLAYER_HEIGHT, static_top};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Span {
     /// Where a body's feet rest on this surface — ServUO's `ourZ`.
-    pub stand_z: i8,
+    pub stand_z:   i8,
     /// The edge a step must reach to climb onto it — ServUO's `itemTop`.
     ///
     /// [`stand_z`](Self::stand_z) for everything but a climbable platform,
@@ -61,7 +81,7 @@ pub struct Span {
     /// folding them would be inventing a rule the step check does not have.
     /// For the land it is the tile's **lowest** corner, which is what
     /// `MapTerrain::check` reaches for, while the body stands at the average.
-    pub reach_z: i8,
+    pub reach_z:   i8,
     /// Free height above [`stand_z`](Self::stand_z) before the map's own
     /// statics are in the way, saturating at 255.
     ///
@@ -79,7 +99,7 @@ pub struct Span {
     /// more than 239 above where it is landing.
     pub clearance: u8,
     /// What kind of surface this is. Today: whether only a swimmer stands here.
-    pub flags: SpanFlags,
+    pub flags:     SpanFlags,
 }
 
 /// What a [`Span`] is, past its heights.
@@ -225,7 +245,7 @@ enum LandKind {
 /// columns for both abilities.
 struct BlockTable {
     /// Where this block's columns begin in [`SpanIndex::spans`].
-    base: u32,
+    base:     u32,
     /// Which of the block's sixty-four columns own a run, bit per cell in the
     /// block's own row-major cell order.
     ///
@@ -236,7 +256,7 @@ struct BlockTable {
     occupied: u64,
     /// Where this block's counts begin in [`SpanIndex::counts`]: one byte per
     /// set bit of [`occupied`](Self::occupied), in ascending cell.
-    counts: u32,
+    counts:   u32,
 }
 
 /// The occupancy mask is one bit per cell, so a block's cells must fit a word.
@@ -285,10 +305,10 @@ pub struct SpanIndex {
     counts: Vec<u8>,
     /// Every stored span, blocks in [`blocks`](Self::blocks) order and columns
     /// in each block's row-major cell order.
-    spans: Vec<Span>,
+    spans:  Vec<Span>,
     /// What each land graphic is, indexed by
     /// [`LandTileId`](openshard_tiles::LandTileId).
-    land: Vec<LandKind>,
+    land:   Vec<LandKind>,
     /// How many of [`spans`](Self::spans) no table addresses any more.
     ///
     /// Zero for a facet baked whole, and it only ever grows through
@@ -303,7 +323,7 @@ pub struct SpanIndex {
     /// live ones rebake the facet whole. A publish is an operator typing, so a
     /// session's worth of them is a few thousand blocks against a facet's
     /// 458,752 — and the next load builds from the map anyway.
-    dead: usize,
+    dead:   usize,
 }
 
 impl fmt::Debug for SpanIndex {
@@ -340,9 +360,9 @@ impl SpanIndex {
             blocks: vec![BARE; extent.count() as usize],
             tables: Vec::new(),
             counts: Vec::new(),
-            spans: Vec::new(),
-            land: land_kinds(tiles),
-            dead: 0,
+            spans:  Vec::new(),
+            land:   land_kinds(tiles),
+            dead:   0,
         };
         let mut column = Vec::new();
         for block in extent.blocks() {
@@ -556,9 +576,9 @@ impl SpanIndex {
 pub struct Spans<'a> {
     /// The ground. Read for the 92% of columns the bake deliberately does not
     /// store, and for the block addressing both halves share.
-    map: &'a WorldMap,
+    map:      &'a WorldMap,
     /// The bake.
-    index: &'a SpanIndex,
+    index:    &'a SpanIndex,
     /// Whether water counts as somewhere to stand. A property of the *body*
     /// asking and never of the world, which is why one facet's bake serves a
     /// walker and a fish at once.
@@ -610,11 +630,11 @@ impl<'a> Spans<'a> {
             // answers it, and nothing can be in the way of a surface with
             // nothing above it. This is the column tier, and it is 92% of the
             // facet.
-            bare: match stored.is_empty() {
+            bare:     match stored.is_empty() {
                 true => self.ground(x, y).filter(|span| self.wants(*span)),
                 false => None,
             },
-            listed: stored.iter(),
+            listed:   stored.iter(),
             swimming: self.swimming,
         }
     }
@@ -632,14 +652,14 @@ impl<'a> Spans<'a> {
         // for them separately read `(x, y)` twice — see `land_and_corners`.
         let (cell, corners) = self.map.land_and_corners(x, y)?;
         Some(Span {
-            stand_z: openshard_map::map::average_corner_z(corners),
+            stand_z:   openshard_map::map::average_corner_z(corners),
             // What a step has to reach is the tile's lowest corner, not the
             // height a body ends up at: `MapTerrain::check` compares `step_top`
             // against `land_z`, and a body stands at the average.
-            reach_z: corners.into_iter().min().expect("four corners"),
+            reach_z:   corners.into_iter().min().expect("four corners"),
             // Nothing is stored for this column because nothing stands on it.
             clearance: u8::MAX,
-            flags: kind_flags(self.index.land[usize::from(cell.tile.0)])?,
+            flags:     kind_flags(self.index.land[usize::from(cell.tile.0)])?,
         })
     }
 
@@ -736,9 +756,9 @@ impl<'a> Spans<'a> {
 #[derive(Clone, Debug)]
 pub struct Surfaces<'a> {
     /// The land surface of an unstored column, already filtered.
-    bare: Option<Span>,
+    bare:     Option<Span>,
     /// A stored column's run, filtered as it is walked.
-    listed: std::slice::Iter<'a, Span>,
+    listed:   std::slice::Iter<'a, Span>,
     /// Whether water counts.
     swimming: bool,
 }
@@ -822,9 +842,9 @@ fn bake_block(
         return None;
     }
     let mut table = BlockTable {
-        base: u32::try_from(spans.len()).expect("a facet's spans fit a u32"),
+        base:     u32::try_from(spans.len()).expect("a facet's spans fit a u32"),
         occupied: 0,
-        counts: u32::try_from(counts.len()).expect("a facet's columns fit a u32"),
+        counts:   u32::try_from(counts.len()).expect("a facet's columns fit a u32"),
     };
     let (origin_x, origin_y) = coord.origin();
     // A block's items are sorted by `(y, x)`, which *is* its row-major cell
@@ -1069,13 +1089,23 @@ fn land_wins(land_center: Option<i32>, base: i8, height: u8, stand_z: i8) -> boo
 
 #[cfg(test)]
 mod tests {
-    use openshard_map::grid::{BlockExtent, Tile};
-    use openshard_tiles::TileFlags;
-
+    use openshard_map::grid::{
+        BlockExtent,
+        Tile,
+    };
     use openshard_map::map::LandCell;
-    use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime, Undo};
+    use openshard_map::patch::{
+        Patch,
+        PatchAuthor,
+        PatchOp,
+        PatchTime,
+        Undo,
+    };
     use openshard_protocol::world::Facet;
-    use openshard_tiles::LandTileId;
+    use openshard_tiles::{
+        LandTileId,
+        TileFlags,
+    };
 
     use super::*;
     use crate::ground::Ground;

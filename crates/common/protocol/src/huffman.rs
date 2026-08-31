@@ -144,7 +144,8 @@ impl core::fmt::Display for HuffmanError {
     }
 }
 
-impl std::error::Error for HuffmanError {}
+impl std::error::Error for HuffmanError {
+}
 
 /// Decompress a stream produced by [`compress`].
 ///

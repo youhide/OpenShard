@@ -80,11 +80,22 @@
 //! the reassembly path covered.
 
 use crate::access::OPENSHARD_SUBCOMMANDS;
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength, frame_body};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+    frame_body,
+};
 use crate::version::ClientVersion;
-use crate::world::{Facet, WorldId};
+use crate::world::{
+    Facet,
+    WorldId,
+};
 
 /// The largest slice of one chunk's deflated blob a single packet carries.
 ///
@@ -280,7 +291,7 @@ impl Fragment {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ChunkRequest {
     /// Which facet's ground is wanted.
-    pub facet: Facet,
+    pub facet:  Facet,
     /// Which chunks of it, at most [`MAX_CHUNKS`] of them.
     pub chunks: Vec<ChunkAt>,
 }
@@ -349,9 +360,9 @@ impl ChunkRequest {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ChunkData {
     /// Which facet's ground this is.
-    pub facet: Facet,
+    pub facet:    Facet,
     /// Which chunk of it.
-    pub at: ChunkAt,
+    pub at:       ChunkAt,
     /// The revision the chunk was cut at.
     pub revision: WorldRevision,
     /// Which piece of the deflated blob this packet carries.
@@ -363,7 +374,7 @@ pub struct ChunkData {
     ///
     /// A buffer and not a number; see [`join`], which is the only thing that
     /// should ever concatenate two of these.
-    pub blob: Vec<u8>,
+    pub blob:     Vec<u8>,
 }
 
 impl ChunkData {
@@ -407,14 +418,16 @@ impl ChunkData {
         deflated
             .chunks(FRAGMENT_BYTES)
             .enumerate()
-            .map(|(index, slice)| Self {
-                facet,
-                at,
-                revision,
-                fragment: Fragment::new(u8::try_from(index).expect("fewer than 255 fragments"), count)
-                    .expect("an index below the count it was derived from"),
-                inflated,
-                blob: slice.to_vec(),
+            .map(|(index, slice)| {
+                Self {
+                    facet,
+                    at,
+                    revision,
+                    fragment: Fragment::new(u8::try_from(index).expect("fewer than 255 fragments"), count)
+                        .expect("an index below the count it was derived from"),
+                    inflated,
+                    blob: slice.to_vec(),
+                }
             })
             .collect()
     }
@@ -502,7 +515,7 @@ pub enum JoinError {
         /// How many fragments the set says there are.
         wanted: u8,
         /// How many distinct indices arrived.
-        found: usize,
+        found:  usize,
     },
     /// The joined blob is not a deflate stream of the length it claimed.
     NotDeflated,
@@ -523,7 +536,8 @@ impl std::fmt::Display for JoinError {
     }
 }
 
-impl std::error::Error for JoinError {}
+impl std::error::Error for JoinError {
+}
 
 /// Put one chunk's record back together out of the packets that carried it.
 ///
@@ -603,9 +617,9 @@ pub fn join(fragments: &[ChunkData]) -> Result<Vec<u8>, JoinError> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WorldNotice {
     /// Which facet.
-    pub facet: Facet,
+    pub facet:    Facet,
     /// How big it is, in blocks.
-    pub blocks: FacetBlocks,
+    pub blocks:   FacetBlocks,
     /// Which published revision of it the shard is holding.
     pub revision: WorldRevision,
     /// Which world this ground *is*, when the shard can say.
@@ -619,7 +633,7 @@ pub struct WorldNotice {
     /// With one, a client files its cache under it and the revision beside it is
     /// then a question about *this* world rather than about a number two shards
     /// both start at 1. See [`WorldId`].
-    pub world: Option<WorldId>,
+    pub world:    Option<WorldId>,
 }
 
 impl WorldNotice {
@@ -760,9 +774,9 @@ impl std::fmt::Display for Refusal {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ChunkRefused {
     /// Which facet was asked about.
-    pub facet: Facet,
+    pub facet:  Facet,
     /// Which chunk of it.
-    pub at: ChunkAt,
+    pub at:     ChunkAt,
     /// Why it is not coming.
     pub reason: Refusal,
 }
@@ -845,7 +859,7 @@ pub const MAX_MOVED: u16 = 4_096;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ChangesRequest {
     /// Which facet's ground the question is about.
-    pub facet: Facet,
+    pub facet:    Facet,
     /// The revision the asker already holds.
     pub revision: WorldRevision,
 }
@@ -862,7 +876,7 @@ impl ChangesRequest {
     /// error.
     pub(crate) fn decode_body(reader: &mut PacketReader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
-            facet: Facet(reader.u8()?),
+            facet:    Facet(reader.u8()?),
             revision: WorldRevision(reader.u64()?),
         })
     }
@@ -934,11 +948,11 @@ impl Changes {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ChangesReply {
     /// Which facet this is about.
-    pub facet: Facet,
+    pub facet:    Facet,
     /// The revision the shard is at now.
     pub revision: WorldRevision,
     /// What moved to get there from the revision that was asked about.
-    pub changes: Changes,
+    pub changes:  Changes,
 }
 
 impl ChangesReply {
@@ -1025,7 +1039,7 @@ impl DecodePacket for ChangesReply {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct PublishNotice {
     /// Which facet moved.
-    pub facet: Facet,
+    pub facet:    Facet,
     /// The revision it moved to.
     pub revision: WorldRevision,
     /// What moved to get there.
@@ -1039,7 +1053,7 @@ pub struct PublishNotice {
     ///
     /// An empty list is not sent at all: an empty patch moves the revision
     /// without moving a tile, and there is nothing for a client to do about it.
-    pub changes: Changes,
+    pub changes:  Changes,
 }
 
 impl PublishNotice {
@@ -1156,7 +1170,10 @@ mod tests {
     use super::*;
     use crate::extended::ExtendedRequest;
     use crate::packet::MAX_PACKET_SIZE;
-    use crate::server_packet::{ServerPacket, frame_server_packet};
+    use crate::server_packet::{
+        ServerPacket,
+        frame_server_packet,
+    };
 
     fn version() -> ClientVersion {
         ClientVersion::new(7, 0, 45, 65)
@@ -1218,7 +1235,7 @@ mod tests {
     #[test]
     fn a_request_reads_back_through_the_extended_envelope() {
         let sent = ChunkRequest {
-            facet: Facet(3),
+            facet:  Facet(3),
             chunks: vec![ChunkAt { x: 0, y: 0 }, ChunkAt { x: 111, y: 63 }],
         };
         let bytes = sent.encode();
@@ -1238,7 +1255,7 @@ mod tests {
     fn every_facet_byte_round_trips_through_a_request() {
         for raw in u8::MIN..=u8::MAX {
             let sent = ChunkRequest {
-                facet: Facet(raw),
+                facet:  Facet(raw),
                 chunks: vec![ChunkAt { x: 17, y: 29 }],
             };
             assert_eq!(
@@ -1255,7 +1272,7 @@ mod tests {
     #[test]
     fn a_request_for_no_chunks_is_a_request() {
         let sent = ChunkRequest {
-            facet: Facet(0),
+            facet:  Facet(0),
             chunks: Vec::new(),
         };
         assert_eq!(
@@ -1270,7 +1287,7 @@ mod tests {
     #[test]
     fn a_request_cut_short_anywhere_is_refused() {
         let full = ChunkRequest {
-            facet: Facet(0),
+            facet:  Facet(0),
             chunks: vec![ChunkAt { x: 1, y: 2 }, ChunkAt { x: 3, y: 4 }],
         }
         .encode();
@@ -1287,7 +1304,7 @@ mod tests {
     #[test]
     fn a_request_over_the_cap_is_refused() {
         let mut bytes = ChunkRequest {
-            facet: Facet(0),
+            facet:  Facet(0),
             chunks: vec![ChunkAt { x: 1, y: 2 }],
         }
         .encode();
@@ -1307,7 +1324,7 @@ mod tests {
     #[test]
     fn the_largest_request_fits_in_a_packet() {
         let bytes = ChunkRequest {
-            facet: Facet(0),
+            facet:  Facet(0),
             chunks: (0..MAX_CHUNKS).map(|n| ChunkAt { x: n, y: n }).collect(),
         }
         .encode();
@@ -1405,7 +1422,7 @@ mod tests {
             join(&mine[..mine.len() - 1]),
             Err(JoinError::Incomplete {
                 wanted: mine.len() as u8,
-                found: mine.len() - 1,
+                found:  mine.len() - 1,
             })
         );
         // The right number of fragments and the wrong set of indices: one
@@ -1416,7 +1433,7 @@ mod tests {
             join(&doubled),
             Err(JoinError::Incomplete {
                 wanted: mine.len() as u8,
-                found: mine.len() - 1,
+                found:  mine.len() - 1,
             })
         );
     }
@@ -1447,12 +1464,12 @@ mod tests {
         assert!(Fragment::new(1, 2).is_some());
 
         let packet = ChunkData {
-            facet: Facet(0),
-            at: ChunkAt { x: 0, y: 0 },
+            facet:    Facet(0),
+            at:       ChunkAt { x: 0, y: 0 },
             revision: WorldRevision(1),
             fragment: Fragment::new(0, 1).expect("one of one"),
             inflated: InflatedLength(4),
-            blob: vec![1, 2, 3],
+            blob:     vec![1, 2, 3],
         };
         let mut bytes = ServerPacket::ChunkData(packet).encode(version());
         // The two fragment bytes, after id, length, subcommand, facet, x, y and
@@ -1491,7 +1508,7 @@ mod tests {
     #[test]
     fn a_changes_conversation_survives_the_wire() {
         let asked = ChangesRequest {
-            facet: Facet(2),
+            facet:    Facet(2),
             revision: WorldRevision(41),
         };
         let bytes = asked.encode();
@@ -1600,13 +1617,15 @@ mod tests {
     #[test]
     fn the_moved_cap_is_what_a_packet_holds() {
         let full = ChangesReply {
-            facet: Facet(0),
+            facet:    Facet(0),
             revision: WorldRevision(9),
-            changes: Changes::These(
+            changes:  Changes::These(
                 (0..MAX_MOVED)
-                    .map(|n| ChunkAt {
-                        x: n % 112,
-                        y: n / 112,
+                    .map(|n| {
+                        ChunkAt {
+                            x: n % 112,
+                            y: n / 112,
+                        }
                     })
                     .collect(),
             ),
@@ -1625,9 +1644,9 @@ mod tests {
         // One past the cap, written by hand: no encoder of ours can produce it,
         // which is exactly why the decoder is what has to refuse it.
         let mut bytes = ChangesReply {
-            facet: Facet(0),
+            facet:    Facet(0),
             revision: WorldRevision(9),
-            changes: Changes::These(vec![ChunkAt { x: 1, y: 1 }]),
+            changes:  Changes::These(vec![ChunkAt { x: 1, y: 1 }]),
         }
         .encode();
         // The count, after id, length, subcommand, facet, revision and answer.
@@ -1657,8 +1676,8 @@ mod tests {
         // it knows would report the wrong thing to whoever is watching.
         assert_eq!(Refusal::from_wire(2), None);
         let mut bytes = ChunkRefused {
-            facet: Facet(1),
-            at: ChunkAt { x: 0, y: 0 },
+            facet:  Facet(1),
+            at:     ChunkAt { x: 0, y: 0 },
             reason: Refusal::NoWorld,
         }
         .encode();

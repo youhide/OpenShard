@@ -9,7 +9,10 @@
 //! away; a base set is **the world**, which is why it lands beside the shard by
 //! default rather than beside the client's files.
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -21,13 +24,13 @@ use openshard_protocol::world::Facet;
 struct Cli {
     /// Ultima Online Classic install directory.
     #[arg(short, long, env = "OPENSHARD_CLIENT", value_name = "DIR")]
-    client: PathBuf,
+    client:  PathBuf,
     /// Facet to import; may be repeated. Defaults to 0.
     #[arg(long, value_name = "N")]
-    facet: Vec<u8>,
+    facet:   Vec<u8>,
     /// Explicit destination (valid with exactly one facet).
     #[arg(long, value_name = "FILE")]
-    out: Option<PathBuf>,
+    out:     Option<PathBuf>,
     /// Import and report, but do not write.
     #[arg(long)]
     dry_run: bool,
@@ -37,7 +40,7 @@ struct Cli {
     /// pass over every tile. It is what the acceptance test does, available to
     /// an operator who wants the same assurance about the file they just made.
     #[arg(long)]
-    verify: bool,
+    verify:  bool,
 }
 
 fn main() -> ExitCode {

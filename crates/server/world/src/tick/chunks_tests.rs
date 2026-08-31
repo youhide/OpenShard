@@ -14,21 +14,55 @@
 //! wire that transposed a chunk, or dropped the statics of one block, passes the
 //! first and fails the second.
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use super::tests::{connection, enter_as, packets_for, world};
-use super::*;
-use openshard_map::chunk::{Chunk, ChunkCoord, assemble, chunks_of};
+use openshard_map::chunk::{
+    Chunk,
+    ChunkCoord,
+    assemble,
+    chunks_of,
+};
 use openshard_map::codec;
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, StaticItem, WorldMap};
-use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
-use openshard_map::snapshot::{MapRevision, MapSnapshot};
+use openshard_map::map::{
+    LandCell,
+    StaticItem,
+    WorldMap,
+};
+use openshard_map::patch::{
+    Patch,
+    PatchAuthor,
+    PatchOp,
+    PatchTime,
+};
+use openshard_map::snapshot::{
+    MapRevision,
+    MapSnapshot,
+};
 use openshard_protocol::chunks::{
-    Changes, ChangesReply, ChunkAt, ChunkData, PublishNotice, Refusal, WorldNotice, WorldRevision, join,
+    Changes,
+    ChangesReply,
+    ChunkAt,
+    ChunkData,
+    PublishNotice,
+    Refusal,
+    WorldNotice,
+    WorldRevision,
+    join,
 };
 use openshard_state::WorldHome;
 use openshard_tiles::LandTileId;
+
+use super::tests::{
+    connection,
+    enter_as,
+    packets_for,
+    world,
+};
+use super::*;
 
 /// Nine blocks square — 72 tiles — which is **not** a whole number of chunks on
 /// either axis, so three of the four chunks are edge chunks: eight by eight,
@@ -47,7 +81,7 @@ const TILES: u32 = BLOCKS * 8;
 fn cell(x: u16, y: u16) -> LandCell {
     LandCell {
         tile: LandTileId(u16::try_from(u32::from(x) * TILES + u32::from(y)).unwrap()),
-        z: (i32::from(x) - i32::from(y)) as i8,
+        z:    (i32::from(x) - i32::from(y)) as i8,
     }
 }
 
@@ -79,10 +113,10 @@ fn ground() -> WorldMap {
     for n in 0..3u16 {
         map.place_static(StaticItem {
             tile: Graphic(0x200 + n),
-            x: 20,
-            y: 21,
-            z: 5,
-            hue: Hue(n),
+            x:    20,
+            y:    21,
+            z:    5,
+            hue:  Hue(n),
         });
     }
     map
@@ -116,7 +150,7 @@ fn world_of_ours(tag: &str, base: MapRevision) -> (World, PathBuf) {
     let loaded = openshard_basemap::load(&path).expect("the base set just written");
     let home = WorldHome {
         base_set: path.clone(),
-        base: loaded.base,
+        base:     loaded.base,
         identity: openshard_basemap::identity_of(&path).expect("the base set just written"),
     };
     let world = World::new(Tile::new(32, 32)).with_facet(
@@ -159,7 +193,7 @@ fn commit_a_tile(world: &mut World, at: (u16, u16)) -> MapRevision {
         at.1,
         LandCell {
             tile: LandTileId(0x3FF),
-            z: 7,
+            z:    7,
         },
     )
     .expect("a tile of this facet");
@@ -181,9 +215,11 @@ fn notice_for(world: &mut World, connection: ConnectionId) -> Option<WorldNotice
     let notices: Vec<WorldNotice> = packets_for(world, connection)
         .iter()
         .filter_map(|bytes| ServerPacket::decode(bytes, ClientVersion::TOL).expect("our own bytes"))
-        .filter_map(|packet| match packet {
-            ServerPacket::WorldNotice(notice) => Some(notice),
-            _ => None,
+        .filter_map(|packet| {
+            match packet {
+                ServerPacket::WorldNotice(notice) => Some(notice),
+                _ => None,
+            }
         })
         .collect();
     assert!(notices.len() <= 1, "a notice is sent once, on world entry");
@@ -201,9 +237,11 @@ fn ask_changes(world: &mut World, connection: ConnectionId, held: WorldRevision)
     let replies: Vec<ChangesReply> = packets_for(world, connection)
         .iter()
         .filter_map(|bytes| ServerPacket::decode(bytes, ClientVersion::TOL).expect("the shard's own bytes"))
-        .filter_map(|packet| match packet {
-            ServerPacket::ChangesReply(reply) => Some(reply),
-            _ => None,
+        .filter_map(|packet| {
+            match packet {
+                ServerPacket::ChangesReply(reply) => Some(reply),
+                _ => None,
+            }
         })
         .collect();
     assert_eq!(replies.len(), 1, "one question, one answer");
@@ -216,9 +254,11 @@ fn every_chunk() -> Vec<ChunkAt> {
         wide: BLOCKS,
         down: BLOCKS,
     })
-    .map(|at| ChunkAt {
-        x: u16::try_from(at.x).unwrap(),
-        y: u16::try_from(at.y).unwrap(),
+    .map(|at| {
+        ChunkAt {
+            x: u16::try_from(at.x).unwrap(),
+            y: u16::try_from(at.y).unwrap(),
+        }
     })
     .collect()
 }
@@ -402,9 +442,11 @@ fn a_facet_with_no_ground_refuses_every_chunk_asked_for() {
     let answers = ask(&mut world, connection, wanted.clone());
     let refused: Vec<_> = answers
         .iter()
-        .filter_map(|packet| match packet {
-            ServerPacket::ChunkRefused(refused) => Some((refused.at, refused.reason)),
-            _ => None,
+        .filter_map(|packet| {
+            match packet {
+                ServerPacket::ChunkRefused(refused) => Some((refused.at, refused.reason)),
+                _ => None,
+            }
         })
         .collect();
     assert_eq!(
@@ -440,9 +482,11 @@ fn a_facet_the_shard_never_loaded_is_refused_rather_than_panicked_on() {
     let answers = ask_on(&mut world, connection, elsewhere, wanted.clone());
     let refused: Vec<_> = answers
         .iter()
-        .filter_map(|packet| match packet {
-            ServerPacket::ChunkRefused(refused) => Some((refused.facet, refused.at, refused.reason)),
-            _ => None,
+        .filter_map(|packet| {
+            match packet {
+                ServerPacket::ChunkRefused(refused) => Some((refused.facet, refused.at, refused.reason)),
+                _ => None,
+            }
         })
         .collect();
     assert_eq!(
@@ -704,7 +748,7 @@ fn a_commit_the_log_refuses_is_not_announced() {
         4,
         LandCell {
             tile: LandTileId(0x3FF),
-            z: 7,
+            z:    7,
         },
     )
     .expect("a tile of this facet");
@@ -733,9 +777,11 @@ fn publish_notices(world: &mut World, connection: ConnectionId) -> Vec<PublishNo
     packets_for(world, connection)
         .iter()
         .filter_map(|bytes| ServerPacket::decode(bytes, ClientVersion::TOL).expect("our own bytes"))
-        .filter_map(|packet| match packet {
-            ServerPacket::PublishNotice(notice) => Some(notice),
-            _ => None,
+        .filter_map(|packet| {
+            match packet {
+                ServerPacket::PublishNotice(notice) => Some(notice),
+                _ => None,
+            }
         })
         .collect()
 }

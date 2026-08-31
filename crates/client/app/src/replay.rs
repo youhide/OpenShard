@@ -29,9 +29,15 @@
 
 use std::time::Duration;
 
-use openshard_client_render::bench::{Knot, Script};
+use openshard_client_render::bench::{
+    Knot,
+    Script,
+};
 use openshard_movement::direction_toward;
-use openshard_protocol::direction::{Direction, Facing};
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
 use openshard_protocol::world::Point;
 
 /// One knot, resolved into what the crowd is to be told.
@@ -39,7 +45,7 @@ use openshard_protocol::world::Point;
 pub struct Move {
     /// Where the body goes, with the script's height carried onto the ground it
     /// is being replayed over — see [`Replay::new`].
-    pub to: Point,
+    pub to:     Point,
     /// Which way it is facing on the way. A jump that changes only the height
     /// keeps whatever it was facing: nobody turns to fall through a floor.
     pub facing: Facing,
@@ -54,9 +60,9 @@ pub struct Replay {
     /// Its own clock, advanced by the frame's elapsed span. Not an `Instant`:
     /// the script's instants are measured from its own start, and a replay that
     /// read the wall clock would drift from the trace the scope is recording.
-    at: Duration,
+    at:     Duration,
     /// The next knot to fire. Every knot before it has been handed over.
-    next: usize,
+    next:   usize,
     /// What the script's `z = 0` means on this map: the ground under the tile it
     /// starts on.
     ///
@@ -181,10 +187,10 @@ impl Replay {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use openshard_client_render::bench::scripts;
     use openshard_movement::WALK_HOLD;
+
+    use super::*;
 
     fn named(name: &str) -> Script {
         scripts()
@@ -279,10 +285,21 @@ mod tests {
     /// smooth and this repository has shipped that green before.
     #[test]
     fn a_replayed_scenario_walks_the_same_body_the_bench_scripts() {
-        use openshard_client_render::bench::{self, Cadence, Metrics, Scope};
-        use openshard_client_render::follow::{Follower, Rig};
+        use openshard_client_render::bench::{
+            self,
+            Cadence,
+            Metrics,
+            Scope,
+        };
+        use openshard_client_render::follow::{
+            Follower,
+            Rig,
+        };
         use openshard_client_render::mobiles;
-        use openshard_protocol::wire::{Graphic, Hue};
+        use openshard_protocol::wire::{
+            Graphic,
+            Hue,
+        };
 
         let frame = Duration::from_millis(16);
         let script = named("ten_east");

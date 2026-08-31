@@ -19,12 +19,22 @@
 
 use openshard_client_net::action::Outgoing;
 use openshard_client_net::view::WorldView;
-use openshard_client_render::gump::{GumpArt, GumpPixel};
+use openshard_client_render::gump::{
+    GumpArt,
+    GumpPixel,
+};
 use openshard_client_render::party as party_art;
 use openshard_client_render::party::Hit;
 use openshard_protocol::serial::Serial;
 
-use crate::panes::{Button, Effect, Input, PaneCtx, PaneFrame, Response};
+use crate::panes::{
+    Button,
+    Effect,
+    Input,
+    PaneCtx,
+    PaneFrame,
+    Response,
+};
 use crate::windows::Drawn;
 
 /// The open manifest: which of its controls is down, and nothing else.
@@ -98,10 +108,12 @@ impl PartyPane {
             // drawn — see the module docs. A row the roster has since lost is a
             // press that answers nothing rather than one that turns out the
             // wrong person.
-            Hit::Kick(row) => match view.party.members.get(row).copied() {
-                Some(member) => Response::changed().with(Effect::Net(Outgoing::PartyRemove(member))),
-                None => Response::changed(),
-            },
+            Hit::Kick(row) => {
+                match view.party.members.get(row).copied() {
+                    Some(member) => Response::changed().with(Effect::Net(Outgoing::PartyRemove(member))),
+                    None => Response::changed(),
+                }
+            }
             // Leaving is `0x02` naming *yourself* — the same packet a leader
             // kicks with, which is the wire's own shape rather than this
             // client's shortcut. See `openshard_client_net::party::remove`.

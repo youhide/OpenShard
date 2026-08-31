@@ -47,9 +47,17 @@
 //! `silhouettes_agree` precedent for why a second copy of an alignment rule is
 //! worth avoiding.
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use openshard_client_render::facing::{self, Face, Facing, Prism};
+use openshard_client_render::facing::{
+    self,
+    Face,
+    Facing,
+    Prism,
+};
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::image::Image;
@@ -247,11 +255,13 @@ fn measure_residual(prism: &Prism, image: &Image) -> Option<(f32, f32, usize)> {
     }
     match riser_all.is_empty() {
         true => None,
-        false => Some((
-            crest_all.iter().sum::<f32>() / crest_all.len().max(1) as f32,
-            riser_all.iter().sum::<f32>() / riser_all.len() as f32,
-            riser_all.len(),
-        )),
+        false => {
+            Some((
+                crest_all.iter().sum::<f32>() / crest_all.len().max(1) as f32,
+                riser_all.iter().sum::<f32>() / riser_all.len() as f32,
+                riser_all.len(),
+            ))
+        }
     }
 }
 
@@ -276,12 +286,12 @@ fn report(dir: &Path) {
     let mut profile_sizes: std::collections::BTreeMap<usize, usize> = std::collections::BTreeMap::new();
 
     struct Row {
-        graphic: u16,
-        name: String,
-        treads: usize,
+        graphic:  u16,
+        name:     String,
+        treads:   usize,
         crest_px: f32,
         riser_px: f32,
-        columns: usize,
+        columns:  usize,
     }
     let mut rows: Vec<Row> = Vec::new();
     let mut undetected: Vec<(u16, String)> = Vec::new();
@@ -336,14 +346,16 @@ fn report(dir: &Path) {
         multi_tread += 1;
         let name = tiledata.static_tile(id).name.clone();
         match measure_residual(&winner, &image) {
-            Some((crest_px, riser_px, columns)) => rows.push(Row {
-                graphic: id,
-                name,
-                treads: winner.treads().len(),
-                crest_px,
-                riser_px,
-                columns,
-            }),
+            Some((crest_px, riser_px, columns)) => {
+                rows.push(Row {
+                    graphic: id,
+                    name,
+                    treads: winner.treads().len(),
+                    crest_px,
+                    riser_px,
+                    columns,
+                })
+            }
             None => undetected.push((id, name)),
         }
     }
@@ -380,10 +392,12 @@ fn report(dir: &Path) {
             .collect();
         match of_size.is_empty() {
             true => println!("  {count:>5} fits use {treads} treads"),
-            false => println!(
-                "  {count:>5} fits use {treads} treads — mean residual {:.2} px",
-                of_size.iter().sum::<f32>() / of_size.len() as f32,
-            ),
+            false => {
+                println!(
+                    "  {count:>5} fits use {treads} treads — mean residual {:.2} px",
+                    of_size.iter().sum::<f32>() / of_size.len() as f32,
+                )
+            }
         }
     }
 

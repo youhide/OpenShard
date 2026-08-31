@@ -19,7 +19,7 @@ use crate::skill::Skill;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CraftToolData {
     /// The trade this tool opens.
-    pub skill: Skill,
+    pub skill:    Skill,
     /// The fewest uses a fresh one has.
     pub min_uses: u16,
     /// And the most.

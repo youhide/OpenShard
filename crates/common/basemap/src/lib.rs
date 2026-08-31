@@ -81,16 +81,35 @@
 //! missing its last chunk column would otherwise assemble happily into a
 //! narrower world, and a narrower world parses perfectly.
 
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::io::{
+    Read,
+    Write,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use openshard_map::chunk::{self, AssemblyError, Chunk};
-use openshard_map::codec::{self, DecodeError};
+use openshard_map::chunk::{
+    self,
+    AssemblyError,
+    Chunk,
+};
+use openshard_map::codec::{
+    self,
+    DecodeError,
+};
 use openshard_map::grid::BlockExtent;
 use openshard_map::patch::PatchError;
-use openshard_map::snapshot::{MapRevision, MapSnapshot};
+use openshard_map::snapshot::{
+    MapRevision,
+    MapSnapshot,
+};
 use openshard_protocol::chunks::InflatedLength;
-use openshard_protocol::world::{Facet, WorldId};
+use openshard_protocol::world::{
+    Facet,
+    WorldId,
+};
 
 pub mod patches;
 
@@ -131,14 +150,14 @@ pub enum BaseError {
     /// The file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
     /// The file could not be written.
     Write {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
@@ -150,18 +169,18 @@ pub enum BaseError {
     /// The file is a base set of a layout this build does not read.
     Version {
         /// Which file.
-        path: PathBuf,
+        path:  PathBuf,
         /// What it says it is.
         found: u8,
     },
     /// The file ends before the header or the table it describes does.
     Truncated {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// How long it has to be to hold what its header describes.
         wanted: usize,
         /// How long it is.
-        found: usize,
+        found:  usize,
     },
     /// The table does not describe a run of chunks inside the file.
     ///
@@ -172,23 +191,23 @@ pub enum BaseError {
         /// Which file.
         path: PathBuf,
         /// The entry that broke the run.
-        at: usize,
+        at:   usize,
     },
     /// The header says the facet holds a number of chunks its size does not.
     CountMismatch {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// What the facet's size in blocks comes to.
         wanted: usize,
         /// What the header claims.
-        found: usize,
+        found:  usize,
     },
     /// One of the chunks is not the deflate stream the manifest says it is.
     NotDeflated {
         /// Which file.
         path: PathBuf,
         /// Which chunk of it, counted in the file's own order.
-        at: usize,
+        at:   usize,
     },
     /// One of the chunks does not hash to what the manifest says it does.
     ///
@@ -199,27 +218,27 @@ pub enum BaseError {
     /// and there is nothing downstream that could tell.
     HashMismatch {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Which chunk of it, counted in the file's own order.
-        at: usize,
+        at:     usize,
         /// What the manifest claims the record hashes to.
         wanted: u64,
         /// What it hashes to.
-        found: u64,
+        found:  u64,
     },
     /// One of the chunks is not a chunk.
     Chunk {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Which chunk of it, counted in the file's own order.
-        at: usize,
+        at:     usize,
         /// Why.
         source: DecodeError,
     },
     /// The chunks do not make one facet.
     Assembly {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: AssemblyError,
     },
@@ -235,9 +254,9 @@ pub enum BaseError {
     /// a log that belongs to some other base set the header check let through.
     NotApplied {
         /// Which log.
-        path: PathBuf,
+        path:   PathBuf,
         /// Which record of it, counted from zero.
-        at: usize,
+        at:     usize,
         /// Why the patch was refused.
         source: PatchError,
     },
@@ -255,39 +274,49 @@ impl std::fmt::Display for BaseError {
                     path.display()
                 )
             }
-            Self::Version { path, found } => write!(
-                f,
-                "{} is a version {found} base set, and this build reads version {VERSION}",
-                path.display()
-            ),
+            Self::Version { path, found } => {
+                write!(
+                    f,
+                    "{} is a version {found} base set, and this build reads version {VERSION}",
+                    path.display()
+                )
+            }
             Self::Truncated { path, wanted, found } => {
                 write!(f, "{} describes {wanted} bytes and is {found}", path.display())
             }
-            Self::BadTable { path, at } => write!(
-                f,
-                "{}: table entry {at} does not point inside the file after the one before it",
-                path.display()
-            ),
-            Self::CountMismatch { path, wanted, found } => write!(
-                f,
-                "{} holds {found} chunks, and a facet of the size in its header has {wanted}",
-                path.display()
-            ),
-            Self::NotDeflated { path, at } => write!(
-                f,
-                "{}: chunk {at} did not inflate to the length its manifest entry declares",
-                path.display()
-            ),
+            Self::BadTable { path, at } => {
+                write!(
+                    f,
+                    "{}: table entry {at} does not point inside the file after the one before it",
+                    path.display()
+                )
+            }
+            Self::CountMismatch { path, wanted, found } => {
+                write!(
+                    f,
+                    "{} holds {found} chunks, and a facet of the size in its header has {wanted}",
+                    path.display()
+                )
+            }
+            Self::NotDeflated { path, at } => {
+                write!(
+                    f,
+                    "{}: chunk {at} did not inflate to the length its manifest entry declares",
+                    path.display()
+                )
+            }
             Self::HashMismatch {
                 path,
                 at,
                 wanted,
                 found,
-            } => write!(
-                f,
-                "{}: chunk {at} hashes to {found:016x} and its manifest entry says {wanted:016x}",
-                path.display()
-            ),
+            } => {
+                write!(
+                    f,
+                    "{}: chunk {at} hashes to {found:016x} and its manifest entry says {wanted:016x}",
+                    path.display()
+                )
+            }
             Self::Chunk { path, at, source } => {
                 write!(f, "{}: chunk {at} is not one: {source}", path.display())
             }
@@ -319,14 +348,14 @@ impl std::error::Error for BaseError {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Written {
     /// How many chunks the facet cut into.
-    pub chunks: usize,
+    pub chunks:  usize,
     /// How many statics they hold between them.
     pub statics: usize,
     /// How long the file is.
-    pub bytes: usize,
+    pub bytes:   usize,
     /// The identity the file went out under — minted here, or the one the
     /// caller carried in.
-    pub world: WorldId,
+    pub world:   WorldId,
 }
 
 /// Whose world the file about to be written is.
@@ -429,9 +458,11 @@ pub fn write(
         }
         file.flush()
     };
-    write(&out, &blobs).map_err(|source| BaseError::Write {
-        path: path.to_owned(),
-        source,
+    write(&out, &blobs).map_err(|source| {
+        BaseError::Write {
+            path: path.to_owned(),
+            source,
+        }
     })?;
 
     Ok(Written {
@@ -460,15 +491,15 @@ fn mint(manifest: &[(u64, u32)]) -> WorldId {
 
 /// The fields a reader needs after the fixed header has been validated.
 struct BaseHeader {
-    facet: Facet,
+    facet:    Facet,
     revision: MapRevision,
-    extent: BlockExtent,
-    count: usize,
+    extent:   BlockExtent,
+    count:    usize,
 }
 
 /// The two per-chunk tables between the fixed header and the chunk blobs.
 struct BaseIndex {
-    offsets: Vec<u64>,
+    offsets:  Vec<u64>,
     manifest: Vec<(u64, InflatedLength)>,
 }
 
@@ -483,19 +514,22 @@ struct BaseIndex {
 /// [`BaseError`], one variant per way a file fails to be one facet.
 pub fn read(path: impl AsRef<Path>) -> Result<MapSnapshot, BaseError> {
     let path = path.as_ref();
-    let bytes = std::fs::read(path).map_err(|source| BaseError::Read {
-        path: path.to_owned(),
-        source,
+    let bytes = std::fs::read(path).map_err(|source| {
+        BaseError::Read {
+            path: path.to_owned(),
+            source,
+        }
     })?;
 
     let header = parse_header(path, &bytes)?;
     let index = parse_index(path, &bytes, header.count)?;
     let chunks = decode_chunks(path, &bytes, &index)?;
-    let map =
-        chunk::assemble(header.facet, header.extent, &chunks).map_err(|source| BaseError::Assembly {
+    let map = chunk::assemble(header.facet, header.extent, &chunks).map_err(|source| {
+        BaseError::Assembly {
             path: path.to_owned(),
             source,
-        })?;
+        }
+    })?;
     Ok(MapSnapshot::restored(header.facet, header.revision, map))
 }
 
@@ -509,7 +543,7 @@ fn parse_header(path: &Path, bytes: &[u8]) -> Result<BaseHeader, BaseError> {
     }
     if bytes[4] != VERSION {
         return Err(BaseError::Version {
-            path: path.to_owned(),
+            path:  path.to_owned(),
             found: bytes[4],
         });
     }
@@ -548,9 +582,9 @@ fn parse_index(path: &Path, bytes: &[u8], count: usize) -> Result<BaseIndex, Bas
     let table_end = manifest_at + count * MANIFEST_BYTES;
     if bytes.len() < table_end {
         return Err(BaseError::Truncated {
-            path: path.to_owned(),
+            path:   path.to_owned(),
             wanted: table_end,
-            found: bytes.len(),
+            found:  bytes.len(),
         });
     }
     let table: Vec<u64> = bytes[HEADER_BYTES..manifest_at]
@@ -616,10 +650,12 @@ fn decode_chunks(path: &Path, bytes: &[u8], index: &BaseIndex) -> Result<Vec<Chu
                 found,
             });
         }
-        chunks.push(codec::decode(&record).map_err(|source| BaseError::Chunk {
-            path: path.to_owned(),
-            at,
-            source,
+        chunks.push(codec::decode(&record).map_err(|source| {
+            BaseError::Chunk {
+                path: path.to_owned(),
+                at,
+                source,
+            }
         })?);
     }
     Ok(chunks)
@@ -665,9 +701,11 @@ fn decode_chunks(path: &Path, bytes: &[u8], index: &BaseIndex) -> Result<Vec<Chu
 pub fn identity_of(base_set: impl AsRef<Path>) -> Result<WorldId, BaseError> {
     let path = base_set.as_ref();
     let mut header = [0_u8; HEADER_BYTES];
-    let mut file = std::fs::File::open(path).map_err(|source| BaseError::Read {
-        path: path.to_owned(),
-        source,
+    let mut file = std::fs::File::open(path).map_err(|source| {
+        BaseError::Read {
+            path: path.to_owned(),
+            source,
+        }
     })?;
     if let Err(source) = file.read_exact(&mut header) {
         // A file too short to hold a header is not one, whatever else it is;
@@ -690,7 +728,7 @@ pub fn identity_of(base_set: impl AsRef<Path>) -> Result<WorldId, BaseError> {
     }
     if header[4] != VERSION {
         return Err(BaseError::Version {
-            path: path.to_owned(),
+            path:  path.to_owned(),
             found: header[4],
         });
     }
@@ -734,13 +772,13 @@ pub struct Loaded {
     /// back off the snapshot's revision: that arithmetic is only right while
     /// one patch means one revision, and it is not a property worth depending
     /// on from outside.
-    pub base: MapRevision,
+    pub base:     MapRevision,
     /// The log the patches came out of, if there is one on disk. `None` is a
     /// world nobody has edited, and it is not the same as an empty log: an
     /// empty log is a file, and a file is an input to stamp.
-    pub log: Option<PathBuf>,
+    pub log:      Option<PathBuf>,
     /// How many patches were applied.
-    pub patches: usize,
+    pub patches:  usize,
 }
 
 /// Read a base set and everything committed over it.
@@ -769,10 +807,12 @@ pub fn load(base_set: impl AsRef<Path>) -> Result<Loaded, BaseError> {
         patches::read(&path, snapshot.facet(), base).map_err(|source| BaseError::Log { source })?;
 
     for (at, patch) in committed.iter().enumerate() {
-        snapshot.publish(patch).map_err(|source| BaseError::NotApplied {
-            path: path.clone(),
-            at,
-            source,
+        snapshot.publish(patch).map_err(|source| {
+            BaseError::NotApplied {
+                path: path.clone(),
+                at,
+                source,
+            }
         })?;
     }
     Ok(Loaded {

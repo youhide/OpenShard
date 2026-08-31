@@ -21,7 +21,10 @@
 //! identity: who was being logged in stayed in the login session, which is the
 //! only thing that will act on the answer. See `Credential::against`.
 
-use openshard_login::{CredentialCheck, PasswordVerdict};
+use openshard_login::{
+    CredentialCheck,
+    PasswordVerdict,
+};
 
 use super::*;
 
@@ -32,7 +35,7 @@ pub(crate) struct Verdict {
     /// Whose check this was. The verdict means nothing without it, and the login
     /// session refuses one that arrives at a connection which asked for none.
     pub(crate) connection: ConnectionId,
-    pub(crate) verdict: PasswordVerdict,
+    pub(crate) verdict:    PasswordVerdict,
 }
 
 /// Sender half of the verdict channel, held by the tasks doing the hashing.
@@ -51,7 +54,7 @@ impl VerdictRx {
 
 /// Hands password checks to blocking tasks and their answers back to the loop.
 pub(crate) struct Verifier {
-    done: VerdictTx,
+    done:    VerdictTx,
     /// How many hashes may run at once — see [`Verifier::with_permits`].
     permits: Arc<Semaphore>,
 }
@@ -82,7 +85,7 @@ impl Verifier {
         let (tx, rx) = mpsc::unbounded_channel();
         (
             Self {
-                done: VerdictTx(tx),
+                done:    VerdictTx(tx),
                 permits: Arc::new(Semaphore::new(permits)),
             },
             VerdictRx(rx),
@@ -124,7 +127,10 @@ impl Verifier {
 mod tests {
     use openshard_login::DevAccounts;
     use openshard_protocol::identity::{
-        AccountName, PlaintextPassword, RawAccountName, RawPlaintextPassword,
+        AccountName,
+        PlaintextPassword,
+        RawAccountName,
+        RawPlaintextPassword,
     };
 
     use super::*;

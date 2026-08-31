@@ -23,21 +23,34 @@
 //! makes a one-way drop representable at all.
 
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BinaryHeap, VecDeque};
+use std::collections::{
+    BTreeMap,
+    BinaryHeap,
+    VecDeque,
+};
 use std::time::Instant;
 
+use openshard_map::chunk::{
+    CHUNK_TILES,
+    ChunkCoord,
+};
+use openshard_map::grid::Tile;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 use rustc_hash::FxHashMap;
 
 use crate::footing::Footing;
-use openshard_map::chunk::{CHUNK_TILES, ChunkCoord};
-use openshard_map::grid::Tile;
-
 use crate::walk::steps_out_of;
 use crate::{
-    Effort, Rigour, Weight, can_stand, debug_enabled, destination_place, find_path_toward_within,
-    find_path_within, step_allowed,
+    Effort,
+    Rigour,
+    Weight,
+    can_stand,
+    debug_enabled,
+    destination_place,
+    find_path_toward_within,
+    find_path_within,
+    step_allowed,
 };
 
 /// The whole work one long query may do, in node expansions.
@@ -88,23 +101,23 @@ const NO_NEIGHBOR: u32 = u32::MAX;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct NavigationGraph {
-    pub(crate) width: u32,
-    pub(crate) height: u32,
-    pub(crate) regions: Vec<Region>,
+    pub(crate) width:             u32,
+    pub(crate) height:            u32,
+    pub(crate) regions:           Vec<Region>,
     /// One bit per tile. Region ids are a regular 32×32 grid and are computed.
-    pub(crate) walkable: Vec<u8>,
-    pub(crate) nodes: Vec<Node>,
+    pub(crate) walkable:          Vec<u8>,
+    pub(crate) nodes:             Vec<Node>,
     /// Which nodes stand in each region, one [`Run`] per region into
     /// [`region_nodes`](Self::region_nodes).
-    pub(crate) region_runs: Vec<Run>,
-    pub(crate) region_nodes: Vec<u32>,
+    pub(crate) region_runs:       Vec<Run>,
+    pub(crate) region_nodes:      Vec<u32>,
     /// Which edges leave each node, one [`Run`] per node into
     /// [`edge_targets`](Self::edge_targets) and its parallel costs.
-    pub(crate) edge_runs: Vec<Run>,
-    pub(crate) edge_targets: Vec<u32>,
-    pub(crate) edge_costs: Vec<u16>,
+    pub(crate) edge_runs:         Vec<Run>,
+    pub(crate) edge_targets:      Vec<u32>,
+    pub(crate) edge_costs:        Vec<u16>,
     /// Entries of [`nodes`](Self::nodes) no region names any more.
-    pub(crate) dead_nodes: u32,
+    pub(crate) dead_nodes:        u32,
     /// Entries of [`region_nodes`](Self::region_nodes) no run points at.
     pub(crate) dead_region_nodes: u32,
     /// Entries of [`edge_targets`](Self::edge_targets) no run points at.
@@ -114,7 +127,7 @@ pub struct NavigationGraph {
     /// `SpanIndex` answers that by baking the facet whole, and 11.6 s is the
     /// thing this graph's own rebake exists to stop paying. See
     /// [`repack`](NavigationGraph::repack).
-    pub(crate) dead_edges: u32,
+    pub(crate) dead_edges:        u32,
 }
 
 /// Where one owner's entries sit in a packed array: `base..base + count`.
@@ -128,7 +141,7 @@ pub struct NavigationGraph {
 /// dropping a graph that costs 11.6 s to build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Run {
-    pub(crate) base: u32,
+    pub(crate) base:  u32,
     pub(crate) count: u32,
 }
 
@@ -144,9 +157,9 @@ impl Run {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Region {
-    pub(crate) left: u16,
-    pub(crate) top: u16,
-    pub(crate) width: u16,
+    pub(crate) left:   u16,
+    pub(crate) top:    u16,
+    pub(crate) width:  u16,
     pub(crate) height: u16,
 }
 
@@ -174,7 +187,7 @@ pub(crate) struct Node {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Edge {
-    pub(crate) to: NodeId,
+    pub(crate) to:   NodeId,
     pub(crate) cost: u32,
 }
 
@@ -202,11 +215,11 @@ type Entrances = BTreeMap<(usize, u16, usize, u16), Vec<(Point, Point)>>;
 /// the one region it needs; both go through [`Self::sampled`], which is what
 /// makes a node of a region findable in the sampling a query takes of it.
 struct RegionPlaces {
-    region: Region,
+    region:  Region,
     /// `offsets[cell]..offsets[cell + 1]`, in the region's row-major cell order.
     offsets: Vec<u32>,
     /// Every place of the region, in that order.
-    points: Vec<Point>,
+    points:  Vec<Point>,
 }
 
 impl RegionPlaces {
@@ -311,7 +324,7 @@ struct RegionBake {
 /// is the half.
 struct Held {
     /// Which entry of [`bakes`](Self::bakes) a region is, or [`NOT_HELD`].
-    slot: Vec<u32>,
+    slot:  Vec<u32>,
     bakes: Vec<RegionBake>,
 }
 
@@ -322,7 +335,7 @@ impl Held {
     /// Sample and label each region named, once however often it is named.
     fn of(footing: &Footing<'_>, graph: &NavigationGraph, regions: &[RegionId]) -> Self {
         let mut held = Self {
-            slot: vec![NOT_HELD; graph.regions.len()],
+            slot:  vec![NOT_HELD; graph.regions.len()],
             bakes: Vec::with_capacity(regions.len()),
         };
         for &region in regions {
@@ -360,7 +373,7 @@ enum Side {
 /// One side of a border: which region, and what a bake sampled of it.
 #[derive(Clone, Copy)]
 struct Bank<'a> {
-    id: RegionId,
+    id:   RegionId,
     bake: &'a RegionBake,
 }
 
@@ -385,27 +398,27 @@ struct Rebuild {
     /// these and their neighbours, and the difference is what the neighbours are
     /// allowed to keep: their places did not move, so their intra-region routes
     /// stand unless their node set came back different.
-    moved: Vec<bool>,
-    nodes: Vec<(RegionId, Vec<NodeId>)>,
+    moved:       Vec<bool>,
+    nodes:       Vec<(RegionId, Vec<NodeId>)>,
     /// Which entry of [`edges`](Self::edges) a node's new list is, or
     /// [`NOT_REWRITTEN`].
-    node_slot: Vec<u32>,
-    edges: Vec<(NodeId, Vec<Edge>)>,
+    node_slot:   Vec<u32>,
+    edges:       Vec<(NodeId, Vec<Edge>)>,
     /// One node per standing place, however many entrances name it — seeded
     /// with what the graph already holds, which is the whole of how a local
     /// rebake keeps a `NodeId` meaning what it meant.
-    interned: BTreeMap<(u16, u16, i8), NodeId>,
+    interned:    BTreeMap<(u16, u16, i8), NodeId>,
 }
 
 impl Rebuild {
     fn of(graph: &NavigationGraph, held: &Held, rebuilt: &[RegionId], moved: &[RegionId]) -> Self {
         let mut build = Self {
             region_slot: vec![NOT_REBUILT; graph.regions.len()],
-            moved: vec![false; graph.regions.len()],
-            nodes: Vec::with_capacity(rebuilt.len()),
-            node_slot: vec![NOT_REWRITTEN; graph.nodes.len()],
-            edges: Vec::new(),
-            interned: BTreeMap::new(),
+            moved:       vec![false; graph.regions.len()],
+            nodes:       Vec::with_capacity(rebuilt.len()),
+            node_slot:   vec![NOT_REWRITTEN; graph.nodes.len()],
+            edges:       Vec::new(),
+            interned:    BTreeMap::new(),
         };
         for &region in moved {
             build.moved[region.0] = true;
@@ -442,14 +455,18 @@ impl Rebuild {
                 //   is its own routes and its portals to the world beyond.
                 let kept: Vec<Edge> = match (rebuilt, build.moved[index]) {
                     (true, true) => Vec::new(),
-                    (true, false) => graph
-                        .edges_from(node)
-                        .filter(|edge| graph.node_region(edge.to) == region)
-                        .collect(),
-                    (false, _) => graph
-                        .edges_from(node)
-                        .filter(|edge| build.region_slot[graph.node_region(edge.to).0] == NOT_REBUILT)
-                        .collect(),
+                    (true, false) => {
+                        graph
+                            .edges_from(node)
+                            .filter(|edge| graph.node_region(edge.to) == region)
+                            .collect()
+                    }
+                    (false, _) => {
+                        graph
+                            .edges_from(node)
+                            .filter(|edge| build.region_slot[graph.node_region(edge.to).0] == NOT_REBUILT)
+                            .collect()
+                    }
                 };
                 build.node_slot[node.0] = build.edges.len() as u32;
                 build.edges.push((node, kept));
@@ -633,12 +650,12 @@ struct RegionEdges {
     // places of one neighbouring column can land on the same place — which is
     // exactly what a stair does, and what a fixed eight-slot array here used to
     // make an out-of-bounds panic.
-    outgoing: Vec<[u32; Direction::ALL.len()]>,
-    outgoing_len: Vec<u8>,
+    outgoing:         Vec<[u32; Direction::ALL.len()]>,
+    outgoing_len:     Vec<u8>,
     // Counting-sorted into one run per destination. Kosaraju's second pass
     // walks these, and a region has thousands of places.
     incoming_offsets: Vec<u32>,
-    incoming: Vec<u32>,
+    incoming:         Vec<u32>,
 }
 
 impl RegionEdges {
@@ -863,9 +880,9 @@ impl NavigationGraph {
         for top in (0..self.height).step_by(REGION_SIZE as usize) {
             for left in (0..self.width).step_by(REGION_SIZE as usize) {
                 self.regions.push(Region {
-                    left: left as u16,
-                    top: top as u16,
-                    width: REGION_SIZE.min(self.width - left) as u16,
+                    left:   left as u16,
+                    top:    top as u16,
+                    width:  REGION_SIZE.min(self.width - left) as u16,
                     height: REGION_SIZE.min(self.height - top) as u16,
                 });
                 self.region_runs.push(Run::NONE);
@@ -1155,11 +1172,11 @@ impl NavigationGraph {
             Side::South => RegionId(first.0 + self.regions_across()),
         };
         let near = Bank {
-            id: first,
+            id:   first,
             bake: held.at(first),
         };
         let far = Bank {
-            id: second,
+            id:   second,
             bake: held.at(second),
         };
         let rectangle = self.regions[first.0];
@@ -1498,9 +1515,11 @@ impl NavigationGraph {
         self.edge_targets[run.clone()]
             .iter()
             .zip(&self.edge_costs[run])
-            .map(|(&to, &cost)| Edge {
-                to: NodeId(to as usize),
-                cost: u32::from(cost),
+            .map(|(&to, &cost)| {
+                Edge {
+                    to:   NodeId(to as usize),
+                    cost: u32::from(cost),
+                }
             })
     }
 
@@ -1739,7 +1758,7 @@ enum Join {
 /// height — so the prefix or suffix is kept until the abstract path chooses
 /// which portal it actually uses.
 struct EndpointJoin {
-    costs: Vec<(NodeId, u32)>,
+    costs:  Vec<(NodeId, u32)>,
     routes: FxHashMap<usize, Vec<Direction>>,
 }
 
@@ -1761,7 +1780,7 @@ struct LiveVisit {
     /// The preceding place and the step from it to this one. `None` at the
     /// endpoint the flood started from.
     previous: Option<(Point, Direction)>,
-    cost: u32,
+    cost:     u32,
 }
 
 #[derive(Clone, Copy)]
@@ -1820,7 +1839,7 @@ impl NavigationGraph {
             endpoint,
             LiveVisit {
                 previous: None,
-                cost: 0,
+                cost:     0,
             },
         );
         open.push_back(endpoint);
@@ -1853,7 +1872,7 @@ impl NavigationGraph {
                     landing,
                     LiveVisit {
                         previous: Some((here, direction)),
-                        cost: cost + 1,
+                        cost:     cost + 1,
                     },
                 );
                 open.push_back(landing);
@@ -1995,7 +2014,7 @@ fn reconstruct_live_into(
 /// than to the region it runs over.
 struct Sought {
     marked: Vec<bool>,
-    left: usize,
+    left:   usize,
 }
 
 impl Sought {
@@ -2435,13 +2454,16 @@ fn append(
 
 #[cfg(test)]
 mod tests {
-    use crate::find_path;
-
+    use openshard_map::overlay::{
+        Cover,
+        Doors,
+        Overlay,
+    };
     use proptest::prelude::*;
 
     use super::*;
+    use crate::find_path;
     use crate::scene::Scene;
-    use openshard_map::overlay::{Cover, Doors, Overlay};
 
     /// A bounded open grid with some tiles blocked.
     ///
@@ -2451,7 +2473,7 @@ mod tests {
     /// node E took away: a fixture that reimplements the step rule agrees with
     /// itself and proves nothing.
     struct Grid {
-        scene: Scene,
+        scene:   Scene,
         blocked: Overlay,
     }
 
@@ -2967,16 +2989,28 @@ mod tests {
 /// proposes too.
 #[cfg(test)]
 mod rebake {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::{
+        BTreeMap,
+        BTreeSet,
+    };
+
+    use openshard_map::map::LandCell;
+    use openshard_map::overlay::{
+        Doors,
+        Overlay,
+    };
+    use openshard_map::patch::{
+        Patch,
+        PatchAuthor,
+        PatchOp,
+        PatchTime,
+    };
+    use openshard_protocol::world::Facet;
+    use openshard_tiles::TileData;
 
     use super::*;
     use crate::ground::Ground;
     use crate::scene::Scene;
-    use openshard_map::map::LandCell;
-    use openshard_map::overlay::{Doors, Overlay};
-    use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
-    use openshard_protocol::world::Facet;
-    use openshard_tiles::TileData;
 
     /// A place, and every place it can be crossed to, with what the crossing
     /// costs.
@@ -3069,7 +3103,7 @@ mod rebake {
                     y,
                     LandCell {
                         tile: was.tile,
-                        z: was.z.saturating_add(40),
+                        z:    was.z.saturating_add(40),
                     },
                 )
                 .expect("a cell on this facet")

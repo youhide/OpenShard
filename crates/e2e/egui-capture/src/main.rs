@@ -10,8 +10,14 @@
 //! catalogue comes from the live in-process shard; neither the canvas nor its
 //! items are reimplemented for the screenshot.
 
-use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::path::{
+    Path,
+    PathBuf,
+};
+use std::process::{
+    Command,
+    ExitCode,
+};
 
 use clap::Parser;
 

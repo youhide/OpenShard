@@ -1,7 +1,11 @@
-use super::*;
-use openshard_protocol::context::{ContextMenuFlags, RawContextMenuIndex};
+use openshard_protocol::context::{
+    ContextMenuFlags,
+    RawContextMenuIndex,
+};
 use openshard_protocol::serial::RawSerial;
 use openshard_protocol::wire::ClilocId;
+
+use super::*;
 
 /// The cliloc numbers for the default context-menu entries. These are the
 /// **`3006xxx`** context-menu range that lives in a modern `cliloc.enu` (verified
@@ -62,13 +66,15 @@ impl World {
         }
         let wire = entries
             .iter()
-            .map(|(cliloc, _)| ContextMenuEntry {
-                cliloc: *cliloc,
-                flags: ContextMenuFlags::NONE,
+            .map(|(cliloc, _)| {
+                ContextMenuEntry {
+                    cliloc: *cliloc,
+                    flags:  ContextMenuFlags::NONE,
+                }
             })
             .collect();
         let packet = ServerPacket::ContextMenu(ContextMenu {
-            serial: object,
+            serial:  object,
             entries: wire,
         });
         self.state.send_packet(connection, &packet);

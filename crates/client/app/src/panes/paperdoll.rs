@@ -28,22 +28,53 @@
 use std::time::Instant;
 
 use openshard_client_net::action::Outgoing;
-use openshard_client_render::gump::{self as gump_art, GumpArt, GumpPixel};
+use openshard_client_render::gump::{
+    self as gump_art,
+    GumpArt,
+    GumpPixel,
+};
 use openshard_client_render::mobiles::EquipmentLayer;
 use openshard_client_render::paperdoll;
-use openshard_protocol::containers::{ContainedItem, GridSlot};
+use openshard_protocol::containers::{
+    ContainedItem,
+    GridSlot,
+};
 use openshard_protocol::gump::GumpPoint;
-use openshard_protocol::items::{ItemAmount, classic_weapon_layer, is_classic_weapon};
+use openshard_protocol::items::{
+    ItemAmount,
+    classic_weapon_layer,
+    is_classic_weapon,
+};
 use openshard_protocol::mobile::Equipment;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::{Hue, Layer};
+use openshard_protocol::wire::{
+    Hue,
+    Layer,
+};
 
-use crate::DOUBLE_CLICK;
-use crate::crowd;
-use crate::hand::{DragOrigin, Dragged, ItemPress, PendingDrop, centre_of};
-use crate::panes::{Button, Effect, Input, Line, LocalWindow, PaneCtx, PaneFrame, Response};
+use crate::hand::{
+    DragOrigin,
+    Dragged,
+    ItemPress,
+    PendingDrop,
+    centre_of,
+};
+use crate::panes::{
+    Button,
+    Effect,
+    Input,
+    Line,
+    LocalWindow,
+    PaneCtx,
+    PaneFrame,
+    Response,
+};
 use crate::windows::Drawn;
+use crate::{
+    DOUBLE_CLICK,
+    crowd,
+};
 
 /// One open paperdoll window.
 #[derive(Debug)]
@@ -54,7 +85,7 @@ pub struct PaperdollPane {
     /// is handed it when the window opens, because whether this doll is the
     /// player's own — which decides the frame, the buttons and what a press on
     /// a worn item means — is a comparison against this.
-    mobile: Serial,
+    mobile:          Serial,
     /// The button the mouse went down on.
     ///
     /// [`DialogPane::held`](crate::panes::dialog)'s counterpart, and the same
@@ -67,7 +98,7 @@ pub struct PaperdollPane {
     /// in front of the buttons — so an index taken at the press would name a
     /// different picture by the time the button comes up. The button itself is
     /// stable.
-    held: Option<paperdoll::DollButton>,
+    held:            Option<paperdoll::DollButton>,
     /// The last completed click on one of the three scrolls, and when.
     ///
     /// The scrolls answer a *double* click where the seven buttons answer a
@@ -78,7 +109,7 @@ pub struct PaperdollPane {
     /// `Windows::last_scroll`, keyed by subject; the subject key is gone
     /// because the state is this window's own now, so two clicks on two dolls
     /// cannot pair **by construction** rather than by a comparison.
-    last_scroll: Option<(Instant, paperdoll::DollButton)>,
+    last_scroll:     Option<(Instant, paperdoll::DollButton)>,
     /// The last worn item clicked on this doll. A second click on the same
     /// item is a normal UO `Use`, just as it is for an icon in a container;
     /// it must be keyed by serial because a dagger and an axe may occupy the
@@ -92,7 +123,7 @@ pub struct PaperdollPane {
     /// on the pointer owes the ask itself. `Windows::hovered_equipment` kept
     /// this for every doll at once, keyed by serial; per-pane, the key is
     /// gone.
-    hovered: Option<Layer>,
+    hovered:         Option<Layer>,
     /// The cursor, with the hand full, is over this doll — and the doll is
     /// this client's own body, so the held wearable is drawn on it
     /// translucently as a preview.
@@ -102,7 +133,7 @@ pub struct PaperdollPane {
     /// the preview with it on the next frame whether or not the pointer moves
     /// again. `Windows::preview_equipment` kept a copy of the item instead,
     /// which could outlive the drag it described.
-    hand_over: bool,
+    hand_over:       bool,
     /// The press on a worn item of this body, until it becomes a lift.
     ///
     /// [`ContainerPane::pressed`](crate::panes::container)'s counterpart, and
@@ -113,7 +144,7 @@ pub struct PaperdollPane {
     /// Only ever a press on *our own* body: a stranger's shirt is not this
     /// client's to lift, so a press on one moves the window instead, exactly
     /// as it did.
-    pressed: Option<ItemPress>,
+    pressed:         Option<ItemPress>,
 }
 
 /// A paperdoll, laid out for one frame: the doll, and what is written over it.
@@ -127,7 +158,7 @@ pub struct PaperdollPane {
 pub struct Window {
     /// The frame, its furniture and the doll — everything the pointer is
     /// tested against.
-    pub doll: paperdoll::Doll,
+    pub doll:  paperdoll::Doll,
     /// The text over them: the name on the plate, and the worn item the
     /// pointer is resting on.
     pub lines: Vec<Line>,
@@ -177,14 +208,18 @@ fn button_effects(
         // Status packets describe this connection's player, so a stranger's
         // Status control must not open a misleading local window — and it
         // asks the shard nothing either, which is what the old handler did.
-        paperdoll::DollButton::Status if own => answer
-            .with(Effect::Net(Outgoing::Status(mobile)))
-            .with(Effect::Open(LocalWindow::Status)),
+        paperdoll::DollButton::Status if own => {
+            answer
+                .with(Effect::Net(Outgoing::Status(mobile)))
+                .with(Effect::Open(LocalWindow::Status))
+        }
         // Window visibility is local intent; the `0x3A` merely refreshes
         // data.
-        paperdoll::DollButton::Skills if own => answer
-            .with(Effect::Net(Outgoing::Skills(mobile)))
-            .with(Effect::Open(LocalWindow::Skills)),
+        paperdoll::DollButton::Skills if own => {
+            answer
+                .with(Effect::Net(Outgoing::Skills(mobile)))
+                .with(Effect::Open(LocalWindow::Skills))
+        }
         paperdoll::DollButton::Virtue if paired => answer.with(Effect::Net(Outgoing::Virtue(mobile))),
         // The roster is already in the view; the scroll's job is to restore
         // its window when the player closed it, or bring the existing one up.
@@ -193,10 +228,12 @@ fn button_effects(
         }
         // Opening the backpack is a use of the worn bag, which needs its
         // serial — a body wearing none has nothing to open.
-        paperdoll::DollButton::Backpack if paired => match backpack {
-            Some(serial) => answer.with(Effect::Net(Outgoing::Use(serial))),
-            None => answer,
-        },
+        paperdoll::DollButton::Backpack if paired => {
+            match backpack {
+                Some(serial) => answer.with(Effect::Net(Outgoing::Use(serial))),
+                None => answer,
+            }
+        }
         // Help and the first click of every scroll pair: drawn,
         // pressed, released — and wired to nothing yet, exactly as they were
         // before this pane existed.
@@ -242,11 +279,13 @@ impl PaperdollPane {
     fn equipment<'view>(&self, frame: &PaneFrame<'view>) -> &'view [Equipment] {
         match self.own(frame) {
             true => &frame.view.player.equipment,
-            false => frame
-                .view
-                .mobiles
-                .get(&self.mobile)
-                .map_or(&[] as &[Equipment], |mobile| mobile.equipment.as_slice()),
+            false => {
+                frame
+                    .view
+                    .mobiles
+                    .get(&self.mobile)
+                    .map_or(&[] as &[Equipment], |mobile| mobile.equipment.as_slice())
+            }
         }
     }
 
@@ -265,9 +304,11 @@ impl PaperdollPane {
         let equipment = self.equipment(frame);
         match layer {
             Layer::TWO_HANDED => equipment.iter().any(|item| item.layer == Layer::ONE_HANDED),
-            Layer::ONE_HANDED => equipment
-                .iter()
-                .any(|item| item.layer == Layer::TWO_HANDED && is_classic_weapon(item.graphic)),
+            Layer::ONE_HANDED => {
+                equipment
+                    .iter()
+                    .any(|item| item.layer == Layer::TWO_HANDED && is_classic_weapon(item.graphic))
+            }
             _ => false,
         }
     }
@@ -330,19 +371,19 @@ impl PaperdollPane {
                             return raised.with(Effect::Net(Outgoing::Use(item.serial)));
                         }
                         self.pressed = Some(ItemPress {
-                            item: ContainedItem {
-                                serial: item.serial,
+                            item:   ContainedItem {
+                                serial:  item.serial,
                                 graphic: item.graphic,
                                 // A worn item is one thing, whatever the wire
                                 // says about the pile it came out of: nothing
                                 // stacks on a body.
-                                amount: ItemAmount(1),
+                                amount:  ItemAmount(1),
                                 // No gump position — it is on a body, not in a
                                 // bag. One becomes relevant only after a drop,
                                 // which supplies its own.
-                                at: GumpPoint::new(0, 0),
-                                grid: GridSlot(0),
-                                hue: item.hue,
+                                at:      GumpPoint::new(0, 0),
+                                grid:    GridSlot(0),
+                                hue:     item.hue,
                             },
                             origin: DragOrigin::Equipment {
                                 mobile: self.mobile,
@@ -353,7 +394,7 @@ impl PaperdollPane {
                             // what goes on the cursor is the item's own icon.
                             // Anchor its centre to the pointer, and use the
                             // same offset if it is released into a bag.
-                            grab: centre_of(item.graphic, ctx.frame.files.art),
+                            grab:   centre_of(item.graphic, ctx.frame.files.art),
                         });
                         return raised;
                     }
@@ -415,7 +456,7 @@ impl PaperdollPane {
                     // used by its other container-targeted gestures.
                     return Response::changed().with(Effect::Drop(PendingDrop::Container {
                         container: backpack,
-                        at: GumpPoint::new(0, 0),
+                        at:        GumpPoint::new(0, 0),
                     }));
                 }
             }
@@ -514,12 +555,14 @@ impl PaperdollPane {
     /// remembering what the picture was.
     fn hover(&mut self, ctx: &PaneCtx<'_>) -> Response {
         let hovered = match (ctx.under_pointer, ctx.drawn) {
-            (true, Some(Drawn::Paperdoll(window))) => gump_art::pick(
-                &window.doll.pictures,
-                ctx.frame.cursor,
-                ctx.frame.files.gump_atlas,
-            )
-            .and_then(|index| window.doll.equipment_hits.get(&index).copied()),
+            (true, Some(Drawn::Paperdoll(window))) => {
+                gump_art::pick(
+                    &window.doll.pictures,
+                    ctx.frame.cursor,
+                    ctx.frame.files.gump_atlas,
+                )
+                .and_then(|index| window.doll.equipment_hits.get(&index).copied())
+            }
             _ => None,
         };
         let hand_over = ctx.under_pointer && self.own(&ctx.frame) && ctx.frame.hand.is_some();
@@ -565,9 +608,9 @@ impl PaperdollPane {
             // Window-local — see `PaneFrame::cursor`'s doc.
             let name = paperdoll::title(title, GumpPixel::new(0, 0));
             lines.push(Line {
-                at: name.at,
+                at:   name.at,
                 font: name.font,
-                hue: name.hue,
+                hue:  name.hue,
                 clip: name.clip,
                 text: name.text.to_owned(),
             });
@@ -577,9 +620,9 @@ impl PaperdollPane {
                 lines.push(Line {
                     // The same step down-right the container hover uses, so
                     // the two hovers read as one behaviour.
-                    at: frame.cursor.offset(GumpPixel::new(14, 18)),
+                    at:   frame.cursor.offset(GumpPixel::new(14, 18)),
                     font: Font(1),
-                    hue: Hue::LABEL,
+                    hue:  Hue::LABEL,
                     clip: None,
                     text: frame.files.tiledata.static_tile(item.graphic.0).name.clone(),
                 });
@@ -613,10 +656,11 @@ impl PaperdollPane {
         let own = self.own(frame);
         let body = match own {
             true => Some((view.player.body, view.player.hue)),
-            false => view
-                .mobiles
-                .get(&self.mobile)
-                .map(|mobile| (mobile.body, mobile.hue)),
+            false => {
+                view.mobiles
+                    .get(&self.mobile)
+                    .map(|mobile| (mobile.body, mobile.hue))
+            }
         };
         // The `0x88` carries no equipment — see `WorldView::paperdolls` — so
         // it is read off the body the window names, resolved once through
@@ -630,15 +674,17 @@ impl PaperdollPane {
                     hand.drag().origin
                         != DragOrigin::Equipment {
                             mobile: self.mobile,
-                            layer: item.layer,
+                            layer:  item.layer,
                         }
                 })
             })
             .collect();
-        let wearer = body.map(|(body, hue)| paperdoll::Wearer {
-            body,
-            hue,
-            equipment: &equipment,
+        let wearer = body.map(|(body, hue)| {
+            paperdoll::Wearer {
+                body,
+                hue,
+                equipment: &equipment,
+            }
         });
         // The stance, off the player and not off the `0x88` the window opened
         // on: a `0x72` moves it while that packet stands still, and the
@@ -652,20 +698,22 @@ impl PaperdollPane {
         // the move (see `hand_over`), and only a layer the body has empty
         // takes a preview.
         let preview = match self.hand_over {
-            true => frame.hand.and_then(|hand| {
-                let drag = hand.drag();
-                let tile = frame.files.tiledata.static_tile(drag.item.graphic.0);
-                let layer = classic_weapon_layer(drag.item.graphic, Layer(tile.layer));
-                (own && layer.0 > 0
-                    && layer.0 <= 25
-                    && !equipment.iter().any(|worn| worn.layer == layer)
-                    && !self.hands_conflict(frame, drag.item.graphic, layer))
-                .then_some(EquipmentLayer {
-                    graphic: tile.anim_id,
-                    hue: drag.item.hue,
-                    layer,
+            true => {
+                frame.hand.and_then(|hand| {
+                    let drag = hand.drag();
+                    let tile = frame.files.tiledata.static_tile(drag.item.graphic.0);
+                    let layer = classic_weapon_layer(drag.item.graphic, Layer(tile.layer));
+                    (own && layer.0 > 0
+                        && layer.0 <= 25
+                        && !equipment.iter().any(|worn| worn.layer == layer)
+                        && !self.hands_conflict(frame, drag.item.graphic, layer))
+                    .then_some(EquipmentLayer {
+                        graphic: tile.anim_id,
+                        hue: drag.item.hue,
+                        layer,
+                    })
                 })
-            }),
+            }
             false => None,
         };
         let doll = paperdoll::window(
@@ -906,7 +954,10 @@ mod tests {
     fn a_press_on_our_own_worn_item_becomes_a_lift_through_handle() {
         use std::collections::BTreeMap;
 
-        use openshard_client_render::gump::{GumpArt, PictureIndex};
+        use openshard_client_render::gump::{
+            GumpArt,
+            PictureIndex,
+        };
         use openshard_protocol::wire::Graphic;
 
         use crate::panes::fixture;
@@ -918,20 +969,20 @@ mod tests {
         let files = fixture::Install::shipping([(GumpArt::Item(SHIRT), (20, 20))]);
         let mut view = fixture::world(me);
         view.player.equipment.push(Equipment {
-            serial: serial(0x4000_0001),
+            serial:  serial(0x4000_0001),
             graphic: SHIRT,
-            layer: WORN_LAYER,
-            hue: Hue::NONE,
+            layer:   WORN_LAYER,
+            hue:     Hue::NONE,
         });
 
         let mut pane = PaperdollPane::new(me);
         let at = GumpPixel::new(50, 50);
         let doll = paperdoll::Doll {
-            pictures: vec![openshard_client_render::gump::Picture::plain(
+            pictures:       vec![openshard_client_render::gump::Picture::plain(
                 GumpArt::Item(SHIRT),
                 at,
             )],
-            hits: BTreeMap::new(),
+            hits:           BTreeMap::new(),
             equipment_hits: BTreeMap::from([(PictureIndex::new(0), WORN_LAYER)]),
         };
         let drawn = Drawn::Paperdoll(Window {
@@ -986,12 +1037,19 @@ mod tests {
     fn a_drop_on_the_paperdoll_backpack_goes_into_the_closed_pack() {
         use std::collections::BTreeMap;
 
-        use openshard_client_render::gump::{GumpArt, Picture, PictureIndex};
+        use openshard_client_render::gump::{
+            GumpArt,
+            Picture,
+            PictureIndex,
+        };
         use openshard_protocol::containers::GridSlot;
         use openshard_protocol::items::ItemAmount;
         use openshard_protocol::wire::Graphic;
 
-        use crate::hand::{Hand, ItemDrag};
+        use crate::hand::{
+            Hand,
+            ItemDrag,
+        };
         use crate::panes::fixture;
 
         const BACKPACK: Graphic = Graphic(0x0E75);
@@ -1003,16 +1061,16 @@ mod tests {
         let files = fixture::Install::shipping([(GumpArt::Item(BACKPACK), (30, 30))]);
         let mut view = fixture::world(me);
         view.player.equipment.push(Equipment {
-            serial: pack,
+            serial:  pack,
             graphic: BACKPACK,
-            layer: Layer::BACKPACK,
-            hue: Hue::NONE,
+            layer:   Layer::BACKPACK,
+            hue:     Hue::NONE,
         });
 
         let at = GumpPixel::new(90, 80);
         let doll = paperdoll::Doll {
-            pictures: vec![Picture::plain(GumpArt::Item(BACKPACK), at)],
-            hits: BTreeMap::from([(PictureIndex::new(0), paperdoll::DollButton::Backpack)]),
+            pictures:       vec![Picture::plain(GumpArt::Item(BACKPACK), at)],
+            hits:           BTreeMap::from([(PictureIndex::new(0), paperdoll::DollButton::Backpack)]),
             equipment_hits: BTreeMap::new(),
         };
         let drawn = Drawn::Paperdoll(Window {
@@ -1021,16 +1079,16 @@ mod tests {
         });
         let mut ctx = files.ctx(&view, Some(&drawn), at.offset(GumpPixel::new(5, 5)), true);
         ctx.frame.hand = Some(Hand::Held(ItemDrag {
-            item: ContainedItem {
-                serial: axe,
+            item:   ContainedItem {
+                serial:  axe,
                 graphic: AXE,
-                amount: ItemAmount(1),
-                at: GumpPoint::new(0, 0),
-                grid: GridSlot(0),
-                hue: Hue::NONE,
+                amount:  ItemAmount(1),
+                at:      GumpPoint::new(0, 0),
+                grid:    GridSlot(0),
+                hue:     Hue::NONE,
             },
             origin: DragOrigin::Ground,
-            grab: GumpPixel::new(5, 5),
+            grab:   GumpPixel::new(5, 5),
         }));
 
         let mut pane = PaperdollPane::new(me);
@@ -1049,7 +1107,10 @@ mod tests {
     fn a_bow_drop_requests_the_two_handed_layer() {
         use openshard_protocol::wire::Graphic;
 
-        use crate::hand::{Hand, ItemDrag};
+        use crate::hand::{
+            Hand,
+            ItemDrag,
+        };
         use crate::panes::fixture;
 
         const BOW: Graphic = Graphic(0x13B2);
@@ -1059,16 +1120,16 @@ mod tests {
         let view = fixture::world(me);
         let mut ctx = files.ctx(&view, None, GumpPixel::new(50, 50), true);
         ctx.frame.hand = Some(Hand::Held(ItemDrag {
-            item: ContainedItem {
-                serial: serial(0x4000_0001),
+            item:   ContainedItem {
+                serial:  serial(0x4000_0001),
                 graphic: BOW,
-                amount: ItemAmount::ONE,
-                at: GumpPoint::new(0, 0),
-                grid: GridSlot(0),
-                hue: Hue::NONE,
+                amount:  ItemAmount::ONE,
+                at:      GumpPoint::new(0, 0),
+                grid:    GridSlot(0),
+                hue:     Hue::NONE,
             },
             origin: DragOrigin::Ground,
-            grab: GumpPixel::new(0, 0),
+            grab:   GumpPixel::new(0, 0),
         }));
 
         let mut pane = PaperdollPane::new(me);

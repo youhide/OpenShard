@@ -52,7 +52,22 @@ mod entity;
 mod registry;
 mod serial;
 
-pub use component::{Component, Entities, Iter, IterMut, SparseSet};
+pub use component::{
+    Component,
+    Entities,
+    Iter,
+    IterMut,
+    SparseSet,
+};
 pub use entity::EntityId;
-pub use registry::{BindSerialError, Query, QueryMut, Registry, SpawnError};
-pub use serial::{SerialAllocator, SerialPoolExhausted};
+pub use registry::{
+    BindSerialError,
+    Query,
+    QueryMut,
+    Registry,
+    SpawnError,
+};
+pub use serial::{
+    SerialAllocator,
+    SerialPoolExhausted,
+};

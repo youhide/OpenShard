@@ -99,15 +99,34 @@
 //! successor, and [`Patch::revision`] derives it. A record carrying both could
 //! disagree with itself.
 
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Facet;
-
-use crate::chunk::{BLOCKS_PER_CHUNK, Chunk, ChunkCoord, ChunkKey};
-use crate::grid::BlockExtent;
-use crate::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell, StaticItem};
-use crate::patch::{Patch, PatchAuthor, PatchOp, PatchTime, StaticId};
-use crate::snapshot::MapRevision;
 use openshard_tiles::LandTileId;
+
+use crate::chunk::{
+    BLOCKS_PER_CHUNK,
+    Chunk,
+    ChunkCoord,
+    ChunkKey,
+};
+use crate::grid::BlockExtent;
+use crate::map::{
+    BLOCK_SIZE,
+    CELLS_PER_BLOCK,
+    LandCell,
+    StaticItem,
+};
+use crate::patch::{
+    Patch,
+    PatchAuthor,
+    PatchOp,
+    PatchTime,
+    StaticId,
+};
+use crate::snapshot::MapRevision;
 
 /// What every chunk starts with, so a blob that is not one says so in four
 /// bytes rather than in a plausible facet.
@@ -149,7 +168,7 @@ pub enum DecodeError {
         /// How long the header says it is.
         wanted: usize,
         /// How long it is.
-        found: usize,
+        found:  usize,
     },
     /// The blob is longer than the chunk it describes.
     ///
@@ -160,7 +179,7 @@ pub enum DecodeError {
         /// How long the header says it is.
         wanted: usize,
         /// How long it is.
-        found: usize,
+        found:  usize,
     },
     /// The chunk claims a block extent no chunk can have.
     BadExtent {
@@ -174,7 +193,7 @@ pub enum DecodeError {
         /// What the header says.
         wanted: u32,
         /// What the counts come to.
-        found: u64,
+        found:  u64,
     },
     /// A static's packed position uses bits that are not a position.
     ///
@@ -184,7 +203,7 @@ pub enum DecodeError {
     /// record into a plausible static standing somewhere it never stood.
     BadPosition {
         /// Which static, counted through the whole chunk.
-        at: usize,
+        at:    usize,
         /// The byte.
         found: u8,
     },
@@ -209,24 +228,31 @@ impl std::fmt::Display for DecodeError {
                     "a chunk of {wanted} bytes arrived in {found}, with a tail nothing reads"
                 )
             }
-            Self::BadExtent { wide, down } => write!(
-                f,
-                "a chunk of {wide}x{down} blocks, where a chunk is at most \
+            Self::BadExtent { wide, down } => {
+                write!(
+                    f,
+                    "a chunk of {wide}x{down} blocks, where a chunk is at most \
                  {BLOCKS_PER_CHUNK}x{BLOCKS_PER_CHUNK} and at least 1x1"
-            ),
-            Self::CountMismatch { wanted, found } => write!(
-                f,
-                "the header says {wanted} statics and the per-block counts come to {found}"
-            ),
-            Self::BadPosition { at, found } => write!(
-                f,
-                "static {at} is at {found:#04x}, which is not a position inside a block"
-            ),
+                )
+            }
+            Self::CountMismatch { wanted, found } => {
+                write!(
+                    f,
+                    "the header says {wanted} statics and the per-block counts come to {found}"
+                )
+            }
+            Self::BadPosition { at, found } => {
+                write!(
+                    f,
+                    "static {at} is at {found:#04x}, which is not a position inside a block"
+                )
+            }
         }
     }
 }
 
-impl std::error::Error for DecodeError {}
+impl std::error::Error for DecodeError {
+}
 
 /// How long the encoding of a chunk of this shape is.
 const fn encoded_len(blocks: usize, statics: usize) -> usize {
@@ -305,10 +331,10 @@ pub fn decode(bytes: &[u8]) -> Result<Chunk, DecodeError> {
 
 /// The fields that describe every run in a chunk body.
 struct ChunkHeader {
-    key: ChunkKey,
+    key:      ChunkKey,
     revision: MapRevision,
-    extent: BlockExtent,
-    statics: u32,
+    extent:   BlockExtent,
+    statics:  u32,
 }
 
 fn decode_header(bytes: &[u8]) -> Result<ChunkHeader, DecodeError> {
@@ -321,7 +347,7 @@ fn decode_header(bytes: &[u8]) -> Result<ChunkHeader, DecodeError> {
 
     let key = ChunkKey {
         facet: Facet(bytes[5]),
-        at: ChunkCoord {
+        at:    ChunkCoord {
             x: u32::from(u16::from_le_bytes([bytes[6], bytes[7]])),
             y: u32::from(u16::from_le_bytes([bytes[8], bytes[9]])),
         },
@@ -348,8 +374,8 @@ fn decode_header(bytes: &[u8]) -> Result<ChunkHeader, DecodeError> {
 }
 
 struct ChunkBody<'a> {
-    land: &'a [u8],
-    counts: &'a [u8],
+    land:    &'a [u8],
+    counts:  &'a [u8],
     statics: &'a [u8],
 }
 
@@ -373,8 +399,8 @@ fn chunk_body<'a>(bytes: &'a [u8], header: &ChunkHeader) -> Result<ChunkBody<'a>
     let counts_from = land_from + blocks * CELLS_PER_BLOCK * CELL_BYTES;
     let statics_from = counts_from + blocks * COUNT_BYTES;
     Ok(ChunkBody {
-        land: &bytes[land_from..counts_from],
-        counts: &bytes[counts_from..statics_from],
+        land:    &bytes[land_from..counts_from],
+        counts:  &bytes[counts_from..statics_from],
         statics: &bytes[statics_from..],
     })
 }
@@ -384,9 +410,11 @@ fn decode_land(bytes: &[u8]) -> Vec<LandCell> {
         .as_chunks::<CELL_BYTES>()
         .0
         .iter()
-        .map(|cell| LandCell {
-            tile: LandTileId(u16::from_le_bytes([cell[0], cell[1]])),
-            z: cell[2] as i8,
+        .map(|cell| {
+            LandCell {
+                tile: LandTileId(u16::from_le_bytes([cell[0], cell[1]])),
+                z:    cell[2] as i8,
+            }
         })
         .collect()
 }
@@ -404,7 +432,7 @@ fn decode_counts(bytes: &[u8], statics: u32) -> Result<Vec<u32>, DecodeError> {
     if total != u64::from(statics) {
         return Err(DecodeError::CountMismatch {
             wanted: statics,
-            found: total,
+            found:  total,
         });
     }
     Ok(counts)
@@ -432,17 +460,17 @@ fn decode_statics(
         for _ in 0..*count {
             let entry = records.next().expect("the length was checked above");
             let (x, y) = unpack_position(entry[2]).ok_or(DecodeError::BadPosition {
-                at: items.len(),
+                at:    items.len(),
                 found: entry[2],
             })?;
             items.push(StaticItem {
                 tile: Graphic(u16::from_le_bytes([entry[0], entry[1]])),
                 // Back to a world coordinate, which is what every reader
                 // downstream of `WorldMap` has always been handed.
-                x: (block_x + u32::from(x)) as u16,
-                y: (block_y + u32::from(y)) as u16,
-                z: entry[3] as i8,
-                hue: Hue(u16::from_le_bytes([entry[4], entry[5]])),
+                x:    (block_x + u32::from(x)) as u16,
+                y:    (block_y + u32::from(y)) as u16,
+                z:    entry[3] as i8,
+                hue:  Hue(u16::from_le_bytes([entry[4], entry[5]])),
             });
         }
     }
@@ -515,7 +543,7 @@ pub enum PatchDecodeError {
         /// How many bytes were wanted by the time it ran out.
         wanted: usize,
         /// How many there are.
-        found: usize,
+        found:  usize,
     },
     /// The blob is longer than the patch it describes.
     ///
@@ -526,7 +554,7 @@ pub enum PatchDecodeError {
         /// How long the patch is.
         wanted: usize,
         /// How long the blob is.
-        found: usize,
+        found:  usize,
     },
     /// The author's name is not UTF-8.
     BadAuthor,
@@ -541,10 +569,12 @@ impl std::fmt::Display for PatchDecodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotAPatch => write!(f, "not a patch"),
-            Self::Version { found } => write!(
-                f,
-                "a patch of version {found}, and this build reads {PATCH_VERSION}"
-            ),
+            Self::Version { found } => {
+                write!(
+                    f,
+                    "a patch of version {found}, and this build reads {PATCH_VERSION}"
+                )
+            }
             Self::Truncated { wanted, found } => {
                 write!(
                     f,
@@ -564,7 +594,8 @@ impl std::fmt::Display for PatchDecodeError {
     }
 }
 
-impl std::error::Error for PatchDecodeError {}
+impl std::error::Error for PatchDecodeError {
+}
 
 /// One patch as its canonical bytes.
 ///
@@ -660,24 +691,28 @@ pub fn decode_patch(bytes: &[u8]) -> Result<Patch, PatchDecodeError> {
     let mut ops = Vec::with_capacity(count.min(1024));
     for _ in 0..count {
         ops.push(match at.byte()? {
-            OP_SET_LAND => PatchOp::SetLand {
-                x: at.u16()?,
-                y: at.u16()?,
-                was: at.cell()?,
-                now: at.cell()?,
-            },
+            OP_SET_LAND => {
+                PatchOp::SetLand {
+                    x:   at.u16()?,
+                    y:   at.u16()?,
+                    was: at.cell()?,
+                    now: at.cell()?,
+                }
+            }
             OP_ADD_STATIC => PatchOp::AddStatic { item: at.item()? },
-            OP_REMOVE_STATIC => PatchOp::RemoveStatic {
-                which: StaticId(at.u16()?),
-                was: at.item()?,
-            },
+            OP_REMOVE_STATIC => {
+                PatchOp::RemoveStatic {
+                    which: StaticId(at.u16()?),
+                    was:   at.item()?,
+                }
+            }
             tag => return Err(PatchDecodeError::BadOp { tag }),
         });
     }
     if at.read != bytes.len() {
         return Err(PatchDecodeError::Trailing {
             wanted: at.read,
-            found: bytes.len(),
+            found:  bytes.len(),
         });
     }
     Ok(Patch::new(facet, parent, author, committed, ops))
@@ -691,7 +726,7 @@ pub fn decode_patch(bytes: &[u8]) -> Result<Patch, PatchDecodeError> {
 /// to run off the end is that check written once instead of at every field.
 struct Cursor<'a> {
     bytes: &'a [u8],
-    read: usize,
+    read:  usize,
 }
 
 impl<'a> Cursor<'a> {
@@ -731,7 +766,7 @@ impl<'a> Cursor<'a> {
     fn cell(&mut self) -> Result<LandCell, PatchDecodeError> {
         Ok(LandCell {
             tile: LandTileId(self.u16()?),
-            z: self.byte()? as i8,
+            z:    self.byte()? as i8,
         })
     }
 
@@ -739,10 +774,10 @@ impl<'a> Cursor<'a> {
         let bytes = self.take(PATCH_STATIC_BYTES)?;
         Ok(StaticItem {
             tile: Graphic(u16::from_le_bytes([bytes[0], bytes[1]])),
-            x: u16::from_le_bytes([bytes[2], bytes[3]]),
-            y: u16::from_le_bytes([bytes[4], bytes[5]]),
-            z: bytes[6] as i8,
-            hue: Hue(u16::from_le_bytes([bytes[7], bytes[8]])),
+            x:    u16::from_le_bytes([bytes[2], bytes[3]]),
+            y:    u16::from_le_bytes([bytes[4], bytes[5]]),
+            z:    bytes[6] as i8,
+            hue:  Hue(u16::from_le_bytes([bytes[7], bytes[8]])),
         })
     }
 }
@@ -750,7 +785,11 @@ impl<'a> Cursor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chunk::{assemble, chunks_of, fixture};
+    use crate::chunk::{
+        assemble,
+        chunks_of,
+        fixture,
+    };
     use crate::snapshot::MapSnapshot;
 
     const FACET: Facet = Facet(0);
@@ -919,7 +958,7 @@ mod tests {
             decode(&blob),
             Err(DecodeError::CountMismatch {
                 wanted: chunk.static_count() as u32,
-                found: chunk.static_count() as u64 + 1,
+                found:  chunk.static_count() as u64 + 1,
             })
         );
     }
@@ -940,8 +979,8 @@ mod tests {
         assert_eq!(
             decode(&blob),
             Err(DecodeError::BadPosition {
-                at: 0,
-                found: blob[at]
+                at:    0,
+                found: blob[at],
             })
         );
     }
@@ -962,16 +1001,18 @@ mod tests {
 
     /// One patch of every kind of op, through its bytes and back.
     fn a_patch_of_everything() -> Patch {
-        let cell = |tile, z| LandCell {
-            tile: LandTileId(tile),
-            z,
+        let cell = |tile, z| {
+            LandCell {
+                tile: LandTileId(tile),
+                z,
+            }
         };
         let rock = StaticItem {
             tile: Graphic(0x1234),
-            x: 4_321,
-            y: 60_000,
-            z: -17,
-            hue: Hue(0x0f0f),
+            x:    4_321,
+            y:    60_000,
+            z:    -17,
+            hue:  Hue(0x0f0f),
         };
         Patch::new(
             Facet(3),
@@ -980,15 +1021,15 @@ mod tests {
             PatchTime(1_755_000_000),
             vec![
                 PatchOp::SetLand {
-                    x: 1_000,
-                    y: 2_000,
+                    x:   1_000,
+                    y:   2_000,
                     was: cell(3, -5),
                     now: cell(0x8000, 127),
                 },
                 PatchOp::AddStatic { item: rock },
                 PatchOp::RemoveStatic {
                     which: StaticId(700),
-                    was: rock,
+                    was:   rock,
                 },
             ],
         )

@@ -20,7 +20,10 @@
 //! ally read green and a guild at war read orange. Guild colour loses to standing,
 //! which is what stops a red hiding inside a guild tabard.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
 
 /// A guild's stable id — the key its members carry and its relations are named
 /// by.
@@ -55,15 +58,15 @@ pub struct AllianceId(pub u32);
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Alliance {
     /// Its id, which is also the key it is stored under.
-    pub id: AllianceId,
+    pub id:      AllianceId,
     /// What it calls itself — "The Northern Compact".
-    pub name: String,
+    pub name:    String,
     /// Which member guild leads it.
     ///
     /// Replaced rather than dissolved when that guild leaves: ServUO's
     /// `CalculateAllianceLeader` picks another member, and only an alliance with
     /// fewer than two members left disbands.
-    pub leader: GuildId,
+    pub leader:  GuildId,
     /// Every guild in it, the leader included.
     pub members: BTreeSet<GuildId>,
     /// Every guild asked in that has not answered.
@@ -210,30 +213,30 @@ impl Rank {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Guild {
     /// Its id, which is also the key it is stored under.
-    pub id: GuildId,
+    pub id:           GuildId,
     /// What it calls itself — "The Order of the Silver Serpent".
-    pub name: String,
+    pub name:         String,
     /// The short form the client draws in brackets after a member's name, three
     /// or four letters by convention: "OSS".
     pub abbreviation: String,
     /// Who leads it. A guild always has one; disbanding is what happens when it
     /// would not.
-    pub leader: openshard_protocol::serial::Serial,
+    pub leader:       openshard_protocol::serial::Serial,
     /// Every guild it is at war with.
     ///
     /// A set and no longer a map to a relation: war is the only thing two guilds
     /// declare at each other now that an alliance is a named group rather than a
     /// pairwise fact. See [`Alliance`].
-    pub wars: BTreeSet<GuildId>,
+    pub wars:         BTreeSet<GuildId>,
     /// Every guild it has declared war on that has not declared back.
     ///
     /// Separate from [`wars`](Self::wars) because a declaration is not a war: a
     /// guild that has declared and been ignored is not at war, and its members
     /// must not turn orange on the strength of its own opinion. The war exists
     /// once both sides hold the declaration — see [`Guilds::declare_war`].
-    pub war_offers: BTreeSet<GuildId>,
+    pub war_offers:   BTreeSet<GuildId>,
     /// Which alliance it belongs to, if any. A guild is in at most one.
-    pub alliance: Option<AllianceId>,
+    pub alliance:     Option<AllianceId>,
 }
 
 impl Guild {
@@ -258,7 +261,7 @@ impl Guild {
 /// backwards for that reason.
 #[derive(Clone, Default, Debug)]
 pub struct Guilds {
-    guilds: BTreeMap<GuildId, Guild>,
+    guilds:  BTreeMap<GuildId, Guild>,
     /// The next id to hand out. Monotonic, and saved with the world: a restart
     /// that restarted it would let a new guild inherit a disbanded one's id, and
     /// every member record still naming that id would silently join it.
@@ -462,7 +465,7 @@ pub struct Alliances {
     /// The next id to hand out. Monotonic and saved, for [`Guilds`]' reason: a
     /// guild record names its alliance by id, and a restart that reissued one
     /// would put a guild into a body it never joined.
-    next_id: u32,
+    next_id:   u32,
 }
 
 impl Alliances {
@@ -608,8 +611,9 @@ pub enum Removal {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_protocol::serial::Serial;
+
+    use super::*;
 
     fn leader() -> Serial {
         Serial::new(0x0000_0001).expect("a mobile serial")

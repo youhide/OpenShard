@@ -11,11 +11,20 @@
 //! whichever body it names.
 
 use crate::casting::CastSpellRequest;
-use crate::chunks::{ChangesRequest, ChunkRequest};
-use crate::context::{ContextMenuRequest, ContextMenuSelect};
+use crate::chunks::{
+    ChangesRequest,
+    ChunkRequest,
+};
+use crate::context::{
+    ContextMenuRequest,
+    ContextMenuSelect,
+};
 use crate::craft::OpenCraftCatalogue;
 use crate::design::DesignDetailsRequest;
-use crate::error::{DecodeError, expect_id};
+use crate::error::{
+    DecodeError,
+    expect_id,
+};
 use crate::mapedit::MapEditRequest;
 use crate::mobile::StatLockRequest;
 use crate::party::PartyRequest;

@@ -33,16 +33,43 @@ use std::time::Instant;
 use openshard_client_net::action::Outgoing;
 use openshard_client_net::view::WorldView;
 use openshard_client_render::container;
-use openshard_client_render::gump::{self as gump_art, GumpArt, GumpAtlas, GumpPixel, Picture};
+use openshard_client_render::gump::{
+    self as gump_art,
+    GumpArt,
+    GumpAtlas,
+    GumpPixel,
+    Picture,
+};
 use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::{Graphic, Hue, Layer, RawLayer};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+    RawLayer,
+};
 
 use crate::DOUBLE_CLICK;
-use crate::hand::{DragOrigin, Dragged, Hand, ItemPress, PendingDrop};
-use crate::panes::{Answer, Button, Effect, Input, Line, PaneCtx, PaneFrame, Response, SplitPrompt};
+use crate::hand::{
+    DragOrigin,
+    Dragged,
+    Hand,
+    ItemPress,
+    PendingDrop,
+};
+use crate::panes::{
+    Answer,
+    Button,
+    Effect,
+    Input,
+    Line,
+    PaneCtx,
+    PaneFrame,
+    Response,
+    SplitPrompt,
+};
 use crate::windows::Drawn;
 
 /// The face both of this window's labels are written in — `fonts.mul`'s face
@@ -83,7 +110,7 @@ pub struct ContainerPane {
     /// a key, and the pane is handed it when the window opens because every
     /// packet this window sends names it — see
     /// [`AnyPane::of`](crate::panes::AnyPane::of).
-    container: Serial,
+    container:      Serial,
     /// The press on one of this bag's icons, until it becomes a lift, a click
     /// or nothing.
     ///
@@ -95,7 +122,7 @@ pub struct ContainerPane {
     /// [`DialogPane::held`](crate::panes::dialog) are — one window, one
     /// gesture, and a window that closes takes its unfinished gestures with
     /// it.
-    pressed: Option<ItemPress>,
+    pressed:        Option<ItemPress>,
     /// The icon under the pointer, tinted on the next frame.
     ///
     /// `Windows::hovered_container_item` kept this for every bag at once,
@@ -103,7 +130,7 @@ pub struct ContainerPane {
     /// won. Per-pane, two bags can each remember their own, and the one the
     /// pointer is on is the only one that answers, because the tint is written
     /// only while [`PaneCtx::under_pointer`] says so.
-    hovered: Option<Serial>,
+    hovered:        Option<Serial>,
     /// The last completed click on one of this bag's icons, and when.
     ///
     /// The pair that makes a double click a *use*. It was
@@ -112,7 +139,7 @@ pub struct ContainerPane {
     /// the same item — which is not a thing that can be arranged, but was not
     /// a thing the rule refused either. Per-pane, the window half is gone by
     /// construction and what is left is the icon and the clock.
-    last_click: Option<(Instant, Serial)>,
+    last_click:     Option<(Instant, Serial)>,
     /// Whether the pointer is on this window's action button right now, which
     /// is the button's pressed face on the next frame.
     ///
@@ -148,7 +175,7 @@ pub struct ContainerPane {
     /// See `docs/window_components.md`'s backlog entry this closes: the
     /// broader question of a once-a-frame scratch for every pane kind stays
     /// open, and this is deliberately narrower than that.
-    scratch: RefCell<Option<Vec<ContainedItem>>>,
+    scratch:        RefCell<Option<Vec<ContainedItem>>>,
 }
 
 /// A container, laid out for one frame: the pictures, what they *are*, and
@@ -172,7 +199,7 @@ pub struct Window {
     pub contents: Vec<ContainedItem>,
     /// The action button's caption below the frame, and the name of whatever the
     /// pointer is resting on.
-    pub lines: Vec<Line>,
+    pub lines:    Vec<Line>,
 }
 
 impl Window {
@@ -286,12 +313,12 @@ fn double_clicked(item: ContainedItem, worn: RawLayer, player: Serial) -> Respon
     }
     answer
         .with(Effect::Net(Outgoing::PickUp {
-            item: item.serial,
+            item:   item.serial,
             amount: item.amount,
         }))
         .with(Effect::Net(Outgoing::Equip {
-            item: item.serial,
-            layer: worn,
+            item:   item.serial,
+            layer:  worn,
             mobile: player,
         }))
 }
@@ -315,13 +342,13 @@ fn take_all(contents: &[ContainedItem], backpack: Serial) -> Vec<Effect> {
             let row = ((index / SWEEP_COLUMNS) % SWEEP_ROWS) as i32;
             [
                 Effect::Net(Outgoing::PickUp {
-                    item: item.serial,
+                    item:   item.serial,
                     amount: item.amount,
                 }),
                 Effect::Net(Outgoing::DropInto {
-                    item: item.serial,
+                    item:      item.serial,
                     container: backpack,
-                    at: GumpPoint::new(
+                    at:        GumpPoint::new(
                         SWEEP_ORIGIN.x + column * SWEEP_STEP,
                         SWEEP_ORIGIN.y + row * SWEEP_STEP,
                     ),
@@ -468,9 +495,9 @@ impl ContainerPane {
         let mut lines = Vec::new();
         if let Some((action, button)) = self.action_button(frame) {
             lines.push(Line {
-                at: button.label_at(),
+                at:   button.label_at(),
                 font: LABEL_FONT,
-                hue: Hue::LABEL,
+                hue:  Hue::LABEL,
                 clip: None,
                 text: action.label().to_owned(),
             });
@@ -488,12 +515,14 @@ impl ContainerPane {
                 frame.files.font_atlas,
             )
             .into_iter()
-            .map(|(at, text)| Line {
-                at,
-                font: openshard_client_render::items::STACK_COUNT_FONT,
-                hue: Hue::STACK_COUNT,
-                clip: None,
-                text,
+            .map(|(at, text)| {
+                Line {
+                    at,
+                    font: openshard_client_render::items::STACK_COUNT_FONT,
+                    hue: Hue::STACK_COUNT,
+                    clip: None,
+                    text,
+                }
             }),
         );
         if let Some(item) = self
@@ -501,9 +530,9 @@ impl ContainerPane {
             .and_then(|serial| contents.iter().find(|item| item.serial == serial))
         {
             lines.push(Line {
-                at: frame.cursor.offset(HOVER_OFFSET),
+                at:   frame.cursor.offset(HOVER_OFFSET),
                 font: LABEL_FONT,
-                hue: Hue::LABEL,
+                hue:  Hue::LABEL,
                 clip: None,
                 text: hover_text(item, &frame.files.tiledata.static_tile(item.graphic.0).name),
             });
@@ -598,14 +627,18 @@ impl ContainerPane {
         let raised = Response::changed().with(Effect::Raise);
         match action {
             Action::StackAll => raised.with(Effect::StackAll),
-            Action::TakeAll => match backpack_of(ctx.frame.view) {
-                Some(backpack) => take_all(&self.contents(ctx.frame.view, ctx.frame.hand), backpack)
-                    .into_iter()
-                    .fold(raised, Response::with),
-                // Nothing to sweep into. The action button is drawn — a body can lose
-                // its pack — and pressing it asks for nothing.
-                None => raised,
-            },
+            Action::TakeAll => {
+                match backpack_of(ctx.frame.view) {
+                    Some(backpack) => {
+                        take_all(&self.contents(ctx.frame.view, ctx.frame.hand), backpack)
+                            .into_iter()
+                            .fold(raised, Response::with)
+                    }
+                    // Nothing to sweep into. The action button is drawn — a body can lose
+                    // its pack — and pressing it asks for nothing.
+                    None => raised,
+                }
+            }
         }
     }
 
@@ -704,9 +737,11 @@ impl ContainerPane {
     /// layout draws have to be computed by the same predicate.
     fn hover(&mut self, ctx: &PaneCtx<'_>) -> Response {
         let hovered = match (ctx.under_pointer, ctx.drawn) {
-            (true, Some(Drawn::Container(window))) => window
-                .item_at(ctx.frame.cursor, ctx.frame.files.gump_atlas)
-                .map(|item| item.serial),
+            (true, Some(Drawn::Container(window))) => {
+                window
+                    .item_at(ctx.frame.cursor, ctx.frame.files.gump_atlas)
+                    .map(|item| item.serial)
+            }
             _ => None,
         };
         if self.hovered == hovered {
@@ -890,9 +925,8 @@ mod tests {
     use openshard_protocol::containers::GridSlot;
     use openshard_protocol::items::ItemAmount;
 
-    use crate::panes::fixture;
-
     use super::*;
+    use crate::panes::fixture;
 
     fn serial(raw: u32) -> Serial {
         Serial::new(raw).expect("an item serial")
@@ -914,14 +948,21 @@ mod tests {
     /// no `Default` on purpose (see its own doc comment); `entered` is its
     /// cheapest real constructor and touches no client file.
     fn bare_view() -> WorldView {
-        use openshard_protocol::direction::{Direction, Facing};
-        use openshard_protocol::world::{MapSize, PlayerStart, Point};
+        use openshard_protocol::direction::{
+            Direction,
+            Facing,
+        };
+        use openshard_protocol::world::{
+            MapSize,
+            PlayerStart,
+            Point,
+        };
         WorldView::entered(PlayerStart {
-            serial: serial(0x0000_002A),
-            body: Graphic(0x0190),
+            serial:   serial(0x0000_002A),
+            body:     Graphic(0x0190),
             position: Point::new(1475, 1770, 20),
-            facing: Facing::walking(Direction::South),
-            map: MapSize::BRITANNIA,
+            facing:   Facing::walking(Direction::South),
+            map:      MapSize::BRITANNIA,
         })
     }
 
@@ -1074,7 +1115,7 @@ mod tests {
     #[test]
     fn the_action_lights_up_only_on_its_own_box() {
         let button = container::ActionButton {
-            at: GumpPixel::new(100, 100),
+            at:   GumpPixel::new(100, 100),
             size: (210, 19),
         };
         assert!(action_is_lit(Some(button), GumpPixel::new(150, 110)));
@@ -1095,7 +1136,10 @@ mod tests {
     /// all.
     #[test]
     fn an_action_picture_sits_at_the_buttons_position_and_is_not_an_icon() {
-        use openshard_client_render::gump::{GumpArt, GumpAtlas};
+        use openshard_client_render::gump::{
+            GumpArt,
+            GumpAtlas,
+        };
         use openshard_uofiles::color::Color16;
         use openshard_uofiles::image::Image;
 
@@ -1125,7 +1169,7 @@ mod tests {
                 Some((button, container::action_face(true))),
             ),
             contents: Vec::new(),
-            lines: Vec::new(),
+            lines:    Vec::new(),
         };
         assert_eq!(
             window
@@ -1144,7 +1188,7 @@ mod tests {
         let no_action = Window {
             pictures: container::window_with_action(BAG, &[], at, None, None),
             contents: Vec::new(),
-            lines: Vec::new(),
+            lines:    Vec::new(),
         };
         assert_eq!(
             no_action.pictures.len(),
@@ -1159,7 +1203,10 @@ mod tests {
     /// window rather than anything in it.
     #[test]
     fn a_click_lands_on_the_icon_that_was_drawn_there() {
-        use openshard_client_render::gump::{GumpArt, GumpAtlas};
+        use openshard_client_render::gump::{
+            GumpArt,
+            GumpAtlas,
+        };
         use openshard_uofiles::color::Color16;
         use openshard_uofiles::image::Image;
 
@@ -1192,7 +1239,7 @@ mod tests {
         let window = Window {
             pictures: container::window_highlighted(BAG, &contents, at, None),
             contents: contents.clone(),
-            lines: Vec::new(),
+            lines:    Vec::new(),
         };
 
         assert_eq!(
@@ -1271,9 +1318,9 @@ mod tests {
         let held = item(0x4000_0001, CANDLE, 1);
         let mut ctx = files.ctx(&view, None, GumpPixel::new(195, 195), true);
         ctx.frame.hand = Some(Hand::Held(ItemDrag {
-            item: held,
+            item:   held,
             origin: DragOrigin::Ground,
-            grab: GumpPixel::new(0, 0),
+            grab:   GumpPixel::new(0, 0),
         }));
 
         let mut pane = ContainerPane::new(bag);

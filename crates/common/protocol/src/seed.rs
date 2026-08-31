@@ -28,7 +28,10 @@
 //! not collide with it.
 
 use crate::codec::PacketReader;
-use crate::packet::{SEED_LENGTH_NEW, SEED_LENGTH_OLD};
+use crate::packet::{
+    SEED_LENGTH_NEW,
+    SEED_LENGTH_OLD,
+};
 use crate::version::ClientVersion;
 
 /// The `0xEF` byte that opens a new-style seed.
@@ -52,7 +55,7 @@ pub struct RawSeedValue(pub u32);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Seed {
     /// The seed value. Never read — see [`RawSeedValue`].
-    pub value: RawSeedValue,
+    pub value:   RawSeedValue,
     /// The version the client reports here.
     ///
     /// `None` for an old-style seed, which carries no version — those clients
@@ -139,7 +142,7 @@ pub struct SeedReader {
     /// This flag is the whole reason the type exists — it is state that has to
     /// survive between reads. Sphere calls it `m_newseed`.
     command_seen: bool,
-    done: bool,
+    done:         bool,
 }
 
 impl SeedReader {
@@ -147,7 +150,7 @@ impl SeedReader {
     pub const fn new() -> Self {
         Self {
             command_seen: false,
-            done: false,
+            done:         false,
         }
     }
 
@@ -223,7 +226,7 @@ impl SeedReader {
         (
             offset + body_length,
             Some(Seed {
-                value: RawSeedValue(value),
+                value:   RawSeedValue(value),
                 // The client sends each field as a dword but every real value
                 // fits a byte. Saturating rather than truncating: a claimed
                 // major of 256 becoming 0 would silently demote a modern client
@@ -271,7 +274,7 @@ mod tests {
         assert_eq!(
             seed,
             Some(Seed {
-                value: RawSeedValue(0x0A00_0001),
+                value:   RawSeedValue(0x0A00_0001),
                 version: Some(ClientVersion::new(7, 0, 45, 65)),
             })
         );
@@ -286,7 +289,7 @@ mod tests {
         assert_eq!(
             seed,
             Some(Seed {
-                value: RawSeedValue(0xC0A8_0001),
+                value:   RawSeedValue(0xC0A8_0001),
                 version: None,
             }),
             "a legacy seed carries no version at all"

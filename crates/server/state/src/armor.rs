@@ -97,11 +97,11 @@ pub enum MedAllowance {
 pub struct ArmorData {
     /// The durable item kind for a registered armour piece. Rows without one
     /// are legacy classes still addressed through their drawing graphic.
-    pub item_kind: Option<ItemKindId>,
+    pub item_kind:  Option<ItemKindId>,
     /// The item graphic this row describes.
-    pub graphic: Graphic,
+    pub graphic:    Graphic,
     /// ServUO's `ArmorBase` — the class rating before body coverage.
-    pub rating: u16,
+    pub rating:     u16,
     /// How much it hinders meditation — its material's `DefMedAllowance`.
     pub meditation: MedAllowance,
 }
@@ -121,11 +121,31 @@ pub fn armor_data_for_kind(kind: ItemKindId) -> Option<&'static ArmorData> {
     ARMOR.iter().find(|armor| armor.item_kind == Some(kind))
 }
 
-use crate::components::{Armor, Drawn, ItemKind, Material, Quality};
-use crate::{WorldState, equipped_items, item_definition, material_definition, material_from_legacy_hue};
 use openshard_entities::EntityId;
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-use openshard_protocol::wire::{Graphic, Hue, Layer};
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
+
+use crate::components::{
+    Armor,
+    Drawn,
+    ItemKind,
+    Material,
+    Quality,
+};
+use crate::{
+    WorldState,
+    equipped_items,
+    item_definition,
+    material_definition,
+    material_from_legacy_hue,
+};
 
 /// What an exceptional piece is worth — ServUO's `ar += -8 + 8 * (int)m_Quality`
 /// with `ItemQuality.Exceptional` being 2, so eight points over an ordinary one.

@@ -71,18 +71,80 @@ pub mod surfaces;
 mod terrain;
 mod walk;
 
-pub use detour::{Around, Detour, Leeway, Step};
-pub use footing::{Bodies, Footing};
-pub use navigation::{COARSE_MIN_DISTANCE, LongExit, NavigationGraph, find_long_path, search_long_path};
-pub use pace::{
-    MOUNTED_RUN_HOLD, Pace, RUN_HOLD, RUN_INTERVAL, WALK_BUFFER, WALK_HOLD, WALK_INTERVAL, WalkPace,
-    crossing_left, step_hold, step_progress,
+pub use detour::{
+    Around,
+    Detour,
+    Leeway,
+    Step,
 };
-pub(crate) use path::{Effort, Rigour, debug_enabled, find_path_toward_within, find_path_within};
-pub use path::{PathSearch, SearchExit, Weight, destination_place, find_path, find_path_toward, search_path};
-pub use sequence::{OutOfSequence, StepCounter, WalkSequence};
-pub use terrain::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
+pub use footing::{
+    Bodies,
+    Footing,
+};
+pub use navigation::{
+    COARSE_MIN_DISTANCE,
+    LongExit,
+    NavigationGraph,
+    find_long_path,
+    search_long_path,
+};
+pub use pace::{
+    MOUNTED_RUN_HOLD,
+    Pace,
+    RUN_HOLD,
+    RUN_INTERVAL,
+    WALK_BUFFER,
+    WALK_HOLD,
+    WALK_INTERVAL,
+    WalkPace,
+    crossing_left,
+    step_hold,
+    step_progress,
+};
+pub(crate) use path::{
+    Effort,
+    Rigour,
+    debug_enabled,
+    find_path_toward_within,
+    find_path_within,
+};
+pub use path::{
+    PathSearch,
+    SearchExit,
+    Weight,
+    destination_place,
+    find_path,
+    find_path_toward,
+    search_path,
+};
+pub use sequence::{
+    OutOfSequence,
+    StepCounter,
+    WalkSequence,
+};
+pub use terrain::{
+    MAX_STEP_UP,
+    MapTerrain,
+    PLAYER_HEIGHT,
+};
 pub use walk::{
-    Heading, Intent, Lean, Refusal, Walk, Walker, arrival_z, can_fit, can_stand, can_step, direction_toward,
-    heading_toward, intend, line_tiles, predict_step, sight_clear, step_allowed, step_from, steps_out_of,
+    Heading,
+    Intent,
+    Lean,
+    Refusal,
+    Walk,
+    Walker,
+    arrival_z,
+    can_fit,
+    can_stand,
+    can_step,
+    direction_toward,
+    heading_toward,
+    intend,
+    line_tiles,
+    predict_step,
+    sight_clear,
+    step_allowed,
+    step_from,
+    steps_out_of,
 };

@@ -8,12 +8,18 @@
 //!
 //! The hash is a self-describing PHC string (`$argon2id$v=19$...`), so the
 //! parameters travel with it and an old hash still verifies after a parameter
-//! change. The salt is drawn from the OS entropy pool through `getrandom`, the
-//! same source the auth keys use, so no PRNG feature is pulled in for it.
+//! change. `password-hash` generates every salt from the OS entropy pool.
 
 use argon2::Argon2;
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
-use openshard_protocol::identity::{PlaintextPassword, RawPlaintextPassword};
+use argon2::password_hash::phc::PasswordHash;
+use argon2::password_hash::{
+    PasswordHasher,
+    PasswordVerifier,
+};
+use openshard_protocol::identity::{
+    PlaintextPassword,
+    RawPlaintextPassword,
+};
 
 /// Hash a plaintext password into a PHC string for storage.
 ///
@@ -23,11 +29,8 @@ use openshard_protocol::identity::{PlaintextPassword, RawPlaintextPassword};
 /// can meaningfully continue past.
 #[must_use]
 pub fn hash(plaintext: &PlaintextPassword) -> String {
-    let mut salt_bytes = [0u8; 16];
-    getrandom::getrandom(&mut salt_bytes).expect("the OS entropy pool is available");
-    let salt = SaltString::encode_b64(&salt_bytes).expect("sixteen bytes is a valid salt");
     Argon2::default()
-        .hash_password(plaintext.0.as_bytes(), &salt)
+        .hash_password(plaintext.0.as_bytes())
         .expect("argon2 does not fail on a valid salt and password")
         .to_string()
 }
@@ -40,9 +43,11 @@ pub fn hash(plaintext: &PlaintextPassword) -> String {
 #[must_use]
 pub fn verify(plaintext: &RawPlaintextPassword, phc: &str) -> bool {
     match PasswordHash::new(phc) {
-        Ok(parsed) => Argon2::default()
-            .verify_password(plaintext.0.as_bytes(), &parsed)
-            .is_ok(),
+        Ok(parsed) => {
+            Argon2::default()
+                .verify_password(plaintext.0.as_bytes(), &parsed)
+                .is_ok()
+        }
         Err(_) => false,
     }
 }

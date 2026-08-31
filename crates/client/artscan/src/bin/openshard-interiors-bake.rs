@@ -1,6 +1,9 @@
 //! Bake facet-wide positive building space from the measured wall catalogue.
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -14,10 +17,10 @@ use openshard_protocol::world::Facet;
 struct Cli {
     /// Ultima Online Classic install directory.
     #[arg(short, long, env = "OPENSHARD_CLIENT", value_name = "DIR")]
-    client: PathBuf,
+    client:   PathBuf,
     /// Facet to bake. Defaults to Britannia (0).
     #[arg(long, default_value_t = 0, value_name = "N")]
-    facet: u8,
+    facet:    u8,
     /// Flood a base set instead of the install's map and statics.
     ///
     /// What `world.base_sets` names in the shard's config, and what the client's
@@ -30,10 +33,10 @@ struct Cli {
     base_set: Option<PathBuf>,
     /// Explicit destination instead of the file beside the world.
     #[arg(long, value_name = "FILE")]
-    out: Option<PathBuf>,
+    out:      Option<PathBuf>,
     /// Calculate and report without writing an artifact.
     #[arg(long)]
-    dry_run: bool,
+    dry_run:  bool,
 }
 
 fn main() -> ExitCode {
@@ -50,10 +53,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let facet = Facet(cli.facet);
     match cli.base_set.as_deref() {
-        Some(base_set) => eprintln!(
-            "interiors bake: reading wall catalogue, and facet {facet} from {}",
-            base_set.display()
-        ),
+        Some(base_set) => {
+            eprintln!(
+                "interiors bake: reading wall catalogue, and facet {facet} from {}",
+                base_set.display()
+            )
+        }
         None => eprintln!("interiors bake: reading wall catalogue and facet {facet}"),
     }
     let source = cli

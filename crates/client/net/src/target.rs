@@ -1,6 +1,10 @@
 //! Client-side answer to a server targeting cursor.
 
-use openshard_protocol::packet::{DecodePacket, PacketLength, frame_body};
+use openshard_protocol::packet::{
+    DecodePacket,
+    PacketLength,
+    frame_body,
+};
 use openshard_protocol::target::TargetResponse;
 
 /// Encode the `0x6C` response to an active target cursor.
@@ -38,9 +42,9 @@ mod tests {
         let object = Serial::new(0x4000_002A).unwrap();
         let response = TargetResponse {
             cursor_id: CursorId(42),
-            object: Some(object),
-            location: Point::new(123, 456, 7),
-            graphic: None,
+            object:    Some(object),
+            location:  Point::new(123, 456, 7),
+            graphic:   None,
             cancelled: false,
         };
         let ClientPacket::TargetResponse(decoded) =
@@ -55,9 +59,9 @@ mod tests {
     fn cancellation_reaches_the_shards_target_handler() {
         let response = TargetResponse {
             cursor_id: CursorId(42),
-            object: None,
-            location: Point::new(0, 0, 0),
-            graphic: None,
+            object:    None,
+            location:  Point::new(0, 0, 0),
+            graphic:   None,
             cancelled: true,
         };
         let ClientPacket::TargetResponse(decoded) =

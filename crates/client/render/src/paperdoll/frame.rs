@@ -1,12 +1,19 @@
 //! Paperdoll frame artwork, controls, and title label layout.
 
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::{Graphic, Hue};
-
-use crate::gump::{GumpArt, GumpPixel, Picture, PictureIndex};
-use crate::text::GumpLabel;
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 
 use super::Doll;
+use crate::gump::{
+    GumpArt,
+    GumpPixel,
+    Picture,
+    PictureIndex,
+};
+use crate::text::GumpLabel;
 
 /// Whether a paperdoll belongs to this client or another mobile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

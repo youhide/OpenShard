@@ -199,7 +199,10 @@ impl Stance {
     /// readable wall for — falls back to [`Stance::Upright`], which is exactly
     /// what every static did before faces existed. Nothing gets worse anywhere.
     pub fn of(tile: &openshard_tiles::StaticTile, facing: Option<crate::facing::Facing>) -> Self {
-        use crate::facing::{Face, Facing};
+        use crate::facing::{
+            Face,
+            Facing,
+        };
 
         if tile.flags.is_background() {
             return Self::Flat;
@@ -211,13 +214,15 @@ impl Stance {
             // allow are the four the detector can produce, and anything else is
             // a facing built by hand and not by measurement. It falls back to
             // the whole-tile answer rather than picking a half.
-            Some(Facing::Corner { right, left }) => match (right, left) {
-                (Face::North, Face::South) => Self::CornerNorthSouth,
-                (Face::North, Face::West) => Self::CornerNorthWest,
-                (Face::East, Face::South) => Self::CornerEastSouth,
-                (Face::East, Face::West) => Self::CornerEastWest,
-                _ => Self::Upright,
-            },
+            Some(Facing::Corner { right, left }) => {
+                match (right, left) {
+                    (Face::North, Face::South) => Self::CornerNorthSouth,
+                    (Face::North, Face::West) => Self::CornerNorthWest,
+                    (Face::East, Face::South) => Self::CornerEastSouth,
+                    (Face::East, Face::West) => Self::CornerEastWest,
+                    _ => Self::Upright,
+                }
+            }
             None => Self::Upright,
         }
     }
@@ -327,18 +332,18 @@ impl Stance {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Place {
     /// The tile's `x`.
-    pub x: u16,
+    pub x:      u16,
     /// The tile's `y`.
-    pub y: u16,
+    pub y:      u16,
     /// The height it was drawn at.
     ///
     /// The ground pass ignores this and writes the height its corner
     /// interpolation gives the pixel — a hillside's pixels each carry their own
     /// — so for a [`GroundQuad`](crate::ground::GroundQuad) it is the tile's
     /// base and nothing reads it.
-    pub z: i8,
+    pub z:      i8,
     /// What drew it.
-    pub kind: Kind,
+    pub kind:   Kind,
     /// Which way its picture faces. The ground pass ignores this — a land tile
     /// is a diamond by construction and its shader has always read the position
     /// inside it.
@@ -349,10 +354,10 @@ impl Place {
     /// No place at all: the clear value, and what a pass that draws something
     /// outside the world writes.
     pub const NOWHERE: Self = Self {
-        x: 0,
-        y: 0,
-        z: 0,
-        kind: Kind::Nothing,
+        x:      0,
+        y:      0,
+        z:      0,
+        kind:   Kind::Nothing,
         stance: Stance::Upright,
     };
 
@@ -373,10 +378,10 @@ impl Place {
     /// instead.
     pub fn of_static(at: openshard_protocol::world::Point) -> Self {
         Self {
-            x: at.x,
-            y: at.y,
-            z: at.z,
-            kind: Kind::Static,
+            x:      at.x,
+            y:      at.y,
+            z:      at.z,
+            kind:   Kind::Static,
             stance: Stance::Upright,
         }
     }
@@ -397,10 +402,10 @@ impl Place {
     /// A pixel of a mobile, or of what it is wearing, standing at `at`.
     pub fn of_mobile(at: openshard_protocol::world::Point) -> Self {
         Self {
-            x: at.x,
-            y: at.y,
-            z: at.z,
-            kind: Kind::Mobile,
+            x:      at.x,
+            y:      at.y,
+            z:      at.z,
+            kind:   Kind::Mobile,
             stance: Stance::Upright,
         }
     }
@@ -500,7 +505,10 @@ mod tests {
     /// what it must not do is pick one of them for the whole tile.
     #[test]
     fn a_corner_facing_becomes_a_corner_stance() {
-        use crate::facing::{Face, Facing};
+        use crate::facing::{
+            Face,
+            Facing,
+        };
 
         let wall = openshard_tiles::StaticTile::default();
         assert_eq!(
@@ -508,7 +516,7 @@ mod tests {
                 &wall,
                 Some(Facing::Corner {
                     right: Face::East,
-                    left: Face::South
+                    left:  Face::South,
                 })
             ),
             Stance::CornerEastSouth,
@@ -518,7 +526,7 @@ mod tests {
                 &wall,
                 Some(Facing::Corner {
                     right: Face::South,
-                    left: Face::North
+                    left:  Face::North,
                 })
             ),
             Stance::Upright,

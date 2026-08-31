@@ -25,9 +25,20 @@
 
 use openshard_protocol::combat::WarMode;
 use openshard_protocol::encoded::RawEncodedSerial;
-use openshard_protocol::gump::{RawButtonId, RawGumpId, RawGumpKey, RawSwitchId};
-use openshard_protocol::mobile::{StatusQuery, StatusQueryKind};
-use openshard_protocol::serial::{RawSerial, Serial};
+use openshard_protocol::gump::{
+    RawButtonId,
+    RawGumpId,
+    RawGumpKey,
+    RawSwitchId,
+};
+use openshard_protocol::mobile::{
+    StatusQuery,
+    StatusQueryKind,
+};
+use openshard_protocol::serial::{
+    RawSerial,
+    Serial,
+};
 use openshard_protocol::world::LogoutRequest;
 
 /// Ask to enter or leave war mode: the `0x72` to write to the socket.

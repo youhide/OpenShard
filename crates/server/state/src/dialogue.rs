@@ -37,14 +37,14 @@ pub struct SpeechTable {
     pub greetings: Vec<String>,
     /// What it says to itself when nobody is near — ambient colour. Empty is
     /// silence, which is the right default for most trades.
-    pub barks: Vec<String>,
+    pub barks:     Vec<String>,
     /// Keyword groups and the answers to them. The first group with a match wins,
     /// so the order they are written in is their precedence — a specific keyword
     /// goes above a general one.
-    pub entries: Vec<SpeechEntry>,
+    pub entries:   Vec<SpeechEntry>,
     /// What it says when spoken to and nothing matched. `None` stays quiet, which
     /// is better than a shopkeeper answering every passing conversation.
-    pub fallback: Option<String>,
+    pub fallback:  Option<String>,
 }
 
 /// One keyword group and its answers.
@@ -54,7 +54,7 @@ pub struct SpeechEntry {
     /// was said — a substring match is how "unsellable" opened a shop.
     pub keywords: Vec<String>,
     /// The answers, one picked at random so an NPC asked twice does not repeat.
-    pub lines: Vec<String>,
+    pub lines:    Vec<String>,
 }
 
 impl SpeechEntry {
@@ -125,7 +125,7 @@ mod tests {
     fn entry(keywords: &[&str]) -> SpeechEntry {
         SpeechEntry {
             keywords: keywords.iter().map(|k| (*k).to_owned()).collect(),
-            lines: vec!["aye".to_owned()],
+            lines:    vec!["aye".to_owned()],
         }
     }
 

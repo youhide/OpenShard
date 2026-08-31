@@ -1,6 +1,10 @@
-use super::*;
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
 use openshard_protocol::wire::Graphic;
+
+use super::*;
 
 /// A player used (double-clicked) an item the engine has no built-in behaviour
 /// for — the item-trigger seam.
@@ -16,15 +20,15 @@ use openshard_protocol::wire::Graphic;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ItemUsed {
     /// The item that was double-clicked.
-    pub item: Serial,
+    pub item:      Serial,
     /// Its graphic, so a reader matches on the tile with no lookup.
-    pub graphic: Graphic,
+    pub graphic:   Graphic,
     /// Semantic item kind, when the item's presentation is registry-backed.
     pub item_kind: Option<ItemKindId>,
     /// Semantic material grade, when the kind accepts one.
-    pub material: Option<MaterialId>,
+    pub material:  Option<MaterialId>,
     /// The mobile that used it.
-    pub by: Serial,
+    pub by:        Serial,
 }
 
 /// A player double-clicked a mobile the engine has no deeper interaction for —
@@ -41,9 +45,9 @@ pub struct MobileUsed {
     /// The mobile that was double-clicked.
     pub mobile: Serial,
     /// Its body, so a pack matches on the kind with no lookup.
-    pub body: Graphic,
+    pub body:   Graphic,
     /// The mobile that used it.
-    pub by: Serial,
+    pub by:     Serial,
 }
 
 /// The result of a take request — how many of an item were taken from a
@@ -55,16 +59,16 @@ pub struct MobileUsed {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ItemsTaken {
     /// Whose backpack it was taken from.
-    pub player: Serial,
+    pub player:    Serial,
     /// The item graphic asked for.
-    pub graphic: Graphic,
+    pub graphic:   Graphic,
     /// Semantic item kind requested by a typed turn-in. `None` means the
     /// compatibility `Command::TakeItem` path matched presentation art only.
     pub item_kind: Option<ItemKindId>,
     /// Required material for a typed turn-in, where the kind is materialized.
-    pub material: Option<MaterialId>,
+    pub material:  Option<MaterialId>,
     /// How many were actually taken — the amount asked, or `0`.
-    pub taken: u16,
+    pub taken:     u16,
 }
 
 /// Emit [`MobileUsed`] for a double-clicked mobile.

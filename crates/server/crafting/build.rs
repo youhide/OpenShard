@@ -13,7 +13,10 @@
 //! still reads `&'static [Recipe]`. What a runtime load would report as an error
 //! on the first craft of the day, this reports before the crate compiles.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -24,7 +27,7 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields)]
 struct Table {
     /// The gump's left-hand column.
-    groups: Vec<Text>,
+    groups:  Vec<Text>,
     /// The material axis, for the four trades that have one.
     #[serde(default)]
     sub_res: Option<Axis>,
@@ -62,11 +65,11 @@ struct Axis {
     /// Semantic resource kind selected by this material axis.
     item_kind: u32,
     /// The resource graphic the axis substitutes a hue into.
-    graphic: String,
+    graphic:   String,
     /// The heading over the material row.
-    name: Text,
+    name:      Text,
     /// The grades, plain one first.
-    entries: Vec<AxisEntry>,
+    entries:   Vec<AxisEntry>,
 }
 
 /// `recipe::SubRes`.
@@ -74,15 +77,15 @@ struct Axis {
 #[serde(deny_unknown_fields)]
 struct AxisEntry {
     /// Stable material id selected by this row; hue is presentation only.
-    material: u16,
+    material:  u16,
     /// The hue that *is* this material.
-    hue: String,
+    hue:       String,
     /// Its name, for the material row.
-    name: Text,
+    name:      Text,
     /// The base skill needed to work it, in tenths.
     req_skill: i32,
     /// What is said when the crafter is not good enough.
-    message: Text,
+    message:   Text,
 }
 
 /// Only the stable ids are needed from the state-owned semantic registry. The
@@ -90,20 +93,20 @@ struct AxisEntry {
 /// compilation; it does not duplicate the registry's presentation or mechanics.
 #[derive(Deserialize)]
 struct ItemDefinitionIdRow {
-    id: u32,
+    id:              u32,
     #[serde(default)]
     material_family: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct MaterialDefinitionIdRow {
-    id: u16,
+    id:     u16,
     family: String,
-    hue: String,
+    hue:    String,
 }
 
 struct DefinitionIds {
-    items: BTreeMap<u32, Option<String>>,
+    items:     BTreeMap<u32, Option<String>>,
     materials: BTreeMap<u16, (String, String)>,
 }
 
@@ -116,49 +119,49 @@ struct Row {
     /// Stable semantic output identity. Omitted while a legacy row has not been
     /// audited into the item-definition registry.
     #[serde(default)]
-    kind: Option<u32>,
+    kind:               Option<u32>,
     /// The item art produced.
-    graphic: String,
+    graphic:            String,
     /// Its name, for the gump.
-    name: Text,
+    name:               Text,
     /// Which group it files under.
-    group: u16,
+    group:              u16,
     /// How many come out.
     #[serde(default = "one")]
-    amount: u16,
+    amount:             u16,
     /// A fixed hue for the result; zero defers to `retain_color`.
     #[serde(default = "zero")]
-    hue: String,
+    hue:                String,
     /// How a typed output obtains its material. The externally tagged shape is
     /// unambiguous in JSON: `{ "inherit_input": 0 }`, `{ "fixed": 9 }`, or
     /// `"none"`; omitted means this is still a legacy row.
     #[serde(default)]
-    output_material: OutputMaterialRow,
+    output_material:    OutputMaterialRow,
     /// Whether a zero-hued result inherits the chosen material's hue.
     #[serde(default = "yes")]
-    retain_color: bool,
+    retain_color:       bool,
     /// Consume every material in the pack and make as many as it can.
     #[serde(default)]
-    use_all_res: bool,
+    use_all_res:        bool,
     /// Tenths knocked off the "can you attempt this at all" gate.
     #[serde(default)]
-    min_skill_offset: i32,
+    min_skill_offset:   i32,
     /// Whether an exceptional one carries its maker's name.
     #[serde(default)]
-    markable: bool,
+    markable:           bool,
     /// Never exceptional, whatever the roll.
     #[serde(default)]
-    never_exceptional: bool,
+    never_exceptional:  bool,
     /// Always exceptional.
     #[serde(default)]
     always_exceptional: bool,
     /// What has to be standing nearby, on top of the system's own.
     #[serde(default)]
-    needs: NeedsRow,
+    needs:              NeedsRow,
     /// The skills wanted; the system's own leads.
-    skills: Vec<SkillRow>,
+    skills:             Vec<SkillRow>,
     /// What it eats.
-    resources: Vec<ResRow>,
+    resources:          Vec<ResRow>,
 }
 
 /// `recipe::OutputMaterial`, written in JSON only where a recipe has a kind.
@@ -177,9 +180,11 @@ impl OutputMaterialRow {
         match self {
             Self::Legacy => "crate::recipe::OutputMaterial::Legacy".to_owned(),
             Self::None => "crate::recipe::OutputMaterial::None".to_owned(),
-            Self::Fixed(material) => format!(
-                "crate::recipe::OutputMaterial::Fixed(openshard_protocol::item_kind::MaterialId({material}))"
-            ),
+            Self::Fixed(material) => {
+                format!(
+                    "crate::recipe::OutputMaterial::Fixed(openshard_protocol::item_kind::MaterialId({material}))"
+                )
+            }
             Self::InheritInput(input) => {
                 format!("crate::recipe::OutputMaterial::InheritInput({input})")
             }
@@ -194,9 +199,9 @@ struct SkillRow {
     /// The `Skill` variant's name, spelled as the enum spells it.
     skill: String,
     /// The bottom of the band, in tenths.
-    min: i32,
+    min:   i32,
     /// The top, at which the craft always succeeds.
-    max: i32,
+    max:   i32,
 }
 
 /// `recipe::CraftRes`.
@@ -206,18 +211,18 @@ struct ResRow {
     /// A semantic input selector for a migrated row. It is intentionally a
     /// small JSON vocabulary rather than serde's Rust-enum spelling.
     #[serde(default)]
-    selector: Option<SelectorRow>,
+    selector:  Option<SelectorRow>,
     /// The item art consumed.
-    graphic: String,
+    graphic:   String,
     /// And its hue; absent is the plain grade.
     #[serde(default = "zero")]
-    hue: String,
+    hue:       String,
     /// How many, per craft.
-    amount: u16,
+    amount:    u16,
     /// What it is called, for the detail page.
-    name: Text,
+    name:      Text,
     /// What is said when there are not enough.
-    message: Text,
+    message:   Text,
     /// Whether the material axis substitutes into this line.
     #[serde(default)]
     from_axis: bool,
@@ -231,7 +236,7 @@ enum SelectorRow {
         kind: u32,
     },
     KindWithMaterial {
-        kind: u32,
+        kind:     u32,
         material: SelectorMaterialRow,
     },
     Tag {
@@ -252,17 +257,23 @@ enum SelectorMaterialRow {
 impl SelectorRow {
     fn expr(&self) -> String {
         match self {
-            Self::Exact { kind } => format!(
-                "openshard_protocol::item_kind::ItemSelector::Exact(openshard_protocol::item_kind::ItemKindId({kind}))"
-            ),
-            Self::KindWithMaterial { kind, material } => format!(
-                "openshard_protocol::item_kind::ItemSelector::KindWithMaterial {{ kind: openshard_protocol::item_kind::ItemKindId({kind}), material: {} }}",
-                material.expr()
-            ),
-            Self::Tag { tag } => format!(
-                "openshard_protocol::item_kind::ItemSelector::Tag({})",
-                selector_tag(tag)
-            ),
+            Self::Exact { kind } => {
+                format!(
+                    "openshard_protocol::item_kind::ItemSelector::Exact(openshard_protocol::item_kind::ItemKindId({kind}))"
+                )
+            }
+            Self::KindWithMaterial { kind, material } => {
+                format!(
+                    "openshard_protocol::item_kind::ItemSelector::KindWithMaterial {{ kind: openshard_protocol::item_kind::ItemKindId({kind}), material: {} }}",
+                    material.expr()
+                )
+            }
+            Self::Tag { tag } => {
+                format!(
+                    "openshard_protocol::item_kind::ItemSelector::Tag({})",
+                    selector_tag(tag)
+                )
+            }
         }
     }
 }
@@ -271,16 +282,20 @@ impl SelectorMaterialRow {
     fn expr(&self) -> String {
         match self {
             Self::Any => "openshard_protocol::item_kind::MaterialRule::Any".to_owned(),
-            Self::Exact(material) => format!(
-                "openshard_protocol::item_kind::MaterialRule::Exact(openshard_protocol::item_kind::MaterialId({material}))"
-            ),
+            Self::Exact(material) => {
+                format!(
+                    "openshard_protocol::item_kind::MaterialRule::Exact(openshard_protocol::item_kind::MaterialId({material}))"
+                )
+            }
             Self::SameAsInput(input) => {
                 format!("openshard_protocol::item_kind::MaterialRule::SameAsInput({input})")
             }
-            Self::InFamily(family) => format!(
-                "openshard_protocol::item_kind::MaterialRule::InFamily(openshard_protocol::item_kind::MaterialFamilyId({}))",
-                selector_family(family)
-            ),
+            Self::InFamily(family) => {
+                format!(
+                    "openshard_protocol::item_kind::MaterialRule::InFamily(openshard_protocol::item_kind::MaterialFamilyId({}))",
+                    selector_family(family)
+                )
+            }
         }
     }
 }
@@ -322,13 +337,13 @@ struct NeedsRow {
     anvil: bool,
     /// Any fire at all.
     #[serde(default)]
-    heat: bool,
+    heat:  bool,
     /// An oven.
     #[serde(default)]
-    oven: bool,
+    oven:  bool,
     /// A flour mill.
     #[serde(default)]
-    mill: bool,
+    mill:  bool,
     /// Water.
     #[serde(default)]
     water: bool,
@@ -346,7 +361,7 @@ struct Systems {
     #[serde(default)]
     _comment: Vec<String>,
     /// In order: the index is the `SystemId`.
-    systems: Vec<SystemRow>,
+    systems:  Vec<SystemRow>,
 }
 
 /// `system::CraftSystemDef`, minus the three fields that come from the trade's
@@ -355,35 +370,35 @@ struct Systems {
 #[serde(deny_unknown_fields)]
 struct SystemRow {
     /// Which `data/<trade>.json` supplies this system's recipes.
-    trade: String,
+    trade:         String,
     /// Why this system's numbers are what they are; emitted as a comment above
     /// the row, because that is where it was worth reading before the move.
     #[serde(default)]
-    note: String,
+    note:          String,
     /// The `Skill` variant's name, spelled as the enum spells it — and the skill
     /// every one of the trade's recipes has to lead with.
-    skill: String,
+    skill:         String,
     /// The title over the gump.
-    title: Text,
+    title:         Text,
     /// Success chance at the bottom of a recipe's band, in per-mille.
     chance_at_min: u32,
     /// The `Eca` variant's name.
-    eca: String,
+    eca:           String,
     /// ServUO's `Delay`, in milliseconds rather than ticks: the tick rate is the
     /// engine's business and this file is ServUO's numbers.
     #[serde(default = "default_delay_ms")]
-    delay_ms: u64,
+    delay_ms:      u64,
     /// The fewest beats one craft takes.
     #[serde(default = "one_beat")]
-    min_beats: u8,
+    min_beats:     u8,
     /// And the most.
     #[serde(default = "one_beat")]
-    max_beats: u8,
+    max_beats:     u8,
     /// What the tool makes on each beat.
-    craft_sound: String,
+    craft_sound:   String,
     /// What has to be standing nearby for *any* of this system's recipes.
     #[serde(default)]
-    needs: NeedsRow,
+    needs:         NeedsRow,
     /// The cliloc said when `needs` is not met. Absent — not zero — for the four
     /// systems that need no workshop, so "no message" and "message 0" are not
     /// the same bits.
@@ -459,11 +474,13 @@ fn generate(table: &Table) -> String {
     for row in &table.recipes {
         writeln!(out, "    Recipe {{").unwrap();
         match row.kind {
-            Some(kind) => writeln!(
-                out,
-                "        kind: Some(openshard_protocol::item_kind::ItemKindId({kind})),"
-            )
-            .unwrap(),
+            Some(kind) => {
+                writeln!(
+                    out,
+                    "        kind: Some(openshard_protocol::item_kind::ItemKindId({kind})),"
+                )
+                .unwrap()
+            }
             None => out.push_str("        kind: None,\n"),
         }
         writeln!(out, "        graphic: Graphic({}),", hex("graphic", &row.graphic)).unwrap();
@@ -572,14 +589,18 @@ fn check(row: &SystemRow, table: &Table) {
             | (Some(_), OutputMaterialRow::None)
             | (Some(_), OutputMaterialRow::Fixed(_))
             | (Some(_), OutputMaterialRow::InheritInput(_)) => {}
-            (Some(_), OutputMaterialRow::Legacy) => panic!(
-                "{}: recipe {} has an item kind but no output material policy",
-                row.trade, recipe.graphic
-            ),
-            (None, _) => panic!(
-                "{}: recipe {} has an output material policy but no item kind",
-                row.trade, recipe.graphic
-            ),
+            (Some(_), OutputMaterialRow::Legacy) => {
+                panic!(
+                    "{}: recipe {} has an item kind but no output material policy",
+                    row.trade, recipe.graphic
+                )
+            }
+            (None, _) => {
+                panic!(
+                    "{}: recipe {} has an output material policy but no item kind",
+                    row.trade, recipe.graphic
+                )
+            }
         }
         if let OutputMaterialRow::InheritInput(input) = &recipe.output_material {
             assert!(
@@ -633,17 +654,21 @@ fn check_selector(system: &SystemRow, recipe: &Row, input: usize, resource: &Res
         SelectorRow::KindWithMaterial { kind, material } => {
             assert!(*kind != 0, "{name} has reserved item kind 0");
             match material {
-                SelectorMaterialRow::Any => assert!(
-                    resource.from_axis,
-                    "{name} uses material Any without the selected material axis"
-                ),
+                SelectorMaterialRow::Any => {
+                    assert!(
+                        resource.from_axis,
+                        "{name} uses material Any without the selected material axis"
+                    )
+                }
                 SelectorMaterialRow::Exact(material) => {
                     assert!(*material != 0, "{name} has reserved material id 0");
                 }
-                SelectorMaterialRow::InFamily(_) => assert!(
-                    resource.from_axis,
-                    "{name} checks a material family without the selected material axis"
-                ),
+                SelectorMaterialRow::InFamily(_) => {
+                    assert!(
+                        resource.from_axis,
+                        "{name} checks a material family without the selected material axis"
+                    )
+                }
                 SelectorMaterialRow::SameAsInput(_) => {
                     panic!("{name} uses SameAsInput before the multi-input selector evaluator exists")
                 }
@@ -699,10 +724,12 @@ fn check_definition_references(trade: &str, table: &Table, definitions: &Definit
             item(kind, &label);
         }
         match (&recipe.kind, &recipe.output_material) {
-            (Some(kind), OutputMaterialRow::None) => assert!(
-                item(*kind, &label).is_none(),
-                "{trade}: {label} has material policy None for material-bearing kind {kind}"
-            ),
+            (Some(kind), OutputMaterialRow::None) => {
+                assert!(
+                    item(*kind, &label).is_none(),
+                    "{trade}: {label} has material policy None for material-bearing kind {kind}"
+                )
+            }
             (Some(kind), OutputMaterialRow::Fixed(id)) => {
                 let family = item(*kind, &label).as_deref().unwrap_or_else(|| {
                     panic!("{trade}: {label} fixes a material on material-less kind {kind}")
@@ -899,7 +926,7 @@ fn main() {
     let items: Vec<ItemDefinitionIdRow> = read(&state_data.join("items.json"));
     let materials: Vec<MaterialDefinitionIdRow> = read(&state_data.join("materials.json"));
     let definitions = DefinitionIds {
-        items: items
+        items:     items
             .into_iter()
             .map(|row| (row.id, row.material_family))
             .collect(),

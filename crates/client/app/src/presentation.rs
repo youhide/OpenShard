@@ -18,50 +18,117 @@
 
 use std::collections::BTreeSet;
 use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::sync::{Arc, mpsc};
-use std::time::{Duration, Instant};
+use std::hash::{
+    Hash,
+    Hasher,
+};
+use std::sync::{
+    Arc,
+    mpsc,
+};
+use std::time::{
+    Duration,
+    Instant,
+};
 
-use openshard_client_render::atlas::{AnimAtlas, AnimationKey, StaticAtlasPage};
-use openshard_client_render::blit::{self, Blit, ViewportRect};
-use openshard_client_render::camera::{Camera, ViewPixel};
+use openshard_client_render::atlas::{
+    AnimAtlas,
+    AnimationKey,
+    StaticAtlasPage,
+};
+use openshard_client_render::blit::{
+    self,
+    Blit,
+    ViewportRect,
+};
+use openshard_client_render::camera::{
+    Camera,
+    ViewPixel,
+};
 use openshard_client_render::composite::{
-    CompositeKey, CompositeProducerJob, CompositeQuarantineReason, CompositeTexture, CompositeTier,
-    ImmutableRevision, MapBlockBounds,
+    CompositeKey,
+    CompositeProducerJob,
+    CompositeQuarantineReason,
+    CompositeTexture,
+    CompositeTier,
+    ImmutableRevision,
+    MapBlockBounds,
 };
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::debug::View;
 use openshard_client_render::gbuffer::Gbuffer;
 use openshard_client_render::gump::GumpPixel;
-use openshard_client_render::items::{self};
+use openshard_client_render::items::{
+    self,
+};
 use openshard_client_render::lod::BlockLod;
-use openshard_client_render::mobiles::{self, Mobile};
-use openshard_client_render::outline::{self};
-use openshard_client_render::radar::{self, RadarBuildScratch};
+use openshard_client_render::mobiles::{
+    self,
+    Mobile,
+};
+use openshard_client_render::outline::{
+    self,
+};
+use openshard_client_render::radar::{
+    self,
+    RadarBuildScratch,
+};
 use openshard_client_render::radar_pass::Placement;
-use openshard_client_render::renderer::{self, Target};
+use openshard_client_render::renderer::{
+    self,
+    Target,
+};
 use openshard_client_render::sprite::SpriteQuad;
-use openshard_client_render::text::{self, Label};
-use openshard_client_render::{ground, light, statics};
+use openshard_client_render::text::{
+    self,
+    Label,
+};
+use openshard_client_render::{
+    ground,
+    light,
+    statics,
+};
 use openshard_map::grid::BlockCoord;
 use openshard_map::map::WorldMap;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 use openshard_protocol::world::Point;
-use openshard_uofiles::anim::{AnimationGroup, BodyDef, BodyKind};
+use openshard_uofiles::anim::{
+    AnimationGroup,
+    BodyDef,
+    BodyKind,
+};
 
 use crate::app::App;
 use crate::chat::draw_chat_and_speech;
-use crate::crowd::{Crowd, Who};
+use crate::crowd::{
+    Crowd,
+    Who,
+};
 use crate::diagnostics::Pick;
-use crate::frame_geometry::{FrameFacts, assemble_geometry};
+use crate::frame_geometry::{
+    FrameFacts,
+    assemble_geometry,
+};
 use crate::graphics::HighlightTarget;
 use crate::picking::SelectedIdentity;
 use crate::profile;
-use crate::render_passes::{WorldPassAudit, draw_gump_windows, encode_world_passes};
-use crate::window::{Screen, prepare_composite_job, ready_atlases};
+use crate::render_passes::{
+    WorldPassAudit,
+    draw_gump_windows,
+    encode_world_passes,
+};
+use crate::window::{
+    Screen,
+    prepare_composite_job,
+    ready_atlases,
+};
 use crate::world::{
-    DAMAGE_NUMBER_HOLD, DAMAGE_NUMBER_RISE, PlayerMotion, SPEECH_LINE_HEIGHT, advance_presentation_to,
+    DAMAGE_NUMBER_HOLD,
+    DAMAGE_NUMBER_RISE,
+    PlayerMotion,
+    SPEECH_LINE_HEIGHT,
+    advance_presentation_to,
 };
 
 mod composite_producer;
@@ -155,10 +222,10 @@ fn draw_world_text(
             encoder,
             openshard_client_render::gump::Frame {
                 target: view,
-                width: window.config.width,
+                width:  window.config.width,
                 height: window.config.height,
                 // `ScreenLabel` coordinates and glyphs are already real pixels.
-                scale: 1.0,
+                scale:  1.0,
             },
             &quads,
         );
@@ -176,9 +243,9 @@ fn audit_texture_bytes(
     let row = texture.width() * bytes_per_texel;
     let stride = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some(label),
-        size: u64::from(stride) * u64::from(texture.height()),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some(label),
+        size:               u64::from(stride) * u64::from(texture.height()),
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
@@ -192,14 +259,14 @@ fn audit_texture_bytes(
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(stride),
+                offset:         0,
+                bytes_per_row:  Some(stride),
                 rows_per_image: Some(texture.height()),
             },
         },
         wgpu::Extent3d {
-            width: texture.width(),
-            height: texture.height(),
+            width:                 texture.width(),
+            height:                texture.height(),
             depth_or_array_layers: 1,
         },
     );
@@ -243,9 +310,9 @@ fn audit_captured_composite_ids(
     let stride = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let bytes = u64::from(stride) * u64::from(ids.height());
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("map composite IDs audit readback"),
-        size: bytes,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("map composite IDs audit readback"),
+        size:               bytes,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -253,22 +320,22 @@ fn audit_captured_composite_ids(
     });
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: ids,
+            texture:   ids,
             mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    wgpu::TextureAspect::All,
         },
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(stride),
+                offset:         0,
+                bytes_per_row:  Some(stride),
                 rows_per_image: Some(ids.height()),
             },
         },
         wgpu::Extent3d {
-            width: ids.width(),
-            height: ids.height(),
+            width:                 ids.width(),
+            height:                ids.height(),
             depth_or_array_layers: 1,
         },
     );
@@ -430,9 +497,9 @@ fn audit_static_atlas_pages(window: &crate::window::Screen) {
         let row = texture.width() * 4;
         let stride = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let readback = window.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("static atlas soak readback"),
-            size: u64::from(stride) * u64::from(texture.height()),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            label:              Some("static atlas soak readback"),
+            size:               u64::from(stride) * u64::from(texture.height()),
+            usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
         let mut encoder = window
@@ -450,14 +517,14 @@ fn audit_static_atlas_pages(window: &crate::window::Screen) {
             wgpu::TexelCopyBufferInfo {
                 buffer: &readback,
                 layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(stride),
+                    offset:         0,
+                    bytes_per_row:  Some(stride),
                     rows_per_image: Some(texture.height()),
                 },
             },
             wgpu::Extent3d {
-                width: texture.width(),
-                height: texture.height(),
+                width:                 texture.width(),
+                height:                texture.height(),
                 depth_or_array_layers: 1,
             },
         );
@@ -518,9 +585,9 @@ fn audit_atlas_texture(
     let row = texture.width() * 4;
     let stride = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let readback = window.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("atlas soak readback"),
-        size: u64::from(stride) * u64::from(texture.height()),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("atlas soak readback"),
+        size:               u64::from(stride) * u64::from(texture.height()),
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let mut encoder = window
@@ -538,14 +605,14 @@ fn audit_atlas_texture(
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(stride),
+                offset:         0,
+                bytes_per_row:  Some(stride),
                 rows_per_image: Some(texture.height()),
             },
         },
         wgpu::Extent3d {
-            width: texture.width(),
-            height: texture.height(),
+            width:                 texture.width(),
+            height:                texture.height(),
             depth_or_array_layers: 1,
         },
     );
@@ -605,9 +672,9 @@ fn audit_scene_instance_buffers(window: &crate::window::Screen) {
             continue;
         }
         let readback = window.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("scene instance soak readback"),
-            size: expected.len() as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            label:              Some("scene instance soak readback"),
+            size:               expected.len() as u64,
+            usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
         let mut encoder = window
@@ -669,15 +736,15 @@ fn audit_visible_ground_centres(window: &crate::window::Screen, map: &WorldMap, 
     let position_stride =
         position_row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let readback = window.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("LOD screen G-buffer audit readback"),
-        size: u64::from(stride) * u64::from(ids.height()),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("LOD screen G-buffer audit readback"),
+        size:               u64::from(stride) * u64::from(ids.height()),
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let position_readback = window.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("LOD screen G-buffer position audit readback"),
-        size: u64::from(position_stride) * u64::from(position.height()),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("LOD screen G-buffer position audit readback"),
+        size:               u64::from(position_stride) * u64::from(position.height()),
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let mut encoder = window
@@ -687,43 +754,43 @@ fn audit_visible_ground_centres(window: &crate::window::Screen, map: &WorldMap, 
         });
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: ids,
+            texture:   ids,
             mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    wgpu::TextureAspect::All,
         },
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(stride),
+                offset:         0,
+                bytes_per_row:  Some(stride),
                 rows_per_image: Some(ids.height()),
             },
         },
         wgpu::Extent3d {
-            width: ids.width(),
-            height: ids.height(),
+            width:                 ids.width(),
+            height:                ids.height(),
             depth_or_array_layers: 1,
         },
     );
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: position,
+            texture:   position,
             mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    wgpu::TextureAspect::All,
         },
         wgpu::TexelCopyBufferInfo {
             buffer: &position_readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(position_stride),
+                offset:         0,
+                bytes_per_row:  Some(position_stride),
                 rows_per_image: Some(position.height()),
             },
         },
         wgpu::Extent3d {
-            width: position.width(),
-            height: position.height(),
+            width:                 position.width(),
+            height:                position.height(),
             depth_or_array_layers: 1,
         },
     );
@@ -912,17 +979,19 @@ fn audit_lod_map_equivalence(
         height,
     };
     let actual_world_view = window.world.create_view(&wgpu::TextureViewDescriptor::default());
-    let frame = |target, world, gbuffer| blit::Frame {
-        target,
-        world,
-        gbuffer,
-        face_instances: window.statics.instances_buffer(),
-        item_instances: window.items_pass.instances_buffer(),
-        mobile_instances: window.mobile_pass.instances_buffer(),
-        mesh_instances: window.mesh_pass.rows_buffer(),
-        ground_instances: window.renderer.instances_buffer(),
-        zoom: camera.zoom(),
-        rect: raw_rect,
+    let frame = |target, world, gbuffer| {
+        blit::Frame {
+            target,
+            world,
+            gbuffer,
+            face_instances: window.statics.instances_buffer(),
+            item_instances: window.items_pass.instances_buffer(),
+            mobile_instances: window.mobile_pass.instances_buffer(),
+            mesh_instances: window.mesh_pass.rows_buffer(),
+            ground_instances: window.renderer.instances_buffer(),
+            zoom: camera.zoom(),
+            rect: raw_rect,
+        }
     };
     let mut encoder = window
         .device
@@ -1059,17 +1128,21 @@ fn audit_lod_map_equivalence(
             continue;
         }
         let expected_source_tile = match openshard_client_render::gbuffer::ids_kind(expected_id) {
-            Some(openshard_client_render::place::Kind::Land) => geometry
-                .quads
-                .get(openshard_client_render::gbuffer::ids_id(expected_id) as usize)
-                .map(|quad| (quad.place.x, quad.place.y)),
+            Some(openshard_client_render::place::Kind::Land) => {
+                geometry
+                    .quads
+                    .get(openshard_client_render::gbuffer::ids_id(expected_id) as usize)
+                    .map(|quad| (quad.place.x, quad.place.y))
+            }
             _ => None,
         };
         let expected_source_is_flat = match openshard_client_render::gbuffer::ids_kind(expected_id) {
-            Some(openshard_client_render::place::Kind::Land) => geometry
-                .quads
-                .get(openshard_client_render::gbuffer::ids_id(expected_id) as usize)
-                .map(|quad| quad.is_flat()),
+            Some(openshard_client_render::place::Kind::Land) => {
+                geometry
+                    .quads
+                    .get(openshard_client_render::gbuffer::ids_id(expected_id) as usize)
+                    .map(|quad| quad.is_flat())
+            }
             _ => None,
         };
         let expected_source_block = expected_source_tile.map(|(x, y)| BlockCoord::containing(x, y));
@@ -1275,8 +1348,8 @@ const fn visible_composite_lod(selected: BlockLod) -> BlockLod {
 /// overlay and next-frame click must agree on.
 struct PreparedFrame {
     started: Instant,
-    camera: Camera,
-    facts: FrameFacts,
+    camera:  Camera,
+    facts:   FrameFacts,
 }
 
 /// Translate the common motion groups when a `Body.def` redirect crosses one
@@ -1764,30 +1837,34 @@ impl App {
             }
         }
         let on_mobile = match (owns_pointer, self.window.as_ref(), &drawn_mobiles) {
-            (true, Some(window), Some(drawn)) => mobiles::pick_iter_with_interior(
-                drawn.iter().map(|(_, mobile)| mobile),
-                &camera,
-                &window.atlases.mobiles,
-                &cutaway,
-                &self.resources.equip_conv,
-                cursor,
-                interior.as_ref(),
-            ),
-            _ => None,
-        };
-        let on_item = match owns_pointer && on_mobile.is_none() {
-            true => self.window.as_ref().and_then(|window| {
-                items::pick_with_interior(
-                    &drawn_items,
+            (true, Some(window), Some(drawn)) => {
+                mobiles::pick_iter_with_interior(
+                    drawn.iter().map(|(_, mobile)| mobile),
                     &camera,
-                    &self.resources.tiledata,
-                    &self.world.presentation.tile_animations,
-                    &window.atlases.statics,
+                    &window.atlases.mobiles,
                     &cutaway,
+                    &self.resources.equip_conv,
                     cursor,
                     interior.as_ref(),
                 )
-            }),
+            }
+            _ => None,
+        };
+        let on_item = match owns_pointer && on_mobile.is_none() {
+            true => {
+                self.window.as_ref().and_then(|window| {
+                    items::pick_with_interior(
+                        &drawn_items,
+                        &camera,
+                        &self.resources.tiledata,
+                        &self.world.presentation.tile_animations,
+                        &window.atlases.statics,
+                        &cutaway,
+                        cursor,
+                        interior.as_ref(),
+                    )
+                })
+            }
             false => None,
         };
         // A press runs after this frame has finished, when this draw list may
@@ -1831,18 +1908,20 @@ impl App {
         // per static is the collector's own — see the Frames tab if it ever
         // shows.
         let map_static = match owns_pointer && (on_mobile.is_none() || removing_map_static) {
-            true => self.window.as_ref().and_then(|window| {
-                statics::pick_with_interior(
-                    self.resources.map(),
-                    &camera,
-                    &self.resources.tiledata,
-                    &self.world.presentation.tile_animations,
-                    &window.atlases.statics,
-                    &cutaway,
-                    cursor,
-                    interior.as_ref(),
-                )
-            }),
+            true => {
+                self.window.as_ref().and_then(|window| {
+                    statics::pick_with_interior(
+                        self.resources.map(),
+                        &camera,
+                        &self.resources.tiledata,
+                        &self.world.presentation.tile_animations,
+                        &window.atlases.statics,
+                        &cutaway,
+                        cursor,
+                        interior.as_ref(),
+                    )
+                })
+            }
             false => None,
         };
         // An ordinary click takes the picture's frontmost answer. The editor's
@@ -1964,11 +2043,13 @@ impl App {
         // the storey that was clicked. The art distinguishes a floor from a
         // wall or roof when Ctrl-click chooses a route through a house. See
         // [`crate::picking::HoveredItem`].
-        self.picking.hover.item = facts.on_item.map(|index| crate::picking::HoveredItem {
-            serial: facts.drawn_item_serials[index.position()],
-            graphic: facts.drawn_items[index.position()].graphic,
-            at: facts.drawn_items[index.position()].at,
-            grab: facts.on_item_grab.unwrap_or_default(),
+        self.picking.hover.item = facts.on_item.map(|index| {
+            crate::picking::HoveredItem {
+                serial:  facts.drawn_item_serials[index.position()],
+                graphic: facts.drawn_items[index.position()].graphic,
+                at:      facts.drawn_items[index.position()].at,
+                grab:    facts.on_item_grab.unwrap_or_default(),
+            }
         });
     }
 
@@ -2208,15 +2289,15 @@ impl App {
                     crate::windows::Drawn::Minimap(bounds) => {
                         let (content_at, content_extent) = bounds.content();
                         let placement = Placement {
-                            origin: (
+                            origin:   (
                                 at.x as f32 + content_at.x as f32 * window_scale.factor(),
                                 at.y as f32 + content_at.y as f32 * window_scale.factor(),
                             ),
-                            extent: (
+                            extent:   (
                                 content_extent.0 as f32 * window_scale.factor(),
                                 content_extent.1 as f32 * window_scale.factor(),
                             ),
-                            circle: true,
+                            circle:   true,
                             rotation: std::f32::consts::FRAC_PI_4,
                         };
                         radar::RadarView::new(
@@ -2241,15 +2322,15 @@ impl App {
                             radar_facet_extent,
                             bounds.tiles_per_pixel / (window_scale.factor() * gump_scale),
                             Placement {
-                                origin: (
+                                origin:   (
                                     at.x as f32 + content_at.x as f32 * window_scale.factor(),
                                     at.y as f32 + content_at.y as f32 * window_scale.factor(),
                                 ),
-                                extent: (
+                                extent:   (
                                     content_extent.0 as f32 * window_scale.factor(),
                                     content_extent.1 as f32 * window_scale.factor(),
                                 ),
-                                circle: false,
+                                circle:   false,
                                 rotation: 0.0,
                             },
                             gump_scale,
@@ -2280,13 +2361,13 @@ impl App {
                 .map(|(subject, view, lod)| (*subject, *lod, view.tiles_per_pixel))
                 .collect(),
             demand: radar::RadarDemand {
-                exact: 0,
+                exact:   0,
                 coarser: 0,
-                stale: 0,
+                stale:   0,
                 missing: 0,
             },
             raster: Duration::ZERO,
-            built: 0,
+            built:  0,
         };
         let ttf_active = self.ttf_active();
         let bitmap_font_override = self.bitmap_font_override();
@@ -2380,9 +2461,9 @@ impl App {
             let mut scratch = RadarBuildScratch::default();
             let report = radar::advance(
                 radar::RadarStep {
-                    views: &views,
-                    sweep: world_map_open.then_some(openshard_protocol::world::Facet(crate::FACET)),
-                    facet_extent: radar_facet_extent,
+                    views:           &views,
+                    sweep:           world_map_open.then_some(openshard_protocol::world::Facet(crate::FACET)),
+                    facet_extent:    radar_facet_extent,
                     producer_centre: player_tile
                         .map(radar::world_tile_to_base_chunk)
                         .map(|(chunk, _)| chunk)
@@ -2533,9 +2614,9 @@ impl App {
         // a docked panel shrinks the world rather than covering it.
         let viewport = ui.as_ref().map_or(
             ViewportRect {
-                x: 0,
-                y: 0,
-                width: window.config.width,
+                x:      0,
+                y:      0,
+                width:  window.config.width,
                 height: window.config.height,
             },
             |(_, _, viewport)| *viewport,
@@ -2660,10 +2741,12 @@ impl App {
                     project: impl Fn(&ViewPixel) -> GumpPixel,
                 ) -> Vec<text::ScreenLabel<'a>> {
                     list.iter()
-                        .map(|(anchor, line, _font, hue)| text::ScreenLabel {
-                            anchor: project(anchor),
-                            text: line.as_str(),
-                            hue: *hue,
+                        .map(|(anchor, line, _font, hue)| {
+                            text::ScreenLabel {
+                                anchor: project(anchor),
+                                text:   line.as_str(),
+                                hue:    *hue,
+                            }
                         })
                         .collect()
                 }
@@ -2678,20 +2761,22 @@ impl App {
                     bitmap_font_override: Option<Font>,
                 ) -> Vec<Label<'a>> {
                     list.iter()
-                        .map(|(anchor, line, font, hue)| Label {
-                            anchor: *anchor,
-                            text: line.as_str(),
-                            font: bitmap_font_override.unwrap_or(*font),
-                            hue: *hue,
-                            // Nearer than anything the world draws, rather than
-                            // an `Order` of its own: speech reads as an overlay
-                            // above whoever said it in every reference client,
-                            // and there is no real case here of a wall in front
-                            // of the speaker hiding it that a viewer would want
-                            // honoured. Worth revisiting with a
-                            // `depth::text_priority_z` alongside the mobile's
-                            // own if that ever stops being true.
-                            depth: 0.0,
+                        .map(|(anchor, line, font, hue)| {
+                            Label {
+                                anchor: *anchor,
+                                text:   line.as_str(),
+                                font:   bitmap_font_override.unwrap_or(*font),
+                                hue:    *hue,
+                                // Nearer than anything the world draws, rather than
+                                // an `Order` of its own: speech reads as an overlay
+                                // above whoever said it in every reference client,
+                                // and there is no real case here of a wall in front
+                                // of the speaker hiding it that a viewer would want
+                                // honoured. Worth revisiting with a
+                                // `depth::text_priority_z` alongside the mobile's
+                                // own if that ever stops being true.
+                                depth:  0.0,
+                            }
                         })
                         .collect()
                 }
@@ -2712,11 +2797,11 @@ impl App {
         let gbuffer_views = window.gbuffer.views();
         let cutaway_gbuffer_views = window.cutaway_gbuffer.views();
         let target = Target {
-            view: &world_view,
-            depth: &depth_view,
-            gbuffer: &gbuffer_views,
-            width: render_width,
-            height: render_height,
+            view:       &world_view,
+            depth:      &depth_view,
+            gbuffer:    &gbuffer_views,
+            width:      render_width,
+            height:     render_height,
             projection: camera.projection(),
         };
         let mut encoder = window
@@ -2934,15 +3019,15 @@ impl App {
         // lighting, the same rect — once per plane. `docs/parity.md` D5.
         if let Some(into) = self.graphics.frame_dump.take() {
             let dump = window.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("frame dump"),
-                size: wgpu::Extent3d {
-                    width: window.config.width,
-                    height: window.config.height,
+                label:           Some("frame dump"),
+                size:            wgpu::Extent3d {
+                    width:                 window.config.width,
+                    height:                window.config.height,
                     depth_or_array_layers: 1,
                 },
                 mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
+                sample_count:    1,
+                dimension:       wgpu::TextureDimension::D2,
                 // **The world's format and not the surface's**, which is what
                 // the first press of F12 found: a surface is whatever the
                 // compositor offered — here `Rgba16Float`, eight bytes a texel
@@ -2951,9 +3036,9 @@ impl App {
                 // picture would come out with its red and blue swapped, and
                 // nothing would say so. `isolated_scene` has always drawn into
                 // this format, and a dump exists to be compared with that one.
-                format: blit::WORLD_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
+                format:          blit::WORLD_FORMAT,
+                usage:           wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats:    &[],
             });
             let dump_view = dump.create_view(&wgpu::TextureViewDescriptor::default());
             // A second pipeline for that format, built here and dropped with the
@@ -2972,16 +3057,16 @@ impl App {
                     // A view of `dump`, made one line above it: `dump::planes`'s
                     // own contract, and the whole of what this call site has to
                     // keep true.
-                    target: &dump_view,
-                    world: &world_view,
-                    gbuffer: &gbuffer_views,
-                    face_instances: window.statics.instances_buffer(),
-                    item_instances: window.items_pass.instances_buffer(),
+                    target:           &dump_view,
+                    world:            &world_view,
+                    gbuffer:          &gbuffer_views,
+                    face_instances:   window.statics.instances_buffer(),
+                    item_instances:   window.items_pass.instances_buffer(),
                     mobile_instances: window.mobile_pass.instances_buffer(),
-                    mesh_instances: window.mesh_pass.rows_buffer(),
+                    mesh_instances:   window.mesh_pass.rows_buffer(),
                     ground_instances: window.renderer.instances_buffer(),
-                    zoom: camera.zoom(),
-                    rect: viewport,
+                    zoom:             camera.zoom(),
+                    rect:             viewport,
                 },
                 &geometry.lighting,
                 // Every one of them. A dump taken because something looked wrong
@@ -2998,11 +3083,13 @@ impl App {
                     .as_deref()
                     .expect("the summary is taken whenever a dump is armed, above"),
             ) {
-                Ok(()) => tracing::info!(
-                    into = %into.display(),
-                    planes = planes.len(),
-                    "frame dumped",
-                ),
+                Ok(()) => {
+                    tracing::info!(
+                        into = %into.display(),
+                        planes = planes.len(),
+                        "frame dumped",
+                    )
+                }
                 // A dump that could not be written is a diagnostic that failed,
                 // not a frame that failed: the client goes on drawing.
                 Err(error) => tracing::warn!(into = %into.display(), %error, "dumping the frame"),
@@ -3164,12 +3251,19 @@ pub(crate) fn write_frame_dump(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_client_render::follow::Gaze;
-    use openshard_protocol::direction::{Direction, Facing};
-    use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_protocol::direction::{
+        Direction,
+        Facing,
+    };
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
     use openshard_protocol::world::Point;
     use openshard_uofiles::anim::BodyKind;
+
+    use super::*;
 
     #[test]
     fn local_render_projection_uses_game_motion_not_a_presentation_clock() {
@@ -3178,17 +3272,17 @@ mod tests {
         let east = Facing::walking(Direction::East);
         let mut motion = PlayerMotion::new(start, east);
         let mut player = Mobile {
-            at: end,
-            body: Graphic(0x0190),
-            group: BodyKind::of(Graphic(0x0190)).standing(),
-            facing: Direction::East,
-            frame: openshard_uofiles::anim::AnimationFrameIndex(0),
-            from: None,
-            corpse: false,
-            hue: Hue::NONE,
+            at:        end,
+            body:      Graphic(0x0190),
+            group:     BodyKind::of(Graphic(0x0190)).standing(),
+            facing:    Direction::East,
+            frame:     openshard_uofiles::anim::AnimationFrameIndex(0),
+            from:      None,
+            corpse:    false,
+            hue:       Hue::NONE,
             // Deliberately an impossible stale presentation pose: the test
             // proves the frame projection replaces it from GameMotion alone.
-            drawn: Gaze::on(start),
+            drawn:     Gaze::on(start),
             equipment: Vec::new().into(),
         };
 
@@ -3226,26 +3320,28 @@ mod tests {
 
     #[test]
     fn dump_state_names_safe_lod0_fallbacks_separately_from_disabled_lod() {
-        let pass = |requested_lod, ready_blocks, live_ground_quads| WorldPassAudit {
-            requested_lod,
-            composite_revision: ImmutableRevision(4),
-            ready_blocks,
-            live_ground_quads,
-            full_ground_quads: 12,
-            cpu_ground: Duration::ZERO,
-            cpu_composites: Duration::ZERO,
-            cpu_ground_detail: Duration::ZERO,
-            ground_detail_cpu_uniforms: Duration::ZERO,
-            ground_detail_cpu_serialize: Duration::ZERO,
-            ground_detail_cpu_upload: Duration::ZERO,
-            ground_detail_cpu_pass: Duration::ZERO,
-            cpu_statics: Duration::ZERO,
-            cpu_items: Duration::ZERO,
-            composite_bindings_created: 0,
-            composite_bindings_reused: 0,
-            composite_cpu_upload: Duration::ZERO,
-            composite_cpu_bindings: Duration::ZERO,
-            composite_cpu_pass: Duration::ZERO,
+        let pass = |requested_lod, ready_blocks, live_ground_quads| {
+            WorldPassAudit {
+                requested_lod,
+                composite_revision: ImmutableRevision(4),
+                ready_blocks,
+                live_ground_quads,
+                full_ground_quads: 12,
+                cpu_ground: Duration::ZERO,
+                cpu_composites: Duration::ZERO,
+                cpu_ground_detail: Duration::ZERO,
+                ground_detail_cpu_uniforms: Duration::ZERO,
+                ground_detail_cpu_serialize: Duration::ZERO,
+                ground_detail_cpu_upload: Duration::ZERO,
+                ground_detail_cpu_pass: Duration::ZERO,
+                cpu_statics: Duration::ZERO,
+                cpu_items: Duration::ZERO,
+                composite_bindings_created: 0,
+                composite_bindings_reused: 0,
+                composite_cpu_upload: Duration::ZERO,
+                composite_cpu_bindings: Duration::ZERO,
+                composite_cpu_pass: Duration::ZERO,
+            }
         };
         assert_eq!(
             lod_diagnostic_state(pass(BlockLod::Lod0, 0, 12), 0),

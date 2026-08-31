@@ -5,29 +5,61 @@
 //! `crate::frame_geometry` and `App::draw_from` do that, and hand the
 //! answer here to be recorded.
 
-use openshard_client_render::blit::{self, ViewportRect};
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
+use std::time::{
+    Duration,
+    Instant,
+};
 
+use openshard_client_render::blit::{
+    self,
+    ViewportRect,
+};
 use openshard_client_render::camera::Camera;
 use openshard_client_render::composite::{
-    CompositeProducerJob, CompositeQuad, ImmutableRevision, MapBlockBounds,
+    CompositeProducerJob,
+    CompositeQuad,
+    ImmutableRevision,
+    MapBlockBounds,
 };
 use openshard_client_render::geometry::Rect;
-use openshard_client_render::gump::{self as gump_art};
+use openshard_client_render::gump::{
+    self as gump_art,
+};
 use openshard_client_render::lod::BlockLod;
-use openshard_client_render::outline::{self, Ring};
-use openshard_client_render::radar::{self, RadarCache, RadarLod, RadarView};
-use openshard_client_render::radar_pass::{RadarChunkRenderer, RadarMarker, RadarOverlayRenderer};
+use openshard_client_render::outline::{
+    self,
+    Ring,
+};
+use openshard_client_render::radar::{
+    self,
+    RadarCache,
+    RadarLod,
+    RadarView,
+};
+use openshard_client_render::radar_pass::{
+    RadarChunkRenderer,
+    RadarMarker,
+    RadarOverlayRenderer,
+};
 use openshard_client_render::renderer::Target;
-use openshard_client_render::select::{self, Selection};
+use openshard_client_render::select::{
+    self,
+    Selection,
+};
 use openshard_client_render::sprite::SpriteQuad;
-use openshard_client_render::{paperdoll, solids};
+use openshard_client_render::{
+    paperdoll,
+    solids,
+};
 use openshard_map::grid::BlockCoord;
-use std::time::{Duration, Instant};
 
 use crate::frame_geometry::FrameGeometry;
-use crate::picking::{self, SelectedIdentity};
+use crate::picking::{
+    self,
+    SelectedIdentity,
+};
 use crate::window::Screen;
 
 /// Facts from the one world-pass encoding that a GPU dump can later compare
@@ -59,8 +91,19 @@ pub(crate) struct WorldPassAudit {
     pub(crate) composite_cpu_bindings: Duration,
     pub(crate) composite_cpu_pass: Duration,
 }
-use crate::windows::{Drawn, WindowSubject};
-use crate::{graphics, panes, profile, resources, shell, windows, world};
+use crate::windows::{
+    Drawn,
+    WindowSubject,
+};
+use crate::{
+    graphics,
+    panes,
+    profile,
+    resources,
+    shell,
+    windows,
+    world,
+};
 
 /// Opt-in minimap geometry probe. The paired margin override is documented in
 /// `panes::minimap`.
@@ -100,7 +143,7 @@ fn draw_radar_view(
             map,
             view.placement,
             &[RadarMarker {
-                tile: radar::RadarTile::new(u32::from(player.x), u32::from(player.y)),
+                tile:  radar::RadarTile::new(u32::from(player.x), u32::from(player.y)),
                 color: radar::PLAYER_MARKER,
             }],
         );
@@ -397,9 +440,9 @@ pub(crate) fn draw_gump_windows(
         }
         let frame = gump_art::Frame {
             target: view,
-            width: window.config.width,
+            width:  window.config.width,
             height: window.config.height,
-            scale: shell.map(|shell| shell.pixels_per_point()).unwrap_or(1.0),
+            scale:  shell.map(|shell| shell.pixels_per_point()).unwrap_or(1.0),
         };
         // A window is one painter layer: its frame and icons, then the text
         // belonging to that frame, before the next window is allowed to cover
@@ -705,13 +748,13 @@ pub(crate) fn draw_gump_windows(
                 .map(|(row, line)| {
                     (
                         openshard_client_render::text::GumpLabel {
-                            at: cursor.offset(gump_art::GumpPixel::new(
+                            at:   cursor.offset(gump_art::GumpPixel::new(
                                 TOOLTIP_OFFSET.x,
                                 TOOLTIP_OFFSET.y + step * row as i32,
                             )),
                             text: line.as_str(),
                             font: TOOLTIP_FONT,
-                            hue: openshard_protocol::wire::Hue::LABEL,
+                            hue:  openshard_protocol::wire::Hue::LABEL,
                             clip: None,
                         },
                         None,
@@ -863,9 +906,9 @@ fn window_text(
             encoder,
             gump_art::Frame {
                 target: view,
-                width: window.config.width,
+                width:  window.config.width,
                 height: window.config.height,
-                scale: text.density,
+                scale:  text.density,
             },
             &quads,
         );
@@ -906,8 +949,8 @@ fn window_text(
             // The same box in the same space the glyphs are now in, so a row
             // is cut where the list's edge actually is on the screen.
             gump_art::Scissor {
-                at: real(scissor.at),
-                width: (scissor.width as f32 * text.magnify * text.density).round() as i32,
+                at:     real(scissor.at),
+                width:  (scissor.width as f32 * text.magnify * text.density).round() as i32,
                 height: (scissor.height as f32 * text.magnify * text.density).round() as i32,
             }
             .cut(&mut line);
@@ -925,10 +968,10 @@ fn window_text(
             encoder,
             gump_art::Frame {
                 target: view,
-                width: window.config.width,
+                width:  window.config.width,
                 height: window.config.height,
                 // The TrueType quads were already collected in real pixels.
-                scale: 1.0,
+                scale:  1.0,
             },
             &quads,
         );
@@ -1220,11 +1263,11 @@ pub(crate) fn encode_world_passes(
     if geometry.cutaway_instances.drawn != 0 {
         let timed = profile::begin(window.gpu.as_ref(), "cutaway geometry", encoder);
         let cutaway_target = Target {
-            view: cutaway_world_view,
-            depth: target.depth,
-            gbuffer: cutaway_gbuffer_views,
-            width: target.width,
-            height: target.height,
+            view:       cutaway_world_view,
+            depth:      target.depth,
+            gbuffer:    cutaway_gbuffer_views,
+            width:      target.width,
+            height:     target.height,
             projection: target.projection,
         };
         window.statics.render_cutaway(
@@ -1376,7 +1419,7 @@ pub(crate) fn encode_world_passes(
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(openshard_client_render::renderer::CLEAR),
+                    load:  wgpu::LoadOp::Clear(openshard_client_render::renderer::CLEAR),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -1397,16 +1440,16 @@ pub(crate) fn encode_world_passes(
             &window.queue,
             encoder,
             blit::Frame {
-                target: view,
-                world: world_view,
-                gbuffer: gbuffer_views,
-                face_instances: window.statics.instances_buffer(),
-                item_instances: window.items_pass.instances_buffer(),
+                target:           view,
+                world:            world_view,
+                gbuffer:          gbuffer_views,
+                face_instances:   window.statics.instances_buffer(),
+                item_instances:   window.items_pass.instances_buffer(),
                 mobile_instances: window.mobile_pass.instances_buffer(),
-                mesh_instances: window.mesh_pass.rows_buffer(),
+                mesh_instances:   window.mesh_pass.rows_buffer(),
                 ground_instances: window.renderer.instances_buffer(),
-                zoom: camera.zoom(),
-                rect: viewport,
+                zoom:             camera.zoom(),
+                rect:             viewport,
             },
             &geometry.lighting,
         );
@@ -1418,16 +1461,16 @@ pub(crate) fn encode_world_passes(
                 &window.queue,
                 encoder,
                 blit::Frame {
-                    target: view,
-                    world: cutaway_world_view,
-                    gbuffer: cutaway_gbuffer_views,
-                    face_instances: window.statics.cutaway_instances_buffer(),
-                    item_instances: window.items_pass.instances_buffer(),
+                    target:           view,
+                    world:            cutaway_world_view,
+                    gbuffer:          cutaway_gbuffer_views,
+                    face_instances:   window.statics.cutaway_instances_buffer(),
+                    item_instances:   window.items_pass.instances_buffer(),
                     mobile_instances: window.mobile_pass.instances_buffer(),
-                    mesh_instances: window.mesh_pass.rows_buffer(),
+                    mesh_instances:   window.mesh_pass.rows_buffer(),
                     ground_instances: window.renderer.instances_buffer(),
-                    zoom: camera.zoom(),
-                    rect: viewport,
+                    zoom:             camera.zoom(),
+                    rect:             viewport,
                 },
                 &geometry.lighting,
                 1.0,
@@ -1453,8 +1496,8 @@ pub(crate) fn encode_world_passes(
             encoder,
             solids::Frame {
                 target: view,
-                size: (window.config.width, window.config.height),
-                rect: viewport,
+                size:   (window.config.width, window.config.height),
+                rect:   viewport,
             },
             &camera,
             &standing,
@@ -1485,13 +1528,13 @@ pub(crate) fn encode_world_passes(
             &window.queue,
             encoder,
             select::Frame {
-                target: view,
-                mask: &select_view,
-                ids: &gbuffer_views.ids,
-                face_instances: window.statics.instances_buffer(),
+                target:           view,
+                mask:             &select_view,
+                ids:              &gbuffer_views.ids,
+                face_instances:   window.statics.instances_buffer(),
                 ground_instances: window.renderer.instances_buffer(),
-                size: (render_width, render_height),
-                rect: viewport,
+                size:             (render_width, render_height),
+                rect:             viewport,
             },
             // The tile the *static* stands on, and not `selected_tile`: the
             // ground being washed is the ground under the thing that was
@@ -1524,10 +1567,10 @@ pub(crate) fn encode_world_passes(
             &window.queue,
             encoder,
             outline::Frame {
-                target: view,
-                mask: &held_view,
+                target:    view,
+                mask:      &held_view,
                 mask_size: (render_width, render_height),
-                rect: viewport,
+                rect:      viewport,
             },
             Ring::SELECTED.for_zoom(camera.zoom()),
         );
@@ -1540,10 +1583,10 @@ pub(crate) fn encode_world_passes(
             &window.queue,
             encoder,
             outline::Frame {
-                target: view,
-                mask: &mask_view,
+                target:    view,
+                mask:      &mask_view,
                 mask_size: (render_width, render_height),
-                rect: viewport,
+                rect:      viewport,
             },
             // The soft ring — an edge with a glow behind it — widened when
             // the world is minified, where one mask texel is less than one

@@ -8,17 +8,35 @@
 //! only *then* consumed, because a player can hand their ingots to a friend
 //! while the hammer is in the air.
 
-use openshard_entities::EntityId;
-use openshard_protocol::item_kind::{ItemSelector, MaterialRule};
-use openshard_skills::skill_value;
-use openshard_state::components::{ItemKind, Material};
-use openshard_state::{WorldState, item_definition, kind_from_drawn, material_definition};
 use std::collections::HashMap;
 
+use openshard_entities::EntityId;
+use openshard_protocol::item_kind::{
+    ItemSelector,
+    MaterialRule,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
+use openshard_skills::skill_value;
+use openshard_state::components::{
+    ItemKind,
+    Material,
+};
+use openshard_state::{
+    Drawn,
+    WorldState,
+    item_definition,
+    kind_from_drawn,
+    material_definition,
+};
+
 use crate::recipe::Recipe;
-use crate::system::{CraftSystemDef, Text};
-use openshard_protocol::wire::{Graphic, Hue};
-use openshard_state::Drawn;
+use crate::system::{
+    CraftSystemDef,
+    Text,
+};
 
 /// Why a craft cannot go ahead for want of materials.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -38,22 +56,22 @@ pub struct Materials {
     /// Each resolved ingredient. `semantic` is present when the registry names
     /// this legacy projection; the exact graphic/hue remains only for migration
     /// compatibility and classic presentation.
-    pub lines: Vec<MaterialLine>,
+    pub lines:      Vec<MaterialLine>,
     /// How many items this craft will make. One, unless the recipe consumes
     /// everything in the pack — then it is as many as the scarcest line allows.
     pub max_amount: u16,
     /// The hue the finished item takes, where the recipe does not fix one: the
     /// colour of the material it was made from, which is what makes a valorite
     /// blade valorite-coloured.
-    pub res_hue: Hue,
+    pub res_hue:    Hue,
 }
 
 /// One craft input after material-axis selection.
 #[derive(Clone, Copy, Debug)]
 pub struct MaterialLine {
-    pub graphic: Graphic,
-    pub hue: Option<Hue>,
-    pub amount: u16,
+    pub graphic:  Graphic,
+    pub hue:      Option<Hue>,
+    pub amount:   u16,
     pub semantic: Option<(
         openshard_protocol::item_kind::ItemKindId,
         Option<openshard_protocol::item_kind::MaterialId>,
@@ -81,10 +99,10 @@ pub enum Share {
 pub(crate) struct MaterialStock {
     has_pack: bool,
     /// Every drawn item, including typed instances. Used by legacy recipes.
-    drawn: HashMap<Drawn, u32>,
+    drawn:    HashMap<Drawn, u32>,
     /// Drawn instances without an `ItemKind`. These alone are the compatibility
     /// half of a typed selector.
-    legacy: HashMap<Drawn, u32>,
+    legacy:   HashMap<Drawn, u32>,
     identity: HashMap<
         (
             openshard_protocol::item_kind::ItemKindId,
@@ -103,16 +121,16 @@ impl MaterialStock {
         else {
             return Self {
                 has_pack: false,
-                drawn: HashMap::new(),
-                legacy: HashMap::new(),
+                drawn:    HashMap::new(),
+                legacy:   HashMap::new(),
                 identity: HashMap::new(),
             };
         };
 
         let mut stock = Self {
             has_pack: true,
-            drawn: HashMap::new(),
-            legacy: HashMap::new(),
+            drawn:    HashMap::new(),
+            legacy:   HashMap::new(),
             identity: HashMap::new(),
         };
         for (item, _) in openshard_state::contained_items(state, pack) {
@@ -169,19 +187,14 @@ pub fn check(
         return Err(Refusal::NoPack);
     };
 
-    check_with(
-        state,
-        crafter,
-        system,
-        recipe,
-        sub_res,
-        |semantic, legacy| match semantic {
+    check_with(state, crafter, system, recipe, sub_res, |semantic, legacy| {
+        match semantic {
             Some((kind, material)) => {
                 openshard_items::carried_amount_of_identity_or_legacy(state, pack, kind, material, legacy)
             }
             None => openshard_items::carried_amount_of_hue(state, pack, legacy.id, Some(legacy.hue)),
-        },
-    )
+        }
+    })
 }
 
 /// The catalogue's dry run against its one captured backpack view.
@@ -262,7 +275,7 @@ fn check_with(
         let held = held(
             semantic,
             Drawn {
-                id: res.graphic,
+                id:  res.graphic,
                 hue: hue.expect("a craft ingredient has a resolved hue"),
             },
         );
@@ -313,21 +326,23 @@ fn resolve_selector(
 )> {
     match selector {
         ItemSelector::Exact(kind) if !from_axis => Some((kind, None)),
-        ItemSelector::KindWithMaterial { kind, material } => match material {
-            MaterialRule::Any if from_axis => {
-                let family = item_definition(kind)?.material_family?;
-                let selected = axis_material?;
-                (material_definition(selected)?.family == family).then_some((kind, Some(selected)))
+        ItemSelector::KindWithMaterial { kind, material } => {
+            match material {
+                MaterialRule::Any if from_axis => {
+                    let family = item_definition(kind)?.material_family?;
+                    let selected = axis_material?;
+                    (material_definition(selected)?.family == family).then_some((kind, Some(selected)))
+                }
+                MaterialRule::Exact(material) => Some((kind, Some(material))),
+                MaterialRule::InFamily(family) => {
+                    let material = axis_material?;
+                    (material_definition(material)?.family == family).then_some((kind, Some(material)))
+                }
+                // `SameAsInput` needs the already-resolved line it names; a tag
+                // needs a candidate set. Neither may quietly fall back to art.
+                MaterialRule::Any | MaterialRule::SameAsInput(_) => None,
             }
-            MaterialRule::Exact(material) => Some((kind, Some(material))),
-            MaterialRule::InFamily(family) => {
-                let material = axis_material?;
-                (material_definition(material)?.family == family).then_some((kind, Some(material)))
-            }
-            // `SameAsInput` needs the already-resolved line it names; a tag
-            // needs a candidate set. Neither may quietly fall back to art.
-            MaterialRule::Any | MaterialRule::SameAsInput(_) => None,
-        },
+        }
         ItemSelector::Tag(_) => None,
         ItemSelector::Exact(_) => None,
     }
@@ -359,17 +374,19 @@ pub fn take(state: &mut WorldState, crafter: EntityId, materials: &Materials, sh
             continue;
         }
         let took = match line.semantic {
-            Some((kind, material)) => openshard_items::take_from_backpack_identity_or_legacy(
-                state,
-                pack,
-                kind,
-                material,
-                Drawn {
-                    id: line.graphic,
-                    hue: line.hue.expect("a semantic ingredient has a resolved hue"),
-                },
-                wanted,
-            ),
+            Some((kind, material)) => {
+                openshard_items::take_from_backpack_identity_or_legacy(
+                    state,
+                    pack,
+                    kind,
+                    material,
+                    Drawn {
+                        id:  line.graphic,
+                        hue: line.hue.expect("a semantic ingredient has a resolved hue"),
+                    },
+                    wanted,
+                )
+            }
             None => openshard_items::take_from_backpack_of_hue(state, pack, line.graphic, line.hue, wanted),
         };
         if took == 0 {
@@ -381,14 +398,20 @@ pub fn take(state: &mut WorldState, crafter: EntityId, materials: &Materials, sh
 
 #[cfg(test)]
 mod tests {
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
+
     use super::*;
-    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
 
     #[test]
     fn a_material_axis_resolves_using_its_explicit_material_id() {
-        let any_material = |kind| ItemSelector::KindWithMaterial {
-            kind,
-            material: MaterialRule::Any,
+        let any_material = |kind| {
+            ItemSelector::KindWithMaterial {
+                kind,
+                material: MaterialRule::Any,
+            }
         };
         assert_eq!(
             resolve_selector(any_material(ItemKindId(1)), true, Some(MaterialId(1))),

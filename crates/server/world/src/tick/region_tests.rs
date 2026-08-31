@@ -6,10 +6,30 @@
 //! gives: these read private world state, so they stay inside the module, but
 //! they need not pile into the same file.
 
-use super::tests::{START, enter, enter_as, enter_gm, packets_for, teleport, world};
+use openshard_state::components::{
+    CriminalUntil,
+    Guard,
+    Hitpoints,
+    Murders,
+    Staff,
+};
+use openshard_state::{
+    Region,
+    RegionFlags,
+    RegionId,
+    RegionRect,
+};
+
+use super::tests::{
+    START,
+    enter,
+    enter_as,
+    enter_gm,
+    packets_for,
+    teleport,
+    world,
+};
 use super::*;
-use openshard_state::components::{CriminalUntil, Guard, Hitpoints, Murders, Staff};
-use openshard_state::{Region, RegionFlags, RegionId, RegionRect};
 
 /// Britain's music track, as the client numbers them.
 const BRITAIN_MUSIC: u16 = 11;
@@ -58,13 +78,13 @@ fn walking_into_a_town_is_one_crossing_and_standing_still_is_none() {
     register(
         &mut world,
         vec![Region {
-            id: RegionId(0),
-            name: "Britain".to_owned(),
+            id:       RegionId(0),
+            name:     "Britain".to_owned(),
             priority: 50,
-            rects: vec![RegionRect::new(inside.x, inside.y, 4, 4)],
-            flags: RegionFlags::none(),
-            music: None,
-            light: None,
+            rects:    vec![RegionRect::new(inside.x, inside.y, 4, 4)],
+            flags:    RegionFlags::none(),
+            music:    None,
+            light:    None,
         }],
         now,
     );
@@ -167,13 +187,13 @@ fn a_dungeon_is_dark_at_noon_and_night_sight_beats_both() {
     register(
         &mut world,
         vec![Region {
-            id: RegionId(0),
-            name: "Covetous".to_owned(),
+            id:       RegionId(0),
+            name:     "Covetous".to_owned(),
             priority: 50,
-            rects: vec![RegionRect::new(START.x - 20, START.y - 20, 40, 40)],
-            flags: RegionFlags::none(),
-            music: None,
-            light: Some(DUNGEON_LIGHT),
+            rects:    vec![RegionRect::new(START.x - 20, START.y - 20, 40, 40)],
+            flags:    RegionFlags::none(),
+            music:    None,
+            light:    Some(DUNGEON_LIGHT),
         }],
         now,
     );
@@ -232,11 +252,11 @@ fn calling_the_guards_kills_a_criminal_in_a_guarded_town() {
         vec![town(
             "Britain",
             RegionFlags {
-                guarded: true,
+                guarded:     true,
                 no_teleport: false,
-                no_recall: false,
-                no_housing: false,
-                safe: false,
+                no_recall:   false,
+                no_housing:  false,
+                safe:        false,
             },
         )],
         now,
@@ -253,10 +273,10 @@ fn calling_the_guards_kills_a_criminal_in_a_guarded_town() {
 
     world.queue(Command::Say {
         connection: player,
-        mode: RawTalkMode(0),
-        hue: RawHue(0),
-        font: RawFont(0),
-        text: "guards!".to_owned(),
+        mode:       RawTalkMode(0),
+        hue:        RawHue(0),
+        font:       RawFont(0),
+        text:       "guards!".to_owned(),
     });
     world.tick(now);
 
@@ -284,11 +304,11 @@ fn the_guards_do_not_touch_the_innocent() {
         vec![town(
             "Britain",
             RegionFlags {
-                guarded: true,
+                guarded:     true,
                 no_teleport: false,
-                no_recall: false,
-                no_housing: false,
-                safe: false,
+                no_recall:   false,
+                no_housing:  false,
+                safe:        false,
             },
         )],
         now,
@@ -296,10 +316,10 @@ fn the_guards_do_not_touch_the_innocent() {
 
     world.queue(Command::Say {
         connection: player,
-        mode: RawTalkMode(0),
-        hue: RawHue(0),
-        font: RawFont(0),
-        text: "guards".to_owned(),
+        mode:       RawTalkMode(0),
+        hue:        RawHue(0),
+        font:       RawFont(0),
+        text:       "guards".to_owned(),
     });
     world.tick(now);
 
@@ -331,10 +351,10 @@ fn the_guards_are_not_called_outside_a_guarded_region() {
 
     world.queue(Command::Say {
         connection: player,
-        mode: RawTalkMode(0),
-        hue: RawHue(0),
-        font: RawFont(0),
-        text: "guards".to_owned(),
+        mode:       RawTalkMode(0),
+        hue:        RawHue(0),
+        font:       RawFont(0),
+        text:       "guards".to_owned(),
     });
     world.tick(now);
 
@@ -356,11 +376,11 @@ fn staff_are_never_guard_candidates() {
         vec![town(
             "Britain",
             RegionFlags {
-                guarded: true,
+                guarded:     true,
                 no_teleport: false,
-                no_recall: false,
-                no_housing: false,
-                safe: false,
+                no_recall:   false,
+                no_housing:  false,
+                safe:        false,
             },
         )],
         now,
@@ -376,10 +396,10 @@ fn staff_are_never_guard_candidates() {
 
     world.queue(Command::Say {
         connection: player,
-        mode: RawTalkMode(0),
-        hue: RawHue(0),
-        font: RawFont(0),
-        text: "guards".to_owned(),
+        mode:       RawTalkMode(0),
+        hue:        RawHue(0),
+        font:       RawFont(0),
+        text:       "guards".to_owned(),
     });
     world.tick(now);
 
@@ -398,11 +418,11 @@ fn a_murderer_walking_into_town_is_hunted_without_a_call() {
         vec![town(
             "Britain",
             RegionFlags {
-                guarded: true,
+                guarded:     true,
                 no_teleport: false,
-                no_recall: false,
-                no_housing: false,
-                safe: false,
+                no_recall:   false,
+                no_housing:  false,
+                safe:        false,
             },
         )],
         now,
@@ -440,11 +460,11 @@ fn a_guard_earns_no_murder_count_and_leaves_when_it_is_done() {
         vec![town(
             "Britain",
             RegionFlags {
-                guarded: true,
+                guarded:     true,
                 no_teleport: false,
-                no_recall: false,
-                no_housing: false,
-                safe: false,
+                no_recall:   false,
+                no_housing:  false,
+                safe:        false,
             },
         )],
         now,
@@ -458,10 +478,10 @@ fn a_guard_earns_no_murder_count_and_leaves_when_it_is_done() {
     );
     world.queue(Command::Say {
         connection: player,
-        mode: RawTalkMode(0),
-        hue: RawHue(0),
-        font: RawFont(0),
-        text: "guards".to_owned(),
+        mode:       RawTalkMode(0),
+        hue:        RawHue(0),
+        font:       RawFont(0),
+        text:       "guards".to_owned(),
     });
     world.tick(now);
 
@@ -501,19 +521,19 @@ fn a_no_teleport_region_refuses_both_ways() {
     register(
         &mut world,
         vec![Region {
-            id: RegionId(0),
-            name: "The Jail".to_owned(),
+            id:       RegionId(0),
+            name:     "The Jail".to_owned(),
             priority: 50,
-            rects: vec![RegionRect::new(barred.x - 2, barred.y - 2, 8, 8)],
-            flags: RegionFlags {
+            rects:    vec![RegionRect::new(barred.x - 2, barred.y - 2, 8, 8)],
+            flags:    RegionFlags {
                 no_teleport: true,
-                guarded: false,
-                no_recall: false,
-                no_housing: false,
-                safe: false,
+                guarded:     false,
+                no_recall:   false,
+                no_housing:  false,
+                safe:        false,
             },
-            music: None,
-            light: None,
+            music:    None,
+            light:    None,
         }],
         now,
     );
@@ -542,19 +562,19 @@ fn staff_teleport_where_players_may_not() {
     register(
         &mut world,
         vec![Region {
-            id: RegionId(0),
-            name: "The Jail".to_owned(),
+            id:       RegionId(0),
+            name:     "The Jail".to_owned(),
             priority: 50,
-            rects: vec![RegionRect::new(barred.x - 2, barred.y - 2, 8, 8)],
-            flags: RegionFlags {
+            rects:    vec![RegionRect::new(barred.x - 2, barred.y - 2, 8, 8)],
+            flags:    RegionFlags {
                 no_teleport: true,
-                guarded: false,
-                no_recall: false,
-                no_housing: false,
-                safe: false,
+                guarded:     false,
+                no_recall:   false,
+                no_housing:  false,
+                safe:        false,
             },
-            music: None,
-            light: None,
+            music:    None,
+            light:    None,
         }],
         now,
     );
@@ -580,27 +600,27 @@ fn regions_and_the_clock_survive_a_restart() {
             town(
                 "Britain",
                 RegionFlags {
-                    guarded: true,
+                    guarded:     true,
                     no_teleport: false,
-                    no_recall: false,
-                    no_housing: false,
-                    safe: false,
+                    no_recall:   false,
+                    no_housing:  false,
+                    safe:        false,
                 },
             ),
             Region {
-                id: RegionId(0),
-                name: "Covetous".to_owned(),
+                id:       RegionId(0),
+                name:     "Covetous".to_owned(),
                 priority: 60,
-                rects: vec![RegionRect::new(100, 100, 20, 20).with_z(-128, -20)],
-                flags: RegionFlags {
+                rects:    vec![RegionRect::new(100, 100, 20, 20).with_z(-128, -20)],
+                flags:    RegionFlags {
                     no_teleport: true,
-                    guarded: false,
-                    no_recall: false,
-                    no_housing: false,
-                    safe: false,
+                    guarded:     false,
+                    no_recall:   false,
+                    no_housing:  false,
+                    safe:        false,
                 },
-                music: None,
-                light: Some(DUNGEON_LIGHT),
+                music:    None,
+                light:    Some(DUNGEON_LIGHT),
             },
         ],
         now,

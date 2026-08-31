@@ -4,9 +4,16 @@
 use std::fmt;
 use std::str::FromStr;
 
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+};
 use crate::version::ClientVersion;
 
 /// A mobile's authority: what staff commands, if any, it may run.
@@ -187,7 +194,8 @@ impl fmt::Display for UnknownAccessLevel {
     }
 }
 
-impl std::error::Error for UnknownAccessLevel {}
+impl std::error::Error for UnknownAccessLevel {
+}
 
 impl FromStr for AccessLevel {
     type Err = UnknownAccessLevel;

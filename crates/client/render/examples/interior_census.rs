@@ -28,19 +28,29 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use openshard_client_render::interiors::{BlockRooms, Buildings, Cell, StitchedRooms};
+use openshard_client_render::interiors::{
+    BlockRooms,
+    Buildings,
+    Cell,
+    StitchedRooms,
+};
 use openshard_map::grid::BlockCoord;
-use openshard_map::map::{BLOCK_SIZE, WorldMap};
-use openshard_movement::MapTerrain;
-use openshard_movement::PLAYER_HEIGHT;
+use openshard_map::map::{
+    BLOCK_SIZE,
+    WorldMap,
+};
+use openshard_movement::{
+    MapTerrain,
+    PLAYER_HEIGHT,
+};
 use openshard_tiles::TileData;
 
 #[derive(Clone, Debug)]
 struct Region {
-    name: String,
-    x: u16,
-    y: u16,
-    width: u16,
+    name:   String,
+    x:      u16,
+    y:      u16,
+    width:  u16,
     height: u16,
 }
 
@@ -56,10 +66,10 @@ impl Region {
         };
         assert!(*width > 0 && *height > 0, "a region has a positive size");
         Self {
-            name: name.to_owned(),
-            x: *x,
-            y: *y,
-            width: *width,
+            name:   name.to_owned(),
+            x:      *x,
+            y:      *y,
+            width:  *width,
             height: *height,
         }
     }
@@ -70,17 +80,17 @@ impl Region {
         // stairs instead of producing a flattering one-house sample.
         vec![
             Self {
-                name: "britain".to_owned(),
-                x: 1440,
-                y: 1600,
-                width: 128,
+                name:   "britain".to_owned(),
+                x:      1440,
+                y:      1600,
+                width:  128,
                 height: 128,
             },
             Self {
-                name: "wrong".to_owned(),
-                x: 1939,
-                y: 215,
-                width: 134,
+                name:   "wrong".to_owned(),
+                x:      1939,
+                y:      215,
+                width:  134,
                 height: 137,
             },
         ]

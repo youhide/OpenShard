@@ -1,9 +1,18 @@
-use super::*;
 use openshard_map::overlay::Doors;
 use openshard_movement::Walker;
 use openshard_protocol::mobile::Notoriety;
-use openshard_protocol::world::{Aggression, Sight};
-use openshard_state::components::{Brain, Heading, Hitpoints, Movement};
+use openshard_protocol::world::{
+    Aggression,
+    Sight,
+};
+use openshard_state::components::{
+    Brain,
+    Heading,
+    Hitpoints,
+    Movement,
+};
+
+use super::*;
 
 /// The layer a mount item rides on — the client draws whoever wears one as
 /// mounted. `0x19`, the classic mount layer.
@@ -65,7 +74,7 @@ pub fn try_mount(state: &mut WorldState, player: EntityId, target: EntityId, tar
     );
     let equipped = Equipped {
         mobile: rider_serial,
-        layer: MOUNT_LAYER,
+        layer:  MOUNT_LAYER,
     };
     establish_item_location(state, item, ItemLocation::equipped(equipped))
         .expect("a saddle has one valid mount-layer parent");
@@ -167,7 +176,7 @@ pub fn dismount(state: &mut WorldState, player: EntityId) {
             mount,
             Hitpoints {
                 current: DEFAULT_MOUNT_HITS,
-                max: DEFAULT_MOUNT_HITS,
+                max:     DEFAULT_MOUNT_HITS,
             },
         );
     }

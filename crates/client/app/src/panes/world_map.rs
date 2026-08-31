@@ -1,12 +1,24 @@
 //! The facet-wide map as a normal local gump window.
 
-use openshard_client_render::gump::{self, GumpArt, GumpPixel, Picture};
+use openshard_client_render::gump::{
+    self,
+    GumpArt,
+    GumpPixel,
+    Picture,
+};
 use openshard_client_render::party::Line;
 use openshard_client_render::radar::RadarTile;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Graphic;
 
-use crate::panes::{Button, Effect, Input, PaneCtx, PaneFrame, Response};
+use crate::panes::{
+    Button,
+    Effect,
+    Input,
+    PaneCtx,
+    PaneFrame,
+    Response,
+};
 use crate::windows::Drawn;
 
 pub const EXTENT: (i32, i32) = (640, 480);
@@ -26,15 +38,15 @@ pub fn art_of() -> impl Iterator<Item = GumpArt> {
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Window {
-    pub extent: (i32, i32),
-    pub centre: RadarTile,
+    pub extent:          (i32, i32),
+    pub centre:          RadarTile,
     pub tiles_per_pixel: f32,
-    pub pictures: Vec<Picture>,
-    pub lines: Vec<Line>,
-    content_at: GumpPixel,
-    content_extent: (i32, i32),
-    close_at: GumpPixel,
-    close_extent: (i32, i32),
+    pub pictures:        Vec<Picture>,
+    pub lines:           Vec<Line>,
+    content_at:          GumpPixel,
+    content_extent:      (i32, i32),
+    close_at:            GumpPixel,
+    close_extent:        (i32, i32),
 }
 
 impl Window {
@@ -67,14 +79,14 @@ impl Window {
 
 #[derive(Debug, Default)]
 pub struct WorldMapPane {
-    centre: Option<RadarTile>,
-    zoom_steps: i8,
+    centre:      Option<RadarTile>,
+    zoom_steps:  i8,
     /// The pointer and map centre at the start of a canvas drag.  Both stay
     /// fixed for the gesture so cursor events between frames use one coherent
     /// coordinate system.
-    drag_from: Option<GumpPixel>,
+    drag_from:   Option<GumpPixel>,
     drag_centre: Option<RadarTile>,
-    close_held: bool,
+    close_held:  bool,
 }
 
 fn measured_insets(atlas: &gump::GumpAtlas) -> (i32, i32, i32, i32) {
@@ -163,7 +175,7 @@ impl WorldMapPane {
             tiles_per_pixel,
             pictures,
             lines: vec![Line {
-                at: GumpPixel::new(left + 8, 12),
+                at:   GumpPixel::new(left + 8, 12),
                 text: "World WorldMap".to_owned(),
                 font: Font(2),
                 clip: None,
@@ -266,9 +278,10 @@ impl WorldMapPane {
 
 #[cfg(test)]
 mod tests {
+    use openshard_protocol::serial::Serial;
+
     use super::*;
     use crate::panes::fixture;
-    use openshard_protocol::serial::Serial;
 
     #[test]
     fn an_unpressed_move_does_not_start_or_pan_the_canvas() {

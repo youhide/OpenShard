@@ -27,7 +27,10 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 /// `MYP\0`, little-endian.
 const MAGIC: u32 = 0x0050_594D;
@@ -41,7 +44,7 @@ pub enum UopError {
     /// The file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
@@ -53,7 +56,7 @@ pub enum UopError {
     /// The container is structurally broken.
     Malformed {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// What went wrong.
         detail: String,
     },
@@ -75,7 +78,7 @@ pub enum UopError {
     /// A file the caller asked for is not in the container.
     MissingEntry {
         /// Which file.
-        path: PathBuf,
+        path:  PathBuf,
         /// Which index was expected.
         index: usize,
     },
@@ -89,16 +92,20 @@ impl fmt::Display for UopError {
             Self::Malformed { path, detail } => {
                 write!(f, "{} is malformed: {detail}", path.display())
             }
-            Self::Compressed { path, name } => write!(
-                f,
-                "{} stores {name} zlib-compressed; this reader only handles stored entries",
-                path.display()
-            ),
-            Self::MissingEntry { path, index } => write!(
-                f,
-                "{} has no entry for index {index}; the container is incomplete",
-                path.display()
-            ),
+            Self::Compressed { path, name } => {
+                write!(
+                    f,
+                    "{} stores {name} zlib-compressed; this reader only handles stored entries",
+                    path.display()
+                )
+            }
+            Self::MissingEntry { path, index } => {
+                write!(
+                    f,
+                    "{} has no entry for index {index}; the container is incomplete",
+                    path.display()
+                )
+            }
         }
     }
 }
@@ -133,9 +140,9 @@ impl std::error::Error for UopError {
 ///
 /// [`WorldMap`]: crate::map::WorldMap
 pub struct Uop {
-    path: PathBuf,
-    bytes: Vec<u8>,
-    entries: HashMap<u64, Entry>,
+    path:       PathBuf,
+    bytes:      Vec<u8>,
+    entries:    HashMap<u64, Entry>,
     file_count: usize,
 }
 
@@ -153,9 +160,11 @@ impl Uop {
     /// Read a container and index its entries by name hash.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, UopError> {
         let path = path.as_ref().to_owned();
-        let bytes = std::fs::read(&path).map_err(|source| UopError::Read {
-            path: path.clone(),
-            source,
+        let bytes = std::fs::read(&path).map_err(|source| {
+            UopError::Read {
+                path: path.clone(),
+                source,
+            }
         })?;
         let header = Header::parse(&bytes).ok_or_else(|| UopError::NotUop { path: path.clone() })?;
         let entries = header.entries(&bytes, &path)?;
@@ -179,9 +188,9 @@ impl Uop {
     /// asserting on real entries opens a real install.
     pub fn empty() -> Self {
         Self {
-            path: PathBuf::new(),
-            bytes: Vec::new(),
-            entries: HashMap::new(),
+            path:       PathBuf::new(),
+            bytes:      Vec::new(),
+            entries:    HashMap::new(),
             file_count: 0,
         }
     }
@@ -216,9 +225,11 @@ impl Uop {
         self.bytes
             .get(start..start + entry.compressed_length)
             .map(Some)
-            .ok_or_else(|| UopError::Malformed {
-                path: self.path.clone(),
-                detail: format!("the entry for {name} runs past the end of the file"),
+            .ok_or_else(|| {
+                UopError::Malformed {
+                    path:   self.path.clone(),
+                    detail: format!("the entry for {name} runs past the end of the file"),
+                }
             })
     }
 
@@ -244,9 +255,11 @@ impl Uop {
         let bytes = self
             .bytes
             .get(start..start + entry.compressed_length)
-            .ok_or_else(|| UopError::Malformed {
-                path: self.path.clone(),
-                detail: format!("the entry for {name} runs past the end of the file"),
+            .ok_or_else(|| {
+                UopError::Malformed {
+                    path:   self.path.clone(),
+                    detail: format!("the entry for {name} runs past the end of the file"),
+                }
             })?;
         Ok(Some(RawEntry {
             compression: entry.compression,
@@ -270,13 +283,13 @@ pub struct RawEntry<'a> {
     /// stored, `3` for every entry `gumpartLegacyMUL.uop` ships. This reader
     /// has never seen another value; a caller seeing something else here is
     /// looking at a format this crate has no reader for yet.
-    pub compression: UopCompression,
+    pub compression:         UopCompression,
     /// What zlib alone should produce from `bytes`. For a flag-3 entry this is
     /// an intermediate length, not the final picture data: see
     /// `gumpart`'s module documentation for the second pass that sits on top.
     pub decompressed_length: usize,
     /// The entry's stored bytes, exactly as the container holds them.
-    pub bytes: &'a [u8],
+    pub bytes:               &'a [u8],
 }
 
 /// The compression scheme recorded in a UOP entry header.
@@ -323,9 +336,11 @@ pub fn read_concatenated(
     let mut out = Vec::new();
     for index in 0..uop.file_count {
         let name = path_pattern(index);
-        let chunk = uop.entry(&name)?.ok_or_else(|| UopError::MissingEntry {
-            path: uop.path.clone(),
-            index,
+        let chunk = uop.entry(&name)?.ok_or_else(|| {
+            UopError::MissingEntry {
+                path: uop.path.clone(),
+                index,
+            }
         })?;
         out.extend_from_slice(chunk);
     }
@@ -334,19 +349,19 @@ pub fn read_concatenated(
 
 struct Header {
     first_block: usize,
-    file_count: usize,
+    file_count:  usize,
 }
 
 struct Entry {
-    data_offset: usize,
-    header_length: usize,
-    compressed_length: usize,
+    data_offset:         usize,
+    header_length:       usize,
+    compressed_length:   usize,
     /// What zlib alone produces from `compressed_length` bytes at
     /// `data_offset + header_length`. Unread until `raw_entry` needed it —
     /// `entry` never looks past `compressed_length`, since a stored entry's
     /// compressed and decompressed lengths are the same number.
     decompressed_length: usize,
-    compression: UopCompression,
+    compression:         UopCompression,
 }
 
 impl Header {
@@ -356,15 +371,17 @@ impl Header {
         }
         Some(Self {
             first_block: usize::try_from(read_u64(bytes, 12)?).ok()?,
-            file_count: usize::try_from(read_u32(bytes, 24)?).ok()?,
+            file_count:  usize::try_from(read_u32(bytes, 24)?).ok()?,
         })
     }
 
     /// Walk the block chain and collect every entry, keyed by its name hash.
     fn entries(&self, bytes: &[u8], path: &Path) -> Result<HashMap<u64, Entry>, UopError> {
-        let malformed = |detail: &str| UopError::Malformed {
-            path: path.to_owned(),
-            detail: detail.to_owned(),
+        let malformed = |detail: &str| {
+            UopError::Malformed {
+                path:   path.to_owned(),
+                detail: detail.to_owned(),
+            }
         };
 
         let mut entries = HashMap::with_capacity(self.file_count);
@@ -390,16 +407,18 @@ impl Header {
                     continue;
                 }
                 let entry = Entry {
-                    data_offset: usize::try_from(data_offset)
+                    data_offset:         usize::try_from(data_offset)
                         .map_err(|_| malformed("entry offset does not fit in memory"))?,
-                    header_length: read_u32(bytes, at + 8).ok_or_else(|| malformed("truncated entry"))?
+                    header_length:       read_u32(bytes, at + 8)
+                        .ok_or_else(|| malformed("truncated entry"))?
                         as usize,
-                    compressed_length: read_u32(bytes, at + 12).ok_or_else(|| malformed("truncated entry"))?
+                    compressed_length:   read_u32(bytes, at + 12)
+                        .ok_or_else(|| malformed("truncated entry"))?
                         as usize,
                     decompressed_length: read_u32(bytes, at + 16)
                         .ok_or_else(|| malformed("truncated entry"))?
                         as usize,
-                    compression: UopCompression(
+                    compression:         UopCompression(
                         read_u16(bytes, at + 32).ok_or_else(|| malformed("truncated entry"))?,
                     ),
                 };

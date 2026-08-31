@@ -6,13 +6,24 @@
 //! an item, or a spot on the ground. It is one packet id in both directions,
 //! nineteen bytes each way.
 
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
 use crate::feature::Feature;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+};
 use crate::serial::Serial;
 use crate::version::ClientVersion;
-use crate::wire::{CursorId, Graphic, MultiId};
+use crate::wire::{
+    CursorId,
+    Graphic,
+    MultiId,
+};
 use crate::world::Point;
 
 /// The `cursorType` byte a cancelled (right-clicked) target comes back as.
@@ -70,7 +81,7 @@ pub struct TargetCursor {
     /// Echoed back by the client, opaque to it.
     pub cursor_id: CursorId,
     /// What the cursor may pick.
-    pub kind: TargetKind,
+    pub kind:      TargetKind,
 }
 
 /// `0x99` — raise a targeting cursor with a **house drawn under it**.
@@ -104,19 +115,19 @@ pub struct MultiTargetRequest {
     /// [`TargetKind::Location`] in every use there is — carried anyway, because
     /// the byte is on the wire and inventing its value here would be this engine
     /// deciding something the caller is entitled to.
-    pub kind: TargetKind,
+    pub kind:      TargetKind,
     /// Which multi the client draws under the pointer. The bare id, which is
     /// what ServUO writes and `0x4000` below the graphic a placed one carries —
     /// see [`MultiId`], whose whole reason to exist is that those two `u16`s
     /// mean different things.
-    pub multi: MultiId,
+    pub multi:     MultiId,
     /// Where the drawing sits relative to the cursor, in tiles and z.
     ///
     /// Zero in every ordinary placement: a multi is drawn from its own origin and
     /// the origin is the tile clicked. The field exists because the reference's
     /// boats use it, and a value this engine never sets is still a value it must
     /// not corrupt.
-    pub offset: MultiOffset,
+    pub offset:    MultiOffset,
 }
 
 /// How long a `0x99` is for a given client — see [`MultiTargetRequest`].
@@ -234,11 +245,11 @@ pub struct TargetResponse {
     ///
     /// Absence is the real thing here, not a zero to be checked for later: a
     /// ground target *has* no object, and a location spell wants exactly that.
-    pub object: Option<Serial>,
+    pub object:    Option<Serial>,
     /// Where — the clicked tile, meaningful for a ground target.
-    pub location: Point,
+    pub location:  Point,
     /// The tile graphic clicked, `None` for none.
-    pub graphic: Option<Graphic>,
+    pub graphic:   Option<Graphic>,
     /// Whether the target was cancelled — right-clicked away rather than picked.
     pub cancelled: bool,
 }
@@ -276,7 +287,10 @@ impl DecodePacket for TargetResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::{decode_packet, encode_packet};
+    use crate::packet::{
+        decode_packet,
+        encode_packet,
+    };
     use crate::server_packet::ServerPacket;
 
     fn version() -> ClientVersion {
@@ -288,7 +302,7 @@ mod tests {
         let bytes = encode_packet(
             &TargetCursor {
                 cursor_id: CursorId(0x0000_002A),
-                kind: TargetKind::Location,
+                kind:      TargetKind::Location,
             },
             version(),
         );
@@ -306,14 +320,14 @@ mod tests {
         let object = encode_packet(
             &TargetCursor {
                 cursor_id: CursorId(1),
-                kind: TargetKind::Object,
+                kind:      TargetKind::Object,
             },
             version(),
         );
         let location = encode_packet(
             &TargetCursor {
                 cursor_id: CursorId(1),
-                kind: TargetKind::Location,
+                kind:      TargetKind::Location,
             },
             version(),
         );
@@ -371,9 +385,9 @@ mod tests {
     fn a_request() -> MultiTargetRequest {
         MultiTargetRequest {
             cursor_id: CursorId(0x0000_002A),
-            kind: TargetKind::Location,
-            multi: MultiId(0x0064),
-            offset: MultiOffset::default(),
+            kind:      TargetKind::Location,
+            multi:     MultiId(0x0064),
+            offset:    MultiOffset::default(),
         }
     }
 

@@ -480,9 +480,9 @@ struct EnumScan {
     /// struct-like variant and `(Variant.0, type text)` for a tuple one. The
     /// variant name is part of the key because a variant's field carries no
     /// `pub` and would otherwise be indistinguishable from a struct's.
-    hits: Vec<(String, String)>,
+    hits:     Vec<(String, String)>,
     /// How many enum bodies the walk entered.
-    enums: usize,
+    enums:    usize,
     /// How many variants it read inside them.
     variants: usize,
 }
@@ -533,8 +533,8 @@ fn split_top_level(inner: &str) -> Vec<String> {
 /// worse than no scan.
 fn scan_enums(file_name: &str, text: &str) -> EnumScan {
     let mut scan = EnumScan {
-        hits: Vec::new(),
-        enums: 0,
+        hits:     Vec::new(),
+        enums:    0,
         variants: 0,
     };
     let mut depth = 0i32;

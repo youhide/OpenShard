@@ -39,14 +39,20 @@
 
 use std::fmt;
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_protocol::wire::Graphic;
 use openshard_tiles::LandTileId;
 
 use crate::color::Color16;
 use crate::image::Image;
-use crate::uop::{Uop, UopError};
+use crate::uop::{
+    Uop,
+    UopError,
+};
 
 /// A land tile is this many pixels on a side.
 pub const LAND_TILE_SIZE: u16 = 44;
@@ -70,12 +76,12 @@ pub enum ArtError {
         /// Which graphic.
         graphic: Graphic,
         /// What went wrong.
-        detail: String,
+        detail:  String,
     },
     /// A land entry is there but is not the shape its format requires.
     MalformedLand {
         /// Which land tile.
-        tile: LandTileId,
+        tile:   LandTileId,
         /// What went wrong.
         detail: String,
     },
@@ -187,12 +193,14 @@ impl Art {
         let Some(raw) = self.container.entry(&Self::entry_name(tile.0 as usize))? else {
             return Ok(None);
         };
-        let raw = raw.get(..LAND_BYTES).ok_or_else(|| ArtError::MalformedLand {
-            tile,
-            detail: format!(
-                "a land tile is {LAND_BYTES} bytes and this entry is {}",
-                raw.len()
-            ),
+        let raw = raw.get(..LAND_BYTES).ok_or_else(|| {
+            ArtError::MalformedLand {
+                tile,
+                detail: format!(
+                    "a land tile is {LAND_BYTES} bytes and this entry is {}",
+                    raw.len()
+                ),
+            }
         })?;
 
         let side = LAND_TILE_SIZE as usize;

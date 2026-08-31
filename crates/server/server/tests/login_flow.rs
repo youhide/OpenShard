@@ -11,20 +11,54 @@
 //! and would prove less.
 
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{
+    Ipv4Addr,
+    SocketAddr,
+};
 use std::time::Instant;
 
-use openshard_gateway::{ClientGatewayServer, ConnectionId, Event, OutboxTx, Packet, ServerEvent, Shutdown};
-use openshard_login::{DevAccounts, LoginServer, LoginSession, Outcome, Response, single_shard};
+use openshard_gateway::{
+    ClientGatewayServer,
+    ConnectionId,
+    Event,
+    OutboxTx,
+    Packet,
+    ServerEvent,
+    Shutdown,
+};
+use openshard_login::{
+    DevAccounts,
+    LoginServer,
+    LoginSession,
+    Outcome,
+    Response,
+    single_shard,
+};
 use openshard_protocol::access::AccessLevel;
 use openshard_protocol::identity::{
-    AccountName, CharacterName, PlaintextPassword, RawAccountName, RawPlaintextPassword,
+    AccountName,
+    CharacterName,
+    PlaintextPassword,
+    RawAccountName,
+    RawPlaintextPassword,
 };
-use openshard_protocol::login::{AccountLogin, GameServerLogin, RawShardIndex, SelectShard};
+use openshard_protocol::login::{
+    AccountLogin,
+    GameServerLogin,
+    RawShardIndex,
+    SelectShard,
+};
+use openshard_protocol::seed::SEED_COMMAND;
+use openshard_protocol::version::ClientVersion;
 use openshard_protocol::wire::AuthKey;
-use openshard_protocol::{seed::SEED_COMMAND, version::ClientVersion};
-use openshard_world::{Command, World};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use openshard_world::{
+    Command,
+    World,
+};
+use tokio::io::{
+    AsyncReadExt,
+    AsyncWriteExt,
+};
 use tokio::net::TcpStream;
 
 /// Stand up a shard on an ephemeral port. Mirrors `main.rs`.
@@ -90,9 +124,9 @@ async fn shard() -> SocketAddr {
                             if let (false, Some(account)) = (authenticated, session.account()) {
                                 world.queue(Command::Authenticated {
                                     connection: id,
-                                    version: session.version(),
-                                    account: account.clone(),
-                                    access: AccessLevel::Player,
+                                    version:    session.version(),
+                                    account:    account.clone(),
+                                    access:     AccessLevel::Player,
                                 });
                                 world.tick(Instant::now());
                                 for out in world.drain_outbound() {
@@ -162,7 +196,7 @@ async fn a_client_reaches_the_character_list() {
     client
         .write_all(
             &AccountLogin {
-                account: RawAccountName("admin".to_owned()),
+                account:  RawAccountName("admin".to_owned()),
                 password: RawPlaintextPassword("hunter2".to_owned()),
             }
             .encode(),
@@ -233,7 +267,7 @@ async fn a_refused_login_reaches_the_client_and_the_socket_closes() {
     client
         .write_all(
             &AccountLogin {
-                account: RawAccountName("admin".to_owned()),
+                account:  RawAccountName("admin".to_owned()),
                 password: RawPlaintextPassword("wrong".to_owned()),
             }
             .encode(),
@@ -270,7 +304,7 @@ async fn the_client_version_from_the_seed_shapes_the_reply() {
     client
         .write_all(
             &AccountLogin {
-                account: RawAccountName("admin".to_owned()),
+                account:  RawAccountName("admin".to_owned()),
                 password: RawPlaintextPassword("hunter2".to_owned()),
             }
             .encode(),
@@ -298,7 +332,7 @@ async fn a_stolen_auth_key_is_useless_over_a_real_socket() {
     client
         .write_all(
             &AccountLogin {
-                account: RawAccountName("admin".to_owned()),
+                account:  RawAccountName("admin".to_owned()),
                 password: RawPlaintextPassword("hunter2".to_owned()),
             }
             .encode(),
@@ -351,7 +385,7 @@ async fn a_packet_split_across_tcp_segments_still_arrives() {
     let mut stream = seed(1);
     stream.extend_from_slice(
         &AccountLogin {
-            account: RawAccountName("admin".to_owned()),
+            account:  RawAccountName("admin".to_owned()),
             password: RawPlaintextPassword("hunter2".to_owned()),
         }
         .encode(),

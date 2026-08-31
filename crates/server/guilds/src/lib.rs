@@ -58,21 +58,49 @@ mod reply;
 #[cfg(test)]
 mod tests;
 
-pub use chat::{say_to_alliance, say_to_guild, tell_guild};
+pub use chat::{
+    say_to_alliance,
+    say_to_guild,
+    tell_guild,
+};
 pub use diplomacy::{
-    ALLIANCE_NAME_LIMIT, Outcome, alliance_members, declare_war, invite_to_alliance, join_alliance,
-    leave_alliance, make_peace,
+    ALLIANCE_NAME_LIMIT,
+    Outcome,
+    alliance_members,
+    declare_war,
+    invite_to_alliance,
+    join_alliance,
+    leave_alliance,
+    make_peace,
 };
 pub use gump::GUILD_GUMP;
 pub use membership::{
-    ABBREVIATION_LIMIT, NAME_LIMIT, TITLE_LIMIT, accept_invitation, decline_invitation, demote, disband,
-    dismiss, found, invite, leave, pass_leadership, promote, set_title,
+    ABBREVIATION_LIMIT,
+    NAME_LIMIT,
+    TITLE_LIMIT,
+    accept_invitation,
+    decline_invitation,
+    demote,
+    disband,
+    dismiss,
+    found,
+    invite,
+    leave,
+    pass_leadership,
+    promote,
+    set_title,
+};
+use openshard_entities::EntityId;
+use openshard_state::{
+    GuildId,
+    Rank,
+    WorldState,
 };
 pub use rank::RankFlags;
-pub use reply::{handle, open};
-
-use openshard_entities::EntityId;
-use openshard_state::{GuildId, Rank, WorldState};
+pub use reply::{
+    handle,
+    open,
+};
 
 /// Why a guild operation was refused.
 ///

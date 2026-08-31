@@ -1,7 +1,17 @@
-use super::*;
 use openshard_protocol::wire::Hue;
-use openshard_state::components::{House, HouseDoor};
-use openshard_state::{KeyValue, Lock, LockKind, Standing, WorldTick};
+use openshard_state::components::{
+    House,
+    HouseDoor,
+};
+use openshard_state::{
+    KeyValue,
+    Lock,
+    LockKind,
+    Standing,
+    WorldTick,
+};
+
+use super::*;
 
 /// How long a door stays open before it swings shut on its own, in ticks —
 /// roughly the classic client's self-closing delay.
@@ -105,7 +115,7 @@ pub fn use_key(state: &mut WorldState, connection: ConnectionId, player: EntityI
         connection,
         &ServerPacket::TargetCursor(TargetCursor {
             cursor_id: CursorId(0),
-            kind: TargetKind::Location,
+            kind:      TargetKind::Location,
         }),
     );
 }
@@ -162,9 +172,9 @@ pub fn turn_key(state: &mut WorldState, player: EntityId, key: EntityId, target:
             state.registry.insert(
                 target,
                 Lock {
-                    kind: LockKind::Key(value),
+                    kind:           LockKind::Key(value),
                     required_skill: 0,
-                    max_skill: 0,
+                    max_skill:      0,
                 },
             );
             state.system_message(player, "You lock it.");
@@ -220,7 +230,7 @@ pub(crate) fn set_door(state: &mut WorldState, door: EntityId, serial: Serial, o
     state.registry.insert(
         door,
         Drawn {
-            id: graphic,
+            id:  graphic,
             hue: Hue(0),
         },
     );

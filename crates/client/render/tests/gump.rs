@@ -12,10 +12,20 @@
 
 use openshard_client_render::geometry::Rect;
 use openshard_client_render::gump::{
-    self, Frame, GumpArt, GumpAtlas, GumpPixel, GumpRenderer, Picture, Shade,
+    self,
+    Frame,
+    GumpArt,
+    GumpAtlas,
+    GumpPixel,
+    GumpRenderer,
+    Picture,
+    Shade,
 };
 use openshard_client_render::hue::HueRamp;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_uofiles::color::Color16;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::image::Image;
@@ -45,7 +55,7 @@ fn block(width: u16, height: u16) -> Image {
 
 /// A rendered frame, as RGBA8 rows.
 struct Rendered {
-    width: u32,
+    width:  u32,
     pixels: Vec<u8>,
 }
 
@@ -125,9 +135,9 @@ fn render_quads(
     });
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("readback"),
-        size: u64::from(width) * u64::from(height) * 4,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("readback"),
+        size:               u64::from(width) * u64::from(height) * 4,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
 
@@ -138,11 +148,11 @@ fn render_quads(
         .begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("clear"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
+                view:           &view,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                ops:            wgpu::Operations {
+                    load:  wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -167,16 +177,16 @@ fn render_quads(
     );
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: &target,
+            texture:   &target,
             mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    wgpu::TextureAspect::All,
         },
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
+                offset:         0,
+                bytes_per_row:  Some(width * 4),
                 rows_per_image: Some(height),
             },
         },
@@ -333,9 +343,9 @@ fn a_plate_fills_its_rectangle_with_its_own_shade() {
         &atlas,
         &[gump::plate(
             Rect {
-                x: 10.0,
-                y: 6.0,
-                width: 8.0,
+                x:      10.0,
+                y:      6.0,
+                width:  8.0,
                 height: 4.0,
             },
             Hue::NONE,
@@ -382,9 +392,9 @@ fn a_hued_plate_reads_its_shade_off_the_ramp() {
         &[
             gump::plate(
                 Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    width: 4.0,
+                    x:      0.0,
+                    y:      0.0,
+                    width:  4.0,
                     height: 4.0,
                 },
                 Hue(1),
@@ -392,9 +402,9 @@ fn a_hued_plate_reads_its_shade_off_the_ramp() {
             ),
             gump::plate(
                 Rect {
-                    x: 8.0,
-                    y: 0.0,
-                    width: 4.0,
+                    x:      8.0,
+                    y:      0.0,
+                    width:  4.0,
                     height: 4.0,
                 },
                 Hue(1),

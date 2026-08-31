@@ -48,7 +48,10 @@
 //! is built to catch.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_protocol::speech::Font;
 
@@ -75,18 +78,18 @@ pub enum AsciiFontError {
     /// The file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
     /// A decoded set cannot be represented by `fonts.mul`'s byte dimensions.
     Oversized {
         /// Which face.
-        font: usize,
+        font:   usize,
         /// Which byte-sized character.
-        char: u8,
+        char:   u8,
         /// The unrepresentable width.
-        width: u16,
+        width:  u16,
         /// The unrepresentable height.
         height: u16,
     },
@@ -109,10 +112,12 @@ impl fmt::Display for AsciiFontError {
                 char,
                 width,
                 height,
-            } => write!(
-                f,
-                "font {font} character {char:#04X} is {width}x{height}; fonts.mul dimensions are bytes",
-            ),
+            } => {
+                write!(
+                    f,
+                    "font {font} character {char:#04X} is {width}x{height}; fonts.mul dimensions are bytes",
+                )
+            }
             Self::Truncated {
                 font,
                 char: Some(char),
@@ -160,9 +165,11 @@ impl AsciiFonts {
     /// Read a `fonts.mul` at an exact path.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, AsciiFontError> {
         let path = path.as_ref();
-        let bytes = std::fs::read(path).map_err(|source| AsciiFontError::Read {
-            path: path.to_owned(),
-            source,
+        let bytes = std::fs::read(path).map_err(|source| {
+            AsciiFontError::Read {
+                path: path.to_owned(),
+                source,
+            }
         })?;
         Self::parse(&bytes)
     }
@@ -457,9 +464,9 @@ mod tests {
         assert!(matches!(
             fonts.encode(),
             Err(AsciiFontError::Oversized {
-                font: 2,
-                char: b'A',
-                width: 256,
+                font:   2,
+                char:   b'A',
+                width:  256,
                 height: 1,
             })
         ));

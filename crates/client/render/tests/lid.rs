@@ -32,25 +32,60 @@
 
 use std::path::PathBuf;
 
-use openshard_client_render::atlas::{LandAtlas, StaticAtlas, TexmapAtlas};
-use openshard_client_render::blit::{self, Blit, ViewportRect};
+use openshard_client_render::atlas::{
+    LandAtlas,
+    StaticAtlas,
+    TexmapAtlas,
+};
+use openshard_client_render::blit::{
+    self,
+    Blit,
+    ViewportRect,
+};
 use openshard_client_render::camera::Camera;
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::debug::View;
-use openshard_client_render::frame::{self, Impostor};
+use openshard_client_render::frame::{
+    self,
+    Impostor,
+};
 use openshard_client_render::geometry::Vec2;
 use openshard_client_render::hue::HueRamp;
-use openshard_client_render::items::{self, GroundItem};
-use openshard_client_render::light::{self, Tuning};
-use openshard_client_render::occlusion::{self, Shape};
-use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, SpriteRenderer, Target};
+use openshard_client_render::items::{
+    self,
+    GroundItem,
+};
+use openshard_client_render::light::{
+    self,
+    Tuning,
+};
+use openshard_client_render::occlusion::{
+    self,
+    Shape,
+};
+use openshard_client_render::renderer::{
+    self,
+    GroundRenderer,
+    MeshFaceRenderer,
+    SpriteRenderer,
+    Target,
+};
 use openshard_client_render::statics::StaticGeometry;
-use openshard_client_render::{dump, ground};
+use openshard_client_render::{
+    dump,
+    ground,
+};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, WorldMap};
+use openshard_map::map::{
+    LandCell,
+    WorldMap,
+};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
 use openshard_uofiles::animdata::AnimData;
@@ -151,12 +186,12 @@ fn a_bookcases_measured_slab_is_narrower_than_the_whole_tile_and_a_lost_footprin
 /// Everything one drawn frame leaves behind — `tests/dump.rs`'s own `Drawn`,
 /// trimmed to the one view this file reads.
 struct Drawn {
-    world: wgpu::Texture,
-    gbuffer: openshard_client_render::gbuffer::Gbuffer,
+    world:    wgpu::Texture,
+    gbuffer:  openshard_client_render::gbuffer::Gbuffer,
     lighting: light::Lighting,
-    ground: GroundRenderer,
-    statics: SpriteRenderer,
-    mesh: MeshFaceRenderer,
+    ground:   GroundRenderer,
+    statics:  SpriteRenderer,
+    mesh:     MeshFaceRenderer,
 }
 
 /// One frame, drawn from a synthetic tile of land and the two `items` given —
@@ -173,9 +208,11 @@ fn draw(
     at: Point,
     items: &[GroundItem],
 ) -> Drawn {
-    let map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
-        tile: openshard_tiles::LandTileId(0),
-        z: 27,
+    let map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| {
+        LandCell {
+            tile: openshard_tiles::LandTileId(0),
+            z:    27,
+        }
     });
     let camera = Camera::new(at, VIEWPORT.0, VIEWPORT.1);
     let cutaway = Cutaway::at(&map, tiledata, at, true);
@@ -298,11 +335,13 @@ fn a_real_frames_view_normal_draws_the_bookcases_lid_inside_that_slab() {
     let at = Point::new(BOOKCASES[0].1, BOOKCASES[0].2, 27);
     let items: Vec<GroundItem> = BOOKCASES
         .iter()
-        .map(|&(id, x, y)| GroundItem {
-            amount: ItemAmount::ONE,
-            at: Point::new(x, y, 27),
-            graphic: Graphic(id),
-            hue: Hue::NONE,
+        .map(|&(id, x, y)| {
+            GroundItem {
+                amount:  ItemAmount::ONE,
+                at:      Point::new(x, y, 27),
+                graphic: Graphic(id),
+                hue:     Hue::NONE,
+            }
         })
         .collect();
 
@@ -313,8 +352,8 @@ fn a_real_frames_view_normal_draws_the_bookcases_lid_inside_that_slab() {
     let into = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("lid gate dump"),
         size: wgpu::Extent3d {
-            width: VIEWPORT.0,
-            height: VIEWPORT.1,
+            width:                 VIEWPORT.0,
+            height:                VIEWPORT.1,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -333,9 +372,9 @@ fn a_real_frames_view_normal_draws_the_bookcases_lid_inside_that_slab() {
     let mut blit = Blit::new(&device, format);
     let dummy_mobiles = blit::dummy_instances(&device);
     let rect = ViewportRect {
-        x: 0,
-        y: 0,
-        width: VIEWPORT.0,
+        x:      0,
+        y:      0,
+        width:  VIEWPORT.0,
         height: VIEWPORT.1,
     };
     let mut lighting = drawn.lighting.clone();

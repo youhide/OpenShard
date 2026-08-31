@@ -26,7 +26,10 @@
 //! field that carries it.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_protocol::wire::Hue;
 
@@ -52,7 +55,7 @@ pub enum HuesError {
     /// The file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
@@ -69,12 +72,14 @@ impl fmt::Display for HuesError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
-            Self::NotHues { path, size } => write!(
-                f,
-                "{} is {size} bytes, which is not a whole number of {GROUP_BYTES}-byte hue groups; \
+            Self::NotHues { path, size } => {
+                write!(
+                    f,
+                    "{} is {size} bytes, which is not a whole number of {GROUP_BYTES}-byte hue groups; \
                  it is not hues.mul",
-                path.display()
-            ),
+                    path.display()
+                )
+            }
         }
     }
 }
@@ -92,16 +97,16 @@ impl std::error::Error for HuesError {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct HueEntry {
     /// The ramp, darkest first.
-    pub colors: [Color16; COLORS_PER_HUE],
+    pub colors:      [Color16; COLORS_PER_HUE],
     /// The first colour of the range this hue was authored to replace.
     ///
     /// Read by tools that recolour art offline. A renderer tinting a sprite at
     /// draw time uses [`colors`](Self::colors) and ignores both bounds.
     pub table_start: Color16,
     /// The last colour of that range.
-    pub table_end: Color16,
+    pub table_end:   Color16,
     /// Its name, for tools. Usually empty.
-    pub name: String,
+    pub name:        String,
 }
 
 /// Every hue the client knows.
@@ -120,13 +125,17 @@ impl Hues {
     /// Read `hues.mul`.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, HuesError> {
         let path = path.as_ref();
-        let bytes = std::fs::read(path).map_err(|source| HuesError::Read {
-            path: path.to_owned(),
-            source,
+        let bytes = std::fs::read(path).map_err(|source| {
+            HuesError::Read {
+                path: path.to_owned(),
+                source,
+            }
         })?;
-        Self::parse(&bytes).ok_or_else(|| HuesError::NotHues {
-            path: path.to_owned(),
-            size: bytes.len(),
+        Self::parse(&bytes).ok_or_else(|| {
+            HuesError::NotHues {
+                path: path.to_owned(),
+                size: bytes.len(),
+            }
         })
     }
 

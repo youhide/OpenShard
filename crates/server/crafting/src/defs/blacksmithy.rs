@@ -8,10 +8,22 @@
 //!
 //! [`data/blacksmithy.json`]: ../../../data/blacksmithy.json
 
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_state::Skill;
 
-use crate::recipe::{CraftRes, CraftSkillReq, Recipe, SubRes, SubResAxis};
-use crate::system::{Needs, Text};
+use crate::recipe::{
+    CraftRes,
+    CraftSkillReq,
+    Recipe,
+    SubRes,
+    SubResAxis,
+};
+use crate::system::{
+    Needs,
+    Text,
+};
 
 include!(concat!(env!("OUT_DIR"), "/blacksmithy.rs"));

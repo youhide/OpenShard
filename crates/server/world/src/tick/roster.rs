@@ -1,5 +1,6 @@
-use super::*;
 use openshard_protocol::login::CharacterEntry;
+
+use super::*;
 
 /// One character on an account: that it exists, and where it was when it was
 /// last seen.
@@ -19,7 +20,7 @@ use openshard_protocol::login::CharacterEntry;
 /// that.
 struct Enrolled {
     /// The name as it was created, case and all. What `0xA9` shows the player.
-    name: CharacterName,
+    name:  CharacterName,
     /// Where this character was when it was last seen, or `None` if nothing has
     /// ever recorded it.
     saved: Option<CharacterRecord>,
@@ -91,7 +92,7 @@ impl Roster {
             return;
         }
         characters.push(Enrolled {
-            name: name.clone(),
+            name:  name.clone(),
             saved: None,
         });
     }
@@ -173,8 +174,10 @@ impl Roster {
             .map(|characters| {
                 characters
                     .iter()
-                    .map(|entry| CharacterEntry {
-                        name: entry.name.clone(),
+                    .map(|entry| {
+                        CharacterEntry {
+                            name: entry.name.clone(),
+                        }
                     })
                     .collect()
             })
@@ -304,7 +307,7 @@ mod tests {
         assert_eq!(
             roster.characters(&AccountName::new("admin")),
             vec![CharacterEntry {
-                name: CharacterName::new("Dupre")
+                name: CharacterName::new("Dupre"),
             }],
             "it is on the list"
         );

@@ -50,10 +50,10 @@ pub enum Stop {
         /// The art in the way, which is what names it to a person.
         graphic: Graphic,
         /// Its base `z`.
-        base: i32,
+        base:    i32,
         /// One past the top of the span that stopped the ray — **not always the
         /// art's own height**, which is what `wallish` is here to say.
-        top: i32,
+        top:     i32,
         /// Which of the two readings gave it that span: a wall lent a whole
         /// storey (tiledata gives walls height 0 and the client draws them a
         /// storey tall), or a platform kept its real height.
@@ -70,7 +70,7 @@ pub enum Stop {
         /// Its base `z`.
         base: i32,
         /// One past the wall's sight span.
-        top: i32,
+        top:  i32,
     },
 }
 
@@ -78,11 +78,11 @@ pub enum Stop {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SightStep {
     /// The tile crossed.
-    pub tile: Tile,
+    pub tile:  Tile,
     /// How high the ray was here — the interpolated eye line, not the ground.
     pub ray_z: i32,
     /// What stopped the ray here, if anything did.
-    pub stop: Option<Stop>,
+    pub stop:  Option<Stop>,
 }
 
 /// How much of the line a caller wants walked.
@@ -106,12 +106,12 @@ pub enum Extent {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct SightTrace {
     /// Where the look started.
-    pub from: Point,
+    pub from:    Point,
     /// What it was aimed at.
-    pub to: Point,
+    pub to:      Point,
     /// Every tile crossed, in order — **empty** under
     /// [`Extent::ToFirstBlock`], which does not record what it does not need.
-    pub steps: Vec<SightStep>,
+    pub steps:   Vec<SightStep>,
     /// Where the ray first stopped, if it did. Filled under either extent: it
     /// is the verdict, and [`clear`](Self::clear) is a reading of it.
     pub stopped: Option<SightStep>,
@@ -180,16 +180,17 @@ pub fn trace(footing: &Footing<'_>, from: Point, to: Point, extent: Extent) -> S
 
 /// A live-world obstruction on `tile`, if it stops the ray.
 fn live_stop(footing: &Footing<'_>, tile: Tile, ray_z: i32) -> Option<Stop> {
-    footing
-        .overlay
-        .sight_blocker_at(tile, ray_z)
-        .map(|cover| match cover.is_door() {
+    footing.overlay.sight_blocker_at(tile, ray_z).map(|cover| {
+        match cover.is_door() {
             true => Stop::Door,
-            false => Stop::LiveWall {
-                base: cover.bottom(),
-                top: cover.sight_top(),
-            },
-        })
+            false => {
+                Stop::LiveWall {
+                    base: cover.bottom(),
+                    top:  cover.sight_top(),
+                }
+            }
+        }
+    })
 }
 
 /// How high the ray is over the `index`th tile of a line `count` tiles long.
@@ -205,7 +206,11 @@ fn ray_height(from_z: i32, to_z: i32, index: i32, count: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use openshard_map::overlay::{Cover, Doors, Overlay};
+    use openshard_map::overlay::{
+        Cover,
+        Doors,
+        Overlay,
+    };
     use openshard_tiles::TileFlags;
 
     use super::*;
@@ -251,8 +256,8 @@ mod tests {
             stopped.stop,
             Some(Stop::Static {
                 graphic: openshard_protocol::wire::Graphic(0x402),
-                base: 0,
-                top: 15,
+                base:    0,
+                top:     15,
                 wallish: true,
             }),
             "a zero-height wall was not lent its storey"
@@ -281,8 +286,8 @@ mod tests {
             stopped.stop,
             Some(Stop::Static {
                 graphic: openshard_protocol::wire::Graphic(0x404),
-                base: EYE,
-                top: EYE + 1,
+                base:    EYE,
+                top:     EYE + 1,
                 wallish: false,
             })
         );

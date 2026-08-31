@@ -16,18 +16,44 @@ use openshard_entities::EntityId;
 use openshard_items as items;
 use openshard_map::overlay::Doors;
 use openshard_movement::{
-    COARSE_MIN_DISTANCE, SearchExit, Weight, direction_toward, find_long_path, find_path, search_path,
+    COARSE_MIN_DISTANCE,
+    SearchExit,
+    Weight,
+    direction_toward,
+    find_long_path,
+    find_path,
+    search_path,
     step_from,
 };
 use openshard_protocol::direction::Direction;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::world::{Facet, Point, Sight};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+    Sight,
+};
 use openshard_state::components::{
-    Aggression, Brain, Client, Combat, Heading, Hitpoints, Pet, PetOrder, Position, RangedAttack, Route,
+    Aggression,
+    Brain,
+    Client,
+    Combat,
+    Heading,
+    Hitpoints,
+    Pet,
+    PetOrder,
+    Position,
+    RangedAttack,
+    Route,
     RouteRefused,
 };
-use openshard_state::sectors::{distance, in_range};
-use openshard_state::{WorldState, WorldTick};
+use openshard_state::sectors::{
+    distance,
+    in_range,
+};
+use openshard_state::{
+    WorldState,
+    WorldTick,
+};
 
 /// The chance in eight, per beat, that an idle wanderer takes a step. Low enough
 /// that a field of creatures drifts rather than marches.
@@ -342,7 +368,7 @@ enum Coarse {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct StepPlan {
     planned: Planned,
-    coarse: Coarse,
+    coarse:  Coarse,
 }
 
 /// What a decision has behind it: a way, or a guess.
@@ -419,7 +445,7 @@ fn plan_step(
     if local.arrived {
         return StepPlan {
             planned: Planned::Route(local.route),
-            coarse: Coarse::NotAsked,
+            coarse:  Coarse::NotAsked,
         };
     }
     // A short search that exhausted the live component stays refused: joining
@@ -433,19 +459,23 @@ fn plan_step(
     let Some(graph) = graph else {
         return StepPlan {
             planned: Planned::Straight(direction_toward(from, to)),
-            coarse: Coarse::NotAsked,
+            coarse:  Coarse::NotAsked,
         };
     };
     let guide = state.guide(facet);
     match find_long_path(&guide, &planner, graph, from, to, PATH_BUDGET, Weight::PLANNING) {
-        Some(path) => StepPlan {
-            planned: Planned::Route(path),
-            coarse: Coarse::Routed,
-        },
-        None => StepPlan {
-            planned: Planned::Straight(direction_toward(from, to)),
-            coarse: Coarse::Refused,
-        },
+        Some(path) => {
+            StepPlan {
+                planned: Planned::Route(path),
+                coarse:  Coarse::Routed,
+            }
+        }
+        None => {
+            StepPlan {
+                planned: Planned::Straight(direction_toward(from, to)),
+                coarse:  Coarse::Refused,
+            }
+        }
     }
 }
 
@@ -1175,7 +1205,13 @@ mod tests {
             .expect("a test mobile serial");
         state.registry.insert(entity, Position(at));
         state.registry.insert(entity, Facet(0));
-        state.registry.insert(entity, Hitpoints { current: 10, max: 10 });
+        state.registry.insert(
+            entity,
+            Hitpoints {
+                current: 10,
+                max:     10,
+            },
+        );
         (entity, serial)
     }
 

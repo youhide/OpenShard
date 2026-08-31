@@ -31,17 +31,28 @@ use std::path::PathBuf;
 
 use openshard_client_render::animate::StaticAnimations;
 use openshard_client_render::atlas::StaticAtlas;
-use openshard_client_render::camera::{Camera, TileBounds};
+use openshard_client_render::camera::{
+    Camera,
+    TileBounds,
+};
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::facing::Face;
 use openshard_client_render::geometry::Vec2;
 use openshard_client_render::items::GroundItem;
-use openshard_client_render::light::{self, Spot};
-use openshard_client_render::occlusion;
+use openshard_client_render::light::{
+    self,
+    Spot,
+};
 use openshard_client_render::place::Stance;
-use openshard_client_render::statics;
+use openshard_client_render::{
+    occlusion,
+    statics,
+};
 use openshard_protocol::items::ItemAmount;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
 
@@ -143,10 +154,10 @@ fn what_the_lighting_knows_about_a_place() {
 
     // The flame the report is about, standing in the street where the player was.
     let lamp = [GroundItem {
-        amount: ItemAmount::ONE,
-        at: Point::new(LAMP_AT.0, LAMP_AT.1, 0),
+        amount:  ItemAmount::ONE,
+        at:      Point::new(LAMP_AT.0, LAMP_AT.1, 0),
         graphic: LAMP,
-        hue: Hue::NONE,
+        hue:     Hue::NONE,
     }];
     println!(
         "\nthe lamp is {LAMP:?} at {LAMP_AT:?}, and it burns: {}",
@@ -220,10 +231,12 @@ fn what_the_lighting_knows_about_a_place() {
     // a space is one that arrives whole, and the digits in between are tenths.
     println!("\n=== how much of the nearest flame reaches the ground ===");
     let step = 1.0 / 3.0;
-    let ramp = |through: f32| match through {
-        t if t <= 0.0 => '#',
-        t if t >= 1.0 => ' ',
-        t => char::from_digit((t * 10.0) as u32, 10).unwrap_or('?'),
+    let ramp = |through: f32| {
+        match through {
+            t if t <= 0.0 => '#',
+            t if t >= 1.0 => ' ',
+            t => char::from_digit((t * 10.0) as u32, 10).unwrap_or('?'),
+        }
     };
     for row in -AROUND * 3..=AROUND * 3 {
         let y = f32::from(at_y) + 0.5 + row as f32 * step;
@@ -273,10 +286,12 @@ fn what_the_lighting_knows_about_a_place() {
         let sample = light::sample(Spot::flat(at, cell.top as f32, tile), &lighting);
         match sample.reaches.iter().find(|reach| reach.within) {
             None => println!("lid at z {}: no flame reaches it", cell.top),
-            Some(reach) => println!(
-                "lid at z {}: visible {:.3}  delivers {:.3}  from the flame {:.1} tiles away",
-                cell.top, reach.through, reach.delivered, reach.distance,
-            ),
+            Some(reach) => {
+                println!(
+                    "lid at z {}: visible {:.3}  delivers {:.3}  from the flame {:.1} tiles away",
+                    cell.top, reach.through, reach.delivered, reach.distance,
+                )
+            }
         }
     }
     for (face, at, z) in [
@@ -309,10 +324,12 @@ fn what_the_lighting_knows_about_a_place() {
             .min_by(|a, b| a.distance.total_cmp(&b.distance));
         match nearest {
             None => println!("{face:?}: no flame reaches it"),
-            Some(reach) => println!(
-                "{face:?}: visible {:.3}  delivers {:.3}  from the flame {:.1} tiles away",
-                reach.through, reach.delivered, reach.distance,
-            ),
+            Some(reach) => {
+                println!(
+                    "{face:?}: visible {:.3}  delivers {:.3}  from the flame {:.1} tiles away",
+                    reach.through, reach.delivered, reach.distance,
+                )
+            }
         }
     }
 }
@@ -327,9 +344,11 @@ fn edges(mask: occlusion::Edges) -> String {
     ];
     let text: String = named
         .iter()
-        .map(|(bit, letter)| match mask.contains(*bit) {
-            true => *letter,
-            false => '-',
+        .map(|(bit, letter)| {
+            match mask.contains(*bit) {
+                true => *letter,
+                false => '-',
+            }
         })
         .collect();
     match mask {

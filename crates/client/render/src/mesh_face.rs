@@ -21,7 +21,7 @@ use crate::place::Stance;
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct MeshFaceRow {
     /// The tile this face's static stands on.
-    pub tile: (u16, u16),
+    pub tile:   (u16, u16),
     /// This face's real stance — never [`Stance::MeshFace`] itself, which is
     /// only ever the id word's own routing sentinel, not a row's content.
     pub stance: Stance,
@@ -41,7 +41,7 @@ pub struct MeshFaceRow {
     /// needed a height to tell which lid a fragment stood on. This is the number
     /// that replaced it — [`crate::occlusion::Occlusion::id_of`] of the face's
     /// own [`Part`](crate::occlusion::Part), joined where the mesh is built.
-    pub solid: u32,
+    pub solid:  u32,
 }
 
 impl MeshFaceRow {
@@ -88,15 +88,15 @@ pub struct MeshFaceVertex {
     /// world coordinates is exact at every fragment inside it. That is what
     /// replaces both a constant sub-tile-fraction/height approximation and a
     /// second copy of `statics.wgsl`'s per-stance analytic inversion.
-    pub world: [f32; 3],
+    pub world:  [f32; 3],
     /// The enclosing static's own `SpriteQuad::depth`, reused rather than
     /// recomputed — `docs/gbuffer.md` decision 4's "stays depth-consistent
     /// with the visible pass": a second depth formula is a second chance to
     /// disagree with the one that already decided this static's pixels.
-    pub depth: f32,
+    pub depth:  f32,
     /// This face's row index in the frame's `MeshFaceRow` list — identical
     /// for all six vertices [`crate::mesh::Face::fan`] produces for one face.
-    pub id: u32,
+    pub id:     u32,
     /// The tile this face's static stands on — [`MeshFaceRow::tile`] again,
     /// carried on the vertex too rather than looked up a second time.
     ///
@@ -109,7 +109,7 @@ pub struct MeshFaceVertex {
     /// instead of flooring the position is the fix: `docs/lighting.md`'s
     /// shadow-raymarch anomaly, an isolated lit pixel on an otherwise
     /// evenly-shadowed flat face, sitting exactly on that edge.
-    pub tile: [f32; 2],
+    pub tile:   [f32; 2],
     /// This face's own unit normal — [`crate::mesh::Face::normal`], carried
     /// whole rather than named by [`MeshFaceRow::stance`] and read back out of
     /// one.
@@ -180,9 +180,9 @@ mod tests {
     #[test]
     fn a_row_packs_its_tile_and_stance() {
         let row = MeshFaceRow {
-            tile: (0x1234, 0x5678),
+            tile:   (0x1234, 0x5678),
             stance: Stance::FaceWest,
-            solid: 3,
+            solid:  3,
         };
         let mut out = Vec::new();
         row.write(&mut out);
@@ -201,10 +201,10 @@ mod tests {
     fn a_vertex_writes_its_stride_and_nothing_more() {
         let vertex = MeshFaceVertex {
             screen: ViewPoint::new(1.5, 2.5),
-            world: [100.0, 101.0, 5.0],
-            depth: 0.75,
-            id: 0xABCD,
-            tile: [100.0, 100.0],
+            world:  [100.0, 101.0, 5.0],
+            depth:  0.75,
+            id:     0xABCD,
+            tile:   [100.0, 100.0],
             normal: [0.0, 0.0, 1.0],
             colour: [0.72, 0.70, 0.66],
         };

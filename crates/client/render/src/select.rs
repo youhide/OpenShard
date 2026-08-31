@@ -48,7 +48,7 @@ pub struct Selection {
     /// `None` washes the sprite alone. There is no caller for that today; it is
     /// what the type says about a selected thing that stands nowhere, rather
     /// than a coordinate of `(0, 0)` meaning two things.
-    pub tile: Option<Tile>,
+    pub tile:   Option<Tile>,
     /// The wash over the selected thing's own pixels: colour, and `a` is how
     /// much of it replaces what is under it.
     pub sprite: [f32; 4],
@@ -68,7 +68,7 @@ impl Selection {
     /// art is cyan, which is what keeps it legible over the greys and browns of a
     /// town.
     pub const DEFAULT: Self = Self {
-        tile: None,
+        tile:   None,
         // Well under half: the art has to stay readable under it. A wash at 0.6
         // is a coloured rectangle where the wall was.
         sprite: [0.0, 0.86, 1.0, 0.30],
@@ -88,23 +88,23 @@ impl Selection {
 #[derive(Clone, Copy, Debug)]
 pub struct Frame<'a> {
     /// What to draw onto — the surface, after the blit has put the world there.
-    pub target: &'a wgpu::TextureView,
+    pub target:           &'a wgpu::TextureView,
     /// The mask the silhouette pass filled with the selected sprite.
     ///
     /// **Its own texture and not [`outline`](crate::outline)'s.** The ring pass
     /// draws an edge round every id it finds in that one, so a selection sharing
     /// it would be ringed as well as washed — two statements, one of which
     /// nobody asked for.
-    pub mask: &'a wgpu::TextureView,
+    pub mask:             &'a wgpu::TextureView,
     /// What drew each world pixel. The frame's own id plane, the same one the
     /// blit lit from.
-    pub ids: &'a wgpu::TextureView,
+    pub ids:              &'a wgpu::TextureView,
     /// The statics pass's own instance buffer, bound a second time as storage —
     /// the same buffer `blit::Frame::face_instances` is. A `Kind::Static`
     /// pixel's id word carries a row in this, not a tile
     /// (`docs/gbuffer.md` step 3); the ground wash resolves it the same way
     /// `blit.wgsl` does, for the same reason. See step 6.
-    pub face_instances: &'a wgpu::Buffer,
+    pub face_instances:   &'a wgpu::Buffer,
     /// The ground pass's own instance buffer, bound a second time as storage —
     /// the same buffer `blit::Frame::ground_instances` is. A `Kind::Land`
     /// pixel's `place.x`/`place.y` is an id into this, not a tile
@@ -115,11 +115,11 @@ pub struct Frame<'a> {
     /// reads them at one coordinate. Carried beside the views for the reason
     /// [`outline::Frame`](crate::outline::Frame) carries one: a view does not
     /// know its own extent.
-    pub size: (u32, u32),
+    pub size:             (u32, u32),
     /// The rectangle of `target` the world was blitted into. The same
     /// [`ViewportRect`](crate::blit::ViewportRect) the blit was given, or the
     /// wash lands somewhere the world is not.
-    pub rect: crate::blit::ViewportRect,
+    pub rect:             crate::blit::ViewportRect,
 }
 
 /// Bytes of `select.wgsl`'s uniform block: four `vec4`s.
@@ -129,7 +129,7 @@ const SELECTION_BYTES: u64 = 64;
 #[derive(Debug)]
 pub struct Select {
     pipeline: wgpu::RenderPipeline,
-    layout: wgpu::BindGroupLayout,
+    layout:   wgpu::BindGroupLayout,
     uniforms: wgpu::Buffer,
 }
 
@@ -138,99 +138,101 @@ impl Select {
     /// [`WORLD_FORMAT`](crate::blit::WORLD_FORMAT): this pass draws over the
     /// blit's output. See the module docs for why.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        let uint_texture = |binding| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Texture {
-                // Both are integer records — an id and a tile — and neither is
-                // ever sampled: a place averaged with its neighbour would name a
-                // third tile nothing was drawn on, and an id averaged with one is
-                // not an id at all.
-                sample_type: wgpu::TextureSampleType::Uint,
-                view_dimension: wgpu::TextureViewDimension::D2,
-                multisampled: false,
-            },
-            count: None,
+        let uint_texture = |binding| {
+            wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    // Both are integer records — an id and a tile — and neither is
+                    // ever sampled: a place averaged with its neighbour would name a
+                    // third tile nothing was drawn on, and an id averaged with one is
+                    // not an id at all.
+                    sample_type:    wgpu::TextureSampleType::Uint,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled:   false,
+                },
+                count: None,
+            }
         };
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("select"),
+            label:   Some("select"),
             entries: &[
                 uint_texture(0),
                 uint_texture(1),
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding:    2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 // The statics pass's own instance data, bound a second time as
                 // storage — `blit.wgsl`'s binding 9, read here for the same
                 // reason: a static's `place` is an id, not a tile. Read-only,
                 // like every other reader of it.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding:    3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 // The ground pass's own instance data, bound a second time as
                 // storage — `blit.wgsl`'s binding 12, read here for the same
                 // reason: a land pixel's `place` is an id too, since
                 // `docs/gbuffer.md` step 7. Read-only, like binding 3 above.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 4,
+                    binding:    4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
             ],
         });
 
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("selection"),
-            size: SELECTION_BYTES,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            label:              Some("selection"),
+            size:               SELECTION_BYTES,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("select"),
+            label:  Some("select"),
             // `src/shaders/select.wesl`, compiled to plain WGSL by `build.rs`.
             source: wgpu::ShaderSource::Wgsl(include_str!(concat!(env!("OUT_DIR"), "/select.wgsl")).into()),
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("select"),
+            label:              Some("select"),
             bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
+            immediate_size:     0,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("select"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+            label:          Some("select"),
+            layout:         Some(&pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
+                buffers:             &[],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
+                targets:             &[Some(wgpu::ColorTargetState {
                     format,
                     // Premultiplied, like the ring: this draws onto a finished
                     // picture, and a wash the world shows through is the whole
@@ -239,22 +241,22 @@ impl Select {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+            primitive:      wgpu::PrimitiveState {
+                topology:           wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
+                front_face:         wgpu::FrontFace::Ccw,
+                cull_mode:          None,
+                unclipped_depth:    false,
+                polygon_mode:       wgpu::PolygonMode::Fill,
+                conservative:       false,
             },
             // No depth: the world's depth buffer already decided what is
             // visible, and the mask and the id plane are the record of
             // that decision.
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            depth_stencil:  None,
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
 
         Self {
@@ -298,27 +300,27 @@ impl Select {
         // recreated on every resize and every zoom step, and a cached group would
         // point at one nothing is drawing into any more.
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("select"),
-            layout: &self.layout,
+            label:   Some("select"),
+            layout:  &self.layout,
             entries: &[
                 wgpu::BindGroupEntry {
-                    binding: 0,
+                    binding:  0,
                     resource: wgpu::BindingResource::TextureView(frame.mask),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 1,
+                    binding:  1,
                     resource: wgpu::BindingResource::TextureView(frame.ids),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding:  2,
                     resource: self.uniforms.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding:  3,
                     resource: frame.face_instances.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 4,
+                    binding:  4,
                     resource: frame.ground_instances.as_entire_binding(),
                 },
             ],
@@ -327,11 +329,11 @@ impl Select {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("select"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: frame.target,
-                depth_slice: None,
+                view:           frame.target,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                ops:            wgpu::Operations {
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],

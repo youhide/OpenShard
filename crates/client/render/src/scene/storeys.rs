@@ -2,12 +2,21 @@
 
 use openshard_protocol::world::Point;
 
+use super::{
+    CENTRE,
+    FLOOR,
+    ROOM_HALF,
+    Scene,
+    SceneTile,
+    TORCH,
+    WALL,
+    WALL_EAST,
+    WALL_HEIGHT,
+    empty,
+    room_wall_tiles,
+};
 use crate::atlas::StaticAtlas;
 use crate::items::GroundItem;
-
-use super::{
-    CENTRE, FLOOR, ROOM_HALF, Scene, SceneTile, TORCH, WALL, WALL_EAST, WALL_HEIGHT, empty, room_wall_tiles,
-};
 
 /// How far below street level the cellar torch burns.
 pub const CELLAR_DEPTH: i8 = -(7 * 11);
@@ -16,10 +25,10 @@ pub const CELLAR_DEPTH: i8 = -(7 * 11);
 pub fn cellar_under_street() -> Scene {
     let mut scene = empty("a torch in a cellar under an empty street");
     scene.items.push(GroundItem {
-        amount: openshard_protocol::items::ItemAmount::ONE,
-        at: Point::new(CENTRE.x, CENTRE.y, CELLAR_DEPTH),
+        amount:  openshard_protocol::items::ItemAmount::ONE,
+        at:      Point::new(CENTRE.x, CENTRE.y, CELLAR_DEPTH),
         graphic: TORCH,
-        hue: openshard_protocol::wire::Hue::NONE,
+        hue:     openshard_protocol::wire::Hue::NONE,
     });
     scene
 }

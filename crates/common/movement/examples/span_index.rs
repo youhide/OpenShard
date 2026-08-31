@@ -27,7 +27,10 @@ use std::time::Instant;
 
 use clap::Parser;
 use openshard_map::map::WorldMap;
-use openshard_movement::spans::{SpanIndex, Spans};
+use openshard_movement::spans::{
+    SpanIndex,
+    Spans,
+};
 use openshard_movement::surfaces::stand_surfaces;
 
 #[derive(Debug, Parser)]
@@ -35,7 +38,7 @@ struct Cli {
     #[arg(short, long, env = "OPENSHARD_CLIENT", value_name = "DIR")]
     client: PathBuf,
     #[arg(long, default_value_t = 0)]
-    facet: u8,
+    facet:  u8,
     /// How many disagreeing columns to print before going quiet.
     #[arg(long, default_value_t = 10)]
     report: usize,

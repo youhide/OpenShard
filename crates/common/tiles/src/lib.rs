@@ -233,7 +233,7 @@ impl fmt::Debug for TileFlags {
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct LandTile {
     /// What it can do.
-    pub flags: TileFlags,
+    pub flags:   TileFlags,
     /// Which square texture the ground is stretched over where it slopes.
     ///
     /// Its own index space — [`TextureId`] — and unrelated to the tile's
@@ -242,21 +242,21 @@ pub struct LandTile {
     /// the ground around it stands.
     pub texture: TextureId,
     /// Its name, for logs and tools. Often "NoName".
-    pub name: String,
+    pub name:    String,
 }
 
 /// One static tile: anything standing on the ground.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct StaticTile {
     /// What it can do.
-    pub flags: TileFlags,
+    pub flags:   TileFlags,
     /// How tall it is.
     ///
     /// For climbable tiles this is the *full* height; Sphere halves it when
     /// working out where you end up standing. See `MapTerrain`.
-    pub height: u8,
+    pub height:  u8,
     /// 255 means immovable.
-    pub weight: u8,
+    pub weight:  u8,
     /// Which paperdoll layer a wearable copy of it sits on.
     ///
     /// UO's file documentation calls this field *quality*, and for a piece of
@@ -264,7 +264,7 @@ pub struct StaticTile {
     /// (`BaseWeapon`: `Layer = (Layer)ItemData.Quality`), which is how a halberd
     /// knows to take both hands. It was read past for most of this reader's life
     /// because nothing asked; Arms Lore does.
-    pub layer: u8,
+    pub layer:   u8,
     /// What a worn copy of it draws as, in the body-animation index space —
     /// a different space from this tile's own art graphic, and read from
     /// `anim.mul`/`AnimAtlas` rather than `art.mul`.
@@ -276,7 +276,7 @@ pub struct StaticTile {
     /// life, the same way `layer` was, because nothing asked for it either.
     pub anim_id: AnimId,
     /// Its name.
-    pub name: String,
+    pub name:    String,
 }
 
 /// A worn item's picture, in the body-animation index space `anim.mul` reads —
@@ -311,7 +311,7 @@ pub struct TextureId(pub u16);
 /// not a map, so one copy is read and each facet's terrain gets its own.
 #[derive(Clone)]
 pub struct TileData {
-    land: Vec<LandTile>,
+    land:    Vec<LandTile>,
     statics: Vec<StaticTile>,
 }
 
@@ -358,7 +358,7 @@ impl TileData {
     #[must_use]
     pub fn empty() -> Self {
         Self {
-            land: vec![LandTile::default(); LAND_TILE_COUNT],
+            land:    vec![LandTile::default(); LAND_TILE_COUNT],
             statics: vec![StaticTile::default(); STATIC_TILE_COUNT],
         }
     }

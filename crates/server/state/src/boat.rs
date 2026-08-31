@@ -36,7 +36,11 @@
 use std::collections::HashMap;
 
 use openshard_entities::EntityId;
-use openshard_map::overlay::{Body, Cover, Covers};
+use openshard_map::overlay::{
+    Body,
+    Cover,
+    Covers,
+};
 use openshard_tiles::StaticTile;
 
 /// One tile of one boat, as the step check needs it.
@@ -71,7 +75,7 @@ pub struct Plank {
     /// Private, and [`of_art`](Self::of_art) is the only way to fill it: the
     /// whole of this change is that there is one reading of a ship's art, and a
     /// public field is somewhere to put a second.
-    covers: Covers,
+    covers:   Covers,
 }
 
 impl Plank {
@@ -113,7 +117,7 @@ impl Plank {
 /// [`Obstructions`](crate::Obstructions).
 #[derive(Clone, Default, Debug)]
 pub struct Boats {
-    tiles: HashMap<(u16, u16), Vec<Plank>>,
+    tiles:   HashMap<(u16, u16), Vec<Plank>>,
     /// Which tiles each boat put down, so it can be lifted off again without
     /// re-deriving its shape. The reverse index `Obstructions` never had, and
     /// the reason a boat can afford one: there are a handful of ships and
@@ -256,9 +260,14 @@ impl Boats {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_entities::Registry;
-    use openshard_tiles::{AnimId, StaticTile, TileFlags};
+    use openshard_tiles::{
+        AnimId,
+        StaticTile,
+        TileFlags,
+    };
+
+    use super::*;
 
     fn an_entity() -> EntityId {
         Registry::default().spawn()

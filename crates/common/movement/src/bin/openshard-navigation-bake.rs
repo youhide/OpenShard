@@ -16,10 +16,10 @@ struct Cli {
     /// Still required with `--base-set`: a base set holds the map, and
     /// `tiledata.mul` holds what a tile is, which the graph is built out of.
     #[arg(short, long, env = "OPENSHARD_CLIENT", value_name = "DIR")]
-    client: PathBuf,
+    client:   PathBuf,
     /// Facet to build; may be repeated. Defaults to 0.
     #[arg(long, value_name = "N")]
-    facet: Vec<u8>,
+    facet:    Vec<u8>,
     /// Build over a base set instead of the install's map and statics.
     ///
     /// What `world.base_sets` names in the shard's config. The artifact lands
@@ -30,10 +30,10 @@ struct Cli {
     base_set: Option<PathBuf>,
     /// Explicit destination (valid with exactly one facet).
     #[arg(long, value_name = "FILE")]
-    out: Option<PathBuf>,
+    out:      Option<PathBuf>,
     /// Build and report, but do not write.
     #[arg(long)]
-    dry_run: bool,
+    dry_run:  bool,
 }
 
 fn main() -> ExitCode {
@@ -80,10 +80,12 @@ fn source(
     facet: Facet,
 ) -> Result<(MapSnapshot, bake::Stamp, PathBuf), Box<dyn std::error::Error>> {
     match cli.base_set.as_deref() {
-        Some(base_set) => eprintln!(
-            "navigation bake: loading facet {facet} from {}",
-            base_set.display()
-        ),
+        Some(base_set) => {
+            eprintln!(
+                "navigation bake: loading facet {facet} from {}",
+                base_set.display()
+            )
+        }
         None => eprintln!("navigation bake: loading facet {facet}"),
     }
     let source = cli

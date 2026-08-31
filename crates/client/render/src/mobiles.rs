@@ -36,21 +36,44 @@
 //! decided and the renderer places a picture at it. `docs/camera.md` D10 is the
 //! argument for the ease living on the body rather than on the eye.
 
-use openshard_protocol::direction::Direction;
-use openshard_protocol::wire::{Graphic, Hue, Layer};
-use openshard_protocol::world::Point;
-use openshard_tiles::AnimId;
-use openshard_uofiles::anim::{AnimationFrameIndex, AnimationGroup, BodyKind};
-use openshard_uofiles::equipconv::EquipConv;
-
 use std::rc::Rc;
 
-use crate::atlas::{AnimAtlas, AnimFrameSource, AnimationKey, AtlasPixel, FrameKey};
-use crate::camera::{Camera, RealPixel, ViewPixel, ViewPoint, WorldPoint};
+use openshard_protocol::direction::Direction;
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
+use openshard_protocol::world::Point;
+use openshard_tiles::AnimId;
+use openshard_uofiles::anim::{
+    AnimationFrameIndex,
+    AnimationGroup,
+    BodyKind,
+};
+use openshard_uofiles::equipconv::EquipConv;
+
+use crate::atlas::{
+    AnimAtlas,
+    AnimFrameSource,
+    AnimationKey,
+    AtlasPixel,
+    FrameKey,
+};
+use crate::camera::{
+    Camera,
+    RealPixel,
+    ViewPixel,
+    ViewPoint,
+    WorldPoint,
+};
 use crate::cutaway::Cutaway;
 use crate::depth;
 use crate::follow::Gaze;
-use crate::geometry::{Rect, Vec2};
+use crate::geometry::{
+    Rect,
+    Vec2,
+};
 use crate::sprite::SpriteQuad;
 
 /// One creature to draw, as the client knows it.
@@ -68,20 +91,20 @@ pub struct Mobile {
     /// height the body is sorted at, and — with [`Mobile::from`] — which tile
     /// depth it sorts at. A step moves the order once, at the boundary, never
     /// by a fraction.
-    pub at: Point,
+    pub at:        Point,
     /// Its body id.
-    pub body: Graphic,
+    pub body:      Graphic,
     /// Which animation group is playing.
-    pub group: AnimationGroup,
+    pub group:     AnimationGroup,
     /// Which way it is looking.
     ///
     /// The facing, not the stored direction: turning one into the other is
     /// [`openshard_uofiles::anim::facing`], and doing it here rather than in the
     /// caller is what keeps the mirror and the placement from being decided in
     /// two different places.
-    pub facing: Direction,
+    pub facing:    Direction,
     /// Which frame of that animation.
-    pub frame: AnimationFrameIndex,
+    pub frame:     AnimationFrameIndex,
     /// The tile it is stepping *off*, while a step is in flight — `None` for a
     /// body standing still.
     ///
@@ -92,15 +115,15 @@ pub struct Mobile {
     /// its tile even when it is standing (`docs/camera.md` D10), so the pixel
     /// offset cannot tell "walking" from "settling", and this is a question
     /// about the step and not about the picture.
-    pub from: Option<Point>,
+    pub from:      Option<Point>,
     /// Whether this is a corpse item lying on the ground.
     ///
     /// A death frame reaches into the tile immediately nearer the camera. Its
     /// anchor remains the corpse item's tile, but the foreground land must not
     /// cut through the body, so its depth key advances one tile.
-    pub corpse: bool,
+    pub corpse:    bool,
     /// Its hue, or [`Hue::NONE`] for none.
-    pub hue: Hue,
+    pub hue:       Hue,
     /// Where to actually draw it, sub-pixel and with its height kept apart.
     ///
     /// **Not derived from [`Mobile::at`], and that is the point.** A body
@@ -113,7 +136,7 @@ pub struct Mobile {
     /// A [`Gaze`] and not a [`WorldPixel`] because the camera filters it: the
     /// height is kept out of the vertical axis so it can have its own clock, and
     /// the rounding happens once, at the end (D2, D7).
-    pub drawn: Gaze,
+    pub drawn:     Gaze,
     /// What it is wearing. Not the item's own wire graphic — its tiledata
     /// `AnimID`, already resolved by the caller (this crate has no tiledata
     /// reference), because that is what a worn item draws with *by default*.
@@ -163,7 +186,7 @@ pub struct EquipmentLayer {
     /// in `client/app`, which is where the wire's list becomes this one.
     pub graphic: AnimId,
     /// Its hue, or [`Hue::NONE`] for none.
-    pub hue: Hue,
+    pub hue:     Hue,
     /// Which slot it is worn on.
     ///
     /// Carried because the *picture* is not enough to draw a body correctly:
@@ -172,7 +195,7 @@ pub struct EquipmentLayer {
     /// paperdoll's layer ordering needs — see `docs/client.md` — which is why
     /// it is the wire's [`Layer`] and not a smaller local enum: the ordering
     /// table is written against these numbers.
-    pub layer: Layer,
+    pub layer:   Layer,
 }
 
 /// Where a mobile is asking to be looked at.
@@ -457,13 +480,13 @@ fn worn_graphic(mobile: &Mobile, layer: &EquipmentLayer, equip_conv: &EquipConv)
 /// one to draw it, the other to hang a label above it — and computing it twice
 /// is two chances for the anchor arithmetic to disagree with itself.
 struct Placement {
-    rect: Rect,
-    region: crate::atlas::Region,
-    order: depth::Order,
+    rect:     Rect,
+    region:   crate::atlas::Region,
+    order:    depth::Order,
     /// Which atlas picture it is showing. Carried so [`pick`] can ask that
     /// picture's own texels whether the cursor hit it, rather than re-deriving
     /// a source from the mobile and drifting from what was drawn.
-    source: AnimFrameSource,
+    source:   AnimFrameSource,
     /// Whether the picture is sampled right to left. The atlas holds one
     /// picture for both facings, so a texel test has to undo the flip — see
     /// [`AnimAtlas::opaque_at`].
@@ -501,7 +524,7 @@ fn place(
     // wall in the middle of a step. Which of the two tiles a step is between is
     // `depth::mobile_tile`'s to say.
     let order = depth::Order {
-        tile: match mobile.corpse {
+        tile:       match mobile.corpse {
             true => depth::corpse_tile(mobile.at),
             false => depth::mobile_tile(mobile.at, mobile.from),
         },
@@ -524,9 +547,9 @@ fn place(
 
     Some(Placement {
         rect: Rect {
-            x: at.x - anchor_x as f32,
-            y: at.y - (height + i32::from(packed.center_y)) as f32,
-            width: width as f32,
+            x:      at.x - anchor_x as f32,
+            y:      at.y - (height + i32::from(packed.center_y)) as f32,
+            width:  width as f32,
             height: height as f32,
         },
         region,
@@ -659,13 +682,13 @@ fn push_quads(
                 out.push((
                     order,
                     SpriteQuad {
-                        rect: mount.rect,
-                        region: mount.region,
-                        depth: order.to_depth(base),
-                        hue: u32::from(hue.unwrap_or(mount_hue).0),
-                        place: crate::place::Place::of_mobile(mobile.at),
-                        twin: billboard,
-                        owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
+                        rect:    mount.rect,
+                        region:  mount.region,
+                        depth:   order.to_depth(base),
+                        hue:     u32::from(hue.unwrap_or(mount_hue).0),
+                        place:   crate::place::Place::of_mobile(mobile.at),
+                        twin:    billboard,
+                        owner:   u32::from(crate::occlusion::OwnerId::NONE.raw()),
                         volumes: crate::impostor::Range::default(),
                     },
                 ));
@@ -675,17 +698,17 @@ fn push_quads(
     out.push((
         order,
         SpriteQuad {
-            rect: placement.rect,
-            region: placement.region,
-            depth: order.to_depth(base),
-            hue: u32::from(hue.unwrap_or(mobile.hue).0),
-            place: crate::place::Place::of_mobile(mobile.at),
-            twin: billboard,
+            rect:    placement.rect,
+            region:  placement.region,
+            depth:   order.to_depth(base),
+            hue:     u32::from(hue.unwrap_or(mobile.hue).0),
+            place:   crate::place::Place::of_mobile(mobile.at),
+            twin:    billboard,
             // A billboard is no occluder, so it is exempt from nothing — a
             // creature standing on a walled tile is genuinely in that wall's
             // shadow. `docs/lighting_height.md` phase 3, and the one behaviour
             // change it makes on a real frame.
-            owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
+            owner:   u32::from(crate::occlusion::OwnerId::NONE.raw()),
             volumes: crate::impostor::Range::default(),
         },
     ));
@@ -710,15 +733,15 @@ fn push_quads(
         out.push((
             order,
             SpriteQuad {
-                rect: worn.rect,
-                region: worn.region,
-                depth: order.to_depth(base),
-                hue: u32::from(hue.unwrap_or(worn_hue).0),
+                rect:    worn.rect,
+                region:  worn.region,
+                depth:   order.to_depth(base),
+                hue:     u32::from(hue.unwrap_or(worn_hue).0),
                 // The body's tile, not the sprite's: a hat is lit as the
                 // head under it is, and it has no tile of its own.
-                place: crate::place::Place::of_mobile(mobile.at),
-                twin: billboard,
-                owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
+                place:   crate::place::Place::of_mobile(mobile.at),
+                twin:    billboard,
+                owner:   u32::from(crate::occlusion::OwnerId::NONE.raw()),
                 volumes: crate::impostor::Range::default(),
             },
         ));
@@ -928,9 +951,9 @@ pub fn screen_rect(mobile: &Mobile, camera: &Camera, atlas: &AnimAtlas) -> Optio
 /// extend far beyond it.
 #[derive(Clone, Debug)]
 pub struct OpaqueMask {
-    rect: Rect,
-    order: depth::Order,
-    width: u16,
+    rect:   Rect,
+    order:  depth::Order,
+    width:  u16,
     pixels: Vec<bool>,
 }
 
@@ -1030,7 +1053,7 @@ impl OpaqueMask {
         Self {
             rect,
             order: depth::Order {
-                tile: i32::MIN,
+                tile:       i32::MIN,
                 priority_z: i32::MIN,
             },
             width,
@@ -1094,7 +1117,10 @@ pub fn head_anchor(mobile: &Mobile, camera: &Camera, atlas: &AnimAtlas) -> Optio
 
 #[cfg(test)]
 mod tests {
-    use openshard_uofiles::anim::{AnimFrame, AnimationDirection};
+    use openshard_uofiles::anim::{
+        AnimFrame,
+        AnimationDirection,
+    };
     use openshard_uofiles::color::Color16;
     use openshard_uofiles::image::Image;
 
@@ -1110,7 +1136,7 @@ mod tests {
             AnimFrame {
                 center_x: center.0,
                 center_y: center.1,
-                image: Image::new(
+                image:    Image::new(
                     width,
                     height,
                     vec![Color16(0x7C00); usize::from(width) * usize::from(height)],
@@ -1234,9 +1260,11 @@ mod tests {
             4,
             6,
             (0..24)
-                .map(|index| match index % 4 < 2 {
-                    true => Color16::TRANSPARENT,
-                    false => Color16(0x7C00),
+                .map(|index| {
+                    match index % 4 < 2 {
+                        true => Color16::TRANSPARENT,
+                        false => Color16(0x7C00),
+                    }
                 })
                 .collect(),
         );
@@ -1291,7 +1319,7 @@ mod tests {
             AnimFrame {
                 center_x: 12,
                 center_y: -3,
-                image: Image::new(width, height, pixels),
+                image:    Image::new(width, height, pixels),
             },
         )])
         .expect("one frame fits")
@@ -1378,7 +1406,7 @@ mod tests {
                 AnimFrame {
                     center_x: 12,
                     center_y: -3,
-                    image: Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
+                    image:    Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
                 },
             )])
             .expect("both frames fit");
@@ -1417,7 +1445,7 @@ mod tests {
                 AnimFrame {
                     center_x: 12,
                     center_y: -3,
-                    image: Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
+                    image:    Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
                 },
             ),
             (
@@ -1430,7 +1458,7 @@ mod tests {
                 AnimFrame {
                     center_x: 22,
                     center_y: 0,
-                    image: Image::new(44, 44, vec![Color16(0x7C00); 44 * 44]),
+                    image:    Image::new(44, 44, vec![Color16(0x7C00); 44 * 44]),
                 },
             ),
         ])
@@ -1439,8 +1467,8 @@ mod tests {
             group: AnimationGroup(25),
             equipment: vec![EquipmentLayer {
                 graphic: AnimId(200),
-                hue: Hue::NONE,
-                layer: Layer::MOUNT,
+                hue:     Hue::NONE,
+                layer:   Layer::MOUNT,
             }]
             .into(),
             ..body_at(100, Direction::SouthEast)
@@ -1478,7 +1506,7 @@ mod tests {
                 AnimFrame {
                     center_x: 12,
                     center_y: -3,
-                    image: Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
+                    image:    Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
                 },
             ),
             (
@@ -1489,7 +1517,7 @@ mod tests {
                 AnimFrame {
                     center_x: 22,
                     center_y: 0,
-                    image: Image::new(44, 44, vec![Color16(0x7C00); 44 * 44]),
+                    image:    Image::new(44, 44, vec![Color16(0x7C00); 44 * 44]),
                 },
             ),
         ])
@@ -1498,8 +1526,8 @@ mod tests {
             group: AnimationGroup(27), // PeopleAnimationGroup.OnmountAttackBow.
             equipment: vec![EquipmentLayer {
                 graphic: AnimId(200),
-                hue: Hue::NONE,
-                layer: Layer::MOUNT,
+                hue:     Hue::NONE,
+                layer:   Layer::MOUNT,
             }]
             .into(),
             ..body_at(100, Direction::SouthEast)
@@ -1537,8 +1565,8 @@ mod tests {
             group: AnimationGroup(4),
             equipment: vec![EquipmentLayer {
                 graphic: AnimId(200),
-                hue: Hue::NONE,
-                layer: Layer::MOUNT,
+                hue:     Hue::NONE,
+                layer:   Layer::MOUNT,
             }]
             .into(),
             ..body_at(100, Direction::SouthEast)
@@ -1597,15 +1625,17 @@ mod tests {
                 AnimFrame {
                     center_x: 12,
                     center_y: -3,
-                    image: Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
+                    image:    Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
                 },
             )])
             .expect("both frames fit");
         // Their own hues, so the assertion is "replaced" and not "set".
-        let dressed = |x: u16| Mobile {
-            hue: Hue(0x03B2),
-            equipment: vec![worn_on_torso(AnimId(7005), Hue(0x0455))].into(),
-            ..body_at(x, Direction::SouthEast)
+        let dressed = |x: u16| {
+            Mobile {
+                hue: Hue(0x03B2),
+                equipment: vec![worn_on_torso(AnimId(7005), Hue(0x0455))].into(),
+                ..body_at(x, Direction::SouthEast)
+            }
         };
         let quads = collect(
             &[dressed(100), dressed(101)],
@@ -1672,15 +1702,15 @@ mod tests {
         // Facing 3 is the stored direction 0, unflipped.
         let quads = collect(
             &[Mobile {
-                at: Point::new(100, 100, 0),
-                body: Graphic(400),
-                group: AnimationGroup(4),
-                facing: Direction::SouthEast,
-                frame: AnimationFrameIndex(0),
-                from: None,
-                corpse: false,
-                hue: Hue::NONE,
-                drawn: Gaze::on(Point::new(100, 100, 0)),
+                at:        Point::new(100, 100, 0),
+                body:      Graphic(400),
+                group:     AnimationGroup(4),
+                facing:    Direction::SouthEast,
+                frame:     AnimationFrameIndex(0),
+                from:      None,
+                corpse:    false,
+                hue:       Hue::NONE,
+                drawn:     Gaze::on(Point::new(100, 100, 0)),
                 equipment: Vec::new().into(),
             }],
             &camera,
@@ -1749,16 +1779,16 @@ mod tests {
         let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
         let atlas = atlas(400, 0, 40, 60, (12, -3));
         let missing = Mobile {
-            at: Point::new(100, 100, 0),
-            body: Graphic(400),
-            group: AnimationGroup(4),
-            facing: Direction::SouthEast,
+            at:        Point::new(100, 100, 0),
+            body:      Graphic(400),
+            group:     AnimationGroup(4),
+            facing:    Direction::SouthEast,
             // One past the only frame packed.
-            frame: AnimationFrameIndex(1),
-            from: None,
-            corpse: false,
-            hue: Hue::NONE,
-            drawn: Gaze::on(Point::new(100, 100, 0)),
+            frame:     AnimationFrameIndex(1),
+            from:      None,
+            corpse:    false,
+            hue:       Hue::NONE,
+            drawn:     Gaze::on(Point::new(100, 100, 0)),
             equipment: Vec::new().into(),
         };
         assert_eq!(
@@ -1811,17 +1841,17 @@ mod tests {
     fn a_ghost_is_packed_and_drawn_under_the_living_body() {
         let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
         let ghost = Mobile {
-            at: Point::new(100, 100, 0),
+            at:        Point::new(100, 100, 0),
             // 0x0192, the male ghost: a body the client's files have no
             // animation for.
-            body: Graphic(402),
-            group: AnimationGroup(4),
-            facing: Direction::SouthEast,
-            frame: AnimationFrameIndex(0),
-            from: None,
-            corpse: false,
-            hue: Hue::NONE,
-            drawn: Gaze::on(Point::new(100, 100, 0)),
+            body:      Graphic(402),
+            group:     AnimationGroup(4),
+            facing:    Direction::SouthEast,
+            frame:     AnimationFrameIndex(0),
+            from:      None,
+            corpse:    false,
+            hue:       Hue::NONE,
+            drawn:     Gaze::on(Point::new(100, 100, 0)),
             equipment: Vec::new().into(),
         };
         assert_eq!(
@@ -1871,15 +1901,15 @@ mod tests {
         let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
         let atlas = atlas(400, 0, 40, 60, (12, -3));
         let mobile = Mobile {
-            at: Point::new(100, 100, 0),
-            body: Graphic(400),
-            group: AnimationGroup(4),
-            facing: Direction::SouthEast,
-            frame: AnimationFrameIndex(0),
-            from: None,
-            corpse: false,
-            hue: Hue::NONE,
-            drawn: Gaze::on(Point::new(100, 100, 0)),
+            at:        Point::new(100, 100, 0),
+            body:      Graphic(400),
+            group:     AnimationGroup(4),
+            facing:    Direction::SouthEast,
+            frame:     AnimationFrameIndex(0),
+            from:      None,
+            corpse:    false,
+            hue:       Hue::NONE,
+            drawn:     Gaze::on(Point::new(100, 100, 0)),
             equipment: Vec::new().into(),
         };
         let quads = collect(
@@ -1902,15 +1932,15 @@ mod tests {
         let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
         let atlas = atlas(400, 0, 40, 60, (12, -3));
         let missing = Mobile {
-            at: Point::new(100, 100, 0),
-            body: Graphic(400),
-            group: AnimationGroup(4),
-            facing: Direction::SouthEast,
-            frame: AnimationFrameIndex(1),
-            from: None,
-            corpse: false,
-            hue: Hue::NONE,
-            drawn: Gaze::on(Point::new(100, 100, 0)),
+            at:        Point::new(100, 100, 0),
+            body:      Graphic(400),
+            group:     AnimationGroup(4),
+            facing:    Direction::SouthEast,
+            frame:     AnimationFrameIndex(1),
+            from:      None,
+            corpse:    false,
+            hue:       Hue::NONE,
+            drawn:     Gaze::on(Point::new(100, 100, 0)),
             equipment: Vec::new().into(),
         };
         assert!(head_anchor(&missing, &camera, &atlas).is_some());
@@ -1928,15 +1958,15 @@ mod tests {
         let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
         let atlas = atlas(400, 0, 40, 60, (12, -3));
         let on_its_tile = Mobile {
-            at: Point::new(101, 100, 0),
-            body: Graphic(400),
-            group: AnimationGroup(4),
-            facing: Direction::SouthEast,
-            frame: AnimationFrameIndex(0),
-            from: None,
-            corpse: false,
-            hue: Hue::NONE,
-            drawn: Gaze::on(Point::new(101, 100, 0)),
+            at:        Point::new(101, 100, 0),
+            body:      Graphic(400),
+            group:     AnimationGroup(4),
+            facing:    Direction::SouthEast,
+            frame:     AnimationFrameIndex(0),
+            from:      None,
+            corpse:    false,
+            hue:       Hue::NONE,
+            drawn:     Gaze::on(Point::new(101, 100, 0)),
             equipment: Vec::new().into(),
         };
         let standing = collect(
@@ -1989,21 +2019,21 @@ mod tests {
         // The ground it is walking off, sorted the way `ground::collect` sorts
         // it: the tile's own depth, and the client's land priority.
         let ground_left_behind = depth::Order {
-            tile: 200,
+            tile:       200,
             priority_z: depth::land_priority_z([0; 4]),
         }
         .to_depth(base);
 
         let walking_north = Mobile {
-            at: Point::new(100, 99, 0),
-            body: Graphic(400),
-            group: AnimationGroup(4),
-            facing: Direction::North,
-            frame: AnimationFrameIndex(0),
-            from: Some(Point::new(100, 100, 0)),
-            corpse: false,
-            hue: Hue::NONE,
-            drawn: Gaze::on(Point::new(100, 99, 0)).back_towards(Gaze::on(Point::new(100, 100, 0)), 0.5),
+            at:        Point::new(100, 99, 0),
+            body:      Graphic(400),
+            group:     AnimationGroup(4),
+            facing:    Direction::North,
+            frame:     AnimationFrameIndex(0),
+            from:      Some(Point::new(100, 100, 0)),
+            corpse:    false,
+            hue:       Hue::NONE,
+            drawn:     Gaze::on(Point::new(100, 99, 0)).back_towards(Gaze::on(Point::new(100, 100, 0)), 0.5),
             equipment: Vec::new().into(),
         };
         let quads = collect(
@@ -2044,17 +2074,19 @@ mod tests {
     /// Every distinct animation a set of mobiles needs, once each.
     #[test]
     fn the_needed_animations_are_deduplicated_by_stored_direction() {
-        let mobile = |facing: Direction| Mobile {
-            at: Point::new(0, 0, 0),
-            body: Graphic(400),
-            group: AnimationGroup(4),
-            facing,
-            frame: AnimationFrameIndex(0),
-            from: None,
-            corpse: false,
-            hue: Hue::NONE,
-            drawn: Gaze::on(Point::new(0, 0, 0)),
-            equipment: Vec::new().into(),
+        let mobile = |facing: Direction| {
+            Mobile {
+                at: Point::new(0, 0, 0),
+                body: Graphic(400),
+                group: AnimationGroup(4),
+                facing,
+                frame: AnimationFrameIndex(0),
+                from: None,
+                corpse: false,
+                hue: Hue::NONE,
+                drawn: Gaze::on(Point::new(0, 0, 0)),
+                equipment: Vec::new().into(),
+            }
         };
         // East and South share a picture, so they are one animation to read.
         let wanted = needed_animations(
@@ -2089,7 +2121,7 @@ mod tests {
                 AnimFrame {
                     center_x: 12,
                     center_y: -3,
-                    image: Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
+                    image:    Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
                 },
             )
         };
@@ -2099,15 +2131,15 @@ mod tests {
 
         let equip_conv = EquipConv::parse("400\t7017\t7005\t0\t0\n");
         let mobile = Mobile {
-            at: Point::new(100, 100, 0),
-            body: Graphic(400),
-            group: AnimationGroup(4),
-            facing: Direction::SouthEast,
-            frame: AnimationFrameIndex(0),
-            from: None,
-            corpse: false,
-            hue: Hue::NONE,
-            drawn: Gaze::on(Point::new(100, 100, 0)),
+            at:        Point::new(100, 100, 0),
+            body:      Graphic(400),
+            group:     AnimationGroup(4),
+            facing:    Direction::SouthEast,
+            frame:     AnimationFrameIndex(0),
+            from:      None,
+            corpse:    false,
+            hue:       Hue::NONE,
+            drawn:     Gaze::on(Point::new(100, 100, 0)),
             equipment: vec![worn_on_torso(AnimId(7017), Hue::NONE)].into(),
         };
         let quads = collect(&[mobile], &camera, &atlas, &Cutaway::OPEN, &equip_conv, None);
@@ -2137,7 +2169,7 @@ mod tests {
                 AnimFrame {
                     center_x: 12,
                     center_y: -3,
-                    image: Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
+                    image:    Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
                 },
             )
         };
@@ -2145,25 +2177,25 @@ mod tests {
         let cloak = Hue(11);
         let tunic = Hue(22);
         let mobile = Mobile {
-            at: Point::new(100, 100, 0),
-            body: Graphic(400),
-            group: AnimationGroup(4),
-            facing: Direction::SouthEast,
-            frame: AnimationFrameIndex(0),
-            from: None,
-            corpse: false,
-            hue: Hue::NONE,
-            drawn: Gaze::on(Point::new(100, 100, 0)),
+            at:        Point::new(100, 100, 0),
+            body:      Graphic(400),
+            group:     AnimationGroup(4),
+            facing:    Direction::SouthEast,
+            frame:     AnimationFrameIndex(0),
+            from:      None,
+            corpse:    false,
+            hue:       Hue::NONE,
+            drawn:     Gaze::on(Point::new(100, 100, 0)),
             equipment: vec![
                 EquipmentLayer {
                     graphic: AnimId(7017),
-                    hue: tunic,
-                    layer: Layer::TUNIC,
+                    hue:     tunic,
+                    layer:   Layer::TUNIC,
                 },
                 EquipmentLayer {
                     graphic: AnimId(7018),
-                    hue: cloak,
-                    layer: Layer::CLOAK,
+                    hue:     cloak,
+                    layer:   Layer::CLOAK,
                 },
             ]
             .into(),
@@ -2202,7 +2234,7 @@ mod tests {
                 AnimFrame {
                     center_x: 12,
                     center_y: -3,
-                    image: Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
+                    image:    Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
                 },
             ),
             (
@@ -2213,21 +2245,21 @@ mod tests {
                 AnimFrame {
                     center_x: 4,
                     center_y: -1,
-                    image: Image::new(10, 10, vec![Color16(0x7C00); 10 * 10]),
+                    image:    Image::new(10, 10, vec![Color16(0x7C00); 10 * 10]),
                 },
             ),
         ])
         .expect("both frames fit");
         let mobile = Mobile {
-            at: Point::new(100, 100, 0),
-            body: Graphic(400),
-            group: AnimationGroup(4),
-            facing: Direction::SouthEast,
-            frame: AnimationFrameIndex(0),
-            from: None,
-            corpse: false,
-            hue: Hue::NONE,
-            drawn: Gaze::on(Point::new(100, 100, 0)),
+            at:        Point::new(100, 100, 0),
+            body:      Graphic(400),
+            group:     AnimationGroup(4),
+            facing:    Direction::SouthEast,
+            frame:     AnimationFrameIndex(0),
+            from:      None,
+            corpse:    false,
+            hue:       Hue::NONE,
+            drawn:     Gaze::on(Point::new(100, 100, 0)),
             equipment: vec![worn_on_torso(AnimId(0), Hue::NONE)].into(),
         };
         assert_eq!(
@@ -2268,7 +2300,7 @@ mod tests {
                 AnimFrame {
                     center_x: 20,
                     center_y: -2,
-                    image: Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
+                    image:    Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
                 },
             ),
             (
@@ -2279,23 +2311,25 @@ mod tests {
                 AnimFrame {
                     center_x: 20,
                     center_y: -2,
-                    image: Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
+                    image:    Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
                 },
             ),
         ])
         .expect("both frames fit");
-        let dressed = |body: Graphic| Mobile {
-            body,
-            equipment: vec![
-                worn_on_torso(AnimId(7005), Hue::NONE),
-                EquipmentLayer {
-                    graphic: AnimId(7005),
-                    hue: Hue::NONE,
-                    layer: Layer::HAIR,
-                },
-            ]
-            .into(),
-            ..body_at(100, Direction::SouthEast)
+        let dressed = |body: Graphic| {
+            Mobile {
+                body,
+                equipment: vec![
+                    worn_on_torso(AnimId(7005), Hue::NONE),
+                    EquipmentLayer {
+                        graphic: AnimId(7005),
+                        hue:     Hue::NONE,
+                        layer:   Layer::HAIR,
+                    },
+                ]
+                .into(),
+                ..body_at(100, Direction::SouthEast)
+            }
         };
 
         let living = dressed(Graphic(0x0190));
@@ -2336,7 +2370,7 @@ mod tests {
                 AnimFrame {
                     center_x: 12,
                     center_y: -3,
-                    image: Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
+                    image:    Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
                 },
             )
         };
@@ -2344,15 +2378,15 @@ mod tests {
         // entry for either, the way a plain shirt ships none.
         let atlas = AnimAtlas::pack([frame(400), frame(7017)]).expect("both frames fit");
         let mobile = Mobile {
-            at: Point::new(100, 100, 0),
-            body: Graphic(400),
-            group: AnimationGroup(4),
-            facing: Direction::SouthEast,
-            frame: AnimationFrameIndex(0),
-            from: None,
-            corpse: false,
-            hue: Hue::NONE,
-            drawn: Gaze::on(Point::new(100, 100, 0)),
+            at:        Point::new(100, 100, 0),
+            body:      Graphic(400),
+            group:     AnimationGroup(4),
+            facing:    Direction::SouthEast,
+            frame:     AnimationFrameIndex(0),
+            from:      None,
+            corpse:    false,
+            hue:       Hue::NONE,
+            drawn:     Gaze::on(Point::new(100, 100, 0)),
             equipment: vec![worn_on_torso(AnimId(7017), Hue::NONE)].into(),
         };
         let quads = collect(&[mobile], &camera, &atlas, &Cutaway::OPEN, &no_equip(), None);
@@ -2371,15 +2405,15 @@ mod tests {
         let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
         let atlas = atlas(400, 0, 40, 60, (12, -3));
         let mobile = Mobile {
-            at: Point::new(100, 100, 0),
-            body: Graphic(400),
-            group: AnimationGroup(4),
-            facing: Direction::SouthEast,
-            frame: AnimationFrameIndex(0),
-            from: None,
-            corpse: false,
-            hue: Hue::NONE,
-            drawn: Gaze::on(Point::new(100, 100, 0)),
+            at:        Point::new(100, 100, 0),
+            body:      Graphic(400),
+            group:     AnimationGroup(4),
+            facing:    Direction::SouthEast,
+            frame:     AnimationFrameIndex(0),
+            from:      None,
+            corpse:    false,
+            hue:       Hue::NONE,
+            drawn:     Gaze::on(Point::new(100, 100, 0)),
             equipment: vec![worn_on_torso(AnimId(7017), Hue::NONE)].into(),
         };
         let quads = collect(&[mobile], &camera, &atlas, &Cutaway::OPEN, &no_equip(), None);

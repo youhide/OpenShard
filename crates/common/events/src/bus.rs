@@ -1,11 +1,18 @@
 //! The bus: one [`Events`] queue per event type, in one value.
 
-use std::any::{Any, TypeId};
+use std::any::{
+    Any,
+    TypeId,
+};
 use std::fmt;
 
 use rustc_hash::FxHashMap;
 
-use crate::queue::{Cursor, Event, Events};
+use crate::queue::{
+    Cursor,
+    Event,
+    Events,
+};
 
 /// Type-erased view of a queue, so the bus can tick every queue it holds
 /// without knowing any of their types.
@@ -297,7 +304,8 @@ mod tests {
 
     #[test]
     fn bus_is_send_and_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
+        fn assert_send_sync<T: Send + Sync>() {
+        }
         assert_send_sync::<EventBus>();
         assert_send_sync::<Cursor<Login>>();
     }

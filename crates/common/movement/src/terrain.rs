@@ -15,11 +15,18 @@ use openshard_map::map::WorldMap;
 use openshard_map::overlay::Cover;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_tiles::LandTileId;
-use openshard_tiles::{StaticTile, TileData, TileFlags};
+use openshard_tiles::{
+    LandTileId,
+    StaticTile,
+    TileData,
+    TileFlags,
+};
 
 use crate::sight::Stop;
-use crate::spans::{SpanIndex, Spans};
+use crate::spans::{
+    SpanIndex,
+    Spans,
+};
 
 /// How far a walking human can step up.
 ///
@@ -90,8 +97,8 @@ pub(crate) fn static_top(tile: &StaticTile, base: i32) -> i32 {
 /// one beside its own data copies it rather than borrowing the borrow.
 #[derive(Clone, Copy, Debug)]
 pub struct MapTerrain<'a> {
-    map: &'a WorldMap,
-    tiles: &'a TileData,
+    map:      &'a WorldMap,
+    tiles:    &'a TileData,
     /// The bake over the two, which is what a *step* actually reads.
     ///
     /// **Not an `Option`.** A facet that has a map has a span index over it —
@@ -100,7 +107,7 @@ pub struct MapTerrain<'a> {
     /// forget, leaving the step rule to re-derive every column from `tiledata`
     /// at six times the cost with nothing saying so. See
     /// `docs/map/navigation_spans.md`'s N3.
-    spans: &'a SpanIndex,
+    spans:    &'a SpanIndex,
     /// Whether water counts as ground. A boat or a fish says yes.
     ///
     /// A property of the *body* asking, which is why it is set on the view and
@@ -748,8 +755,9 @@ impl MapTerrain<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_protocol::direction::Direction;
+
+    use super::*;
 
     #[test]
     fn predict_z_answers_near_z_off_the_map_or_with_nothing_on_the_tile() {
@@ -838,7 +846,7 @@ mod tests {
     /// `WorldState`; here it is this, which is the same arrangement written
     /// small — the fixture owning the tables and the rule reading them.
     struct Install {
-        map: WorldMap,
+        map:   WorldMap,
         tiles: TileData,
         /// The bake over the two, because a terrain borrows one — see
         /// [`MapTerrain::new`]. It is 0.07 s and 16.5 MiB for the whole facet,
@@ -1930,14 +1938,14 @@ mod tests {
     /// rule's heading.
     struct Arrivals {
         /// How it is spelled at the call site, so a reader can go and look.
-        who: &'static str,
+        who:               &'static str,
         /// Deck tiles it was asked about.
-        asked: u64,
+        asked:             u64,
         /// Where it answered with the deck itself — the body arrives on the pier.
-        on_deck: u64,
+        on_deck:           u64,
         /// **Where it answered with something below the deck.** The report's
         /// symptom: a body standing under the planking it was put on.
-        under: u64,
+        under:             u64,
         /// Of those, the ones where the land under the deck is walkable — a
         /// bridge over a ravine rather than a pier over the sea.
         ///
@@ -1951,11 +1959,11 @@ mod tests {
         /// Every drop, so the shape of them can be printed rather than just the
         /// worst — a facet where the median is one and the worst is thirty is a
         /// different world from one where they are both thirty.
-        drops: Vec<i32>,
+        drops:             Vec<i32>,
         /// Where it refused to place a body at all.
-        refused: u64,
+        refused:           u64,
         /// A few, spelled out: tile, the deck, and what the rule answered.
-        examples: Vec<(u16, u16, i32, Option<i32>)>,
+        examples:          Vec<(u16, u16, i32, Option<i32>)>,
     }
 
     impl Arrivals {

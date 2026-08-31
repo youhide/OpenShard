@@ -1,5 +1,8 @@
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{
+    AtomicUsize,
+    Ordering,
+};
 
 use openshard_events::Cursor;
 
@@ -31,7 +34,7 @@ pub struct Unwritten(Arc<UnwrittenCounts>);
 #[derive(Debug, Default)]
 struct UnwrittenCounts {
     writes: AtomicUsize,
-    rows: AtomicUsize,
+    rows:   AtomicUsize,
 }
 
 impl Unwritten {
@@ -99,7 +102,7 @@ impl Unwritten {
 /// [`Shutdown`] does; there is no owner among the clones.
 #[derive(Debug, Clone)]
 pub struct Reins {
-    shutdown: Shutdown,
+    shutdown:  Shutdown,
     unwritten: Unwritten,
 }
 
@@ -592,24 +595,28 @@ fn report_pace(pace: &mut crate::pace::Pace, window: crate::pace::Window, shutdo
             // this and saves below it.
             shutdown.stop();
         }
-        Some(crate::pace::Verdict::FellBehind(window)) => warn!(
-            observed_ticks_per_second = window.observed_rate(),
-            declared_ticks_per_second = openshard_state::TICKS_PER_SECOND,
-            behind_ticks_per_second = window.behind_ticks(),
-            busy_share = window.busy_share(),
-            worst_tick_ms = window.worst.as_secs_f32() * 1000.0,
-            worst_tick_work = %window.worst_work,
-            "the tick is slower than the rate every announced duration is denominated in; \
-             clients are being told intervals this shard will not keep"
-        ),
-        Some(crate::pace::Verdict::CaughtUp(window)) => info!(
-            observed_ticks_per_second = window.observed_rate(),
-            declared_ticks_per_second = openshard_state::TICKS_PER_SECOND,
-            busy_share = window.busy_share(),
-            worst_tick_ms = window.worst.as_secs_f32() * 1000.0,
-            worst_tick_work = %window.worst_work,
-            "the tick is keeping its declared rate"
-        ),
+        Some(crate::pace::Verdict::FellBehind(window)) => {
+            warn!(
+                observed_ticks_per_second = window.observed_rate(),
+                declared_ticks_per_second = openshard_state::TICKS_PER_SECOND,
+                behind_ticks_per_second = window.behind_ticks(),
+                busy_share = window.busy_share(),
+                worst_tick_ms = window.worst.as_secs_f32() * 1000.0,
+                worst_tick_work = %window.worst_work,
+                "the tick is slower than the rate every announced duration is denominated in; \
+                 clients are being told intervals this shard will not keep"
+            )
+        }
+        Some(crate::pace::Verdict::CaughtUp(window)) => {
+            info!(
+                observed_ticks_per_second = window.observed_rate(),
+                declared_ticks_per_second = openshard_state::TICKS_PER_SECOND,
+                busy_share = window.busy_share(),
+                worst_tick_ms = window.worst.as_secs_f32() * 1000.0,
+                worst_tick_work = %window.worst_work,
+                "the tick is keeping its declared rate"
+            )
+        }
         None => {}
     }
 }
@@ -932,7 +939,7 @@ fn handle_login_packet(
         LoginStagePacket::DeleteCharacter(delete) => {
             world.queue(Command::DeleteCharacter {
                 connection: id,
-                slot: delete.slot,
+                slot:       delete.slot,
             });
             true
         }
@@ -955,7 +962,7 @@ fn handle_login_packet(
             let _ = session.control.send(session.login.version());
             world.queue(Command::PlayCharacter {
                 connection: id,
-                name: play.name,
+                name:       play.name,
             });
             true
         }
@@ -1111,47 +1118,49 @@ impl Shard {
                 const PRESENT: &str = "the session was looked up at the top of this arm";
                 match event {
                     Event::Seeded(seed) => sessions.get_mut(id).expect(PRESENT).login.on_seed(seed),
-                    Event::Packet(packet) => match packet.parse_packet(version) {
-                        // Ok: hand the decoded packet to whichever side it belongs
-                        // to. Every handler returns the same "keep the connection?"
-                        // bool, so there is one place that acts on it.
-                        Ok(packet) => {
-                            let session = sessions.get_mut(id).expect(PRESENT);
-                            let keep = match packet {
-                                Packet::Login(login_packet) => {
-                                    handle_login_packet(session, login, world, verifier, login_packet, id)
+                    Event::Packet(packet) => {
+                        match packet.parse_packet(version) {
+                            // Ok: hand the decoded packet to whichever side it belongs
+                            // to. Every handler returns the same "keep the connection?"
+                            // bool, so there is one place that acts on it.
+                            Ok(packet) => {
+                                let session = sessions.get_mut(id).expect(PRESENT);
+                                let keep = match packet {
+                                    Packet::Login(login_packet) => {
+                                        handle_login_packet(session, login, world, verifier, login_packet, id)
+                                    }
+                                    Packet::World(world_packet) => {
+                                        handle_world_packet(session, world, world_packet, id)
+                                    }
+                                };
+                                if !keep {
+                                    sessions.close(id);
                                 }
-                                Packet::World(world_packet) => {
-                                    handle_world_packet(session, world, world_packet, id)
+                            }
+                            // Err: every case here only logs and drops. Nothing decoded,
+                            // so there is nothing to route.
+                            Err(error) => {
+                                match error {
+                                    PacketError::Login(ClientLoginDecodeError::CreateCharacter(error)) => {
+                                        warn!(%id, %error, "malformed create-character");
+                                    }
+                                    PacketError::Login(ClientLoginDecodeError::DeleteCharacter(error)) => {
+                                        warn!(%id, %error, "malformed delete-character");
+                                    }
+                                    PacketError::Login(ClientLoginDecodeError::PlayCharacter(error)) => {
+                                        warn!(%id, %error, "malformed character-select");
+                                    }
+                                    PacketError::Login(other) => {
+                                        warn!(%id, ?other, "malformed login packet");
+                                    }
+                                    PacketError::World(error) => {
+                                        warn!(%id, ?error, "malformed packet");
+                                    }
                                 }
-                            };
-                            if !keep {
                                 sessions.close(id);
                             }
                         }
-                        // Err: every case here only logs and drops. Nothing decoded,
-                        // so there is nothing to route.
-                        Err(error) => {
-                            match error {
-                                PacketError::Login(ClientLoginDecodeError::CreateCharacter(error)) => {
-                                    warn!(%id, %error, "malformed create-character");
-                                }
-                                PacketError::Login(ClientLoginDecodeError::DeleteCharacter(error)) => {
-                                    warn!(%id, %error, "malformed delete-character");
-                                }
-                                PacketError::Login(ClientLoginDecodeError::PlayCharacter(error)) => {
-                                    warn!(%id, %error, "malformed character-select");
-                                }
-                                PacketError::Login(other) => {
-                                    warn!(%id, ?other, "malformed login packet");
-                                }
-                                PacketError::World(error) => {
-                                    warn!(%id, ?error, "malformed packet");
-                                }
-                            }
-                            sessions.close(id);
-                        }
-                    },
+                    }
                 }
             }
 
@@ -1172,17 +1181,29 @@ impl Shard {
 
 #[cfg(test)]
 mod tests {
-    use openshard_protocol::direction::{Direction, Facing};
-    use openshard_protocol::identity::RawCharacterName;
-    use openshard_protocol::wire::{RawCharacterSlot, RawClientIp};
-    use openshard_protocol::world::{RawFastwalkKey, RawStepSequence, WalkRequest};
-
-    use openshard_protocol::world::CharacterPlay;
-
     use openshard_persistence::SCHEMA_VERSION;
+    use openshard_protocol::direction::{
+        Direction,
+        Facing,
+    };
+    use openshard_protocol::identity::RawCharacterName;
+    use openshard_protocol::wire::{
+        RawCharacterSlot,
+        RawClientIp,
+    };
+    use openshard_protocol::world::{
+        CharacterPlay,
+        RawFastwalkKey,
+        RawStepSequence,
+        WalkRequest,
+    };
 
     use super::*;
-    use crate::testing::{at_character_screen, login_server, lord_british};
+    use crate::testing::{
+        at_character_screen,
+        login_server,
+        lord_british,
+    };
 
     fn client(address: &str) -> SocketAddr {
         address.parse().expect("a client address")
@@ -1227,8 +1248,8 @@ mod tests {
     /// One step north — any in-world packet would do; this is the smallest.
     fn a_step() -> ClientPacket {
         ClientPacket::Walk(WalkRequest {
-            facing: Facing::walking(Direction::North),
-            sequence: RawStepSequence(0),
+            facing:       Facing::walking(Direction::North),
+            sequence:     RawStepSequence(0),
             fastwalk_key: RawFastwalkKey(0),
         })
     }
@@ -1236,8 +1257,8 @@ mod tests {
     /// The `0x5D` a client sends when it picks [`lord_british`] off the list.
     fn picking_lord_british() -> LoginStagePacket {
         LoginStagePacket::PlayCharacter(CharacterPlay {
-            name: RawCharacterName(lord_british().0),
-            slot: RawCharacterSlot(0),
+            name:      RawCharacterName(lord_british().0),
+            slot:      RawCharacterSlot(0),
             client_ip: RawClientIp(0),
         })
     }

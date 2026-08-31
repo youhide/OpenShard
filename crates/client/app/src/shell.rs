@@ -44,33 +44,72 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use openshard_client_net::action::GumpReply;
 use openshard_client_render::bench::Reading;
 use openshard_client_render::blit::ViewportRect;
 use openshard_client_render::camera::Camera;
-use openshard_client_render::facing::{Face, Prism};
+use openshard_client_render::facing::{
+    Face,
+    Prism,
+};
 use openshard_client_render::follow::Rig;
 use openshard_client_render::light;
 use openshard_client_render::solid::Cut;
-use openshard_protocol::feedback::{ActionStage, CombatActionKind, CombatActionOutcome, InterruptReason};
-use openshard_protocol::gump::{RawButtonId, RawGumpId, RawGumpKey};
+use openshard_movement::sight::{
+    EYE,
+    Stop,
+};
+use openshard_protocol::feedback::{
+    ActionStage,
+    CombatActionKind,
+    CombatActionOutcome,
+    InterruptReason,
+};
+use openshard_protocol::gump::{
+    RawButtonId,
+    RawGumpId,
+    RawGumpKey,
+};
 use openshard_protocol::localized;
 use openshard_protocol::mobile::Notoriety;
-use openshard_protocol::wire::{ClilocId, Graphic, Hue};
+use openshard_protocol::wire::{
+    ClilocId,
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::RangedRange;
-use openshard_uofiles::cliloc::{Cliloc, ClilocNumber};
+use openshard_uofiles::cliloc::{
+    Cliloc,
+    ClilocNumber,
+};
 use winit::window::Window;
 
-use crate::desk::{Desk, Tab};
-use openshard_client_net::action::GumpReply;
-use openshard_movement::sight::{EYE, Stop};
-
 use crate::crowd::ActionFill;
+use crate::desk::{
+    Desk,
+    Tab,
+};
 use crate::diagnostics::{
-    ActionBar, HealthBar, Height, Hud, Navigation, PickedTile, PriorityZ, Route, Selection, SightLine,
+    ActionBar,
+    HealthBar,
+    Height,
+    Hud,
+    Navigation,
+    PickedTile,
+    PriorityZ,
+    Route,
+    Selection,
+    SightLine,
     TerrainOverlay,
 };
-use crate::graphics::{HighlightStyle, HighlightTarget};
-use crate::world::{Shard, WorldState};
+use crate::graphics::{
+    HighlightStyle,
+    HighlightTarget,
+};
+use crate::world::{
+    Shard,
+    WorldState,
+};
 
 /// What the panels asked for this frame.
 ///
@@ -235,9 +274,9 @@ pub enum ScriptRequest {
 /// One validated submission from the F1 administrator item panel.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct AdminItemRequest {
-    pub graphic: u16,
-    pub hue: u16,
-    pub amount: u16,
+    pub graphic:   u16,
+    pub hue:       u16,
+    pub amount:    u16,
     pub stackable: bool,
 }
 
@@ -354,9 +393,9 @@ impl Shell {
             hud_renderer,
             world_overlay_renderer,
             viewport: ViewportRect {
-                x: 0,
-                y: 0,
-                width: size.width.max(1),
+                x:      0,
+                y:      0,
+                width:  size.width.max(1),
                 height: size.height.max(1),
             },
             // Until the first frame has run there is nothing to wait for; the
@@ -738,8 +777,10 @@ impl Shell {
             layer.pass_label(),
         );
         let jobs = context.tessellate(output.shapes, pixels_per_point);
-        for (id, delta) in &output.textures_delta.set {
-            renderer.update_texture(device, queue, *id, delta);
+        for (id, deltas) in &output.textures_delta.set {
+            for delta in deltas {
+                renderer.update_texture(device, queue, *id, delta);
+            }
         }
         let descriptor = egui_wgpu::ScreenDescriptor {
             size_in_pixels,
@@ -750,12 +791,12 @@ impl Shell {
         let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some(layer.pass_label()),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                depth_slice: None,
+                view:           target,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
+                ops:            wgpu::Operations {
                     // Over the world, not instead of it.
-                    load: wgpu::LoadOp::Load,
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -775,32 +816,32 @@ impl Shell {
 /// The world-side inputs used to lay out one shell frame.
 pub struct ShellFrame<'a> {
     /// Read-only facts assembled for the HUD.
-    pub hud: &'a Hud,
+    pub hud:         &'a Hud,
     /// The camera whose viewport the shell may resize.
-    pub camera: Camera,
+    pub camera:      Camera,
     /// The client's current projection of the world.
-    pub world: &'a WorldState,
+    pub world:       &'a WorldState,
     /// Installed static art used by catalogue panels.
-    pub art: &'a openshard_uofiles::art::Art,
+    pub art:         &'a openshard_uofiles::art::Art,
     /// Installed tile metadata used by catalogue panels.
-    pub tiledata: &'a openshard_tiles::TileData,
+    pub tiledata:    &'a openshard_tiles::TileData,
     /// The installed hue ramps, used by the staff dye palette and its preview.
-    pub hue_ramp: &'a openshard_client_render::hue::HueRamp,
+    pub hue_ramp:    &'a openshard_client_render::hue::HueRamp,
     /// Localized recipe and skill labels supplied by the client's install.
-    pub cliloc: Option<&'a Cliloc>,
+    pub cliloc:      Option<&'a Cliloc>,
     /// Installed skill names used by the staff skill tester.
     pub skill_names: &'a openshard_uofiles::skills::Skills,
     /// Mutable map-editor session shown by staff panels.
-    pub map_editor: &'a mut crate::editor_mode::MapEditor,
+    pub map_editor:  &'a mut crate::editor_mode::MapEditor,
     /// Authority granted by the connected shard.
-    pub authority: openshard_protocol::access::AccessLevel,
+    pub authority:   openshard_protocol::access::AccessLevel,
 }
 
 struct LayoutFrame<'a> {
-    shell: ShellFrame<'a>,
+    shell:          ShellFrame<'a>,
     item_catalogue: &'a mut ItemArtCatalogue,
-    crafting: &'a mut CraftWindowPanel,
-    desk: &'a mut Desk,
+    crafting:       &'a mut CraftWindowPanel,
+    desk:           &'a mut Desk,
 }
 
 /// The panels, and the server's own dialogs.
@@ -984,9 +1025,11 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
     // memory is what moves the window, and forcing the saved rect every frame
     // would make it undraggable.
     let window = match desk.panel {
-        Some(panel) => window
-            .default_pos([panel.x, panel.y])
-            .default_size([panel.width, panel.height]),
+        Some(panel) => {
+            window
+                .default_pos([panel.x, panel.y])
+                .default_size([panel.width, panel.height])
+        }
         None => window.default_pos([16.0, 48.0]).default_size([360.0, 420.0]),
     };
     let placed = window.show(&context, |ui| {
@@ -1016,41 +1059,47 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
         // the camera tab scrolled to somewhere it has no rows for.
         egui::ScrollArea::vertical()
             .id_salt(desk.tab.title())
-            .show(ui, |ui| match desk.tab {
-                Tab::Camera => camera_panel(ui, hud, camera, &mut desk.movement, &mut request),
-                Tab::Rig => rig_panel(ui, hud, world, &mut request),
-                Tab::Frames => frames_panel(ui, hud),
-                Tab::World => world_panel(ui, hud, world, &mut request),
-                Tab::Tile => tile_tab(ui, hud, world, &mut request),
-                Tab::Light => light_panel(ui, hud, &mut desk.light, &mut request),
-                Tab::Chat => chat_panel(
-                    ui,
-                    ChatPanel {
-                        chat: &mut desk.chat,
-                        fonts: &mut desk.fonts,
-                        face: &mut desk.font_face,
-                        override_all_fonts: &mut desk.override_all_fonts,
-                        bitmap_font: &mut desk.bitmap_font,
-                        ttf_active: hud.ttf_active,
-                        ttf_available: hud.ttf_available,
-                    },
-                ),
-                Tab::Audio => audio_panel(ui, &mut desk.audio, &mut request),
-                Tab::Windows => windows_panel(ui, &mut desk.window_scale),
-                Tab::Admin => admin_items_panel(
-                    ui,
-                    &mut desk.admin_item,
-                    &mut desk.admin_skill,
-                    &mut desk.admin_catalogue,
-                    art,
-                    tiledata,
-                    hue_ramp,
-                    skill_names,
-                    world,
-                    item_catalogue,
-                    &mut request,
-                ),
-                Tab::Combat => combat_recorder_panel(ui, &mut desk.combat_recorder, world, &mut request),
+            .show(ui, |ui| {
+                match desk.tab {
+                    Tab::Camera => camera_panel(ui, hud, camera, &mut desk.movement, &mut request),
+                    Tab::Rig => rig_panel(ui, hud, world, &mut request),
+                    Tab::Frames => frames_panel(ui, hud),
+                    Tab::World => world_panel(ui, hud, world, &mut request),
+                    Tab::Tile => tile_tab(ui, hud, world, &mut request),
+                    Tab::Light => light_panel(ui, hud, &mut desk.light, &mut request),
+                    Tab::Chat => {
+                        chat_panel(
+                            ui,
+                            ChatPanel {
+                                chat:               &mut desk.chat,
+                                fonts:              &mut desk.fonts,
+                                face:               &mut desk.font_face,
+                                override_all_fonts: &mut desk.override_all_fonts,
+                                bitmap_font:        &mut desk.bitmap_font,
+                                ttf_active:         hud.ttf_active,
+                                ttf_available:      hud.ttf_available,
+                            },
+                        )
+                    }
+                    Tab::Audio => audio_panel(ui, &mut desk.audio, &mut request),
+                    Tab::Windows => windows_panel(ui, &mut desk.window_scale),
+                    Tab::Admin => {
+                        admin_items_panel(
+                            ui,
+                            &mut desk.admin_item,
+                            &mut desk.admin_skill,
+                            &mut desk.admin_catalogue,
+                            art,
+                            tiledata,
+                            hue_ramp,
+                            skill_names,
+                            world,
+                            item_catalogue,
+                            &mut request,
+                        )
+                    }
+                    Tab::Combat => combat_recorder_panel(ui, &mut desk.combat_recorder, world, &mut request),
+                }
             });
     });
     desk.open = open;
@@ -1060,9 +1109,9 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
     if let Some(placed) = placed {
         let rect = placed.response.rect;
         desk.panel = Some(crate::desk::Panel {
-            x: rect.min.x,
-            y: rect.min.y,
-            width: rect.width(),
+            x:      rect.min.x,
+            y:      rect.min.y,
+            width:  rect.width(),
             height: rect.height(),
         });
     }
@@ -1086,23 +1135,23 @@ fn crafting_window_id(gump_id: u32) -> egui::Id {
 /// state instead of closing one UI and constructing another.
 #[derive(Default)]
 struct CraftWindowPanel {
-    gump_id: Option<u32>,
-    query: String,
-    availability: CraftAvailability,
-    skill: Option<u32>,
-    materials: CraftMaterials,
-    sort: CraftSort,
+    gump_id:       Option<u32>,
+    query:         String,
+    availability:  CraftAvailability,
+    skill:         Option<u32>,
+    materials:     CraftMaterials,
+    sort:          CraftSort,
     /// These areas may be absent while a detail page is visible. Their offsets
     /// live here so returning to either list resumes exactly where it was.
-    table_scroll: egui::Vec2,
-    row_scroll: f32,
+    table_scroll:  egui::Vec2,
+    row_scroll:    f32,
     recipe_scroll: f32,
     /// A gump reply closes the authoritative shell locally before the shard
     /// sends its replacement page. Keep this state alive across that gap.
     awaiting_page: bool,
     /// Thumbnails are decoded only for rows inside the scroll viewport. The
     /// key includes hue: the same ingot graphic is several distinct metals.
-    textures: BTreeMap<(u16, u16), Option<egui::TextureHandle>>,
+    textures:      BTreeMap<(u16, u16), Option<egui::TextureHandle>>,
 }
 
 impl CraftWindowPanel {
@@ -1151,12 +1200,12 @@ enum CraftSort {
 /// wire row makes filtering and sorting linear in the catalogue rather than
 /// repeatedly resolving localization strings from a sort comparator.
 struct CraftCatalogueEntry<'a> {
-    row: &'a openshard_protocol::craft::CraftCatalogueRow,
-    name: String,
-    skill: String,
-    component_names: Vec<String>,
+    row:                 &'a openshard_protocol::craft::CraftCatalogueRow,
+    name:                String,
+    skill:               String,
+    component_names:     Vec<String>,
     weapon_combat_skill: Option<String>,
-    search: String,
+    search:              String,
 }
 
 impl<'a> CraftCatalogueEntry<'a> {
@@ -1499,14 +1548,18 @@ fn craft_workbench_window(
                 ui.heading(&title);
                 ui.separator();
                 match workbench.tool_uses {
-                    Some(uses) if workbench.tool_carried => ui.colored_label(
-                        egui::Color32::from_rgb(95, 205, 120),
-                        format!("Tool · {uses} uses"),
-                    ),
-                    Some(uses) => ui.colored_label(
-                        ui.visuals().warn_fg_color,
-                        format!("Tool is not carried · {uses} uses"),
-                    ),
+                    Some(uses) if workbench.tool_carried => {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(95, 205, 120),
+                            format!("Tool · {uses} uses"),
+                        )
+                    }
+                    Some(uses) => {
+                        ui.colored_label(
+                            ui.visuals().warn_fg_color,
+                            format!("Tool is not carried · {uses} uses"),
+                        )
+                    }
                     None => ui.colored_label(ui.visuals().warn_fg_color, "Tool unavailable"),
                 };
                 craft_facility_badges(ui, workbench.required_facilities, workbench.present_facilities);
@@ -1531,72 +1584,74 @@ fn craft_workbench_window(
                         }
                     }
                 });
-                columns[1].vertical(|ui| match &workbench.page {
-                    openshard_protocol::craft::CraftWorkbenchPage::Items { recipes } => {
-                        ui.strong("Recipes");
-                        let recipe_scroll = egui::ScrollArea::vertical()
-                            .id_salt(("craft recipes", workbench.gump_id.0))
-                            .vertical_scroll_offset(panel.recipe_scroll);
-                        let output = recipe_scroll.show(ui, |ui| {
-                            for recipe in recipes {
-                                craft_workbench_recipe_row(
-                                    ui, recipe, art, hue_ramp, cliloc, panel, gump, &mut reply,
-                                );
-                                ui.separator();
-                            }
-                        });
-                        panel.recipe_scroll = output.state.offset.y;
-                    }
-                    openshard_protocol::craft::CraftWorkbenchPage::Resources { materials } => {
-                        ui.strong("Materials");
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            for material in materials {
-                                ui.horizontal(|ui| {
-                                    craft_workbench_icon(
-                                        ui,
-                                        art,
-                                        hue_ramp,
-                                        panel,
-                                        material.graphic,
-                                        material.hue,
-                                        34.0,
+                columns[1].vertical(|ui| {
+                    match &workbench.page {
+                        openshard_protocol::craft::CraftWorkbenchPage::Items { recipes } => {
+                            ui.strong("Recipes");
+                            let recipe_scroll = egui::ScrollArea::vertical()
+                                .id_salt(("craft recipes", workbench.gump_id.0))
+                                .vertical_scroll_offset(panel.recipe_scroll);
+                            let output = recipe_scroll.show(ui, |ui| {
+                                for recipe in recipes {
+                                    craft_workbench_recipe_row(
+                                        ui, recipe, art, hue_ramp, cliloc, panel, gump, &mut reply,
                                     );
-                                    let text = format!(
-                                        "{} · {} available",
-                                        craft_workbench_text(&material.name, cliloc),
-                                        material.carried
-                                    );
-                                    if ui.selectable_label(material.selected, text).clicked() {
-                                        panel.awaiting_page = true;
-                                        reply = Some(craft_reply(gump, material.button));
-                                    }
-                                });
-                            }
-                        });
-                    }
-                    openshard_protocol::craft::CraftWorkbenchPage::Details {
-                        recipe,
-                        success_per_mille,
-                        exceptional_per_mille,
-                    } => {
-                        ui.strong("Recipe details");
-                        craft_workbench_detail(
-                            ui,
+                                    ui.separator();
+                                }
+                            });
+                            panel.recipe_scroll = output.state.offset.y;
+                        }
+                        openshard_protocol::craft::CraftWorkbenchPage::Resources { materials } => {
+                            ui.strong("Materials");
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                for material in materials {
+                                    ui.horizontal(|ui| {
+                                        craft_workbench_icon(
+                                            ui,
+                                            art,
+                                            hue_ramp,
+                                            panel,
+                                            material.graphic,
+                                            material.hue,
+                                            34.0,
+                                        );
+                                        let text = format!(
+                                            "{} · {} available",
+                                            craft_workbench_text(&material.name, cliloc),
+                                            material.carried
+                                        );
+                                        if ui.selectable_label(material.selected, text).clicked() {
+                                            panel.awaiting_page = true;
+                                            reply = Some(craft_reply(gump, material.button));
+                                        }
+                                    });
+                                }
+                            });
+                        }
+                        openshard_protocol::craft::CraftWorkbenchPage::Details {
                             recipe,
-                            *success_per_mille,
-                            *exceptional_per_mille,
-                            art,
-                            hue_ramp,
-                            cliloc,
-                            panel,
-                            gump,
-                            if workbench.tool_uses.is_some() {
-                                "Back to recipes"
-                            } else {
-                                "Back to catalogue"
-                            },
-                            &mut reply,
-                        );
+                            success_per_mille,
+                            exceptional_per_mille,
+                        } => {
+                            ui.strong("Recipe details");
+                            craft_workbench_detail(
+                                ui,
+                                recipe,
+                                *success_per_mille,
+                                *exceptional_per_mille,
+                                art,
+                                hue_ramp,
+                                cliloc,
+                                panel,
+                                gump,
+                                if workbench.tool_uses.is_some() {
+                                    "Back to recipes"
+                                } else {
+                                    "Back to catalogue"
+                                },
+                                &mut reply,
+                            );
+                        }
                     }
                 });
             });
@@ -2044,12 +2099,14 @@ fn craft_icon(
     egui::Frame::group(ui.style())
         .show(ui, |ui| {
             match craft_item_texture(ui.ctx(), art, hue_ramp, &mut panel.textures, graphic, hue) {
-                Some(texture) => ui.add_sized(
-                    [size, size],
-                    egui::Image::from_texture(texture)
-                        .fit_to_exact_size(egui::vec2(size, size))
-                        .sense(egui::Sense::hover()),
-                ),
+                Some(texture) => {
+                    ui.add_sized(
+                        [size, size],
+                        egui::Image::from_texture(texture)
+                            .fit_to_exact_size(egui::vec2(size, size))
+                            .sense(egui::Sense::hover()),
+                    )
+                }
                 None => ui.add_sized([size, size], egui::Button::new("—")),
             }
         })
@@ -2236,10 +2293,10 @@ fn craft_skill_label(id: ClilocId, cliloc: Option<&Cliloc>) -> String {
 
 fn craft_reply(gump: &openshard_client_net::view::OpenGump, button: u32) -> GumpReply {
     GumpReply {
-        key: RawGumpKey(gump.key.0),
-        gump_id: RawGumpId(gump.gump_id.0),
-        button: RawButtonId(button),
-        switches: Vec::new(),
+        key:          RawGumpKey(gump.key.0),
+        gump_id:      RawGumpId(gump.gump_id.0),
+        button:       RawButtonId(button),
+        switches:     Vec::new(),
         text_entries: Vec::new(),
     }
 }
@@ -2363,9 +2420,9 @@ fn admin_items_panel(
         ui.label("Quick access: click an item to put it in your backpack.");
         catalogue_grid(ui, ITEMS, |entry| {
             request.create_item = Some(AdminItemRequest {
-                graphic: entry.graphic,
-                hue: selected_hue.expect("enabled only with a valid hue"),
-                amount: entry.amount,
+                graphic:   entry.graphic,
+                hue:       selected_hue.expect("enabled only with a valid hue"),
+                amount:    entry.amount,
                 stackable: entry.stackable,
             });
         });
@@ -2486,12 +2543,14 @@ fn admin_skills_panel(
         .find(|(_, known)| known.name == skill.name)
         .and_then(|(id, _)| world.authoritative.view.as_ref()?.player.skills.get(&id.0));
     match current {
-        Some(line) => ui.label(format!(
-            "Current: {}  |  trained: {}  |  cap: {}",
-            tenths(line.value),
-            tenths(line.base),
-            tenths(line.cap)
-        )),
+        Some(line) => {
+            ui.label(format!(
+                "Current: {}  |  trained: {}  |  cap: {}",
+                tenths(line.value),
+                tenths(line.base),
+                tenths(line.cap)
+            ))
+        }
         None => ui.label("Current value has not arrived from the shard yet."),
     };
 
@@ -2540,17 +2599,17 @@ fn parse_admin_skill(skill: &crate::desk::AdminSkill) -> Result<String, &'static
 }
 
 struct ItemCatalogueEntry {
-    icon: &'static str,
-    name: &'static str,
-    graphic: u16,
-    amount: u16,
+    icon:      &'static str,
+    name:      &'static str,
+    graphic:   u16,
+    amount:    u16,
     stackable: bool,
 }
 
 struct AnimalCatalogueEntry {
     icon: &'static str,
     name: &'static str,
-    id: u16,
+    id:   u16,
 }
 
 trait CatalogueEntry {
@@ -2578,52 +2637,52 @@ impl CatalogueEntry for AnimalCatalogueEntry {
 
 const ITEMS: &[ItemCatalogueEntry] = &[
     ItemCatalogueEntry {
-        icon: "💰",
-        name: "Gold",
-        graphic: 0x0eed,
-        amount: 100,
+        icon:      "💰",
+        name:      "Gold",
+        graphic:   0x0eed,
+        amount:    100,
         stackable: true,
     },
     ItemCatalogueEntry {
-        icon: "🩹",
-        name: "Bandages",
-        graphic: 0x0e21,
-        amount: 10,
+        icon:      "🩹",
+        name:      "Bandages",
+        graphic:   0x0e21,
+        amount:    10,
         stackable: true,
     },
     ItemCatalogueEntry {
-        icon: "🍎",
-        name: "Apples",
-        graphic: 0x09d0,
-        amount: 5,
+        icon:      "🍎",
+        name:      "Apples",
+        graphic:   0x09d0,
+        amount:    5,
         stackable: true,
     },
     ItemCatalogueEntry {
-        icon: "🔥",
-        name: "Torch",
-        graphic: 0x0f6b,
-        amount: 1,
+        icon:      "🔥",
+        name:      "Torch",
+        graphic:   0x0f6b,
+        amount:    1,
         stackable: false,
     },
     ItemCatalogueEntry {
-        icon: "🎒",
-        name: "Backpack",
-        graphic: 0x0e75,
-        amount: 1,
+        icon:      "🎒",
+        name:      "Backpack",
+        graphic:   0x0e75,
+        amount:    1,
         stackable: false,
     },
     ItemCatalogueEntry {
-        icon: "🗝",
-        name: "Lockpick",
-        graphic: 0x14fb,
-        amount: 5,
+        icon:      "🗝",
+        name:      "Lockpick",
+        graphic:   0x14fb,
+        amount:    5,
         stackable: true,
     },
     ItemCatalogueEntry {
-        icon: "🔪",
-        name: "Dagger",
-        graphic: 0x0f52,
-        amount: 1,
+        icon:      "🔪",
+        name:      "Dagger",
+        graphic:   0x0f52,
+        amount:    1,
         stackable: false,
     },
 ];
@@ -2632,52 +2691,52 @@ const ANIMALS: &[AnimalCatalogueEntry] = &[
     AnimalCatalogueEntry {
         icon: "🐎",
         name: "Horse",
-        id: 1,
+        id:   1,
     },
     AnimalCatalogueEntry {
         icon: "🐕",
         name: "Dog",
-        id: 2,
+        id:   2,
     },
     AnimalCatalogueEntry {
         icon: "🐈",
         name: "Cat",
-        id: 3,
+        id:   3,
     },
     AnimalCatalogueEntry {
         icon: "🐄",
         name: "Cow",
-        id: 4,
+        id:   4,
     },
     AnimalCatalogueEntry {
         icon: "🐑",
         name: "Sheep",
-        id: 5,
+        id:   5,
     },
     AnimalCatalogueEntry {
         icon: "🐔",
         name: "Chicken",
-        id: 6,
+        id:   6,
     },
     AnimalCatalogueEntry {
         icon: "🐇",
         name: "Rabbit",
-        id: 7,
+        id:   7,
     },
     AnimalCatalogueEntry {
         icon: "🦙",
         name: "Llama",
-        id: 8,
+        id:   8,
     },
     AnimalCatalogueEntry {
         icon: "🐺",
         name: "Grey wolf",
-        id: 9,
+        id:   9,
     },
     AnimalCatalogueEntry {
         icon: "🐻",
         name: "Brown bear",
-        id: 10,
+        id:   10,
     },
 ];
 
@@ -2846,13 +2905,13 @@ fn preview_pixel(
 /// visible in the scroll area.
 #[derive(Default)]
 struct ItemArtCatalogue {
-    textures: BTreeMap<u16, Option<egui::TextureHandle>>,
+    textures:  BTreeMap<u16, Option<egui::TextureHandle>>,
     /// One recoloured robe, renewed only when the staff member picks another
     /// hue. This is a deliberately small preview cache, unlike the browser's
     /// thumbnails which follow the visible art rows.
     dyed_robe: Option<(u16, egui::TextureHandle)>,
-    matching: Vec<u16>,
-    key: Option<(String, crate::desk::AdminItemCategory)>,
+    matching:  Vec<u16>,
+    key:       Option<(String, crate::desk::AdminItemCategory)>,
 }
 
 fn item_art_catalogue(
@@ -2925,13 +2984,14 @@ fn item_art_catalogue(
                 ui.horizontal(|ui| {
                     let texture = item_art_texture(ui.ctx(), art, &mut browser.textures, id);
                     let clicked = match texture {
-                        Some(texture) => ui
-                            .add(
+                        Some(texture) => {
+                            ui.add(
                                 egui::Image::from_texture(texture)
                                     .max_size(egui::vec2(36.0, 28.0))
                                     .sense(egui::Sense::click()),
                             )
-                            .clicked(),
+                            .clicked()
+                        }
                         None => ui.add_sized([36.0, 28.0], egui::Button::new("—")).clicked(),
                     };
                     let name = tiledata.item_name(id).unwrap_or("Unnamed static");
@@ -2957,12 +3017,16 @@ fn matching_item_ids(
 ) -> Vec<u16> {
     let id_query = parse_u16(query);
     (u16::MIN..=u16::MAX)
-        .filter(|&id| match category {
-            crate::desk::AdminItemCategory::All => true,
-            crate::desk::AdminItemCategory::Weapons => {
-                openshard_protocol::items::is_classic_weapon(Graphic(id))
+        .filter(|&id| {
+            match category {
+                crate::desk::AdminItemCategory::All => true,
+                crate::desk::AdminItemCategory::Weapons => {
+                    openshard_protocol::items::is_classic_weapon(Graphic(id))
+                }
+                crate::desk::AdminItemCategory::Armor => {
+                    openshard_protocol::items::is_classic_armor(Graphic(id))
+                }
             }
-            crate::desk::AdminItemCategory::Armor => openshard_protocol::items::is_classic_armor(Graphic(id)),
         })
         .filter(|&id| {
             query.is_empty()
@@ -3259,13 +3323,13 @@ fn audio_panel(ui: &mut egui::Ui, audio: &mut crate::desk::Audio, request: &mut 
 /// rasterizes at the selected pixel size; `fonts.mul` uses the corresponding
 /// fractional scale of its baked glyphs. See `docs/text_sizes.md`.
 struct ChatPanel<'a> {
-    chat: &'a mut crate::desk::Chat,
-    fonts: &'a mut crate::desk::FontSizes,
-    face: &'a mut crate::desk::FontFace,
+    chat:               &'a mut crate::desk::Chat,
+    fonts:              &'a mut crate::desk::FontSizes,
+    face:               &'a mut crate::desk::FontFace,
     override_all_fonts: &'a mut bool,
-    bitmap_font: &'a mut crate::desk::BitmapFont,
-    ttf_active: bool,
-    ttf_available: bool,
+    bitmap_font:        &'a mut crate::desk::BitmapFont,
+    ttf_active:         bool,
+    ttf_available:      bool,
 }
 
 fn chat_panel(ui: &mut egui::Ui, settings: ChatPanel<'_>) {
@@ -3278,8 +3342,12 @@ fn chat_panel(ui: &mut egui::Ui, settings: ChatPanel<'_>) {
         ttf_active,
         ttf_available,
     } = settings;
-    use crate::desk::{BitmapFont, FontFace};
     use openshard_client_render::atlas::TextSize;
+
+    use crate::desk::{
+        BitmapFont,
+        FontFace,
+    };
 
     ui.label("Face");
     ui.radio_value(
@@ -3879,11 +3947,13 @@ fn tile_tab(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut Requ
                     // this overlay to understand.
                     let far = match sight.within_reach() {
                         true => String::new(),
-                        false => format!(
-                            " — but out of reach, {} > {}",
-                            sight.distance(),
-                            sight.reach.get()
-                        ),
+                        false => {
+                            format!(
+                                " — but out of reach, {} > {}",
+                                sight.distance(),
+                                sight.reach.get()
+                            )
+                        }
                     };
                     ui.label(format!(
                         "sight {aimed}: clear, {} tiles{far}",
@@ -3955,10 +4025,12 @@ fn tile_tab(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut Requ
             }
             ui.label(match hud.solid_cut {
                 Cut::Nothing => format!("{drawn} surfaces, the whole grid"),
-                Cut::BelowFeet(_) => format!(
-                    "{drawn} surfaces above your feet, {} below and not drawn",
-                    total - drawn
-                ),
+                Cut::BelowFeet(_) => {
+                    format!(
+                        "{drawn} surfaces above your feet, {} below and not drawn",
+                        total - drawn
+                    )
+                }
             });
         }
         None => {
@@ -4081,10 +4153,11 @@ fn tile_tab(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut Requ
         // it is built on. The hover readout below names the other one, so the two
         // rows together are the whole of why they differ.
         match &hud.pick.static_ {
-            Some(picked) => format!(
-                "0x{:04X} at {}, {}, {}",
-                picked.graphic.0, picked.at.x, picked.at.y, picked.at.z
-            ),
+            Some(picked) =>
+                format!(
+                    "0x{:04X} at {}, {}, {}",
+                    picked.graphic.0, picked.at.x, picked.at.y, picked.at.z
+                ),
             None => "—".to_string(),
         },
     ));
@@ -4142,14 +4215,18 @@ fn selected_header(selection: &Selection) -> String {
 /// several statics or items on one tile only this says which line is which.
 fn selected_marked(selection: &Selection) -> Option<Marked> {
     match selection {
-        Selection::Static { static_, .. } => Some(Marked::Static {
-            graphic: static_.graphic,
-            height: Height(static_.at.z),
-        }),
-        Selection::Item(Some((item, _))) => Some(Marked::Item {
-            graphic: item.graphic,
-            height: Height(item.at.z),
-        }),
+        Selection::Static { static_, .. } => {
+            Some(Marked::Static {
+                graphic: static_.graphic,
+                height:  Height(static_.at.z),
+            })
+        }
+        Selection::Item(Some((item, _))) => {
+            Some(Marked::Item {
+                graphic: item.graphic,
+                height:  Height(item.at.z),
+            })
+        }
         _ => None,
     }
 }
@@ -4773,33 +4850,39 @@ fn action_state_labels(
     released_from_held_draw: bool,
 ) -> (&'static str, Option<&'static str>) {
     let state = match fill {
-        ActionFill::Arming { .. } => match (kind, stage) {
-            (CombatActionKind::Swing, ActionStage::Ready) => "raising",
-            (CombatActionKind::Swing, _) => "winding up",
-            (CombatActionKind::Shot, ActionStage::Ready) => "raising bow",
-            (CombatActionKind::Shot, _) => "drawing",
-            (CombatActionKind::Breath, ActionStage::Ready) => "rearing",
-            (CombatActionKind::Breath, _) => "inhaling",
-        },
-        ActionFill::Armed => match kind {
-            CombatActionKind::Swing => "swing · held",
-            CombatActionKind::Shot => "aim · held",
-            CombatActionKind::Breath => "breath · held",
-        },
-        ActionFill::Releasing { .. } => match (kind, stage) {
-            (CombatActionKind::Swing, ActionStage::Ready) => "raising",
-            (CombatActionKind::Swing, ActionStage::Load) => "winding up",
-            (CombatActionKind::Swing, ActionStage::Aim) => "set",
-            (CombatActionKind::Swing, ActionStage::Release) => "striking",
-            (CombatActionKind::Shot, ActionStage::Ready) => "raising bow",
-            (CombatActionKind::Shot, ActionStage::Load) => "drawing",
-            (CombatActionKind::Shot, ActionStage::Aim) => "aiming",
-            (CombatActionKind::Shot, ActionStage::Release) => "loosing",
-            (CombatActionKind::Breath, ActionStage::Ready) => "rearing",
-            (CombatActionKind::Breath, ActionStage::Load) => "inhaling",
-            (CombatActionKind::Breath, ActionStage::Aim) => "fixing",
-            (CombatActionKind::Breath, ActionStage::Release) => "breathing",
-        },
+        ActionFill::Arming { .. } => {
+            match (kind, stage) {
+                (CombatActionKind::Swing, ActionStage::Ready) => "raising",
+                (CombatActionKind::Swing, _) => "winding up",
+                (CombatActionKind::Shot, ActionStage::Ready) => "raising bow",
+                (CombatActionKind::Shot, _) => "drawing",
+                (CombatActionKind::Breath, ActionStage::Ready) => "rearing",
+                (CombatActionKind::Breath, _) => "inhaling",
+            }
+        }
+        ActionFill::Armed => {
+            match kind {
+                CombatActionKind::Swing => "swing · held",
+                CombatActionKind::Shot => "aim · held",
+                CombatActionKind::Breath => "breath · held",
+            }
+        }
+        ActionFill::Releasing { .. } => {
+            match (kind, stage) {
+                (CombatActionKind::Swing, ActionStage::Ready) => "raising",
+                (CombatActionKind::Swing, ActionStage::Load) => "winding up",
+                (CombatActionKind::Swing, ActionStage::Aim) => "set",
+                (CombatActionKind::Swing, ActionStage::Release) => "striking",
+                (CombatActionKind::Shot, ActionStage::Ready) => "raising bow",
+                (CombatActionKind::Shot, ActionStage::Load) => "drawing",
+                (CombatActionKind::Shot, ActionStage::Aim) => "aiming",
+                (CombatActionKind::Shot, ActionStage::Release) => "loosing",
+                (CombatActionKind::Breath, ActionStage::Ready) => "rearing",
+                (CombatActionKind::Breath, ActionStage::Load) => "inhaling",
+                (CombatActionKind::Breath, ActionStage::Aim) => "fixing",
+                (CombatActionKind::Breath, ActionStage::Release) => "breathing",
+            }
+        }
     };
     let context = (kind == CombatActionKind::Shot && released_from_held_draw).then_some("bow drawn");
     (state, context)
@@ -5201,10 +5284,12 @@ fn frames_panel(ui: &mut egui::Ui, hud: &Hud) {
         ui.label(hud.composites.quarantined.to_string());
         ui.label("latest");
         ui.label(match hud.composites.latest_quarantine {
-            Some(quarantine) => format!(
-                "{:?} block {:?}, key {:?}, owner {:?}",
-                quarantine.reason, quarantine.block, quarantine.key, quarantine.ground
-            ),
+            Some(quarantine) => {
+                format!(
+                    "{:?} block {:?}, key {:?}, owner {:?}",
+                    quarantine.reason, quarantine.block, quarantine.key, quarantine.ground
+                )
+            }
             None => "none".to_owned(),
         });
         ui.end_row();
@@ -5264,12 +5349,12 @@ fn frames_panel(ui: &mut egui::Ui, hud: &Hud) {
         "what a frame cost, ms",
         &[
             Curve {
-                name: "ui",
+                name:   "ui",
                 points: series(|frame| frame.ui.as_secs_f64() * 1_000.0),
                 colour: egui::Color32::from_rgb(150, 180, 240),
             },
             Curve {
-                name: "world",
+                name:   "world",
                 points: series(|frame| frame.scene.as_secs_f64() * 1_000.0),
                 colour: egui::Color32::from_rgb(220, 200, 90),
             },
@@ -5280,7 +5365,7 @@ fn frames_panel(ui: &mut egui::Ui, hud: &Hud) {
             // that cannot time itself — the grid above says so in words, and a
             // curve cannot.
             Curve {
-                name: "gpu",
+                name:   "gpu",
                 points: series(|frame| frame.gpu.map_or(0.0, |gpu| gpu.as_secs_f64() * 1_000.0)),
                 colour: egui::Color32::from_rgb(230, 130, 200),
             },
@@ -5447,7 +5532,7 @@ fn strip(ui: &mut egui::Ui, title: &str, series: &[(f32, f32)], span: f32, colou
 /// window, value).
 struct Curve<'a> {
     /// What to call it in the legend, or empty for the one-curve chart.
-    name: &'a str,
+    name:   &'a str,
     points: Vec<(f32, f32)>,
     colour: egui::Color32,
 }
@@ -6021,14 +6106,18 @@ fn draw_interiors(
             // strength very slightly by floor preserves the distinction where
             // two floors project over the same tile without turning the view
             // into a per-tile rainbow.
-            true => (
-                washed(colour, 72 + (cell.floor % 3) as u8 * 12),
-                washed(colour, 180),
-            ),
-            false => (
-                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 220),
-                egui::Color32::from_rgba_unmultiplied(80, 80, 80, 230),
-            ),
+            true => {
+                (
+                    washed(colour, 72 + (cell.floor % 3) as u8 * 12),
+                    washed(colour, 180),
+                )
+            }
+            false => {
+                (
+                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 220),
+                    egui::Color32::from_rgba_unmultiplied(80, 80, 80, 230),
+                )
+            }
         };
         painter.add(egui::Shape::convex_polygon(
             corners,
@@ -6306,15 +6395,17 @@ fn draw_occluders(
             // against. The two faces a camera cannot see are drawn darker still
             // rather than dropped — a wall the eye cannot find is a wall this
             // view failed to report.
-            named => face(
-                wall_of(panel_edge(named)),
-                match named {
-                    Edges::EAST => Side::EAST_SHADE,
-                    Edges::SOUTH => Side::SOUTH_SHADE,
-                    Edges::NORTH => 0.42,
-                    _ => 0.58,
-                },
-            ),
+            named => {
+                face(
+                    wall_of(panel_edge(named)),
+                    match named {
+                        Edges::EAST => Side::EAST_SHADE,
+                        Edges::SOUTH => Side::SOUTH_SHADE,
+                        Edges::NORTH => 0.42,
+                        _ => 0.58,
+                    },
+                )
+            }
         }
     }
 }
@@ -6692,17 +6783,17 @@ mod tests {
     #[test]
     fn the_admin_item_form_accepts_hex_and_rejects_zero_amount() {
         let valid = crate::desk::AdminItem {
-            graphic: "0x0eed".to_owned(),
-            hue: "0x0481".to_owned(),
-            amount: "25".to_owned(),
+            graphic:   "0x0eed".to_owned(),
+            hue:       "0x0481".to_owned(),
+            amount:    "25".to_owned(),
             stackable: true,
         };
         assert_eq!(
             parse_admin_item(&valid),
             Ok(AdminItemRequest {
-                graphic: 0x0eed,
-                hue: 0x0481,
-                amount: 25,
+                graphic:   0x0eed,
+                hue:       0x0481,
+                amount:    25,
                 stackable: true,
             })
         );
@@ -6720,7 +6811,7 @@ mod tests {
     #[test]
     fn the_admin_skill_form_makes_the_existing_staff_command() {
         let skill = crate::desk::AdminSkill {
-            name: "Item Identification".to_owned(),
+            name:  "Item Identification".to_owned(),
             value: "95.5".to_owned(),
         };
         assert_eq!(
@@ -6741,16 +6832,16 @@ mod tests {
     #[test]
     fn craft_filter_combines_text_and_ready_state() {
         let row = openshard_protocol::craft::CraftCatalogueRow {
-            button: 8,
-            result: Graphic(0x13EB),
-            result_hue: Hue::NONE,
+            button:           8,
+            result:           Graphic(0x13EB),
+            result_hue:       Hue::NONE,
             result_item_kind: None,
-            name: ClilocId(0),
-            skill: ClilocId(0),
-            skill_min: 0,
-            ready: false,
-            weapon: None,
-            components: Vec::new(),
+            name:             ClilocId(0),
+            skill:            ClilocId(0),
+            skill_min:        0,
+            ready:            false,
+            weapon:           None,
+            components:       Vec::new(),
         };
 
         assert!(craft_matches(
@@ -6783,19 +6874,19 @@ mod tests {
             components: vec![
                 openshard_protocol::craft::CraftCatalogueComponent {
                     item_kind: None,
-                    material: None,
-                    graphic: Graphic(0x1BF2),
-                    hue: Hue::NONE,
-                    name: ClilocId(0),
-                    amount: 2,
+                    material:  None,
+                    graphic:   Graphic(0x1BF2),
+                    hue:       Hue::NONE,
+                    name:      ClilocId(0),
+                    amount:    2,
                 },
                 openshard_protocol::craft::CraftCatalogueComponent {
                     item_kind: None,
-                    material: None,
-                    graphic: Graphic(0x0F8D),
-                    hue: Hue::NONE,
-                    name: ClilocId(0),
-                    amount: 1,
+                    material:  None,
+                    graphic:   Graphic(0x0F8D),
+                    hue:       Hue::NONE,
+                    name:      ClilocId(0),
+                    amount:    1,
                 },
             ],
             ..row

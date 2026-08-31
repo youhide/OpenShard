@@ -22,7 +22,10 @@ use std::collections::HashSet;
 use openshard_client_net::view::Tooltip;
 use openshard_protocol::properties::PropertyEntry;
 use openshard_protocol::serial::Serial;
-use openshard_uofiles::cliloc::{Cliloc, ClilocNumber};
+use openshard_uofiles::cliloc::{
+    Cliloc,
+    ClilocNumber,
+};
 
 use crate::net_command::resolve_cliloc_arguments;
 
@@ -106,9 +109,9 @@ mod tests {
     fn a_pointer_sitting_still_asks_once() {
         let mut tooltips = Tooltips::default();
         let held = Tooltip {
-            revision: Some(7),
+            revision:      Some(7),
             held_revision: None,
-            entries: Vec::new(),
+            entries:       Vec::new(),
         };
         assert!(tooltips.should_ask(serial(), Some(&held)));
         assert!(
@@ -121,16 +124,16 @@ mod tests {
     fn a_new_revision_is_a_new_question() {
         let mut tooltips = Tooltips::default();
         let first = Tooltip {
-            revision: Some(7),
+            revision:      Some(7),
             held_revision: Some(7),
-            entries: Vec::new(),
+            entries:       Vec::new(),
         };
         assert!(!tooltips.should_ask(serial(), Some(&first)), "nothing to ask");
 
         let changed = Tooltip {
-            revision: Some(8),
+            revision:      Some(8),
             held_revision: Some(7),
-            entries: Vec::new(),
+            entries:       Vec::new(),
         };
         assert!(tooltips.should_ask(serial(), Some(&changed)));
     }
@@ -145,9 +148,9 @@ mod tests {
     fn a_reset_lets_the_question_be_asked_again() {
         let mut tooltips = Tooltips::default();
         let held = Tooltip {
-            revision: Some(7),
+            revision:      Some(7),
             held_revision: None,
-            entries: Vec::new(),
+            entries:       Vec::new(),
         };
         assert!(tooltips.should_ask(serial(), Some(&held)));
         tooltips.reset();
@@ -157,7 +160,7 @@ mod tests {
     #[test]
     fn with_no_text_table_there_are_no_lines() {
         let entries = vec![PropertyEntry {
-            cliloc: ClilocId(1_050_045),
+            cliloc:    ClilocId(1_050_045),
             arguments: " \tLord British\t ".to_owned(),
         }];
         assert!(lines(&entries, None).is_empty(), "not the bare number");

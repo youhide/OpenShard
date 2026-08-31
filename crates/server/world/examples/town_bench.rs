@@ -24,16 +24,40 @@
 //! cargo run -p openshard-world --example town_bench --release
 //! ```
 
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_gateway::ConnectionId;
-use openshard_protocol::identity::{AccountName, CharacterName};
+use openshard_protocol::access::AccessLevel;
+use openshard_protocol::identity::{
+    AccountName,
+    CharacterName,
+};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::{Graphic, Hue};
-use openshard_protocol::world::{Aggression, DamageType, Facet, Point, Sight};
-use openshard_protocol::{access::AccessLevel, version::ClientVersion};
-use openshard_world::{Character, Command, Entering, FreshCharacter, Gameplay, TICK_INTERVAL, World};
+use openshard_protocol::version::ClientVersion;
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
+use openshard_protocol::world::{
+    Aggression,
+    DamageType,
+    Facet,
+    Point,
+    Sight,
+};
+use openshard_world::{
+    Character,
+    Command,
+    Entering,
+    FreshCharacter,
+    Gameplay,
+    TICK_INTERVAL,
+    World,
+};
 
 /// Britain, the same spot the tests use.
 const START: openshard_map::grid::Tile = openshard_map::grid::Tile::new(1363, 1600);
@@ -54,15 +78,15 @@ fn populate(gameplay: Gameplay, folk: u32, decor: u32, players: u32) -> World {
     for i in 0..players {
         world.queue(Command::Enter(Entering {
             connection: ConnectionId::from_raw(u64::from(i + 1)),
-            version: ClientVersion::TOL,
-            account: AccountName("bench".to_owned()),
-            name: CharacterName(format!("Player{i}")),
-            access: AccessLevel::Player,
-            character: Character::Fresh(FreshCharacter {
-                facet: Facet(0),
-                start: Some(Point::new(START.x + side + (i % 4) as u16, START.y + side, 0)),
+            version:    ClientVersion::TOL,
+            account:    AccountName("bench".to_owned()),
+            name:       CharacterName(format!("Player{i}")),
+            access:     AccessLevel::Player,
+            character:  Character::Fresh(FreshCharacter {
+                facet:      Facet(0),
+                start:      Some(Point::new(START.x + side + (i % 4) as u16, START.y + side, 0)),
                 appearance: None,
-                sheet: None,
+                sheet:      None,
             }),
         }));
     }
@@ -81,35 +105,35 @@ fn populate(gameplay: Gameplay, folk: u32, decor: u32, players: u32) -> World {
                 break 'grid;
             }
             world.queue(Command::SpawnMobile {
-                body: Graphic(0x0190),
-                hue: Hue(0),
-                hits: 100,
-                notoriety: Notoriety::from_bits(7),
-                damage: 0,
-                resistance: openshard_protocol::world::PhysicalResistance::new(0),
-                swing: 0,
-                sight: Sight(0),
-                aggression: Aggression::from_bits(2),
-                beat: 0,
-                ranged: None,
+                body:        Graphic(0x0190),
+                hue:         Hue(0),
+                hits:        100,
+                notoriety:   Notoriety::from_bits(7),
+                damage:      0,
+                resistance:  openshard_protocol::world::PhysicalResistance::new(0),
+                swing:       0,
+                sight:       Sight(0),
+                aggression:  Aggression::from_bits(2),
+                beat:        0,
+                ranged:      None,
                 ranged_kind: DamageType::Physical,
-                wander: false,
-                position: Point::new(START.x + gx * 2, START.y + gy * 2, 0),
-                facet: Facet(0),
-                name: None,
-                title: Some(trades[placed as usize % trades.len()].to_owned()),
-                shoe: 1,
-                fame: 0,
-                karma: 0,
-                night_home: None,
-                banker: false,
-                vendor: placed.is_multiple_of(3),
-                healer: false,
-                equipment: Vec::new(),
-                skills: Vec::new(),
-                stock: Vec::new(),
-                escort_to: None,
-                quests: Vec::new(),
+                wander:      false,
+                position:    Point::new(START.x + gx * 2, START.y + gy * 2, 0),
+                facet:       Facet(0),
+                name:        None,
+                title:       Some(trades[placed as usize % trades.len()].to_owned()),
+                shoe:        1,
+                fame:        0,
+                karma:       0,
+                night_home:  None,
+                banker:      false,
+                vendor:      placed.is_multiple_of(3),
+                healer:      false,
+                equipment:   Vec::new(),
+                skills:      Vec::new(),
+                stock:       Vec::new(),
+                escort_to:   None,
+                quests:      Vec::new(),
             });
             placed += 1;
         }

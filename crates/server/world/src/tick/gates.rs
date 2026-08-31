@@ -158,7 +158,7 @@ impl World {
         self.state.registry.insert(
             entity,
             Drawn {
-                id: MOONGATE_GRAPHIC,
+                id:  MOONGATE_GRAPHIC,
                 hue: Hue(0),
             },
         );
@@ -199,7 +199,7 @@ impl World {
             self.state.registry.insert(
                 entity,
                 Drawn {
-                    id: MOONGATE_GRAPHIC,
+                    id:  MOONGATE_GRAPHIC,
                     hue: Hue(0),
                 },
             );
@@ -394,21 +394,21 @@ impl World {
             connection,
             &ServerPacket::CloseGump(CloseGump {
                 gump_id: MOONGATE_GUMP,
-                button: ButtonId::CLOSE_BOX,
+                button:  ButtonId::CLOSE_BOX,
             }),
         );
         self.state.send_packet(
             connection,
             &ServerPacket::GumpDisplay(GumpDisplay {
-                serial: self
+                serial:  self
                     .state
                     .registry
                     .serial_of(traveller)
                     .map_or(GumpKey::STANDALONE, GumpKey::on),
                 gump_id: MOONGATE_GUMP,
-                at: GumpPoint::new(50, 50),
-                layout: text.to_owned(),
-                lines: lines.to_vec(),
+                at:      GumpPoint::new(50, 50),
+                layout:  text.to_owned(),
+                lines:   lines.to_vec(),
             }),
         );
         // Remembered so the reply can re-check the player is still beside the

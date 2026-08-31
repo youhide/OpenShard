@@ -35,10 +35,23 @@
 
 use crate::access::OPENSHARD_SUBCOMMANDS;
 use crate::codec::PacketWriter;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
-use crate::serial::{Serial, raw_or_none};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+};
+use crate::serial::{
+    Serial,
+    raw_or_none,
+};
 use crate::version::ClientVersion;
-use crate::wire::{CursorId, Graphic, Hue, Layer, SoundId};
+use crate::wire::{
+    CursorId,
+    Graphic,
+    Hue,
+    Layer,
+    SoundId,
+};
 use crate::world::Point;
 
 /// The ordinary client cadence for a mobile-animation frame.
@@ -72,7 +85,7 @@ impl SwingDuration {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SwingTiming {
     /// The mobile whose next animation this timing belongs to.
-    pub serial: Serial,
+    pub serial:   Serial,
     /// Minimum time from the first frame to the impact.
     pub duration: SwingDuration,
 }
@@ -135,13 +148,13 @@ impl DecodePacket for SwingTiming {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct HarvestToolVisual {
     /// The mobile about to swing.
-    pub serial: Serial,
+    pub serial:  Serial,
     /// The tool's item graphic.
     pub graphic: Graphic,
     /// The tool's hue.
-    pub hue: Hue,
+    pub hue:     Hue,
     /// The hand layer it is drawn on for this action.
-    pub layer: Layer,
+    pub layer:   Layer,
 }
 
 impl HarvestToolVisual {
@@ -204,17 +217,17 @@ impl DecodePacket for HarvestToolVisual {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct HarvestPreview {
     /// The target cursor this preview belongs to.
-    pub cursor_id: CursorId,
+    pub cursor_id:   CursorId,
     /// The mobile that will perform the action.
-    pub serial: Serial,
+    pub serial:      Serial,
     /// The classic animation group to start locally.
-    pub action: u16,
+    pub action:      u16,
     /// The group length the server will later authoritatively send.
     pub frame_count: AnimationFrameCount,
     /// Server-owned work duration, before transport latency.
-    pub duration: SwingDuration,
+    pub duration:    SwingDuration,
     /// Number of complete swings that make up the work interval.
-    pub cycles: u16,
+    pub cycles:      u16,
 }
 
 impl HarvestPreview {
@@ -574,10 +587,12 @@ impl CombatActionOutcome {
         match outcome {
             0 => Some(Self::Hit),
             1 => Some(Self::Miss),
-            2 => match InterruptReason::from_bits(reason) {
-                Some(reason) => Some(Self::Interrupted(reason)),
-                None => None,
-            },
+            2 => {
+                match InterruptReason::from_bits(reason) {
+                    Some(reason) => Some(Self::Interrupted(reason)),
+                    None => None,
+                }
+            }
             3 => Some(Self::Expired),
             _ => None,
         }
@@ -598,13 +613,13 @@ impl CombatActionOutcome {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CombatActionPhase {
     /// Whose action it is.
-    pub actor: Serial,
+    pub actor:  Serial,
     /// What it is committed to.
     pub target: Serial,
     /// What its impact will do.
-    pub kind: CombatActionKind,
+    pub kind:   CombatActionKind,
     /// The phase just entered, and the interval that phase measures.
-    pub phase: ActionPhase,
+    pub phase:  ActionPhase,
 }
 
 impl CombatActionPhase {
@@ -683,7 +698,7 @@ impl DecodePacket for CombatActionPhase {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CombatActionEnded {
     /// Whose action ended.
-    pub actor: Serial,
+    pub actor:   Serial,
     /// How it ended.
     pub outcome: CombatActionOutcome,
 }
@@ -835,10 +850,12 @@ impl BalkState {
     pub const fn from_bits(bits: u8) -> Option<Self> {
         match bits {
             0 => Some(Self::Clear),
-            other => match InterruptReason::from_bits(other) {
-                Some(reason) => Some(Self::Blocked(reason)),
-                None => None,
-            },
+            other => {
+                match InterruptReason::from_bits(other) {
+                    Some(reason) => Some(Self::Blocked(reason)),
+                    None => None,
+                }
+            }
         }
     }
 }
@@ -854,7 +871,7 @@ pub struct CombatActionBalked {
     /// Whose commit is being refused, or is refused no longer.
     pub actor: Serial,
     /// What is in the way, or that nothing is.
-    pub balk: BalkState,
+    pub balk:  BalkState,
 }
 
 impl CombatActionBalked {
@@ -978,7 +995,7 @@ pub struct PlaySound {
     /// Which sound.
     pub sound: SoundId,
     /// Where it happens.
-    pub at: Point,
+    pub at:    Point,
 }
 
 impl EncodePacket for PlaySound {
@@ -1029,21 +1046,21 @@ impl DecodePacket for PlaySound {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Animation {
     /// Who moves.
-    pub serial: Serial,
+    pub serial:       Serial,
     /// Which action, in the numbering for this mobile's body.
-    pub action: u16,
+    pub action:       u16,
     /// How many frames the action runs for.
-    pub frame_count: AnimationFrameCount,
+    pub frame_count:  AnimationFrameCount,
     /// How many times to repeat it.
     pub repeat_count: u16,
     /// Play the frames in order. Written inverted on the wire, where the field is
     /// really "reverse"; this takes the intuitive sense and flips it, as ServUO
     /// does.
-    pub forward: bool,
+    pub forward:      bool,
     /// Loop rather than play once.
-    pub repeat: bool,
+    pub repeat:       bool,
     /// Frame delay.
-    pub delay: u8,
+    pub delay:        u8,
 }
 
 impl EncodePacket for Animation {
@@ -1069,16 +1086,16 @@ impl DecodePacket for Animation {
         _version: ClientVersion,
     ) -> Result<Self, crate::error::DecodeError> {
         Ok(Self {
-            serial: Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
+            serial:       Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
                 field: "animation serial",
                 value: 0,
             })?,
-            action: reader.u16()?,
-            frame_count: AnimationFrameCount(reader.u16()?),
+            action:       reader.u16()?,
+            frame_count:  AnimationFrameCount(reader.u16()?),
             repeat_count: reader.u16()?,
-            forward: !reader.bool()?,
-            repeat: reader.bool()?,
-            delay: reader.u8()?,
+            forward:      !reader.bool()?,
+            repeat:       reader.bool()?,
+            delay:        reader.u8()?,
         })
     }
 }
@@ -1095,13 +1112,13 @@ impl DecodePacket for Animation {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct NewAnimation {
     /// Who moves.
-    pub serial: Serial,
+    pub serial:         Serial,
     /// Which category of action, in the `0xE2` numbering.
     pub animation_type: u16,
     /// Which action within the category.
-    pub action: u16,
+    pub action:         u16,
     /// Frame delay.
-    pub delay: u8,
+    pub delay:          u8,
 }
 
 /// Number of frames in a body-specific mobile animation.
@@ -1146,13 +1163,13 @@ impl DecodePacket for NewAnimation {
         _version: ClientVersion,
     ) -> Result<Self, crate::error::DecodeError> {
         Ok(Self {
-            serial: Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
+            serial:         Serial::new(reader.u32()?).ok_or(crate::error::DecodeError::UnknownValue {
                 field: "new animation serial",
                 value: 0,
             })?,
             animation_type: reader.u16()?,
-            action: reader.u16()?,
-            delay: reader.u8()?,
+            action:         reader.u16()?,
+            delay:          reader.u8()?,
         })
     }
 }
@@ -1193,25 +1210,25 @@ impl EffectKind {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct GraphicalEffect {
     /// How it moves.
-    pub kind: EffectKind,
+    pub kind:            EffectKind,
     /// The mobile it comes from, if any.
-    pub from: Option<Serial>,
+    pub from:            Option<Serial>,
     /// The mobile it goes to, if any.
-    pub to: Option<Serial>,
+    pub to:              Option<Serial>,
     /// The effect's sprite.
-    pub art: Graphic,
+    pub art:             Graphic,
     /// Where it starts.
-    pub from_point: Point,
+    pub from_point:      Point,
     /// Where it ends. The same as `from_point` for a fixed effect.
-    pub to_point: Point,
+    pub to_point:        Point,
     /// How fast a moving effect travels.
-    pub speed: u8,
+    pub speed:           u8,
     /// How long a fixed effect lasts.
-    pub duration: u8,
+    pub duration:        u8,
     /// Keep the sprite's orientation rather than turning it along its path.
     pub fixed_direction: bool,
     /// Play the client's explosion at the end.
-    pub explode: bool,
+    pub explode:         bool,
 }
 
 impl EncodePacket for GraphicalEffect {
@@ -1293,9 +1310,9 @@ impl DecodePacket for GraphicalEffect {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct HuedEffect {
     /// Everything the uncoloured form carries.
-    pub effect: GraphicalEffect,
+    pub effect:      GraphicalEffect,
     /// Tints the effect art: a green poison bolt, a blue frost.
-    pub hue: Hue,
+    pub hue:         Hue,
     /// The client's blend: 0 normal, higher values additive or translucent.
     pub render_mode: u32,
 }
@@ -1315,7 +1332,10 @@ impl EncodePacket for HuedEffect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::{decode_packet, encode_packet};
+    use crate::packet::{
+        decode_packet,
+        encode_packet,
+    };
 
     fn version() -> ClientVersion {
         ClientVersion::new(7, 0, 45, 65)
@@ -1333,7 +1353,7 @@ mod tests {
         let packet = encode_packet(
             &PlaySound {
                 sound: SoundId(0x0028),
-                at: Point::new(0x0568, 0x0640, -5),
+                at:    Point::new(0x0568, 0x0640, -5),
             },
             version(),
         );
@@ -1352,13 +1372,13 @@ mod tests {
         // 0x6E, serial, action, frameCount, repeatCount, !forward, repeat, delay.
         let packet = encode_packet(
             &Animation {
-                serial: mobile(0x0000_1234),
-                action: 0x000A,
-                frame_count: AnimationFrameCount(0x0007),
+                serial:       mobile(0x0000_1234),
+                action:       0x000A,
+                frame_count:  AnimationFrameCount(0x0007),
                 repeat_count: 0x0001,
-                forward: true,
-                repeat: false,
-                delay: 0,
+                forward:      true,
+                repeat:       false,
+                delay:        0,
             },
             version(),
         );
@@ -1377,10 +1397,10 @@ mod tests {
     fn new_animation_is_ten_bytes() {
         let packet = encode_packet(
             &NewAnimation {
-                serial: mobile(0x0000_1234),
+                serial:         mobile(0x0000_1234),
                 animation_type: 0x0005,
-                action: 0x0009,
-                delay: 1,
+                action:         0x0009,
+                delay:          1,
             },
             version(),
         );
@@ -1395,7 +1415,7 @@ mod tests {
     #[test]
     fn swing_timing_carries_a_multi_second_duration() {
         let timing = SwingTiming {
-            serial: mobile(0x0000_1234),
+            serial:   mobile(0x0000_1234),
             duration: SwingDuration(5_000),
         };
         let packet = encode_packet(&timing, version());
@@ -1411,10 +1431,10 @@ mod tests {
     #[test]
     fn a_released_action_carries_its_target_and_the_time_to_impact() {
         let phase = CombatActionPhase {
-            actor: mobile(0x0000_1234),
+            actor:  mobile(0x0000_1234),
             target: mobile(0x0000_5678),
-            kind: CombatActionKind::Swing,
-            phase: ActionPhase::Releasing {
+            kind:   CombatActionKind::Swing,
+            phase:  ActionPhase::Releasing {
                 impact_in: SwingDuration(1_500),
             },
         };
@@ -1436,10 +1456,10 @@ mod tests {
     #[test]
     fn an_armed_action_carries_its_endurance_rather_than_an_impact() {
         let phase = CombatActionPhase {
-            actor: mobile(0x0000_1234),
+            actor:  mobile(0x0000_1234),
             target: mobile(0x0000_5678),
-            kind: CombatActionKind::Shot,
-            phase: ActionPhase::Armed {
+            kind:   CombatActionKind::Shot,
+            phase:  ActionPhase::Armed {
                 endurance: SwingDuration(8_000),
             },
         };
@@ -1453,10 +1473,10 @@ mod tests {
     #[test]
     fn an_arming_action_carries_the_time_until_it_can_be_held() {
         let phase = CombatActionPhase {
-            actor: mobile(0x0000_1234),
+            actor:  mobile(0x0000_1234),
             target: mobile(0x0000_5678),
-            kind: CombatActionKind::Shot,
-            phase: ActionPhase::Arming {
+            kind:   CombatActionKind::Shot,
+            phase:  ActionPhase::Arming {
                 ready_in: SwingDuration(1_250),
             },
         };
@@ -1469,7 +1489,7 @@ mod tests {
     #[test]
     fn an_interruption_names_its_reason_and_a_hit_does_not() {
         let interrupted = CombatActionEnded {
-            actor: mobile(0x0000_1234),
+            actor:   mobile(0x0000_1234),
             outcome: CombatActionOutcome::Interrupted(InterruptReason::OutOfReach),
         };
         let packet = encode_packet(&interrupted, version());
@@ -1484,7 +1504,7 @@ mod tests {
         );
 
         let hit = CombatActionEnded {
-            actor: mobile(0x0000_1234),
+            actor:   mobile(0x0000_1234),
             outcome: CombatActionOutcome::Hit,
         };
         let packet = encode_packet(&hit, version());
@@ -1515,7 +1535,7 @@ mod tests {
     fn a_balk_names_what_is_in_the_way_and_clears_with_a_zero() {
         let blocked = CombatActionBalked {
             actor: mobile(0x0000_1234),
-            balk: BalkState::Blocked(InterruptReason::NoLineOfSight),
+            balk:  BalkState::Blocked(InterruptReason::NoLineOfSight),
         };
         let packet = encode_packet(&blocked, version());
         assert_eq!(packet.len(), usize::from(CombatActionBalked::LENGTH_BYTES));
@@ -1531,7 +1551,7 @@ mod tests {
 
         let clear = CombatActionBalked {
             actor: mobile(0x0000_1234),
-            balk: BalkState::Clear,
+            balk:  BalkState::Clear,
         };
         let packet = encode_packet(&clear, version());
         assert_eq!(packet[9], 0, "clear");
@@ -1573,10 +1593,10 @@ mod tests {
     #[test]
     fn harvest_tool_visual_carries_the_backpack_axes_picture() {
         let visual = HarvestToolVisual {
-            serial: mobile(0x0000_1234),
+            serial:  mobile(0x0000_1234),
             graphic: Graphic(0x0F43),
-            hue: Hue(0x0481),
-            layer: Layer(1),
+            hue:     Hue(0x0481),
+            layer:   Layer(1),
         };
         let packet = encode_packet(&visual, version());
         assert_eq!(packet.len(), usize::from(HarvestToolVisual::LENGTH_BYTES));
@@ -1592,16 +1612,16 @@ mod tests {
     fn graphical_effect_is_twenty_eight_bytes() {
         let packet = encode_packet(
             &GraphicalEffect {
-                kind: EffectKind::Moving,
-                from: Serial::new(0x0000_0001),
-                to: Serial::new(0x0000_0002),
-                art: Graphic(0x36D4),
-                from_point: Point::new(0x0568, 0x0640, 0),
-                to_point: Point::new(0x0570, 0x0640, 0),
-                speed: 7,
-                duration: 0,
+                kind:            EffectKind::Moving,
+                from:            Serial::new(0x0000_0001),
+                to:              Serial::new(0x0000_0002),
+                art:             Graphic(0x36D4),
+                from_point:      Point::new(0x0568, 0x0640, 0),
+                to_point:        Point::new(0x0570, 0x0640, 0),
+                speed:           7,
+                duration:        0,
                 fixed_direction: false,
-                explode: true,
+                explode:         true,
             },
             version(),
         );
@@ -1618,16 +1638,16 @@ mod tests {
     fn an_effect_with_no_mobiles_writes_zero_serials() {
         let packet = encode_packet(
             &GraphicalEffect {
-                kind: EffectKind::FixedXyz,
-                from: None,
-                to: None,
-                art: Graphic(0x373A),
-                from_point: Point::new(1, 2, 3),
-                to_point: Point::new(1, 2, 3),
-                speed: 9,
-                duration: 20,
+                kind:            EffectKind::FixedXyz,
+                from:            None,
+                to:              None,
+                art:             Graphic(0x373A),
+                from_point:      Point::new(1, 2, 3),
+                to_point:        Point::new(1, 2, 3),
+                speed:           9,
+                duration:        20,
                 fixed_direction: true,
-                explode: false,
+                explode:         false,
             },
             version(),
         );
@@ -1637,16 +1657,16 @@ mod tests {
     #[test]
     fn hued_effect_is_thirty_six_bytes_with_the_colour_last() {
         let effect = GraphicalEffect {
-            kind: EffectKind::FixedFrom,
-            from: Serial::new(0x0000_0001),
-            to: None,
-            art: Graphic(0x373A),
-            from_point: Point::new(0x0568, 0x0640, 0),
-            to_point: Point::new(0x0568, 0x0640, 0),
-            speed: 9,
-            duration: 20,
+            kind:            EffectKind::FixedFrom,
+            from:            Serial::new(0x0000_0001),
+            to:              None,
+            art:             Graphic(0x373A),
+            from_point:      Point::new(0x0568, 0x0640, 0),
+            to_point:        Point::new(0x0568, 0x0640, 0),
+            speed:           9,
+            duration:        20,
             fixed_direction: true,
-            explode: false,
+            explode:         false,
         };
         let packet = encode_packet(
             &HuedEffect {
@@ -1667,16 +1687,16 @@ mod tests {
     fn a_hued_effect_body_is_the_plain_one_plus_eight_bytes() {
         // The reuse is the point: 0xC0 cannot drift away from 0x70.
         let effect = GraphicalEffect {
-            kind: EffectKind::Lightning,
-            from: Serial::new(0x0000_0007),
-            to: None,
-            art: Graphic(0x0000),
-            from_point: Point::new(10, 20, -3),
-            to_point: Point::new(10, 20, -3),
-            speed: 0,
-            duration: 0,
+            kind:            EffectKind::Lightning,
+            from:            Serial::new(0x0000_0007),
+            to:              None,
+            art:             Graphic(0x0000),
+            from_point:      Point::new(10, 20, -3),
+            to_point:        Point::new(10, 20, -3),
+            speed:           0,
+            duration:        0,
             fixed_direction: false,
-            explode: false,
+            explode:         false,
         };
         let plain = encode_packet(&effect, version());
         let hued = encode_packet(

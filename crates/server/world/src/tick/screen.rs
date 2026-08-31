@@ -18,15 +18,24 @@
 //! Login keeps what is genuinely not simulation: credentials, argon2, the auth
 //! key and the relay. It ends at `Command::Authenticated`.
 
-use super::*;
 use openshard_protocol::identity::RawCharacterName;
 use openshard_protocol::login::{
-    CHARACTER_NAME_LENGTH, CharacterList, CharacterListFlags, CharacterListUpdate, DeleteReject,
-    DeleteResult, DenyReason, LoginDenied, MIN_CHARACTER_SLOTS, StartLocation,
+    CHARACTER_NAME_LENGTH,
+    CharacterList,
+    CharacterListFlags,
+    CharacterListUpdate,
+    DeleteReject,
+    DeleteResult,
+    DenyReason,
+    LoginDenied,
+    MIN_CHARACTER_SLOTS,
+    StartLocation,
 };
 use openshard_protocol::skill::SkillLock;
 use openshard_protocol::wire::RawCharacterSlot;
 use openshard_protocol::world::CreateCharacter;
+
+use super::*;
 
 /// What the character screen shows, beside the characters themselves.
 ///
@@ -45,10 +54,10 @@ pub struct CharacterScreen {
     /// screen without one and says so ("No city found. Something wrong with the
     /// received cities.") — but empty is representable, because a `World::new`
     /// with no boot behind it has no cities and no client either.
-    pub starts: Vec<StartLocation>,
+    pub starts:   Vec<StartLocation>,
     /// The `0xA9` client-capability mask. This is the one ClassicUO reads to turn
     /// on AoS tooltips and context menus, not the `0xB9` below.
-    pub flags: CharacterListFlags,
+    pub flags:    CharacterListFlags,
     /// The `0xB9` SupportedFeatures mask sent just ahead of the list.
     /// [`SupportedFeatures::NONE`] means "do not advertise": no `0xB9` goes out
     /// and a modern client stays on the classic single-click name path.
@@ -188,7 +197,7 @@ impl World {
                         let (sex, race) = create.sex_race.interpret();
                         Graphic(CreateCharacter::body(sex, race))
                     },
-                    hue: Hue(create.skin_hue.0),
+                    hue:  Hue(create.skin_hue.0),
                 }),
                 sheet: Some(Box::new(Self::chosen_sheet(&create))),
             }),
@@ -207,10 +216,10 @@ impl World {
     /// notes.
     fn chosen_sheet(create: &CreateCharacter) -> CharacterSheet {
         CharacterSheet {
-            strength: u16::from(create.strength.0),
-            dexterity: u16::from(create.dexterity.0),
-            intelligence: u16::from(create.intelligence.0),
-            skills: create
+            strength:        u16::from(create.strength.0),
+            dexterity:       u16::from(create.dexterity.0),
+            intelligence:    u16::from(create.intelligence.0),
+            skills:          create
                 .skills
                 .iter()
                 .filter(|choice| choice.value.0 > 0)
@@ -220,16 +229,16 @@ impl World {
                 .map(|choice| (choice.skill.0, u16::from(choice.value.0) * 10, SkillLock::Up, 0))
                 .collect(),
             // A new character's arrows all point up, and no stat has ever risen.
-            stat_locks: openshard_persistence::StatLockRecord::default(),
+            stat_locks:      openshard_persistence::StatLockRecord::default(),
             // A new character is clean, and unknown.
-            effects: Vec::new(),
-            dead: false,
-            fame: 0,
-            karma: 0,
-            murders: 0,
-            quests: Vec::new(),
-            done_quests: Vec::new(),
-            guild: None,
+            effects:         Vec::new(),
+            dead:            false,
+            fame:            0,
+            karma:           0,
+            murders:         0,
+            quests:          Vec::new(),
+            done_quests:     Vec::new(),
+            guild:           None,
             guild_candidate: None,
         }
     }
@@ -357,10 +366,21 @@ impl World {
 mod tests {
     use openshard_protocol::wire::RawGraphic;
     use openshard_protocol::world::{
-        ClientFlags, RawProfession, RawSexRace, RawStartLocationIndex, RawStatValue,
+        ClientFlags,
+        RawProfession,
+        RawSexRace,
+        RawStartLocationIndex,
+        RawStatValue,
     };
 
-    use super::super::tests::{authenticate, connection, delete_slot, enter_as, packets_for, world};
+    use super::super::tests::{
+        authenticate,
+        connection,
+        delete_slot,
+        enter_as,
+        packets_for,
+        world,
+    };
     use super::*;
 
     fn admin() -> AccountName {
@@ -372,23 +392,23 @@ mod tests {
     /// packet carries and is filled in so the fixture is a whole one.
     fn creating(name: &str) -> CreateCharacter {
         CreateCharacter {
-            name: RawCharacterName(name.to_owned()),
-            flags: ClientFlags(0),
-            profession: RawProfession(0),
-            sex_race: RawSexRace(0),
-            strength: RawStatValue(45),
-            dexterity: RawStatValue(35),
-            intelligence: RawStatValue(10),
-            skills: Vec::new(),
-            skin_hue: RawHue(0x83EA),
-            hair: RawGraphic(0),
-            hair_hue: RawHue(0),
-            beard: RawGraphic(0),
-            beard_hue: RawHue(0),
+            name:           RawCharacterName(name.to_owned()),
+            flags:          ClientFlags(0),
+            profession:     RawProfession(0),
+            sex_race:       RawSexRace(0),
+            strength:       RawStatValue(45),
+            dexterity:      RawStatValue(35),
+            intelligence:   RawStatValue(10),
+            skills:         Vec::new(),
+            skin_hue:       RawHue(0x83EA),
+            hair:           RawGraphic(0),
+            hair_hue:       RawHue(0),
+            beard:          RawGraphic(0),
+            beard_hue:      RawHue(0),
             start_location: RawStartLocationIndex(0),
-            slot: RawCharacterSlot(0),
-            shirt_hue: RawHue(0),
-            pants_hue: RawHue(0),
+            slot:           RawCharacterSlot(0),
+            shirt_hue:      RawHue(0),
+            pants_hue:      RawHue(0),
         }
     }
 

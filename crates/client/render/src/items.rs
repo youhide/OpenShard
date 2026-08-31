@@ -20,22 +20,44 @@
 
 use std::collections::BTreeSet;
 
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_tiles::TileData;
 
 use crate::animate::StaticAnimations;
 #[cfg(test)]
 use crate::atlas::StaticAtlas;
-use crate::atlas::{AtlasPixel, StaticArt};
-use crate::camera::{Camera, RealPixel, ViewPixel};
+use crate::atlas::{
+    AtlasPixel,
+    StaticArt,
+};
+use crate::camera::{
+    Camera,
+    RealPixel,
+    ViewPixel,
+};
 use crate::cutaway::Cutaway;
 use crate::depth;
 use crate::gump::GumpPixel;
 use crate::sprite::SpriteQuad;
-use crate::statics::{Placed, on_screen, place_cutaway, placed_rect, quad_of};
+use crate::statics::{
+    Placed,
+    on_screen,
+    place_cutaway,
+    placed_rect,
+    quad_of,
+};
 
 mod stacks;
-pub use stacks::{GroundItem, STACK_COUNT_FONT, abbreviated, displayed_graphic, stack_label};
+pub use stacks::{
+    GroundItem,
+    STACK_COUNT_FONT,
+    abbreviated,
+    displayed_graphic,
+    stack_label,
+};
 
 /// A position in the frame's ground-item list.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -340,17 +362,19 @@ pub fn outlined<'a>(
         .and_then(|(item, _)| {
             let placed = place(item, camera, tiledata, animations, atlas, cutaway)?;
             match on_screen(camera, placed.at, &placed.sprite) {
-                true => Some(quad_of(
-                    item.at,
-                    &placed,
-                    base,
-                    u32::from(item.hue.0),
-                    crate::occlusion::OwnerId::NONE,
-                    // A silhouette is a mask and its colour is never read, so
-                    // it is lit by nothing and needs no geometry under it —
-                    // the same reason it stamps `OwnerId::NONE` beside this.
-                    crate::impostor::Range::default(),
-                )),
+                true => {
+                    Some(quad_of(
+                        item.at,
+                        &placed,
+                        base,
+                        u32::from(item.hue.0),
+                        crate::occlusion::OwnerId::NONE,
+                        // A silhouette is a mask and its colour is never read, so
+                        // it is lit by nothing and needs no geometry under it —
+                        // the same reason it stamps `OwnerId::NONE` beside this.
+                        crate::impostor::Range::default(),
+                    ))
+                }
                 false => None,
             }
         })
@@ -399,17 +423,17 @@ fn place<'a>(
 #[derive(Debug)]
 pub struct GrabAt<'a> {
     /// The ground item whose drawn sprite was picked.
-    pub item: &'a GroundItem,
+    pub item:       &'a GroundItem,
     /// The camera that placed the sprite in the viewport.
-    pub camera: &'a Camera,
+    pub camera:     &'a Camera,
     /// Static metadata used by the ordinary item placement path.
-    pub tiledata: &'a TileData,
+    pub tiledata:   &'a TileData,
     /// The animation frame used for the picked picture.
     pub animations: &'a StaticAnimations,
     /// The active storey cutaway.
-    pub cutaway: &'a Cutaway,
+    pub cutaway:    &'a Cutaway,
     /// The pointer in real surface pixels.
-    pub cursor: RealPixel,
+    pub cursor:     RealPixel,
     /// Interface magnification used by the cursor preview.
     pub gump_scale: f32,
 }
@@ -560,7 +584,7 @@ pub fn pick_with_interior<'a>(
         if hit.is_none_or(|best| placed.order >= best.order) {
             hit = Some(depth::Hit {
                 order: placed.order,
-                what: ItemIndex::new(index),
+                what:  ItemIndex::new(index),
             });
         }
     }
@@ -712,12 +736,12 @@ mod tests {
 
         let grab = grab_at(
             GrabAt {
-                item: &item,
-                camera: &camera,
-                tiledata: &TileData::empty(),
+                item:       &item,
+                camera:     &camera,
+                tiledata:   &TileData::empty(),
                 animations: &StaticAnimations::default(),
-                cutaway: &Cutaway::OPEN,
-                cursor: RealPixel::new(top_left.x.round() as i32 + 24, top_left.y.round() as i32 + 18),
+                cutaway:    &Cutaway::OPEN,
+                cursor:     RealPixel::new(top_left.x.round() as i32 + 24, top_left.y.round() as i32 + 18),
                 gump_scale: 2.0,
             },
             &atlas,
@@ -802,10 +826,10 @@ mod tests {
 
         let labelled = labels(
             &[GroundItem {
-                amount: ItemAmount(50),
-                at: Point::new(100, 100, 0),
+                amount:  ItemAmount(50),
+                at:      Point::new(100, 100, 0),
                 graphic: copper,
-                hue: Hue::NONE,
+                hue:     Hue::NONE,
             }],
             &camera,
             &tiledata,
@@ -881,11 +905,13 @@ mod tests {
         let graphic = Graphic(0x0EED);
         let atlas = atlas(graphic, 30, 50);
         let tiledata = TileData::empty();
-        let at = |z: i8| GroundItem {
-            amount: ItemAmount::ONE,
-            at: Point::new(100, 100, z),
-            graphic,
-            hue: Hue::NONE,
+        let at = |z: i8| {
+            GroundItem {
+                amount: ItemAmount::ONE,
+                at: Point::new(100, 100, z),
+                graphic,
+                hue: Hue::NONE,
+            }
         };
         let floor = collect(
             &[at(0)],
@@ -926,10 +952,10 @@ mod tests {
         let tiledata = TileData::empty();
         let quads = collect(
             &[GroundItem {
-                amount: ItemAmount::ONE,
-                at: Point::new(100, 100, 0),
+                amount:  ItemAmount::ONE,
+                at:      Point::new(100, 100, 0),
                 graphic: Graphic(0x0EEE),
-                hue: Hue::NONE,
+                hue:     Hue::NONE,
             }],
             &camera,
             &tiledata,
@@ -952,11 +978,13 @@ mod tests {
         let graphic = Graphic(0x0EED);
         let atlas = atlas(graphic, 30, 50);
         let tiledata = TileData::empty();
-        let item = |x: u16, y: u16| GroundItem {
-            amount: ItemAmount::ONE,
-            at: Point::new(x, y, 0),
-            graphic,
-            hue: Hue::NONE,
+        let item = |x: u16, y: u16| {
+            GroundItem {
+                amount: ItemAmount::ONE,
+                at: Point::new(x, y, 0),
+                graphic,
+                hue: Hue::NONE,
+            }
         };
         // Given nearest first, on purpose.
         let quads = collect(
@@ -1052,11 +1080,13 @@ mod tests {
         // Tall enough that the nearer tile's sprite covers the further one's.
         let atlas = atlas(graphic, 44, 120);
         let tiledata = TileData::empty();
-        let item = |x: u16, y: u16| GroundItem {
-            amount: ItemAmount::ONE,
-            at: Point::new(x, y, 0),
-            graphic,
-            hue: Hue::NONE,
+        let item = |x: u16, y: u16| {
+            GroundItem {
+                amount: ItemAmount::ONE,
+                at: Point::new(x, y, 0),
+                graphic,
+                hue: Hue::NONE,
+            }
         };
         // Given furthest first, which is *not* what decides it: the order does.
         let items = [item(100, 100), item(101, 101)];
@@ -1090,11 +1120,13 @@ mod tests {
         let atlas = atlas(graphic, 40, 60);
         let tiledata = TileData::empty();
         // Its own hue, so the assertion below is "replaced" and not "set".
-        let item = |x: u16| GroundItem {
-            amount: ItemAmount::ONE,
-            at: Point::new(x, 100, 0),
-            graphic,
-            hue: Hue(0x03B2),
+        let item = |x: u16| {
+            GroundItem {
+                amount: ItemAmount::ONE,
+                at: Point::new(x, 100, 0),
+                graphic,
+                hue: Hue(0x03B2),
+            }
         };
         let items = [item(100), item(101)];
         let quads = collect(
@@ -1136,9 +1168,9 @@ mod tests {
         };
         let screen_at = stand_on(&camera, item.at, &atlas.sprite(graphic).expect("packed item"));
         let body = crate::geometry::Rect {
-            x: screen_at.x + 12.0,
-            y: screen_at.y + 32.0,
-            width: 20.0,
+            x:      screen_at.x + 12.0,
+            y:      screen_at.y + 32.0,
+            width:  20.0,
             height: 32.0,
         };
         let body_mask = crate::mobiles::OpaqueMask::solid(body);
@@ -1244,11 +1276,13 @@ mod tests {
     /// The graphics a list needs, once each, ready to be unioned with the map's.
     #[test]
     fn the_needed_graphics_are_deduplicated() {
-        let item = |graphic: u16| GroundItem {
-            amount: ItemAmount::ONE,
-            at: Point::new(0, 0, 0),
-            graphic: Graphic(graphic),
-            hue: Hue::NONE,
+        let item = |graphic: u16| {
+            GroundItem {
+                amount:  ItemAmount::ONE,
+                at:      Point::new(0, 0, 0),
+                graphic: Graphic(graphic),
+                hue:     Hue::NONE,
+            }
         };
         let wanted = needed_graphics(
             &[item(0x0EED), item(0x0EED), item(0x0EEA)],

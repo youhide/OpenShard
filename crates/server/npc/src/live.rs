@@ -29,14 +29,31 @@
 
 use openshard_entities::EntityId;
 use openshard_map::overlay::Doors;
-use openshard_protocol::direction::{Direction, Facing};
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
 use openshard_protocol::serial::Serial;
-use openshard_protocol::world::{Facet, Point};
-use openshard_state::components::{Heading, Npc, Position};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
+use openshard_state::components::{
+    Heading,
+    Npc,
+    Position,
+};
 use openshard_state::sectors::in_range;
-use openshard_state::{Rng, WorldState, WorldTick};
+use openshard_state::{
+    Rng,
+    WorldState,
+    WorldTick,
+};
 
-use crate::speech::{bark_line, greeting_for};
+use crate::speech::{
+    bark_line,
+    greeting_for,
+};
 
 /// How long between an NPC's beats, in ticks — two seconds.
 ///

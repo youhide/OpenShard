@@ -31,9 +31,19 @@
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::mobile::Notoriety;
-use openshard_state::components::{Escortable, Name, Npc, Position, Title, Vendor};
+use openshard_state::components::{
+    Escortable,
+    Name,
+    Npc,
+    Position,
+    Title,
+    Vendor,
+};
 use openshard_state::sectors::in_range;
-use openshard_state::{SpeechEntry, WorldState};
+use openshard_state::{
+    SpeechEntry,
+    WorldState,
+};
 
 use crate::live::GREET_RANGE;
 

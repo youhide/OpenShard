@@ -30,21 +30,38 @@
 //! folding them in would make the struct a bag of everything a caller might want
 //! rather than the inputs of one assembly.
 
+use std::time::{
+    Duration,
+    Instant,
+};
+
 use openshard_map::map::WorldMap;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
-use std::time::{Duration, Instant};
 
 use crate::animate::StaticAnimations;
-use crate::atlas::{LandAtlas, StaticArt, TexmapAtlas};
+use crate::atlas::{
+    LandAtlas,
+    StaticArt,
+    TexmapAtlas,
+};
 use crate::camera::Camera;
 use crate::cutaway::Cutaway;
 use crate::debug::View;
 use crate::geometry::Vec2;
 use crate::ground::GroundQuad;
-use crate::items::{GroundItem, ItemIndex};
-use crate::light::{self, Ambient, Lighting, Sun, Tuning};
+use crate::items::{
+    GroundItem,
+    ItemIndex,
+};
+use crate::light::{
+    self,
+    Ambient,
+    Lighting,
+    Sun,
+    Tuning,
+};
 use crate::occlusion::Occlusion;
 use crate::occlusion::bake::Bake;
 use crate::statics::StaticGeometry;
@@ -94,18 +111,18 @@ pub enum Impostor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Draw {
     /// The land: every tile's own diamond.
-    pub land: bool,
+    pub land:    bool,
     /// The statics built into the map — walls, floors, roofs, and the furniture
     /// an artist put in a building.
     pub statics: bool,
     /// What the server put on the ground: dropped items and a pack's
     /// decorations, which reach the same pass through [`crate::items::collect`].
-    pub items: bool,
+    pub items:   bool,
     /// Houses and other multis the server put in the world. A multi is
     /// expanded into ordinary item pieces before it reaches this renderer, but
     /// the client keeps this separate switch so a dropped item under a house
     /// can still be inspected.
-    pub houses: bool,
+    pub houses:  bool,
     /// Mobiles — **honoured by the caller and not here.** This module does not
     /// collect them (see the module's own note), so nothing in [`assemble`] reads
     /// this field; the client's own mobile pass does.
@@ -121,10 +138,10 @@ impl Draw {
     /// The whole world, which is what the client draws when nobody has ticked
     /// anything off — and what every caller that is not a diagnostic wants.
     pub const EVERYTHING: Self = Self {
-        land: true,
+        land:    true,
         statics: true,
-        items: true,
-        houses: true,
+        items:   true,
+        houses:  true,
         mobiles: true,
     };
 }
@@ -140,42 +157,42 @@ impl Draw {
 #[derive(Debug)]
 pub struct Inputs<'a> {
     /// The world. Land and the statics built into it.
-    pub map: &'a WorldMap,
+    pub map:         &'a WorldMap,
     /// What the server has put in it: dropped items, decorations, and — for a
     /// tool that builds a place rather than loading one — the map's own statics
     /// translated onto a synthetic anchor. This complete list remains the
     /// lighting and occlusion source even when a diagnostic hides part of it.
-    pub items: &'a [GroundItem],
+    pub items:       &'a [GroundItem],
     /// The server-owned item sprites this frame may show. Usually this is
     /// [`Self::items`]; the client uses a filtered view to independently hide
     /// houses (multis) and ordinary ground items without changing lighting.
     pub drawn_items: &'a [GroundItem],
     /// Where the eye is and how much it can see. Its zoom is in here too, so
     /// two callers at different zooms differ by this one field.
-    pub camera: &'a Camera,
+    pub camera:      &'a Camera,
     /// The client's own table: what a graphic's flags and height are.
-    pub tiledata: &'a TileData,
+    pub tiledata:    &'a TileData,
     /// The animation cycles, and the clock they have been advanced by — see
     /// [`StaticAnimations::advance`]. A frame collected off a table advanced to
     /// a different instant draws different pictures for the same map.
-    pub animations: &'a StaticAnimations,
+    pub animations:  &'a StaticAnimations,
     /// What the frame has cut away above the player's head. The same one the
     /// lights are tested against as the pictures: a wall the frame did not draw
     /// must not darken the street, and a brazier on a hidden storey must not
     /// light the floor.
-    pub cutaway: &'a Cutaway,
+    pub cutaway:     &'a Cutaway,
     /// The separate, building-local picture policy. `None` leaves the ordinary
     /// open-world frame untouched; it is never folded into [`Cutaway`].
-    pub interior: Option<&'a crate::interiors::InteriorFrame>,
+    pub interior:    Option<&'a crate::interiors::InteriorFrame>,
     /// The land art.
-    pub land: &'a LandAtlas,
+    pub land:        &'a LandAtlas,
     /// The land textures.
-    pub texmaps: &'a TexmapAtlas,
+    pub texmaps:     &'a TexmapAtlas,
     /// The sprites — one atlas for the map's furniture and the server's items,
     /// because they go through one pass. It is also where an occluder's *facing*
     /// comes from, which is why a frame drawn from one atlas and lit from
     /// another would be two different sets of walls.
-    pub statics: StaticArt<'a>,
+    pub statics:     StaticArt<'a>,
     /// The sky, already flattened or not by whoever knows whether the field is
     /// wanted.
     ///
@@ -184,10 +201,10 @@ pub struct Inputs<'a> {
     /// not "no lighting yet" — it is a frame nothing is multiplied by, and the
     /// statics of it are [`Impostor::Billboards`] whatever the field below says,
     /// because there is no grid for them to be met against.
-    pub sky: Option<Ambient>,
+    pub sky:         Option<Ambient>,
     /// The sun, where the frame has one. Set on the lighting rather than walked
     /// with the tiles: it is one direction for the whole world.
-    pub sun: Option<Sun>,
+    pub sun:         Option<Sun>,
     /// The flame in the player's own hand — where they stand and which way they
     /// face. No walk of the map could find this one; nothing on the wire says a
     /// hand is carrying anything.
@@ -199,15 +216,15 @@ pub struct Inputs<'a> {
     /// The middle field is [`light::carried`]'s `offset`: how far past `at`'s
     /// tile the body is actually drawn this instant, so the pool glides with
     /// the sprite instead of jumping once a step.
-    pub carried: Option<(Point, Vec2, Direction)>,
+    pub carried:     Option<(Point, Vec2, Direction)>,
     /// What a person has turned. Read here rather than applied to the result —
     /// the reach is what the walk's rectangle is grown by, so a frame collected
     /// without it has already lost the flames outside the old margin.
-    pub tuning: &'a Tuning,
+    pub tuning:      &'a Tuning,
     /// The flicker's clock, in seconds. An argument because this crate does not
     /// own one, and the same sampled instant every other clock in the frame was
     /// advanced by.
-    pub flame_time: f32,
+    pub flame_time:  f32,
     /// The blocks of the occlusion grid built for earlier frames, where the
     /// caller keeps them across frames.
     ///
@@ -216,26 +233,26 @@ pub struct Inputs<'a> {
     /// It is still a field: a caller that passes `None` where the client passes
     /// a bake is running different code to reach the same answer, and when the
     /// two disagree the gate should be able to say which one was asked for.
-    pub bake: Option<&'a mut Bake>,
+    pub bake:        Option<&'a mut Bake>,
     /// The item the cursor is over, drawn in [`crate::items::HIGHLIGHT_HUE`]
     /// instead of its own. An index into `items`, and a fact about this frame
     /// rather than about the thing.
-    pub highlight: Option<ItemIndex>,
+    pub highlight:   Option<ItemIndex>,
     /// Whether the statics are met against this frame's boxes — see
     /// [`Impostor`].
-    pub impostor: Impostor,
+    pub impostor:    Impostor,
     /// Which producers this frame draws at all — see [`Draw`]. The lighting is
     /// collected from the whole world whatever this says.
-    pub draw: Draw,
+    pub draw:        Draw,
     /// Which of the pass's own values to draw instead of the lit frame. A
     /// property of the person looking, which is why it is set on the way out
     /// rather than walked with the tiles.
-    pub view: View,
+    pub view:        View,
     /// Whether the player's own character is a ghost — `view::Player::dead`,
     /// `0x2C`. Set on the way out beside [`view`](Self::view) for the same
     /// reason: a fact about the person looking, not about the tiles walked to
     /// light them. `docs/combat.md`'s D9.
-    pub dead: bool,
+    pub dead:        bool,
     /// Where the player's own picture lands on screen this frame —
     /// [`crate::mobiles::screen_rect`] — so a tree standing over it can be cut
     /// away. `None` for a caller with no player on screen to protect: the
@@ -249,7 +266,7 @@ pub struct Inputs<'a> {
     pub player_mask: Option<&'a crate::mobiles::OpaqueMask>,
     /// The long-lived opacity of cutaway candidates, owned by the presentation
     /// rather than reconstructed from a single frame.
-    pub fades: &'a mut crate::cutaway::Fades,
+    pub fades:       &'a mut crate::cutaway::Fades,
 }
 
 impl Inputs<'_> {
@@ -414,10 +431,10 @@ pub struct Frame {
     /// per-fragment knobs — everything the lighting pass reads.
     pub lighting: Lighting,
     /// The land, back to front.
-    pub ground: Vec<GroundQuad>,
+    pub ground:   Vec<GroundQuad>,
     /// The map's furniture and the server's items, as one set — see
     /// [`StaticGeometry::absorb`] for why joining them is not three `extend`s.
-    pub statics: StaticGeometry,
+    pub statics:  StaticGeometry,
 }
 
 /// The same frame before immutable map statics and server-owned items are
@@ -433,13 +450,13 @@ pub struct Frame {
 #[derive(Debug)]
 pub struct SplitFrame {
     /// Lighting for the complete current world.
-    pub lighting: Lighting,
+    pub lighting:    Lighting,
     /// Immutable map land, before a composite consumer elects to omit blocks.
-    pub ground: Vec<GroundQuad>,
+    pub ground:      Vec<GroundQuad>,
     /// Immutable map statics only.
     pub map_statics: StaticGeometry,
     /// Server-owned ground items only.
-    pub items: StaticGeometry,
+    pub items:       StaticGeometry,
 }
 
 /// CPU cost of the three map walks [`assemble_profiled`] makes.
@@ -451,19 +468,19 @@ pub struct SplitFrame {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AssemblyCosts {
     /// Lights and the occlusion grid.
-    pub lighting: Duration,
+    pub lighting:        Duration,
     /// Land-tile quads.
-    pub ground: Duration,
+    pub ground:          Duration,
     /// Map statics and server items, including their impostor volumes.
-    pub statics: Duration,
+    pub statics:         Duration,
     /// Map-static placement, culling and volume construction.
-    pub static_walk: Duration,
+    pub static_walk:     Duration,
     /// Stable ordering of opaque and cutaway map statics.
-    pub static_sort: Duration,
+    pub static_sort:     Duration,
     /// Whether the visible map-static list had clock-driven art this frame.
     pub static_animated: bool,
     /// Server-owned items folded into the static render pass.
-    pub items: Duration,
+    pub items:           Duration,
 }
 
 /// **Assemble one frame.** The only place the four collectors are called in
@@ -546,24 +563,26 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
 
     let lighting_started = Instant::now();
     let mut lighting = match sky {
-        Some(ambient) => light::collect_with_interior(
-            map,
-            items,
-            camera,
-            tiledata,
-            cutaway,
-            ambient,
-            tuning,
-            flame_time,
-            // The pictures, which is where an occluder's *facing* comes from: a
-            // wall stops a ray only where the ray crosses the side the wall
-            // stands on, and only the art says which side that is. The same
-            // atlas the statics pass below draws from, so the grid and the
-            // picture cannot be about two different sets of sprites.
-            Some(statics),
-            bake,
-            interior,
-        ),
+        Some(ambient) => {
+            light::collect_with_interior(
+                map,
+                items,
+                camera,
+                tiledata,
+                cutaway,
+                ambient,
+                tuning,
+                flame_time,
+                // The pictures, which is where an occluder's *facing* comes from: a
+                // wall stops a ray only where the ray crosses the side the wall
+                // stands on, and only the art says which side that is. The same
+                // atlas the statics pass below draws from, so the grid and the
+                // picture cannot be about two different sets of sprites.
+                Some(statics),
+                bake,
+                interior,
+            )
+        }
         // No sky, no grid, no walk. The identity — see [`Lighting::NONE`].
         None => Lighting::NONE,
     };
@@ -612,19 +631,21 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
     // different world, lit differently, and the summary would not say so.
     let statics_started = Instant::now();
     let (map_statics, static_costs) = match draw.statics {
-        true => crate::statics::collect_with_fades_profiled_with_interior(
-            map,
-            camera,
-            tiledata,
-            animations,
-            statics,
-            cutaway,
-            met,
-            player_rect,
-            player_mask,
-            fades,
-            interior,
-        ),
+        true => {
+            crate::statics::collect_with_fades_profiled_with_interior(
+                map,
+                camera,
+                tiledata,
+                animations,
+                statics,
+                cutaway,
+                met,
+                player_rect,
+                player_mask,
+                fades,
+                interior,
+            )
+        }
         false => (StaticGeometry::default(), crate::statics::CollectCosts::default()),
     };
     // Through the same pass as the map's statics, because they are the same
@@ -659,13 +680,13 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
             items,
         },
         AssemblyCosts {
-            lighting: lighting_cost,
-            ground: ground_cost,
-            statics: statics_cost,
-            static_walk: static_costs.walk,
-            static_sort: static_costs.sort,
+            lighting:        lighting_cost,
+            ground:          ground_cost,
+            statics:         statics_cost,
+            static_walk:     static_costs.walk,
+            static_sort:     static_costs.sort,
             static_animated: static_costs.animated,
-            items: items_cost,
+            items:           items_cost,
         },
     )
 }

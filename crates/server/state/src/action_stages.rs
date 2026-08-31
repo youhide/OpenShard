@@ -27,7 +27,10 @@
 //!   [`Phase::Armed`](crate::components::Phase::Armed) action sits in, which is
 //!   the only thing on this shard that waits on purpose.
 
-use openshard_config::{ActionStagesConfig, StageSharesConfig};
+use openshard_config::{
+    ActionStagesConfig,
+    StageSharesConfig,
+};
 use openshard_protocol::feedback::ActionStage;
 
 use crate::components::ActionKind;
@@ -43,7 +46,7 @@ pub struct StageShares {
     /// The share spent bringing the weapon up.
     pub ready: u8,
     /// The share spent on the effort — the bow bending, the arm cocking.
-    pub load: u8,
+    pub load:  u8,
 }
 
 impl StageShares {
@@ -52,7 +55,7 @@ impl StageShares {
     pub const fn from_config(shares: &StageSharesConfig) -> Self {
         Self {
             ready: shares.ready,
-            load: shares.load,
+            load:  shares.load,
         }
     }
 
@@ -86,9 +89,9 @@ impl StageShares {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ActionStages {
     /// How a blow divides.
-    pub swing: StageShares,
+    pub swing:  StageShares,
     /// How a shot divides.
-    pub shot: StageShares,
+    pub shot:   StageShares,
     /// How an innate ranged attack divides.
     pub breath: StageShares,
 }
@@ -105,8 +108,8 @@ impl ActionStages {
     #[must_use]
     pub const fn shipped() -> Self {
         Self {
-            swing: StageShares { ready: 15, load: 65 },
-            shot: StageShares { ready: 10, load: 70 },
+            swing:  StageShares { ready: 15, load: 65 },
+            shot:   StageShares { ready: 10, load: 70 },
             breath: StageShares { ready: 20, load: 60 },
         }
     }
@@ -115,8 +118,8 @@ impl ActionStages {
     #[must_use]
     pub fn from_config(stages: &ActionStagesConfig) -> Self {
         Self {
-            swing: StageShares::from_config(&stages.swing),
-            shot: StageShares::from_config(&stages.shot),
+            swing:  StageShares::from_config(&stages.swing),
+            shot:   StageShares::from_config(&stages.shot),
             breath: StageShares::from_config(&stages.breath),
         }
     }
@@ -141,9 +144,13 @@ impl ActionStages {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionStages, StageShares};
     use openshard_config::ActionStagesConfig;
     use openshard_protocol::feedback::ActionStage;
+
+    use super::{
+        ActionStages,
+        StageShares,
+    };
 
     /// The shipped table is written twice — once in the operator's vocabulary
     /// and once in the systems' — and a shard that ships one and documents the

@@ -24,7 +24,10 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 /// The stable number a client's localized string table assigns to a sentence.
 ///
@@ -55,7 +58,7 @@ pub enum ClilocError {
     /// The file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
@@ -104,14 +107,20 @@ impl Cliloc {
     /// Read `Cliloc.enu`.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ClilocError> {
         let path = path.as_ref();
-        let bytes = std::fs::read(path).map_err(|source| ClilocError::Read {
-            path: path.to_owned(),
-            source,
+        let bytes = std::fs::read(path).map_err(|source| {
+            ClilocError::Read {
+                path: path.to_owned(),
+                source,
+            }
         })?;
         let bytes = match bytes.get(3) == Some(&0x8E) {
-            true => decompress_bwt(&bytes).ok_or_else(|| ClilocError::Compressed {
-                path: path.to_owned(),
-            })?,
+            true => {
+                decompress_bwt(&bytes).ok_or_else(|| {
+                    ClilocError::Compressed {
+                        path: path.to_owned(),
+                    }
+                })?
+            }
             false => bytes,
         };
         Ok(Self::parse(&bytes))

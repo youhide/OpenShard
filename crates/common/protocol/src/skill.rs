@@ -9,10 +9,21 @@
 //! ([`UseSkillRequest`]). The byte layout is ServUO's `SkillUpdate`/`SkillChange`
 //! and its `ChangeSkillLock`/`TextCommand` handlers.
 
-use crate::codec::{PacketReader, PacketWriter};
-use crate::error::{DecodeError, expect_id};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
+use crate::error::{
+    DecodeError,
+    expect_id,
+};
 use crate::feature::Feature;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength, frame_body};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+    frame_body,
+};
 use crate::version::ClientVersion;
 use crate::wire::RawSkillId;
 
@@ -64,16 +75,16 @@ impl SkillLock {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SkillEntry {
     /// The skill id, zero-based (Alchemy is 0), as the client numbers them.
-    pub id: u8,
+    pub id:    u8,
     /// The value in play — base plus any item/buff modifier, capped. No modifiers
     /// exist yet, so it equals `base` for now.
     pub value: u16,
     /// The trained value, before modifiers.
-    pub base: u16,
+    pub base:  u16,
     /// How the window trains it.
-    pub lock: SkillLock,
+    pub lock:  SkillLock,
     /// The individual skill cap.
-    pub cap: u16,
+    pub cap:   u16,
 }
 
 /// How many skills a client of this version knows — the length of the full list,
@@ -205,9 +216,11 @@ fn decode_entry(
     } else {
         raw
     };
-    let id = u8::try_from(id).map_err(|_| DecodeError::UnknownValue {
-        field: "skill id",
-        value: u32::from(id),
+    let id = u8::try_from(id).map_err(|_| {
+        DecodeError::UnknownValue {
+            field: "skill id",
+            value: u32::from(id),
+        }
     })?;
     let value = reader.u16()?;
     let base = reader.u16()?;
@@ -220,7 +233,7 @@ fn decode_entry(
     if !caps {
         return Err(DecodeError::Unsupported {
             packet: <SkillsFull as EncodePacket>::ID,
-            form: "a capless skill row, from before 4.0.0a",
+            form:   "a capless skill row, from before 4.0.0a",
         });
     }
     let cap = reader.u16()?;
@@ -262,13 +275,17 @@ impl DecodePacket for SkillsPacket {
                 }
                 Ok(Self::WholeList(SkillsFull { entries }))
             }
-            SkillsForm::OneLine { caps } => Ok(Self::OneLine(SkillUpdate {
-                entry: decode_entry(reader, caps, false)?,
-            })),
-            SkillsForm::NameTable => Err(DecodeError::Unsupported {
-                packet: Self::ID,
-                form: "the shard's own skill-name table (0xFE)",
-            }),
+            SkillsForm::OneLine { caps } => {
+                Ok(Self::OneLine(SkillUpdate {
+                    entry: decode_entry(reader, caps, false)?,
+                }))
+            }
+            SkillsForm::NameTable => {
+                Err(DecodeError::Unsupported {
+                    packet: Self::ID,
+                    form:   "the shard's own skill-name table (0xFE)",
+                })
+            }
         }
     }
 }
@@ -310,7 +327,7 @@ pub struct SkillLockRequest {
     /// Which skill, zero-based, exactly as sent.
     pub skill: RawSkillId,
     /// The new lock state.
-    pub lock: SkillLock,
+    pub lock:  SkillLock,
 }
 
 impl DecodePacket for SkillLockRequest {
@@ -391,8 +408,10 @@ impl UseSkillRequest {
             .trim()
             .parse::<u8>()
             .ok()
-            .map(|skill| Self {
-                skill: RawSkillId(skill),
+            .map(|skill| {
+                Self {
+                    skill: RawSkillId(skill),
+                }
             }))
     }
 
@@ -417,7 +436,10 @@ impl UseSkillRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::{decode_packet, encode_packet};
+    use crate::packet::{
+        decode_packet,
+        encode_packet,
+    };
 
     fn aos() -> ClientVersion {
         ClientVersion::new(4, 0, 0, 0)
@@ -469,18 +491,18 @@ mod tests {
     fn the_full_list_is_one_based_and_zero_terminated_with_caps() {
         let entries = [
             SkillEntry {
-                id: 0, // Alchemy — sent as 1, so the 0 terminator is unambiguous
+                id:    0, // Alchemy — sent as 1, so the 0 terminator is unambiguous
                 value: 755,
-                base: 700,
-                lock: SkillLock::Locked,
-                cap: 1000,
+                base:  700,
+                lock:  SkillLock::Locked,
+                cap:   1000,
             },
             SkillEntry {
-                id: 45, // Mining
+                id:    45, // Mining
                 value: 500,
-                base: 500,
-                lock: SkillLock::Up,
-                cap: 1000,
+                base:  500,
+                lock:  SkillLock::Up,
+                cap:   1000,
             },
         ];
         let packet = encode_packet(
@@ -517,11 +539,11 @@ mod tests {
     #[test]
     fn the_full_list_drops_the_cap_field_on_an_old_client() {
         let entries = [SkillEntry {
-            id: 0,
+            id:    0,
             value: 100,
-            base: 100,
-            lock: SkillLock::Up,
-            cap: 1000,
+            base:  100,
+            lock:  SkillLock::Up,
+            cap:   1000,
         }];
         let packet = encode_packet(
             &SkillsFull {
@@ -536,11 +558,11 @@ mod tests {
     #[test]
     fn a_single_update_is_zero_based_and_unterminated() {
         let entry = SkillEntry {
-            id: 25, // Magery
+            id:    25, // Magery
             value: 501,
-            base: 501,
-            lock: SkillLock::Up,
-            cap: 1000,
+            base:  501,
+            lock:  SkillLock::Up,
+            cap:   1000,
         };
         let packet = encode_packet(&SkillUpdate { entry }, aos());
         assert_eq!(packet[0], 0x3A);
@@ -556,25 +578,25 @@ mod tests {
     fn the_whole_list_comes_back_off_the_wire_as_it_was_sent() {
         let entries = vec![
             SkillEntry {
-                id: 0, // Alchemy, the id the one-based numbering exists for
+                id:    0, // Alchemy, the id the one-based numbering exists for
                 value: 755,
-                base: 700,
-                lock: SkillLock::Locked,
-                cap: 1000,
+                base:  700,
+                lock:  SkillLock::Locked,
+                cap:   1000,
             },
             SkillEntry {
-                id: 45,
+                id:    45,
                 value: 500,
-                base: 480,
-                lock: SkillLock::Down,
-                cap: 1200,
+                base:  480,
+                lock:  SkillLock::Down,
+                cap:   1200,
             },
             SkillEntry {
-                id: 57, // the last skill a 7.0 client knows
+                id:    57, // the last skill a 7.0 client knows
                 value: 0,
-                base: 0,
-                lock: SkillLock::Up,
-                cap: 1000,
+                base:  0,
+                lock:  SkillLock::Up,
+                cap:   1000,
             },
         ];
         let packet = encode_packet(
@@ -595,11 +617,11 @@ mod tests {
     #[test]
     fn a_single_line_comes_back_on_the_skill_it_was_sent_for() {
         let entry = SkillEntry {
-            id: 25, // Magery
+            id:    25, // Magery
             value: 501,
-            base: 501,
-            lock: SkillLock::Up,
-            cap: 1000,
+            base:  501,
+            lock:  SkillLock::Up,
+            cap:   1000,
         };
         let packet = encode_packet(&SkillUpdate { entry }, aos());
         let decoded = decode_server_packet(&packet);
@@ -644,11 +666,11 @@ mod tests {
         let packet = encode_packet(
             &SkillsFull {
                 entries: vec![SkillEntry {
-                    id: 0,
+                    id:    0,
                     value: 100,
-                    base: 100,
-                    lock: SkillLock::Up,
-                    cap: 1000,
+                    base:  100,
+                    lock:  SkillLock::Up,
+                    cap:   1000,
                 }],
             },
             pre_aos(),
@@ -706,7 +728,7 @@ mod tests {
     fn a_lock_click_reaches_the_server_as_the_request_it_means() {
         let sent = SkillLockRequest {
             skill: RawSkillId(45),
-            lock: SkillLock::Locked,
+            lock:  SkillLock::Locked,
         };
         let heard = crate::client_packet::ClientPacket::decode(&sent.encode(), aos()).expect("it decodes");
         assert!(matches!(

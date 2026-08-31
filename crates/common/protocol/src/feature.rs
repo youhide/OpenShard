@@ -265,7 +265,7 @@ impl Feature {
 pub struct FeatureSet {
     version: ClientVersion,
     /// Bit `i` is `Feature::ALL[i]`.
-    bits: u64,
+    bits:    u64,
 }
 
 impl FeatureSet {

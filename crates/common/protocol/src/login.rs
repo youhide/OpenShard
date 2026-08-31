@@ -41,16 +41,40 @@
 //! the client announcing its own version.
 
 use std::fmt;
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{
+    Ipv4Addr,
+    SocketAddrV4,
+};
 
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
 use crate::feature::Feature;
-use crate::identity::{CharacterName, RawAccountName, RawPlaintextPassword};
-use crate::packet::{DecodePacket, EncodePacket, PacketLength, decode_packet};
+use crate::identity::{
+    CharacterName,
+    RawAccountName,
+    RawPlaintextPassword,
+};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+    decode_packet,
+};
 use crate::version::ClientVersion;
-use crate::wire::{AuthKey, ClilocId, RawCharacterSlot};
-use crate::world::{CharacterPlay, CreateCharacter, Facet, Point};
+use crate::wire::{
+    AuthKey,
+    ClilocId,
+    RawCharacterSlot,
+};
+use crate::world::{
+    CharacterPlay,
+    CreateCharacter,
+    Facet,
+    Point,
+};
 
 /// Width of an account name field. Sphere's `MAX_ACCOUNT_NAME_SIZE`.
 pub const ACCOUNT_NAME_LENGTH: usize = 30;
@@ -67,7 +91,7 @@ pub const SHARD_NAME_LENGTH: usize = 32;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct AccountLogin {
     /// The account name, as typed.
-    pub account: RawAccountName,
+    pub account:  RawAccountName,
     /// The password, in plaintext.
     ///
     /// The UO protocol has no password hashing: it is plaintext inside the
@@ -279,13 +303,13 @@ impl PercentFull {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ShardEntry {
     /// Shard name. Truncated to 32 bytes on the wire.
-    pub name: String,
+    pub name:         String,
     /// How full, 0–100.
     pub percent_full: PercentFull,
     /// Timezone, as the client's own oddity: hours west of GMT.
-    pub timezone: u8,
+    pub timezone:     u8,
     /// Where to reach it.
-    pub address: Ipv4Addr,
+    pub address:      Ipv4Addr,
 }
 
 /// The client refuses to render more than this many shards, and crashes on more.
@@ -438,7 +462,7 @@ pub enum InvalidShardIndex {
     /// Past the end of the list that was sent.
     PastEnd {
         /// The one-based index the client sent.
-        index: u16,
+        index:   u16,
         /// How many shards the list actually held.
         offered: usize,
     },
@@ -455,7 +479,8 @@ impl fmt::Display for InvalidShardIndex {
     }
 }
 
-impl std::error::Error for InvalidShardIndex {}
+impl std::error::Error for InvalidShardIndex {
+}
 
 /// `0xA0` — the client picks a shard. 3 bytes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -554,7 +579,7 @@ pub struct GameServerLogin {
     /// The key handed out in the 0x8C relay. The server must check it.
     pub auth_key: AuthKey,
     /// The account name, again.
-    pub account: RawAccountName,
+    pub account:  RawAccountName,
     /// The password, again, still plaintext.
     pub password: RawPlaintextPassword,
 }
@@ -565,7 +590,7 @@ impl DecodePacket for GameServerLogin {
     fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
         Ok(Self {
             auth_key: AuthKey(reader.u32()?),
-            account: RawAccountName(reader.fixed_string(ACCOUNT_NAME_LENGTH)?),
+            account:  RawAccountName(reader.fixed_string(ACCOUNT_NAME_LENGTH)?),
             password: RawPlaintextPassword(reader.fixed_string(PASSWORD_LENGTH)?),
         })
     }
@@ -597,16 +622,16 @@ pub struct CharacterEntry {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct StartLocation {
     /// The region name, e.g. "Britain".
-    pub area: String,
+    pub area:               String,
     /// The specific spot, e.g. "Castle Britannia".
-    pub name: String,
+    pub name:               String,
     /// Where the character appears. The wire widens each coordinate to a full
     /// dword here — unlike every other position on the wire, which is
     /// [`Point`]'s own `u16`/`u16`/`i8` — but the value named is the same map
     /// coordinate, so decode narrows it back down.
-    pub position: Point,
+    pub position:           Point,
     /// Which map.
-    pub map: Facet,
+    pub map:                Facet,
     /// Cliloc id for the description. Ignored by clients before 7.0.13.0.
     pub description_cliloc: ClilocId,
 }
@@ -756,9 +781,9 @@ pub struct CharacterList {
     /// The account's characters, one per slot.
     pub characters: Vec<CharacterEntry>,
     /// The starting cities offered at character creation.
-    pub starts: Vec<StartLocation>,
+    pub starts:     Vec<StartLocation>,
     /// The client-capability mask; see [`CharacterListFlags`].
-    pub flags: CharacterListFlags,
+    pub flags:      CharacterListFlags,
 }
 
 impl EncodePacket for CharacterList {
@@ -834,7 +859,7 @@ impl DecodePacket for CharacterList {
         if !version.supports(Feature::ExtraStartInfo) {
             return Err(DecodeError::Unsupported {
                 packet: <Self as DecodePacket>::ID,
-                form: "the pre-7.0.13.0 start list, which carries no coordinates",
+                form:   "the pre-7.0.13.0 start list, which carries no coordinates",
             });
         }
 
@@ -1136,24 +1161,36 @@ impl LoginStagePacket {
             ClientVersionReport::ID => {
                 Ok(decode_packet(packet, version).map_or(Self::MalformedVersionReport, Self::VersionReport))
             }
-            AccountLogin::ID => decode_packet(packet, version)
-                .map(Self::AccountLogin)
-                .map_err(ClientLoginDecodeError::AccountLogin),
-            SelectShard::ID => decode_packet(packet, version)
-                .map(Self::SelectShard)
-                .map_err(ClientLoginDecodeError::SelectShard),
-            GameServerLogin::ID => decode_packet(packet, version)
-                .map(Self::GameServerLogin)
-                .map_err(ClientLoginDecodeError::GameServerLogin),
-            CreateCharacter::ID_CLASSIC | CreateCharacter::ID_HIGH_SEAS => CreateCharacter::decode(packet)
-                .map(Self::CreateCharacter)
-                .map_err(ClientLoginDecodeError::CreateCharacter),
-            DeleteCharacter::ID => decode_packet(packet, version)
-                .map(Self::DeleteCharacter)
-                .map_err(ClientLoginDecodeError::DeleteCharacter),
-            CharacterPlay::ID => decode_packet(packet, version)
-                .map(Self::PlayCharacter)
-                .map_err(ClientLoginDecodeError::PlayCharacter),
+            AccountLogin::ID => {
+                decode_packet(packet, version)
+                    .map(Self::AccountLogin)
+                    .map_err(ClientLoginDecodeError::AccountLogin)
+            }
+            SelectShard::ID => {
+                decode_packet(packet, version)
+                    .map(Self::SelectShard)
+                    .map_err(ClientLoginDecodeError::SelectShard)
+            }
+            GameServerLogin::ID => {
+                decode_packet(packet, version)
+                    .map(Self::GameServerLogin)
+                    .map_err(ClientLoginDecodeError::GameServerLogin)
+            }
+            CreateCharacter::ID_CLASSIC | CreateCharacter::ID_HIGH_SEAS => {
+                CreateCharacter::decode(packet)
+                    .map(Self::CreateCharacter)
+                    .map_err(ClientLoginDecodeError::CreateCharacter)
+            }
+            DeleteCharacter::ID => {
+                decode_packet(packet, version)
+                    .map(Self::DeleteCharacter)
+                    .map_err(ClientLoginDecodeError::DeleteCharacter)
+            }
+            CharacterPlay::ID => {
+                decode_packet(packet, version)
+                    .map(Self::PlayCharacter)
+                    .map_err(ClientLoginDecodeError::PlayCharacter)
+            }
             _ => Ok(Self::Unknown(id)),
         }
     }
@@ -1186,8 +1223,14 @@ pub enum ClientLoginDecodeError {
 mod tests {
     use super::*;
     use crate::error::WrongPacket;
-    use crate::packet::{client_packet_length, encode_packet};
-    use crate::wire::{CharacterSlot, InvalidCharacterSlot};
+    use crate::packet::{
+        client_packet_length,
+        encode_packet,
+    };
+    use crate::wire::{
+        CharacterSlot,
+        InvalidCharacterSlot,
+    };
 
     fn version() -> ClientVersion {
         ClientVersion::new(7, 0, 45, 65)
@@ -1205,17 +1248,17 @@ mod tests {
 
     fn shard(name: &str, address: [u8; 4]) -> ShardEntry {
         ShardEntry {
-            name: name.to_owned(),
+            name:         name.to_owned(),
             percent_full: PercentFull::clamped(10),
-            timezone: 5,
-            address: Ipv4Addr::from(address),
+            timezone:     5,
+            address:      Ipv4Addr::from(address),
         }
     }
 
     #[test]
     fn account_login_round_trips_at_the_declared_length() {
         let login = AccountLogin {
-            account: RawAccountName("admin".to_owned()),
+            account:  RawAccountName("admin".to_owned()),
             password: RawPlaintextPassword("hunter2".to_owned()),
         };
         let bytes = login.encode();
@@ -1231,7 +1274,7 @@ mod tests {
     #[test]
     fn account_login_rejects_the_wrong_packet() {
         let mut bytes = AccountLogin {
-            account: RawAccountName("a".to_owned()),
+            account:  RawAccountName("a".to_owned()),
             password: RawPlaintextPassword("b".to_owned()),
         }
         .encode();
@@ -1240,7 +1283,7 @@ mod tests {
             decode_packet::<AccountLogin>(&bytes, version()),
             Err(DecodeError::WrongPacket(WrongPacket {
                 expected: 0x80,
-                found: 0x91,
+                found:    0x91,
             }))
         );
     }
@@ -1373,7 +1416,7 @@ mod tests {
         assert_eq!(
             encode_packet(
                 &DeleteReject {
-                    result: DeleteResult::CharBeingPlayed
+                    result: DeleteResult::CharBeingPlayed,
                 },
                 version()
             ),
@@ -1400,7 +1443,7 @@ mod tests {
     #[test]
     fn account_login_truncates_an_overlong_name_to_its_field() {
         let login = AccountLogin {
-            account: RawAccountName("x".repeat(50)),
+            account:  RawAccountName("x".repeat(50)),
             password: RawPlaintextPassword(String::new()),
         };
         assert_eq!(login.encode().len(), 62, "a long name must not overrun");
@@ -1606,7 +1649,10 @@ mod tests {
         assert_eq!(RawShardIndex(0).validate(4), Err(InvalidShardIndex::Zero));
         assert_eq!(
             RawShardIndex(5).validate(4),
-            Err(InvalidShardIndex::PastEnd { index: 5, offered: 4 })
+            Err(InvalidShardIndex::PastEnd {
+                index:   5,
+                offered: 4,
+            })
         );
         assert_eq!(RawShardIndex(4).validate(4), Ok(ShardIndex(3)), "the last shard");
     }
@@ -1688,7 +1734,7 @@ mod tests {
     fn game_server_login_round_trips_at_the_declared_length() {
         let login = GameServerLogin {
             auth_key: AuthKey(0x1234_5678),
-            account: RawAccountName("admin".to_owned()),
+            account:  RawAccountName("admin".to_owned()),
             password: RawPlaintextPassword("hunter2".to_owned()),
         };
         let bytes = login.encode();
@@ -1746,10 +1792,10 @@ mod tests {
     #[test]
     fn character_list_start_locations_widen_at_7_0_13_0() {
         let starts = vec![StartLocation {
-            area: "Britain".to_owned(),
-            name: "Castle Britannia".to_owned(),
-            position: Point::new(1475, 1774, 0),
-            map: Facet(0),
+            area:               "Britain".to_owned(),
+            name:               "Castle Britannia".to_owned(),
+            position:           Point::new(1475, 1774, 0),
+            map:                Facet(0),
             description_cliloc: ClilocId(1_075_072),
         }];
 
@@ -1773,8 +1819,8 @@ mod tests {
         // character-slot padding, which is a different gate entirely.
         let list = CharacterList {
             characters: Vec::new(),
-            starts: Vec::new(),
-            flags: CharacterListFlags(0xAABB_CCDD),
+            starts:     Vec::new(),
+            flags:      CharacterListFlags(0xAABB_CCDD),
         };
         let with_flags = encode_packet(&list, ClientVersion::new(1, 26, 0, 1));
         let without = encode_packet(&list, ClientVersion::new(1, 26, 0, 0));

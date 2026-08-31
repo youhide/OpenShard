@@ -21,22 +21,63 @@ mod stats;
 
 use std::num::NonZeroU16;
 
-pub use button::{DEFAULT_SKILL_DELAY_TICKS, SkillRequested, set_skill_delay, use_skill_button};
-pub use check::{SkillBand, gain_chance, roll_skill_band, roll_skill_chance, skill_value};
-pub use handlers::{
-    BANDAGE_GRAPHIC, BandageFinished, BandageStarted, Begged, HarvestTarget, Harvested, InstrumentSpent,
-    LOCKPICK_GRAPHIC, LockpickBroke, MAX_FOLLOWERS, Outcome, PoisonedSelf, Stolen, Tamed, ToolWorn,
-    advance_harvests, begin_harvest, expire_ghost_contact, expire_songs, finish_bandages, followers_of,
-    on_item_target, on_second_target, on_target, play_instrument, resolve_harvest_target, snooping,
-    use_bandage, use_lockpick, use_tool,
+pub use button::{
+    DEFAULT_SKILL_DELAY_TICKS,
+    SkillRequested,
+    set_skill_delay,
+    use_skill_button,
 };
-pub use stats::gain_stat;
-
+pub use check::{
+    SkillBand,
+    gain_chance,
+    roll_skill_band,
+    roll_skill_chance,
+    skill_value,
+};
+pub use handlers::{
+    BANDAGE_GRAPHIC,
+    BandageFinished,
+    BandageStarted,
+    Begged,
+    HarvestTarget,
+    Harvested,
+    InstrumentSpent,
+    LOCKPICK_GRAPHIC,
+    LockpickBroke,
+    MAX_FOLLOWERS,
+    Outcome,
+    PoisonedSelf,
+    Stolen,
+    Tamed,
+    ToolWorn,
+    advance_harvests,
+    begin_harvest,
+    expire_ghost_contact,
+    expire_songs,
+    finish_bandages,
+    followers_of,
+    on_item_target,
+    on_second_target,
+    on_target,
+    play_instrument,
+    resolve_harvest_target,
+    snooping,
+    use_bandage,
+    use_lockpick,
+    use_tool,
+};
 use openshard_entities::EntityId;
 use openshard_protocol::serial::Serial;
 use openshard_state::WorldState;
-use openshard_state::components::{Hitpoints, Mana, Skills, Stamina, Stats};
+use openshard_state::components::{
+    Hitpoints,
+    Mana,
+    Skills,
+    Stamina,
+    Stats,
+};
 use openshard_state::skill::Skill;
+pub use stats::gain_stat;
 
 /// The two ordinary dice used by skill handlers.
 const PER_MILLE: NonZeroU16 = NonZeroU16::new(1000).expect("one thousand is nonzero");
@@ -92,15 +133,15 @@ impl SkillValue {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SkillChanged {
     /// The mobile.
-    pub entity: EntityId,
+    pub entity:   EntityId,
     /// Its wire identity.
-    pub serial: Serial,
+    pub serial:   Serial,
     /// Which skill.
-    pub skill: Skill,
+    pub skill:    Skill,
     /// Its trained value before this move, in tenths.
     pub previous: SkillValue,
     /// The skill's value now, in tenths.
-    pub value: SkillValue,
+    pub value:    SkillValue,
 }
 
 /// A mobile used a skill: the check resolved, and any gain is already applied.
@@ -111,15 +152,15 @@ pub struct SkillChanged {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SkillUsed {
     /// The mobile.
-    pub entity: EntityId,
+    pub entity:  EntityId,
     /// Its wire identity.
-    pub serial: Serial,
+    pub serial:  Serial,
     /// Which skill.
-    pub skill: Skill,
+    pub skill:   Skill,
     /// Whether the check succeeded.
     pub success: bool,
     /// The skill's value now, in tenths, after any gain.
-    pub value: SkillValue,
+    pub value:   SkillValue,
 }
 
 /// Set a mobile's stats by serial, and re-cap its pools to match.
@@ -152,7 +193,7 @@ pub fn apply_stats(state: &mut WorldState, entity: EntityId, stats: Stats) {
             entity,
             Hitpoints {
                 current: current.min(stats.strength),
-                max: stats.strength,
+                max:     stats.strength,
             },
         );
     }
@@ -161,7 +202,7 @@ pub fn apply_stats(state: &mut WorldState, entity: EntityId, stats: Stats) {
             entity,
             Mana {
                 current: current.min(stats.intelligence),
-                max: stats.intelligence,
+                max:     stats.intelligence,
             },
         );
     }
@@ -170,7 +211,7 @@ pub fn apply_stats(state: &mut WorldState, entity: EntityId, stats: Stats) {
             entity,
             Stamina {
                 current: current.min(stats.dexterity),
-                max: stats.dexterity,
+                max:     stats.dexterity,
             },
         );
     }
@@ -292,7 +333,14 @@ pub fn use_skill(state: &mut WorldState, serial: Serial, skill: u8, min_skill: i
 
 #[cfg(test)]
 mod tests {
-    use super::{PER_MILLE, PERCENT, SkillValue, apply_stats, roll_u16, set_stats};
+    use super::{
+        PER_MILLE,
+        PERCENT,
+        SkillValue,
+        apply_stats,
+        roll_u16,
+        set_stats,
+    };
 
     #[test]
     fn stat_mutation_api_carries_stats_as_one_value() {

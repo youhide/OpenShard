@@ -6,14 +6,38 @@
 //! file should be. These read private world state, so they stay inside the
 //! module.
 
-use super::tests::{START, enter, packets_for, spawn_mobile_at, world};
-use super::*;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::RawSerial;
-use openshard_quests::{QUEST_GUMP, QUEST_RESIGN_GUMP};
-use openshard_state::components::{Amount, Contained, Drawn, QuestGiver, QuestLog, Stackable};
-use openshard_state::quest::{ObjectiveDef, ObjectiveKind, QuestDef, QuestKey, RewardDef, RewardKind};
+use openshard_quests::{
+    QUEST_GUMP,
+    QUEST_RESIGN_GUMP,
+};
+use openshard_state::components::{
+    Amount,
+    Contained,
+    Drawn,
+    QuestGiver,
+    QuestLog,
+    Stackable,
+};
+use openshard_state::quest::{
+    ObjectiveDef,
+    ObjectiveKind,
+    QuestDef,
+    QuestKey,
+    RewardDef,
+    RewardKind,
+};
+
+use super::tests::{
+    START,
+    enter,
+    packets_for,
+    spawn_mobile_at,
+    world,
+};
+use super::*;
 
 /// The body a rat is drawn as — the slay quests' target.
 const RAT: u16 = 0x00EE;
@@ -28,11 +52,11 @@ fn rat_cull() -> QuestDef {
         description: "Slay five rats.".to_owned(),
         complete: "Well done.".to_owned(),
         objectives: vec![ObjectiveDef {
-            kind: ObjectiveKind::Slay {
+            kind:    ObjectiveKind::Slay {
                 body: openshard_protocol::wire::Graphic(RAT),
             },
-            count: 5,
-            name: "sewer rat".to_owned(),
+            count:   5,
+            name:    "sewer rat".to_owned(),
             seconds: 0,
         }],
         rewards: vec![RewardDef {
@@ -49,11 +73,11 @@ fn silk_gather() -> QuestDef {
         key: QuestKey::new("silk_gather"),
         title: "Silk for the Spellwright".to_owned(),
         objectives: vec![ObjectiveDef {
-            kind: ObjectiveKind::Obtain {
+            kind:    ObjectiveKind::Obtain {
                 graphic: openshard_protocol::wire::Graphic(SILK),
             },
-            count: 5,
-            name: "spiders' silk".to_owned(),
+            count:   5,
+            name:    "spiders' silk".to_owned(),
             seconds: 0,
         }],
         rewards: vec![RewardDef {
@@ -129,10 +153,10 @@ fn press_with(
     world.queue(Command::GumpResponse {
         connection,
         response: openshard_protocol::gump::GumpResponse {
-            serial: openshard_protocol::gump::RawGumpKey(0),
-            gump_id: openshard_protocol::gump::RawGumpId(gump_id.0),
-            button: openshard_protocol::gump::RawButtonId(button),
-            switches: switches
+            serial:       openshard_protocol::gump::RawGumpKey(0),
+            gump_id:      openshard_protocol::gump::RawGumpId(gump_id.0),
+            button:       openshard_protocol::gump::RawButtonId(button),
+            switches:     switches
                 .into_iter()
                 .map(openshard_protocol::gump::RawSwitchId)
                 .collect(),
@@ -404,19 +428,19 @@ fn a_player_one_item_short_loses_nothing_and_is_paid_nothing() {
         title: "Two Things".to_owned(),
         objectives: vec![
             ObjectiveDef {
-                kind: ObjectiveKind::Obtain {
+                kind:    ObjectiveKind::Obtain {
                     graphic: openshard_protocol::wire::Graphic(SILK),
                 },
-                count: 2,
-                name: "silk".to_owned(),
+                count:   2,
+                name:    "silk".to_owned(),
                 seconds: 0,
             },
             ObjectiveDef {
-                kind: ObjectiveKind::Obtain {
+                kind:    ObjectiveKind::Obtain {
                     graphic: openshard_protocol::wire::Graphic(0x0F7A),
                 },
-                count: 2,
-                name: "garlic".to_owned(),
+                count:   2,
+                name:    "garlic".to_owned(),
                 seconds: 0,
             },
         ],
@@ -641,7 +665,7 @@ fn put_silk(world: &mut World, container: Serial, amount: u16) -> EntityId {
     world.state.registry.insert(
         item,
         Drawn {
-            id: openshard_protocol::wire::Graphic(SILK),
+            id:  openshard_protocol::wire::Graphic(SILK),
             hue: openshard_protocol::wire::Hue(0),
         },
     );
@@ -837,13 +861,13 @@ fn a_quest_log_survives_a_restart_with_its_progress_and_cooldowns() {
     shard.restore_characters(vec![record]);
     shard.queue(Command::Enter(Entering {
         connection: connection_two(),
-        version: ClientVersion::TOL,
-        account: AccountName("admin".to_owned()),
-        name: CharacterName("Lord British".to_owned()),
-        access: AccessLevel::Player,
+        version:    ClientVersion::TOL,
+        account:    AccountName("admin".to_owned()),
+        name:       CharacterName("Lord British".to_owned()),
+        access:     AccessLevel::Player,
         // Nothing but the name: the row went in through the boot path above,
         // and the world unpacks it itself.
-        character: Character::Saved,
+        character:  Character::Saved,
     }));
     shard.tick(now);
 
@@ -935,11 +959,11 @@ fn escort_quest() -> QuestDef {
         key: QuestKey::new("escort"),
         title: "An Escort Request".to_owned(),
         objectives: vec![ObjectiveDef {
-            kind: ObjectiveKind::Escort {
+            kind:    ObjectiveKind::Escort {
                 region: String::new(),
             },
-            count: 1,
-            name: "escort".to_owned(),
+            count:   1,
+            name:    "escort".to_owned(),
             seconds: 0,
         }],
         ..QuestDef::default()
@@ -954,8 +978,8 @@ fn make_escortable(world: &mut World, serial: Serial) {
         entity,
         openshard_state::components::Escortable {
             destination: "Britain".to_owned(),
-            escorter: None,
-            last_seen: openshard_state::WorldTick::ZERO,
+            escorter:    None,
+            last_seen:   openshard_state::WorldTick::ZERO,
         },
     );
 }
@@ -984,7 +1008,7 @@ fn an_escort_names_its_destination_in_the_offer_and_the_log() {
     register_towns(&mut world, now);
     // Bound with no destination, the way the pack binds every traveller.
     world.queue(Command::MakeEscortable {
-        serial: giver,
+        serial:      giver,
         destination: String::new(),
     });
     world.tick(now);
@@ -1035,7 +1059,7 @@ fn a_traveller_with_nowhere_to_go_offers_nothing() {
     register(&mut world, vec![escort_quest()]);
     let giver = place_giver(&mut world, &["escort"], now);
     world.queue(Command::MakeEscortable {
-        serial: giver,
+        serial:      giver,
         destination: String::new(),
     });
     world.tick(now);
@@ -1060,7 +1084,7 @@ fn re_binding_an_escortable_keeps_the_escort_it_is_on() {
     let giver = place_giver(&mut world, &["escort"], now);
     register_towns(&mut world, now);
     world.queue(Command::MakeEscortable {
-        serial: giver,
+        serial:      giver,
         destination: String::new(),
     });
     world.tick(now);
@@ -1075,7 +1099,7 @@ fn re_binding_an_escortable_keeps_the_escort_it_is_on() {
     assert!(leading.is_some());
 
     world.queue(Command::MakeEscortable {
-        serial: giver,
+        serial:      giver,
         destination: String::new(),
     });
     world.tick(now);
@@ -1120,27 +1144,32 @@ fn last_gump_lines(world: &mut World, connection: ConnectionId) -> Vec<String> {
 /// Two named regions on the default facet: the one the travellers stand in, and
 /// somewhere for them to want to go.
 fn register_towns(world: &mut World, now: Instant) {
-    use openshard_state::{Region, RegionFlags, RegionId, RegionRect};
+    use openshard_state::{
+        Region,
+        RegionFlags,
+        RegionId,
+        RegionRect,
+    };
     let here = Region {
-        id: RegionId(0),
-        name: "Britain".to_owned(),
+        id:       RegionId(0),
+        name:     "Britain".to_owned(),
         priority: 50,
-        rects: vec![RegionRect::new(START.x - 20, START.y - 20, 40, 40)],
-        flags: RegionFlags::none(),
-        music: None,
-        light: None,
+        rects:    vec![RegionRect::new(START.x - 20, START.y - 20, 40, 40)],
+        flags:    RegionFlags::none(),
+        music:    None,
+        light:    None,
     };
     let away = Region {
-        id: RegionId(0),
-        name: "Minoc".to_owned(),
+        id:       RegionId(0),
+        name:     "Minoc".to_owned(),
         priority: 50,
-        rects: vec![RegionRect::new(START.x + 200, START.y + 200, 40, 40)],
-        flags: RegionFlags::none(),
-        music: None,
-        light: None,
+        rects:    vec![RegionRect::new(START.x + 200, START.y + 200, 40, 40)],
+        flags:    RegionFlags::none(),
+        music:    None,
+        light:    None,
     };
     world.queue(Command::RegisterRegions {
-        facet: Facet(0),
+        facet:   Facet(0),
         regions: vec![here, away],
     });
     world.tick(now);
@@ -1158,7 +1187,7 @@ fn an_escort_pays_on_reaching_its_destination() {
     let giver = place_giver(&mut world, &["escort"], now);
     register_towns(&mut world, now);
     world.queue(Command::MakeEscortable {
-        serial: giver,
+        serial:      giver,
         destination: String::new(),
     });
     world.tick(now);
@@ -1241,12 +1270,12 @@ fn deliver_quest() -> QuestDef {
         key: QuestKey::new("deliver_silk"),
         title: "A Parcel for Mirabel".to_owned(),
         objectives: vec![ObjectiveDef {
-            kind: ObjectiveKind::Deliver {
+            kind:    ObjectiveKind::Deliver {
                 graphic: openshard_protocol::wire::Graphic(SILK),
-                to: "Mirabel".to_owned(),
+                to:      "Mirabel".to_owned(),
             },
-            count: 2,
-            name: "spiders' silk".to_owned(),
+            count:   2,
+            name:    "spiders' silk".to_owned(),
             seconds: 0,
         }],
         ..QuestDef::default()
@@ -1286,7 +1315,7 @@ fn an_escorted_traveller_walks_after_its_escorter() {
     let giver = place_giver(&mut world, &["escort"], now);
     register_towns(&mut world, now);
     world.queue(Command::MakeEscortable {
-        serial: giver,
+        serial:      giver,
         destination: String::new(),
     });
     world.tick(now);
@@ -1371,19 +1400,19 @@ fn an_any_of_these_quest_completes_on_one_objective() {
         all_objectives: false,
         objectives: vec![
             ObjectiveDef {
-                kind: ObjectiveKind::Slay {
+                kind:    ObjectiveKind::Slay {
                     body: openshard_protocol::wire::Graphic(RAT),
                 },
-                count: 1,
-                name: "rat".to_owned(),
+                count:   1,
+                name:    "rat".to_owned(),
                 seconds: 0,
             },
             ObjectiveDef {
-                kind: ObjectiveKind::Obtain {
+                kind:    ObjectiveKind::Obtain {
                     graphic: openshard_protocol::wire::Graphic(SILK),
                 },
-                count: 5,
-                name: "silk".to_owned(),
+                count:   5,
+                name:    "silk".to_owned(),
                 seconds: 0,
             },
         ],

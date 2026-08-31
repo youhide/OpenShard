@@ -15,8 +15,14 @@
 //! position that is the cell's top-left corner — the same two numbers, said
 //! from the corner instead of the centre.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::time::{Duration, Instant};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
@@ -26,16 +32,37 @@ use openshard_tiles::TileData;
 use crate::animate::StaticAnimations;
 #[cfg(test)]
 use crate::atlas::StaticAtlas;
-use crate::atlas::{AtlasPixel, Sprite, StaticArt, StaticAtlasPage};
-use crate::camera::{Camera, TILE_HEIGHT, TileBounds, ViewPoint};
-use crate::cutaway::{self, Cutaway};
+use crate::atlas::{
+    AtlasPixel,
+    Sprite,
+    StaticArt,
+    StaticAtlasPage,
+};
+use crate::camera::{
+    Camera,
+    TILE_HEIGHT,
+    TileBounds,
+    ViewPoint,
+};
+use crate::cutaway::{
+    self,
+    Cutaway,
+};
 use crate::depth;
 use crate::geometry::Rect;
-use crate::mesh_face::{MeshFaceRow, MeshFaceVertex};
+use crate::mesh_face::{
+    MeshFaceRow,
+    MeshFaceVertex,
+};
 use crate::sprite::SpriteQuad;
 
 mod picking;
-pub use picking::{PickedStatic, pick, pick_with_interior, selected};
+pub use picking::{
+    PickedStatic,
+    pick,
+    pick_with_interior,
+    selected,
+};
 
 /// Where a sprite standing on a tile lands, as a [`ViewPoint`] — the drawn
 /// image's own grid, before any zoom. The doc here said "viewport pixels" for
@@ -138,7 +165,7 @@ pub fn graphics_in(
 pub struct StaticGeometry {
     /// The pictures, back to front — what this function returned before mesh
     /// geometry existed, unchanged.
-    pub quads: Vec<SpriteQuad>,
+    pub quads:         Vec<SpriteQuad>,
     /// Pictures that would otherwise cover the player's body. They are drawn
     /// into a private G-buffer, then lit and alpha-composited over the opaque
     /// world, so the wall keeps its own surface data without replacing the
@@ -153,7 +180,7 @@ pub struct StaticGeometry {
     pub mesh_vertices: Vec<MeshFaceVertex>,
     /// One row per face represented in `mesh_vertices`, addressed by a
     /// vertex's own `id`.
-    pub mesh_rows: Vec<MeshFaceRow>,
+    pub mesh_rows:     Vec<MeshFaceRow>,
     /// Every box every drawn static stands as, each quad naming its own run of
     /// them through [`SpriteQuad::volumes`] —
     /// `docs/lighting_rebuild.md` phase 6.
@@ -161,7 +188,7 @@ pub struct StaticGeometry {
     /// One flat list for the frame rather than a list per static, because it
     /// becomes one storage buffer: a range into it is two words on a row the
     /// instance buffer was already padding out to.
-    pub boxes: Vec<crate::impostor::Volume>,
+    pub boxes:         Vec<crate::impostor::Volume>,
 }
 
 /// CPU time spent by [`collect_with_fades_profiled`] inside the map-static
@@ -170,9 +197,9 @@ pub struct StaticGeometry {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct CollectCosts {
     /// Placement, culling, volume construction and collection of map statics.
-    pub walk: Duration,
+    pub walk:     Duration,
     /// The two stable back-to-front sorts after collection.
-    pub sort: Duration,
+    pub sort:     Duration,
     /// Whether an animated map static was visible to this collection.
     pub animated: bool,
 }
@@ -189,9 +216,9 @@ pub struct StaticMesh {
     /// See [`StaticGeometry::mesh_vertices`].
     pub mesh_vertices: Vec<MeshFaceVertex>,
     /// See [`StaticGeometry::mesh_rows`].
-    pub mesh_rows: Vec<MeshFaceRow>,
+    pub mesh_rows:     Vec<MeshFaceRow>,
     /// See [`StaticGeometry::boxes`].
-    pub boxes: Vec<crate::impostor::Volume>,
+    pub boxes:         Vec<crate::impostor::Volume>,
 }
 
 impl StaticGeometry {
@@ -573,9 +600,11 @@ fn collect_in_with_fades_profiled_with_interior<'a>(
                     false => crate::cutaway::FadeKey::static_(at, item.tile),
                 };
                 let alpha = match is_foliage {
-                    true => *foliage_alpha
-                        .entry(fade_key)
-                        .or_insert_with(|| fades.advance(fade_key, 0)),
+                    true => {
+                        *foliage_alpha
+                            .entry(fade_key)
+                            .or_insert_with(|| fades.advance(fade_key, 0))
+                    }
                     false => fades.advance(fade_key, 0),
                 };
                 if alpha == 0 {
@@ -628,9 +657,11 @@ fn collect_in_with_fades_profiled_with_interior<'a>(
             false => crate::cutaway::FadeKey::static_(at, item.tile),
         };
         let alpha = match is_foliage {
-            true => *foliage_alpha
-                .entry(fade_key)
-                .or_insert_with(|| fades.advance(fade_key, target)),
+            true => {
+                *foliage_alpha
+                    .entry(fade_key)
+                    .or_insert_with(|| fades.advance(fade_key, target))
+            }
             false => fades.advance(fade_key, target),
         };
         if alpha != u8::MAX {
@@ -826,19 +857,19 @@ pub(crate) fn push_volumes(
 /// standing the same way, differing only in where the list came from.
 pub(crate) struct Placed {
     /// Where it sorts against everything else drawn this frame.
-    pub(crate) order: depth::Order,
+    pub(crate) order:   depth::Order,
     /// Its top-left corner in the drawn image.
-    pub(crate) at: ViewPoint,
+    pub(crate) at:      ViewPoint,
     /// The atlas entry for the frame it is showing.
-    pub(crate) sprite: Sprite,
+    pub(crate) sprite:  Sprite,
     /// Atlas page that holds `sprite.region`; page zero is the legacy atlas.
-    pub(crate) page: StaticAtlasPage,
+    pub(crate) page:    StaticAtlasPage,
     /// That frame's graphic, which is what the atlas is keyed by — not the
     /// placed one, which for an animated static is only the cycle's start.
     pub(crate) showing: Graphic,
     /// Which way its picture faces — a rug on the ground is as flat as a floor
     /// built into the map. See [`crate::place::Stance`].
-    pub(crate) stance: crate::place::Stance,
+    pub(crate) stance:  crate::place::Stance,
 }
 
 /// Place one static, or `None` when there is nothing on screen for it: hidden by
@@ -932,9 +963,9 @@ pub(crate) fn place_cutaway<'a>(
 /// depth comparison remain GPU decisions in the pass that actually blends.
 pub(crate) fn placed_rect(placed: &Placed) -> Rect {
     Rect {
-        x: placed.at.x,
-        y: placed.at.y,
-        width: f32::from(placed.sprite.width),
+        x:      placed.at.x,
+        y:      placed.at.y,
+        width:  f32::from(placed.sprite.width),
         height: f32::from(placed.sprite.height),
     }
 }
@@ -960,9 +991,9 @@ pub(crate) fn quad_of(
 ) -> SpriteQuad {
     SpriteQuad {
         rect: Rect {
-            x: placed.at.x,
-            y: placed.at.y,
-            width: f32::from(placed.sprite.width),
+            x:      placed.at.x,
+            y:      placed.at.y,
+            width:  f32::from(placed.sprite.width),
             height: f32::from(placed.sprite.height),
         },
         region: placed.sprite.region,
@@ -1019,24 +1050,28 @@ pub fn for_each_static_in(
 
 #[cfg(test)]
 mod tests {
-    use crate::atlas::StaticAtlasPages;
-    use crate::camera::RealPixel;
-
     use openshard_map::grid::BlockExtent;
-    use openshard_map::map::{LandCell, StaticItem};
+    use openshard_map::map::{
+        LandCell,
+        StaticItem,
+    };
     use openshard_protocol::wire::Hue;
     use openshard_tiles::LandTileId;
     use openshard_uofiles::color::Color16;
     use openshard_uofiles::image::Image;
 
     use super::*;
+    use crate::atlas::StaticAtlasPages;
+    use crate::camera::RealPixel;
 
     /// A map big enough for a camera at (100, 100), with flat ground and nothing
     /// standing on it. Statics are placed by the tests that want them.
     fn field() -> WorldMap {
-        WorldMap::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
-            tile: LandTileId(3),
-            z: 0,
+        WorldMap::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| {
+            LandCell {
+                tile: LandTileId(3),
+                z:    0,
+            }
         })
     }
 
@@ -1088,15 +1123,15 @@ mod tests {
         let sprite = atlas.sprite(graphic).expect("packed");
         let screen_at = stand_on(&camera, at, &sprite);
         let over = Rect {
-            x: screen_at.x,
-            y: screen_at.y,
-            width: 44.0,
+            x:      screen_at.x,
+            y:      screen_at.y,
+            width:  44.0,
             height: 88.0,
         };
         let elsewhere = Rect {
-            x: screen_at.x + 1000.0,
-            y: screen_at.y + 1000.0,
-            width: 44.0,
+            x:      screen_at.x + 1000.0,
+            y:      screen_at.y + 1000.0,
+            width:  44.0,
             height: 88.0,
         };
 
@@ -1184,27 +1219,27 @@ mod tests {
         let mut map = field();
         map.place_static(StaticItem {
             tile: graphic,
-            x: at.x,
-            y: at.y,
-            z: at.z,
-            hue: Hue::NONE,
+            x:    at.x,
+            y:    at.y,
+            z:    at.z,
+            hue:  Hue::NONE,
         });
         let screen_at = stand_on(&camera, at, &atlas.sprite(graphic).expect("packed canopy"));
         let over = Rect {
-            x: screen_at.x,
-            y: screen_at.y,
-            width: 44.0,
+            x:      screen_at.x,
+            y:      screen_at.y,
+            width:  44.0,
             height: 88.0,
         };
         let elsewhere = Rect {
-            x: screen_at.x + 1000.0,
-            y: screen_at.y + 1000.0,
-            width: 44.0,
+            x:      screen_at.x + 1000.0,
+            y:      screen_at.y + 1000.0,
+            width:  44.0,
             height: 88.0,
         };
         let building = Cutaway {
-            max_z: 10,
-            max_ground_z: 127,
+            max_z:         10,
+            max_ground_z:  127,
             no_draw_roofs: true,
         };
         let mut fades = crate::cutaway::Fades::default();
@@ -1256,17 +1291,17 @@ mod tests {
         let mut map = field();
         map.place_static(StaticItem {
             tile: graphic,
-            x: at.x,
-            y: at.y,
-            z: at.z,
-            hue: Hue(0),
+            x:    at.x,
+            y:    at.y,
+            z:    at.z,
+            hue:  Hue(0),
         });
         let sprite = atlas.sprite(graphic).expect("packed wall");
         let screen_at = stand_on(&camera, at, &sprite);
         let player = Rect {
-            x: screen_at.x + 12.0,
-            y: screen_at.y + 32.0,
-            width: 20.0,
+            x:      screen_at.x + 12.0,
+            y:      screen_at.y + 32.0,
+            width:  20.0,
             height: 32.0,
         };
         let player_mask = crate::mobiles::OpaqueMask::solid(player);
@@ -1359,16 +1394,16 @@ mod tests {
         let mut map = field();
         map.place_static(StaticItem {
             tile: graphic,
-            x: at.x,
-            y: at.y,
-            z: at.z,
-            hue: Hue(0),
+            x:    at.x,
+            y:    at.y,
+            z:    at.z,
+            hue:  Hue(0),
         });
         let screen_at = stand_on(&camera, at, &atlas.sprite(graphic).expect("packed wall"));
         let empty_corner = Rect {
-            x: screen_at.x + 2.0,
-            y: screen_at.y + 32.0,
-            width: 12.0,
+            x:      screen_at.x + 2.0,
+            y:      screen_at.y + 32.0,
+            width:  12.0,
             height: 32.0,
         };
         let mask = crate::mobiles::OpaqueMask::solid(empty_corner);
@@ -1420,10 +1455,10 @@ mod tests {
         let mut map = field();
         map.place_static(StaticItem {
             tile: graphic,
-            x: 100,
-            y: 100,
-            z: 0,
-            hue: Hue(0),
+            x:    100,
+            y:    100,
+            z:    0,
+            hue:  Hue(0),
         });
         let sprite = atlas.sprite(graphic).expect("packed");
         let at = stand_on(&camera, Point::new(100, 100, 0), &sprite);
@@ -1518,16 +1553,18 @@ mod tests {
         let mut map = field();
         map.place_static(StaticItem {
             tile: graphic,
-            x: at.x,
-            y: at.y,
-            z: at.z,
-            hue: Hue(0),
+            x:    at.x,
+            y:    at.y,
+            z:    at.z,
+            hue:  Hue(0),
         });
-        let item = |at| crate::items::GroundItem {
-            amount: openshard_protocol::items::ItemAmount::ONE,
-            at,
-            graphic,
-            hue: Hue::NONE,
+        let item = |at| {
+            crate::items::GroundItem {
+                amount: openshard_protocol::items::ItemAmount::ONE,
+                at,
+                graphic,
+                hue: Hue::NONE,
+            }
         };
         let sprite = atlas.sprite(graphic).expect("packed");
         // On the wall's own tile, so both pictures stand in the same place and
@@ -1591,10 +1628,10 @@ mod tests {
         let mut map = field();
         map.place_static(StaticItem {
             tile: graphic,
-            x: 100,
-            y: 100,
-            z: 20,
-            hue: Hue(0),
+            x:    100,
+            y:    100,
+            z:    20,
+            hue:  Hue(0),
         });
         let sprite = atlas.sprite(graphic).expect("packed");
         let at = stand_on(&camera, Point::new(100, 100, 20), &sprite);
@@ -1644,10 +1681,10 @@ mod tests {
         let stands = Point::new(100, 100, 0);
         map.place_static(StaticItem {
             tile: graphic,
-            x: stands.x,
-            y: stands.y,
-            z: stands.z,
-            hue: Hue(0),
+            x:    stands.x,
+            y:    stands.y,
+            z:    stands.z,
+            hue:  Hue(0),
         });
         let sprite = atlas.sprite(graphic).expect("packed");
         let at = stand_on(&camera, stands, &sprite);
@@ -1699,10 +1736,10 @@ mod tests {
         let mut map = field();
         map.place_static(StaticItem {
             tile: graphic,
-            x: 101,
-            y: 99,
-            z: 5,
-            hue: Hue(0),
+            x:    101,
+            y:    99,
+            z:    5,
+            hue:  Hue(0),
         });
         let animations = StaticAnimations::default();
         let drawn = collect(
@@ -1774,10 +1811,10 @@ mod tests {
         let mut map = field();
         map.place_static(StaticItem {
             tile: graphic,
-            x: at.x,
-            y: at.y,
-            z: at.z,
-            hue: Hue(0),
+            x:    at.x,
+            y:    at.y,
+            z:    at.z,
+            hue:  Hue(0),
         });
         let screen_at = stand_on(&camera, at, &sprite.sprite);
         let cursor = cursor_over(&camera, screen_at, 22.0, 30.0);
@@ -1863,8 +1900,12 @@ mod tests {
     /// connected on a real map.
     #[test]
     fn britain_offers_the_atlas_every_frame_its_fires_will_show() {
-        use crate::animate::{FRAME_STEP, StaticAnimations};
         use openshard_uofiles::animdata::AnimData;
+
+        use crate::animate::{
+            FRAME_STEP,
+            StaticAnimations,
+        };
 
         let Some(dir) = std::env::var_os("OPENSHARD_CLIENT").map(std::path::PathBuf::from) else {
             return;
@@ -1955,11 +1996,11 @@ mod tests {
     fn a_sprite_one_pixel_onto_the_screen_is_kept() {
         let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
         let sprite = Sprite {
-            width: 30,
+            width:  30,
             height: 50,
             region: crate::atlas::Region {
-                u: 0.0,
-                v: 0.0,
+                u:  0.0,
+                v:  0.0,
                 du: 0.0,
                 dv: 0.0,
             },
@@ -2257,7 +2298,7 @@ mod tests {
         // `occlusion::boxes_of`'s own doc.
         let corner = crate::facing::Facing::Corner {
             right: crate::facing::Face::East,
-            left: crate::facing::Face::South,
+            left:  crate::facing::Face::South,
         };
         let volumes_of = |shape: crate::occlusion::Shape| {
             let mut builder = crate::occlusion::Builder::new(grid_bounds());

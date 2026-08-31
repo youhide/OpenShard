@@ -25,8 +25,14 @@
 //! exists so nobody "fixes" one reference to match the other later.
 
 use crate::codec::PacketWriter;
-use crate::error::{DecodeError, expect_id};
-use crate::serial::{RawSerial, Serial};
+use crate::error::{
+    DecodeError,
+    expect_id,
+};
+use crate::serial::{
+    RawSerial,
+    Serial,
+};
 
 /// The packet id both directions share.
 pub const SECURE_TRADE: u8 = 0x6F;
@@ -50,7 +56,7 @@ pub enum SecureTradeAction {
         /// The escrow container the window is drawn on, as the client names it.
         container: RawSerial,
         /// Whether the box is now ticked.
-        accepted: bool,
+        accepted:  bool,
     },
     /// The player moved virtual gold or platinum onto the trade.
     ///
@@ -65,9 +71,9 @@ pub enum SecureTradeAction {
         /// The escrow container the window is drawn on, as the client names it.
         container: RawSerial,
         /// Gold offered from the account balance.
-        gold: i32,
+        gold:      i32,
         /// Platinum offered from the account balance.
-        platinum: i32,
+        platinum:  i32,
     },
 }
 
@@ -96,15 +102,19 @@ impl SecureTradeAction {
         let container = RawSerial(reader.u32()?);
         Ok(match action {
             Self::CANCEL => Some(Self::Cancel { container }),
-            Self::ACCEPT => Some(Self::Accept {
-                container,
-                accepted: reader.i32()? != 0,
-            }),
-            Self::UPDATE_GOLD => Some(Self::UpdateGold {
-                container,
-                gold: reader.i32()?,
-                platinum: reader.i32()?,
-            }),
+            Self::ACCEPT => {
+                Some(Self::Accept {
+                    container,
+                    accepted: reader.i32()? != 0,
+                })
+            }
+            Self::UPDATE_GOLD => {
+                Some(Self::UpdateGold {
+                    container,
+                    gold: reader.i32()?,
+                    platinum: reader.i32()?,
+                })
+            }
             _ => None,
         })
     }
@@ -214,7 +224,7 @@ mod tests {
         assert_eq!(
             SecureTradeAction::decode(&packet).unwrap(),
             Some(SecureTradeAction::Cancel {
-                container: RawSerial(0x4000_0002)
+                container: RawSerial(0x4000_0002),
             })
         );
     }
@@ -229,7 +239,7 @@ mod tests {
             SecureTradeAction::decode(&packet).unwrap(),
             Some(SecureTradeAction::Accept {
                 container: RawSerial(0x4000_0002),
-                accepted: true
+                accepted:  true,
             })
         );
     }
@@ -245,8 +255,8 @@ mod tests {
             SecureTradeAction::decode(&packet).unwrap(),
             Some(SecureTradeAction::UpdateGold {
                 container: RawSerial(0x4000_0002),
-                gold: 500,
-                platinum: 7
+                gold:      500,
+                platinum:  7,
             })
         );
     }

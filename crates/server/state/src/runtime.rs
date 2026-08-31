@@ -12,38 +12,103 @@
 //! a `WorldState` and drives it. This crate knows the shape of world state and
 //! nothing about when it changes or how it is saved.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{
+    BTreeMap,
+    HashMap,
+    HashSet,
+};
 
 use openshard_commands::StaffCommand;
 use openshard_config::CombatEra;
-use openshard_entities::{EntityId, Registry};
+use openshard_entities::{
+    EntityId,
+    Registry,
+};
 use openshard_events::EventBus;
 use openshard_gateway::ConnectionId;
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Cover, Doors};
-use openshard_map::patch::{Patch, PatchError, Undo};
+use openshard_map::overlay::{
+    Cover,
+    Doors,
+};
+use openshard_map::patch::{
+    Patch,
+    PatchError,
+    Undo,
+};
 use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::ground::Ground;
-use openshard_movement::{Footing, MapTerrain, NavigationGraph};
+use openshard_movement::{
+    Footing,
+    MapTerrain,
+    NavigationGraph,
+};
+use openshard_protocol::access::AccessLevel;
 use openshard_protocol::casting::SpellId;
-use openshard_protocol::combat::{AttackTarget, HealthBar, WarMode};
+use openshard_protocol::combat::{
+    AttackTarget,
+    HealthBar,
+    WarMode,
+};
+use openshard_protocol::feature::Feature;
 use openshard_protocol::feedback::{
-    ActionStage, Animation, BalkState, CombatActionBalked, CombatActionEnded, CombatActionOutcome,
-    CombatActionPhase, CombatActionStage, HarvestCompleted, HarvestPreview, HarvestToolVisual,
-    InterruptReason, NewAnimation, PlaySound, SwingDuration, SwingTiming,
+    ActionStage,
+    Animation,
+    BalkState,
+    CombatActionBalked,
+    CombatActionEnded,
+    CombatActionOutcome,
+    CombatActionPhase,
+    CombatActionStage,
+    HarvestCompleted,
+    HarvestPreview,
+    HarvestToolVisual,
+    InterruptReason,
+    NewAnimation,
+    PlaySound,
+    SwingDuration,
+    SwingTiming,
 };
 use openshard_protocol::items::WorldItem;
 use openshard_protocol::localized;
-use openshard_protocol::mobile::{Equipment, MobileIncoming, MobileMove, Notoriety, Remove, StatusFlags};
-use openshard_protocol::properties::{PropertyList, TooltipRevision};
+use openshard_protocol::mobile::{
+    Equipment,
+    MobileIncoming,
+    MobileMove,
+    Notoriety,
+    Remove,
+    StatusFlags,
+};
+use openshard_protocol::properties::{
+    PropertyList,
+    TooltipRevision,
+};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::speech::{Font, LocalizedMessage, SpokenMessage, TalkMode};
-use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue, Layer, SoundId};
-use openshard_protocol::world::{
-    Facet, MapChange, MapSize, PlayerUpdate, Point, Season, encode_server_change,
+use openshard_protocol::speech::{
+    Font,
+    LocalizedMessage,
+    SpokenMessage,
+    TalkMode,
 };
-use openshard_protocol::{access::AccessLevel, feature::Feature, version::ClientVersion};
+use openshard_protocol::version::ClientVersion;
+use openshard_protocol::wire::{
+    ClilocId,
+    CursorId,
+    Graphic,
+    Hue,
+    Layer,
+    SoundId,
+};
+use openshard_protocol::world::{
+    Facet,
+    MapChange,
+    MapSize,
+    PlayerUpdate,
+    Point,
+    Season,
+    encode_server_change,
+};
 use openshard_tiles::TileData;
 use openshard_uofiles::anim::BodyKind;
 
@@ -52,23 +117,70 @@ use crate::action_speeds::ActionSpeeds;
 use crate::action_stages::ActionStages;
 use crate::boat::Plank;
 use crate::components::{
-    Access, Amount, Balked, Body, Client, Combat, CombatAction, Contained, CorpseBody, CraftedBy, Drawn,
-    Equipped, Ghost, Heading, HearsGhosts, Hidden, Hitpoints, HouseDesign, InRegion, ItemAffix, ItemAffixes,
-    ItemKind, ItemLocation, LastStep, Meditating, Movement, Name, Position, Quality, SettledItemLocation,
-    Staff, Stamina, Stealthing, TradeWindow, body_opens_doors, creature_name,
+    Access,
+    Amount,
+    Balked,
+    Body,
+    Client,
+    Combat,
+    CombatAction,
+    Contained,
+    CorpseBody,
+    CraftedBy,
+    Drawn,
+    Equipped,
+    Ghost,
+    Heading,
+    HearsGhosts,
+    Hidden,
+    Hitpoints,
+    HouseDesign,
+    InRegion,
+    ItemAffix,
+    ItemAffixes,
+    ItemKind,
+    ItemLocation,
+    LastStep,
+    Meditating,
+    Movement,
+    Name,
+    Position,
+    Quality,
+    SettledItemLocation,
+    Staff,
+    Stamina,
+    Stealthing,
+    TradeWindow,
+    body_opens_doors,
+    creature_name,
 };
 use crate::connection::Connection;
 use crate::dialogue::Dialogue;
 use crate::facet_rules::FacetRules;
 use crate::harvest::Banks;
 use crate::obstruct::Obstructions;
-use crate::quest::{QuestDefs, QuestKey};
-use crate::region::{Region, Regions};
+use crate::quest::{
+    QuestDefs,
+    QuestKey,
+};
+use crate::region::{
+    Region,
+    Regions,
+};
 use crate::rng::Rng;
-use crate::sectors::{Occupant, Sectors, VIEW_RANGE};
+use crate::sectors::{
+    Occupant,
+    Sectors,
+    VIEW_RANGE,
+};
 use crate::skill::Skill;
 use crate::weapon::{
-    LAYER_ONE_HANDED, LAYER_TWO_HANDED, WeaponAnimation, weapon_animation, weapon_data, weapon_data_for_kind,
+    LAYER_ONE_HANDED,
+    LAYER_TWO_HANDED,
+    WeaponAnimation,
+    weapon_animation,
+    weapon_data,
+    weapon_data_for_kind,
 };
 
 /// A character's height above the ground when the facet has no map to ask.
@@ -478,7 +590,7 @@ pub struct Outbound {
     /// Who to send to.
     pub connection: ConnectionId,
     /// What to send.
-    pub packet: Vec<u8>,
+    pub packet:     Vec<u8>,
 }
 
 /// One facet: its ground, and who is near what on it.
@@ -512,12 +624,12 @@ pub struct FacetState {
     /// held, without anything noticing. See [`Ground`], and
     /// [`WorldState::footing`](WorldState::footing), which is the one
     /// composition over it.
-    ground: Ground,
+    ground:       Ground,
     /// Static long-distance connectivity, built with the terrain at facet load.
     /// It deliberately has no live doors or placed items in it; a caller still
     /// refines every hop through [`WorldState::live_terrain`] or its
     /// doors-open sibling.
-    pub coarse: Option<NavigationGraph>,
+    pub coarse:   Option<NavigationGraph>,
     /// How wide this facet's map is, in tiles.
     ///
     /// Kept here rather than asked of the terrain because the client has to be
@@ -532,9 +644,9 @@ pub struct FacetState {
     /// are sized from this pair, so a facet whose width is assigned after
     /// construction has two indexes that disagree with it and no way to notice.
     /// Read through [`width()`](Self::width).
-    width: u32,
+    width:        u32,
     /// How tall this facet's map is, in tiles. See [`width`](Self::width).
-    height: u32,
+    height:       u32,
     /// Who is near what, on this facet.
     ///
     /// **Private, and written only through
@@ -552,14 +664,14 @@ pub struct FacetState {
     /// caller's to declare — see [`Occupant`] for why it is never derived — but
     /// it is declared by *which* of the two calls is made, so there is no third
     /// spelling to get wrong.
-    sectors: Sectors,
+    sectors:      Sectors,
     /// Where this facet's world lives on disk, when it is a world of ours.
     ///
     /// Private, and read only through [`home`](Self::home): it is a fact about
     /// where the facet came from, set once at construction, and a facet that
     /// could be told a *second* home is a facet whose edits could be written
     /// into somebody else's world.
-    home: Option<WorldHome>,
+    home:         Option<WorldHome>,
     /// What the live world has put in the way: closed doors, placed decoration.
     ///
     /// **Private, and mutated only through this facet.** Every write here has to
@@ -575,7 +687,7 @@ pub struct FacetState {
     /// used to be beside each other *for* — being asked separately by every step
     /// — is over; they project into one overlay now. Private for the same reason
     /// as [`obstructions`](Self::obstructions).
-    boats: crate::boat::Boats,
+    boats:        crate::boat::Boats,
     /// The named areas of this facet — towns, dungeons, guarded zones.
     ///
     /// **Public on purpose**, alone among the indexes here, and the distinction
@@ -589,14 +701,14 @@ pub struct FacetState {
     /// write here of the kind that makes [`obstructions`](Self::obstructions)
     /// forgettable. Hiding it behind an accessor pair would rename the leak
     /// rather than close one.
-    pub regions: Regions,
+    pub regions:  Regions,
     /// What each block of this facet's ground still has left to give: the
     /// mining, lumberjacking and fishing stock, per [`crate::harvest`] bank.
     ///
     /// Beside the sector grid and the obstruction index because it is the same
     /// kind of thing — a fact about *this ground*, keyed by coordinates, that no
     /// entity owns. Not persisted; see [`Banks`].
-    pub banks: Banks,
+    pub banks:    Banks,
     /// What this facet allows: the ruleset, as against the ground.
     ///
     /// The odd field out here, and deliberately so — every other one is a place
@@ -607,7 +719,7 @@ pub struct FacetState {
     ///
     /// See [`FacetRules`], and in particular why its default is derived from a
     /// facet number this crate otherwise treats as opaque.
-    rules: FacetRules,
+    rules:        FacetRules,
 }
 
 impl FacetState {
@@ -911,7 +1023,7 @@ pub struct WorldHome {
     pub base_set: std::path::PathBuf,
     /// The revision the base set *file* is at, which is what a patch log's
     /// header records — not the revision the world reached by replaying it.
-    pub base: openshard_map::snapshot::MapRevision,
+    pub base:     openshard_map::snapshot::MapRevision,
     /// Which world this base set *is*, by its own bytes.
     ///
     /// `openshard_basemap::identity_of`'s answer, taken once when the facet was
@@ -973,7 +1085,7 @@ pub enum Origin {
         /// Where it lay.
         position: Point,
         /// On which facet.
-        facet: Facet,
+        facet:    Facet,
     },
     /// It was inside a container.
     Container(Contained),
@@ -985,16 +1097,16 @@ pub enum Origin {
 #[derive(Clone, Debug)]
 pub struct TradeSide {
     /// The trading player.
-    pub player: EntityId,
+    pub player:           EntityId,
     /// Their connection, which is what a trade packet is addressed to.
-    pub connection: ConnectionId,
+    pub connection:       ConnectionId,
     /// Their escrow container.
-    pub container: EntityId,
+    pub container:        EntityId,
     /// Its serial — the id the client names the window by, and the only handle a
     /// `0x6F` from the client carries.
     pub container_serial: Serial,
     /// Whether their checkbox is ticked.
-    pub accepted: bool,
+    pub accepted:         bool,
 }
 
 /// Two players exchanging goods, and the two escrow containers between them.
@@ -1005,9 +1117,9 @@ pub struct TradeSide {
 #[derive(Clone, Debug)]
 pub struct Trade {
     /// The player who started it, by dropping something on the other.
-    pub from: TradeSide,
+    pub from:      TradeSide,
     /// The player it was offered to.
-    pub to: TradeSide,
+    pub to:        TradeSide,
     /// What was in the two escrows when a checkbox was last ticked.
     ///
     /// ServUO clears both boxes from the container's own `OnItemAdded`/
@@ -1053,22 +1165,22 @@ impl Trade {
 #[derive(Debug, Default)]
 pub struct WornIndex {
     /// The `Registry::column_version::<ItemLocation>` this was built from.
-    version: u64,
+    version:   u64,
     /// Mobile serial -> the item entities it is wearing.
     by_mobile: HashMap<Serial, Vec<EntityId>>,
 }
 
 pub struct WorldState {
     /// Everything in the world.
-    pub registry: Registry,
+    pub registry:        Registry,
     /// What happened, for anyone to read: the client, persistence, scripts.
-    pub bus: EventBus,
+    pub bus:             EventBus,
     /// The loaded facets, each with its own ground and interest grid, keyed by
     /// facet number. There is always at least the default one.
-    pub facets: BTreeMap<Facet, FacetState>,
+    pub facets:          BTreeMap<Facet, FacetState>,
     /// The facet a new character spawns on, and the one anything asking for a
     /// facet it does not have falls back to.
-    pub default_facet: Facet,
+    pub default_facet:   Facet,
     /// What the client's `tiledata.mul` says about a graphic: whether it blocks,
     /// how tall it is, what it weighs, which hand it is held in, what it is
     /// called.
@@ -1102,7 +1214,7 @@ pub struct WorldState {
     /// longer has. It was a public field, and a direct `state.tiles = table` was
     /// the one remaining way to hold a bake that describes neither world in
     /// hand: [`Ground`] closed the other, where the ground moved under the bake.
-    tiles: openshard_tiles::TileData,
+    tiles:               openshard_tiles::TileData,
     /// Every multi the client knows: what a house or a ship is made of.
     ///
     /// Beside [`tiles`](Self::tiles) and for the same reason — a multi's
@@ -1112,7 +1224,7 @@ pub struct WorldState {
     ///
     /// Owned outright, like [`tiles`](Self::tiles) beside it: one holder each,
     /// and nothing on the shard to share either with.
-    pub multis: openshard_uofiles::multi::Multis,
+    pub multis:          openshard_uofiles::multi::Multis,
     /// Imported house designs the operator has made available to staff.
     ///
     /// Unlike [`multis`](Self::multis), these shapes are original content rather
@@ -1120,7 +1232,7 @@ pub struct WorldState {
     /// authoritative and can be sent to every client as a `HouseDesign`.
     pub house_templates: BTreeMap<String, Vec<openshard_uofiles::multi::Component>>,
     /// Which entity a connection is driving.
-    pub players: HashMap<ConnectionId, EntityId>,
+    pub players:         HashMap<ConnectionId, EntityId>,
     /// Every connection the world is holding, playing a character or not.
     ///
     /// Wider than [`players`](Self::players) on purpose: a connection exists from
@@ -1134,24 +1246,24 @@ pub struct WorldState {
     /// own numbers. Those were maps of their own, cleared by name on the way out;
     /// the row is what makes forgetting one impossible. Let go of through
     /// [`forget_connection`](Self::forget_connection), never `connections.remove`.
-    pub connections: HashMap<ConnectionId, Connection>,
+    pub connections:     HashMap<ConnectionId, Connection>,
     /// What each player's client currently has on screen.
     ///
     /// The server has to remember, because the client never says. There is no
     /// "what can you see" packet — only "draw this" and "forget that" — so the
     /// only way to send a mobile exactly once is to know what was sent before.
-    pub seen: HashMap<EntityId, HashSet<EntityId>>,
+    pub seen:            HashMap<EntityId, HashSet<EntityId>>,
     /// Where new characters appear. The height comes from the map.
-    pub start: Tile,
+    pub start:           Tile,
     /// The generator behind every roll — a swing landing, a skill gaining. Part
     /// of the state so replay is exact; advanced only inside the tick.
-    pub rng: Rng,
+    pub rng:             Rng,
     /// How many ticks have run.
-    pub ticks: crate::WorldTick,
+    pub ticks:           crate::WorldTick,
     /// Who is wearing what, rebuilt from the `Equipped` column when it changes.
     /// A cache with no contents of its own — read it through
     /// [`equipment_of`](WorldState::equipment_of), never directly.
-    pub worn: WornIndex,
+    pub worn:            WornIndex,
     /// The world's hour, 0–23, refreshed once per tick from the tick counter.
     ///
     /// Derived, not stored — `world/tick/ambient.rs` computes it and drops it
@@ -1160,9 +1272,9 @@ pub struct WorldState {
     /// system now asks what time it is (a townsperson's routine, a shop's opening
     /// hours, its greeting), and threading an `hour` argument through each of them
     /// is a signature to keep in step for a value that has exactly one source.
-    pub hour: u64,
+    pub hour:            u64,
     /// Packets the last tick produced.
-    pub outbox: Vec<Outbound>,
+    pub outbox:          Vec<Outbound>,
     /// Which connections have each container open, so a change to its contents —
     /// an item consumed as a reagent, one decaying inside — can be pushed to the
     /// clients looking at it. A connection's opens are cleared on logout.
@@ -1172,25 +1284,25 @@ pub struct WorldState {
     /// A `Vec` and not a map because there is almost never one: it is scanned
     /// whole once a tick to find a trade whose parties have walked apart, which
     /// is cheaper than the region diff it copies, and a player is in at most one.
-    pub trades: Vec<Trade>,
+    pub trades:          Vec<Trade>,
     /// Every quest this shard knows. Replaced
     /// wholesale on a pack reload, and never persisted — the pack is the truth
     /// about what a quest *is*, every boot; only a player's progress is saved.
-    pub quests: QuestDefs,
+    pub quests:          QuestDefs,
     /// What every trade says. Replaced wholesale
     /// on a reload and never persisted, for the same reason as
     /// [`quests`](Self::quests): the pack is the truth about content.
-    pub dialogue: Dialogue,
+    pub dialogue:        Dialogue,
     /// Every guild on the shard, and how they regard each other.
     ///
     /// Here rather than only in `openshard-guilds` because the `0x78` has a
     /// notoriety byte and that byte depends on who is looking — see
     /// [`notoriety_toward`](Self::notoriety_toward).
-    pub guilds: crate::guild::Guilds,
+    pub guilds:          crate::guild::Guilds,
     /// Every named alliance. See [`Alliance`](crate::guild::Alliance).
-    pub alliances: crate::guild::Alliances,
+    pub alliances:       crate::guild::Alliances,
     /// Every party. Runtime-only — see [`crate::party`].
-    pub parties: crate::party::Parties,
+    pub parties:         crate::party::Parties,
     // The targeting cursor and the four gump contexts used to be maps here, keyed
     // by the *player's entity*. They are fields on the connection's row now —
     // `connection::Connection` — reached through `row_of`/`row_of_mut`. They are
@@ -1198,11 +1310,11 @@ pub struct WorldState {
     // already unreachable without a `Client`, and keying them by the entity meant
     // nothing swept them when the client went. Four of the five leaked outright.
     /// The tunable rules — swing era, speech ranges, timers — the systems read.
-    pub gameplay: Gameplay,
+    pub gameplay:        Gameplay,
     /// Set by a staff `.save` to ask the tick for an immediate snapshot. The world
     /// clears it once taken — a request, not the save itself, because taking the
     /// snapshot is the `World`'s to do, not a system's.
-    pub save_requested: bool,
+    pub save_requested:  bool,
 }
 
 /// Which page of the quest dialog a player is looking at.
@@ -1235,18 +1347,18 @@ pub enum QuestSection {
 pub struct QuestGumpContext {
     /// Which quest, by the pack's key. Empty on the log page, which is about no
     /// single quest.
-    pub quest: Option<QuestKey>,
+    pub quest:     Option<QuestKey>,
     /// Which page.
-    pub section: QuestSection,
+    pub section:   QuestSection,
     /// Whether this is an *offer* (Accept/Refuse) rather than the log's view of a
     /// quest already taken (Resign/Close). The same pages, different buttons — and
     /// the difference decides whether a button id means "accept" or "resign", so it
     /// is remembered here rather than trusted from the reply.
-    pub offer: bool,
+    pub offer:     bool,
     /// Whether the quest is finished, which is what lets the rewards page pay out.
     pub completed: bool,
     /// The giver the dialog was opened at, so a turn-in knows who to thank.
-    pub giver: Option<Serial>,
+    pub giver:     Option<Serial>,
 }
 
 /// Which page of the guild window a player is looking at.
@@ -1269,9 +1381,9 @@ pub enum GuildPage {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct GuildGumpContext {
     /// Which page.
-    pub page: GuildPage,
+    pub page:    GuildPage,
     /// The guilds the diplomacy page drew, in row order.
-    pub guilds: Vec<crate::guild::GuildId>,
+    pub guilds:  Vec<crate::guild::GuildId>,
     /// The members the roster drew, by serial, in row order. Serials rather than
     /// entities because the window outlives a tick and an entity id does not
     /// survive a despawn — a row naming a logged-out member resolves to nobody
@@ -1294,7 +1406,7 @@ pub struct HouseGumpContext {
     /// Which house's sign was clicked.
     pub house: EntityId,
     /// Everyone the window drew, in row order.
-    pub rows: Vec<HouseGumpRow>,
+    pub rows:  Vec<HouseGumpRow>,
 }
 
 /// One of a house's three lists of people.
@@ -1316,7 +1428,7 @@ pub enum HouseList {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct HouseGumpRow {
     /// The list whose column drew this person.
-    pub list: HouseList,
+    pub list:   HouseList,
     /// The person named by this row.
     pub member: Serial,
 }
@@ -1352,23 +1464,23 @@ pub enum CraftGumpPage {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CraftGumpContext {
     /// Which trade, by its index in the core table.
-    pub system: u8,
+    pub system:  u8,
     /// The tool the window was opened from. Re-checked on every attempt: a tool
     /// dropped with the window still up makes nothing.
-    pub tool: EntityId,
+    pub tool:    EntityId,
     /// The selected category.
-    pub group: u16,
+    pub group:   u16,
     /// The selected material, indexed into the system's axis.
     pub sub_res: u8,
     /// Which page.
-    pub page: CraftGumpPage,
+    pub page:    CraftGumpPage,
     /// The cliloc in the window's notice box — what the last attempt had to say,
     /// or `None` when the box is empty.
     ///
     /// An `Option` and not a zero sentinel: cliloc `0` is a number the client
     /// would look up, so "no notice" and "notice number zero" were the same
     /// value here, and only the `!= 0` at the draw site kept them apart.
-    pub notice: Option<ClilocId>,
+    pub notice:  Option<ClilocId>,
 }
 
 /// What a house-list cursor is about to do with the mobile it is answered with.
@@ -1429,7 +1541,7 @@ pub enum TargetPurpose {
         /// pressed the button by the sign is standing outside the walls the item
         /// is behind. A despawned entity resolves to nothing, which is the right
         /// answer for a window opened on a house that has since come down.
-        house: EntityId,
+        house:  EntityId,
     },
     /// A house waiting for its plot — the cursor a deed raises.
     ///
@@ -1456,7 +1568,7 @@ pub enum TargetPurpose {
     /// so a fumbled cast that still raises a cursor simply lands no effect.
     Spell {
         /// Which spell, by id.
-        spell: SpellId,
+        spell:   SpellId,
         /// Whether the cast's skill roll passed.
         success: bool,
     },
@@ -1482,7 +1594,7 @@ pub enum TargetPurpose {
     /// A staff `.trap` waiting for the container to put a trap on.
     SetTrap {
         /// What the trap will do.
-        kind: crate::components::TrapKind,
+        kind:  crate::components::TrapKind,
         /// How hard it hits, and how hard it is to take off.
         power: u16,
     },
@@ -1574,7 +1686,7 @@ impl WorldState {
             rng: Rng::new(seed),
             ticks: crate::WorldTick::ZERO,
             worn: WornIndex {
-                version: 0,
+                version:   0,
                 by_mobile: HashMap::new(),
             },
             hour: 0,
@@ -2290,13 +2402,13 @@ impl WorldState {
             return;
         };
         let packet = ServerPacket::SpokenMessage(SpokenMessage {
-            serial: None, // the system talking, not a mobile
+            serial:  None, // the system talking, not a mobile
             graphic: None,
-            mode: TalkMode::Regular,
-            hue: SYSTEM_HUE,
-            font: SYSTEM_FONT,
-            name: "System".to_owned(),
-            text: text.to_owned(),
+            mode:    TalkMode::Regular,
+            hue:     SYSTEM_HUE,
+            font:    SYSTEM_FONT,
+            name:    "System".to_owned(),
+            text:    text.to_owned(),
         });
         self.send_packet(connection, &packet);
     }
@@ -2557,10 +2669,11 @@ impl WorldState {
                     .and_then(|(item, worn)| {
                         match self.registry.get::<ItemKind>(item) {
                             Some(kind) => weapon_data_for_kind(kind.0),
-                            None => self
-                                .registry
-                                .get::<Drawn>(item)
-                                .and_then(|drawn| weapon_data(drawn.id)),
+                            None => {
+                                self.registry
+                                    .get::<Drawn>(item)
+                                    .and_then(|drawn| weapon_data(drawn.id))
+                            }
                         }
                         .map(|weapon| weapon_animation(weapon, worn.layer))
                     })
@@ -2942,10 +3055,12 @@ impl Action {
         match (self, humanoid) {
             (Self::Attack, true) => (weapon.group(), weapon.frame_count()),
             (Self::Attack, false) => (4, 4), // monster attack1
-            (Self::Die, _) => (
-                kind.dying().index() as u16,
-                if matches!(kind, BodyKind::Human) { 6 } else { 4 },
-            ),
+            (Self::Die, _) => {
+                (
+                    kind.dying().index() as u16,
+                    if matches!(kind, BodyKind::Human) { 6 } else { 4 },
+                )
+            }
             (Self::Cast, true) => (16, 7),  // human directed-cast
             (Self::Cast, false) => (12, 7), // monster cast
             // Only a person bows; a creature that is asked for money simply looks
@@ -3502,7 +3617,7 @@ impl WorldState {
         let serial = self.registry.serial_of(entity)?;
         Some(
             openshard_protocol::design::DesignRevision {
-                serial: openshard_protocol::serial::RawSerial(serial.raw()),
+                serial:   openshard_protocol::serial::RawSerial(serial.raw()),
                 revision: house_design_wire_revision(design.revision),
             }
             .encode(),
@@ -3523,7 +3638,11 @@ impl WorldState {
     /// because a client asked, clear when the shard volunteered it.
     #[must_use]
     pub fn design_detail_packet(&self, house: EntityId, response: bool) -> Option<Vec<u8>> {
-        use openshard_protocol::design::{DesignBounds, DesignDetail, DesignTile};
+        use openshard_protocol::design::{
+            DesignBounds,
+            DesignDetail,
+            DesignTile,
+        };
 
         let design = self.registry.get::<crate::components::HouseDesign>(house)?;
         let serial = self.registry.serial_of(house)?;
@@ -3541,9 +3660,9 @@ impl WorldState {
             // exactly: adding a seemingly harmless extra x column makes the
             // client decode every following column with the wrong stride,
             // wrapping floors and roof rows into unrelated map tiles.
-            x_min: i8::try_from(foundation.min_x).ok()?,
-            y_min: i8::try_from(foundation.min_y).ok()?,
-            width: usize::from(foundation.max_x.abs_diff(foundation.min_x)) + 1,
+            x_min:  i8::try_from(foundation.min_x).ok()?,
+            y_min:  i8::try_from(foundation.min_y).ok()?,
+            width:  usize::from(foundation.max_x.abs_diff(foundation.min_x)) + 1,
             height: usize::from(foundation.max_y.abs_diff(foundation.min_y)) + 1,
         };
         // The table, not the facet the house stands on: how tall a graphic is has
@@ -3568,9 +3687,9 @@ impl WorldState {
             .filter_map(|component| {
                 Some(DesignTile {
                     graphic: component.graphic,
-                    dx: i8::try_from(component.dx).ok()?,
-                    dy: i8::try_from(component.dy).ok()?,
-                    dz: i8::try_from(component.dz).ok()?,
+                    dx:      i8::try_from(component.dx).ok()?,
+                    dy:      i8::try_from(component.dy).ok()?,
+                    dz:      i8::try_from(component.dz).ok()?,
                 })
             })
             .collect();
@@ -3622,7 +3741,7 @@ impl WorldState {
             return;
         };
         let packet = openshard_protocol::design::DesignRevision {
-            serial: openshard_protocol::serial::RawSerial(serial.raw()),
+            serial:   openshard_protocol::serial::RawSerial(serial.raw()),
             revision: house_design_wire_revision(design.revision),
         }
         .encode();
@@ -4726,15 +4845,21 @@ impl std::fmt::Debug for WorldState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use openshard_movement::scene::Scene;
     use openshard_protocol::direction::Direction;
     use openshard_protocol::identity::AccountName;
     use openshard_protocol::serial::SerialKind;
-    use openshard_protocol::wire::{Graphic, MultiId};
+    use openshard_protocol::wire::{
+        Graphic,
+        MultiId,
+    };
     use openshard_tiles::TileData;
-    use openshard_uofiles::multi::{Component, Multi};
+    use openshard_uofiles::multi::{
+        Component,
+        Multi,
+    };
+
+    use super::*;
 
     #[test]
     fn a_house_gump_row_remembers_both_the_member_and_its_list() {
@@ -4752,10 +4877,10 @@ mod tests {
             graphic: Graphic(0x0001),
             // The foundation anchor is twenty tiles away, but the drawn house
             // reaches two tiles back into the normal eighteen-tile view.
-            dx: -2,
-            dy: 0,
-            dz: 0,
-            flags: 1,
+            dx:      -2,
+            dy:      0,
+            dz:      0,
+            flags:   1,
         }];
 
         assert!(
@@ -4790,7 +4915,7 @@ mod tests {
         state.registry.insert(
             viewer,
             Body {
-                id: Graphic(0x0190),
+                id:  Graphic(0x0190),
                 hue: Hue::NONE,
             },
         );
@@ -4801,17 +4926,17 @@ mod tests {
         let foundation = MultiId(0x13EC);
         let component = Component {
             graphic: Graphic(0x0001),
-            dx: 0,
-            dy: 0,
-            dz: 0,
-            flags: 1,
+            dx:      0,
+            dy:      0,
+            dz:      0,
+            flags:   1,
         };
         state.multis = openshard_uofiles::multi::Multis::of([Multi::new(foundation.0, vec![component])]);
         let (house, _) = state.registry.spawn_with_serial(SerialKind::Item).unwrap();
         state.registry.insert(
             house,
             Drawn {
-                id: Graphic(0x13EC),
+                id:  Graphic(0x13EC),
                 hue: Hue::NONE,
             },
         );
@@ -4831,7 +4956,7 @@ mod tests {
             house,
             HouseDesign {
                 components: vec![component],
-                revision: 1,
+                revision:   1,
             },
         );
         state.registry.insert(house, Position(Point::new(5, 4, 0)));
@@ -4841,7 +4966,7 @@ mod tests {
         state.registry.insert(
             sign,
             Drawn {
-                id: Graphic(0x0B9E),
+                id:  Graphic(0x0B9E),
                 hue: Hue::NONE,
             },
         );
@@ -4949,7 +5074,7 @@ mod tests {
         state.registry.insert(
             entity,
             Body {
-                id: openshard_protocol::wire::Graphic(0x0190),
+                id:  openshard_protocol::wire::Graphic(0x0190),
                 hue: Hue(0),
             },
         );
@@ -4965,7 +5090,7 @@ mod tests {
         state.registry.insert(
             wielder_entity,
             Body {
-                id: openshard_protocol::wire::Graphic(0x0190),
+                id:  openshard_protocol::wire::Graphic(0x0190),
                 hue: Hue::NONE,
             },
         );
@@ -4979,13 +5104,13 @@ mod tests {
         state.registry.insert(
             axe,
             Drawn {
-                id: openshard_protocol::wire::Graphic(0x0F49),
+                id:  openshard_protocol::wire::Graphic(0x0F49),
                 hue: Hue::NONE,
             },
         );
         let equipped = Equipped {
             mobile: wielder,
-            layer: LAYER_ONE_HANDED,
+            layer:  LAYER_ONE_HANDED,
         };
         crate::establish_item_location(&mut state, axe, ItemLocation::equipped(equipped)).unwrap();
 
@@ -5040,7 +5165,7 @@ mod tests {
             bystander,
             Ghost {
                 body: Body {
-                    id: openshard_protocol::wire::Graphic(0x0190),
+                    id:  openshard_protocol::wire::Graphic(0x0190),
                     hue: Hue(0),
                 },
             },
@@ -5052,18 +5177,26 @@ mod tests {
             "a ghost stands in nobody's way"
         );
         state.registry.remove::<Ghost>(bystander);
-        state
-            .registry
-            .insert(bystander, Hitpoints { current: 0, max: 50 });
+        state.registry.insert(
+            bystander,
+            Hitpoints {
+                current: 0,
+                max:     50,
+            },
+        );
         assert!(
             state
                 .crowd_near(Facet(0), walker, Point::new(8, 8, 0), 1)
                 .is_empty(),
             "and neither does a body worn down to nothing, before the reap takes it"
         );
-        state
-            .registry
-            .insert(bystander, Hitpoints { current: 1, max: 50 });
+        state.registry.insert(
+            bystander,
+            Hitpoints {
+                current: 1,
+                max:     50,
+            },
+        );
         assert_eq!(
             state.crowd_near(Facet(0), walker, Point::new(8, 8, 0), 1).len(),
             1,

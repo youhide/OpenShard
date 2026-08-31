@@ -4,8 +4,17 @@ use std::collections::HashMap;
 use std::fmt;
 
 use openshard_protocol::access::AccessLevel;
-use openshard_protocol::identity::{AccountName, PlaintextPassword, RawAccountName, RawPlaintextPassword};
-use openshard_protocol::login::{ACCOUNT_NAME_LENGTH, DenyReason, PASSWORD_LENGTH};
+use openshard_protocol::identity::{
+    AccountName,
+    PlaintextPassword,
+    RawAccountName,
+    RawPlaintextPassword,
+};
+use openshard_protocol::login::{
+    ACCOUNT_NAME_LENGTH,
+    DenyReason,
+    PASSWORD_LENGTH,
+};
 
 use crate::password;
 
@@ -29,7 +38,7 @@ use crate::password;
 #[derive(Clone, PartialEq, Eq)]
 pub struct Credential {
     account: AccountName,
-    phc: String,
+    phc:     String,
 }
 
 impl Credential {
@@ -77,7 +86,7 @@ impl fmt::Debug for Credential {
 /// can answer is [`PasswordVerdict`].
 #[derive(Clone, PartialEq, Eq)]
 pub struct CredentialCheck {
-    phc: String,
+    phc:     String,
     offered: RawPlaintextPassword,
 }
 
@@ -120,9 +129,9 @@ pub struct DevAccount {
     /// The credential — an argon2 PHC hash, never plaintext. See [`password`].
     pub credential: String,
     /// Whether logins are refused.
-    pub blocked: bool,
+    pub blocked:    bool,
     /// The authority this account's characters play with.
-    pub access: AccessLevel,
+    pub access:     AccessLevel,
 }
 
 /// An in-memory account store.
@@ -166,8 +175,8 @@ impl DevAccounts {
             account.normalized(),
             DevAccount {
                 credential: credential.to_owned(),
-                blocked: false,
-                access: AccessLevel::Player,
+                blocked:    false,
+                access:     AccessLevel::Player,
             },
         );
         self

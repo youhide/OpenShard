@@ -4,23 +4,48 @@
 //! text placement and atlas packing stay in `openshard-client-render`, so this
 //! preview has the same geometry as the client instead of a second UI renderer.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
 use std::fs::File;
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::process::ExitCode;
 
 use clap::Parser;
-use fontdue::{Font as TtfFont, FontSettings};
+use fontdue::{
+    Font as TtfFont,
+    FontSettings,
+};
 use openshard_client_render::atlas::FontAtlas;
-use openshard_client_render::gump::{self, ArtFiles, GumpArt, GumpAtlas, GumpPixel, Picture};
+use openshard_client_render::gump::{
+    self,
+    ArtFiles,
+    GumpArt,
+    GumpAtlas,
+    GumpPixel,
+    Picture,
+};
 use openshard_client_render::renderer::SPRITE_ATLAS_SIDE;
 use openshard_client_render::sprite::SpriteQuad;
-use openshard_client_render::text::{self, GumpLabel};
+use openshard_client_render::text::{
+    self,
+    GumpLabel,
+};
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_uofiles::art::Art;
-use openshard_uofiles::font::{AsciiFonts, FONT_COUNT};
+use openshard_uofiles::font::{
+    AsciiFonts,
+    FONT_COUNT,
+};
 use openshard_uofiles::gumpart::Gumps;
 use serde::Deserialize;
 
@@ -49,15 +74,15 @@ struct Cli {
 /// One complete preview surface, measured in unscaled gump pixels.
 #[derive(Debug, Deserialize)]
 struct Scene {
-    width: u32,
-    height: u32,
+    width:      u32,
+    height:     u32,
     #[serde(default = "default_background")]
     background: Rgb,
     /// A project-owned PNG to draw below every gump layer. Its path is relative
     /// to this scene, so one design remains runnable from any working directory.
     #[serde(default)]
-    backdrop: Option<PathBuf>,
-    elements: Vec<Element>,
+    backdrop:   Option<PathBuf>,
+    elements:   Vec<Element>,
 }
 
 /// An opaque colour behind the scene.
@@ -80,93 +105,97 @@ enum Element {
     /// A solid, axis-aligned rectangle. This mirrors the client's `{ rect }`
     /// gump primitive and is useful for neutral frames before a skin exists.
     Rect {
-        x: i32,
-        y: i32,
-        width: u32,
+        x:      i32,
+        y:      i32,
+        width:  u32,
         height: u32,
         colour: Rgb,
     },
     /// A cropped project asset drawn at its native size. Paths are relative to
     /// the scene, which keeps design previews independent of the working dir.
     Asset {
-        asset: PathBuf,
+        asset:    PathBuf,
         source_x: u32,
         source_y: u32,
-        width: u32,
-        height: u32,
-        x: i32,
-        y: i32,
+        width:    u32,
+        height:   u32,
+        x:        i32,
+        y:        i32,
     },
     /// A cropped project asset resized with nearest-neighbour sampling. This
     /// is for compact fixed controls such as a checkbox, never for a frame.
     ScaledAsset {
-        asset: PathBuf,
-        source_x: u32,
-        source_y: u32,
-        source_width: u32,
+        asset:         PathBuf,
+        source_x:      u32,
+        source_y:      u32,
+        source_width:  u32,
         source_height: u32,
-        x: i32,
-        y: i32,
-        width: u32,
-        height: u32,
+        x:             i32,
+        y:             i32,
+        width:         u32,
+        height:        u32,
     },
     /// A project-owned frame whose corners stay fixed while its edges and
     /// centre tile. This is the skin primitive used by resizable panes, rows,
     /// buttons and scroll tracks.
     NineSlice {
-        asset: PathBuf,
-        source_x: u32,
-        source_y: u32,
-        source_width: u32,
+        asset:         PathBuf,
+        source_x:      u32,
+        source_y:      u32,
+        source_width:  u32,
         source_height: u32,
-        inset_left: u32,
-        inset_top: u32,
-        inset_right: u32,
-        inset_bottom: u32,
+        inset_left:    u32,
+        inset_top:     u32,
+        inset_right:   u32,
+        inset_bottom:  u32,
         /// Repeat the source's centre and edges. Use it only with art
         /// authored as seamless tiles; otherwise the centre is stretched.
         #[serde(default)]
-        tile: bool,
-        x: i32,
-        y: i32,
-        width: u32,
-        height: u32,
+        tile:          bool,
+        x:             i32,
+        y:             i32,
+        width:         u32,
+        height:        u32,
     },
     /// One native-size gump-art picture.
     Gump { gump: u16, x: i32, y: i32 },
     /// One static-art icon, as used by a container or `{ tilepic }`.
-    Item { graphic: u16, x: i32, y: i32 },
+    Item {
+        graphic: u16,
+        x:       i32,
+        y:       i32,
+    },
     /// One static-art icon fitted proportionally and centred in its cell, as
     /// the client's `{ tilepicfit }` gump primitive does.
     FittedItem {
         graphic: u16,
-        x: i32,
-        y: i32,
-        width: u32,
-        height: u32,
+        x:       i32,
+        y:       i32,
+        width:   u32,
+        height:  u32,
         #[serde(default)]
         padding: u32,
     },
     /// A gump-art picture repeated, never scaled, over this rectangle.
     Tile {
-        gump: u16,
-        x: i32,
-        y: i32,
-        width: u32,
+        gump:   u16,
+        x:      i32,
+        y:      i32,
+        width:  u32,
         height: u32,
     },
     /// The client's `resizepic`: nine gumps tiled into a scalable frame.
     Resize {
-        gump: u16,
-        x: i32,
-        y: i32,
-        width: u32,
+        gump:   u16,
+        x:      i32,
+        y:      i32,
+        width:  u32,
         height: u32,
     },
     /// One line from the install's bitmap fonts.
     Label {
-        x: i32,
-        y: i32,
+        x:    i32,
+        y:    i32,
         text: String,
         #[serde(default = "default_font")]
         font: u16,
@@ -175,12 +204,12 @@ enum Element {
     /// client font files, this lets skin previews include Cyrillic without a
     /// UO installation.
     Text {
-        font: PathBuf,
-        x: i32,
-        y: i32,
-        size: f32,
+        font:   PathBuf,
+        x:      i32,
+        y:      i32,
+        size:   f32,
         colour: Rgb,
-        text: String,
+        text:   String,
     },
 }
 
@@ -278,15 +307,19 @@ fn render(
         let labels: Vec<_> = scene
             .elements
             .iter()
-            .filter_map(|element| match element {
-                Element::Label { x, y, text, font } => Some(GumpLabel {
-                    at: GumpPixel::new(*x, *y),
-                    text,
-                    font: Font(*font),
-                    hue: Hue::NONE,
-                    clip: None,
-                }),
-                _ => None,
+            .filter_map(|element| {
+                match element {
+                    Element::Label { x, y, text, font } => {
+                        Some(GumpLabel {
+                            at: GumpPixel::new(*x, *y),
+                            text,
+                            font: Font(*font),
+                            hue: Hue::NONE,
+                            clip: None,
+                        })
+                    }
+                    _ => None,
+                }
             })
             .collect();
         composite(
@@ -351,17 +384,19 @@ fn composite_project_assets(
                 height: source_height,
                 x,
                 y,
-            } => (
-                asset,
-                ProjectDraw::Asset {
-                    source_x: *source_x,
-                    source_y: *source_y,
-                    source_width: *source_width,
-                    source_height: *source_height,
-                    x: *x,
-                    y: *y,
-                },
-            ),
+            } => {
+                (
+                    asset,
+                    ProjectDraw::Asset {
+                        source_x:      *source_x,
+                        source_y:      *source_y,
+                        source_width:  *source_width,
+                        source_height: *source_height,
+                        x:             *x,
+                        y:             *y,
+                    },
+                )
+            }
             Element::NineSlice {
                 asset,
                 source_x,
@@ -377,24 +412,26 @@ fn composite_project_assets(
                 y,
                 width: target_width,
                 height: target_height,
-            } => (
-                asset,
-                ProjectDraw::NineSlice {
-                    source_x: *source_x,
-                    source_y: *source_y,
-                    source_width: *source_width,
-                    source_height: *source_height,
-                    inset_left: *inset_left,
-                    inset_top: *inset_top,
-                    inset_right: *inset_right,
-                    inset_bottom: *inset_bottom,
-                    tile: *tile,
-                    x: *x,
-                    y: *y,
-                    target_width: *target_width,
-                    target_height: *target_height,
-                },
-            ),
+            } => {
+                (
+                    asset,
+                    ProjectDraw::NineSlice {
+                        source_x:      *source_x,
+                        source_y:      *source_y,
+                        source_width:  *source_width,
+                        source_height: *source_height,
+                        inset_left:    *inset_left,
+                        inset_top:     *inset_top,
+                        inset_right:   *inset_right,
+                        inset_bottom:  *inset_bottom,
+                        tile:          *tile,
+                        x:             *x,
+                        y:             *y,
+                        target_width:  *target_width,
+                        target_height: *target_height,
+                    },
+                )
+            }
             Element::ScaledAsset {
                 asset,
                 source_x,
@@ -405,19 +442,21 @@ fn composite_project_assets(
                 y,
                 width: target_width,
                 height: target_height,
-            } => (
-                asset,
-                ProjectDraw::ScaledAsset {
-                    source_x: *source_x,
-                    source_y: *source_y,
-                    source_width: *source_width,
-                    source_height: *source_height,
-                    x: *x,
-                    y: *y,
-                    target_width: *target_width,
-                    target_height: *target_height,
-                },
-            ),
+            } => {
+                (
+                    asset,
+                    ProjectDraw::ScaledAsset {
+                        source_x:      *source_x,
+                        source_y:      *source_y,
+                        source_width:  *source_width,
+                        source_height: *source_height,
+                        x:             *x,
+                        y:             *y,
+                        target_width:  *target_width,
+                        target_height: *target_height,
+                    },
+                )
+            }
             _ => continue,
         };
         let path = scene_dir.join(asset_path);
@@ -433,18 +472,20 @@ fn composite_project_assets(
                 source_height,
                 x,
                 y,
-            } => composite_crop(
-                canvas,
-                width,
-                height,
-                image,
-                source_x,
-                source_y,
-                source_width,
-                source_height,
-                x,
-                y,
-            )?,
+            } => {
+                composite_crop(
+                    canvas,
+                    width,
+                    height,
+                    image,
+                    source_x,
+                    source_y,
+                    source_width,
+                    source_height,
+                    x,
+                    y,
+                )?
+            }
             ProjectDraw::NineSlice {
                 source_x,
                 source_y,
@@ -459,27 +500,29 @@ fn composite_project_assets(
                 y,
                 target_width,
                 target_height,
-            } => composite_nine_slice(
-                canvas,
-                width,
-                height,
-                image,
-                NineSliceSource {
-                    x: source_x,
-                    y: source_y,
-                    width: source_width,
-                    height: source_height,
-                    left: inset_left,
-                    top: inset_top,
-                    right: inset_right,
-                    bottom: inset_bottom,
-                    tile,
-                },
-                x,
-                y,
-                target_width,
-                target_height,
-            )?,
+            } => {
+                composite_nine_slice(
+                    canvas,
+                    width,
+                    height,
+                    image,
+                    NineSliceSource {
+                        x: source_x,
+                        y: source_y,
+                        width: source_width,
+                        height: source_height,
+                        left: inset_left,
+                        top: inset_top,
+                        right: inset_right,
+                        bottom: inset_bottom,
+                        tile,
+                    },
+                    x,
+                    y,
+                    target_width,
+                    target_height,
+                )?
+            }
             ProjectDraw::ScaledAsset {
                 source_x,
                 source_y,
@@ -489,20 +532,22 @@ fn composite_project_assets(
                 y,
                 target_width,
                 target_height,
-            } => composite_scaled_crop(
-                canvas,
-                width,
-                height,
-                image,
-                source_x,
-                source_y,
-                source_width,
-                source_height,
-                x,
-                y,
-                target_width,
-                target_height,
-            )?,
+            } => {
+                composite_scaled_crop(
+                    canvas,
+                    width,
+                    height,
+                    image,
+                    source_x,
+                    source_y,
+                    source_width,
+                    source_height,
+                    x,
+                    y,
+                    target_width,
+                    target_height,
+                )?
+            }
         }
     }
     Ok(())
@@ -510,51 +555,51 @@ fn composite_project_assets(
 
 enum ProjectDraw {
     Asset {
-        source_x: u32,
-        source_y: u32,
-        source_width: u32,
+        source_x:      u32,
+        source_y:      u32,
+        source_width:  u32,
         source_height: u32,
-        x: i32,
-        y: i32,
+        x:             i32,
+        y:             i32,
     },
     ScaledAsset {
-        source_x: u32,
-        source_y: u32,
-        source_width: u32,
+        source_x:      u32,
+        source_y:      u32,
+        source_width:  u32,
         source_height: u32,
-        x: i32,
-        y: i32,
-        target_width: u32,
+        x:             i32,
+        y:             i32,
+        target_width:  u32,
         target_height: u32,
     },
     NineSlice {
-        source_x: u32,
-        source_y: u32,
-        source_width: u32,
+        source_x:      u32,
+        source_y:      u32,
+        source_width:  u32,
         source_height: u32,
-        inset_left: u32,
-        inset_top: u32,
-        inset_right: u32,
-        inset_bottom: u32,
-        tile: bool,
-        x: i32,
-        y: i32,
-        target_width: u32,
+        inset_left:    u32,
+        inset_top:     u32,
+        inset_right:   u32,
+        inset_bottom:  u32,
+        tile:          bool,
+        x:             i32,
+        y:             i32,
+        target_width:  u32,
         target_height: u32,
     },
 }
 
 #[derive(Clone, Copy)]
 struct NineSliceSource {
-    x: u32,
-    y: u32,
-    width: u32,
+    x:      u32,
+    y:      u32,
+    width:  u32,
     height: u32,
-    left: u32,
-    top: u32,
-    right: u32,
+    left:   u32,
+    top:    u32,
+    right:  u32,
     bottom: u32,
-    tile: bool,
+    tile:   bool,
 }
 
 /// Copy one native rectangle from an RGBA atlas, preserving its alpha.
@@ -871,9 +916,9 @@ fn draw_text(
 
 /// An RGBA asset the scene can composite without a UO client installation.
 struct RgbaImage {
-    width: u32,
+    width:  u32,
     height: u32,
-    rgba: Vec<u8>,
+    rgba:   Vec<u8>,
 }
 
 /// Decode an 8-bit RGB/RGBA PNG supplied by the project.
@@ -889,12 +934,14 @@ fn read_png(path: &Path) -> Result<RgbaImage, Box<dyn std::error::Error>> {
     let source = &bytes[..info.buffer_size()];
     let rgba = match info.color_type {
         png::ColorType::Rgba => source.to_vec(),
-        png::ColorType::Rgb => source
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .flat_map(|rgb| [rgb[0], rgb[1], rgb[2], u8::MAX])
-            .collect(),
+        png::ColorType::Rgb => {
+            source
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .flat_map(|rgb| [rgb[0], rgb[1], rgb[2], u8::MAX])
+                .collect()
+        }
         other => return Err(format!("{} decoded as unsupported {other:?}", path.display()).into()),
     };
     Ok(RgbaImage {
@@ -977,14 +1024,18 @@ fn pictures(elements: &[Element], atlas: &GumpAtlas) -> Result<Vec<Picture>, Box
     let mut pictures = Vec::new();
     for element in elements {
         match element {
-            Element::Gump { gump, x, y } => pictures.push(Picture::plain(
-                GumpArt::Gump(Graphic(*gump)),
-                GumpPixel::new(*x, *y),
-            )),
-            Element::Item { graphic, x, y } => pictures.push(Picture::plain(
-                GumpArt::Item(Graphic(*graphic)),
-                GumpPixel::new(*x, *y),
-            )),
+            Element::Gump { gump, x, y } => {
+                pictures.push(Picture::plain(
+                    GumpArt::Gump(Graphic(*gump)),
+                    GumpPixel::new(*x, *y),
+                ))
+            }
+            Element::Item { graphic, x, y } => {
+                pictures.push(Picture::plain(
+                    GumpArt::Item(Graphic(*graphic)),
+                    GumpPixel::new(*x, *y),
+                ))
+            }
             Element::FittedItem {
                 graphic,
                 x,
@@ -1009,23 +1060,27 @@ fn pictures(elements: &[Element], atlas: &GumpAtlas) -> Result<Vec<Picture>, Box
                 y,
                 width,
                 height,
-            } => pictures.push(
-                Picture::plain(GumpArt::Gump(Graphic(*gump)), GumpPixel::new(*x, *y))
-                    .tiled(i32::try_from(*width)?, i32::try_from(*height)?),
-            ),
+            } => {
+                pictures.push(
+                    Picture::plain(GumpArt::Gump(Graphic(*gump)), GumpPixel::new(*x, *y))
+                        .tiled(i32::try_from(*width)?, i32::try_from(*height)?),
+                )
+            }
             Element::Resize {
                 gump,
                 x,
                 y,
                 width,
                 height,
-            } => pictures.extend(gump::resize(
-                atlas,
-                Graphic(*gump),
-                GumpPixel::new(*x, *y),
-                i32::try_from(*width)?,
-                i32::try_from(*height)?,
-            )),
+            } => {
+                pictures.extend(gump::resize(
+                    atlas,
+                    Graphic(*gump),
+                    GumpPixel::new(*x, *y),
+                    i32::try_from(*width)?,
+                    i32::try_from(*height)?,
+                ))
+            }
             Element::Rect { .. }
             | Element::Asset { .. }
             | Element::ScaledAsset { .. }
@@ -1105,12 +1160,25 @@ fn scale_nearest(
 
 #[cfg(test)]
 mod tests {
-    use super::{Element, Scene, composite, nine_slice_axis, pictures, scale_nearest, wanted_art};
-    use openshard_client_render::gump::{GumpArt, GumpAtlas};
-    use openshard_client_render::gump::{GumpPixel, Picture};
+    use openshard_client_render::gump::{
+        GumpArt,
+        GumpAtlas,
+        GumpPixel,
+        Picture,
+    };
     use openshard_protocol::wire::Graphic;
     use openshard_uofiles::color::Color16;
     use openshard_uofiles::image::Image;
+
+    use super::{
+        Element,
+        Scene,
+        composite,
+        nine_slice_axis,
+        pictures,
+        scale_nearest,
+        wanted_art,
+    };
 
     #[test]
     fn example_scene_parses() {
@@ -1172,10 +1240,10 @@ mod tests {
     #[test]
     fn resize_layer_packs_and_expands_all_nine_pieces() {
         let layers = [Element::Resize {
-            gump: 100,
-            x: 0,
-            y: 0,
-            width: 20,
+            gump:   100,
+            x:      0,
+            y:      0,
+            width:  20,
             height: 20,
         }];
         let wanted = wanted_art(&layers);

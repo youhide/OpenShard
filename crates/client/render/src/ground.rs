@@ -6,12 +6,22 @@
 
 use std::collections::BTreeSet;
 
-use openshard_map::map::{LandCell, WorldMap};
+use openshard_map::map::{
+    LandCell,
+    WorldMap,
+};
 use openshard_protocol::world::Point;
 use openshard_tiles::LandTileId;
 
-use crate::atlas::{LandAtlas, Region, TexmapAtlas};
-use crate::camera::{Camera, TileBounds};
+use crate::atlas::{
+    LandAtlas,
+    Region,
+    TexmapAtlas,
+};
+use crate::camera::{
+    Camera,
+    TileBounds,
+};
 use crate::cutaway::Cutaway;
 use crate::depth;
 
@@ -25,9 +35,9 @@ pub struct GroundQuad {
     /// The diamond's centre, in viewport pixels, ignoring height. Fractional
     /// never happens, but the GPU wants floats and converting once here keeps
     /// the buffer writer trivial.
-    pub x: f32,
+    pub x:       f32,
     /// The same, downwards.
-    pub y: f32,
+    pub y:       f32,
     /// The heights of the tile's four corners, in the order the shader indexes
     /// them: `(x, y)`, `(x+1, y)`, `(x, y+1)`, `(x+1, y+1)` — index `a + 2*b`
     /// for a unit-quad corner `(a, b)`. On screen that reads top, right, left,
@@ -37,14 +47,14 @@ pub struct GroundQuad {
     /// `i8` and converts back exactly.
     pub corners: [f32; 4],
     /// Where its sprite lives in the land atlas.
-    pub region: Region,
+    pub region:  Region,
     /// Where its square texture lives in the texture atlas, if it has one.
     ///
     /// Absent is ordinary and means what it says: three quarters of the land
     /// index has no texture at all, and such a tile is drawn from `region` at
     /// whatever shape its corners make. The shader is told by a zero size, which
     /// no real region can have.
-    pub texmap: Option<Region>,
+    pub texmap:  Option<Region>,
     /// What hides it and what it hides: smaller is nearer. See [`crate::depth`].
     ///
     /// Ground is drawn before the statics, so within one frame this decides
@@ -52,14 +62,14 @@ pub struct GroundQuad {
     /// everything about the *other* pass: a hillside has to cover the wall
     /// standing behind it, and the pass order alone would put every static in
     /// front of every tile.
-    pub depth: f32,
+    pub depth:   f32,
     /// Which tile this is, for the lighting pass.
     ///
     /// [`Place::land`](crate::place::Place::land), and the height in it is not
     /// read: the shader lifts each corner by its own, so the height a pixel of a
     /// hillside carries is the interpolated one rather than the tile's base. See
     /// [`crate::place`].
-    pub place: crate::place::Place,
+    pub place:   crate::place::Place,
 }
 
 impl GroundQuad {
@@ -89,8 +99,8 @@ impl GroundQuad {
         // corner of the atlas and a zero *extent* is not a texture anything
         // could be sampled from.
         let texmap = self.texmap.unwrap_or(Region {
-            u: 0.0,
-            v: 0.0,
+            u:  0.0,
+            v:  0.0,
             du: 0.0,
             dv: 0.0,
         });
@@ -312,16 +322,16 @@ pub fn collect_in_with_interior(
 /// included. Nothing about the picture changes.
 struct LandWindow {
     /// The north-west tile of the rectangle held.
-    min_x: i32,
-    min_y: i32,
+    min_x:  i32,
+    min_y:  i32,
     /// Its extent in tiles. One column and one row wider than the tiles drawn
     /// from it, because a tile's corner heights are its east and south
     /// neighbours' — clamped where that fringe would leave the map.
-    width: usize,
+    width:  usize,
     height: usize,
     /// Row-major over that extent. `None` is a tile the map has no cell for,
     /// which is off its edge.
-    cells: Vec<Option<LandCell>>,
+    cells:  Vec<Option<LandCell>>,
 }
 
 impl LandWindow {
@@ -464,13 +474,15 @@ mod tests {
     /// rather than random: this whole file is arithmetic, and a fixture that
     /// changed between runs would make every count below a different number.
     fn hillside() -> WorldMap {
-        WorldMap::from_blocks(BlockExtent { wide: 8, down: 8 }, |x, y| LandCell {
-            tile: if (x + y).is_multiple_of(17) {
-                MISSING
-            } else {
-                GRASS
-            },
-            z: (((i32::from(x) * 3 + i32::from(y) * 7) % 41) - 20) as i8,
+        WorldMap::from_blocks(BlockExtent { wide: 8, down: 8 }, |x, y| {
+            LandCell {
+                tile: if (x + y).is_multiple_of(17) {
+                    MISSING
+                } else {
+                    GRASS
+                },
+                z:    (((i32::from(x) * 3 + i32::from(y) * 7) % 41) - 20) as i8,
+            }
         })
     }
 
@@ -601,9 +613,11 @@ mod tests {
         let atlas = grass_atlas();
 
         let hilly = hillside();
-        let flat = WorldMap::from_blocks(BlockExtent { wide: 8, down: 8 }, |x, y| LandCell {
-            tile: hilly.land(x, y).unwrap().tile,
-            z: 0,
+        let flat = WorldMap::from_blocks(BlockExtent { wide: 8, down: 8 }, |x, y| {
+            LandCell {
+                tile: hilly.land(x, y).unwrap().tile,
+                z:    0,
+            }
         });
         let corners_by_position = |map: &WorldMap| -> std::collections::BTreeMap<(i32, i32), [i32; 4]> {
             collect(map, &camera, &atlas, &texmaps, &Cutaway::OPEN)
@@ -697,23 +711,23 @@ mod tests {
     #[test]
     fn a_quad_writes_its_stride_and_nothing_more() {
         let quad = GroundQuad {
-            x: 1.0,
-            y: 2.0,
+            x:       1.0,
+            y:       2.0,
             corners: [3.0, 4.0, 5.0, 6.0],
-            region: Region {
-                u: 0.25,
-                v: 0.5,
+            region:  Region {
+                u:  0.25,
+                v:  0.5,
                 du: 0.125,
                 dv: 0.125,
             },
-            depth: 0.5,
-            texmap: Some(Region {
-                u: 0.75,
-                v: 0.5,
+            depth:   0.5,
+            texmap:  Some(Region {
+                u:  0.75,
+                v:  0.5,
                 du: 0.03125,
                 dv: 0.03125,
             }),
-            place: crate::place::Place::land(7, 9),
+            place:   crate::place::Place::land(7, 9),
         };
         let mut out = Vec::new();
         quad.write(&mut out);
@@ -737,18 +751,18 @@ mod tests {
     #[test]
     fn a_quad_with_no_texture_writes_a_region_of_no_size() {
         let quad = GroundQuad {
-            x: 0.0,
-            y: 0.0,
+            x:       0.0,
+            y:       0.0,
             corners: [0.0; 4],
-            region: Region {
-                u: 0.0,
-                v: 0.0,
+            region:  Region {
+                u:  0.0,
+                v:  0.0,
                 du: 0.021484375,
                 dv: 0.021484375,
             },
-            texmap: None,
-            depth: 0.25,
-            place: crate::place::Place::land(0, 0),
+            texmap:  None,
+            depth:   0.25,
+            place:   crate::place::Place::land(0, 0),
         };
         let mut out = Vec::new();
         quad.write(&mut out);
@@ -762,18 +776,18 @@ mod tests {
     #[test]
     fn a_quad_distinguishes_a_self_contained_flat_tile_from_a_shared_slope() {
         let mut quad = GroundQuad {
-            x: 0.0,
-            y: 0.0,
+            x:       0.0,
+            y:       0.0,
             corners: [7.0; 4],
-            region: Region {
-                u: 0.0,
-                v: 0.0,
+            region:  Region {
+                u:  0.0,
+                v:  0.0,
                 du: 1.0,
                 dv: 1.0,
             },
-            texmap: None,
-            depth: 0.0,
-            place: crate::place::Place::land(0, 0),
+            texmap:  None,
+            depth:   0.0,
+            place:   crate::place::Place::land(0, 0),
         };
         assert!(quad.is_flat());
         quad.corners[3] = 8.0;

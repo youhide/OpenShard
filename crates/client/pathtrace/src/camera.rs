@@ -13,7 +13,10 @@
 //! checks that assumption on probes it did not measure from. Nothing here knows
 //! that a tile is 44 pixels across or that a `z` unit lifts a sprite four.
 
-use crate::vector::{Axis, Vec3};
+use crate::vector::{
+    Axis,
+    Vec3,
+};
 
 /// A line through the world: every point that projects to one pixel.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -21,7 +24,7 @@ pub struct Ray {
     /// A point on it — the one closest to the world origin, which is an
     /// arbitrary choice with one useful property: it does not depend on how far
     /// away a caller imagined the camera to be.
-    pub at: Vec3,
+    pub at:        Vec3,
     /// Which way the viewer is looking: a unit vector, pointing *into* the
     /// scene. Increasing `t` along it goes away from the viewer, so a smaller
     /// `t` is nearer and the front-most surface is the smallest one.
@@ -43,9 +46,9 @@ impl Ray {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Parallel {
     /// The pixel a step of one along each world axis moves by.
-    columns: [(f64, f64); 3],
+    columns:   [(f64, f64); 3],
     /// The pixel the world origin projects to.
-    origin: (f64, f64),
+    origin:    (f64, f64),
     /// The null space of `columns`, oriented to point away from the viewer.
     direction: Vec3,
 }
@@ -143,7 +146,7 @@ impl Parallel {
             (a * target.1 - b * target.0) / determinant,
         );
         Ray {
-            at: rows.0 * u + rows.1 * v,
+            at:        rows.0 * u + rows.1 * v,
             direction: self.direction,
         }
     }
@@ -160,10 +163,12 @@ impl Parallel {
 
 /// Measure the two pixel components contributed by a step on each world axis.
 fn measure_columns(map: &impl Fn(Vec3) -> (f64, f64), about: Vec3, span: f64) -> [(f64, f64); 3] {
-    let axis_step = |axis: Axis| match axis {
-        Axis::X => Vec3::new(span, 0.0, 0.0),
-        Axis::Y => Vec3::new(0.0, span, 0.0),
-        Axis::Z => Vec3::new(0.0, 0.0, span),
+    let axis_step = |axis: Axis| {
+        match axis {
+            Axis::X => Vec3::new(span, 0.0, 0.0),
+            Axis::Y => Vec3::new(0.0, span, 0.0),
+            Axis::Z => Vec3::new(0.0, 0.0, span),
+        }
     };
     let mut columns = [(0.0, 0.0); 3];
     for (axis, column) in Axis::ALL.into_iter().zip(columns.iter_mut()) {

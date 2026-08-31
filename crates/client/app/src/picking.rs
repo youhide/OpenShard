@@ -86,7 +86,7 @@ impl SelectedIdentity {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct HoveredItem {
     /// What the shard knows it by — a house's serial, for any of its pieces.
-    pub serial: Serial,
+    pub serial:  Serial,
     /// The art of the exact piece the cursor hit.
     ///
     /// A multi shares one serial between its wall, roof and floor pieces, but
@@ -95,10 +95,10 @@ pub struct HoveredItem {
     /// about the completed frame, just like the rest of this snapshot.
     pub graphic: Graphic,
     /// Where the piece the cursor actually hit stands.
-    pub at: Point,
+    pub at:      Point,
     /// The texel in the sprite under the pointer, in the cursor preview's
     /// gump pixels. It lets a ground-item drag preserve the point grabbed.
-    pub grab: GumpPixel,
+    pub grab:    GumpPixel,
 }
 
 impl HoveredItem {
@@ -139,9 +139,9 @@ pub struct Hover {
     /// [`diagnostics::Hud::hover_lit`](crate::diagnostics::Hud::hover_lit).
     pub static_: Option<PickedStatic>,
     /// A mobile under the cursor; `None` inside `Some` is the local player.
-    pub mobile: Option<Who>,
+    pub mobile:  Option<Who>,
     /// A shard item under the cursor, and where its picture stands.
-    pub item: Option<HoveredItem>,
+    pub item:    Option<HoveredItem>,
 }
 
 /// Which of the two world hit tests the frame drew in front, with the loser put
@@ -170,10 +170,12 @@ pub(crate) fn in_front(
     map_static: Option<Hit<PickedStatic>>,
 ) -> (Option<ItemIndex>, Option<PickedStatic>) {
     match (item, map_static) {
-        (Some(item), Some(map_static)) => match item.order >= map_static.order {
-            true => (Some(item.what), None),
-            false => (None, Some(map_static.what)),
-        },
+        (Some(item), Some(map_static)) => {
+            match item.order >= map_static.order {
+                true => (Some(item.what), None),
+                false => (None, Some(map_static.what)),
+            }
+        }
         // One of them, or neither: nothing to compare, and the hit that exists
         // is the answer.
         (item, map_static) => (item.map(|hit| hit.what), map_static.map(|hit| hit.what)),
@@ -209,7 +211,7 @@ pub(crate) fn map_static_for_removal(
 #[derive(Default)]
 pub struct Picking {
     /// The live, temporary cursor answer. Replaced after every drawn frame.
-    pub hover: Hover,
+    pub hover:    Hover,
     /// What a left click last landed on, kept by *identity* until the next
     /// click — a coordinate, a static's own graphic-and-place, or a
     /// creature's or item's serial. Never the data itself:
@@ -243,7 +245,7 @@ mod tests {
         let harp = Serial::new(0x4000_0001).expect("valid item serial");
         let drum = Serial::new(0x4000_0002).expect("valid item serial");
         let mut picking = Picking {
-            hover: Hover {
+            hover:    Hover {
                 item: Some(hovered(harp)),
                 ..Hover::default()
             },
@@ -268,10 +270,10 @@ mod tests {
     fn a_house_selection_keeps_its_exact_component() {
         let house = Serial::new(0x4000_0001).expect("valid item serial");
         let wall = HoveredItem {
-            serial: house,
+            serial:  house,
             graphic: Graphic(0x0006),
-            at: Point::new(1400, 1600, 7),
-            grab: GumpPixel::default(),
+            at:      Point::new(1400, 1600, 7),
+            grab:    GumpPixel::default(),
         };
 
         assert!(wall.matches(house, Graphic(0x0006), Point::new(1400, 1600, 7)));
@@ -287,30 +289,30 @@ mod tests {
     fn the_nearer_of_the_two_hit_tests_is_the_one_the_cursor_is_on() {
         let floor = Hit {
             order: Order {
-                tile: 3037,
+                tile:       3037,
                 priority_z: 19,
             },
-            what: ItemIndex::new(7),
+            what:  ItemIndex::new(7),
         };
         let wall = PickedStatic {
-            at: Point::new(1400, 1637, 0),
+            at:      Point::new(1400, 1637, 0),
             graphic: Graphic(0x0006),
         };
         // One tile nearer the eye, which outranks any height on the tile behind
         // it — see `depth::Order`.
         let nearer_wall = Hit {
             order: Order {
-                tile: 3038,
+                tile:       3038,
                 priority_z: 1,
             },
-            what: wall,
+            what:  wall,
         };
         let further_wall = Hit {
             order: Order {
-                tile: 3036,
+                tile:       3036,
                 priority_z: 1,
             },
-            what: wall,
+            what:  wall,
         };
 
         assert_eq!(
@@ -330,7 +332,7 @@ mod tests {
     #[test]
     fn an_item_takes_a_tie_with_a_map_static() {
         let order = Order {
-            tile: 3037,
+            tile:       3037,
             priority_z: 4,
         };
         let (item, map_static) = in_front(
@@ -341,7 +343,7 @@ mod tests {
             Some(Hit {
                 order,
                 what: PickedStatic {
-                    at: Point::new(1400, 1637, 4),
+                    at:      Point::new(1400, 1637, 4),
                     graphic: Graphic(0x0006),
                 },
             }),
@@ -358,10 +360,10 @@ mod tests {
     fn a_lone_hit_is_the_answer() {
         let item = Hit {
             order: Order {
-                tile: 3037,
+                tile:       3037,
                 priority_z: 19,
             },
-            what: ItemIndex::new(2),
+            what:  ItemIndex::new(2),
         };
 
         assert_eq!(in_front(Some(item), None), (Some(ItemIndex::new(2)), None));
@@ -371,7 +373,7 @@ mod tests {
     #[test]
     fn static_removal_reaches_map_data_behind_a_house_component() {
         let map_static = PickedStatic {
-            at: Point::new(1400, 1637, 0),
+            at:      Point::new(1400, 1637, 0),
             graphic: Graphic(0x0006),
         };
         let mobile = openshard_client_render::mobiles::MobileIndex::new(3);
@@ -380,17 +382,17 @@ mod tests {
             Some(mobile),
             Some(Hit {
                 order: Order {
-                    tile: 3038,
+                    tile:       3038,
                     priority_z: 0,
                 },
-                what: ItemIndex::new(1),
+                what:  ItemIndex::new(1),
             }),
             Some(Hit {
                 order: Order {
-                    tile: 3037,
+                    tile:       3037,
                     priority_z: 0,
                 },
-                what: map_static,
+                what:  map_static,
             }),
         );
 

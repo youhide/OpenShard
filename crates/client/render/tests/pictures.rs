@@ -33,8 +33,15 @@ use std::path::PathBuf;
 use openshard_client_render::debug::View;
 use openshard_client_render::light::Lighting;
 use openshard_client_render::occlusion;
-use openshard_client_render::plan::{self, Picture};
-use openshard_client_render::scene::{self, CENTRE, Scene};
+use openshard_client_render::plan::{
+    self,
+    Picture,
+};
+use openshard_client_render::scene::{
+    self,
+    CENTRE,
+    Scene,
+};
 
 /// How many pixels one tile gets in a plan view.
 ///
@@ -123,9 +130,11 @@ fn slug(scene: &Scene) -> String {
     scene
         .name
         .chars()
-        .map(|c| match c.is_ascii_alphanumeric() {
-            true => c.to_ascii_lowercase(),
-            false => '-',
+        .map(|c| {
+            match c.is_ascii_alphanumeric() {
+                true => c.to_ascii_lowercase(),
+                false => '-',
+            }
         })
         .collect()
 }
@@ -299,15 +308,15 @@ fn a_wall_lit_from_one_end_has_no_dark_stroke_at_its_seam() {
     let scene = scene::wall_run_lit_from_along_it();
     let lighting = scene.lighting(STILL);
     let wall = plan::Wall {
-        from: (CENTRE.x, CENTRE.y),
-        face: openshard_client_render::facing::Face::South,
+        from:  (CENTRE.x, CENTRE.y),
+        face:  openshard_client_render::facing::Face::South,
         tiles: u32::from(scene::RUN),
-        top: i32::from(scene::WALL_HEIGHT),
+        top:   i32::from(scene::WALL_HEIGHT),
         // The run is `WALL` at `z 0` on every tile, which is what names the panel
         // each pixel of the elevation is a point of. Without it every fragment of
         // this picture is a point of nothing and the face is shadowed by its own
         // panel — see `plan::elevation`.
-        of: occlusion::Owner::new(0, scene::WALL),
+        of:    occlusion::Owner::new(0, scene::WALL),
     };
     let drawn = plan::elevation(&device, &queue, &lighting, View::Flames, wall, SCALE * 4);
 
@@ -384,11 +393,11 @@ fn a_wall_is_not_lit_from_behind_its_own_face() {
     let scene = scene::torch_before_a_wall();
     let lighting = scene.lighting(STILL);
     let wall = plan::Wall {
-        from: (CENTRE.x - 4, CENTRE.y),
-        face: openshard_client_render::facing::Face::South,
+        from:  (CENTRE.x - 4, CENTRE.y),
+        face:  openshard_client_render::facing::Face::South,
         tiles: 9,
-        top: i32::from(scene::WALL_HEIGHT),
-        of: occlusion::Owner::new(0, scene::WALL),
+        top:   i32::from(scene::WALL_HEIGHT),
+        of:    occlusion::Owner::new(0, scene::WALL),
     };
     let drawn = plan::elevation(&device, &queue, &lighting, View::Flames, wall, SCALE);
     written(&slug(&scene), View::Flames, "elevation", &drawn);
@@ -416,11 +425,11 @@ fn a_wall_is_not_lit_from_behind_its_own_face() {
         &lit.lighting(STILL),
         View::Flames,
         plan::Wall {
-            from: (CENTRE.x, CENTRE.y),
-            face: openshard_client_render::facing::Face::South,
+            from:  (CENTRE.x, CENTRE.y),
+            face:  openshard_client_render::facing::Face::South,
             tiles: u32::from(scene::RUN),
-            top: i32::from(scene::WALL_HEIGHT),
-            of: occlusion::Owner::new(0, scene::WALL),
+            top:   i32::from(scene::WALL_HEIGHT),
+            of:    occlusion::Owner::new(0, scene::WALL),
         },
         SCALE,
     );

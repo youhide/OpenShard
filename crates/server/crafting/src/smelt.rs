@@ -14,12 +14,32 @@
 //! a double-click anywhere else says so.
 
 use openshard_entities::EntityId;
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-use openshard_protocol::wire::{ClilocId, Graphic};
-use openshard_skills::{roll_skill_band, skill_value};
-use openshard_state::components::{Drawn, ItemKind, Material, Stackable};
-use openshard_state::harvest::{ORE_GRAPHIC, ORES};
-use openshard_state::{Skill, WorldState};
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
+use openshard_protocol::wire::{
+    ClilocId,
+    Graphic,
+};
+use openshard_skills::{
+    roll_skill_band,
+    skill_value,
+};
+use openshard_state::components::{
+    Drawn,
+    ItemKind,
+    Material,
+    Stackable,
+};
+use openshard_state::harvest::{
+    ORE_GRAPHIC,
+    ORES,
+};
+use openshard_state::{
+    Skill,
+    WorldState,
+};
 
 use crate::environment;
 use crate::system::Needs;
@@ -87,10 +107,11 @@ pub fn smelt(state: &mut WorldState, smelter: EntityId, ore: EntityId) -> bool {
     ) {
         (Some(ItemKind(kind)), Some(Material(material))) if *kind == ORE_KIND => Some(*material),
         (Some(_), _) => return false,
-        (None, _) if graphic.id == ORE_GRAPHIC => ORES
-            .iter()
-            .find(|row| row.hue == graphic.hue)
-            .and_then(|row| row.material),
+        (None, _) if graphic.id == ORE_GRAPHIC => {
+            ORES.iter()
+                .find(|row| row.hue == graphic.hue)
+                .and_then(|row| row.material)
+        }
         _ => None,
     };
     let Some(material) = material else {

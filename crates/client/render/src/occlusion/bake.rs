@@ -49,12 +49,20 @@
 
 use std::collections::hash_map::Entry;
 
+use openshard_map::map::{
+    BLOCK_SIZE,
+    WorldMap,
+};
+use openshard_tiles::TileData;
 use rustc_hash::FxHashMap;
 
-use openshard_map::map::{BLOCK_SIZE, WorldMap};
-use openshard_tiles::TileData;
-
-use super::{Builder, Link, Occlusion, SKY_OPEN, Solid};
+use super::{
+    Builder,
+    Link,
+    Occlusion,
+    SKY_OPEN,
+    Solid,
+};
 use crate::atlas::StaticArt;
 #[cfg(test)]
 use crate::atlas::StaticAtlas;
@@ -89,7 +97,7 @@ pub struct Baked {
     /// Every solid the block stands, as `(cell, solid)` with the cell being
     /// `y * SIDE + x` inside the block — in the order the map walk found them,
     /// which is the order a tile's solids have to come out in.
-    solids: Vec<(u8, Solid)>,
+    solids:  Vec<(u8, Solid)>,
     /// Every tile besides its own anchor that a solid's box touches, as
     /// `(x, y, solid)` in absolute map coordinates — decision 38.2's spill.
     ///
@@ -100,10 +108,10 @@ pub struct Baked {
     /// exactly as it reads any other tile.
     ///
     /// Empty for every block a stock install bakes: see [`Solid::footprint`].
-    spill: Vec<(i32, i32, Solid)>,
+    spill:   Vec<(i32, i32, Solid)>,
     /// How much of the sky each of the block's tiles can see, **before the
     /// blur**, which is the frame's.
-    sky: [u8; CELLS],
+    sky:     [u8; CELLS],
     /// What the block's own build refused for want of room on a tile — see
     /// [`super::MAX_SOLIDS_PER_CELL`].
     dropped: usize,
@@ -281,7 +289,7 @@ impl Stamp {
 struct Cached {
     baked: Baked,
     /// The value of [`Bake::frame`] the last time a frame asked for it.
-    used: u64,
+    used:  u64,
 }
 
 /// The blocks a client has already derived, kept between frames.
@@ -295,17 +303,17 @@ struct Cached {
 pub struct Bake {
     /// What the atlas said when these blocks were derived. A change clears them
     /// all — see this module's header.
-    stamp: Stamp,
+    stamp:  Stamp,
     /// Keyed by `(block_x, block_y)` packed into a word. A facet is at most 896
     /// blocks on a side, so sixteen bits each is room to spare.
     blocks: FxHashMap<u32, Cached>,
     /// How many frames this bake has served, which is what [`Cached::used`] is
     /// counted in.
-    frame: u64,
+    frame:  u64,
     /// How many blocks were served from the cache, and how many were built. The
     /// companion the measurement needs: a cache that is never hit reads exactly
     /// like a cache that works.
-    hits: usize,
+    hits:   usize,
     misses: usize,
 }
 
@@ -367,7 +375,7 @@ impl Bake {
                 &entry
                     .insert(Cached {
                         baked: Baked::of(map, tiledata, atlas, block_x, block_y),
-                        used: frame,
+                        used:  frame,
                     })
                     .baked
             }
@@ -491,15 +499,24 @@ fn collect_ring(
 #[cfg(test)]
 mod tests {
     use openshard_map::grid::BlockExtent;
-    use openshard_map::map::{LandCell, StaticItem};
-    use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_map::map::{
+        LandCell,
+        StaticItem,
+    };
+    use openshard_protocol::items::ItemAmount;
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
     use openshard_protocol::world::Point;
-    use openshard_tiles::LandTileId;
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_tiles::{
+        LandTileId,
+        StaticTile,
+        TileFlags,
+    };
 
     use super::*;
     use crate::facing::Hole;
-    use openshard_protocol::items::ItemAmount;
 
     /// A tiledata entry that stops light: what a wall is, for the tests here.
     fn wall(height: u8) -> StaticTile {
@@ -517,9 +534,11 @@ mod tests {
     /// disagreement between the two builds names a tile rather than a
     /// coordinate in Britain.
     fn town() -> (WorldMap, TileData) {
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
-            tile: LandTileId(3),
-            z: 0,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| {
+            LandCell {
+                tile: LandTileId(3),
+                z:    0,
+            }
         });
         // A run of wall along one row, crossing the boundary between the two
         // block columns at x = 8: the case a per-block bake could get wrong and a
@@ -536,27 +555,27 @@ mod tests {
         // Two statics on one tile, at two heights: the list has to keep both, in
         // the order the file has them.
         map.place_static(StaticItem {
-            x: 3,
-            y: 3,
-            z: 0,
+            x:    3,
+            y:    3,
+            z:    0,
             tile: WALL,
-            hue: Hue(0),
+            hue:  Hue(0),
         });
         map.place_static(StaticItem {
-            x: 3,
-            y: 3,
-            z: 30,
+            x:    3,
+            y:    3,
+            z:    30,
             tile: OTHER,
-            hue: Hue(0),
+            hue:  Hue(0),
         });
         // One in the far block, so that a bake that only ever built the first
         // block would be caught.
         map.place_static(StaticItem {
-            x: 12,
-            y: 13,
-            z: 0,
+            x:    12,
+            y:    13,
+            z:    0,
             tile: WALL,
-            hue: Hue(0),
+            hue:  Hue(0),
         });
 
         let mut tiledata = TileData::empty();
@@ -593,10 +612,10 @@ mod tests {
         // a ground item that vanished under a baked block would be a door the
         // grid stopped knowing about.
         let items = [GroundItem {
-            amount: ItemAmount::ONE,
+            amount:  ItemAmount::ONE,
             graphic: WALL,
-            at: Point::new(9, 9, 0),
-            hue: Hue::NONE,
+            at:      Point::new(9, 9, 0),
+            hue:     Hue::NONE,
         }];
         let mut bake = Bake::new();
 
@@ -709,10 +728,10 @@ mod tests {
         atlas.state_hole(
             WALL,
             Hole {
-                near: 64,
-                far: 191,
+                near:   64,
+                far:    191,
                 bottom: 4,
-                top: 12,
+                top:    12,
             },
         );
         collect(
@@ -759,7 +778,7 @@ mod tests {
     fn overhanging(anchor_x: i32, anchor_y: i32, width: i32) -> Solid {
         use crate::camera::WorldSpot;
         Solid {
-            space: crate::solid::Solid {
+            space:    crate::solid::Solid {
                 min: WorldSpot {
                     x: f64::from(anchor_x),
                     y: f64::from(anchor_y),
@@ -771,12 +790,12 @@ mod tests {
                     z: 20.0,
                 },
             },
-            opacity: super::super::OPAQUE,
-            edges: super::super::Edges::ANY,
+            opacity:  super::super::OPAQUE,
+            edges:    super::super::Edges::ANY,
             aperture: None,
-            roof: false,
-            owner: super::super::Owner::new(0, openshard_protocol::wire::Graphic(0)),
-            part: super::super::Part::ONLY,
+            roof:     false,
+            owner:    super::super::Owner::new(0, openshard_protocol::wire::Graphic(0)),
+            part:     super::super::Part::ONLY,
         }
     }
 
@@ -789,9 +808,11 @@ mod tests {
     /// closed some other way.
     #[test]
     fn a_solid_anchored_outside_the_frame_still_occludes_through_the_ring() {
-        let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(3),
-            z: 0,
+        let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(3),
+                z:    0,
+            }
         });
         let tiledata = TileData::empty();
         // Anchored at the last tile of block (0, 0) and authored two tiles
@@ -821,7 +842,7 @@ mod tests {
             0 << 16,
             Cached {
                 baked: Baked::synthetic(0, 0, vec![(63, overhanging(7, 7, 2))]),
-                used: 0,
+                used:  0,
             },
         );
         let found = collect_ring(&mut bake, &map, &[], frame, &tiledata, &Cutaway::OPEN, None, 1);
@@ -838,9 +859,11 @@ mod tests {
     /// radius rather than choosing it.
     #[test]
     fn a_wider_reach_needs_a_wider_ring() {
-        let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(3),
-            z: 0,
+        let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(3),
+                z:    0,
+            }
         });
         let tiledata = TileData::empty();
         // Anchored at (7, 7) in block (0, 0) and authored ten tiles wide, so
@@ -860,7 +883,7 @@ mod tests {
             0 << 16,
             Cached {
                 baked: block((63, 7, 7, 10)),
-                used: 0,
+                used:  0,
             },
         );
         let narrow = collect_ring(&mut bake, &map, &[], frame, &tiledata, &Cutaway::OPEN, None, 1);
@@ -875,7 +898,7 @@ mod tests {
             0 << 16,
             Cached {
                 baked: block((63, 7, 7, 10)),
-                used: 0,
+                used:  0,
             },
         );
         let wide = collect_ring(&mut bake, &map, &[], frame, &tiledata, &Cutaway::OPEN, None, 2);

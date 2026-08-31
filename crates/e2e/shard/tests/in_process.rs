@@ -13,16 +13,26 @@
 //! deadline on every step, and a walk at the end that needs bytes to travel in
 //! both directions.
 
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_client_net::connection::Event;
 use openshard_client_net::transport::enter_world_with;
-use openshard_client_net::walk::{Moved, Walk};
+use openshard_client_net::walk::{
+    Moved,
+    Walk,
+};
+use openshard_e2e_shard::{
+    in_process,
+    plan,
+    stock_config,
+    version,
+};
 use openshard_protocol::direction::Facing;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_server::shard::SHUTDOWN_NOTICE;
-
-use openshard_e2e_shard::{in_process, plan, stock_config, version};
 
 /// Generous, and only ever paid by a failure: every wait below finishes the
 /// moment its answer arrives. What it bounds is a hang, which is this

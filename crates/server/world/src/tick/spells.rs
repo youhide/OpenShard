@@ -16,15 +16,39 @@
 //! nothing happens. This module never decides what a spell *does* beyond
 //! dispatching on the table's archetype.
 
-use super::*;
-use openshard_magic::{MAGERY_SKILL, SpellEffect, SpellTarget};
+use openshard_magic::{
+    MAGERY_SKILL,
+    SpellEffect,
+    SpellTarget,
+};
 use openshard_protocol::casting::SpellId;
-use openshard_protocol::feedback::{EffectKind, GraphicalEffect, PlaySound};
+use openshard_protocol::feedback::{
+    EffectKind,
+    GraphicalEffect,
+    PlaySound,
+};
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::target::{TargetCursor, TargetKind};
-use openshard_protocol::wire::{CursorId, Graphic, SoundId};
-use openshard_state::components::{Casting, Skills};
-use openshard_state::{CastStyle, DamageType, FieldKind, TargetPurpose};
+use openshard_protocol::target::{
+    TargetCursor,
+    TargetKind,
+};
+use openshard_protocol::wire::{
+    CursorId,
+    Graphic,
+    SoundId,
+};
+use openshard_state::components::{
+    Casting,
+    Skills,
+};
+use openshard_state::{
+    CastStyle,
+    DamageType,
+    FieldKind,
+    TargetPurpose,
+};
+
+use super::*;
 
 impl World {
     /// A client asked to cast a spell (`0xBF`). Begin it: right away in the
@@ -469,42 +493,48 @@ impl World {
             // An area spell has no mark: it aims at a spot, not a mobile.
             .unwrap_or(target_location);
         let packet = match visual {
-            Visual::Bolt(graphic) => GraphicalEffect {
-                kind: EffectKind::Moving,
-                from: caster_serial,
-                to: target_serial,
-                art: Graphic(graphic),
-                from_point: caster_pos,
-                to_point: target_pos,
-                speed: 7,
-                duration: 0,
-                fixed_direction: false,
-                explode: true,
-            },
-            Visual::OnTarget(graphic) => GraphicalEffect {
-                kind: EffectKind::FixedFrom,
-                from: target_serial,
-                to: None,
-                art: Graphic(graphic),
-                from_point: target_pos,
-                to_point: target_pos,
-                speed: 9,
-                duration: 20,
-                fixed_direction: true,
-                explode: false,
-            },
-            Visual::AtSpot(graphic) => GraphicalEffect {
-                kind: EffectKind::FixedXyz,
-                from: None,
-                to: None,
-                art: Graphic(graphic),
-                from_point: target_location,
-                to_point: target_location,
-                speed: 9,
-                duration: 20,
-                fixed_direction: true,
-                explode: false,
-            },
+            Visual::Bolt(graphic) => {
+                GraphicalEffect {
+                    kind:            EffectKind::Moving,
+                    from:            caster_serial,
+                    to:              target_serial,
+                    art:             Graphic(graphic),
+                    from_point:      caster_pos,
+                    to_point:        target_pos,
+                    speed:           7,
+                    duration:        0,
+                    fixed_direction: false,
+                    explode:         true,
+                }
+            }
+            Visual::OnTarget(graphic) => {
+                GraphicalEffect {
+                    kind:            EffectKind::FixedFrom,
+                    from:            target_serial,
+                    to:              None,
+                    art:             Graphic(graphic),
+                    from_point:      target_pos,
+                    to_point:        target_pos,
+                    speed:           9,
+                    duration:        20,
+                    fixed_direction: true,
+                    explode:         false,
+                }
+            }
+            Visual::AtSpot(graphic) => {
+                GraphicalEffect {
+                    kind:            EffectKind::FixedXyz,
+                    from:            None,
+                    to:              None,
+                    art:             Graphic(graphic),
+                    from_point:      target_location,
+                    to_point:        target_location,
+                    speed:           9,
+                    duration:        20,
+                    fixed_direction: true,
+                    explode:         false,
+                }
+            }
         };
         self.state.broadcast_packet(caster, &ServerPacket::Effect(packet));
         // The sound at the point of the effect — target_pos is the aimed spot for
@@ -513,7 +543,7 @@ impl World {
             caster,
             &ServerPacket::PlaySound(PlaySound {
                 sound: SoundId(sound),
-                at: target_pos,
+                at:    target_pos,
             }),
         );
         // The caster's gesture. A Sphere-style cast resolves as it is made, so the
@@ -569,15 +599,19 @@ impl World {
             // Night Sight: a marker; 15–25 minutes, Magery-scaled.
             BehaviourBuffKind::NIGHT_SIGHT => (0, (900 + (magery * 6 / 10) as u64).clamp(900, 1500)),
             // Protection: the chance a blow does not break a cast, capped 75%.
-            BehaviourBuffKind::PROTECTION => (
-                (magery * 75 / 1000).clamp(0, 75) as i16,
-                (magery / 5).clamp(15, 240) as u64,
-            ),
+            BehaviourBuffKind::PROTECTION => {
+                (
+                    (magery * 75 / 1000).clamp(0, 75) as i16,
+                    (magery / 5).clamp(15, 240) as u64,
+                )
+            }
             // Reactive Armor: the percent of a melee blow bounced back, capped 50%.
-            BehaviourBuffKind::REACTIVE_ARMOR => (
-                (magery * 50 / 1000).clamp(5, 50) as i16,
-                (magery / 5).clamp(15, 240) as u64,
-            ),
+            BehaviourBuffKind::REACTIVE_ARMOR => {
+                (
+                    (magery * 50 / 1000).clamp(5, 50) as i16,
+                    (magery / 5).clamp(15, 240) as u64,
+                )
+            }
             // Magic Reflection: a marker, spent on the first bounce; the timer is a
             // fallback if no spell arrives.
             _ => (0, (magery / 5).clamp(15, 240) as u64),

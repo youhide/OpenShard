@@ -24,25 +24,52 @@
 //! the blit. A scene that also carried sprites would need a client install, and
 //! then none of these tests would run anywhere.
 
-use openshard_map::grid::BlockExtent;
-use openshard_map::grid::Tile;
-use openshard_map::map::{LandCell, WorldMap};
+use openshard_map::grid::{
+    BlockExtent,
+    Tile,
+};
+use openshard_map::map::{
+    LandCell,
+    WorldMap,
+};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Point;
-use openshard_tiles::{StaticTile, TileData, TileFlags};
+use openshard_tiles::{
+    StaticTile,
+    TileData,
+    TileFlags,
+};
 
 use crate::atlas::StaticAtlas;
 use crate::camera::Camera;
 use crate::cutaway::Cutaway;
 use crate::items::GroundItem;
-use crate::light::{self, Lighting, Sun};
+use crate::light::{
+    self,
+    Lighting,
+    Sun,
+};
 
 mod storeys;
 pub use storeys::{
-    CELLAR_DEPTH, FLOOR_HOLE, INSIDE, LIT_ROOM_SCONCE, LIT_ROOM_TORCH, STOREY_SPOT, STOREY_TORCH,
-    STOREY_WALL, STOREY_Z, cellar_under_street, hole_in_a_floor, storey_over_a_lit_room, storey_over_a_torch,
+    CELLAR_DEPTH,
+    FLOOR_HOLE,
+    INSIDE,
+    LIT_ROOM_SCONCE,
+    LIT_ROOM_TORCH,
+    STOREY_SPOT,
+    STOREY_TORCH,
+    STOREY_WALL,
+    STOREY_Z,
+    cellar_under_street,
+    hole_in_a_floor,
+    storey_over_a_lit_room,
+    storey_over_a_torch,
 };
 
 /// A wall: what stops an arrow, and therefore what stops light. Twenty `z` units
@@ -117,10 +144,10 @@ pub const WALL_HOLED: Graphic = Graphic(0x000D);
 /// the rule is pinned by `light`'s own unit tests, where a ray can be aimed at a
 /// stated `z` instead of being whatever a floor pixel and a flame happen to make.
 pub const WALL_HOLE: crate::facing::Hole = crate::facing::Hole {
-    near: 64,
-    far: 191,
+    near:   64,
+    far:    191,
     bottom: 0,
-    top: 255,
+    top:    255,
 };
 
 /// A torch. Flagged `LIGHT_SOURCE`, which is the only reason anything burns —
@@ -173,24 +200,24 @@ pub const ROOM_HALF: u16 = 3;
 #[derive(Debug)]
 pub struct Scene {
     /// What it is, for the message a failing test prints.
-    pub name: &'static str,
+    pub name:     &'static str,
     /// Flat ground at `z = 0`, wide enough that no camera runs off it.
-    pub map: WorldMap,
+    pub map:      WorldMap,
     /// The flags of the graphics above, and nothing else: an unlisted graphic
     /// has no flags at all, so it neither burns nor occludes.
     pub tiledata: TileData,
     /// What stands in it. Statics come through the item list rather than the map
     /// because a built [`WorldMap`] has none — see [`WorldMap::from_blocks`].
-    pub items: Vec<GroundItem>,
+    pub items:    Vec<GroundItem>,
     /// Looking at [`CENTRE`], at the zoom every other test uses.
-    pub camera: Camera,
+    pub camera:   Camera,
     /// Open: these scenes have one storey, and a cutaway that hid half of it
     /// would be a second variable in every assertion.
-    pub cutaway: Cutaway,
+    pub cutaway:  Cutaway,
     /// The sky, where the scene has one. `None` is night — which is what every
     /// scene about firelight wants, because a sun would put a second term in
     /// every brightness they assert on.
-    pub sun: Option<Sun>,
+    pub sun:      Option<Sun>,
     /// Where the character stands and which way they face, when they are the one
     /// holding the light.
     ///
@@ -199,7 +226,7 @@ pub struct Scene {
     /// is carrying anything — and the flicker has to be the same instant every
     /// other flame in the frame is at, which is [`Scene::lighting`]'s argument
     /// and not this field's. See [`light::carried`] and [`Lighting::hold`].
-    pub carried: Option<(Point, Direction)>,
+    pub carried:  Option<(Point, Direction)>,
     /// The pictures, where the scene is about which *edge* a wall stands on.
     ///
     /// `None` for almost every scene, and that is not a gap: these scenes have no
@@ -212,7 +239,7 @@ pub struct Scene {
     /// with [`facing::silhouette`](crate::facing::silhouette) and hands it here.
     /// See [`lamp_against_a_wall`], which is the case a whole-tile occluder gets
     /// wrong: a light mounted on a house, shining along the street it hangs over.
-    pub art: Option<StaticAtlas>,
+    pub art:      Option<StaticAtlas>,
 }
 
 impl Scene {
@@ -298,9 +325,11 @@ impl Scene {
 /// The land graphic is `0`, which the scenes' `tiledata` gives no flags, so the
 /// ground itself neither burns nor stops anything.
 fn ground() -> WorldMap {
-    WorldMap::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
-        tile: openshard_tiles::LandTileId(0),
-        z: 0,
+    WorldMap::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| {
+        LandCell {
+            tile: openshard_tiles::LandTileId(0),
+            z:    0,
+        }
     })
 }
 

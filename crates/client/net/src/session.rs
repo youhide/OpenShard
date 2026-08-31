@@ -19,15 +19,35 @@
 
 use std::net::SocketAddrV4;
 
-use openshard_protocol::identity::{RawAccountName, RawCharacterName, RawPlaintextPassword};
-use openshard_protocol::login::{
-    AccountLogin, CharacterList, DenyReason, GameServerLogin, RawShardIndex, SelectShard, ShardList,
+use openshard_protocol::identity::{
+    RawAccountName,
+    RawCharacterName,
+    RawPlaintextPassword,
 };
-use openshard_protocol::seed::{RawSeedValue, Seed};
+use openshard_protocol::login::{
+    AccountLogin,
+    CharacterList,
+    DenyReason,
+    GameServerLogin,
+    RawShardIndex,
+    SelectShard,
+    ShardList,
+};
+use openshard_protocol::seed::{
+    RawSeedValue,
+    Seed,
+};
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::version::ClientVersion;
-use openshard_protocol::wire::{AuthKey, RawCharacterSlot, RawClientIp};
-use openshard_protocol::world::{CharacterPlay, PlayerStart};
+use openshard_protocol::wire::{
+    AuthKey,
+    RawCharacterSlot,
+    RawClientIp,
+};
+use openshard_protocol::world::{
+    CharacterPlay,
+    PlayerStart,
+};
 
 use crate::connection::PacketId;
 
@@ -51,14 +71,18 @@ impl Pick {
     /// Find it, among names in the order the server listed them.
     fn find<'a>(&self, names: impl Iterator<Item = &'a str>) -> Option<usize> {
         match self {
-            Self::First => names
-                .enumerate()
-                .find(|(_, name)| !name.is_empty())
-                .map(|(i, _)| i),
-            Self::Named(wanted) => names
-                .enumerate()
-                .find(|(_, name)| name.eq_ignore_ascii_case(wanted))
-                .map(|(i, _)| i),
+            Self::First => {
+                names
+                    .enumerate()
+                    .find(|(_, name)| !name.is_empty())
+                    .map(|(i, _)| i)
+            }
+            Self::Named(wanted) => {
+                names
+                    .enumerate()
+                    .find(|(_, name)| name.eq_ignore_ascii_case(wanted))
+                    .map(|(i, _)| i)
+            }
         }
     }
 }
@@ -67,11 +91,11 @@ impl Pick {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Plan {
     /// The account name.
-    pub account: RawAccountName,
+    pub account:   RawAccountName,
     /// The password, plaintext — the protocol has no other kind.
-    pub password: RawPlaintextPassword,
+    pub password:  RawPlaintextPassword,
     /// Which shard to take from the `0xA8` list.
-    pub shard: Pick,
+    pub shard:     Pick,
     /// Which character to play from the `0xA9` list.
     pub character: Pick,
 }
@@ -117,7 +141,7 @@ pub enum Step {
         endpoint: SocketAddrV4,
         /// The seed and the `0x91`, which carry the auth key that makes the new
         /// socket this account's.
-        opening: Vec<u8>,
+        opening:  Vec<u8>,
     },
     /// A body arrived: this is the client's own character, and where it stands.
     Entered(PlayerStart),
@@ -141,7 +165,7 @@ pub enum LoginError {
         /// Where the conversation was.
         stage: Stage,
         /// The id that arrived.
-        id: PacketId,
+        id:    PacketId,
     },
     /// The shard list held nothing matching the pick.
     NoSuchShard(Pick),
@@ -163,14 +187,15 @@ impl std::fmt::Display for LoginError {
     }
 }
 
-impl std::error::Error for LoginError {}
+impl std::error::Error for LoginError {
+}
 
 /// Drives one login, across both sockets.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Login {
-    plan: Plan,
-    version: ClientVersion,
-    stage: Stage,
+    plan:     Plan,
+    version:  ClientVersion,
+    stage:    Stage,
     /// Kept from the relay so the `0x91` can present it. This is the only thing
     /// linking the two sockets.
     auth_key: AuthKey,
@@ -204,7 +229,7 @@ impl Login {
         let mut bytes = Seed::encode(RawSeedValue(0x0A00_0001), self.version);
         bytes.extend(
             AccountLogin {
-                account: self.plan.account.clone(),
+                account:  self.plan.account.clone(),
                 password: self.plan.password.clone(),
             }
             .encode(),
@@ -228,7 +253,7 @@ impl Login {
                 self.stage = Stage::Relayed;
                 Ok(Step::Relay {
                     endpoint: relay.endpoint,
-                    opening: self.open_game(),
+                    opening:  self.open_game(),
                 })
             }
             (Stage::AwaitingCharacters, ServerPacket::CharacterList(list)) => self.pick_character(list),
@@ -244,17 +269,21 @@ impl Login {
             // rest — the features mask, the light level, the music — is the
             // server talking while the client listens, and is not this type's
             // business.
-            (stage, packet) => match packet {
-                ServerPacket::ShardList(_)
-                | ServerPacket::Relay(_)
-                | ServerPacket::CharacterList(_)
-                | ServerPacket::PlayerStart(_)
-                | ServerPacket::LoginComplete(_) => Err(LoginError::OutOfTurn {
-                    stage,
-                    id: PacketId(packet.id()),
-                }),
-                _ => Ok(Step::Idle),
-            },
+            (stage, packet) => {
+                match packet {
+                    ServerPacket::ShardList(_)
+                    | ServerPacket::Relay(_)
+                    | ServerPacket::CharacterList(_)
+                    | ServerPacket::PlayerStart(_)
+                    | ServerPacket::LoginComplete(_) => {
+                        Err(LoginError::OutOfTurn {
+                            stage,
+                            id: PacketId(packet.id()),
+                        })
+                    }
+                    _ => Ok(Step::Idle),
+                }
+            }
         }
     }
 
@@ -287,8 +316,8 @@ impl Login {
         self.stage = Stage::AwaitingStart;
         Ok(Step::Send(
             CharacterPlay {
-                name: RawCharacterName(name),
-                slot: RawCharacterSlot(slot as u32),
+                name:      RawCharacterName(name),
+                slot:      RawCharacterSlot(slot as u32),
                 // The client's own idea of its address. The server has the
                 // socket's real one and does not believe this field — see
                 // `RawClientIp` — so there is nothing to be gained by
@@ -306,7 +335,7 @@ impl Login {
         bytes.extend(
             GameServerLogin {
                 auth_key: self.auth_key,
-                account: self.plan.account.clone(),
+                account:  self.plan.account.clone(),
                 password: self.plan.password.clone(),
             }
             .encode(),
@@ -321,11 +350,27 @@ mod tests {
 
     use openshard_protocol::identity::CharacterName;
     use openshard_protocol::login::{
-        CharacterEntry, CharacterListFlags, LoginDenied, PercentFull, Relay, ShardEntry, StartLocation,
+        CharacterEntry,
+        CharacterListFlags,
+        LoginDenied,
+        PercentFull,
+        Relay,
+        ShardEntry,
+        StartLocation,
     };
     use openshard_protocol::serial::Serial;
-    use openshard_protocol::wire::{ClilocId, Graphic};
-    use openshard_protocol::world::{Facet, Light, LightLevel, LoginComplete, MapSize, Point};
+    use openshard_protocol::wire::{
+        ClilocId,
+        Graphic,
+    };
+    use openshard_protocol::world::{
+        Facet,
+        Light,
+        LightLevel,
+        LoginComplete,
+        MapSize,
+        Point,
+    };
 
     use super::*;
 
@@ -335,9 +380,9 @@ mod tests {
 
     fn plan() -> Plan {
         Plan {
-            account: RawAccountName("admin".to_owned()),
-            password: RawPlaintextPassword("hunter2".to_owned()),
-            shard: Pick::First,
+            account:   RawAccountName("admin".to_owned()),
+            password:  RawPlaintextPassword("hunter2".to_owned()),
+            shard:     Pick::First,
             character: Pick::Named("Lord British".to_owned()),
         }
     }
@@ -345,10 +390,10 @@ mod tests {
     fn shard_list() -> ServerPacket {
         ServerPacket::ShardList(ShardList {
             shards: vec![ShardEntry {
-                name: "OpenShard".to_owned(),
+                name:         "OpenShard".to_owned(),
                 percent_full: PercentFull::EMPTY,
-                timezone: 5,
-                address: Ipv4Addr::LOCALHOST,
+                timezone:     5,
+                address:      Ipv4Addr::LOCALHOST,
             }],
         })
     }
@@ -362,10 +407,10 @@ mod tests {
         ServerPacket::CharacterList(CharacterList {
             characters,
             starts: vec![StartLocation {
-                area: "Britain".to_owned(),
-                name: "Castle Britannia".to_owned(),
-                position: Point::new(1475, 1770, 20),
-                map: Facet(0),
+                area:               "Britain".to_owned(),
+                name:               "Castle Britannia".to_owned(),
+                position:           Point::new(1475, 1770, 20),
+                map:                Facet(0),
                 description_cliloc: ClilocId(1_075_072),
             }],
             flags: CharacterListFlags::TOOLTIPS,
@@ -374,13 +419,13 @@ mod tests {
 
     fn player_start() -> PlayerStart {
         PlayerStart {
-            serial: Serial::new(0x0000_002A).unwrap(),
-            body: Graphic(0x0190),
+            serial:   Serial::new(0x0000_002A).unwrap(),
+            body:     Graphic(0x0190),
             position: Point::new(1475, 1770, 20),
-            facing: openshard_protocol::direction::Facing::walking(
+            facing:   openshard_protocol::direction::Facing::walking(
                 openshard_protocol::direction::Direction::South,
             ),
-            map: MapSize::BRITANNIA,
+            map:      MapSize::BRITANNIA,
         }
     }
 
@@ -511,7 +556,7 @@ mod tests {
             login.on_packet(&character_list()),
             Err(LoginError::OutOfTurn {
                 stage: Stage::AwaitingShards,
-                id: PacketId(0xA9),
+                id:    PacketId(0xA9),
             })
         );
     }
@@ -540,8 +585,8 @@ mod tests {
         // 0x5D naming nobody.
         let list = ServerPacket::CharacterList(CharacterList {
             characters: vec![CharacterEntry::default(); 5],
-            starts: Vec::new(),
-            flags: CharacterListFlags::NONE,
+            starts:     Vec::new(),
+            flags:      CharacterListFlags::NONE,
         });
         let mut login = Login::new(plan(), version());
         login.stage = Stage::AwaitingCharacters;

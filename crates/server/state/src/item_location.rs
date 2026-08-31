@@ -5,11 +5,25 @@
 //! projections for spatial, container, and outfit code; this module is the one
 //! door through which the canonical edge is established or changed.
 
-use crate::components::{Body, Container, Drawn, Equipped, ItemLocation, Position, SettledItemLocation};
-use crate::{HeldItem, WorldState, runtime::Origin};
+use std::collections::HashSet;
+
 use openshard_entities::EntityId;
 use openshard_protocol::serial::Serial;
-use std::collections::HashSet;
+
+use crate::components::{
+    Body,
+    Container,
+    Drawn,
+    Equipped,
+    ItemLocation,
+    Position,
+    SettledItemLocation,
+};
+use crate::runtime::Origin;
+use crate::{
+    HeldItem,
+    WorldState,
+};
 
 /// Why an ownership edge could not be installed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -45,8 +59,8 @@ pub enum LocationError {
 /// branch.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PreparedItemRelocation {
-    item: EntityId,
-    previous: ItemLocation,
+    item:        EntityId,
+    previous:    ItemLocation,
     destination: ItemLocation,
 }
 
@@ -133,17 +147,16 @@ pub fn contained_items(
         .entity_of(container)
         .and_then(|entity| state.registry.get::<ContainedItems>(entity))
         .map_or(&[], |contents| contents.candidates.as_slice());
-    candidates
-        .iter()
-        .copied()
-        .filter_map(move |item| match item_location(state, item) {
+    candidates.iter().copied().filter_map(move |item| {
+        match item_location(state, item) {
             Some(ItemLocation::Settled(SettledItemLocation::Contained(contained)))
                 if contained.container == container =>
             {
                 Some((item, contained))
             }
             _ => None,
-        })
+        }
+    })
 }
 
 /// Every descendant below `root`, in stable serial order.
@@ -717,20 +730,32 @@ fn validate_container(state: &WorldState, item: EntityId, container: Serial) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::FacetState;
-    use crate::components::Contained;
-    use crate::components::{Drawn, Equipped};
+    use std::collections::BTreeMap;
+
     use openshard_protocol::access::AccessLevel;
     use openshard_protocol::containers::GridSlot;
     use openshard_protocol::gump::GumpPoint;
     use openshard_protocol::identity::AccountName;
     use openshard_protocol::serial::SerialKind;
     use openshard_protocol::version::ClientVersion;
-    use openshard_protocol::wire::{Graphic, Hue, Layer};
-    use openshard_protocol::world::{Facet, Point};
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+        Layer,
+    };
+    use openshard_protocol::world::{
+        Facet,
+        Point,
+    };
     use proptest::prelude::*;
-    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::FacetState;
+    use crate::components::{
+        Contained,
+        Drawn,
+        Equipped,
+    };
 
     fn world() -> WorldState {
         let tiles = openshard_tiles::TileData::empty();
@@ -765,7 +790,7 @@ mod tests {
         state.registry.insert(
             entity,
             Drawn {
-                id: Graphic(graphic),
+                id:  Graphic(graphic),
                 hue: Hue(0),
             },
         );
@@ -825,8 +850,8 @@ mod tests {
             inner,
             ItemLocation::contained(Contained {
                 container: outer_serial,
-                position: GumpPoint::new(0, 0),
-                grid: GridSlot(0),
+                position:  GumpPoint::new(0, 0),
+                grid:      GridSlot(0),
             }),
         )
         .unwrap();
@@ -837,8 +862,8 @@ mod tests {
                 outer,
                 ItemLocation::contained(Contained {
                     container: inner_serial,
-                    position: GumpPoint::new(0, 0),
-                    grid: GridSlot(0),
+                    position:  GumpPoint::new(0, 0),
+                    grid:      GridSlot(0),
                 }),
             ),
             Err(LocationError::ContainerCycle)
@@ -859,7 +884,7 @@ mod tests {
         state.registry.insert(
             mobile,
             Body {
-                id: Graphic(0x0190),
+                id:  Graphic(0x0190),
                 hue: Hue(0),
             },
         );
@@ -867,7 +892,7 @@ mod tests {
         let (second, _) = item(&mut state, 2);
         let worn = Equipped {
             mobile: mobile_serial,
-            layer: Layer(1),
+            layer:  Layer(1),
         };
 
         establish_item_location(&mut state, first, ItemLocation::equipped(worn)).unwrap();
@@ -889,8 +914,8 @@ mod tests {
         establish_item_location(&mut state, item, ItemLocation::ground(Facet(0), at)).unwrap();
         let contained = Contained {
             container: container_serial,
-            position: GumpPoint::new(20, 30),
-            grid: GridSlot(1),
+            position:  GumpPoint::new(20, 30),
+            grid:      GridSlot(1),
         };
         relocate_item(&mut state, item, ItemLocation::contained(contained)).unwrap();
 
@@ -913,8 +938,8 @@ mod tests {
         let (child, _) = item(&mut state, 3);
         let in_first = Contained {
             container: first_serial,
-            position: GumpPoint::new(10, 20),
-            grid: GridSlot(1),
+            position:  GumpPoint::new(10, 20),
+            grid:      GridSlot(1),
         };
         establish_item_location(&mut state, child, ItemLocation::contained(in_first)).unwrap();
 
@@ -926,8 +951,8 @@ mod tests {
 
         let in_second = Contained {
             container: second_serial,
-            position: GumpPoint::new(30, 40),
-            grid: GridSlot(2),
+            position:  GumpPoint::new(30, 40),
+            grid:      GridSlot(2),
         };
         relocate_item(&mut state, child, ItemLocation::contained(in_second)).unwrap();
 
@@ -952,8 +977,8 @@ mod tests {
             child,
             ItemLocation::contained(Contained {
                 container: container_serial,
-                position: GumpPoint::new(10, 20),
-                grid: GridSlot(1),
+                position:  GumpPoint::new(10, 20),
+                grid:      GridSlot(1),
             }),
         )
         .unwrap();
@@ -980,8 +1005,8 @@ mod tests {
             child,
             ItemLocation::contained(Contained {
                 container: container_serial,
-                position: GumpPoint::new(10, 20),
-                grid: GridSlot(1),
+                position:  GumpPoint::new(10, 20),
+                grid:      GridSlot(1),
             }),
         )
         .unwrap();
@@ -1024,8 +1049,8 @@ mod tests {
             nested,
             ItemLocation::contained(Contained {
                 container: root_serial,
-                position: GumpPoint::new(30, 40),
-                grid: GridSlot(2),
+                position:  GumpPoint::new(30, 40),
+                grid:      GridSlot(2),
             }),
         )
         .unwrap();
@@ -1034,8 +1059,8 @@ mod tests {
             lower_serial_child,
             ItemLocation::contained(Contained {
                 container: root_serial,
-                position: GumpPoint::new(10, 20),
-                grid: GridSlot(1),
+                position:  GumpPoint::new(10, 20),
+                grid:      GridSlot(1),
             }),
         )
         .unwrap();
@@ -1044,8 +1069,8 @@ mod tests {
             nested_child,
             ItemLocation::contained(Contained {
                 container: nested_serial,
-                position: GumpPoint::new(50, 60),
-                grid: GridSlot(3),
+                position:  GumpPoint::new(50, 60),
+                grid:      GridSlot(3),
             }),
         )
         .unwrap();
@@ -1080,7 +1105,7 @@ mod tests {
             ItemLocation::Held {
                 connection,
                 origin: SettledItemLocation::Ground {
-                    facet: Facet(0),
+                    facet:    Facet(0),
                     position: at,
                 },
             },
@@ -1107,8 +1132,8 @@ mod tests {
             child,
             ItemLocation::contained(Contained {
                 container: container_serial,
-                position: GumpPoint::new(10, 20),
-                grid: GridSlot(1),
+                position:  GumpPoint::new(10, 20),
+                grid:      GridSlot(1),
             }),
         )
         .unwrap();

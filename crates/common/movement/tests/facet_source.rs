@@ -10,13 +10,31 @@
 //! It needs no client install: a base set is a world of ours, and one four
 //! blocks square is written into the temp directory here.
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, WorldMap};
-use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
-use openshard_map::snapshot::{MapRevision, MapSnapshot};
-use openshard_movement::bake::{FacetWorld, SourceError, WorldSource};
+use openshard_map::map::{
+    LandCell,
+    WorldMap,
+};
+use openshard_map::patch::{
+    Patch,
+    PatchAuthor,
+    PatchOp,
+    PatchTime,
+};
+use openshard_map::snapshot::{
+    MapRevision,
+    MapSnapshot,
+};
+use openshard_movement::bake::{
+    FacetWorld,
+    SourceError,
+    WorldSource,
+};
 use openshard_protocol::world::Facet;
 use openshard_tiles::LandTileId;
 
@@ -26,7 +44,7 @@ const BLOCKS: u32 = 4;
 /// Flat ground, so a patch that raises one tile is visible against it.
 const GROUND: LandCell = LandCell {
     tile: LandTileId(3),
-    z: 0,
+    z:    0,
 };
 
 /// A base set in the temp directory, and the log path beside it.
@@ -143,7 +161,7 @@ fn a_committed_patch_is_part_of_the_world_the_source_resolves_to() {
     let before = FacetWorld::read(&install, WorldSource::BaseSet(&path), FACET).expect("the base set");
     let raised = LandCell {
         tile: GROUND.tile,
-        z: 40,
+        z:    40,
     };
     let op = PatchOp::set_land(before.snapshot.map(), 5, 6, raised).expect("a tile of this world");
     let patch = Patch::new(

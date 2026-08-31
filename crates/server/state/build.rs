@@ -33,7 +33,10 @@
 //! JSON — a data file is a poor place for prose, and this is the file that
 //! decides what the item means.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -63,34 +66,34 @@ const SKILLS_DOC: &str = "\
 #[serde(deny_unknown_fields)]
 struct SkillRow {
     /// What it is called: "Alchemy", "Item Identification".
-    name: String,
+    name:              String,
     /// The title a grandmaster earns.
-    title: String,
+    title:             String,
     /// The stat the ML gain mechanic tries first — a `StatCode` variant's name.
-    primary: String,
+    primary:           String,
     /// The stat it falls back to.
-    secondary: String,
+    secondary:         String,
     /// How much strength lends to the effective value, in hundredths.
-    str_scale: u32,
+    str_scale:         u32,
     /// How much dexterity lends.
-    dex_scale: u32,
+    dex_scale:         u32,
     /// How much intelligence lends.
-    int_scale: u32,
+    int_scale:         u32,
     /// The ceiling on the whole stat bonus. ServUO sums the *undivided* scales
     /// here; see `SkillInfo::stat_total` for why that is not a slip.
-    stat_total: u32,
+    stat_total:        u32,
     /// The chance weight that training nudges strength, in thousandths.
-    str_gain: u32,
+    str_gain:          u32,
     /// The same for dexterity.
-    dex_gain: u32,
+    dex_gain:          u32,
     /// The same for intelligence.
-    int_gain: u32,
+    int_gain:          u32,
     /// A multiplier on how readily the skill trains, in per-mille.
-    gain_factor: u32,
+    gain_factor:       u32,
     /// Whether the skill can be used straight from the window's button. False on
     /// thirty-five of the fifty-eight, so it is left out of the data there.
     #[serde(default)]
-    usable: bool,
+    usable:            bool,
     /// Whether it may be used with a spell in flight. Spirit Speak alone.
     #[serde(default)]
     use_while_casting: bool,
@@ -110,9 +113,9 @@ fn id(raw: &str) -> u16 {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ItemDefinitionRow {
-    id: u32,
-    name: String,
-    graphic: String,
+    id:              u32,
+    name:            String,
+    graphic:         String,
     /// Alternative legacy graphics for the same semantic kind (for example a
     /// flipped pickaxe). The first `graphic` remains the canonical projection.
     #[serde(default)]
@@ -120,22 +123,22 @@ struct ItemDefinitionRow {
     /// The gump that makes a semantic container openable. A container kind
     /// must name one so a typed constructor never creates a decorative bag.
     #[serde(default)]
-    container_gump: Option<String>,
+    container_gump:  Option<String>,
     material_family: Option<String>,
     #[serde(default)]
-    armor_rating: Option<u16>,
+    armor_rating:    Option<u16>,
     #[serde(default)]
-    tags: Vec<String>,
+    tags:            Vec<String>,
 }
 
 /// One material grade and its legacy presentation hue.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MaterialDefinitionRow {
-    id: u16,
-    family: String,
-    name: String,
-    hue: String,
+    id:          u16,
+    family:      String,
+    name:        String,
+    hue:         String,
     armor_bonus: u16,
 }
 
@@ -404,7 +407,7 @@ struct CreatureGroup {
     /// The heading: "Farm and forest animals", "Undead".
     group: String,
     /// The rows under it, in the order they are matched.
-    rows: Vec<CreatureRow>,
+    rows:  Vec<CreatureRow>,
 }
 
 /// One row: the bodies that share a value, and the value.
@@ -417,17 +420,17 @@ struct CreatureGroup {
 #[serde(deny_unknown_fields)]
 struct CreatureRow {
     /// The body ids this row answers for.
-    ids: Vec<String>,
+    ids:   Vec<String>,
     /// The default name, in `creature_names.json`.
     #[serde(default)]
-    name: Option<String>,
+    name:  Option<String>,
     /// The base sound id, in `creature_sounds.json`.
     #[serde(default)]
     sound: Option<String>,
     /// What the sound belongs to, kept as the trailing comment it was: a sound
     /// id says nothing on its own, and `0x00E5` is a wolf only if it says so.
     #[serde(default)]
-    note: Option<String>,
+    note:  Option<String>,
 }
 
 /// The doc over the generated `creature_name`.
@@ -520,11 +523,11 @@ struct HarvestTiles {
     /// ServUO's `Mining.m_MountainAndCaveTiles`, land ids and Ter Mur statics.
     mountain_and_cave: Vec<u16>,
     /// ServUO's sand tiles.
-    sand: Vec<u16>,
+    sand:              Vec<u16>,
     /// ServUO's `Lumberjacking.m_TreeTiles` — all statics.
-    tree: Vec<String>,
+    tree:              Vec<String>,
     /// Water, as inclusive `(from, to)` ranges rather than every id.
-    water: Vec<(String, String)>,
+    water:             Vec<(String, String)>,
 }
 
 /// The four tile tables, emitted the way they were written: mining's and sand's
@@ -617,24 +620,24 @@ const QUESTS_DOC: &str = "\
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Quest {
-    key: String,
-    title: String,
-    description: String,
-    refuse: String,
-    uncomplete: String,
-    complete: String,
+    key:                String,
+    title:              String,
+    description:        String,
+    refuse:             String,
+    uncomplete:         String,
+    complete:           String,
     /// Said when a timed objective runs out. Blank for the quests that have no
     /// clock, which is all of them so far.
     #[serde(default)]
-    failed: String,
-    objectives: Vec<Objective>,
+    failed:             String,
+    objectives:         Vec<Objective>,
     #[serde(default)]
-    rewards: Vec<Reward>,
+    rewards:            Vec<Reward>,
     /// ServUO's default: a quest asks for everything on its list.
     #[serde(default = "every_objective")]
-    all_objectives: bool,
+    all_objectives:     bool,
     #[serde(default)]
-    done_once: bool,
+    done_once:          bool,
     #[serde(default)]
     restart_delay_secs: u32,
 }
@@ -649,9 +652,9 @@ const fn every_objective() -> bool {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Objective {
-    kind: ObjectiveKind,
-    count: u16,
-    name: String,
+    kind:    ObjectiveKind,
+    count:   u16,
+    name:    String,
     /// How long the player has, in seconds. `0` is untimed.
     #[serde(default)]
     seconds: u32,
@@ -671,7 +674,7 @@ enum ObjectiveKind {
     },
     Deliver {
         graphic: String,
-        to: String,
+        to:      String,
     },
     Escort {
         /// The destination region, as `Regions` names it — or **empty**, which
@@ -728,10 +731,10 @@ struct Reward {
 enum RewardKind {
     Gold(u32),
     Item {
-        graphic: String,
+        graphic:   String,
         #[serde(default = "no_hue")]
-        hue: String,
-        amount: u16,
+        hue:       String,
+        amount:    u16,
         #[serde(default)]
         stackable: bool,
     },
@@ -801,9 +804,9 @@ const REGIONS_DOC: &str = "\
 #[serde(deny_unknown_fields)]
 struct RegionSet {
     /// The admin verb — `world::admin`'s `ROWS` is the other half of this.
-    verb: String,
+    verb:    String,
     /// Which facet the areas belong to.
-    facet: u8,
+    facet:   u8,
     /// The areas, in the order they will be numbered.
     regions: Vec<RegionDef>,
 }
@@ -817,27 +820,27 @@ struct RegionSet {
 #[serde(deny_unknown_fields)]
 struct RegionDef {
     /// What it is called — "Britain", "Covetous".
-    name: String,
+    name:        String,
     /// Which region wins where two overlap: the higher number.
-    priority: u8,
+    priority:    u8,
     /// The boxes it covers.
-    rects: Vec<Rect>,
+    rects:       Vec<Rect>,
     #[serde(default)]
-    guarded: bool,
+    guarded:     bool,
     #[serde(default)]
     no_teleport: bool,
     #[serde(default)]
-    no_recall: bool,
+    no_recall:   bool,
     #[serde(default)]
-    no_housing: bool,
+    no_housing:  bool,
     #[serde(default)]
-    safe: bool,
+    safe:        bool,
     /// A `MusicName` index, ServUO's enum order.
     #[serde(default)]
-    music: Option<u16>,
+    music:       Option<u16>,
     /// The light level inside, overriding the time of day.
     #[serde(default)]
-    light: Option<u8>,
+    light:       Option<u8>,
 }
 
 /// One box of a region. `z_min`/`z_max` default to the whole column, which is
@@ -845,14 +848,14 @@ struct RegionDef {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Rect {
-    x: u16,
-    y: u16,
-    width: u16,
+    x:      u16,
+    y:      u16,
+    width:  u16,
     height: u16,
     #[serde(default = "z_floor")]
-    z_min: i8,
+    z_min:  i8,
     #[serde(default = "z_ceiling")]
-    z_max: i8,
+    z_max:  i8,
 }
 
 /// A rect's default lowest height: everything below.
@@ -1017,20 +1020,20 @@ const SPEECH_DOC: &str = "\
 #[serde(deny_unknown_fields)]
 struct Trade {
     /// The [`Title`] its NPCs wear, and the key the table is found by.
-    title: String,
+    title:     String,
     /// What it greets an approaching player with.
     #[serde(default)]
     greetings: Vec<String>,
     /// What it says to itself. Empty is silence, and two trades in three are.
     #[serde(default)]
-    barks: Vec<String>,
+    barks:     Vec<String>,
     /// Keyword groups, in precedence order — the first match wins.
     #[serde(default)]
-    entries: Vec<TradeEntry>,
+    entries:   Vec<TradeEntry>,
     /// What it answers when nothing matched. Blank stays quiet, which is what
     /// every trade so far does.
     #[serde(default)]
-    fallback: String,
+    fallback:  String,
 }
 
 /// One keyword group of a [`Trade`].
@@ -1040,7 +1043,7 @@ struct TradeEntry {
     /// The words that trigger it.
     keywords: Vec<String>,
     /// The answers, one picked at random.
-    lines: Vec<String>,
+    lines:    Vec<String>,
 }
 
 /// The Rust expression for a list of owned strings.
@@ -1159,12 +1162,14 @@ fn speech(text: &str) -> String {
 
         match trade.fallback.is_empty() {
             true => out.push_str("                fallback: None,\n"),
-            false => writeln!(
-                out,
-                "                fallback: Some({:?}.to_owned()),",
-                trade.fallback
-            )
-            .unwrap(),
+            false => {
+                writeln!(
+                    out,
+                    "                fallback: Some({:?}.to_owned()),",
+                    trade.fallback
+                )
+                .unwrap()
+            }
         }
         out.push_str("            },\n");
         out.push_str("        ),\n");

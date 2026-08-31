@@ -6,23 +6,42 @@
 //! atlases and [`crate::presentation`]'s passes do that from what is
 //! collected here.
 
-use openshard_client_render::camera::Camera;
-use openshard_client_render::cutaway::Cutaway;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
-use openshard_client_render::frame::{self, Impostor};
+use openshard_client_render::camera::Camera;
+use openshard_client_render::cutaway::Cutaway;
+use openshard_client_render::frame::{
+    self,
+    Impostor,
+};
 use openshard_client_render::mobiles::Mobile;
-use openshard_client_render::sprite::{SpriteQuad, split_corners};
-use openshard_client_render::{ground, items, light, mobiles, statics};
+use openshard_client_render::sprite::{
+    SpriteQuad,
+    split_corners,
+};
+use openshard_client_render::{
+    ground,
+    items,
+    light,
+    mobiles,
+    statics,
+};
 use openshard_map::grid::BlockCoord;
 use openshard_protocol::world::Weather;
 
 use crate::crowd::Who;
 use crate::diagnostics::Pick;
-use crate::picking::{self, SelectedIdentity};
+use crate::picking::{
+    self,
+    SelectedIdentity,
+};
 use crate::window::Screen;
-use crate::{graphics, resources, world};
+use crate::{
+    graphics,
+    resources,
+    world,
+};
 
 /// The ambient colour for the shard's current light level and weather.
 ///
@@ -36,7 +55,7 @@ fn ambient_for(daylight: f32, weather: openshard_client_net::view::WeatherState)
         std::array::from_fn(|channel| night[channel] + (day_colour[channel] - night[channel]) * day)
     };
     let mut ambient = light::Ambient {
-        sky: blend(light::NIGHT.sky, light::Ambient::DAY.sky),
+        sky:    blend(light::NIGHT.sky, light::Ambient::DAY.sky),
         ground: blend(light::NIGHT.ground, light::Ambient::DAY.ground),
     };
     let strength = f32::from(weather.intensity) / f32::from(u8::MAX);
@@ -112,17 +131,17 @@ pub(crate) struct GeometryCosts {
     /// cache went: a hit copies out, a miss copies in.
     pub(crate) static_cache_copy: std::time::Duration,
     /// [`split_corners`] over the map statics and the server items.
-    pub(crate) split: std::time::Duration,
+    pub(crate) split:             std::time::Duration,
     /// The selection, outline and crowd collectors that run after the frame is
     /// assembled — `statics::selected`, both `items::outlined` calls, both
     /// `mobiles::outlined` calls and `mobiles::collect`.
-    pub(crate) overlays: std::time::Duration,
+    pub(crate) overlays:          std::time::Duration,
     /// Ground quads the frame assembled, cached blocks not yet removed.
-    pub(crate) ground_quads: usize,
+    pub(crate) ground_quads:      usize,
     /// Map-static instance rows, after `split_corners` appended its shadows.
-    pub(crate) static_rows: usize,
+    pub(crate) static_rows:       usize,
     /// Server-item instance rows, the same way.
-    pub(crate) item_rows: usize,
+    pub(crate) item_rows:         usize,
 }
 
 /// Everything `frame::assemble` and its neighbours collected for one frame —
@@ -473,11 +492,13 @@ pub(crate) fn assemble_geometry(
         .presentation
         .effects
         .iter()
-        .map(|effect| openshard_client_render::effects::FlyingArrow {
-            art: effect.art,
-            from: effect.from,
-            to: effect.to,
-            progress: effect.progress(),
+        .map(|effect| {
+            openshard_client_render::effects::FlyingArrow {
+                art:      effect.art,
+                from:     effect.from,
+                to:       effect.to,
+                progress: effect.progress(),
+            }
         })
         .collect();
     item_geometry
@@ -653,38 +674,38 @@ pub(crate) fn assemble_geometry(
 /// `pick.static_`, `on_mobile` and `on_item` back out again.
 pub(crate) struct FrameFacts {
     /// Whether anybody is looking at the window at all — see `App::watched`.
-    pub(crate) watched: bool,
+    pub(crate) watched:            bool,
     /// The roof cutaway this frame's picks and picture are both drawn under.
-    pub(crate) cutaway: Cutaway,
+    pub(crate) cutaway:            Cutaway,
     /// The separate building picture policy, resolved once beside the picks.
-    pub(crate) interior: Option<openshard_client_render::interiors::InteriorFrame>,
+    pub(crate) interior:           Option<openshard_client_render::interiors::InteriorFrame>,
     /// What the cursor is over and what it lit — see [`Pick`].
-    pub(crate) pick: Pick,
+    pub(crate) pick:               Pick,
     /// The crowd as the mobile pass's own atlas already has it packed — the
     /// list `on_mobile` indexes into, and `None` before there is a window at
     /// all.
-    pub(crate) drawn_mobiles: Option<Vec<(Who, Mobile)>>,
+    pub(crate) drawn_mobiles:      Option<Vec<(Who, Mobile)>>,
     /// The server item list this frame actually draws, with serials kept in
     /// matching positions for hover and selection.
-    pub(crate) drawn_items: Vec<openshard_client_render::items::GroundItem>,
+    pub(crate) drawn_items:        Vec<openshard_client_render::items::GroundItem>,
     pub(crate) drawn_item_serials: Vec<openshard_protocol::serial::Serial>,
     /// Where in the picked ground sprite the pointer was. Captured while the
     /// completed frame is available for a later press.
-    pub(crate) on_item_grab: Option<openshard_client_render::gump::GumpPixel>,
+    pub(crate) on_item_grab:       Option<openshard_client_render::gump::GumpPixel>,
     /// The creature the cursor is over, indexing `drawn_mobiles` — the
     /// unfiltered form of [`Pick::mobile`], kept here because
     /// `App::draw_from` reads it back into `self.picking` regardless of the
     /// highlight mode: what a click selects is not a question about lighting.
-    pub(crate) on_mobile: Option<openshard_client_render::mobiles::MobileIndex>,
+    pub(crate) on_mobile:          Option<openshard_client_render::mobiles::MobileIndex>,
     /// The item the cursor is over, indexing [`Self::drawn_items`] — the
     /// unfiltered form of [`Pick::item`], for the same reason.
-    pub(crate) on_item: Option<openshard_client_render::items::ItemIndex>,
+    pub(crate) on_item:            Option<openshard_client_render::items::ItemIndex>,
     /// The server-confirmed combat target, or what a click is holding when no
     /// target is active, turned back into an index into `drawn_mobiles`.
-    pub(crate) held_mobile: Option<openshard_client_render::mobiles::MobileIndex>,
+    pub(crate) held_mobile:        Option<openshard_client_render::mobiles::MobileIndex>,
     /// The diagnostic selection, turned back into an index into
     /// [`Self::drawn_item_serials`].
-    pub(crate) selected_item: Option<openshard_client_render::items::ItemIndex>,
+    pub(crate) selected_item:      Option<openshard_client_render::items::ItemIndex>,
 }
 
 #[cfg(test)]
@@ -695,17 +716,23 @@ mod tests {
     use openshard_client_render::occlusion;
     use openshard_client_render::statics::StaticGeometry;
     use openshard_protocol::items::ItemAmount;
-    use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
     use openshard_protocol::world::Point;
 
-    use super::{items_fingerprint, separate_opaque_items};
+    use super::{
+        items_fingerprint,
+        separate_opaque_items,
+    };
 
     fn at(x: u16, y: u16) -> GroundItem {
         GroundItem {
-            amount: ItemAmount::ONE,
-            at: Point::new(x, y, 0),
+            amount:  ItemAmount::ONE,
+            at:      Point::new(x, y, 0),
             graphic: Graphic(0x0006),
-            hue: Hue::NONE,
+            hue:     Hue::NONE,
         }
     }
 
@@ -746,8 +773,8 @@ mod tests {
     #[test]
     fn an_opaque_item_keeps_its_own_impostor_volumes() {
         let volume = Volume {
-            lo: WorldVec::new(10.0, 20.0, 0.0),
-            hi: WorldVec::new(11.0, 21.0, 11.0),
+            lo:    WorldVec::new(10.0, 20.0, 0.0),
+            hi:    WorldVec::new(11.0, 21.0, 11.0),
             solid: None,
             edges: occlusion::Edges::SOUTH,
         };

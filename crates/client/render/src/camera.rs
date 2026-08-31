@@ -662,7 +662,7 @@ pub struct Projection {
     /// D11 took it from.
     pub origin: ViewPoint,
     /// Real pixels per virtual pixel.
-    pub scale: f32,
+    pub scale:  f32,
 }
 
 /// Half an extent, floored, as a float — in whichever pixel space the extent
@@ -724,7 +724,7 @@ impl Projection {
         let half = half_extent(width, height);
         Self {
             origin: ViewPoint::new(half.0, half.1),
-            scale: 1.0,
+            scale:  1.0,
         }
     }
 }
@@ -753,11 +753,11 @@ pub struct Camera {
     /// rather than a tile because everything upstream of it has one: a body
     /// mid-step is between two tiles, and naming the tile throws away the part
     /// of the answer the whole glide exists to produce.
-    eye: WorldPoint,
-    zoom: Zoom,
+    eye:        WorldPoint,
+    zoom:       Zoom,
     /// The viewport's width in *physical* pixels — the rect the UI leaves free,
     /// which is not the window.
-    pub width: u32,
+    pub width:  u32,
     /// Its height, likewise.
     pub height: u32,
 }

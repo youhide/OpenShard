@@ -95,18 +95,18 @@ const GLOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// attachment exactly.
 pub fn mask_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("outline mask"),
-        size: wgpu::Extent3d {
-            width: width.max(1),
-            height: height.max(1),
+        label:           Some("outline mask"),
+        size:            wgpu::Extent3d {
+            width:                 width.max(1),
+            height:                height.max(1),
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: MASK_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
+        sample_count:    1,
+        dimension:       wgpu::TextureDimension::D2,
+        format:          MASK_FORMAT,
+        usage:           wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats:    &[],
     })
 }
 
@@ -130,7 +130,7 @@ pub struct Glow {
     /// Its colour, and `a` is how bright the light is where it leaves the
     /// silhouette. Added to what is already there, so an alpha above one is a
     /// glow that blows the picture out rather than a brighter one.
-    pub color: [f32; 4],
+    pub color:  [f32; 4],
 }
 
 impl Glow {
@@ -140,7 +140,7 @@ impl Glow {
         // Well under one: the glow is added on top of a finished picture, and
         // half of white over the middle greys of UO art is already the
         // difference between "lit" and "not" at a glance.
-        color: [1.0, 1.0, 1.0, 0.45],
+        color:  [1.0, 1.0, 1.0, 0.45],
     };
 }
 
@@ -162,7 +162,7 @@ pub struct Ring {
     /// *screen* pixel only while the world is magnified.
     pub width: u32,
     /// The halo round the edge, or `None` for the hard edge alone.
-    pub glow: Option<Glow>,
+    pub glow:  Option<Glow>,
 }
 
 impl Ring {
@@ -174,7 +174,7 @@ impl Ring {
     pub const DEFAULT: Self = Self {
         color: [1.0, 1.0, 1.0, 1.0],
         width: 1,
-        glow: None,
+        glow:  None,
     };
 
     /// The same edge with [`Glow::DEFAULT`] behind it — what the client draws.
@@ -195,9 +195,9 @@ impl Ring {
     pub const SELECTED: Self = Self {
         color: [1.0, 0.6, 0.0, 1.0],
         width: 1,
-        glow: Some(Glow {
+        glow:  Some(Glow {
             radius: 6,
-            color: [1.0, 0.6, 0.0, 0.45],
+            color:  [1.0, 0.6, 0.0, 0.45],
         }),
     };
 
@@ -224,9 +224,9 @@ impl Ring {
 #[derive(Clone, Copy, Debug)]
 pub struct Frame<'a> {
     /// What to draw onto — the surface, after the blit has put the world there.
-    pub target: &'a wgpu::TextureView,
+    pub target:    &'a wgpu::TextureView,
     /// The mask the silhouette pass filled.
-    pub mask: &'a wgpu::TextureView,
+    pub mask:      &'a wgpu::TextureView,
     /// Its size in texels. Carried beside the view for the reason
     /// [`Target`](crate::renderer::Target) carries a size: a view does not know
     /// its own extent, and a mask sampled at the wrong one is a ring drawn in
@@ -235,36 +235,36 @@ pub struct Frame<'a> {
     /// The rectangle of `target` the world was blitted into. The same
     /// [`ViewportRect`](crate::blit::ViewportRect) the blit was given, or the
     /// ring lands somewhere the world is not.
-    pub rect: crate::blit::ViewportRect,
+    pub rect:      crate::blit::ViewportRect,
 }
 
 /// Turns a silhouette mask into a ring on the surface.
 #[derive(Debug)]
 pub struct Outline {
-    pipeline: wgpu::RenderPipeline,
-    layout: wgpu::BindGroupLayout,
-    uniforms: wgpu::Buffer,
+    pipeline:    wgpu::RenderPipeline,
+    layout:      wgpu::BindGroupLayout,
+    uniforms:    wgpu::Buffer,
     /// The glow's two pipelines: coverage out of the id mask, then one Kawase
     /// iteration, run [`GLOW_PASSES`] times between the cached pair.
-    seed: wgpu::RenderPipeline,
+    seed:        wgpu::RenderPipeline,
     seed_layout: wgpu::BindGroupLayout,
-    blur: wgpu::RenderPipeline,
+    blur:        wgpu::RenderPipeline,
     blur_layout: wgpu::BindGroupLayout,
     /// Linear and clamped: the taps are deliberately between texels — that is
     /// where a Kawase iteration gets four texels out of one tap — and a tap off
     /// the edge must read the edge rather than wrap the glow to the far side of
     /// the screen.
-    sampler: wgpu::Sampler,
+    sampler:     wgpu::Sampler,
     /// One offset per iteration. Separate buffers and not one written between
     /// passes: every pass of a frame is recorded into one encoder and submitted
     /// together, so a buffer rewritten between them would have its last value in
     /// all of them.
-    steps: Vec<wgpu::Buffer>,
+    steps:       Vec<wgpu::Buffer>,
     /// The blur's ping-pong pair, at half the mask's size, and what size that
     /// was. Owned here rather than by the caller: they are this module's
     /// intermediates, nothing else can draw into them, and a caller that had to
     /// resize them would be a caller that can get it wrong.
-    spread: SpreadState,
+    spread:      SpreadState,
 }
 
 /// Whether the glow targets have been fitted to a frame yet.
@@ -284,7 +284,7 @@ enum SpreadState {
 struct Spread {
     /// The mask size these were sized from — not their own size, so the test
     /// for "still valid" is against what the caller passes.
-    mask: (u32, u32),
+    mask:     (u32, u32),
     textures: [wgpu::Texture; 2],
 }
 
@@ -313,8 +313,8 @@ impl Spread {
     /// world's mask.
     fn new(device: &wgpu::Device, mask: (u32, u32)) -> Self {
         let size = wgpu::Extent3d {
-            width: mask.0.div_ceil(2).max(1),
-            height: mask.1.div_ceil(2).max(1),
+            width:                 mask.0.div_ceil(2).max(1),
+            height:                mask.1.div_ceil(2).max(1),
             depth_or_array_layers: 1,
         };
         let target = |label| {
@@ -348,79 +348,79 @@ impl Outline {
     /// blit's output.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("outline"),
+            label:   Some("outline"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                    binding:    0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding:    1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding:    2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding:    3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
+                    ty:         wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count:      None,
                 },
             ],
         });
 
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("ring"),
-            size: RING_BYTES,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            label:              Some("ring"),
+            size:               RING_BYTES,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("outline"),
+            label:  Some("outline"),
             source: wgpu::ShaderSource::Wgsl(include_str!("outline.wgsl").into()),
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("outline"),
+            label:              Some("outline"),
             bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
+            immediate_size:     0,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("outline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+            label:          Some("outline"),
+            layout:         Some(&pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
+                buffers:             &[],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
+                targets:             &[Some(wgpu::ColorTargetState {
                     format,
                     // Blended, unlike every other pass here, because this one
                     // draws *onto* a finished picture rather than into an empty
@@ -438,41 +438,41 @@ impl Outline {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+            primitive:      wgpu::PrimitiveState {
+                topology:           wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
+                front_face:         wgpu::FrontFace::Ccw,
+                cull_mode:          None,
+                unclipped_depth:    false,
+                polygon_mode:       wgpu::PolygonMode::Fill,
+                conservative:       false,
             },
             // No depth: the world's depth buffer already decided what is
             // visible, and the mask is the record of that decision.
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            depth_stencil:  None,
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
 
         let glow = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("glow"),
+            label:  Some("glow"),
             source: wgpu::ShaderSource::Wgsl(include_str!("glow.wgsl").into()),
         });
 
         // Binding 0 alone: the seed reads the id mask and nothing else, and its
         // output size is the target's rather than a uniform's.
         let seed_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("glow seed"),
+            label:   Some("glow seed"),
             entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
+                binding:    0,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Uint,
+                ty:         wgpu::BindingType::Texture {
+                    sample_type:    wgpu::TextureSampleType::Uint,
                     view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
+                    multisampled:   false,
                 },
-                count: None,
+                count:      None,
             }],
         });
         let seed = full_screen_pipeline(device, &glow, "seed", &seed_layout, GLOW_FORMAT);
@@ -480,33 +480,33 @@ impl Outline {
         // 1..3, matching `glow.wgsl` — see the comment there for why the blur's
         // bindings start where they do.
         let blur_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("glow blur"),
+            label:   Some("glow blur"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding:    1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding:    2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
+                    ty:         wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding:    3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
             ],
         });
@@ -525,9 +525,9 @@ impl Outline {
         let steps = (0..GLOW_PASSES)
             .map(|_| {
                 device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("glow step"),
-                    size: STEP_BYTES,
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    label:              Some("glow step"),
+                    size:               STEP_BYTES,
+                    usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 })
             })
@@ -589,23 +589,23 @@ impl Outline {
         // every resize and every zoom step, and a cached group would point at a
         // texture nothing is drawing into any more.
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("outline"),
-            layout: &self.layout,
+            label:   Some("outline"),
+            layout:  &self.layout,
             entries: &[
                 wgpu::BindGroupEntry {
-                    binding: 0,
+                    binding:  0,
                     resource: wgpu::BindingResource::TextureView(frame.mask),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 1,
+                    binding:  1,
                     resource: self.uniforms.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding:  2,
                     resource: wgpu::BindingResource::TextureView(lit),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding:  3,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
                 },
             ],
@@ -614,11 +614,11 @@ impl Outline {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("outline"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: frame.target,
-                depth_slice: None,
+                view:           frame.target,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                ops:            wgpu::Operations {
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -662,10 +662,10 @@ impl Outline {
         glow: Glow,
     ) {
         let seed = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("glow seed"),
-            layout: &self.seed_layout,
+            label:   Some("glow seed"),
+            layout:  &self.seed_layout,
             entries: &[wgpu::BindGroupEntry {
-                binding: 0,
+                binding:  0,
                 resource: wgpu::BindingResource::TextureView(mask),
             }],
         });
@@ -680,19 +680,19 @@ impl Outline {
             queue.write_buffer(&self.steps[index], 0, &bytes);
             let source = index % 2;
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("glow blur"),
-                layout: &self.blur_layout,
+                label:   Some("glow blur"),
+                layout:  &self.blur_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
-                        binding: 1,
+                        binding:  1,
                         resource: wgpu::BindingResource::TextureView(&views[source]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 2,
+                        binding:  2,
                         resource: wgpu::BindingResource::Sampler(&self.sampler),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 3,
+                        binding:  3,
                         resource: self.steps[index].as_entire_binding(),
                     },
                 ],
@@ -731,11 +731,11 @@ fn full_screen_pass(
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some(label),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: target,
-            depth_slice: None,
+            view:           target,
+            depth_slice:    None,
             resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            ops:            wgpu::Operations {
+                load:  wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                 store: wgpu::StoreOp::Store,
             },
         })],
@@ -759,24 +759,24 @@ fn full_screen_pipeline(
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some(entry),
+        label:              Some(entry),
         bind_group_layouts: &[Some(layout)],
-        immediate_size: 0,
+        immediate_size:     0,
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some(entry),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: shader,
-            entry_point: Some("vs_main"),
+        label:          Some(entry),
+        layout:         Some(&pipeline_layout),
+        vertex:         wgpu::VertexState {
+            module:              shader,
+            entry_point:         Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[],
+            buffers:             &[],
         },
-        fragment: Some(wgpu::FragmentState {
-            module: shader,
-            entry_point: Some(entry),
+        fragment:       Some(wgpu::FragmentState {
+            module:              shader,
+            entry_point:         Some(entry),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &[Some(wgpu::ColorTargetState {
+            targets:             &[Some(wgpu::ColorTargetState {
                 format,
                 // No blending anywhere in the chain: every pass writes every
                 // texel of its target, so there is nothing underneath to blend
@@ -785,18 +785,18 @@ fn full_screen_pipeline(
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleStrip,
+        primitive:      wgpu::PrimitiveState {
+            topology:           wgpu::PrimitiveTopology::TriangleStrip,
             strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None,
-            unclipped_depth: false,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
+            front_face:         wgpu::FrontFace::Ccw,
+            cull_mode:          None,
+            unclipped_depth:    false,
+            polygon_mode:       wgpu::PolygonMode::Fill,
+            conservative:       false,
         },
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
+        depth_stencil:  None,
+        multisample:    wgpu::MultisampleState::default(),
         multiview_mask: None,
-        cache: None,
+        cache:          None,
     })
 }

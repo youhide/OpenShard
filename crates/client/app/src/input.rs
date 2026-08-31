@@ -20,17 +20,17 @@ pub struct Input {
     /// Whether the right button is down, which is what makes dragging steer:
     /// a heading (or, with Ctrl, a destination) is restated on every cursor
     /// move while it is.
-    pub aiming: bool,
+    pub aiming:         bool,
     /// Whether Ctrl is held, which is what turns the right-hold from a
     /// heading — the default "run toward the cursor" idiom, no map involved
     /// — into a move order that plans a route with `find_path`. See
     /// `steer.rs`'s module docs.
-    pub ctrl_held: bool,
+    pub ctrl_held:      bool,
     /// Whether Shift is held; a stack drag reads it to request a partial amount.
-    pub shift_held: bool,
+    pub shift_held:     bool,
     /// Whether Tab is currently held. It prevents key-repeat events from
     /// toggling war mode again; the key release only permits the next toggle.
-    pub war_mode_held: bool,
+    pub war_mode_held:  bool,
     /// When the last left click landed, or `None` when the one before it
     /// already made a pair.
     ///
@@ -41,7 +41,7 @@ pub struct Input {
     /// three clicks from being two double-clicks; ClassicUO's
     /// `GameController` zeroes its own `lastClickTime` in the same place and
     /// for the same reason.
-    pub last_click: Option<Instant>,
+    pub last_click:     Option<Instant>,
     /// Whether the cursor is inside the window at all.
     ///
     /// The other half of "does the world own the mouse", and the half no
@@ -59,7 +59,7 @@ pub struct Input {
     /// the picture's centre and not the window's, and an interface has no
     /// viewport at all. Converting one into the other at each use is the
     /// arithmetic the two pixel types exist to stop being done wrong once.
-    pub pointer_gump: GumpPixel,
+    pub pointer_gump:   GumpPixel,
     /// Where the left button went down, or `None` while it is up.
     ///
     /// **The anchor every press-that-may-become-a-drag is measured from**, and
@@ -81,20 +81,20 @@ pub struct Input {
     /// [`WindowGrip`](crate::windows::WindowGrip) is let go in, for the same
     /// reason — a gesture that outlives its button acts on a hand that is no
     /// longer there.
-    pub left_press: Option<GumpPixel>,
+    pub left_press:     Option<GumpPixel>,
     /// Whether the window has the keyboard.
     ///
     /// Half of [`watched`](crate::App::watched), and true at construction: a
     /// window is mapped focused and winit sends no event to say the thing it
     /// has just done.
-    pub focused: bool,
+    pub focused:        bool,
     /// Whether the compositor says the window is entirely covered.
     ///
     /// The other half of [`watched`](crate::App::watched). Its own field
     /// rather than folded into the first, because the two arrive as two
     /// events in an order nothing promises, and one `bool` written by both
     /// would read the second one's answer to the first one's question.
-    pub occluded: bool,
+    pub occluded:       bool,
 }
 
 impl Input {

@@ -25,14 +25,23 @@
 
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
+use openshard_magic as magic;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::world::{Light, LightLevel, Season, Weather, WeatherChange};
+use openshard_protocol::world::{
+    Light,
+    LightLevel,
+    Season,
+    Weather,
+    WeatherChange,
+};
 use openshard_state::components::Position;
 
 use super::World;
-use super::defaults::{LIGHT_DAY, LIGHT_NIGHT, LIGHT_NIGHTSIGHT};
-
-use openshard_magic as magic;
+use super::defaults::{
+    LIGHT_DAY,
+    LIGHT_NIGHT,
+    LIGHT_NIGHTSIGHT,
+};
 
 impl World {
     /// The world clock, in UO minutes since this shard's epoch. Derived from the

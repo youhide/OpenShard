@@ -25,27 +25,64 @@ mod stealth;
 mod taming;
 
 pub use bandage::{
-    BANDAGE_GRAPHIC, BandageFinished, BandageStarted, LOCKPICK_GRAPHIC, LockpickBroke, finish_bandages,
-    use_bandage, use_lockpick,
+    BANDAGE_GRAPHIC,
+    BandageFinished,
+    BandageStarted,
+    LOCKPICK_GRAPHIC,
+    LockpickBroke,
+    finish_bandages,
+    use_bandage,
+    use_lockpick,
 };
-pub use bard::{InstrumentSpent, expire_songs, play_instrument};
+pub use bard::{
+    InstrumentSpent,
+    expire_songs,
+    play_instrument,
+};
 pub use harvest::{
-    HarvestTarget, Harvested, ToolWorn, advance_harvests, begin_harvest, resolve_harvest_target, use_tool,
+    HarvestTarget,
+    Harvested,
+    ToolWorn,
+    advance_harvests,
+    begin_harvest,
+    resolve_harvest_target,
+    use_tool,
 };
-pub use poison::PoisonedSelf;
-pub use social::Begged;
-pub use stealth::{Stolen, snooping};
-pub use taming::{MAX_FOLLOWERS, Tamed, followers_of};
-
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::localized::begging;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::target::{TargetCursor, TargetKind};
-use openshard_protocol::wire::{ClilocId, CursorId};
-use openshard_state::components::{Client, HearsGhosts, Position};
-use openshard_state::{Skill, TargetPurpose, WorldState, in_range};
+use openshard_protocol::target::{
+    TargetCursor,
+    TargetKind,
+};
+use openshard_protocol::wire::{
+    ClilocId,
+    CursorId,
+};
+use openshard_state::components::{
+    Client,
+    HearsGhosts,
+    Position,
+};
+use openshard_state::{
+    Skill,
+    TargetPurpose,
+    WorldState,
+    in_range,
+};
+pub use poison::PoisonedSelf;
+pub use social::Begged;
+pub use stealth::{
+    Stolen,
+    snooping,
+};
+pub use taming::{
+    MAX_FOLLOWERS,
+    Tamed,
+    followers_of,
+};
 
 /// A skill that answers a question about something: the line it asks with, and how
 /// far the cursor reaches.
@@ -58,7 +95,7 @@ struct Ask {
     /// The cliloc the client is prompted with — "Whom shall I examine?".
     prompt: ClilocId,
     /// How far the answer may be, in tiles. Re-checked server-side when it lands.
-    range: u32,
+    range:  u32,
 }
 
 /// The prompt and reach of every skill that raises an object cursor.
@@ -230,7 +267,7 @@ pub struct Outcome {
     /// A theft to carry out: `items` moves it, `combat` flags the thief.
     pub stolen: Option<Stolen>,
     /// A taming: `npc` owns what a creature is, so it makes the pet.
-    pub tamed: Option<Tamed>,
+    pub tamed:  Option<Tamed>,
 }
 
 /// A skill's *second* cursor came back. Only Poisoning asks twice.

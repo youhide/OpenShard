@@ -20,7 +20,11 @@
 //! whether that table has a line 1 is the caller's question — see
 //! [`GumpDisplay::lines`](super::GumpDisplay::lines).
 
-use super::{GumpButton, RawButtonId, RawSwitchId};
+use super::{
+    GumpButton,
+    RawButtonId,
+    RawSwitchId,
+};
 
 /// One drawable element of a layout, with its arguments in the client's order.
 ///
@@ -39,82 +43,82 @@ pub enum Element {
     /// `{ resizepic }` — a stretched background frame.
     Background {
         /// Top-left corner, from the window's own origin.
-        x: i32,
+        x:      i32,
         /// Top-left corner, from the window's own origin.
-        y: i32,
+        y:      i32,
         /// How wide to stretch it.
-        width: i32,
+        width:  i32,
         /// How tall to stretch it.
         height: i32,
         /// The gump art to stretch.
-        gump: u32,
+        gump:   u32,
     },
     /// `{ gumppic }` — a picture from the gump art, optionally hued.
     Image {
         /// Where it goes.
-        x: i32,
+        x:    i32,
         /// Where it goes.
-        y: i32,
+        y:    i32,
         /// Which picture.
         gump: u32,
         /// The `hue=` suffix, or `None` when the element carried none.
-        hue: Option<u32>,
+        hue:  Option<u32>,
     },
     /// `{ gumppictiled }` — one picture repeated to fill a rectangle.
     ImageTiled {
         /// Where the rectangle starts.
-        x: i32,
+        x:      i32,
         /// Where the rectangle starts.
-        y: i32,
+        y:      i32,
         /// How wide it is.
-        width: i32,
+        width:  i32,
         /// How tall it is.
         height: i32,
         /// The picture to repeat.
-        gump: u32,
+        gump:   u32,
     },
     /// `{ rect }` — an OpenShard flat-colour rectangle, in RGB555.  It is the
     /// primitive behind egui-like panels, table cells, and borders.
     Rect {
         /// Top-left corner, from the window's own origin.
-        x: i32,
+        x:      i32,
         /// Top-left corner, from the window's own origin.
-        y: i32,
+        y:      i32,
         /// How wide it is.
-        width: i32,
+        width:  i32,
         /// How tall it is.
         height: i32,
         /// RGB555 colour (`0RRRRRGGGGGBBBBB`).
-        color: u16,
+        color:  u16,
     },
     /// `{ checkertrans }` — a darkened, semi-transparent rectangle.
     AlphaRegion {
         /// Where the rectangle starts.
-        x: i32,
+        x:      i32,
         /// Where the rectangle starts.
-        y: i32,
+        y:      i32,
         /// How wide it is.
-        width: i32,
+        width:  i32,
         /// How tall it is.
         height: i32,
     },
     /// `{ button }` — the only element that answers.
     Button {
         /// Where it goes.
-        x: i32,
+        x:       i32,
         /// Where it goes.
-        y: i32,
+        y:       i32,
         /// The art drawn while it is up.
-        normal: u32,
+        normal:  u32,
         /// The art drawn while it is held down.
         pressed: u32,
         /// Whether pressing it replies or flips a page.
-        kind: GumpButton,
+        kind:    GumpButton,
         /// For a [`GumpButton::Page`], the page to flip to; unread otherwise.
-        page: u32,
+        page:    u32,
         /// For a [`GumpButton::Reply`], what to send back. Raw: it is the
         /// server's number and this end only repeats it.
-        id: RawButtonId,
+        id:      RawButtonId,
     },
     /// `{ checkbox }` — an independent switch.
     Check(Switch),
@@ -123,55 +127,55 @@ pub enum Element {
     /// `{ text }` — one line from the text table, in a hue.
     Label {
         /// Where it goes.
-        x: i32,
+        x:    i32,
         /// Where it goes.
-        y: i32,
+        y:    i32,
         /// The client's 15-bit colour.
-        hue: u32,
+        hue:  u32,
         /// Which line of the table.
         line: usize,
     },
     /// `{ croppedtext }` — a line clipped to a box rather than overflowing it.
     CroppedLabel {
         /// Where the box starts.
-        x: i32,
+        x:      i32,
         /// Where the box starts.
-        y: i32,
+        y:      i32,
         /// How wide the box is.
-        width: i32,
+        width:  i32,
         /// How tall the box is.
         height: i32,
         /// The client's 15-bit colour.
-        hue: u32,
+        hue:    u32,
         /// Which line of the table.
-        line: usize,
+        line:   usize,
     },
     /// `{ htmlgump }` — a block of HTML text from the table.
     Html {
         /// Where the block starts.
-        x: i32,
+        x:          i32,
         /// Where the block starts.
-        y: i32,
+        y:          i32,
         /// How wide it is.
-        width: i32,
+        width:      i32,
         /// How tall it is.
-        height: i32,
+        height:     i32,
         /// Which line of the table.
-        line: usize,
+        line:       usize,
         /// Whether it is drawn over a background.
         background: bool,
         /// Whether it scrolls.
-        scrollbar: bool,
+        scrollbar:  bool,
     },
     /// The `xmfhtml*` family — a string from the client's own `cliloc` file, so
     /// no text travelled and there is nothing here to draw without one.
     Localized {
         /// Where the block starts.
-        x: i32,
+        x:      i32,
         /// Where the block starts.
-        y: i32,
+        y:      i32,
         /// How wide it is.
-        width: i32,
+        width:  i32,
         /// How tall it is.
         height: i32,
         /// The number to look up.
@@ -181,47 +185,47 @@ pub enum Element {
     /// same graphic an item on the ground is drawn with.
     Item {
         /// Where it goes.
-        x: i32,
+        x:       i32,
         /// Where it goes.
-        y: i32,
+        y:       i32,
         /// Which graphic.
         graphic: u32,
         /// Its hue, or `None` for the plain `tilepic` form.
-        hue: Option<u32>,
+        hue:     Option<u32>,
     },
     /// `{ tilepicfit }` — an OpenShard item cell. The item's decoded art is
     /// proportionally fitted and centred in this rectangle rather than drawn
     /// at its natural dimensions.
     ItemFitted {
         /// Where the cell starts.
-        x: i32,
+        x:       i32,
         /// Where the cell starts.
-        y: i32,
+        y:       i32,
         /// How wide the cell is.
-        width: i32,
+        width:   i32,
         /// How tall the cell is.
-        height: i32,
+        height:  i32,
         /// Which world-art graphic the cell shows.
         graphic: u32,
         /// Its hue, or `None` when the element carried no hue.
-        hue: Option<u32>,
+        hue:     Option<u32>,
     },
     /// `{ textentry }` — a field the player types into, answered in the `0xB1`.
     TextEntry {
         /// Where the field starts.
-        x: i32,
+        x:        i32,
         /// Where the field starts.
-        y: i32,
+        y:        i32,
         /// How wide it is.
-        width: i32,
+        width:    i32,
         /// How tall it is.
-        height: i32,
+        height:   i32,
         /// The client's 15-bit colour.
-        hue: u32,
+        hue:      u32,
         /// The id its contents come back under.
         entry_id: u16,
         /// Which line of the table it starts out holding.
-        line: usize,
+        line:     usize,
     },
     /// An element this engine has no picture for, or one whose arguments did not
     /// fit its keyword. Kept, keyword and all, so a client can say what it did
@@ -236,17 +240,17 @@ pub enum Element {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Switch {
     /// Where it goes.
-    pub x: i32,
+    pub x:       i32,
     /// Where it goes.
-    pub y: i32,
+    pub y:       i32,
     /// The art drawn while it is off.
-    pub off: u32,
+    pub off:     u32,
     /// The art drawn while it is on.
-    pub on: u32,
+    pub on:      u32,
     /// Whether it starts out set.
     pub initial: bool,
     /// What comes back when it is left on. Raw for [`Element::Button`]'s reason.
-    pub id: RawSwitchId,
+    pub id:      RawSwitchId,
 }
 
 /// How the window may be handled — the four argument-less keywords.
@@ -304,8 +308,10 @@ fn element(body: &str) -> Element {
         }
     }
 
-    let unknown = || Element::Unknown {
-        keyword: keyword.to_owned(),
+    let unknown = || {
+        Element::Unknown {
+            keyword: keyword.to_owned(),
+        }
     };
     let at = |i: usize| args.get(i).copied();
 
@@ -317,181 +323,235 @@ fn element(body: &str) -> Element {
         "noresize" => Element::Flag(Flag::NoResize),
         // Note the order: `resizepic` names the art *before* the size, unlike
         // every other element — see `GumpLayout::background`.
-        "resizepic" => match (at(0), at(1), at(2), at(3), at(4)) {
-            (Some(x), Some(y), Some(gump), Some(width), Some(height)) => Element::Background {
-                x: x as i32,
-                y: y as i32,
-                width: width as i32,
-                height: height as i32,
-                gump: gump as u32,
-            },
-            _ => unknown(),
-        },
-        "gumppic" => match (at(0), at(1), at(2)) {
-            (Some(x), Some(y), Some(gump)) => Element::Image {
-                x: x as i32,
-                y: y as i32,
-                gump: gump as u32,
-                hue: hue_suffix,
-            },
-            _ => unknown(),
-        },
-        "gumppictiled" => match (at(0), at(1), at(2), at(3), at(4)) {
-            (Some(x), Some(y), Some(width), Some(height), Some(gump)) => Element::ImageTiled {
-                x: x as i32,
-                y: y as i32,
-                width: width as i32,
-                height: height as i32,
-                gump: gump as u32,
-            },
-            _ => unknown(),
-        },
-        "rect" => match (at(0), at(1), at(2), at(3), at(4)) {
-            (Some(x), Some(y), Some(width), Some(height), Some(color)) => Element::Rect {
-                x: x as i32,
-                y: y as i32,
-                width: width as i32,
-                height: height as i32,
-                color: color as u16,
-            },
-            _ => unknown(),
-        },
-        "checkertrans" => match (at(0), at(1), at(2), at(3)) {
-            (Some(x), Some(y), Some(width), Some(height)) => Element::AlphaRegion {
-                x: x as i32,
-                y: y as i32,
-                width: width as i32,
-                height: height as i32,
-            },
-            _ => unknown(),
-        },
-        "button" => match (at(0), at(1), at(2), at(3), at(4), at(5), at(6)) {
-            (Some(x), Some(y), Some(normal), Some(pressed), Some(kind), Some(page), Some(id)) => {
-                Element::Button {
-                    x: x as i32,
-                    y: y as i32,
-                    normal: normal as u32,
-                    pressed: pressed as u32,
-                    // Anything that is not the page code is a reply: the client
-                    // reads the field as a boolean, and a button that answered
-                    // nothing at all would be a dialog with no way out.
-                    kind: if kind == 0 {
-                        GumpButton::Page
-                    } else {
-                        GumpButton::Reply
-                    },
-                    page: page as u32,
-                    id: RawButtonId(id as u32),
+        "resizepic" => {
+            match (at(0), at(1), at(2), at(3), at(4)) {
+                (Some(x), Some(y), Some(gump), Some(width), Some(height)) => {
+                    Element::Background {
+                        x:      x as i32,
+                        y:      y as i32,
+                        width:  width as i32,
+                        height: height as i32,
+                        gump:   gump as u32,
+                    }
                 }
+                _ => unknown(),
             }
-            _ => unknown(),
-        },
+        }
+        "gumppic" => {
+            match (at(0), at(1), at(2)) {
+                (Some(x), Some(y), Some(gump)) => {
+                    Element::Image {
+                        x:    x as i32,
+                        y:    y as i32,
+                        gump: gump as u32,
+                        hue:  hue_suffix,
+                    }
+                }
+                _ => unknown(),
+            }
+        }
+        "gumppictiled" => {
+            match (at(0), at(1), at(2), at(3), at(4)) {
+                (Some(x), Some(y), Some(width), Some(height), Some(gump)) => {
+                    Element::ImageTiled {
+                        x:      x as i32,
+                        y:      y as i32,
+                        width:  width as i32,
+                        height: height as i32,
+                        gump:   gump as u32,
+                    }
+                }
+                _ => unknown(),
+            }
+        }
+        "rect" => {
+            match (at(0), at(1), at(2), at(3), at(4)) {
+                (Some(x), Some(y), Some(width), Some(height), Some(color)) => {
+                    Element::Rect {
+                        x:      x as i32,
+                        y:      y as i32,
+                        width:  width as i32,
+                        height: height as i32,
+                        color:  color as u16,
+                    }
+                }
+                _ => unknown(),
+            }
+        }
+        "checkertrans" => {
+            match (at(0), at(1), at(2), at(3)) {
+                (Some(x), Some(y), Some(width), Some(height)) => {
+                    Element::AlphaRegion {
+                        x:      x as i32,
+                        y:      y as i32,
+                        width:  width as i32,
+                        height: height as i32,
+                    }
+                }
+                _ => unknown(),
+            }
+        }
+        "button" => {
+            match (at(0), at(1), at(2), at(3), at(4), at(5), at(6)) {
+                (Some(x), Some(y), Some(normal), Some(pressed), Some(kind), Some(page), Some(id)) => {
+                    Element::Button {
+                        x:       x as i32,
+                        y:       y as i32,
+                        normal:  normal as u32,
+                        pressed: pressed as u32,
+                        // Anything that is not the page code is a reply: the client
+                        // reads the field as a boolean, and a button that answered
+                        // nothing at all would be a dialog with no way out.
+                        kind:    if kind == 0 {
+                            GumpButton::Page
+                        } else {
+                            GumpButton::Reply
+                        },
+                        page:    page as u32,
+                        id:      RawButtonId(id as u32),
+                    }
+                }
+                _ => unknown(),
+            }
+        }
         "checkbox" => switch(&args).map_or_else(unknown, Element::Check),
         "radio" => switch(&args).map_or_else(unknown, Element::Radio),
-        "text" => match (at(0), at(1), at(2), at(3)) {
-            (Some(x), Some(y), Some(hue), Some(line)) if line >= 0 => Element::Label {
-                x: x as i32,
-                y: y as i32,
-                hue: hue as u32,
-                line: line as usize,
-            },
-            _ => unknown(),
-        },
-        "croppedtext" => match (at(0), at(1), at(2), at(3), at(4), at(5)) {
-            (Some(x), Some(y), Some(width), Some(height), Some(hue), Some(line)) if line >= 0 => {
-                Element::CroppedLabel {
-                    x: x as i32,
-                    y: y as i32,
-                    width: width as i32,
-                    height: height as i32,
-                    hue: hue as u32,
-                    line: line as usize,
+        "text" => {
+            match (at(0), at(1), at(2), at(3)) {
+                (Some(x), Some(y), Some(hue), Some(line)) if line >= 0 => {
+                    Element::Label {
+                        x:    x as i32,
+                        y:    y as i32,
+                        hue:  hue as u32,
+                        line: line as usize,
+                    }
                 }
+                _ => unknown(),
             }
-            _ => unknown(),
-        },
-        "htmlgump" => match (at(0), at(1), at(2), at(3), at(4), at(5), at(6)) {
-            (Some(x), Some(y), Some(width), Some(height), Some(line), Some(back), Some(scroll))
-                if line >= 0 =>
-            {
-                Element::Html {
-                    x: x as i32,
-                    y: y as i32,
-                    width: width as i32,
-                    height: height as i32,
-                    line: line as usize,
-                    background: back != 0,
-                    scrollbar: scroll != 0,
+        }
+        "croppedtext" => {
+            match (at(0), at(1), at(2), at(3), at(4), at(5)) {
+                (Some(x), Some(y), Some(width), Some(height), Some(hue), Some(line)) if line >= 0 => {
+                    Element::CroppedLabel {
+                        x:      x as i32,
+                        y:      y as i32,
+                        width:  width as i32,
+                        height: height as i32,
+                        hue:    hue as u32,
+                        line:   line as usize,
+                    }
                 }
+                _ => unknown(),
             }
-            _ => unknown(),
-        },
+        }
+        "htmlgump" => {
+            match (at(0), at(1), at(2), at(3), at(4), at(5), at(6)) {
+                (Some(x), Some(y), Some(width), Some(height), Some(line), Some(back), Some(scroll))
+                    if line >= 0 =>
+                {
+                    Element::Html {
+                        x:          x as i32,
+                        y:          y as i32,
+                        width:      width as i32,
+                        height:     height as i32,
+                        line:       line as usize,
+                        background: back != 0,
+                        scrollbar:  scroll != 0,
+                    }
+                }
+                _ => unknown(),
+            }
+        }
         // The three localized forms differ in what follows the cliloc, and agree
         // on everything up to it — except `xmfhtmltok`, which puts the flags and
         // the colour *first* and the cliloc last. See `html_localized_args`.
-        "xmfhtmlgump" | "xmfhtmlgumpcolor" => match (at(0), at(1), at(2), at(3), at(4)) {
-            (Some(x), Some(y), Some(width), Some(height), Some(cliloc)) => Element::Localized {
-                x: x as i32,
-                y: y as i32,
-                width: width as i32,
-                height: height as i32,
-                cliloc: cliloc as u32,
-            },
-            _ => unknown(),
-        },
-        "xmfhtmltok" => match (at(0), at(1), at(2), at(3), at(7)) {
-            (Some(x), Some(y), Some(width), Some(height), Some(cliloc)) => Element::Localized {
-                x: x as i32,
-                y: y as i32,
-                width: width as i32,
-                height: height as i32,
-                cliloc: cliloc as u32,
-            },
-            _ => unknown(),
-        },
-        "tilepic" => match (at(0), at(1), at(2)) {
-            (Some(x), Some(y), Some(graphic)) => Element::Item {
-                x: x as i32,
-                y: y as i32,
-                graphic: graphic as u32,
-                hue: None,
-            },
-            _ => unknown(),
-        },
-        "tilepichue" => match (at(0), at(1), at(2), at(3)) {
-            (Some(x), Some(y), Some(graphic), Some(hue)) => Element::Item {
-                x: x as i32,
-                y: y as i32,
-                graphic: graphic as u32,
-                hue: Some(hue as u32),
-            },
-            _ => unknown(),
-        },
-        "tilepicfit" => match (at(0), at(1), at(2), at(3), at(4), at(5)) {
-            (Some(x), Some(y), Some(width), Some(height), Some(graphic), Some(hue)) => Element::ItemFitted {
-                x: x as i32,
-                y: y as i32,
-                width: width as i32,
-                height: height as i32,
-                graphic: graphic as u32,
-                hue: (hue != 0).then_some(hue as u32),
-            },
-            _ => unknown(),
-        },
-        "textentry" => match (at(0), at(1), at(2), at(3), at(4), at(5), at(6)) {
-            (Some(x), Some(y), Some(width), Some(height), Some(hue), Some(id), Some(line)) if line >= 0 => {
-                Element::TextEntry {
-                    x: x as i32,
-                    y: y as i32,
-                    width: width as i32,
-                    height: height as i32,
-                    hue: hue as u32,
-                    entry_id: id as u16,
-                    line: line as usize,
+        "xmfhtmlgump" | "xmfhtmlgumpcolor" => {
+            match (at(0), at(1), at(2), at(3), at(4)) {
+                (Some(x), Some(y), Some(width), Some(height), Some(cliloc)) => {
+                    Element::Localized {
+                        x:      x as i32,
+                        y:      y as i32,
+                        width:  width as i32,
+                        height: height as i32,
+                        cliloc: cliloc as u32,
+                    }
                 }
+                _ => unknown(),
             }
-            _ => unknown(),
-        },
+        }
+        "xmfhtmltok" => {
+            match (at(0), at(1), at(2), at(3), at(7)) {
+                (Some(x), Some(y), Some(width), Some(height), Some(cliloc)) => {
+                    Element::Localized {
+                        x:      x as i32,
+                        y:      y as i32,
+                        width:  width as i32,
+                        height: height as i32,
+                        cliloc: cliloc as u32,
+                    }
+                }
+                _ => unknown(),
+            }
+        }
+        "tilepic" => {
+            match (at(0), at(1), at(2)) {
+                (Some(x), Some(y), Some(graphic)) => {
+                    Element::Item {
+                        x:       x as i32,
+                        y:       y as i32,
+                        graphic: graphic as u32,
+                        hue:     None,
+                    }
+                }
+                _ => unknown(),
+            }
+        }
+        "tilepichue" => {
+            match (at(0), at(1), at(2), at(3)) {
+                (Some(x), Some(y), Some(graphic), Some(hue)) => {
+                    Element::Item {
+                        x:       x as i32,
+                        y:       y as i32,
+                        graphic: graphic as u32,
+                        hue:     Some(hue as u32),
+                    }
+                }
+                _ => unknown(),
+            }
+        }
+        "tilepicfit" => {
+            match (at(0), at(1), at(2), at(3), at(4), at(5)) {
+                (Some(x), Some(y), Some(width), Some(height), Some(graphic), Some(hue)) => {
+                    Element::ItemFitted {
+                        x:       x as i32,
+                        y:       y as i32,
+                        width:   width as i32,
+                        height:  height as i32,
+                        graphic: graphic as u32,
+                        hue:     (hue != 0).then_some(hue as u32),
+                    }
+                }
+                _ => unknown(),
+            }
+        }
+        "textentry" => {
+            match (at(0), at(1), at(2), at(3), at(4), at(5), at(6)) {
+                (Some(x), Some(y), Some(width), Some(height), Some(hue), Some(id), Some(line))
+                    if line >= 0 =>
+                {
+                    Element::TextEntry {
+                        x:        x as i32,
+                        y:        y as i32,
+                        width:    width as i32,
+                        height:   height as i32,
+                        hue:      hue as u32,
+                        entry_id: id as u16,
+                        line:     line as usize,
+                    }
+                }
+                _ => unknown(),
+            }
+        }
         _ => unknown(),
     }
 }
@@ -502,20 +562,27 @@ fn switch(args: &[i64]) -> Option<Switch> {
         return None;
     };
     Some(Switch {
-        x: x as i32,
-        y: y as i32,
-        off: off as u32,
-        on: on as u32,
+        x:       x as i32,
+        y:       y as i32,
+        off:     off as u32,
+        on:      on as u32,
         initial: initial != 0,
-        id: RawSwitchId(id as u32),
+        id:      RawSwitchId(id as u32),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gump::{ButtonId, GumpLayout, SwitchId};
-    use crate::wire::{Graphic, Hue};
+    use crate::gump::{
+        ButtonId,
+        GumpLayout,
+        SwitchId,
+    };
+    use crate::wire::{
+        Graphic,
+        Hue,
+    };
 
     /// The one test that matters, and the reason the parser lives beside the
     /// builder: what this engine *sends* is what it must be able to read. A
@@ -550,120 +617,120 @@ mod tests {
                 Element::Flag(Flag::NoMove),
                 Element::Page(0),
                 Element::Background {
-                    x: 0,
-                    y: 0,
-                    width: 300,
+                    x:      0,
+                    y:      0,
+                    width:  300,
                     height: 270,
-                    gump: 5054,
+                    gump:   5054,
                 },
                 Element::Label {
-                    x: 105,
-                    y: 14,
-                    hue: 2100,
+                    x:    105,
+                    y:    14,
+                    hue:  2100,
                     line: 0,
                 },
                 Element::Button {
-                    x: 30,
-                    y: 54,
-                    normal: 4005,
+                    x:       30,
+                    y:       54,
+                    normal:  4005,
                     pressed: 4007,
-                    kind: GumpButton::Reply,
-                    page: 0,
-                    id: RawButtonId(13),
+                    kind:    GumpButton::Reply,
+                    page:    0,
+                    id:      RawButtonId(13),
                 },
                 Element::Button {
-                    x: 10,
-                    y: 10,
-                    normal: 250,
+                    x:       10,
+                    y:       10,
+                    normal:  250,
                     pressed: 251,
-                    kind: GumpButton::Page,
-                    page: 2,
-                    id: RawButtonId(0),
+                    kind:    GumpButton::Page,
+                    page:    2,
+                    id:      RawButtonId(0),
                 },
                 Element::Check(Switch {
-                    x: 20,
-                    y: 20,
-                    off: 210,
-                    on: 211,
+                    x:       20,
+                    y:       20,
+                    off:     210,
+                    on:      211,
                     initial: true,
-                    id: RawSwitchId(7),
+                    id:      RawSwitchId(7),
                 }),
                 Element::Radio(Switch {
-                    x: 20,
-                    y: 40,
-                    off: 208,
-                    on: 209,
+                    x:       20,
+                    y:       40,
+                    off:     208,
+                    on:      209,
                     initial: false,
-                    id: RawSwitchId(8),
+                    id:      RawSwitchId(8),
                 }),
                 Element::Image {
-                    x: 4,
-                    y: 4,
+                    x:    4,
+                    y:    4,
                     gump: 1417,
-                    hue: None,
+                    hue:  None,
                 },
                 Element::Image {
-                    x: 4,
-                    y: 40,
+                    x:    4,
+                    y:    40,
                     gump: 1417,
-                    hue: Some(1153),
+                    hue:  Some(1153),
                 },
                 Element::ImageTiled {
-                    x: 0,
-                    y: 0,
-                    width: 10,
+                    x:      0,
+                    y:      0,
+                    width:  10,
                     height: 10,
-                    gump: 2624,
+                    gump:   2624,
                 },
                 Element::Rect {
-                    x: 10,
-                    y: 12,
-                    width: 14,
+                    x:      10,
+                    y:      12,
+                    width:  14,
                     height: 16,
-                    color: 0x18C6,
+                    color:  0x18C6,
                 },
                 Element::AlphaRegion {
-                    x: 1,
-                    y: 2,
-                    width: 3,
+                    x:      1,
+                    y:      2,
+                    width:  3,
                     height: 4,
                 },
                 Element::CroppedLabel {
-                    x: 66,
-                    y: 56,
-                    width: 200,
+                    x:      66,
+                    y:      56,
+                    width:  200,
                     height: 20,
-                    hue: 1153,
-                    line: 1,
+                    hue:    1153,
+                    line:   1,
                 },
                 Element::Item {
-                    x: 50,
-                    y: 50,
+                    x:       50,
+                    y:       50,
                     graphic: 0x0EED,
-                    hue: None,
+                    hue:     None,
                 },
                 Element::Item {
-                    x: 50,
-                    y: 70,
+                    x:       50,
+                    y:       70,
                     graphic: 0x0EED,
-                    hue: Some(33),
+                    hue:     Some(33),
                 },
                 Element::ItemFitted {
-                    x: 80,
-                    y: 50,
-                    width: 24,
-                    height: 18,
+                    x:       80,
+                    y:       50,
+                    width:   24,
+                    height:  18,
                     graphic: 0x0EED,
-                    hue: None,
+                    hue:     None,
                 },
                 Element::TextEntry {
-                    x: 60,
-                    y: 60,
-                    width: 100,
-                    height: 20,
-                    hue: 1153,
+                    x:        60,
+                    y:        60,
+                    width:    100,
+                    height:   20,
+                    hue:      1153,
                     entry_id: 3,
-                    line: 2,
+                    line:     2,
                 },
             ]
         );
@@ -676,10 +743,10 @@ mod tests {
         assert_eq!(
             parse("{ gumppic -16 -8 1417 }"),
             vec![Element::Image {
-                x: -16,
-                y: -8,
+                x:    -16,
+                y:    -8,
                 gump: 1417,
-                hue: None,
+                hue:  None,
             }]
         );
     }

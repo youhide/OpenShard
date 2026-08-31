@@ -10,10 +10,26 @@
 //! the version this engine's ghosts are built for.
 
 use openshard_entities::EntityId;
-use openshard_protocol::wire::{ClilocId, SoundId};
-use openshard_state::components::{HearsGhosts, Hitpoints, Mana, Meditating, Spellbook};
-use openshard_state::weapon::{LAYER_ONE_HANDED, LAYER_TWO_HANDED};
-use openshard_state::{Skill, TICKS_PER_SECOND, WorldState};
+use openshard_protocol::wire::{
+    ClilocId,
+    SoundId,
+};
+use openshard_state::components::{
+    HearsGhosts,
+    Hitpoints,
+    Mana,
+    Meditating,
+    Spellbook,
+};
+use openshard_state::weapon::{
+    LAYER_ONE_HANDED,
+    LAYER_TWO_HANDED,
+};
+use openshard_state::{
+    Skill,
+    TICKS_PER_SECOND,
+    WorldState,
+};
 
 use crate::check::roll_skill_band;
 
@@ -76,11 +92,10 @@ pub(super) fn meditation(state: &mut WorldState, actor: EntityId) {
             return;
         }
     }
-    let mana = state
-        .registry
-        .get::<Mana>(actor)
-        .copied()
-        .unwrap_or(Mana { current: 0, max: 0 });
+    let mana = state.registry.get::<Mana>(actor).copied().unwrap_or(Mana {
+        current: 0,
+        max:     0,
+    });
     if mana.current >= mana.max {
         state.localized_message(actor, AT_PEACE, "");
         crate::set_skill_delay(state, actor, SHORT_DELAY);

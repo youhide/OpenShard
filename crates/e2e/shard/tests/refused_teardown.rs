@@ -53,15 +53,29 @@ use std::time::Duration;
 
 use openshard_client_net::connection::Event;
 use openshard_client_net::session::Plan;
-use openshard_client_net::transport::{Socket, TransportError, enter_world};
+use openshard_client_net::transport::{
+    Socket,
+    TransportError,
+    enter_world,
+};
 use openshard_client_net::view::WorldView;
+use openshard_e2e_shard::{
+    CHARACTER,
+    NYSTUL,
+    WITNESS,
+    plan,
+    plan_for,
+    shard,
+    version,
+};
 use openshard_protocol::identity::RawCharacterName;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::{RawCharacterSlot, RawClientIp};
+use openshard_protocol::wire::{
+    RawCharacterSlot,
+    RawClientIp,
+};
 use openshard_protocol::world::CharacterPlay;
 use tokio::net::TcpStream;
-
-use openshard_e2e_shard::{CHARACTER, NYSTUL, WITNESS, plan, plan_for, shard, version};
 
 /// How long any one step of this may take.
 ///
@@ -131,8 +145,8 @@ async fn read_until_closed(socket: &mut Socket<TcpStream>, what: &str) {
 /// off no list this account was sent.
 fn play_again() -> Vec<u8> {
     CharacterPlay {
-        name: RawCharacterName(CHARACTER.to_owned()),
-        slot: RawCharacterSlot(0),
+        name:      RawCharacterName(CHARACTER.to_owned()),
+        slot:      RawCharacterSlot(0),
         client_ip: RawClientIp(0),
     }
     .encode()

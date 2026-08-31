@@ -43,20 +43,49 @@
 mod oracle;
 
 use openshard_client_pathtrace::trace as pt_trace;
-use openshard_client_render::camera::{Camera, RealPixel, TileBounds, WorldSpot, Zoom, project_exact};
+use openshard_client_render::camera::{
+    Camera,
+    RealPixel,
+    TileBounds,
+    WorldSpot,
+    Zoom,
+    project_exact,
+};
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::debug::View;
 use openshard_client_render::depth;
 use openshard_client_render::geometry::Vec2;
-use openshard_client_render::light::{Light, Lighting, NIGHT};
-use openshard_client_render::mesh_face::{MeshFaceRow, MeshFaceVertex};
-use openshard_client_render::occlusion::{Builder, Part, SolidId};
+use openshard_client_render::light::{
+    Light,
+    Lighting,
+    NIGHT,
+};
+use openshard_client_render::mesh_face::{
+    MeshFaceRow,
+    MeshFaceVertex,
+};
+use openshard_client_render::occlusion::{
+    Builder,
+    Part,
+    SolidId,
+};
 use openshard_client_render::place::Stance;
-use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, Target};
+use openshard_client_render::renderer::{
+    self,
+    GroundRenderer,
+    MeshFaceRenderer,
+    Target,
+};
 use openshard_map::grid::BlockExtent;
-use openshard_tiles::{StaticTile, TileFlags};
-
-use oracle::boxes::{BoxSpec, box_mesh, box_owner};
+use openshard_tiles::{
+    StaticTile,
+    TileFlags,
+};
+use oracle::boxes::{
+    BoxSpec,
+    box_mesh,
+    box_owner,
+};
 
 /// The frame the gate is measured over. Square, and large enough that a box's
 /// own face is thousands of pixels rather than dozens: the comparison's whole
@@ -99,15 +128,15 @@ fn line_scene() -> Vec<BoxSpec> {
     let h = 4.0;
     vec![
         BoxSpec {
-            tile: (100, 100),
-            min: (100.0, 100.0, 0.0),
-            max: (101.0, 101.0, h),
+            tile:    (100, 100),
+            min:     (100.0, 100.0, 0.0),
+            max:     (101.0, 101.0, h),
             graphic: 0,
         },
         BoxSpec {
-            tile: (101, 100),
-            min: (101.0, 100.0, 0.0),
-            max: (102.0, 101.0, h),
+            tile:    (101, 100),
+            min:     (101.0, 100.0, 0.0),
+            max:     (102.0, 101.0, h),
             // A second graphic, so these stay two primitives: the point of this
             // scene is an occluder that is *not* the one the fragment stands on,
             // and one graphic would make `occlusion::merge` fold the two into a
@@ -160,9 +189,9 @@ fn stair_scene() -> Vec<BoxSpec> {
         for (tread, height) in [1.0, 3.0, 5.0].into_iter().enumerate().rev() {
             let near = 100.0 + (2 - tread) as f64 * third;
             boxes.push(BoxSpec {
-                tile: (100 + flight as u16, 100),
-                min: (x, near, 0.0),
-                max: (x + 1.0, near + third, height),
+                tile:    (100 + flight as u16, 100),
+                min:     (x, near, 0.0),
+                max:     (x + 1.0, near + third, height),
                 // Every tread of every flight is its own static, so the landings
                 // stay three primitives each and this scene keeps asking what it
                 // has always asked: whether the walk is right about nine abutting
@@ -204,11 +233,13 @@ const WALL_RUN: std::ops::Range<u16> = 100..103;
 fn wall_run_scene(graphic: impl Fn(u16) -> u16) -> Vec<BoxSpec> {
     let h = 4.0;
     WALL_RUN
-        .map(|x| BoxSpec {
-            tile: (x, 100),
-            min: (f64::from(x), 100.0, 0.0),
-            max: (f64::from(x) + 1.0, 101.0, h),
-            graphic: graphic(x),
+        .map(|x| {
+            BoxSpec {
+                tile:    (x, 100),
+                min:     (f64::from(x), 100.0, 0.0),
+                max:     (f64::from(x) + 1.0, 101.0, h),
+                graphic: graphic(x),
+            }
         })
         .collect()
 }
@@ -342,15 +373,15 @@ const FLAME_RADIUS: f32 = 8.0;
 struct Rendered {
     /// What the world passes left on each pixel: the surface, and where its
     /// fragment is.
-    drawn: Vec<oracle::Drawn>,
+    drawn:      Vec<oracle::Drawn>,
     /// The requested [`View`], read back, `RGBA8`.
-    surface: Vec<u8>,
+    surface:    Vec<u8>,
     /// The art itself, before any light — what the albedo of a comparison has to
     /// be taken from.
-    world: Vec<u8>,
+    world:      Vec<u8>,
     /// Which box and stance each mesh-face row is, recorded as the rows were
     /// pushed rather than re-derived.
-    face_rows: Vec<(usize, Stance, u32)>,
+    face_rows:  Vec<(usize, Stance, u32)>,
     /// Which primitive of the grid each box's own fragments are met against —
     /// `Occlusion::id_of`'s answer, box by box.
     ///
@@ -358,14 +389,14 @@ struct Rendered {
     /// and a gate about the merge has to be able to say that they do without
     /// building a second grid to look at: a fixture that asserted on its own
     /// second copy of the build would be asserting about the copy.
-    solids: Vec<SolidId>,
+    solids:     Vec<SolidId>,
     /// How many primitives the frame's grid came out holding, which is the
     /// merge's own count for the scene above.
     primitives: usize,
     /// The frame's own world-to-pixel map. Boxed because the tracer's camera is
     /// recovered from it as a black box and this fixture is what owns the
     /// camera it closes over.
-    to_pixel: Box<dyn Fn(WorldSpot) -> (f64, f64)>,
+    to_pixel:   Box<dyn Fn(WorldSpot) -> (f64, f64)>,
 }
 
 /// A frame to draw: the scene, the light on it, and how close the camera is.
@@ -380,10 +411,10 @@ struct Rendered {
 /// the tracer and would have agreed with almost any falloff curve; its own
 /// non-triviality assertion is what caught it.
 struct Shot<'a> {
-    boxes: &'a [BoxSpec],
-    flame: WorldSpot,
+    boxes:        &'a [BoxSpec],
+    flame:        WorldSpot,
     /// The flame's reach, in tiles — `light::Light::radius`.
-    radius: f32,
+    radius:       f32,
     /// How brightly it burns — `light::Light::intensity`.
     ///
     /// A field since phase 3, and the reason is the brightness gate: with a
@@ -391,11 +422,11 @@ struct Shot<'a> {
     /// than most of the canvas, and how wide that disc is is what decides whether
     /// a comparison is asking the falloff curve about its whole range or about
     /// its tail. A shadow comparison does not care and passes `1.0`.
-    intensity: f32,
-    ambient: openshard_client_render::light::Ambient,
-    view: View,
+    intensity:    f32,
+    ambient:      openshard_client_render::light::Ambient,
+    view:         View,
     /// Notches up `camera::LADDER` from 1:1.
-    zoom: u32,
+    zoom:         u32,
     /// How big the flame is — `light::Lighting::flame_radius`, and the reason
     /// that is a field rather than a constant.
     ///
@@ -498,7 +529,7 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, shot: Shot<'_>) -> Rendere
     for (box_index, b) in boxes.iter().enumerate() {
         let solid = b.solid();
         let d = depth::Order {
-            tile: i32::from(b.tile.0) + i32::from(b.tile.1),
+            tile:       i32::from(b.tile.0) + i32::from(b.tile.1),
             priority_z: depth::static_priority_z(solid.min.z.round() as i8, &cube_tile),
         }
         .to_depth(base_tile);
@@ -607,8 +638,8 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, shot: Shot<'_>) -> Rendere
     let surface = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("surface"),
         size: wgpu::Extent3d {
-            width: SIDE,
-            height: SIDE,
+            width:                 SIDE,
+            height:                SIDE,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -627,19 +658,19 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, shot: Shot<'_>) -> Rendere
         queue,
         &mut encoder,
         openshard_client_render::blit::Frame {
-            target: &surface_view,
-            world: &world_view,
-            gbuffer: &gbuffer_views,
-            face_instances: &dummy_instances,
-            item_instances: &dummy_instances,
+            target:           &surface_view,
+            world:            &world_view,
+            gbuffer:          &gbuffer_views,
+            face_instances:   &dummy_instances,
+            item_instances:   &dummy_instances,
             mobile_instances: &dummy_instances,
-            mesh_instances: mesh_pass.rows_buffer(),
+            mesh_instances:   mesh_pass.rows_buffer(),
             ground_instances: ground_pass.instances_buffer(),
-            zoom: Zoom::ONE,
-            rect: openshard_client_render::blit::ViewportRect {
-                x: 0,
-                y: 0,
-                width: SIDE,
+            zoom:             Zoom::ONE,
+            rect:             openshard_client_render::blit::ViewportRect {
+                x:      0,
+                y:      0,
+                width:  SIDE,
                 height: SIDE,
             },
         },
@@ -670,17 +701,17 @@ fn the_frame_and_the_path_tracer_agree_about_every_interior_pixel() {
         &device,
         &queue,
         Shot {
-            boxes: &boxes,
-            flame: at,
-            radius: FLAME_RADIUS,
+            boxes:        &boxes,
+            flame:        at,
+            radius:       FLAME_RADIUS,
             // Visibility, so brightness is not what is being read: any intensity
             // that lights the scene at all answers the same question.
-            intensity: 1.0,
-            ambient: NIGHT,
-            view: View::Shadow,
+            intensity:    1.0,
+            ambient:      NIGHT,
+            view:         View::Shadow,
             // Three notches is the top of `camera::LADDER` — 4:1 — where a
             // whole-tile box fills a 512-pixel canvas comfortably.
-            zoom: 3,
+            zoom:         3,
             // The shipped sphere: this gate carries the penumbra assertions
             // below, and they are the ones phase 5 is judged by.
             flame_radius: openshard_client_render::light::FLAME_RADIUS,
@@ -693,18 +724,18 @@ fn the_frame_and_the_path_tracer_agree_about_every_interior_pixel() {
     // `the_frame_and_the_path_tracer_agree_about_brightness_on_open_ground`,
     // which takes its ground albedo off the frame itself.
     let mirror = oracle::pathtrace::Mirror::of(oracle::pathtrace::Mirrored {
-        boxes: &boxes,
-        light_at: at,
+        boxes:        &boxes,
+        light_at:     at,
         light_radius: f64::from(FLAME_RADIUS),
-        colour: [1.0, 1.0, 1.0],
-        intensity: 1.0,
-        albedos: oracle::pathtrace::Albedos::INVENTED,
+        colour:       [1.0, 1.0, 1.0],
+        intensity:    1.0,
+        albedos:      oracle::pathtrace::Albedos::INVENTED,
         // **The engine's own sphere, and phase 5 is what changed it from a
         // point.** A reference holding a point where the frame holds a body
         // reports the whole penumbra as a disagreement — it did, on one pixel of
         // this very scene, the hour the eight rays landed.
-        body: oracle::pathtrace::ENGINE_FLAME,
-        to_pixel: frame.to_pixel.as_ref(),
+        body:         oracle::pathtrace::ENGINE_FLAME,
+        to_pixel:     frame.to_pixel.as_ref(),
     });
     let seen = |brdf, seed| mirror.render(brdf, seed, TRACE_SIZE);
     let exact = seen(pt_trace::Brdf::Flat, oracle::pathtrace::FIRST_SEED);
@@ -712,9 +743,9 @@ fn the_frame_and_the_path_tracer_agree_about_every_interior_pixel() {
         &exact,
         &seen(pt_trace::Brdf::Lambert, oracle::pathtrace::FIRST_SEED),
         oracle::pathtrace::Frame {
-            size: TRACE_SIZE,
-            drawn: &frame.drawn,
-            picture: &frame.surface,
+            size:      TRACE_SIZE,
+            drawn:     &frame.drawn,
+            picture:   &frame.surface,
             face_rows: &frame.face_rows,
         },
     );
@@ -731,9 +762,9 @@ fn the_frame_and_the_path_tracer_agree_about_every_interior_pixel() {
         &exact,
         &seen(pt_trace::Brdf::Flat, oracle::pathtrace::SECOND_SEED),
         oracle::pathtrace::Frame {
-            size: TRACE_SIZE,
-            drawn: &frame.drawn,
-            picture: &frame.surface,
+            size:      TRACE_SIZE,
+            drawn:     &frame.drawn,
+            picture:   &frame.surface,
             face_rows: &frame.face_rows,
         },
         allowed,
@@ -921,20 +952,20 @@ fn the_frame_and_the_path_tracer_agree_about_a_run_of_flights() {
     );
 
     let mirror = oracle::pathtrace::Mirror::of(oracle::pathtrace::Mirrored {
-        boxes: &boxes,
-        light_at: at,
+        boxes:        &boxes,
+        light_at:     at,
         light_radius: f64::from(radius),
-        colour: [1.0, 1.0, 1.0],
-        intensity: 1.0,
-        albedos: oracle::pathtrace::Albedos::INVENTED,
+        colour:       [1.0, 1.0, 1.0],
+        intensity:    1.0,
+        albedos:      oracle::pathtrace::Albedos::INVENTED,
         // **A point on this side too, because the frame's flame is one.**
         // `ENGINE_FLAME` is the shipped sphere and it is right for every scene
         // that draws one; here the `Shot` above asked for a radius of zero, and a
         // reference holding a body where the frame holds a point reports the
         // whole penumbra as a disagreement. It did: forty-seven pixels, the hour
         // the radius became a field and this line had not followed.
-        body: oracle::pathtrace::Body::Point,
-        to_pixel: frame.to_pixel.as_ref(),
+        body:         oracle::pathtrace::Body::Point,
+        to_pixel:     frame.to_pixel.as_ref(),
     });
     let seen = |brdf, seed| mirror.render(brdf, seed, TRACE_SIZE);
     let exact = seen(pt_trace::Brdf::Flat, oracle::pathtrace::FIRST_SEED);
@@ -946,9 +977,9 @@ fn the_frame_and_the_path_tracer_agree_about_a_run_of_flights() {
         &exact,
         &seen(pt_trace::Brdf::Lambert, oracle::pathtrace::FIRST_SEED),
         oracle::pathtrace::Frame {
-            size: TRACE_SIZE,
-            drawn: &frame.drawn,
-            picture: &frame.surface,
+            size:      TRACE_SIZE,
+            drawn:     &frame.drawn,
+            picture:   &frame.surface,
             face_rows: &frame.face_rows,
         },
     );
@@ -969,9 +1000,9 @@ fn the_frame_and_the_path_tracer_agree_about_a_run_of_flights() {
             oracle::pathtrace::probe(
                 &exact,
                 oracle::pathtrace::Frame {
-                    size: TRACE_SIZE,
-                    drawn: &frame.drawn,
-                    picture: &frame.surface,
+                    size:      TRACE_SIZE,
+                    drawn:     &frame.drawn,
+                    picture:   &frame.surface,
                     face_rows: &frame.face_rows,
                 },
                 pt_trace::ImagePixel::new(numbers[0], numbers[1]),
@@ -1074,14 +1105,14 @@ fn the_frame_and_the_path_tracer_agree_about_a_merged_run_of_wall() {
     );
 
     let mirror = oracle::pathtrace::Mirror::of(oracle::pathtrace::Mirrored {
-        boxes: &boxes,
-        light_at: at,
+        boxes:        &boxes,
+        light_at:     at,
         light_radius: f64::from(radius),
-        colour: [1.0, 1.0, 1.0],
-        intensity: 1.0,
-        albedos: oracle::pathtrace::Albedos::INVENTED,
-        body: oracle::pathtrace::Body::Point,
-        to_pixel: frame.to_pixel.as_ref(),
+        colour:       [1.0, 1.0, 1.0],
+        intensity:    1.0,
+        albedos:      oracle::pathtrace::Albedos::INVENTED,
+        body:         oracle::pathtrace::Body::Point,
+        to_pixel:     frame.to_pixel.as_ref(),
     });
     let seen = |brdf, seed| mirror.render(brdf, seed, TRACE_SIZE);
     let exact = seen(pt_trace::Brdf::Flat, oracle::pathtrace::FIRST_SEED);
@@ -1093,9 +1124,9 @@ fn the_frame_and_the_path_tracer_agree_about_a_merged_run_of_wall() {
         &exact,
         &seen(pt_trace::Brdf::Lambert, oracle::pathtrace::FIRST_SEED),
         oracle::pathtrace::Frame {
-            size: TRACE_SIZE,
-            drawn: &frame.drawn,
-            picture: &frame.surface,
+            size:      TRACE_SIZE,
+            drawn:     &frame.drawn,
+            picture:   &frame.surface,
             face_rows: &frame.face_rows,
         },
     );
@@ -1403,7 +1434,7 @@ fn a_flame_just_over_a_landing_does_not_wedge_it_with_its_own_below_horizon_rays
             // same number: a degenerate path trace is direct light and has no
             // ambient term to match.
             ambient: openshard_client_render::light::Ambient {
-                sky: [0.0; 3],
+                sky:    [0.0; 3],
                 ground: [0.0; 3],
             },
             view: View::Flames,
@@ -1415,21 +1446,21 @@ fn a_flame_just_over_a_landing_does_not_wedge_it_with_its_own_below_horizon_rays
     );
 
     let mirror = oracle::pathtrace::Mirror::of(oracle::pathtrace::Mirrored {
-        boxes: &boxes,
-        light_at: at,
+        boxes:        &boxes,
+        light_at:     at,
         light_radius: f64::from(radius),
-        colour: [1.0, 1.0, 1.0],
-        intensity: f64::from(BRIGHTNESS) * oracle::pathtrace::LAMBERT_PI,
+        colour:       [1.0, 1.0, 1.0],
+        intensity:    f64::from(BRIGHTNESS) * oracle::pathtrace::LAMBERT_PI,
         // One, on both surfaces: this comparison is about the light and the
         // engine's side has thrown the art away, so a reflectance on the
         // reference's side alone would be a constant factor between two pictures
         // that are otherwise the same sum.
-        albedos: oracle::pathtrace::Albedos {
+        albedos:      oracle::pathtrace::Albedos {
             ground: [1.0; 3],
-            body: [1.0; 3],
+            body:   [1.0; 3],
         },
-        body: oracle::pathtrace::ENGINE_FLAME,
-        to_pixel: frame.to_pixel.as_ref(),
+        body:         oracle::pathtrace::ENGINE_FLAME,
+        to_pixel:     frame.to_pixel.as_ref(),
     });
     let seen = |seed| mirror.render(pt_trace::Brdf::Lambert, seed, TRACE_SIZE);
     let traced = seen(oracle::pathtrace::FIRST_SEED);
@@ -1438,9 +1469,9 @@ fn a_flame_just_over_a_landing_does_not_wedge_it_with_its_own_below_horizon_rays
         &traced,
         &seen(oracle::pathtrace::SECOND_SEED),
         oracle::pathtrace::Frame {
-            size: TRACE_SIZE,
-            drawn: &frame.drawn,
-            picture: &frame.surface,
+            size:      TRACE_SIZE,
+            drawn:     &frame.drawn,
+            picture:   &frame.surface,
             face_rows: &frame.face_rows,
         },
         allowed,
@@ -1542,13 +1573,13 @@ fn a_face_fragments_own_plane_is_the_primitives_own_number() {
         &device,
         &queue,
         Shot {
-            boxes: &boxes,
-            flame: flame(),
-            radius: FLAME_RADIUS,
-            intensity: 1.0,
-            ambient: NIGHT,
-            view: View::Shadow,
-            zoom: 2,
+            boxes:        &boxes,
+            flame:        flame(),
+            radius:       FLAME_RADIUS,
+            intensity:    1.0,
+            ambient:      NIGHT,
+            view:         View::Shadow,
+            zoom:         2,
             flame_radius: 0.0,
         },
     );
@@ -1698,7 +1729,7 @@ fn the_frame_and_the_path_tracer_agree_about_brightness_on_open_ground() {
         z: f64::from(openshard_client_render::light::Z_PER_TILE),
     };
     let dark = openshard_client_render::light::Ambient {
-        sky: [0.0; 3],
+        sky:    [0.0; 3],
         ground: [0.0; 3],
     };
     // Brighter than a torch on purpose, and not to make the picture pretty: the
@@ -1711,13 +1742,13 @@ fn the_frame_and_the_path_tracer_agree_about_brightness_on_open_ground() {
         &device,
         &queue,
         Shot {
-            boxes: &[],
-            flame: at,
-            radius: FLAME_RADIUS,
-            intensity: BRIGHTNESS,
-            ambient: dark,
-            view: View::Lit,
-            zoom: 0,
+            boxes:        &[],
+            flame:        at,
+            radius:       FLAME_RADIUS,
+            intensity:    BRIGHTNESS,
+            ambient:      dark,
+            view:         View::Lit,
+            zoom:         0,
             // The brightness gate has no occluder in it at all, so the flame's
             // own size reaches nothing: the shipped one, because a scene that is
             // about the falloff curve should be lit by the flame the client has.
@@ -1732,26 +1763,26 @@ fn the_frame_and_the_path_tracer_agree_about_brightness_on_open_ground() {
     let albedo = oracle::ground_albedo(&frame.drawn, &frame.world);
 
     let mirror = oracle::pathtrace::Mirror::of(oracle::pathtrace::Mirrored {
-        boxes: &[],
-        light_at: at,
+        boxes:        &[],
+        light_at:     at,
         light_radius: f64::from(FLAME_RADIUS),
-        colour: [1.0, 1.0, 1.0],
+        colour:       [1.0, 1.0, 1.0],
         // The engine's Lambert has no `1/π` and the reference's does — see
         // `LAMBERT_PI`. This is the whole of the conversion between the two
         // conventions, and it is stated once, here, rather than by either side
         // being rewritten to look like the other.
-        intensity: f64::from(BRIGHTNESS) * oracle::pathtrace::LAMBERT_PI,
+        intensity:    f64::from(BRIGHTNESS) * oracle::pathtrace::LAMBERT_PI,
         // A point: this scene has no occluder, so the flame's own size cannot
         // cast anything and an exact render is the stronger reference.
-        body: oracle::pathtrace::Body::Point,
-        albedos: oracle::pathtrace::Albedos {
+        body:         oracle::pathtrace::Body::Point,
+        albedos:      oracle::pathtrace::Albedos {
             ground: albedo,
             // No body in the scene to have one. Left at the invented value
             // rather than at zero so that a box arriving here later fails loudly
             // as a difference rather than quietly as a black shape.
             ..oracle::pathtrace::Albedos::INVENTED
         },
-        to_pixel: frame.to_pixel.as_ref(),
+        to_pixel:     frame.to_pixel.as_ref(),
     });
     // **`Lambert`, and phase 3 is what changed it from `Flat`.** `Brdf::Flat` is
     // a description of the engine *before* this phase — no cosine and no notion

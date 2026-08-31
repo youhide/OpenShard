@@ -9,7 +9,8 @@ use std::marker::PhantomData;
 /// type that can cross threads is already an event.
 pub trait Event: Send + Sync + 'static {}
 
-impl<T: Send + Sync + 'static> Event for T {}
+impl<T: Send + Sync + 'static> Event for T {
+}
 
 /// A double-buffered queue of events of one type.
 ///
@@ -25,13 +26,13 @@ impl<T: Send + Sync + 'static> Event for T {}
 /// listening. Nothing here is a subscription.
 pub struct Events<E> {
     /// Events from the previous tick. Still readable, dropped on next update.
-    older: Vec<E>,
+    older:         Vec<E>,
     /// Events sent during the current tick.
-    newer: Vec<E>,
+    newer:         Vec<E>,
     /// Sequence number of `older[0]`.
-    older_start: u64,
+    older_start:   u64,
     /// Sequence number of `newer[0]`.
-    newer_start: u64,
+    newer_start:   u64,
     /// Sequence number the next sent event will get.
     next_sequence: u64,
 }
@@ -56,10 +57,10 @@ impl<E> Events<E> {
     /// An empty queue.
     pub const fn new() -> Self {
         Self {
-            older: Vec::new(),
-            newer: Vec::new(),
-            older_start: 0,
-            newer_start: 0,
+            older:         Vec::new(),
+            newer:         Vec::new(),
+            older_start:   0,
+            newer_start:   0,
             next_sequence: 0,
         }
     }
@@ -113,7 +114,7 @@ impl<E> Events<E> {
     /// A cursor positioned at the oldest readable event.
     pub fn cursor(&self) -> Cursor<E> {
         Cursor {
-            next: self.older_start,
+            next:    self.older_start,
             _marker: PhantomData,
         }
     }
@@ -121,7 +122,7 @@ impl<E> Events<E> {
     /// A cursor that skips everything already buffered.
     pub fn cursor_at_end(&self) -> Cursor<E> {
         Cursor {
-            next: self.next_sequence,
+            next:    self.next_sequence,
             _marker: PhantomData,
         }
     }
@@ -178,7 +179,7 @@ impl<E> Events<E> {
 /// different `Events<PlayerMove>` compiles but yields nonsense, so keep a cursor
 /// next to the bus it came from.
 pub struct Cursor<E> {
-    next: u64,
+    next:    u64,
     _marker: PhantomData<fn() -> E>,
 }
 
@@ -188,13 +189,14 @@ impl<E> Clone for Cursor<E> {
     }
 }
 
-impl<E> Copy for Cursor<E> {}
+impl<E> Copy for Cursor<E> {
+}
 
 impl<E> Default for Cursor<E> {
     /// A cursor at sequence zero: it will read everything still buffered.
     fn default() -> Self {
         Self {
-            next: 0,
+            next:    0,
             _marker: PhantomData,
         }
     }

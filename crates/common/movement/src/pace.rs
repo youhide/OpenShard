@@ -1,6 +1,9 @@
 //! How often a mobile is allowed to take a step.
 
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 /// The shortest gap between two walking steps, on foot.
 ///
@@ -222,7 +225,7 @@ pub struct WalkPace {
     /// When the bucket was last refilled. `None` before the first step.
     last_step: Option<Instant>,
     /// Credit in milliseconds.
-    credit: i64,
+    credit:    i64,
 }
 
 impl Default for WalkPace {
@@ -240,7 +243,7 @@ impl WalkPace {
     pub const fn new() -> Self {
         Self {
             last_step: None,
-            credit: Self::capacity(),
+            credit:    Self::capacity(),
         }
     }
 

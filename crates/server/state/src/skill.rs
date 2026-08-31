@@ -272,15 +272,15 @@ impl Skill {
 #[derive(Clone, Copy, Debug)]
 pub struct SkillInfo {
     /// What it is called: "Alchemy", "Item Identification".
-    pub name: &'static str,
+    pub name:              &'static str,
     /// The title a grandmaster earns: "Alchemist", "Merchant".
-    pub title: &'static str,
+    pub title:             &'static str,
     /// How much strength lends to the skill's effective value, in hundredths.
-    pub str_scale: u32,
+    pub str_scale:         u32,
     /// How much dexterity lends, in hundredths.
-    pub dex_scale: u32,
+    pub dex_scale:         u32,
     /// How much intelligence lends, in hundredths.
-    pub int_scale: u32,
+    pub int_scale:         u32,
     /// The ceiling on the whole stat bonus, in hundredths.
     ///
     /// ServUO's `StatTotal`, and the one place its arithmetic looks like a slip
@@ -289,20 +289,20 @@ pub struct SkillInfo {
     /// asymmetry is load-bearing — it makes the bonus cap out at the raw sum, so a
     /// mobile with stats above 100 stops gaining from them. Carried as-is; do not
     /// "fix" it into a sum of the scaled values.
-    pub stat_total: u32,
+    pub stat_total:        u32,
     /// The chance weight that training this skill nudges strength, in thousandths.
-    pub str_gain: u32,
+    pub str_gain:          u32,
     /// The same for dexterity.
-    pub dex_gain: u32,
+    pub dex_gain:          u32,
     /// The same for intelligence.
-    pub int_gain: u32,
+    pub int_gain:          u32,
     /// A multiplier on how readily the skill trains, in per-mille. `1000` on every
     /// row ServUO ships; the column exists so a shard can slow one skill down.
-    pub gain_factor: u32,
+    pub gain_factor:       u32,
     /// The stat the ML gain mechanic tries first.
-    pub primary: StatCode,
+    pub primary:           StatCode,
     /// The stat it falls back to, one time in four.
-    pub secondary: StatCode,
+    pub secondary:         StatCode,
     /// Whether the skill can be used straight from the window's button.
     ///
     /// Twenty-three of the fifty-eight; the rest answer cliloc 500014, "That skill
@@ -310,7 +310,7 @@ pub struct SkillInfo {
     /// (Lockpicking, Mining) or opened by something else (Magery, Blacksmithy).
     /// ServUO expresses this as a `Callback` being non-null; a bool says the same
     /// thing without a function pointer in a `const`.
-    pub usable: bool,
+    pub usable:            bool,
     /// Whether the skill may be used with a spell in flight. Spirit Speak alone.
     pub use_while_casting: bool,
 }

@@ -15,10 +15,23 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::wire::ClilocId;
-use openshard_state::components::{Combat, Contained, Hidden, Position, Stealthing};
-use openshard_state::{Skill, WorldState, in_range};
+use openshard_state::components::{
+    Combat,
+    Contained,
+    Hidden,
+    Position,
+    Stealthing,
+};
+use openshard_state::{
+    Skill,
+    WorldState,
+    in_range,
+};
 
-use crate::check::{roll_skill_band, roll_skill_chance};
+use crate::check::{
+    roll_skill_band,
+    roll_skill_chance,
+};
 
 /// "You can't seem to hide right now." — somebody is fighting you.
 const CANNOT_HIDE_NOW: ClilocId = ClilocId(501_237);
@@ -251,13 +264,13 @@ pub(super) fn stealing(state: &mut WorldState, actor: EntityId, item: EntityId) 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Stolen {
     /// Who reached.
-    pub thief: EntityId,
+    pub thief:  EntityId,
     /// Whose pack it was.
     pub victim: EntityId,
     /// What they reached for.
-    pub item: EntityId,
+    pub item:   EntityId,
     /// Whether they got it.
-    pub took: bool,
+    pub took:   bool,
 }
 
 /// Whether anybody within `range` is in a fight with `actor` — ServUO's two-way

@@ -19,12 +19,25 @@ use std::time::Duration;
 use openshard_client_net::connection::Event;
 use openshard_client_net::transport::enter_world;
 use openshard_client_net::view::WorldView;
-use openshard_client_net::{doll, skill, talk};
+use openshard_client_net::{
+    doll,
+    skill,
+    talk,
+};
+use openshard_e2e_shard::{
+    ACCOUNT,
+    plan,
+    shard,
+    spawn,
+    stock_config,
+    version,
+};
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::skill::SkillLock;
-use openshard_protocol::wire::{ClilocId, RawSkillId};
-
-use openshard_e2e_shard::{ACCOUNT, plan, shard, spawn, stock_config, version};
+use openshard_protocol::wire::{
+    ClilocId,
+    RawSkillId,
+};
 
 /// Alchemy: id 0, and the one the whole list's *one-based* numbering exists to
 /// keep apart from its terminator. A client that read the ids as sent would file

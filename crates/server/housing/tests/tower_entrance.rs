@@ -10,12 +10,29 @@ use std::path::PathBuf;
 
 use openshard_housing::template;
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Cover, Doors, Overlay};
-use openshard_movement::{Footing, MapTerrain, Weight, can_step, find_path, step_allowed};
+use openshard_map::overlay::{
+    Cover,
+    Doors,
+    Overlay,
+};
+use openshard_movement::{
+    Footing,
+    MapTerrain,
+    Weight,
+    can_step,
+    find_path,
+    step_allowed,
+};
 use openshard_protocol::wire::Graphic;
-use openshard_protocol::world::{Facet, Point};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 use openshard_uofiles::multi::{
-    Component, is_closed_door_graphic, is_house_banister_graphic, is_house_sign_graphic,
+    Component,
+    is_closed_door_graphic,
+    is_house_banister_graphic,
+    is_house_sign_graphic,
 };
 
 /// The new tower placed for the report.  Its selected `0x073C` component is at
@@ -82,8 +99,9 @@ fn legacy_five_story_tower_entrance_is_walkable_on_the_reported_map_tile() {
         .get("legacy-five-story-tower")
         .expect("the reported tower template should be installed");
     assert!(
-        tower.iter().any(|component| component.graphic == Graphic(0x073C)
-            && component.placed_at(TOWER_ORIGIN) == Some(ENTRY_TREAD)),
+        tower.iter().any(|component| {
+            component.graphic == Graphic(0x073C) && component.placed_at(TOWER_ORIGIN) == Some(ENTRY_TREAD)
+        }),
         "the reported wooden stair must stay at its declared world tile"
     );
     assert!(
@@ -93,8 +111,9 @@ fn legacy_five_story_tower_entrance_is_walkable_on_the_reported_map_tile() {
         "the approach must use the original stair, not a duplicated lower row"
     );
     assert!(
-        tower.iter().any(|component| component.graphic == Graphic(0x0B9E)
-            && component.placed_at(TOWER_ORIGIN) == Some(ENTRANCE_SIGN)),
+        tower.iter().any(|component| {
+            component.graphic == Graphic(0x0B9E) && component.placed_at(TOWER_ORIGIN) == Some(ENTRANCE_SIGN)
+        }),
         "the entrance needs its metal signpost so the shard can hang the live house-menu sign"
     );
 

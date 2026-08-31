@@ -1,8 +1,17 @@
-use super::tests::{START, authenticate, delete_slot, enter, enter_as, walk, world};
-use super::*;
 use openshard_gateway::ConnectionId;
 use openshard_movement::WALK_INTERVAL;
 use openshard_protocol::wire::Graphic;
+
+use super::tests::{
+    START,
+    authenticate,
+    delete_slot,
+    enter,
+    enter_as,
+    walk,
+    world,
+};
+use super::*;
 
 /// A world that saves every tick, so a test does not have to run four
 /// hundred of them to see one row.
@@ -84,9 +93,11 @@ fn a_shutdown_notice_reaches_the_world_and_nobody_on_the_way_into_it() {
     // it twice would answer the second question about an already-empty world.
     let sent: Vec<_> = world.drain_outbound().collect();
     assert!(
-        sent.iter().any(|out| out.connection == inside
-            && out.packet[0] == 0x1C
-            && String::from_utf8_lossy(&out.packet).contains("the shard is stopping")),
+        sent.iter().any(|out| {
+            out.connection == inside
+                && out.packet[0] == 0x1C
+                && String::from_utf8_lossy(&out.packet).contains("the shard is stopping")
+        }),
         "a player in the world is told why it is going"
     );
     assert!(
@@ -301,26 +312,26 @@ fn a_character_that_logged_out_dead_returns_a_ghost() {
         name: CharacterName("Revenant".to_owned()),
         access: AccessLevel::Player,
         character: Character::Fresh(FreshCharacter {
-            facet: Facet(0),
-            start: None,
+            facet:      Facet(0),
+            start:      None,
             appearance: Some(Appearance {
                 body: Graphic(0x0190),
-                hue: openshard_protocol::wire::Hue::NONE,
+                hue:  openshard_protocol::wire::Hue::NONE,
             }),
-            sheet: Some(Box::new(CharacterSheet {
-                strength: 100,
-                dexterity: 100,
-                intelligence: 100,
-                skills: Vec::new(),
-                effects: Vec::new(),
-                stat_locks: Default::default(),
-                dead: true,
-                fame: 0,
-                karma: 0,
-                murders: 0,
-                quests: Vec::new(),
-                done_quests: Vec::new(),
-                guild: None,
+            sheet:      Some(Box::new(CharacterSheet {
+                strength:        100,
+                dexterity:       100,
+                intelligence:    100,
+                skills:          Vec::new(),
+                effects:         Vec::new(),
+                stat_locks:      Default::default(),
+                dead:            true,
+                fame:            0,
+                karma:           0,
+                murders:         0,
+                quests:          Vec::new(),
+                done_quests:     Vec::new(),
+                guild:           None,
                 guild_candidate: None,
             })),
         }),
@@ -648,26 +659,26 @@ fn a_guild_survives_a_restart_and_its_ids_are_not_handed_out_again() {
         name: CharacterName("Wilbur".to_owned()),
         access: AccessLevel::Player,
         character: Character::Fresh(FreshCharacter {
-            facet: Facet(0),
-            start: None,
+            facet:      Facet(0),
+            start:      None,
             appearance: None,
-            sheet: Some(Box::new(CharacterSheet {
-                strength: 100,
-                dexterity: 100,
-                intelligence: 100,
-                skills: Vec::new(),
-                effects: Vec::new(),
-                stat_locks: Default::default(),
-                dead: false,
-                fame: 0,
-                karma: 0,
-                murders: 0,
-                quests: Vec::new(),
-                done_quests: Vec::new(),
-                guild: Some(crate::tick::command::GuildSeat {
+            sheet:      Some(Box::new(CharacterSheet {
+                strength:        100,
+                dexterity:       100,
+                intelligence:    100,
+                skills:          Vec::new(),
+                effects:         Vec::new(),
+                stat_locks:      Default::default(),
+                dead:            false,
+                fame:            0,
+                karma:           0,
+                murders:         0,
+                quests:          Vec::new(),
+                done_quests:     Vec::new(),
+                guild:           Some(crate::tick::command::GuildSeat {
                     guild: ours,
                     title: "Warlord".to_owned(),
-                    rank: openshard_state::Rank::Emissary,
+                    rank:  openshard_state::Rank::Emissary,
                 }),
                 guild_candidate: Some(theirs.0),
             })),
@@ -814,12 +825,14 @@ fn a_house_survives_a_restart_with_its_walls() {
     fn cottage() -> Vec<Component> {
         [(WALL, -1), (WALL, 1), (FLOOR, 0)]
             .into_iter()
-            .map(|(graphic, dx)| Component {
-                graphic: openshard_protocol::wire::Graphic(graphic),
-                dx,
-                dy: 0,
-                dz: 0,
-                flags: 1,
+            .map(|(graphic, dx)| {
+                Component {
+                    graphic: openshard_protocol::wire::Graphic(graphic),
+                    dx,
+                    dy: 0,
+                    dz: 0,
+                    flags: 1,
+                }
             })
             .collect()
     }
@@ -1083,7 +1096,10 @@ fn a_house_and_its_sign_are_not_also_ground_items() {
 /// something: a classic house here would have no footprint at all.
 #[test]
 fn a_designed_house_restores_its_own_walls_with_no_client_files() {
-    use openshard_persistence::record::{HouseDesignRecord, HouseRecord};
+    use openshard_persistence::record::{
+        HouseDesignRecord,
+        HouseRecord,
+    };
 
     let mut world = World::new(START);
     let serial = Serial::new(0x4000_00CC).expect("an item serial");
@@ -1094,13 +1110,13 @@ fn a_designed_house_restores_its_own_walls_with_no_client_files() {
     // reader normalises both multi formats' opposite senses before a design is
     // ever built from one.
     let wall = HouseDesignRecord {
-        house: serial,
+        house:    serial,
         revision: 7,
-        graphic: 0x0006,
-        dx: 1,
-        dy: 0,
-        dz: 0,
-        flags: 1,
+        graphic:  0x0006,
+        dx:       1,
+        dy:       0,
+        dz:       0,
+        flags:    1,
     };
     world.restore_houses(
         vec![HouseRecord {
@@ -1138,8 +1154,16 @@ fn a_designed_house_restores_its_own_walls_with_no_client_files() {
 /// leave an attractive but inert door and no way to open the house menu.
 #[test]
 fn a_restored_imported_design_recreates_its_door_and_sign() {
-    use openshard_persistence::record::{HouseDesignRecord, HouseRecord};
-    use openshard_state::components::{Door, HouseDoor, HouseSign, Position};
+    use openshard_persistence::record::{
+        HouseDesignRecord,
+        HouseRecord,
+    };
+    use openshard_state::components::{
+        Door,
+        HouseDoor,
+        HouseSign,
+        Position,
+    };
 
     let mut world = World::new(START);
     let serial = Serial::new(0x4000_00CE).expect("an item serial");
@@ -1147,43 +1171,45 @@ fn a_restored_imported_design_recreates_its_door_and_sign() {
     let at = Point::new(START.x + 5, START.y + 5, 0);
     let components = vec![
         HouseDesignRecord {
-            house: serial,
+            house:    serial,
             revision: 3,
-            graphic: 0x0006,
-            dx: 0,
-            dy: 0,
-            dz: 0,
-            flags: 1,
+            graphic:  0x0006,
+            dx:       0,
+            dy:       0,
+            dz:       0,
+            flags:    1,
         },
         HouseDesignRecord {
-            house: serial,
+            house:    serial,
             revision: 3,
-            graphic: 0x06E5,
-            dx: 1,
-            dy: 2,
-            dz: 3,
-            flags: 1,
+            graphic:  0x06E5,
+            dx:       1,
+            dy:       2,
+            dz:       3,
+            flags:    1,
         },
         HouseDesignRecord {
-            house: serial,
+            house:    serial,
             revision: 3,
-            graphic: 0x0B9E,
-            dx: 1,
-            dy: 3,
-            dz: 3,
-            flags: 1,
+            graphic:  0x0B9E,
+            dx:       1,
+            dy:       3,
+            dz:       3,
+            flags:    1,
         },
     ];
     world.state.house_templates.insert(
         "restored-fixtures".into(),
         components
             .iter()
-            .map(|row| openshard_uofiles::multi::Component {
-                graphic: Graphic(row.graphic),
-                dx: row.dx,
-                dy: row.dy,
-                dz: row.dz,
-                flags: row.flags,
+            .map(|row| {
+                openshard_uofiles::multi::Component {
+                    graphic: Graphic(row.graphic),
+                    dx:      row.dx,
+                    dy:      row.dy,
+                    dz:      row.dz,
+                    flags:   row.flags,
+                }
             })
             .collect(),
     );
@@ -1301,12 +1327,14 @@ fn a_boat_survives_a_restart_with_its_deck() {
     fn sloop() -> Vec<Component> {
         [(HULL, -1), (DECK, 0)]
             .into_iter()
-            .map(|(graphic, dx)| Component {
-                graphic: openshard_protocol::wire::Graphic(graphic),
-                dx,
-                dy: 0,
-                dz: 0,
-                flags: 1,
+            .map(|(graphic, dx)| {
+                Component {
+                    graphic: openshard_protocol::wire::Graphic(graphic),
+                    dx,
+                    dy: 0,
+                    dz: 0,
+                    flags: 1,
+                }
             })
             .collect()
     }

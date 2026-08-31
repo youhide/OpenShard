@@ -36,13 +36,20 @@
 //! terrain is opaque everywhere by construction, and a marker over it replaces
 //! rather than tints what it stands on.
 
-use openshard_uofiles::color::Color16;
 use std::collections::BTreeMap;
+
+use openshard_uofiles::color::Color16;
 
 use crate::chunk_cache::LruBudget;
 use crate::gump::Frame;
 use crate::radar::{
-    BASE_CHUNK_TILES, MARKER_ARMS, RadarChunk, RadarChunkKey, RadarRegion, RadarRevision, RadarTile,
+    BASE_CHUNK_TILES,
+    MARKER_ARMS,
+    RadarChunk,
+    RadarChunkKey,
+    RadarRegion,
+    RadarRevision,
+    RadarTile,
 };
 use crate::renderer::QUAD;
 
@@ -79,20 +86,27 @@ pub fn radar_chunk_array_layers(adapter_limit: u32) -> u32 {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Placement {
     /// The top-left corner.
-    pub origin: (f32, f32),
-    pub extent: (f32, f32),
+    pub origin:   (f32, f32),
+    pub extent:   (f32, f32),
     /// Clip all terrain and overlays to this circle.  The minimap uses this
     /// with its classic round frame; rectangular consumers can leave it off.
-    pub circle: bool,
+    pub circle:   bool,
     /// Clockwise rotation in screen coordinates, in radians.
     pub rotation: f32,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::radar::{RadarChunkCoord, RadarExtent, RadarLod, RadarRevision, RadarTile};
     use openshard_protocol::world::Facet;
+
+    use super::*;
+    use crate::radar::{
+        RadarChunkCoord,
+        RadarExtent,
+        RadarLod,
+        RadarRevision,
+        RadarTile,
+    };
 
     fn chunk(x: u32, y: u32) -> RadarChunk {
         RadarChunk::new(
@@ -134,9 +148,9 @@ mod tests {
         let draws = select_region_chunks(
             region,
             Placement {
-                origin: (10.0, 20.0),
-                extent: (128.0, 32.0),
-                circle: false,
+                origin:   (10.0, 20.0),
+                extent:   (128.0, 32.0),
+                circle:   false,
                 rotation: 0.0,
             },
             [&west, &east],
@@ -170,9 +184,9 @@ mod tests {
         let draws = select_region_chunks(
             region((0, 0), (16, 16)),
             Placement {
-                origin: (0.0, 0.0),
-                extent: (16.0, 16.0),
-                circle: false,
+                origin:   (0.0, 0.0),
+                extent:   (16.0, 16.0),
+                circle:   false,
                 rotation: 0.0,
             },
             [&matching, &other_facet],
@@ -200,9 +214,9 @@ mod tests {
         let draws = select_region_chunks(
             region((0, 0), (side, side)),
             Placement {
-                origin: (0.0, 0.0),
-                extent: (f32::from(side), f32::from(side)),
-                circle: false,
+                origin:   (0.0, 0.0),
+                extent:   (f32::from(side), f32::from(side)),
+                circle:   false,
                 rotation: 0.0,
             },
             // Handed in fine-first on purpose: the order drawn is this
@@ -241,9 +255,9 @@ mod tests {
         let draws = select_region_chunks(
             region((0, 0), (side, side)),
             Placement {
-                origin: (0.0, 0.0),
-                extent: (f32::from(side), f32::from(side)),
-                circle: false,
+                origin:   (0.0, 0.0),
+                extent:   (f32::from(side), f32::from(side)),
+                circle:   false,
                 rotation: 0.0,
             },
             // What four base-chunk requests all falling back to one ancestor
@@ -258,9 +272,9 @@ mod tests {
         let north = chunk(0, 0);
         let south = chunk(0, 1);
         let at = Placement {
-            origin: (0.0, 0.0),
-            extent: (100.0, 100.0),
-            circle: false,
+            origin:   (0.0, 0.0),
+            extent:   (100.0, 100.0),
+            circle:   false,
             rotation: 0.0,
         };
         let uv = ChunkUv {
@@ -273,9 +287,9 @@ mod tests {
         let far_north = RadarChunkDraw {
             chunk: &north,
             placement: Placement {
-                origin: (50.0, 10.0),
-                extent: (0.0, 0.0),
-                circle: false,
+                origin:   (50.0, 10.0),
+                extent:   (0.0, 0.0),
+                circle:   false,
                 rotation: 0.0,
             },
             uv,
@@ -283,9 +297,9 @@ mod tests {
         let near_south = RadarChunkDraw {
             chunk: &south,
             placement: Placement {
-                origin: (50.0, 60.0),
-                extent: (0.0, 0.0),
-                circle: false,
+                origin:   (50.0, 60.0),
+                extent:   (0.0, 0.0),
+                circle:   false,
                 rotation: 0.0,
             },
             uv,
@@ -316,20 +330,22 @@ mod tests {
         )
         .unwrap();
         let at = Placement {
-            origin: (0.0, 0.0),
-            extent: (100.0, 100.0),
-            circle: false,
+            origin:   (0.0, 0.0),
+            extent:   (100.0, 100.0),
+            circle:   false,
             rotation: 0.0,
         };
         let uv = ChunkUv {
             origin: (0.0, 0.0),
             extent: (1.0, 1.0),
         };
-        let placement_at = |x: f32, y: f32| Placement {
-            origin: (x, y),
-            extent: (0.0, 0.0),
-            circle: false,
-            rotation: 0.0,
+        let placement_at = |x: f32, y: f32| {
+            Placement {
+                origin:   (x, y),
+                extent:   (0.0, 0.0),
+                circle:   false,
+                rotation: 0.0,
+            }
         };
         // Fed in fine-first and with the ancestor's placement, not its LOD,
         // making it the *second*-nearest of the three: only distance decides
@@ -372,9 +388,9 @@ mod tests {
         (
             region((100, 100), (side, side)),
             Placement {
-                origin: (10.0, 20.0),
-                extent: (f32::from(side) * magnify, f32::from(side) * magnify),
-                circle: false,
+                origin:   (10.0, 20.0),
+                extent:   (f32::from(side) * magnify, f32::from(side) * magnify),
+                circle:   false,
                 rotation: 0.0,
             },
         )
@@ -384,7 +400,7 @@ mod tests {
     fn a_marker_is_a_cross_of_tile_sized_quads_where_the_body_stands() {
         let (region, at) = window(16, 2.0);
         let marker = RadarMarker {
-            tile: RadarTile::new(104, 108),
+            tile:  RadarTile::new(104, 108),
             color: Color16(0x7FFF),
         };
         let quads = select_marker_quads(region, at, [&marker]);
@@ -408,7 +424,7 @@ mod tests {
         // the window, and drawing them at the edge would put the cross's centre
         // one tile from where the body actually is.
         let corner = RadarMarker {
-            tile: RadarTile::new(100, 100),
+            tile:  RadarTile::new(100, 100),
             color: Color16(0x7FFF),
         };
         let quads = select_marker_quads(region, at, [&corner]);
@@ -418,7 +434,7 @@ mod tests {
         }));
 
         let outside = RadarMarker {
-            tile: RadarTile::new(200, 200),
+            tile:  RadarTile::new(200, 200),
             color: Color16(0x7FFF),
         };
         assert!(
@@ -440,9 +456,9 @@ pub struct ChunkUv {
 /// edge exactly instead of relying on filtered texels to hide a seam.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct RadarChunkDraw<'a> {
-    pub chunk: &'a RadarChunk,
+    pub chunk:     &'a RadarChunk,
     pub placement: Placement,
-    pub uv: ChunkUv,
+    pub uv:        ChunkUv,
 }
 
 /// Select the chunks and exact source UVs covering a region.
@@ -497,12 +513,12 @@ pub fn select_region_chunks<'a>(
                 RadarChunkDraw {
                     chunk,
                     placement: Placement {
-                        origin: (
+                        origin:   (
                             at.origin.0 + (x0 - left) as f32 * scale_x,
                             at.origin.1 + (y0 - top) as f32 * scale_y,
                         ),
-                        extent: ((x1 - x0) as f32 * scale_x, (y1 - y0) as f32 * scale_y),
-                        circle: at.circle,
+                        extent:   ((x1 - x0) as f32 * scale_x, (y1 - y0) as f32 * scale_y),
+                        circle:   at.circle,
                         rotation: at.rotation,
                     },
                     uv: ChunkUv {
@@ -592,12 +608,12 @@ fn cap_draws_by_distance<'a>(
 /// the `RadarChunk` held by the content cache.
 #[derive(Debug)]
 pub struct RadarChunkRenderer {
-    pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
-    uniforms: wgpu::Buffer,
-    quad: wgpu::Buffer,
-    texture: wgpu::Texture,
-    pages: BTreeMap<RadarChunkKey, ResidentPage>,
+    pipeline:            wgpu::RenderPipeline,
+    bind_group:          wgpu::BindGroup,
+    uniforms:            wgpu::Buffer,
+    quad:                wgpu::Buffer,
+    texture:             wgpu::Texture,
+    pages:               BTreeMap<RadarChunkKey, ResidentPage>,
     /// Layers an eviction released and no chunk has taken back yet.
     ///
     /// The array's layers are handed out once and recycled forever, so this is
@@ -606,13 +622,13 @@ pub struct RadarChunkRenderer {
     /// `pages.len()` — it is only ever asked for when this is empty — and it is
     /// what makes evicting more than one page at a time safe rather than a
     /// silent layer collision.
-    free_layers: Vec<u32>,
-    residency: LruBudget<RadarChunkKey>,
-    capacity: u32,
-    instances: wgpu::Buffer,
-    instance_capacity: u64,
+    free_layers:         Vec<u32>,
+    residency:           LruBudget<RadarChunkKey>,
+    capacity:            u32,
+    instances:           wgpu::Buffer,
+    instance_capacity:   u64,
     over_capacity_draws: u64,
-    evicted: u64,
+    evicted:             u64,
 }
 
 /// Frame-diagnostic counters for the GPU page cache.
@@ -627,11 +643,11 @@ pub struct RadarChunkRenderer {
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct RadarPageCounters {
     /// Pages holding a chunk right now.
-    pub resident: usize,
+    pub resident:            usize,
     /// Texture-array layers this renderer was built with.
-    pub capacity: usize,
+    pub capacity:            usize,
     /// Pages taken by the residency budget over the session.
-    pub evicted: u64,
+    pub evicted:             u64,
     /// Draws that named more chunks than `capacity` and were truncated by
     /// `cap_draws_by_distance`.
     pub over_capacity_draws: u64,
@@ -658,18 +674,18 @@ impl RadarChunkRenderer {
             .try_into()
             .unwrap_or(u32::MAX);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("radar chunk pages"),
-            size: wgpu::Extent3d {
-                width: u32::from(BASE_CHUNK_TILES),
-                height: u32::from(BASE_CHUNK_TILES),
+            label:           Some("radar chunk pages"),
+            size:            wgpu::Extent3d {
+                width:                 u32::from(BASE_CHUNK_TILES),
+                height:                u32::from(BASE_CHUNK_TILES),
                 depth_or_array_layers: capacity,
             },
             mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
+            sample_count:    1,
+            dimension:       wgpu::TextureDimension::D2,
+            format:          wgpu::TextureFormat::Rgba8Unorm,
+            usage:           wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats:    &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
@@ -686,83 +702,83 @@ impl RadarChunkRenderer {
             ..Default::default()
         });
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("radar chunk draw"),
-            size: CHUNK_UNIFORM_BYTES,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            label:              Some("radar chunk draw"),
+            size:               CHUNK_UNIFORM_BYTES,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("radar chunk"),
+            label:   Some("radar chunk"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                    binding:    0,
                     visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding:    1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding:    2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
+                    ty:         wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count:      None,
                 },
             ],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("radar chunk"),
-            layout: &layout,
+            label:   Some("radar chunk"),
+            layout:  &layout,
             entries: &[
                 wgpu::BindGroupEntry {
-                    binding: 0,
+                    binding:  0,
                     resource: uniforms.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 1,
+                    binding:  1,
                     resource: wgpu::BindingResource::TextureView(&view),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding:  2,
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
             ],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("radar chunk"),
+            label:  Some("radar chunk"),
             source: wgpu::ShaderSource::Wgsl(include_str!("radar_chunk.wgsl").into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("radar chunk"),
+            label:              Some("radar chunk"),
             bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
+            immediate_size:     0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("radar chunk"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+            label:          Some("radar chunk"),
+            layout:         Some(&pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
+                buffers:             &[
                     Some(wgpu::VertexBufferLayout {
                         array_stride: 8,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
+                        step_mode:    wgpu::VertexStepMode::Vertex,
+                        attributes:   &[wgpu::VertexAttribute {
+                            format:          wgpu::VertexFormat::Float32x2,
+                            offset:          0,
                             shader_location: 0,
                         }],
                     }),
@@ -772,60 +788,60 @@ impl RadarChunkRenderer {
                     // not in a uniform rewritten between them.
                     Some(wgpu::VertexBufferLayout {
                         array_stride: CHUNK_INSTANCE_STRIDE,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &[
+                        step_mode:    wgpu::VertexStepMode::Instance,
+                        attributes:   &[
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 0,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          0,
                                 shader_location: 1,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 8,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          8,
                                 shader_location: 2,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 16,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          16,
                                 shader_location: 3,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 24,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          24,
                                 shader_location: 4,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Uint32,
-                                offset: 32,
+                                format:          wgpu::VertexFormat::Uint32,
+                                offset:          32,
                                 shader_location: 5,
                             },
                         ],
                     }),
                 ],
             },
-            primitive: wgpu::PrimitiveState {
+            primitive:      wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
                 ..Default::default()
             },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+            depth_stencil:  None,
+            multisample:    wgpu::MultisampleState::default(),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
+                targets:             &[Some(wgpu::ColorTargetState {
                     format,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
         let quad = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("radar chunk quad"),
-            size: std::mem::size_of_val(&QUAD) as u64,
-            usage: wgpu::BufferUsages::VERTEX,
+            label:              Some("radar chunk quad"),
+            size:               std::mem::size_of_val(&QUAD) as u64,
+            usage:              wgpu::BufferUsages::VERTEX,
             mapped_at_creation: true,
         });
         let bytes: Vec<u8> = QUAD.iter().flat_map(|value| value.to_le_bytes()).collect();
@@ -865,9 +881,9 @@ impl RadarChunkRenderer {
     #[must_use]
     pub fn counters(&self) -> RadarPageCounters {
         RadarPageCounters {
-            resident: self.pages.len(),
-            capacity: self.capacity as usize,
-            evicted: self.evicted,
+            resident:            self.pages.len(),
+            capacity:            self.capacity as usize,
+            evicted:             self.evicted,
             over_capacity_draws: self.over_capacity_draws,
         }
     }
@@ -934,9 +950,9 @@ impl RadarChunkRenderer {
         // run before the whole command buffer, and a one-page cache could then
         // overwrite the first chunk before its already-recorded draw executes.
         let staging = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("radar chunk upload"),
-            size: RADAR_CHUNK_PAGE_BYTES,
-            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            label:              Some("radar chunk upload"),
+            size:               RADAR_CHUNK_PAGE_BYTES,
+            usage:              wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         queue.write_buffer(&staging, 0, &bytes);
@@ -944,20 +960,20 @@ impl RadarChunkRenderer {
             wgpu::TexelCopyBufferInfo {
                 buffer: &staging,
                 layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(u32::from(BASE_CHUNK_TILES) * 4),
+                    offset:         0,
+                    bytes_per_row:  Some(u32::from(BASE_CHUNK_TILES) * 4),
                     rows_per_image: Some(u32::from(BASE_CHUNK_TILES)),
                 },
             },
             wgpu::TexelCopyTextureInfo {
-                texture: &self.texture,
+                texture:   &self.texture,
                 mip_level: 0,
-                origin: wgpu::Origin3d { x: 0, y: 0, z: layer },
-                aspect: wgpu::TextureAspect::All,
+                origin:    wgpu::Origin3d { x: 0, y: 0, z: layer },
+                aspect:    wgpu::TextureAspect::All,
             },
             wgpu::Extent3d {
-                width: u32::from(BASE_CHUNK_TILES),
-                height: u32::from(BASE_CHUNK_TILES),
+                width:                 u32::from(BASE_CHUNK_TILES),
+                height:                u32::from(BASE_CHUNK_TILES),
                 depth_or_array_layers: 1,
             },
         );
@@ -1058,11 +1074,11 @@ impl RadarChunkRenderer {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("radar chunk"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: frame.target,
-                depth_slice: None,
+                view:           frame.target,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                ops:            wgpu::Operations {
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -1109,7 +1125,7 @@ fn window_scissor(frame: Frame<'_>, at: Placement) -> Option<(u32, u32, u32, u32
 pub struct RadarMarker {
     /// The world tile it stands on — the same coordinate space a
     /// [`RadarRegion`]'s origin is in, not a pixel inside the window.
-    pub tile: RadarTile,
+    pub tile:  RadarTile,
     pub color: Color16,
 }
 
@@ -1156,12 +1172,12 @@ pub fn select_marker_quads<'a>(
             }
             quads.push((
                 Placement {
-                    origin: (
+                    origin:   (
                         at.origin.0 + column as f32 * scale_x,
                         at.origin.1 + row as f32 * scale_y,
                     ),
-                    extent: (scale_x, scale_y),
-                    circle: at.circle,
+                    extent:   (scale_x, scale_y),
+                    circle:   at.circle,
                     rotation: at.rotation,
                 },
                 marker.color,
@@ -1179,11 +1195,11 @@ pub fn select_marker_quads<'a>(
 /// rectangles and uploads no texture at all.
 #[derive(Debug)]
 pub struct RadarOverlayRenderer {
-    pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
-    uniforms: wgpu::Buffer,
-    quad: wgpu::Buffer,
-    instances: wgpu::Buffer,
+    pipeline:          wgpu::RenderPipeline,
+    bind_group:        wgpu::BindGroup,
+    uniforms:          wgpu::Buffer,
+    quad:              wgpu::Buffer,
+    instances:         wgpu::Buffer,
     instance_capacity: u64,
 }
 
@@ -1194,108 +1210,108 @@ impl RadarOverlayRenderer {
     #[must_use]
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("radar overlay frame"),
-            size: CHUNK_UNIFORM_BYTES,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            label:              Some("radar overlay frame"),
+            size:               CHUNK_UNIFORM_BYTES,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("radar overlay"),
+            label:   Some("radar overlay"),
             entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
+                binding:    0,
                 visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
+                ty:         wgpu::BindingType::Buffer {
+                    ty:                 wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: None,
+                    min_binding_size:   None,
                 },
-                count: None,
+                count:      None,
             }],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("radar overlay"),
-            layout: &layout,
+            label:   Some("radar overlay"),
+            layout:  &layout,
             entries: &[wgpu::BindGroupEntry {
-                binding: 0,
+                binding:  0,
                 resource: uniforms.as_entire_binding(),
             }],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("radar overlay"),
+            label:  Some("radar overlay"),
             source: wgpu::ShaderSource::Wgsl(include_str!("radar_marker.wgsl").into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("radar overlay"),
+            label:              Some("radar overlay"),
             bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
+            immediate_size:     0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("radar overlay"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+            label:          Some("radar overlay"),
+            layout:         Some(&pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
+                buffers:             &[
                     Some(wgpu::VertexBufferLayout {
                         array_stride: 8,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
+                        step_mode:    wgpu::VertexStepMode::Vertex,
+                        attributes:   &[wgpu::VertexAttribute {
+                            format:          wgpu::VertexFormat::Float32x2,
+                            offset:          0,
                             shader_location: 0,
                         }],
                     }),
                     Some(wgpu::VertexBufferLayout {
                         array_stride: MARKER_INSTANCE_STRIDE,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &[
+                        step_mode:    wgpu::VertexStepMode::Instance,
+                        attributes:   &[
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 0,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          0,
                                 shader_location: 1,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 8,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          8,
                                 shader_location: 2,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 16,
+                                format:          wgpu::VertexFormat::Float32x4,
+                                offset:          16,
                                 shader_location: 3,
                             },
                         ],
                     }),
                 ],
             },
-            primitive: wgpu::PrimitiveState {
+            primitive:      wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
                 ..Default::default()
             },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+            depth_stencil:  None,
+            multisample:    wgpu::MultisampleState::default(),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 // No blending: a marker replaces the terrain under it, exactly
                 // as the bitmap stamp does. A translucent player dot would take
                 // the colour of the ground it stands on, which is the one thing
                 // it must not do.
-                targets: &[Some(wgpu::ColorTargetState {
+                targets:             &[Some(wgpu::ColorTargetState {
                     format,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
         let quad = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("radar overlay quad"),
-            size: std::mem::size_of_val(&QUAD) as u64,
-            usage: wgpu::BufferUsages::VERTEX,
+            label:              Some("radar overlay quad"),
+            size:               std::mem::size_of_val(&QUAD) as u64,
+            usage:              wgpu::BufferUsages::VERTEX,
             mapped_at_creation: true,
         });
         let bytes: Vec<u8> = QUAD.iter().flat_map(|value| value.to_le_bytes()).collect();
@@ -1483,11 +1499,11 @@ impl RadarOverlayRenderer {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("radar overlay"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: frame.target,
-                depth_slice: None,
+                view:           frame.target,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                ops:            wgpu::Operations {
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],

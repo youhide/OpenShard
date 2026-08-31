@@ -16,9 +16,21 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use openshard_client_render::bench::{self, Cadence, Metrics, Sample, Script, Trace, run, scripts};
+use openshard_client_render::bench::{
+    self,
+    Cadence,
+    Metrics,
+    Sample,
+    Script,
+    Trace,
+    run,
+    scripts,
+};
 use openshard_client_render::chart;
-use openshard_client_render::follow::{FLOOR, Rig};
+use openshard_client_render::follow::{
+    FLOOR,
+    Rig,
+};
 use openshard_movement::WALK_HOLD;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
@@ -32,8 +44,8 @@ use openshard_protocol::world::Point;
 /// whether they would show anything.
 const PROBE: Rig = Rig {
     plane_tau: 0.12,
-    lift_tau: 0.25,
-    lift_cut: FLOOR,
+    lift_tau:  0.25,
+    lift_cut:  FLOOR,
 };
 
 /// Somewhere in the middle of a facet, as the scripts start.
@@ -450,13 +462,13 @@ fn chart(script: &Script, traces: &[(&str, Trace)]) -> String {
 
     let panels = vec![
         chart::Panel {
-            title: "the eye's speed, pixels per second".to_string(),
-            series: speed_series(traces, speed),
+            title:    "the eye's speed, pixels per second".to_string(),
+            series:   speed_series(traces, speed),
             baseline: None,
         },
         chart::Panel {
-            title: "how far behind the body, pixels".to_string(),
-            series: speed_series(traces, lag),
+            title:    "how far behind the body, pixels".to_string(),
+            series:   speed_series(traces, lag),
             // The eye is meant to be on the body; the dashed line is what every
             // rig is departing from.
             baseline: Some(0.0),
@@ -469,9 +481,11 @@ fn chart(script: &Script, traces: &[(&str, Trace)]) -> String {
 fn speed_series(traces: &[(&str, Trace)], of: impl Fn(&Trace) -> Vec<(f64, f64)>) -> Vec<chart::Series> {
     traces
         .iter()
-        .map(|(name, trace)| chart::Series {
-            name: (*name).to_string(),
-            points: of(trace),
+        .map(|(name, trace)| {
+            chart::Series {
+                name:   (*name).to_string(),
+                points: of(trace),
+            }
         })
         .collect()
 }

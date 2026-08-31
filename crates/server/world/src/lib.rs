@@ -46,30 +46,109 @@ pub mod townsfolk;
 // `openshard-state` so the gameplay systems can live in their own crates above
 // it. Re-exported here so `openshard_world::Position` and friends keep resolving.
 pub use events::{
-    AdminMenuAction, CorpseCreated, GumpAnswered, MobileMoved, MobileRestored, MobileSpawned, MobileTurned,
-    PlayerEntered, PlayerLeaving, PlayerLeft, PlayerRefused, RefusedEntry, RefusedReason, SpellRequested,
+    AdminMenuAction,
+    CorpseCreated,
+    GumpAnswered,
+    MobileMoved,
+    MobileRestored,
+    MobileSpawned,
+    MobileTurned,
+    PlayerEntered,
+    PlayerLeaving,
+    PlayerLeft,
+    PlayerRefused,
+    RefusedEntry,
+    RefusedReason,
+    SpellRequested,
     StepRefused,
 };
 pub use openshard_chat::MobileSpoke;
-pub use openshard_combat::{MobileDamaged, MobileDied};
-pub use openshard_items::{ItemSpawned, ItemUsed, ItemsTaken, MobileUsed};
+pub use openshard_combat::{
+    MobileDamaged,
+    MobileDied,
+};
+pub use openshard_items::{
+    ItemSpawned,
+    ItemUsed,
+    ItemsTaken,
+    MobileUsed,
+};
 pub use openshard_magic::SpellCast;
 pub use openshard_npc::StockLine;
-pub use openshard_skills::{SkillChanged, SkillRequested, SkillUsed};
-pub use openshard_state::Outbound;
-pub use openshard_state::components;
-pub use openshard_state::{
-    Account, Amount, Body, Brain, Client, Combat, Contained, Container, CriminalUntil, DamageType, Decays,
-    Drawn, Equipped, Heading, Hitpoints, Mana, MeleeDamage, Movement, MurderDecay, Murders, Name, Position,
-    Resistance, Skills, Stackable, Stats, SwingSpeed,
+pub use openshard_skills::{
+    SkillChanged,
+    SkillRequested,
+    SkillUsed,
 };
-pub use openshard_state::{CastStyle, Gameplay, StatLock, TooltipMode};
-pub use openshard_state::{Dialogue, SpeechEntry, SpeechTable};
-pub use openshard_state::{ObjectiveDef, ObjectiveKind, QuestDef, RewardDef, RewardKind};
-pub use openshard_state::{Region, RegionFlags, RegionId, RegionRect};
-pub use openshard_state::{SECTOR_SIZE, Sectors, VIEW_RANGE, distance, in_range, sectors};
-pub use terrain::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
+pub use openshard_state::{
+    Account,
+    Amount,
+    Body,
+    Brain,
+    CastStyle,
+    Client,
+    Combat,
+    Contained,
+    Container,
+    CriminalUntil,
+    DamageType,
+    Decays,
+    Dialogue,
+    Drawn,
+    Equipped,
+    Gameplay,
+    Heading,
+    Hitpoints,
+    Mana,
+    MeleeDamage,
+    Movement,
+    MurderDecay,
+    Murders,
+    Name,
+    ObjectiveDef,
+    ObjectiveKind,
+    Outbound,
+    Position,
+    QuestDef,
+    Region,
+    RegionFlags,
+    RegionId,
+    RegionRect,
+    Resistance,
+    RewardDef,
+    RewardKind,
+    SECTOR_SIZE,
+    Sectors,
+    Skills,
+    SpeechEntry,
+    SpeechTable,
+    Stackable,
+    StatLock,
+    Stats,
+    SwingSpeed,
+    TooltipMode,
+    VIEW_RANGE,
+    components,
+    distance,
+    in_range,
+    sectors,
+};
+pub use terrain::{
+    MAX_STEP_UP,
+    MapTerrain,
+    PLAYER_HEIGHT,
+};
 pub use tick::{
-    Appearance, Character, CharacterSheet, Command, DecorContainer, DecorDoor, Entering, FreshCharacter,
-    RestoredCharacters, RestoredItems, TICK_INTERVAL, World,
+    Appearance,
+    Character,
+    CharacterSheet,
+    Command,
+    DecorContainer,
+    DecorDoor,
+    Entering,
+    FreshCharacter,
+    RestoredCharacters,
+    RestoredItems,
+    TICK_INTERVAL,
+    World,
 };

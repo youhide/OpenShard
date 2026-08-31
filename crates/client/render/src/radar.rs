@@ -33,17 +33,29 @@
 //!   ground.
 
 use std::cell::Cell;
-use std::collections::{BTreeMap, BTreeSet};
-use std::time::{Duration, Instant};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_map::grid::BlockCoord;
-use openshard_map::map::{BLOCK_SIZE, WorldMap};
+use openshard_map::map::{
+    BLOCK_SIZE,
+    WorldMap,
+};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Facet;
 use openshard_uofiles::color::Color16;
 use openshard_uofiles::radarcol::RadarColors;
 
-use crate::chunk_cache::{LruBudget, WorkQueue};
+use crate::chunk_cache::{
+    LruBudget,
+    WorkQueue,
+};
 use crate::radar_pass::Placement;
 
 /// Domain values that name radar space.
@@ -131,7 +143,7 @@ pub mod types {
     /// A non-empty rectangular extent in native radar tiles.
     #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
     pub struct RadarExtent {
-        width: u16,
+        width:  u16,
         height: u16,
     }
 
@@ -243,7 +255,7 @@ pub mod types {
     /// A world rectangle sampled through the level-zero chunk grid.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct RadarRegion {
-        facet: Facet,
+        facet:  Facet,
         origin: RadarTile,
         extent: RadarExtent,
     }
@@ -275,7 +287,14 @@ pub mod types {
     }
 }
 
-pub use types::{RadarChunkCoord, RadarChunkLocalTile, RadarExtent, RadarLod, RadarRegion, RadarTile};
+pub use types::{
+    RadarChunkCoord,
+    RadarChunkLocalTile,
+    RadarExtent,
+    RadarLod,
+    RadarRegion,
+    RadarTile,
+};
 
 /// What a tile with no colour of its own draws as.
 ///
@@ -333,13 +352,13 @@ const RADAR_CHUNK_CPU_BYTES: u64 = (BASE_CHUNK_TILES as u64) * (BASE_CHUNK_TILES
 /// One placement of the shared radar raster.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct RadarView {
-    pub facet: Facet,
-    pub centre: RadarTile,
+    pub facet:           Facet,
+    pub centre:          RadarTile,
     pub tiles_per_pixel: f32,
-    pub placement: Placement,
-    facet_extent: RadarExtent,
-    device_scale: f32,
-    tangent_margin: (u16, u16),
+    pub placement:       Placement,
+    facet_extent:        RadarExtent,
+    device_scale:        f32,
+    tangent_margin:      (u16, u16),
 }
 
 impl RadarView {
@@ -583,16 +602,16 @@ pub fn request_views(
 #[derive(Clone, Copy, Debug)]
 pub struct RadarStep<'a> {
     /// Every open view, each with the level its own window's selector chose.
-    pub views: &'a [(RadarView, RadarLod)],
+    pub views:           &'a [(RadarView, RadarLod)],
     /// The facet whose coarse floor is owed this frame — `Some` while a window
     /// that can show the whole facet is open, `None` while none is. The absence
     /// is the state and not a missing answer: a floor already begun keeps every
     /// key it still owes, and is simply not offered them on a frame when no such
     /// window is open.
-    pub sweep: Option<Facet>,
+    pub sweep:           Option<Facet>,
     /// The facet's own extent: how high the ladder goes, and which absent
     /// children are ground the facet does not have.
-    pub facet_extent: RadarExtent,
+    pub facet_extent:    RadarExtent,
     /// Which chunk the producer's turn works outward from — the player's own,
     /// in the client.
     pub producer_centre: RadarChunkCoord,
@@ -602,13 +621,13 @@ pub struct RadarStep<'a> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct RadarStepReport {
     /// How every key the open views are about to draw was answered.
-    pub demand: RadarDemand,
+    pub demand:  RadarDemand,
     /// What the producer turn spent walking the map and colouring tiles: the
     /// whole of the radar's synchronous CPU cost, measured where it is spent.
-    pub raster: Duration,
+    pub raster:  Duration,
     /// Chunks the turn published, its reduced ancestors not counted — a
     /// reduction is arithmetic over four ready products and walks no map.
-    pub built: usize,
+    pub built:   usize,
     /// Products the CPU budget dropped, which is zero on any frame inside the
     /// tail budget. That is the ordinary frame.
     pub evicted: usize,
@@ -787,9 +806,9 @@ pub struct RadarRevision(pub u64);
 /// space in each direction, but still contains the same number of pixels.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct RadarChunkKey {
-    facet: Facet,
-    lod: RadarLod,
-    chunk: RadarChunkCoord,
+    facet:    Facet,
+    lod:      RadarLod,
+    chunk:    RadarChunkCoord,
     revision: RadarRevision,
 }
 
@@ -847,7 +866,7 @@ impl RadarChunkKey {
 /// An immutable, complete terrain product ready for cache publication.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RadarChunk {
-    key: RadarChunkKey,
+    key:    RadarChunkKey,
     pixels: Vec<Color16>,
 }
 
@@ -872,7 +891,7 @@ pub enum RadarReadyKind {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct RadarReadyChunk<'a> {
     chunk: &'a RadarChunk,
-    kind: RadarReadyKind,
+    kind:  RadarReadyKind,
 }
 
 impl<'a> RadarReadyChunk<'a> {
@@ -896,12 +915,12 @@ impl<'a> RadarReadyChunk<'a> {
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct RadarDemand {
     /// Ready at the requested key, under the current source revision.
-    pub exact: usize,
+    pub exact:   usize,
     /// Stood in for by a ready coarser parent — correct terrain, drawn blurry.
     pub coarser: usize,
     /// Stood in for by the newest retained revision of the same chunk — sharp
     /// terrain that is out of date.
-    pub stale: usize,
+    pub stale:   usize,
     /// Nothing ready: this chunk's area is backdrop this frame.
     pub missing: usize,
 }
@@ -923,7 +942,7 @@ pub struct RadarResolved {
     /// ancestor standing in for four requests appears once per request, which
     /// is harmless — eviction only needs the set — and is what keeps this a
     /// single walk.
-    pub drawn: Vec<RadarChunkKey>,
+    pub drawn:  Vec<RadarChunkKey>,
 }
 
 /// Ask the cache what every requested key will be drawn from, and how it
@@ -966,11 +985,11 @@ pub fn resolve_demand(
 /// a cache does not dispatch or retain pending work.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct RadarCacheCounters {
-    pub requested: u64,
-    pub ready: usize,
-    pub stale: usize,
-    pub rebuilt: u64,
-    pub evicted: u64,
+    pub requested:      u64,
+    pub ready:          usize,
+    pub stale:          usize,
+    pub rebuilt:        u64,
+    pub evicted:        u64,
     /// What every retained product weighs, current and stale together.
     pub retained_bytes: u64,
     /// The tail budget [`RadarCache::evict_to_budget`] measures that weight
@@ -979,7 +998,7 @@ pub struct RadarCacheCounters {
     /// pinned chunks raise cannot be read off `retained_bytes` alone, and
     /// `retained_bytes` above `tail_budget` is the only state in which this
     /// cache evicts at all.
-    pub tail_budget: u64,
+    pub tail_budget:    u64,
 }
 
 /// The sole owner of ready radar terrain products and their source revisions.
@@ -991,14 +1010,14 @@ pub struct RadarCacheCounters {
 /// type establishes the one authoritative identity they operate on.
 #[derive(Debug)]
 pub struct RadarCache {
-    revisions: BTreeMap<Facet, RadarRevision>,
-    ready: BTreeMap<RadarChunkKey, RadarChunk>,
+    revisions:         BTreeMap<Facet, RadarRevision>,
+    ready:             BTreeMap<RadarChunkKey, RadarChunk>,
     highest_ready_lod: BTreeMap<(Facet, RadarRevision), RadarLod>,
-    requested: Cell<u64>,
-    rebuilt: u64,
-    evicted: u64,
-    budget: LruBudget<RadarChunkKey>,
-    tail_budget: u64,
+    requested:         Cell<u64>,
+    rebuilt:           u64,
+    evicted:           u64,
+    budget:            LruBudget<RadarChunkKey>,
+    tail_budget:       u64,
     /// Every coarse key a facet's sweep still owes, per facet.
     ///
     /// A set and not a flag. The flag said *the sweep ran*, which is a
@@ -1009,27 +1028,28 @@ pub struct RadarCache {
     /// later as a patch of backdrop at some zoom, on ground no window has
     /// ever drawn at level zero. An empty entry is a sweep that finished; a
     /// missing one is a sweep that never started.
-    sweep_owed: BTreeMap<Facet, BTreeSet<RadarChunkKey>>,
+    sweep_owed:        BTreeMap<Facet, BTreeSet<RadarChunkKey>>,
     /// Current-source products which a terrain/static mutation made unsafe to
     /// reuse.  A producer consumes these keys in a later phase; keeping the
     /// work here makes the content owner, rather than a minimap window, the
     /// sole authority on what needs rebuilding.
-    dirty: BTreeSet<RadarChunkKey>,
+    dirty:             BTreeSet<RadarChunkKey>,
 }
 
 impl Default for RadarCache {
     fn default() -> Self {
         Self {
-            revisions: BTreeMap::new(),
-            ready: BTreeMap::new(),
+            revisions:         BTreeMap::new(),
+            ready:             BTreeMap::new(),
             highest_ready_lod: BTreeMap::new(),
-            requested: Cell::new(0),
-            rebuilt: 0,
-            evicted: 0,
-            budget: LruBudget::new(RADAR_CPU_TAIL_BUDGET).expect("the shipped radar CPU budget is non-zero"),
-            tail_budget: RADAR_CPU_TAIL_BUDGET,
-            sweep_owed: BTreeMap::new(),
-            dirty: BTreeSet::new(),
+            requested:         Cell::new(0),
+            rebuilt:           0,
+            evicted:           0,
+            budget:            LruBudget::new(RADAR_CPU_TAIL_BUDGET)
+                .expect("the shipped radar CPU budget is non-zero"),
+            tail_budget:       RADAR_CPU_TAIL_BUDGET,
+            sweep_owed:        BTreeMap::new(),
+            dirty:             BTreeSet::new(),
         }
     }
 }
@@ -1156,7 +1176,7 @@ impl RadarCache {
             self.ready.insert(
                 carried_key,
                 RadarChunk {
-                    key: carried_key,
+                    key:    carried_key,
                     pixels: was_ready.pixels,
                 },
             );
@@ -1395,9 +1415,11 @@ impl RadarCache {
                     && candidate.revision <= current_revision
             })
             .max_by_key(|(candidate, _)| candidate.revision)
-            .map(|(_, chunk)| RadarReadyChunk {
-                chunk,
-                kind: RadarReadyKind::StaleExact,
+            .map(|(_, chunk)| {
+                RadarReadyChunk {
+                    chunk,
+                    kind: RadarReadyKind::StaleExact,
+                }
             })
     }
 
@@ -1410,13 +1432,13 @@ impl RadarCache {
             .filter(|key| key.revision == self.revision(key.facet))
             .count();
         RadarCacheCounters {
-            requested: self.requested.get(),
-            ready: current,
-            stale: self.ready.len() - current,
-            rebuilt: self.rebuilt,
-            evicted: self.evicted,
+            requested:      self.requested.get(),
+            ready:          current,
+            stale:          self.ready.len() - current,
+            rebuilt:        self.rebuilt,
+            evicted:        self.evicted,
             retained_bytes: self.budget.retained_bytes(),
-            tail_budget: self.tail_budget,
+            tail_budget:    self.tail_budget,
         }
     }
 
@@ -1549,7 +1571,7 @@ impl RadarCache {
 /// exposed minimap area from becoming a synchronous rasterisation burst.
 #[derive(Debug)]
 pub struct RadarWorkQueue {
-    queue: WorkQueue<RadarChunkKey>,
+    queue:      WorkQueue<RadarChunkKey>,
     priorities: BTreeMap<RadarChunkKey, RadarWorkPriority>,
 }
 
@@ -1570,9 +1592,9 @@ enum RadarWorkPriority {
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct RadarWorkCounters {
     /// Work waiting to be handed to a producer.
-    pub queued: usize,
+    pub queued:     usize,
     /// Work a producer has accepted but not yet returned.
-    pub in_flight: usize,
+    pub in_flight:  usize,
     /// The bound `queued + in_flight` is refused at.
     pub max_queued: usize,
 }
@@ -1607,7 +1629,7 @@ impl RadarWorkQueue {
     #[must_use]
     pub fn new(max_queued: usize, units_per_turn: usize) -> Option<Self> {
         (max_queued != 0 && units_per_turn != 0).then_some(Self {
-            queue: WorkQueue::new(max_queued, units_per_turn)
+            queue:      WorkQueue::new(max_queued, units_per_turn)
                 .expect("the radar wrapper has checked its limits"),
             priorities: BTreeMap::new(),
         })
@@ -1635,8 +1657,8 @@ impl RadarWorkQueue {
     #[must_use]
     pub fn counters(&self) -> RadarWorkCounters {
         RadarWorkCounters {
-            queued: self.pending_len(),
-            in_flight: self.in_flight_len(),
+            queued:     self.pending_len(),
+            in_flight:  self.in_flight_len(),
             max_queued: self.max_queued(),
         }
     }
@@ -2280,13 +2302,20 @@ pub fn static_color(colors: &RadarColors, graphic: Graphic) -> Color16 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use openshard_map::grid::BlockExtent;
-    use openshard_map::map::{LandCell, StaticItem};
-    use openshard_protocol::wire::Hue;
-    use openshard_tiles::LAND_TILE_COUNT;
-    use openshard_tiles::LandTileId;
     use std::collections::BTreeSet;
+
+    use openshard_map::grid::BlockExtent;
+    use openshard_map::map::{
+        LandCell,
+        StaticItem,
+    };
+    use openshard_protocol::wire::Hue;
+    use openshard_tiles::{
+        LAND_TILE_COUNT,
+        LandTileId,
+    };
+
+    use super::*;
 
     /// Land id 1 is green, land id 2 is blue; static 1 is red, static 2 is
     /// white, static 3 has no colour at all.
@@ -2320,9 +2349,11 @@ mod tests {
 
     /// A one-block facet, every tile land id 1 at z 0.
     fn a_field() -> WorldMap {
-        WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTileId(1),
-            z: 0,
+        WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: LandTileId(1),
+                z:    0,
+            }
         })
     }
 
@@ -2512,9 +2543,9 @@ mod tests {
             RadarExtent::new(65_000, 65_000).unwrap(),
             tiles_per_pixel,
             Placement {
-                origin: (0.0, 0.0),
-                extent: (640.0, 480.0),
-                circle: false,
+                origin:   (0.0, 0.0),
+                extent:   (640.0, 480.0),
+                circle:   false,
                 rotation: 0.0,
             },
             1.0,
@@ -2541,11 +2572,13 @@ mod tests {
     #[test]
     fn an_open_facet_map_adds_its_own_demand_and_takes_none_of_the_minimaps() {
         let extent = RadarExtent::new(7168, 4096).expect("Britannia");
-        let placement = |width: f32, height: f32, circle: bool| Placement {
-            origin: (0.0, 0.0),
-            extent: (width, height),
-            circle,
-            rotation: 0.0,
+        let placement = |width: f32, height: f32, circle: bool| {
+            Placement {
+                origin: (0.0, 0.0),
+                extent: (width, height),
+                circle,
+                rotation: 0.0,
+            }
         };
         // The minimap, drawn small and unzoomed around a player in Britain.
         let minimap = RadarView::new(
@@ -2626,9 +2659,11 @@ mod tests {
                     wide: u32::from(side / BLOCK_TILES),
                     down: u32::from(side / BLOCK_TILES),
                 },
-                |_, _| LandCell {
-                    tile: LandTileId(1),
-                    z: 0,
+                |_, _| {
+                    LandCell {
+                        tile: LandTileId(1),
+                        z:    0,
+                    }
                 },
             ),
             RadarExtent::new(side, side).expect("a four-chunk facet"),
@@ -2650,9 +2685,9 @@ mod tests {
             extent,
             1.0,
             Placement {
-                origin: (0.0, 0.0),
-                extent: (64.0, 64.0),
-                circle: false,
+                origin:   (0.0, 0.0),
+                extent:   (64.0, 64.0),
+                circle:   false,
                 rotation: 0.0,
             },
             1.0,
@@ -2663,9 +2698,9 @@ mod tests {
 
         let report = advance(
             RadarStep {
-                views: &[(view, view.lod())],
-                sweep: None,
-                facet_extent: extent,
+                views:           &[(view, view.lod())],
+                sweep:           None,
+                facet_extent:    extent,
                 producer_centre: RadarChunkCoord::new(2, 2),
             },
             &map,
@@ -2699,19 +2734,21 @@ mod tests {
             extent,
             1.0,
             Placement {
-                origin: (0.0, 0.0),
-                extent: (64.0, 64.0),
-                circle: false,
+                origin:   (0.0, 0.0),
+                extent:   (64.0, 64.0),
+                circle:   false,
                 rotation: 0.0,
             },
             1.0,
         );
         let views = [(view, view.lod())];
-        let step = |sweep| RadarStep {
-            views: &views,
-            sweep,
-            facet_extent: extent,
-            producer_centre: RadarChunkCoord::new(2, 2),
+        let step = |sweep| {
+            RadarStep {
+                views: &views,
+                sweep,
+                facet_extent: extent,
+                producer_centre: RadarChunkCoord::new(2, 2),
+            }
         };
         let mut cache = RadarCache::default();
         let mut queue = RadarWorkQueue::default();
@@ -2776,9 +2813,9 @@ mod tests {
                 extent,
                 tiles_per_pixel,
                 Placement {
-                    origin: (0.0, 0.0),
-                    extent: (640.0, 480.0),
-                    circle: false,
+                    origin:   (0.0, 0.0),
+                    extent:   (640.0, 480.0),
+                    circle:   false,
                     rotation: 0.0,
                 },
                 1.0,
@@ -2998,9 +3035,9 @@ mod tests {
             extent,
             64.0,
             Placement {
-                origin: (0.0, 0.0),
-                extent: (640.0, 458.0),
-                circle: false,
+                origin:   (0.0, 0.0),
+                extent:   (640.0, 458.0),
+                circle:   false,
                 rotation: 0.0,
             },
             1.0,
@@ -3423,9 +3460,9 @@ mod tests {
         assert_eq!(
             resolved.demand,
             RadarDemand {
-                exact: 1,
+                exact:   1,
                 coarser: 1,
-                stale: 1,
+                stale:   1,
                 missing: 1,
             }
         );
@@ -3462,9 +3499,9 @@ mod tests {
         assert_eq!(
             resolved.demand,
             RadarDemand {
-                exact: 1,
+                exact:   1,
                 coarser: 1,
-                stale: 0,
+                stale:   0,
                 missing: 1,
             }
         );
@@ -3656,9 +3693,11 @@ mod tests {
 
     #[test]
     fn a_bare_tile_is_its_land() {
-        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, _| LandCell {
-            tile: LandTileId(if x < 4 { 1 } else { 2 }),
-            z: 0,
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, _| {
+            LandCell {
+                tile: LandTileId(if x < 4 { 1 } else { 2 }),
+                z:    0,
+            }
         });
         let colors = colors();
 
@@ -3830,9 +3869,9 @@ mod tests {
         assert_eq!(
             queue.counters(),
             RadarWorkCounters {
-                queued: 2,
-                in_flight: 0,
-                max_queued: 2
+                queued:     2,
+                in_flight:  0,
+                max_queued: 2,
             }
         );
 
@@ -3840,9 +3879,9 @@ mod tests {
         assert_eq!(
             queue.counters(),
             RadarWorkCounters {
-                queued: 1,
-                in_flight: 1,
-                max_queued: 2
+                queued:     1,
+                in_flight:  1,
+                max_queued: 2,
             }
         );
         assert!(queue.request(first), "an in-flight request is also coalesced");
@@ -3867,9 +3906,9 @@ mod tests {
         assert_eq!(
             queue.counters(),
             RadarWorkCounters {
-                queued: 0,
-                in_flight: 0,
-                max_queued: 4
+                queued:     0,
+                in_flight:  0,
+                max_queued: 4,
             }
         );
 
@@ -3893,9 +3932,9 @@ mod tests {
         assert_eq!(
             queue.counters(),
             RadarWorkCounters {
-                queued: 0,
-                in_flight: 0,
-                max_queued: 4
+                queued:     0,
+                in_flight:  0,
+                max_queued: 4,
             },
             "the rejected job released its slot"
         );

@@ -9,8 +9,16 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::wire::ClilocId;
-use openshard_state::components::{BodyType, Corpse, CorpseBody, body_type};
-use openshard_state::{Skill, WorldState};
+use openshard_state::components::{
+    BodyType,
+    Corpse,
+    CorpseBody,
+    body_type,
+};
+use openshard_state::{
+    Skill,
+    WorldState,
+};
 
 use crate::check::roll_skill_band;
 

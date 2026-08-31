@@ -50,7 +50,11 @@ use std::time::Duration;
 
 use openshard_protocol::world::Point;
 
-use crate::camera::{WorldPoint, Z_STEP, project};
+use crate::camera::{
+    WorldPoint,
+    Z_STEP,
+    project,
+};
 
 /// Where the eye is asked to look, before anything smooths it.
 ///
@@ -68,9 +72,9 @@ use crate::camera::{WorldPoint, Z_STEP, project};
 pub struct Gaze {
     /// Where the body stands on the ground, in world pixels read at `z = 0`.
     /// Rightwards.
-    pub x: f64,
+    pub x:    f64,
     /// Downwards.
-    pub y: f64,
+    pub y:    f64,
     /// What its height lifts it by, in pixels — `z * Z_STEP`, positive upwards,
     /// kept apart so it can have its own clock.
     pub lift: f64,
@@ -82,8 +86,8 @@ impl Gaze {
         // Read at `z = 0` so the lift is not in here twice.
         let plane = project(Point::new(point.x, point.y, 0));
         Self {
-            x: f64::from(plane.x),
-            y: f64::from(plane.y),
+            x:    f64::from(plane.x),
+            y:    f64::from(plane.y),
             lift: f64::from(point.z) * f64::from(Z_STEP),
         }
     }
@@ -96,8 +100,8 @@ impl Gaze {
     /// every step, and a body that never quite arrives shimmers.
     pub fn back_towards(self, from: Self, left: f64) -> Self {
         Self {
-            x: self.x - (self.x - from.x) * left,
-            y: self.y - (self.y - from.y) * left,
+            x:    self.x - (self.x - from.x) * left,
+            y:    self.y - (self.y - from.y) * left,
             lift: self.lift - (self.lift - from.lift) * left,
         }
     }
@@ -120,8 +124,8 @@ impl Gaze {
     /// every stair.
     pub fn eased_towards(self, target: Self, tau: f32, dt: Duration) -> Self {
         Self {
-            x: approach(self.x, target.x, tau, dt),
-            y: approach(self.y, target.y, tau, dt),
+            x:    approach(self.x, target.x, tau, dt),
+            y:    approach(self.y, target.y, tau, dt),
             lift: approach(self.lift, target.lift, tau, dt),
         }
     }
@@ -167,7 +171,7 @@ pub struct Rig {
     pub plane_tau: f32,
     /// The same for the height, and its own because it is not the same
     /// question: a stair wants to be smoothed away and a walk does not.
-    pub lift_tau: f32,
+    pub lift_tau:  f32,
     /// How much the height may change between two frames before it is a cut
     /// rather than a climb, in pixels.
     ///
@@ -182,7 +186,7 @@ pub struct Rig {
     ///
     /// [`f32::INFINITY`] never cuts. [`Rig::HARD`]'s value is arbitrary, since
     /// nothing is ever eased for it to interrupt.
-    pub lift_cut: f32,
+    pub lift_cut:  f32,
 }
 
 /// The height a change has to exceed, in one frame, to be a change of floor.
@@ -207,8 +211,8 @@ impl Rig {
     /// not as a default — see `docs/camera.md`, D9.
     pub const HARD: Self = Self {
         plane_tau: 0.0,
-        lift_tau: 0.0,
-        lift_cut: FLOOR,
+        lift_tau:  0.0,
+        lift_cut:  FLOOR,
     };
 
     /// The reference camera with a clock on the height.
@@ -234,8 +238,8 @@ impl Rig {
     /// instead of one. See `docs/camera.md`, C2.
     pub const LIFT: Self = Self {
         plane_tau: 0.0,
-        lift_tau: 0.15,
-        lift_cut: FLOOR,
+        lift_tau:  0.15,
+        lift_cut:  FLOOR,
     };
 }
 
@@ -250,7 +254,7 @@ impl Rig {
 #[derive(Clone, Copy, Debug)]
 struct Eased {
     /// Where the eye is, to a fraction of a pixel.
-    at: Gaze,
+    at:     Gaze,
     /// What it was asked for.
     target: Gaze,
 }
@@ -258,7 +262,7 @@ struct Eased {
 /// A rig, and where the eye it drives has got to.
 #[derive(Clone, Copy, Debug)]
 pub struct Follower {
-    rig: Rig,
+    rig:  Rig,
     /// The last frame, or nothing before the first.
     ///
     /// [`Option`] in its proper sense: before the first frame the eye is not at
@@ -352,25 +356,27 @@ impl Follower {
         // summed onto `gaze`, and the zone reduces the gap before the filter
         // sees it.
         let at = match self.last {
-            Some(last) => Gaze {
-                // Stage 4, per channel. `x` and `y` share a time constant and
-                // not a state: the isometric screen is twice as wide as it is
-                // tall, so the day one of them wants a slower clock than the
-                // other, the split is a field and not a rewrite.
-                x: approach(last.at.x, gaze.x, self.rig.plane_tau, dt),
-                y: approach(last.at.y, gaze.y, self.rig.plane_tau, dt),
-                // Stage 5, on the one channel that has a rule yet: a height
-                // that changed by more than a body is tall between two frames
-                // did not change because somebody walked up it. The plane is
-                // deliberately not cut with it — a floor giving way under a
-                // body does not move it sideways, and jerking the whole world
-                // sideways for a vertical event is a second defect answering
-                // the first.
-                lift: match (gaze.lift - last.target.lift).abs() > f64::from(self.rig.lift_cut) {
-                    true => gaze.lift,
-                    false => approach(last.at.lift, gaze.lift, self.rig.lift_tau, dt),
-                },
-            },
+            Some(last) => {
+                Gaze {
+                    // Stage 4, per channel. `x` and `y` share a time constant and
+                    // not a state: the isometric screen is twice as wide as it is
+                    // tall, so the day one of them wants a slower clock than the
+                    // other, the split is a field and not a rewrite.
+                    x:    approach(last.at.x, gaze.x, self.rig.plane_tau, dt),
+                    y:    approach(last.at.y, gaze.y, self.rig.plane_tau, dt),
+                    // Stage 5, on the one channel that has a rule yet: a height
+                    // that changed by more than a body is tall between two frames
+                    // did not change because somebody walked up it. The plane is
+                    // deliberately not cut with it — a floor giving way under a
+                    // body does not move it sideways, and jerking the whole world
+                    // sideways for a vertical event is a second defect answering
+                    // the first.
+                    lift: match (gaze.lift - last.target.lift).abs() > f64::from(self.rig.lift_cut) {
+                        true => gaze.lift,
+                        false => approach(last.at.lift, gaze.lift, self.rig.lift_tau, dt),
+                    },
+                }
+            }
             // The other cut, and the one a caller raises by hand: nothing to
             // ease from.
             None => gaze,
@@ -426,8 +432,8 @@ mod tests {
     fn eased(tau: f32) -> Rig {
         Rig {
             plane_tau: tau,
-            lift_tau: tau,
-            lift_cut: FLOOR,
+            lift_tau:  tau,
+            lift_cut:  FLOOR,
         }
     }
 
@@ -465,8 +471,8 @@ mod tests {
         let mut follower = Follower::new(eased(0.5));
         follower.advance(Gaze::default(), ms(16));
         let target = Gaze {
-            x: 1000.0,
-            y: 0.0,
+            x:    1000.0,
+            y:    0.0,
             lift: 0.0,
         };
         follower.advance(target, ms(500));
@@ -484,8 +490,8 @@ mod tests {
     fn the_same_span_lands_in_the_same_place_at_any_frame_rate() {
         let rig = eased(0.2);
         let target = Gaze {
-            x: 900.0,
-            y: -400.0,
+            x:    900.0,
+            y:    -400.0,
             lift: 60.0,
         };
         let mut slow = Follower::new(rig);
@@ -511,8 +517,8 @@ mod tests {
     fn the_height_is_filtered_apart_from_the_ground() {
         let mut follower = Follower::new(Rig {
             plane_tau: 0.0,
-            lift_tau: 0.4,
-            lift_cut: FLOOR,
+            lift_tau:  0.4,
+            lift_cut:  FLOOR,
         });
         let ground = Gaze::on(Point::new(500, 500, 0));
         follower.advance(ground, ms(16));
@@ -599,8 +605,8 @@ mod tests {
     fn a_lift_cut_does_not_move_the_ground() {
         let mut follower = Follower::new(Rig {
             plane_tau: 0.2,
-            lift_tau: 0.2,
-            lift_cut: FLOOR,
+            lift_tau:  0.2,
+            lift_cut:  FLOOR,
         });
         follower.advance(Gaze::on(Point::new(500, 500, 0)), ms(16));
         // A trapdoor: a tile east and twenty units down, in one frame.

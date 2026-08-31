@@ -33,10 +33,22 @@
 //! the same state in two shapes, and the shape the player is not looking at is
 //! the one that ends up in the packet.
 
-use openshard_client_render::gump::{GumpArt, GumpPixel};
+use openshard_client_render::gump::{
+    GumpArt,
+    GumpPixel,
+};
 use openshard_client_render::split as split_art;
 
-use crate::panes::{Answer, Button, Effect, Input, Key, PaneCtx, PaneFrame, Response};
+use crate::panes::{
+    Answer,
+    Button,
+    Effect,
+    Input,
+    Key,
+    PaneCtx,
+    PaneFrame,
+    Response,
+};
 use crate::windows::Drawn;
 
 /// One open amount picker: what may be taken, what is chosen, and which of its
@@ -52,17 +64,17 @@ pub struct SplitPane {
     /// bar under the player's finger. What guards against a stale bound is not
     /// this field but [`ItemPress::split`](crate::hand::ItemPress::split), which
     /// clamps the answer against the pile as it is when the answer arrives.
-    most: u16,
+    most:    u16,
     /// The number the bar and the box are both showing.
-    amount: u16,
+    amount:  u16,
     /// The bar is being dragged: every move writes [`Self::amount`] until the
     /// button comes up.
     sliding: bool,
     /// The pointer went down on the button and has not come up.
-    held: bool,
+    held:    bool,
     /// The pointer is over the button, which is a third face and not a second —
     /// see [`split_art::Face`].
-    over: bool,
+    over:    bool,
 }
 
 impl SplitPane {
@@ -73,11 +85,11 @@ impl SplitPane {
     /// the bar takes as much of it as the gesture allows.
     pub fn new(most: u16) -> Self {
         Self {
-            most: most.max(1),
-            amount: most.max(1),
+            most:    most.max(1),
+            amount:  most.max(1),
             sliding: false,
-            held: false,
-            over: false,
+            held:    false,
+            over:    false,
         }
     }
 

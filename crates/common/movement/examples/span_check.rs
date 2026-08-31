@@ -36,8 +36,14 @@ use clap::Parser;
 use openshard_map::grid::Tile;
 use openshard_map::map::WorldMap;
 use openshard_movement::reach::Reach;
-use openshard_movement::spans::{SpanIndex, Spans};
-use openshard_movement::{MapTerrain, step_from};
+use openshard_movement::spans::{
+    SpanIndex,
+    Spans,
+};
+use openshard_movement::{
+    MapTerrain,
+    step_from,
+};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 
@@ -46,14 +52,14 @@ struct Cli {
     #[arg(short, long, env = "OPENSHARD_CLIENT", value_name = "DIR")]
     client: PathBuf,
     #[arg(long, default_value_t = 0)]
-    facet: u8,
+    facet:  u8,
     /// Where the flood starts — `coarse_bench`'s own origin, so the component
     /// this walks is the one every other measurement in this crate is quoted
     /// against.
     #[arg(long, default_value_t = 1363)]
-    x: u16,
+    x:      u16,
     #[arg(long, default_value_t = 1600)]
-    y: u16,
+    y:      u16,
     /// Compare every `stride`-th column of the per-step sweep. One is the whole
     /// facet, which is what the node is done against.
     #[arg(long, default_value_t = 1)]

@@ -8,10 +8,20 @@
 //!
 //! [`data/alchemy.json`]: ../../../data/alchemy.json
 
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_state::Skill;
 
-use crate::recipe::{CraftRes, CraftSkillReq, Recipe};
-use crate::system::{Needs, Text};
+use crate::recipe::{
+    CraftRes,
+    CraftSkillReq,
+    Recipe,
+};
+use crate::system::{
+    Needs,
+    Text,
+};
 
 include!(concat!(env!("OUT_DIR"), "/alchemy.rs"));

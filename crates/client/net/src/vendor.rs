@@ -1,6 +1,9 @@
 //! Client-side answers to NPC vendor lists.
 
-use openshard_protocol::packet::{PacketLength, frame_body};
+use openshard_protocol::packet::{
+    PacketLength,
+    frame_body,
+};
 use openshard_protocol::serial::Serial;
 
 /// Buy the selected quantities from `vendor` (`0x3B`).

@@ -6,12 +6,31 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::localized::begging::{
-    FEEL_SORRY, FROM_A_THING, FROM_PLAYER, NOT_ENOUGH_MONEY, NOT_TRUSTWORTHY, TOO_FAR_HER, TOO_FAR_HIM,
+    FEEL_SORRY,
+    FROM_A_THING,
+    FROM_PLAYER,
+    NOT_ENOUGH_MONEY,
+    NOT_TRUSTWORTHY,
+    TOO_FAR_HER,
+    TOO_FAR_HIM,
     UNWILLING,
 };
 use openshard_protocol::wire::ClilocId;
-use openshard_state::components::{Body, BodyType, Client, Fame, Karma, Lock, Riding, Trap, body_type};
-use openshard_state::{Skill, WorldState};
+use openshard_state::components::{
+    Body,
+    BodyType,
+    Client,
+    Fame,
+    Karma,
+    Lock,
+    Riding,
+    Trap,
+    body_type,
+};
+use openshard_state::{
+    Skill,
+    WorldState,
+};
 
 use crate::check::roll_skill_band;
 
@@ -131,7 +150,7 @@ pub(super) fn begging(state: &mut WorldState, actor: EntityId, target: EntityId)
     state.private_overhead_cliloc(actor, target, FEEL_SORRY, "");
     state.bus.send(Begged {
         entity: actor,
-        gold: amount,
+        gold:   amount,
     });
     // And it costs you, up to forty, down to a floor of −3000: the classic reason
     // a career beggar is nobody's idea of a hero.
@@ -151,7 +170,7 @@ pub struct Begged {
     /// Who begged.
     pub entity: EntityId,
     /// How much they were given.
-    pub gold: u32,
+    pub gold:   u32,
 }
 
 /// Whether a mobile knows enough to attempt a trap at all — the two prerequisites

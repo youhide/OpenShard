@@ -19,12 +19,20 @@ use std::time::Duration;
 
 use openshard_client_net::connection::Event;
 use openshard_client_net::transport::enter_world;
-use openshard_client_net::walk::{InFlightSteps, MAX_IN_FLIGHT, Moved, Walk};
+use openshard_client_net::walk::{
+    InFlightSteps,
+    MAX_IN_FLIGHT,
+    Moved,
+    Walk,
+};
+use openshard_e2e_shard::{
+    plan,
+    shard,
+    version,
+};
 use openshard_movement::WALK_BUFFER;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::world::Point;
-
-use openshard_e2e_shard::{plan, shard, version};
 
 #[tokio::test]
 async fn a_client_walks_and_the_shard_agrees_on_where_it_ended_up() {

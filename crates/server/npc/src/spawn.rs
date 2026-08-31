@@ -2,24 +2,69 @@
 //! living mobile, and the event that announces it.
 
 use openshard_entities::EntityId;
+use openshard_items as items;
 use openshard_map::grid::Tile;
 use openshard_movement::Walker;
-use openshard_protocol::direction::{Direction, Facing};
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
 use openshard_protocol::mobile::Notoriety;
-use openshard_protocol::serial::{Serial, SerialKind};
-use openshard_protocol::wire::{Graphic, Hue, Layer};
-use openshard_protocol::world::{DamageType, Facet, PhysicalResistance, Point, RangedRange, Sight};
+use openshard_protocol::serial::{
+    Serial,
+    SerialKind,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
+use openshard_protocol::world::{
+    DamageType,
+    Facet,
+    PhysicalResistance,
+    Point,
+    RangedRange,
+    Sight,
+};
 use openshard_state::components::{
-    Aggression, Banker, Body, Brain, Fame, Heading, Healer, Hitpoints, Karma, MeleeDamage, Movement, Name,
-    NightHome, Npc, Position, RangedAttack, Resistance, Skills, SwingSpeed, Title, body_opens_doors,
+    Aggression,
+    Banker,
+    Body,
+    Brain,
+    Fame,
+    Heading,
+    Healer,
+    Hitpoints,
+    Karma,
+    MeleeDamage,
+    Movement,
+    Name,
+    NightHome,
+    Npc,
+    Position,
+    RangedAttack,
+    Resistance,
+    Skills,
+    SwingSpeed,
+    Title,
+    body_opens_doors,
     creature_name,
 };
-use openshard_state::{Skill, WorldState};
-use tracing::{debug, warn};
+use openshard_state::{
+    Skill,
+    WorldState,
+};
+use tracing::{
+    debug,
+    warn,
+};
 
-use openshard_items as items;
-
-use crate::dress::{Appearance, ShoeType, dress_townsperson};
+use crate::dress::{
+    Appearance,
+    ShoeType,
+    dress_townsperson,
+};
 use crate::live::BEAT_TICKS;
 use crate::names::townsperson_name;
 
@@ -36,9 +81,9 @@ const TOWNSFOLK_WANDER: u8 = 2;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct MobileSpawned {
     /// The entity.
-    pub entity: EntityId,
+    pub entity:   EntityId,
     /// Its wire identity.
-    pub serial: Serial,
+    pub serial:   Serial,
     /// Where it appeared.
     pub position: Point,
 }
@@ -47,53 +92,53 @@ pub struct MobileSpawned {
 /// creature takes one argument instead of eleven.
 #[derive(Debug)]
 pub struct SpawnSpec {
-    pub body: Graphic,
-    pub hue: Hue,
-    pub hits: u16,
-    pub notoriety: Notoriety,
-    pub damage: u16,
-    pub resistance: PhysicalResistance,
-    pub swing: u64,
-    pub sight: Sight,
+    pub body:        Graphic,
+    pub hue:         Hue,
+    pub hits:        u16,
+    pub notoriety:   Notoriety,
+    pub damage:      u16,
+    pub resistance:  PhysicalResistance,
+    pub swing:       u64,
+    pub sight:       Sight,
     /// Whether it starts fights (2), answers them (1), or only runs (0).
-    pub aggression: Aggression,
+    pub aggression:  Aggression,
     /// Ticks between its beats while hunting; 0 takes the shard default.
-    pub beat: u64,
+    pub beat:        u64,
     /// Its optional ranged attack reach.
-    pub ranged: Option<RangedRange>,
+    pub ranged:      Option<RangedRange>,
     /// The ranged attack's damage type.
     pub ranged_kind: DamageType,
-    pub wander: bool,
-    pub position: Point,
-    pub facet: Facet,
+    pub wander:      bool,
+    pub position:    Point,
+    pub facet:       Facet,
     /// A name the client shows on single-click, if any. Overrides `title`.
-    pub name: Option<String>,
+    pub name:        Option<String>,
     /// The trade this NPC plies, ServUO-style ("the blacksmith"). `None` for a
     /// creature. It is the key three things hang off — the generated name, the
     /// generated outfit, and the speech table — so it is saved with the mobile.
-    pub title: Option<String>,
+    pub title:       Option<String>,
     /// What the trade wears on its feet. Read only when there is a `title`, since
     /// that is when the core does the dressing.
-    pub shoe: ShoeType,
+    pub shoe:        ShoeType,
     /// How widely known it is — what a killer inherits. A creature's own fame.
-    pub fame: i32,
+    pub fame:        i32,
     /// Which way it is known. **Negative is evil**, so killing it *earns* karma: the
     /// killer is awarded the negation. A positive-karma creature is innocent and killing
     /// it costs.
-    pub karma: i32,
+    pub karma:       i32,
     /// Where it sleeps, for the optional daily routine. `None` keeps it at its post
     /// around the clock, which is what both references do and what every pack does
     /// today — but it has to be *settable*, or `gameplay.npc_schedule` is a flag
     /// nothing can ever satisfy.
-    pub night_home: Option<Point>,
+    pub night_home:  Option<Point>,
     /// Whether this mobile is a banker — it answers "bank".
-    pub banker: bool,
+    pub banker:      bool,
     /// Whether this mobile is a shopkeeper — it answers double-click with a
     /// buy gump and "sell" with an offer.
-    pub vendor: bool,
+    pub vendor:      bool,
     /// Whether this mobile is a healer — a ghost that double-clicks it or comes
     /// near is offered a free resurrection.
-    pub healer: bool,
+    pub healer:      bool,
     /// Worn clothing and gear, `(graphic, layer, hue)` — so it is not naked.
     ///
     /// **Additive, not a replacement.** A mobile with a `title` is always dressed by
@@ -101,16 +146,16 @@ pub struct SpawnSpec {
     /// precedence ServUO's per-trade `InitOutfit` overrides have — they call
     /// `base.InitOutfit()` and add an apron, not instead of the shirt. Where the two
     /// want one layer, this list wins. A mobile with no `title` wears only this.
-    pub equipment: Vec<(Graphic, Layer, Hue)>,
+    pub equipment:   Vec<(Graphic, Layer, Hue)>,
     /// Trained combat skills, `(skill id, value in tenths)` — Wrestling, Tactics,
     /// Anatomy and the weapon skills. Without these a creature has no `Skills`
     /// sheet, so its blows always land unscaled (the combat gate); with them it
     /// rolls to hit and scales damage like a player.
-    pub skills: Vec<(Skill, u16)>,
+    pub skills:      Vec<(Skill, u16)>,
 }
 
 struct PreparedSpawn {
-    spec: SpawnSpec,
+    spec:    SpawnSpec,
     dressed: Option<Appearance>,
 }
 
@@ -206,7 +251,7 @@ fn insert_core_components(state: &mut WorldState, entity: EntityId, spec: &Spawn
     state.registry.insert(
         entity,
         Body {
-            id: spec.body,
+            id:  spec.body,
             hue: spec.hue,
         },
     );
@@ -217,7 +262,7 @@ fn insert_core_components(state: &mut WorldState, entity: EntityId, spec: &Spawn
         entity,
         Hitpoints {
             current: hits,
-            max: hits,
+            max:     hits,
         },
     );
     state.registry.insert(entity, spec.notoriety);
@@ -246,10 +291,10 @@ fn insert_combat_components(state: &mut WorldState, entity: EntityId, spec: &Spa
         entity,
         Resistance {
             physical: spec.resistance.get(),
-            fire: 0,
-            cold: 0,
-            poison: 0,
-            energy: 0,
+            fire:     0,
+            cold:     0,
+            poison:   0,
+            energy:   0,
         },
     );
     // Zero means "derive from dexterity", so a script that does not care about
@@ -291,13 +336,13 @@ fn insert_brain(state: &mut WorldState, entity: EntityId, spec: &SpawnSpec) {
         state.registry.insert(
             entity,
             Brain {
-                sight: spec.sight,
-                wander: spec.wander,
-                next_think: first,
+                sight:       spec.sight,
+                wander:      spec.wander,
+                next_think:  first,
                 guard_until: openshard_state::WorldTick::ZERO,
                 opens_doors: body_opens_doors(spec.body),
-                aggression: spec.aggression,
-                beat_ticks: spec.beat,
+                aggression:  spec.aggression,
+                beat_ticks:  spec.beat,
             },
         );
     }
@@ -361,9 +406,9 @@ fn insert_identity_and_services(
         state.registry.insert(
             entity,
             Npc {
-                home: spec.position,
-                wander: TOWNSFOLK_WANDER,
-                next_beat: first,
+                home:       spec.position,
+                wander:     TOWNSFOLK_WANDER,
+                next_beat:  first,
                 next_greet: openshard_state::WorldTick::ZERO,
             },
         );

@@ -44,7 +44,10 @@
 //!   [`Bodies::nobody`], which is the reading a bake, a survey and a coarse
 //!   corridor all want.
 
-use openshard_map::overlay::{Doors, Overlay};
+use openshard_map::overlay::{
+    Doors,
+    Overlay,
+};
 use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
 
@@ -190,12 +193,12 @@ pub struct Footing<'a> {
     /// the overlay and nothing else asks over. It used to be a type of its own
     /// (`OpenWorld`) and an implementor of the trait, which is how the absence
     /// of a map came to be a kind of map.
-    pub map: Option<MapTerrain<'a>>,
+    pub map:     Option<MapTerrain<'a>>,
     /// What the live world has put on that map.
     pub overlay: &'a Overlay,
     /// Whether a shut door is in the way, or whether this is a route being
     /// planned by somebody who will open it.
-    pub doors: Doors,
+    pub doors:   Doors,
     /// Who else is standing on it, as far as this reading is concerned.
     ///
     /// [`Bodies::nobody`] unless a caller says otherwise, which every
@@ -203,7 +206,7 @@ pub struct Footing<'a> {
     /// a crowd is assembled out of a *question* — who is asking, and how far
     /// their step or their route reaches. [`among`](Self::among) is where the
     /// two meet, exactly as [`reading`](Self::reading) is where the doors do.
-    pub bodies: Bodies<'a>,
+    pub bodies:  Bodies<'a>,
 }
 
 impl<'a> Footing<'a> {
@@ -275,10 +278,10 @@ impl<'a> Footing<'a> {
     #[must_use]
     pub fn guide(ground: &'a Ground, tiles: &'a TileData) -> Self {
         Self {
-            map: ground.terrain(tiles),
+            map:     ground.terrain(tiles),
             overlay: &NOTHING_PLACED,
-            doors: Doors::AsTheyStand,
-            bodies: Bodies::nobody(),
+            doors:   Doors::AsTheyStand,
+            bodies:  Bodies::nobody(),
         }
     }
 

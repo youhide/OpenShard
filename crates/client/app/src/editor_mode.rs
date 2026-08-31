@@ -5,29 +5,66 @@
 //! authoritative map. The draft stays a sparse projection over the current
 //! snapshot until the shard accepts it and the accepted revision arrives.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
 use openshard_client_editor::draft::Draft;
 use openshard_client_editor::tools::{
-    Brush, BrushRadius, BrushShape, HeightStrength, StaticHeight, StaticPlacement, TargetHeight, TilePoint,
+    Brush,
+    BrushRadius,
+    BrushShape,
+    HeightStrength,
+    StaticHeight,
+    StaticPlacement,
+    TargetHeight,
+    TilePoint,
     Tool,
 };
-use openshard_client_editor::{AssetId, Catalog, KindFilter, PaletteState};
-use openshard_map::map::{StaticItem, WorldMap};
-use openshard_map::patch::{PatchOp, StaticId};
+use openshard_client_editor::{
+    AssetId,
+    Catalog,
+    KindFilter,
+    PaletteState,
+};
+use openshard_map::map::{
+    StaticItem,
+    WorldMap,
+};
+use openshard_map::patch::{
+    PatchOp,
+    StaticId,
+};
 use openshard_map::snapshot::MapRevision;
 use openshard_protocol::access::AccessLevel;
 use openshard_protocol::chunks::WorldRevision;
 use openshard_protocol::mapedit::{
-    EditLandTile, EditStaticId, EditTile, EditX, EditY, EditZ, MAX_EDIT_OPS, MapEditOp, MapEditOutcome,
-    MapEditRefusal, MapEditReply, MapEditRequest,
+    EditLandTile,
+    EditStaticId,
+    EditTile,
+    EditX,
+    EditY,
+    EditZ,
+    MAX_EDIT_OPS,
+    MapEditOp,
+    MapEditOutcome,
+    MapEditRefusal,
+    MapEditReply,
+    MapEditRequest,
 };
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Facet;
-use openshard_uofiles::multi::{Component, Multis};
+use openshard_uofiles::multi::{
+    Component,
+    Multis,
+};
 use serde::Deserialize;
 
 /// The authority required before this client offers map editing controls.
@@ -70,25 +107,25 @@ enum HouseSelection {
 
 struct HouseTemplate {
     /// Stable server catalogue key: exactly the JSON file stem.
-    key: String,
+    key:        String,
     /// Readable label made from that key for the editor list.
-    name: String,
+    name:       String,
     components: Arc<[Component]>,
 }
 
 #[derive(Deserialize)]
 struct TemplateFile {
-    format: String,
+    format:     String,
     components: Vec<TemplateComponent>,
 }
 
 #[derive(Deserialize)]
 struct TemplateComponent {
     graphic: u16,
-    dx: i16,
-    dy: i16,
-    dz: i16,
-    flags: u64,
+    dx:      i16,
+    dy:      i16,
+    dz:      i16,
+    flags:   u64,
 }
 
 /// The directory an operator populates with [`wsc_to_design`]'s JSON output.
@@ -109,40 +146,40 @@ enum CommitState {
 /// One dirty tile as the world overlay draws it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PreviewTile {
-    pub(crate) x: u16,
-    pub(crate) y: u16,
+    pub(crate) x:       u16,
+    pub(crate) y:       u16,
     pub(crate) corners: [i8; 4],
 }
 
 struct PreviewTexture {
-    image: egui::ColorImage,
-    panel: egui::TextureHandle,
+    image:   egui::ColorImage,
+    panel:   egui::TextureHandle,
     overlay: Option<egui::TextureHandle>,
 }
 
 pub(crate) struct MapEditor {
-    active: bool,
-    catalogue: Option<Catalog>,
-    catalogue_error: Option<String>,
-    palette: PaletteState,
-    matches: Vec<AssetId>,
-    previews: BTreeMap<AssetId, Option<PreviewTexture>>,
+    active:              bool,
+    catalogue:           Option<Catalog>,
+    catalogue_error:     Option<String>,
+    palette:             PaletteState,
+    matches:             Vec<AssetId>,
+    previews:            BTreeMap<AssetId, Option<PreviewTexture>>,
     draft_static_assets: BTreeSet<AssetId>,
-    tool: Option<ActiveTool>,
-    brush: Brush,
-    strength: u8,
-    flatten: i8,
-    draft: Option<Draft>,
-    commit: CommitState,
-    message: Option<String>,
-    multis: Option<std::sync::Arc<Multis>>,
-    house_search: String,
-    house_matches: Vec<u16>,
-    selected_house: Option<HouseSelection>,
-    house_previews: BTreeMap<u16, Option<egui::TextureHandle>>,
-    templates: Vec<HouseTemplate>,
-    template_error: Option<String>,
-    template_previews: BTreeMap<usize, Option<egui::TextureHandle>>,
+    tool:                Option<ActiveTool>,
+    brush:               Brush,
+    strength:            u8,
+    flatten:             i8,
+    draft:               Option<Draft>,
+    commit:              CommitState,
+    message:             Option<String>,
+    multis:              Option<std::sync::Arc<Multis>>,
+    house_search:        String,
+    house_matches:       Vec<u16>,
+    selected_house:      Option<HouseSelection>,
+    house_previews:      BTreeMap<u16, Option<egui::TextureHandle>>,
+    templates:           Vec<HouseTemplate>,
+    template_error:      Option<String>,
+    template_previews:   BTreeMap<usize, Option<egui::TextureHandle>>,
 }
 
 impl MapEditor {
@@ -242,10 +279,11 @@ impl MapEditor {
         }
         match self.selected_house? {
             HouseSelection::Multi(multi) => Some(HousePreview::Multi(multi)),
-            HouseSelection::Template(index) => self
-                .templates
-                .get(index)
-                .map(|template| HousePreview::Design(Arc::clone(&template.components))),
+            HouseSelection::Template(index) => {
+                self.templates
+                    .get(index)
+                    .map(|template| HousePreview::Design(Arc::clone(&template.components)))
+            }
         }
     }
 
@@ -362,37 +400,49 @@ impl MapEditor {
 
     fn tool(&mut self, static_id: Option<StaticId>) -> Option<Tool> {
         match self.tool? {
-            ActiveTool::PaintLand => match self.palette.selected() {
-                Some(AssetId::Land(tile)) => Some(Tool::PaintLand(tile)),
-                _ => {
-                    self.message = Some("select a land tile first".to_owned());
-                    None
+            ActiveTool::PaintLand => {
+                match self.palette.selected() {
+                    Some(AssetId::Land(tile)) => Some(Tool::PaintLand(tile)),
+                    _ => {
+                        self.message = Some("select a land tile first".to_owned());
+                        None
+                    }
                 }
-            },
-            ActiveTool::PlaceStatic => match self.palette.selected() {
-                Some(AssetId::Static(tile)) => Some(Tool::PlaceStatic(StaticPlacement {
-                    tile,
-                    height: StaticHeight::OnGround,
-                    hue: Hue::NONE,
-                })),
-                _ => {
-                    self.message = Some("select a static first".to_owned());
-                    None
+            }
+            ActiveTool::PlaceStatic => {
+                match self.palette.selected() {
+                    Some(AssetId::Static(tile)) => {
+                        Some(Tool::PlaceStatic(StaticPlacement {
+                            tile,
+                            height: StaticHeight::OnGround,
+                            hue: Hue::NONE,
+                        }))
+                    }
+                    _ => {
+                        self.message = Some("select a static first".to_owned());
+                        None
+                    }
                 }
-            },
-            ActiveTool::RemoveStatic => match static_id {
-                Some(which) => Some(Tool::RemoveStatic(which)),
-                None => {
-                    self.message = Some("point at a map static to remove it".to_owned());
-                    None
+            }
+            ActiveTool::RemoveStatic => {
+                match static_id {
+                    Some(which) => Some(Tool::RemoveStatic(which)),
+                    None => {
+                        self.message = Some("point at a map static to remove it".to_owned());
+                        None
+                    }
                 }
-            },
-            ActiveTool::Raise => Some(Tool::Raise(
-                HeightStrength::new(self.strength).expect("the editor slider excludes zero"),
-            )),
-            ActiveTool::Lower => Some(Tool::Lower(
-                HeightStrength::new(self.strength).expect("the editor slider excludes zero"),
-            )),
+            }
+            ActiveTool::Raise => {
+                Some(Tool::Raise(
+                    HeightStrength::new(self.strength).expect("the editor slider excludes zero"),
+                ))
+            }
+            ActiveTool::Lower => {
+                Some(Tool::Lower(
+                    HeightStrength::new(self.strength).expect("the editor slider excludes zero"),
+                ))
+            }
             ActiveTool::Flatten => Some(Tool::Flatten(TargetHeight(self.flatten))),
             ActiveTool::PlaceHouse | ActiveTool::RemoveHouse => None,
         }
@@ -486,8 +536,8 @@ impl MapEditor {
                     .z;
                 let z = |x: u16, y: u16| draft.land(map, x, y).map_or(own, |cell| cell.z);
                 PreviewTile {
-                    x: at.x,
-                    y: at.y,
+                    x:       at.x,
+                    y:       at.y,
                     corners: [
                         own,
                         at.x.checked_add(1).map_or(own, |x| z(x, at.y)),
@@ -906,14 +956,15 @@ impl MapEditor {
                                 }
                             }
                             let art_clicked = match self.previews.get(id).and_then(Option::as_ref) {
-                                Some(texture) => ui
-                                    .add(
+                                Some(texture) => {
+                                    ui.add(
                                         egui::Image::from_texture(&texture.panel)
                                             .max_size(egui::vec2(44.0, 44.0))
                                             .sense(egui::Sense::click()),
                                     )
                                     .on_hover_text(entry.name.unwrap_or("unnamed"))
-                                    .clicked(),
+                                    .clicked()
+                                }
                                 None => {
                                     ui.add_sized([44.0, 44.0], egui::Label::new("—"));
                                     false
@@ -1039,10 +1090,10 @@ fn decode_house_template(path: &Path, source: &str) -> Result<HouseTemplate, Str
             }
             Ok(Component {
                 graphic: Graphic(component.graphic),
-                dx: component.dx,
-                dy: component.dy,
-                dz: component.dz,
-                flags: component.flags,
+                dx:      component.dx,
+                dy:      component.dy,
+                dz:      component.dz,
+                flags:   component.flags,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -1157,26 +1208,34 @@ fn components_preview_texture(
 }
 
 fn wire_op(op: PatchOp) -> MapEditOp {
-    let at = |x, y| EditTile {
-        x: EditX(x),
-        y: EditY(y),
+    let at = |x, y| {
+        EditTile {
+            x: EditX(x),
+            y: EditY(y),
+        }
     };
     match op {
-        PatchOp::SetLand { x, y, now, .. } => MapEditOp::SetLand {
-            at: at(x, y),
-            tile: EditLandTile::from_wire(now.tile.0).expect("LandTileId is inside tiledata"),
-            z: EditZ(now.z),
-        },
-        PatchOp::AddStatic { item } => MapEditOp::AddStatic {
-            at: at(item.x, item.y),
-            graphic: item.tile,
-            z: EditZ(item.z),
-            hue: item.hue,
-        },
-        PatchOp::RemoveStatic { which, was } => MapEditOp::RemoveStatic {
-            at: at(was.x, was.y),
-            which: EditStaticId(which.0),
-        },
+        PatchOp::SetLand { x, y, now, .. } => {
+            MapEditOp::SetLand {
+                at:   at(x, y),
+                tile: EditLandTile::from_wire(now.tile.0).expect("LandTileId is inside tiledata"),
+                z:    EditZ(now.z),
+            }
+        }
+        PatchOp::AddStatic { item } => {
+            MapEditOp::AddStatic {
+                at:      at(item.x, item.y),
+                graphic: item.tile,
+                z:       EditZ(item.z),
+                hue:     item.hue,
+            }
+        }
+        PatchOp::RemoveStatic { which, was } => {
+            MapEditOp::RemoveStatic {
+                at:    at(was.x, was.y),
+                which: EditStaticId(which.0),
+            }
+        }
     }
 }
 
@@ -1273,9 +1332,20 @@ mod tests {
     use openshard_protocol::access::AccessLevel;
     use openshard_protocol::wire::Graphic;
     use openshard_tiles::LandTileId;
-    use openshard_uofiles::multi::{Component, Multi, Multis};
+    use openshard_uofiles::multi::{
+        Component,
+        Multi,
+        Multis,
+    };
 
-    use super::{ActiveTool, AssetId, HousePreview, HouseSelection, MapEditor, decode_house_template};
+    use super::{
+        ActiveTool,
+        AssetId,
+        HousePreview,
+        HouseSelection,
+        MapEditor,
+        decode_house_template,
+    };
 
     #[test]
     fn a_player_cannot_enter_editor_mode() {
@@ -1342,10 +1412,10 @@ mod tests {
             0x64,
             vec![Component {
                 graphic: Graphic(1),
-                dx: 0,
-                dy: 0,
-                dz: 0,
-                flags: 1,
+                dx:      0,
+                dy:      0,
+                dz:      0,
+                flags:   1,
             }],
         )])));
         editor.refresh_house_matches();

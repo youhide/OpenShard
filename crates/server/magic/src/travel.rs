@@ -21,9 +21,15 @@
 //! collapses those four, and this is where to widen it if that is ever wanted.
 
 use openshard_entities::EntityId;
-use openshard_protocol::world::{Facet, Point};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 use openshard_state::WorldState;
-use openshard_state::components::{Position, RuneMark};
+use openshard_state::components::{
+    Position,
+    RuneMark,
+};
 
 /// What a mobile is trying to do, and at which end.
 ///
@@ -128,11 +134,11 @@ pub fn describe(state: &WorldState, facet: Facet, at: Point) -> String {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PublicGate {
     /// What the destination list calls it.
-    pub name: &'static str,
+    pub name:  &'static str,
     /// Which facet it stands on.
     pub facet: Facet,
     /// The tile it stands on, which is also the tile it takes you to.
-    pub at: Point,
+    pub at:    Point,
 }
 
 /// Felucca's nine public moongates — ServUO's `PMList.Felucca`, verbatim.

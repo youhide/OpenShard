@@ -6,20 +6,50 @@
 //! — and a step a player was allowed a moment ago is refused.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, WorldMap};
+use openshard_map::map::{
+    LandCell,
+    WorldMap,
+};
 use openshard_map::overlay::Doors;
-use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
+use openshard_map::patch::{
+    Patch,
+    PatchAuthor,
+    PatchOp,
+    PatchTime,
+};
 use openshard_map::snapshot::MapSnapshot;
-use openshard_movement::{Footing, MapTerrain, NavigationGraph, spans::SpanIndex, step_allowed};
+use openshard_movement::spans::SpanIndex;
+use openshard_movement::{
+    Footing,
+    MapTerrain,
+    NavigationGraph,
+    step_allowed,
+};
 use openshard_protocol::direction::Direction;
-use openshard_protocol::world::{Facet, Point};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 use openshard_state::facet_rules::FacetRules;
-use openshard_state::{FacetState, WorldHome, WorldState};
-use openshard_tiles::{LandTileId, TileData};
-use openshard_world::mapedit::{self, CommitError};
+use openshard_state::{
+    FacetState,
+    WorldHome,
+    WorldState,
+};
+use openshard_tiles::{
+    LandTileId,
+    TileData,
+};
+use openshard_world::mapedit::{
+    self,
+    CommitError,
+};
 
 const FACET: Facet = Facet(0);
 const START: openshard_map::grid::Tile = openshard_map::grid::Tile::new(8, 8);
@@ -29,7 +59,7 @@ const BLOCKS: u32 = 4;
 /// Flat ground, so every step is legal until an edit makes one illegal.
 const GROUND: LandCell = LandCell {
     tile: LandTileId(3),
-    z: 0,
+    z:    0,
 };
 
 /// A base set of flat ground in the temp dir, and the log path beside it.
@@ -87,10 +117,12 @@ fn shard(base_set: &Path, home: bool, router: bool) -> WorldState {
         );
         NavigationGraph::build(&footing, width, height).expect("a facet this size has a graph")
     });
-    let home = home.then(|| WorldHome {
-        base_set: base_set.to_owned(),
-        base: loaded.base,
-        identity: openshard_basemap::identity_of(base_set).expect("the base set just written"),
+    let home = home.then(|| {
+        WorldHome {
+            base_set: base_set.to_owned(),
+            base:     loaded.base,
+            identity: openshard_basemap::identity_of(base_set).expect("the base set just written"),
+        }
     });
 
     let mut facets = BTreeMap::new();

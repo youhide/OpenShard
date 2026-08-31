@@ -25,13 +25,26 @@
 
 use openshard_client_net::action::Outgoing;
 use openshard_client_net::view::WorldView;
-use openshard_client_render::gump::{GumpArt, GumpPixel};
+use openshard_client_render::gump::{
+    GumpArt,
+    GumpPixel,
+};
 use openshard_client_render::vendor;
 use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::vendor::{BuyLine, SellLine};
+use openshard_protocol::vendor::{
+    BuyLine,
+    SellLine,
+};
 
-use crate::panes::{Button, Effect, Input, PaneCtx, PaneFrame, Response};
+use crate::panes::{
+    Button,
+    Effect,
+    Input,
+    PaneCtx,
+    PaneFrame,
+    Response,
+};
 use crate::windows::Drawn;
 
 /// One open shop window.
@@ -43,14 +56,14 @@ pub struct VendorPane {
     /// its context: a window's *subject* is the manager's, but which vendor a
     /// `0x3B` is addressed to is this window's own business — see
     /// [`AnyPane::of`](crate::panes::AnyPane::of).
-    vendor: Serial,
+    vendor:  Serial,
     /// The first row of the catalogue that is visible.
     ///
     /// Clamped downward as it is used rather than as it is set, the way it
     /// always was: the catalogue can restock between two notches, and a offset
     /// clamped against yesterday's row count would be clamped against a number
     /// nothing on the screen still has.
-    scroll: vendor::CatalogueIndex,
+    scroll:  vendor::CatalogueIndex,
     /// How many of each row the player has chosen, in the row order the
     /// catalogue supplied.
     ///
@@ -69,7 +82,7 @@ pub struct VendorPane {
     /// the answer. A pane whose picture depends on the pointer owes a
     /// [`Response::stale`] for that move, and saying it needs knowing what the
     /// picture was. The same shape as the paperdoll's hover, moved in with it.
-    tint: Option<vendor::Action>,
+    tint:    Option<vendor::Action>,
 }
 
 /// Which of the two catalogues this window is showing, and everything the rows
@@ -143,22 +156,26 @@ impl<'a> Stall<'a> {
     /// quantity whose row has since gone simply does not travel.
     fn order(&self, vendor: Serial, amounts: &[u16]) -> Outgoing {
         match self {
-            Self::Buy { stock, .. } => Outgoing::Buy {
-                vendor,
-                purchases: stock
-                    .iter()
-                    .zip(amounts)
-                    .filter_map(|(item, amount)| (*amount > 0).then_some((item.serial, *amount)))
-                    .collect(),
-            },
-            Self::Sell { lines } => Outgoing::Sell {
-                vendor,
-                sales: lines
-                    .iter()
-                    .zip(amounts)
-                    .filter_map(|(line, amount)| (*amount > 0).then_some((line.serial, *amount)))
-                    .collect(),
-            },
+            Self::Buy { stock, .. } => {
+                Outgoing::Buy {
+                    vendor,
+                    purchases: stock
+                        .iter()
+                        .zip(amounts)
+                        .filter_map(|(item, amount)| (*amount > 0).then_some((item.serial, *amount)))
+                        .collect(),
+                }
+            }
+            Self::Sell { lines } => {
+                Outgoing::Sell {
+                    vendor,
+                    sales: lines
+                        .iter()
+                        .zip(amounts)
+                        .filter_map(|(line, amount)| (*amount > 0).then_some((line.serial, *amount)))
+                        .collect(),
+                }
+            }
         }
     }
 }
@@ -327,25 +344,29 @@ impl VendorPane {
         // pass and the pointer pick are the two places that add this
         // window's real, absolute position back.
         let window = match stall {
-            Stall::Buy { lines, stock } => vendor::buy(
-                self.vendor,
-                lines,
-                stock,
-                &self.amounts,
-                self.scroll,
-                GumpPixel::new(0, 0),
-                frame.cursor,
-                frame.files.gump_atlas,
-            ),
-            Stall::Sell { lines } => vendor::sell(
-                self.vendor,
-                lines,
-                &self.amounts,
-                self.scroll,
-                GumpPixel::new(0, 0),
-                frame.cursor,
-                frame.files.gump_atlas,
-            ),
+            Stall::Buy { lines, stock } => {
+                vendor::buy(
+                    self.vendor,
+                    lines,
+                    stock,
+                    &self.amounts,
+                    self.scroll,
+                    GumpPixel::new(0, 0),
+                    frame.cursor,
+                    frame.files.gump_atlas,
+                )
+            }
+            Stall::Sell { lines } => {
+                vendor::sell(
+                    self.vendor,
+                    lines,
+                    &self.amounts,
+                    self.scroll,
+                    GumpPixel::new(0, 0),
+                    frame.cursor,
+                    frame.files.gump_atlas,
+                )
+            }
         };
         Some(Drawn::Vendor(window))
     }
@@ -403,11 +424,13 @@ impl VendorPane {
 mod tests {
     use openshard_client_net::view::VendorSell;
     use openshard_protocol::items::ItemAmount;
-    use openshard_protocol::wire::{Graphic, Hue};
-
-    use crate::panes::fixture;
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
 
     use super::*;
+    use crate::panes::fixture;
 
     fn pane() -> VendorPane {
         VendorPane::new(Serial::new(0x0000_002A).unwrap())
@@ -426,15 +449,17 @@ mod tests {
             vendor,
             VendorSell {
                 lines: (0..rows)
-                    .map(|row| SellLine {
-                        // Serials from a range of their own, so a row's identity
-                        // cannot be confused with the vendor's or the player's.
-                        serial: Serial::new(0x4000_0001 + row as u32).unwrap(),
-                        graphic: Graphic(0x0EED),
-                        hue: Hue::NONE,
-                        amount: ItemAmount(9),
-                        price: 3,
-                        name: format!("row {row}"),
+                    .map(|row| {
+                        SellLine {
+                            // Serials from a range of their own, so a row's identity
+                            // cannot be confused with the vendor's or the player's.
+                            serial:  Serial::new(0x4000_0001 + row as u32).unwrap(),
+                            graphic: Graphic(0x0EED),
+                            hue:     Hue::NONE,
+                            amount:  ItemAmount(9),
+                            price:   3,
+                            name:    format!("row {row}"),
+                        }
                     })
                     .collect(),
             },
@@ -663,20 +688,20 @@ mod tests {
         let vendor = Serial::new(0x0000_002A).unwrap();
         let lines = [
             SellLine {
-                serial: Serial::new(0x0000_0100).unwrap(),
+                serial:  Serial::new(0x0000_0100).unwrap(),
                 graphic: openshard_protocol::wire::Graphic(0x0EED),
-                hue: openshard_protocol::wire::Hue::NONE,
-                amount: openshard_protocol::items::ItemAmount(9),
-                price: 3,
-                name: "gold".into(),
+                hue:     openshard_protocol::wire::Hue::NONE,
+                amount:  openshard_protocol::items::ItemAmount(9),
+                price:   3,
+                name:    "gold".into(),
             },
             SellLine {
-                serial: Serial::new(0x0000_0200).unwrap(),
+                serial:  Serial::new(0x0000_0200).unwrap(),
                 graphic: openshard_protocol::wire::Graphic(0x0EED),
-                hue: openshard_protocol::wire::Hue::NONE,
-                amount: openshard_protocol::items::ItemAmount(9),
-                price: 4,
-                name: "silver".into(),
+                hue:     openshard_protocol::wire::Hue::NONE,
+                amount:  openshard_protocol::items::ItemAmount(9),
+                price:   4,
+                name:    "silver".into(),
             },
         ];
         let stall = Stall::Sell { lines: &lines };

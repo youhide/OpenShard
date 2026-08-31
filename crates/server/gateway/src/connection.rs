@@ -1,9 +1,23 @@
 //! One client connection, as a state machine that has never heard of a socket.
 
-use openshard_protocol::client_packet::{ClientDecodeError, ClientPacket};
-use openshard_protocol::login::{ClientLoginDecodeError, LoginStagePacket};
-use openshard_protocol::packet::{Frame, FrameError, MAX_PACKET_SIZE, frame_client_packet};
-use openshard_protocol::seed::{Seed, SeedReader};
+use openshard_protocol::client_packet::{
+    ClientDecodeError,
+    ClientPacket,
+};
+use openshard_protocol::login::{
+    ClientLoginDecodeError,
+    LoginStagePacket,
+};
+use openshard_protocol::packet::{
+    Frame,
+    FrameError,
+    MAX_PACKET_SIZE,
+    frame_client_packet,
+};
+use openshard_protocol::seed::{
+    Seed,
+    SeedReader,
+};
 use openshard_protocol::version::ClientVersion;
 
 /// A packet the framer completed but nobody has read yet.
@@ -65,9 +79,11 @@ impl RawPacket {
     /// other chance to claim it.
     pub fn parse_packet(&self, version: ClientVersion) -> Result<Packet, PacketError> {
         match LoginStagePacket::decode(&self.0, version) {
-            Ok(LoginStagePacket::Unknown(_)) => ClientPacket::decode(&self.0, version)
-                .map(Packet::World)
-                .map_err(PacketError::World),
+            Ok(LoginStagePacket::Unknown(_)) => {
+                ClientPacket::decode(&self.0, version)
+                    .map(Packet::World)
+                    .map_err(PacketError::World)
+            }
             Ok(login_packet) => Ok(Packet::Login(login_packet)),
             Err(error) => Err(PacketError::Login(error)),
         }
@@ -127,7 +143,8 @@ impl std::fmt::Display for ConnectionError {
     }
 }
 
-impl std::error::Error for ConnectionError {}
+impl std::error::Error for ConnectionError {
+}
 
 /// How many unparsed bytes a connection may hold before it is presumed broken.
 ///
@@ -186,10 +203,10 @@ enum State {
 /// ```
 #[derive(Debug)]
 pub struct Connection {
-    state: State,
+    state:       State,
     seed_reader: SeedReader,
     /// Bytes received but not yet consumed by the handshake or the framer.
-    inbox: Vec<u8>,
+    inbox:       Vec<u8>,
     /// The client's version, once the server has resolved it and told us.
     ///
     /// `None` until then, which frames the drop packet (`0x08`) in its older,
@@ -200,7 +217,7 @@ pub struct Connection {
     /// drag an item.
     ///
     /// [`set_version`]: Connection::set_version
-    version: Option<ClientVersion>,
+    version:     Option<ClientVersion>,
 }
 
 impl Default for Connection {
@@ -213,10 +230,10 @@ impl Connection {
     /// A connection expecting the first byte of a handshake.
     pub const fn new() -> Self {
         Self {
-            state: State::Handshake,
+            state:       State::Handshake,
             seed_reader: SeedReader::new(),
-            inbox: Vec::new(),
-            version: None,
+            inbox:       Vec::new(),
+            version:     None,
         }
     }
 
@@ -287,11 +304,13 @@ impl Connection {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use openshard_protocol::{
-        seed::{RawSeedValue, SEED_COMMAND},
-        version::ClientVersion,
+    use openshard_protocol::seed::{
+        RawSeedValue,
+        SEED_COMMAND,
     };
+    use openshard_protocol::version::ClientVersion;
+
+    use super::*;
 
     /// A well-formed new-style seed for 7.0.45.65.
     fn modern_seed() -> Vec<u8> {

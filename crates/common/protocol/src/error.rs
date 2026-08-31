@@ -7,7 +7,10 @@
 
 use std::fmt;
 
-use crate::codec::{CodecError, PacketReader};
+use crate::codec::{
+    CodecError,
+    PacketReader,
+};
 
 /// A packet did not have the id it was decoded as.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -15,7 +18,7 @@ pub struct WrongPacket {
     /// The id the decoder wanted.
     pub expected: u8,
     /// The id the packet actually had.
-    pub found: u8,
+    pub found:    u8,
 }
 
 impl fmt::Display for WrongPacket {
@@ -28,7 +31,8 @@ impl fmt::Display for WrongPacket {
     }
 }
 
-impl std::error::Error for WrongPacket {}
+impl std::error::Error for WrongPacket {
+}
 
 /// Decoding a packet failed.
 ///
@@ -66,7 +70,7 @@ pub enum DecodeError {
         /// The packet id.
         packet: u8,
         /// The form that is not handled, named for a human.
-        form: &'static str,
+        form:   &'static str,
     },
 }
 
@@ -91,7 +95,8 @@ impl fmt::Display for DecodeError {
     }
 }
 
-impl std::error::Error for DecodeError {}
+impl std::error::Error for DecodeError {
+}
 
 /// Check and strip the id byte.
 pub(crate) fn expect_id(bytes: &[u8], expected: u8) -> Result<PacketReader<'_>, DecodeError> {
@@ -121,7 +126,7 @@ mod tests {
             error,
             DecodeError::WrongPacket(WrongPacket {
                 expected: 0x03,
-                found: 0x02,
+                found:    0x02,
             })
         );
     }

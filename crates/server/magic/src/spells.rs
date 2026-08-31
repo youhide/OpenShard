@@ -13,7 +13,11 @@
 //! subsystem lands.
 
 use openshard_protocol::casting::SpellId;
-use openshard_state::{DamageType, FieldKind, Skill};
+use openshard_state::{
+    DamageType,
+    FieldKind,
+    Skill,
+};
 
 /// A reagent's item graphic — the eight classic Magery reagents.
 const BLACK_PEARL: Graphic = Graphic(0x0F7A);
@@ -141,23 +145,43 @@ pub const AREA_RADIUS: u32 = 2;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SpellInfo {
     /// Its name, for logs and messages.
-    pub name: &'static str,
+    pub name:     &'static str,
     /// Circle 1..=8 — sets mana, cast delay and difficulty.
-    pub circle: SpellCircle,
+    pub circle:   SpellCircle,
     /// The reagents it consumes, by item graphic (one of each).
     pub reagents: &'static [Graphic],
     /// What it aims at.
-    pub target: SpellTarget,
+    pub target:   SpellTarget,
     /// The core's default effect.
-    pub effect: SpellEffect,
+    pub effect:   SpellEffect,
 }
 
-use DamageType::{Cold, Energy, Fire, Physical};
+use DamageType::{
+    Cold,
+    Energy,
+    Fire,
+    Physical,
+};
 use SpellEffect::{
-    AreaCure, AreaDamage, BehaviourBuff, Cure, Damage, Field, Heal, Paralyze, Poison, StatMod, Teleport,
+    AreaCure,
+    AreaDamage,
+    BehaviourBuff,
+    Cure,
+    Damage,
+    Field,
+    Heal,
+    Paralyze,
+    Poison,
+    StatMod,
+    Teleport,
     Unimplemented,
 };
-use SpellTarget::{Item, Location, Mobile, SelfCast};
+use SpellTarget::{
+    Item,
+    Location,
+    Mobile,
+    SelfCast,
+};
 use openshard_protocol::wire::Graphic;
 use openshard_state::components::StatEffectKind;
 

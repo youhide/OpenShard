@@ -508,11 +508,11 @@ pub fn unpack_normal(word: u32) -> [f32; 3] {
 #[derive(Debug)]
 pub struct Gbuffer {
     /// What drew each pixel and which row it came from — [`IDS_FORMAT`].
-    ids: wgpu::Texture,
+    ids:      wgpu::Texture,
     /// Where that pixel's fragment is, exactly — [`POSITION_FORMAT`].
     position: wgpu::Texture,
     /// And which way its surface looks — [`NORMAL_FORMAT`].
-    normal: wgpu::Texture,
+    normal:   wgpu::Texture,
 }
 
 impl Gbuffer {
@@ -524,9 +524,9 @@ impl Gbuffer {
     /// pipeline-bind time with an error that names neither side.
     pub fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
         Self {
-            ids: plane(device, "ids", IDS_FORMAT, width, height),
+            ids:      plane(device, "ids", IDS_FORMAT, width, height),
             position: plane(device, "position", POSITION_FORMAT, width, height),
-            normal: plane(device, "normal", NORMAL_FORMAT, width, height),
+            normal:   plane(device, "normal", NORMAL_FORMAT, width, height),
         }
     }
 
@@ -537,9 +537,9 @@ impl Gbuffer {
     /// with no good answer the moment a caller wants both.
     pub fn views(&self) -> Views {
         Views {
-            ids: self.ids.create_view(&wgpu::TextureViewDescriptor::default()),
+            ids:      self.ids.create_view(&wgpu::TextureViewDescriptor::default()),
             position: self.position.create_view(&wgpu::TextureViewDescriptor::default()),
-            normal: self.normal.create_view(&wgpu::TextureViewDescriptor::default()),
+            normal:   self.normal.create_view(&wgpu::TextureViewDescriptor::default()),
         }
     }
 
@@ -570,11 +570,11 @@ impl Gbuffer {
 #[derive(Debug)]
 pub struct Views {
     /// [`Gbuffer::ids`]'s.
-    pub ids: wgpu::TextureView,
+    pub ids:      wgpu::TextureView,
     /// [`Gbuffer::position`]'s.
     pub position: wgpu::TextureView,
     /// [`Gbuffer::normal`]'s.
-    pub normal: wgpu::TextureView,
+    pub normal:   wgpu::TextureView,
 }
 
 /// One texel of a G-buffer, written by hand.
@@ -601,14 +601,14 @@ pub struct Views {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Fragment {
     /// Which tile the thing drawn here stands on.
-    pub tile: (u16, u16),
+    pub tile:   (u16, u16),
     /// Where in that tile, each axis in `0..1` — [`crate::place::Stance`]
     /// decides what the pair *means*, and this is the number itself.
-    pub sub: (f32, f32),
+    pub sub:    (f32, f32),
     /// How high, in `z` units.
-    pub z: f32,
+    pub z:      f32,
     /// What drew it.
-    pub kind: crate::place::Kind,
+    pub kind:   crate::place::Kind,
     /// Which way its surface looks.
     pub stance: crate::place::Stance,
     /// **Which solid of the grid it is a point of**, or [`None`] for a point of
@@ -621,7 +621,7 @@ pub struct Fragment {
     /// and a fixture that means to compare the two walks has to state it once
     /// for both — which is exactly what it could not do while this rode in a
     /// cell scan keyed on an owner.
-    pub solid: Option<crate::occlusion::SolidId>,
+    pub solid:  Option<crate::occlusion::SolidId>,
 }
 
 impl Fragment {
@@ -693,8 +693,8 @@ fn plane(
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d {
-            width: width.max(1),
-            height: height.max(1),
+            width:                 width.max(1),
+            height:                height.max(1),
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -761,7 +761,10 @@ mod tests {
     /// is that the two do not reach into each other.
     #[test]
     fn an_id_word_holds_three_things_and_gives_all_three_back() {
-        use crate::place::{Kind, Stance};
+        use crate::place::{
+            Kind,
+            Stance,
+        };
 
         for id in [0, 1, 4095, IDS_ID_MASK] {
             for stance in [Stance::Upright, Stance::Flat, Stance::MeshFace] {

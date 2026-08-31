@@ -11,16 +11,25 @@
 //!   Cathedral.wsc --output "$OPENSHARD_CLIENT/openshard-houses/cathedral.json"
 //! ```
 
-use std::fs::{File, read_to_string};
+use std::fs::{
+    File,
+    read_to_string,
+};
 use std::io::Write;
 use std::path::PathBuf;
 
-use openshard_housing::wsc::{Origin, design_at, multiscripter_design, sphere_component_design, world_items};
+use openshard_housing::wsc::{
+    Origin,
+    design_at,
+    multiscripter_design,
+    sphere_component_design,
+    world_items,
+};
 use serde_json::json;
 
 struct Cli {
-    source: PathBuf,
-    output: PathBuf,
+    source:  PathBuf,
+    output:  PathBuf,
     itemdef: Option<String>,
 }
 
@@ -71,16 +80,18 @@ fn wsc_design(
     source: &str,
 ) -> Result<(Origin, Vec<openshard_uofiles::multi::Component>), Box<dyn std::error::Error>> {
     let items = world_items(source)?;
-    let origin = items
-        .iter()
-        .fold(None, |lowest: Option<Origin>, item| match lowest {
+    let origin = items.iter().fold(None, |lowest: Option<Origin>, item| {
+        match lowest {
             None => Some(item.at),
-            Some(lowest) => Some(Origin {
-                x: lowest.x.min(item.at.x),
-                y: lowest.y.min(item.at.y),
-                z: lowest.z.min(item.at.z),
-            }),
-        });
+            Some(lowest) => {
+                Some(Origin {
+                    x: lowest.x.min(item.at.x),
+                    y: lowest.y.min(item.at.y),
+                    z: lowest.z.min(item.at.z),
+                })
+            }
+        }
+    });
     let origin = origin.ok_or("the .wsc has no WORLDITEM sections")?;
     Ok((origin, design_at(source, origin)?))
 }

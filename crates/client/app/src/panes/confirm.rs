@@ -29,9 +29,19 @@ use openshard_client_net::action::Outgoing;
 use openshard_client_net::view::WorldView;
 use openshard_client_render::confirm as confirm_art;
 use openshard_client_render::confirm::Hit;
-use openshard_client_render::gump::{GumpArt, GumpPixel};
+use openshard_client_render::gump::{
+    GumpArt,
+    GumpPixel,
+};
 
-use crate::panes::{Button, Effect, Input, PaneCtx, PaneFrame, Response};
+use crate::panes::{
+    Button,
+    Effect,
+    Input,
+    PaneCtx,
+    PaneFrame,
+    Response,
+};
 use crate::windows::Drawn;
 
 /// What this client is asking, and therefore what either button means.
@@ -89,10 +99,11 @@ impl Question {
             // — a mobile is named by a single click or by a tooltip, and this
             // client may have done neither to the person inviting it. Better a
             // number than a guess at whose it is.
-            Self::PartyInvite => view
-                .party
-                .invited_by
-                .map(|leader| format!("{:#010X} has invited you to a party.", leader.raw())),
+            Self::PartyInvite => {
+                view.party
+                    .invited_by
+                    .map(|leader| format!("{:#010X} has invited you to a party.", leader.raw()))
+            }
         }
     }
 
@@ -103,11 +114,13 @@ impl Question {
     /// nothing here, and the arm would say so.
     const fn answer(self, yes: bool) -> Option<Outgoing> {
         match self {
-            Self::PartyInvite => Some(if yes {
-                Outgoing::PartyAccept
-            } else {
-                Outgoing::PartyDecline
-            }),
+            Self::PartyInvite => {
+                Some(if yes {
+                    Outgoing::PartyAccept
+                } else {
+                    Outgoing::PartyDecline
+                })
+            }
         }
     }
 }
@@ -125,7 +138,7 @@ pub struct ConfirmPane {
     /// reason: the layout draws the pressed face by comparing this against the
     /// hit it computes, so what looks pressed and what the release will act on
     /// are one value.
-    held: Option<Hit>,
+    held:     Option<Hit>,
 }
 
 impl ConfirmPane {

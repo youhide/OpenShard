@@ -12,17 +12,41 @@
 //! builds one and the shard reads it through its own `MapTerrain`, so a test
 //! here cannot pass against a rule the shard does not have.
 
-use super::tests::{START, WALL_FLAGS, enter, packets_for, world};
-use super::*;
 use openshard_movement::scene::Scene;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::item_kind::ItemKindId;
 use openshard_protocol::serial::RawSerial;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_state::Skill;
-use openshard_state::components::{Contained, Harvesting, ItemKind, Material, Skills, Tool};
-use openshard_state::harvest::{HarvestKind, LOG_GRAPHIC, ORE_GRAPHIC, SAND_GRAPHIC, TileSource, definition};
+use openshard_state::components::{
+    Contained,
+    Harvesting,
+    ItemKind,
+    Material,
+    Skills,
+    Tool,
+};
+use openshard_state::harvest::{
+    HarvestKind,
+    LOG_GRAPHIC,
+    ORE_GRAPHIC,
+    SAND_GRAPHIC,
+    TileSource,
+    definition,
+};
+
+use super::tests::{
+    START,
+    WALL_FLAGS,
+    enter,
+    packets_for,
+    world,
+};
+use super::*;
 
 /// A pickaxe, ServUO's `Pickaxe`.
 const PICKAXE: Graphic = Graphic(0x0E86);
@@ -88,7 +112,7 @@ fn give_tool(world: &mut World, connection: ConnectionId, graphic: Graphic) -> E
     world.state.registry.insert(
         item,
         Drawn {
-            id: graphic,
+            id:  graphic,
             hue: Hue(0),
         },
     );
@@ -97,8 +121,8 @@ fn give_tool(world: &mut World, connection: ConnectionId, graphic: Graphic) -> E
         item,
         openshard_state::ItemLocation::contained(Contained {
             container: backpack,
-            position: GumpPoint::new(20, 20),
-            grid: GridSlot(0),
+            position:  GumpPoint::new(20, 20),
+            grid:      GridSlot(0),
         }),
     )
     .unwrap();
@@ -149,9 +173,9 @@ fn swing_at(
         connection,
         response: openshard_protocol::target::TargetResponse {
             cursor_id: openshard_protocol::wire::CursorId(cursor_id),
-            object: openshard_protocol::serial::Serial::new(0),
-            location: Point::new(START.x + dx, START.y, 0),
-            graphic: (graphic != 0).then_some(Graphic(graphic)),
+            object:    openshard_protocol::serial::Serial::new(0),
+            location:  Point::new(START.x + dx, START.y, 0),
+            graphic:   (graphic != 0).then_some(Graphic(graphic)),
             cancelled: false,
         },
     });
@@ -480,7 +504,7 @@ fn a_hatchet_asks_what_to_use_it_on_instead_of_where_to_dig() {
     let serial = world.state.registry.serial_of(axe).unwrap();
     world.queue(Command::DoubleClick {
         connection: player,
-        request: UseRequest::Use(RawSerial(serial.raw())),
+        request:    UseRequest::Use(RawSerial(serial.raw())),
     });
     world.tick(now);
 

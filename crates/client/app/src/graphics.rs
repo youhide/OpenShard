@@ -12,12 +12,23 @@ use std::time::Duration;
 
 use openshard_client_render::camera::TileBounds;
 use openshard_client_render::debug::View;
-use openshard_client_render::frame;
 use openshard_client_render::impostor::Fringe;
-use openshard_client_render::interiors::{FloorView, ZSliceView};
-use openshard_client_render::occlusion;
-use openshard_protocol::world::{Light, RangedRange};
-use serde::{Deserialize, Serialize};
+use openshard_client_render::interiors::{
+    FloorView,
+    ZSliceView,
+};
+use openshard_client_render::{
+    frame,
+    occlusion,
+};
+use openshard_protocol::world::{
+    Light,
+    RangedRange,
+};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 /// Arm's length, in tiles: the reach the sight overlay starts at.
 ///
@@ -38,7 +49,7 @@ pub const MELEE_SIGHT_REACH: RangedRange = match RangedRange::new(1) {
 /// clock: it only eases toward the last authoritative value and never advances
 /// one by itself.
 pub(crate) struct Daylight {
-    level: f32,
+    level:      f32,
     last_frame: Option<Duration>,
 }
 
@@ -47,7 +58,7 @@ impl Daylight {
 
     pub(crate) const fn new() -> Self {
         Self {
-            level: 0.0,
+            level:      0.0,
             last_frame: None,
         }
     }

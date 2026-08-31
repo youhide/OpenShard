@@ -11,9 +11,16 @@
 
 use openshard_protocol::world::Facet;
 
-use crate::chunk::{AssemblyError, Chunk};
+use crate::chunk::{
+    AssemblyError,
+    Chunk,
+};
 use crate::map::WorldMap;
-use crate::patch::{Patch, PatchError, Undo};
+use crate::patch::{
+    Patch,
+    PatchError,
+    Undo,
+};
 
 /// Which published version of a facet a reader holds.
 ///
@@ -72,13 +79,13 @@ impl MapRevision {
 /// ownership seam is visible at every crossing rather than coerced away.
 #[derive(Debug)]
 pub struct MapSnapshot {
-    facet: Facet,
+    facet:    Facet,
     revision: MapRevision,
     /// Owned outright, not shared: nothing hands a `WorldMap` out any more. The
     /// shard thread was the last caller that wanted one, and it does not read
     /// the map at all now — see [`MapSnapshot::map`] and the client's
     /// `link::connect`.
-    map: WorldMap,
+    map:      WorldMap,
 }
 
 impl MapSnapshot {
@@ -170,13 +177,13 @@ impl MapSnapshot {
         if patch.facet() != self.facet {
             return Err(PatchError::WrongFacet {
                 wanted: self.facet,
-                found: patch.facet(),
+                found:  patch.facet(),
             });
         }
         if patch.parent() != self.revision {
             return Err(PatchError::Conflict {
                 holding: self.revision,
-                parent: patch.parent(),
+                parent:  patch.parent(),
             });
         }
         let ops = crate::patch::apply(&mut self.map, patch.ops())?;
@@ -242,17 +249,20 @@ impl MapSnapshot {
 
 #[cfg(test)]
 mod tests {
+    use openshard_tiles::LandTileId;
+
     use super::*;
     use crate::grid::BlockExtent;
     use crate::map::LandCell;
-    use openshard_tiles::LandTileId;
 
     #[test]
     fn snapshots_keep_the_facet_that_resolved_an_ambiguous_size() {
         let map = || {
-            WorldMap::from_blocks(BlockExtent { wide: 320, down: 256 }, |_, _| LandCell {
-                tile: LandTileId(0),
-                z: 0,
+            WorldMap::from_blocks(BlockExtent { wide: 320, down: 256 }, |_, _| {
+                LandCell {
+                    tile: LandTileId(0),
+                    z:    0,
+                }
             })
         };
         let malas = MapSnapshot::new(Facet(3), map());

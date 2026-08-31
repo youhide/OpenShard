@@ -28,14 +28,33 @@
 
 pub mod in_process;
 
-use std::net::{SocketAddr, SocketAddrV4};
-use std::path::{Path, PathBuf};
+use std::net::{
+    SocketAddr,
+    SocketAddrV4,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::thread::JoinHandle;
 
-use openshard_client_net::session::{Pick, Plan};
-use openshard_config::{Config, ConfigError, DEFAULT_TOML};
-use openshard_gateway::{ClientGatewayServer, Shutdown};
-use openshard_protocol::identity::{RawAccountName, RawPlaintextPassword};
+use openshard_client_net::session::{
+    Pick,
+    Plan,
+};
+use openshard_config::{
+    Config,
+    ConfigError,
+    DEFAULT_TOML,
+};
+use openshard_gateway::{
+    ClientGatewayServer,
+    Shutdown,
+};
+use openshard_protocol::identity::{
+    RawAccountName,
+    RawPlaintextPassword,
+};
 use openshard_protocol::version::ClientVersion;
 
 /// The client we claim to be. ClassicUO's own opening version, which is what
@@ -183,7 +202,7 @@ pub fn window_base_set(config: Option<&Config>) -> Option<PathBuf> {
 #[derive(Debug)]
 #[must_use = "the shard stops when this is dropped"]
 pub struct Running {
-    stop: Shutdown,
+    stop:   Shutdown,
     /// `Option` only because [`Drop`] has to move the handle out of a `&mut
     /// self` to join it. It is `Some` for the whole life of the value.
     thread: Option<JoinHandle<()>>,
@@ -306,7 +325,7 @@ pub fn spawn(config: impl FnOnce(SocketAddr) -> Config + Send + 'static) -> (Soc
     (
         address,
         Running {
-            stop: shutdown,
+            stop:   shutdown,
             thread: Some(thread),
         },
     )
@@ -328,9 +347,9 @@ pub fn plan() -> Plan {
 /// no parameter for one.
 pub fn plan_for(account: &str, character: &str) -> Plan {
     Plan {
-        account: RawAccountName(account.to_owned()),
-        password: RawPlaintextPassword(PASSWORD.to_owned()),
-        shard: Pick::First,
+        account:   RawAccountName(account.to_owned()),
+        password:  RawPlaintextPassword(PASSWORD.to_owned()),
+        shard:     Pick::First,
         character: Pick::Named(character.to_owned()),
     }
 }
@@ -352,7 +371,7 @@ mod tests {
     #[should_panic(expected = "the shard thread died on purpose")]
     fn a_shard_thread_that_panicked_fails_the_test() {
         let running = Running {
-            stop: Shutdown::new(),
+            stop:   Shutdown::new(),
             thread: Some(std::thread::spawn(|| panic!("the shard thread died on purpose"))),
         };
         running.stop();

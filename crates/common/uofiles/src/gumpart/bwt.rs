@@ -17,8 +17,9 @@
 //! specific getting re-justified from first principles is a value someone
 //! will "simplify" back to the wrong number later.
 
-use super::GumpError;
 use openshard_protocol::wire::Graphic;
+
+use super::GumpError;
 
 /// Undo both stages: move-to-front, then the run expansion underneath it.
 pub(super) fn decode(graphic: Graphic, data: &[u8]) -> Result<Vec<u8>, GumpError> {
@@ -45,9 +46,11 @@ pub(super) fn decode(graphic: Graphic, data: &[u8]) -> Result<Vec<u8>, GumpError
 /// byte order. So this reader skips building and sorting 65536 entries and
 /// starts directly at the table that sort would have produced.
 fn move_to_front_decode(graphic: Graphic, data: &[u8]) -> Result<Vec<u8>, GumpError> {
-    let malformed = |detail: &str| GumpError::Malformed {
-        graphic,
-        detail: detail.to_owned(),
+    let malformed = |detail: &str| {
+        GumpError::Malformed {
+            graphic,
+            detail: detail.to_owned(),
+        }
     };
 
     // 4 bytes discarded, 1 byte read as the seed for the loop below.

@@ -21,19 +21,18 @@
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::collections::hash_map::Entry;
 use std::sync::OnceLock;
 use std::time::Instant;
 
+use openshard_map::grid::Tile;
 use openshard_map::overlay::Cover;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 use rustc_hash::FxHashMap;
-use std::collections::hash_map::Entry;
 
 use crate::footing::Footing;
 use crate::navigation::Region;
-use openshard_map::grid::Tile;
-
 use crate::walk::steps_out_of;
 
 /// The work one query may do, counted rather than clocked.
@@ -58,7 +57,7 @@ use crate::walk::steps_out_of;
 ///
 /// [`find_long_path`]: crate::find_long_path
 pub(crate) struct Effort {
-    left: usize,
+    left:  usize,
     spent: usize,
 }
 
@@ -66,7 +65,7 @@ impl Effort {
     /// A query allowed `nodes` expansions across every search it makes.
     pub(crate) fn of(nodes: usize) -> Self {
         Self {
-            left: nodes,
+            left:  nodes,
             spent: 0,
         }
     }
@@ -125,7 +124,7 @@ impl Effort {
 /// for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Weight {
-    numerator: u32,
+    numerator:   u32,
     denominator: u32,
 }
 
@@ -138,7 +137,7 @@ impl Weight {
     /// between hops by comparing them — so it may not be the length of a route
     /// that merely happens to be short enough.
     pub const EXACT: Self = Self {
-        numerator: 1,
+        numerator:   1,
         denominator: 1,
     };
 
@@ -175,7 +174,7 @@ impl Weight {
     /// The bound holds whatever the ground: a route planned at this weight is
     /// never longer than five quarters of the shortest one.
     pub const PLANNING: Self = Self {
-        numerator: 5,
+        numerator:   5,
         denominator: 4,
     };
 
@@ -412,12 +411,12 @@ pub fn search_path(
 pub struct PathSearch {
     /// Whether [`Self::route`] ends on the goal itself — the tile *and* the
     /// height, since [`PathNodeKey`] is what the search compares.
-    pub arrived: bool,
+    pub arrived:  bool,
     /// The steps to the goal, or — where it was never reached — to the place that
     /// came closest to it. Empty when nothing the search reached bettered its own
     /// start: with `arrived`, that is a body already standing on the goal, and
     /// without it, a body with nowhere closer to go.
-    pub route: Vec<Direction>,
+    pub route:    Vec<Direction>,
     /// Number of standing places removed from the open list and finalised.
     ///
     /// Not tiles: a column with two floors in it can be finalised twice. On
@@ -431,10 +430,10 @@ pub struct PathSearch {
     /// holds, and the two differ by the frontier. It is here because the table
     /// is now reserved up front — see `visit_capacity` — and a reservation
     /// argued from a guess is a rehash nobody sees.
-    pub written: usize,
+    pub written:  usize,
     /// Why the search stopped.  This is diagnostic only; the two entry points
     /// above keep the established `Option<Vec<Direction>>` contract.
-    pub exit: SearchExit,
+    pub exit:     SearchExit,
 }
 
 /// Why a search stopped looking.
@@ -528,11 +527,11 @@ fn explore(
     let start = from;
     if start == goal {
         return PathSearch {
-            arrived: true,
-            route: Vec::new(),
+            arrived:  true,
+            route:    Vec::new(),
             explored: 0,
-            written: 0,
-            exit: SearchExit::Goal,
+            written:  0,
+            exit:     SearchExit::Goal,
         };
     }
 
@@ -574,8 +573,8 @@ fn explore(
     visited.insert(
         start_key,
         Visit {
-            cost: 0,
-            from: None,
+            cost:   0,
+            from:   None,
             closed: false,
         },
     );
@@ -691,8 +690,8 @@ fn explore(
                 }
                 Entry::Vacant(slot) => {
                     slot.insert(Visit {
-                        cost: next_cost,
-                        from: Some((key, dir)),
+                        cost:   next_cost,
+                        from:   Some((key, dir)),
                         closed: false,
                     });
                 }
@@ -804,13 +803,13 @@ fn reconstruct(
 struct Visit {
     /// The cheapest route to this place found so far. Final once
     /// [`Self::closed`], since the first pop of a place is its cheapest.
-    cost: u32,
+    cost:   u32,
     /// The place stepped from, and the step that landed here.
     ///
     /// **`None` is the start**, which no step reached — the one place in the
     /// table whose absence of a parent is a fact about the search rather than a
     /// value nobody filled in, and what terminates [`reconstruct`].
-    from: Option<(PathNodeKey, Direction)>,
+    from:   Option<(PathNodeKey, Direction)>,
     /// Whether the place has been finalised: popped off the open list with its
     /// cost settled, counted against the budget, and expanded.
     closed: bool,
@@ -976,8 +975,13 @@ fn estimate(from: Point, to: Point) -> (u32, u32) {
 
 #[cfg(test)]
 mod tests {
+    use openshard_map::overlay::{
+        Cover,
+        Doors,
+        Overlay,
+    };
+
     use super::*;
-    use openshard_map::overlay::{Cover, Doors, Overlay};
 
     /// The packed open-list entry ranks candidates exactly the way the six
     /// fields it replaced did.

@@ -13,11 +13,17 @@
 //! head. What it shares with speech is only that a player typed it.
 
 use openshard_entities::EntityId;
-use openshard_protocol::party::{MESSAGE_LIMIT, PartyTextMessage};
+use openshard_protocol::party::{
+    MESSAGE_LIMIT,
+    PartyTextMessage,
+};
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_state::WorldState;
 
-use crate::{Refusal, tell_party};
+use crate::{
+    Refusal,
+    tell_party,
+};
 
 /// Say something to the whole party.
 ///
@@ -94,8 +100,9 @@ fn acceptable(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::acceptable;
     use openshard_protocol::party::MESSAGE_LIMIT;
+
+    use super::acceptable;
 
     #[test]
     fn a_line_is_trimmed_and_an_empty_one_is_not_sent() {

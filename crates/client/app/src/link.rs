@@ -18,34 +18,69 @@
 //! socket gets a current-thread runtime of its own and the two exchange values.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{
+    Arc,
+    Condvar,
+    Mutex,
+};
 use std::time::Instant;
 
 use openshard_client_net::action::Outgoing;
-use openshard_client_net::chunks::{Drain, Fetch, FetchError, Fetched, Restart};
+use openshard_client_net::chunks::{
+    Drain,
+    Fetch,
+    FetchError,
+    Fetched,
+    Restart,
+};
 use openshard_client_net::connection::Event;
 use openshard_client_net::session::Plan;
-use openshard_client_net::transport::{Dial, Socket, enter_world_with};
+use openshard_client_net::transport::{
+    Dial,
+    Socket,
+    enter_world_with,
+};
 use openshard_client_net::view::WorldView;
-use openshard_client_net::walk::{Moved, Walk};
+use openshard_client_net::walk::{
+    Moved,
+    Walk,
+};
 use openshard_protocol::chunks::{
-    Changes, ChangesReply, ChangesRequest, PublishNotice, WorldNotice, WorldRevision,
+    Changes,
+    ChangesReply,
+    ChangesRequest,
+    PublishNotice,
+    WorldNotice,
+    WorldRevision,
 };
 use openshard_protocol::feedback::{
-    Animation, CombatActionBalked, CombatActionEnded, CombatActionPhase, CombatActionStage, GraphicalEffect,
-    HarvestCompleted, HarvestRefused, HarvestToolVisual, NewAnimation, SwingTiming,
+    Animation,
+    CombatActionBalked,
+    CombatActionEnded,
+    CombatActionPhase,
+    CombatActionStage,
+    GraphicalEffect,
+    HarvestCompleted,
+    HarvestRefused,
+    HarvestToolVisual,
+    NewAnimation,
+    SwingTiming,
 };
-use openshard_protocol::gump::GumpId;
-use openshard_protocol::gump::GumpPoint;
+use openshard_protocol::gump::{
+    GumpId,
+    GumpPoint,
+};
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::packet::FramedClientPacket;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::TalkMode;
 use openshard_protocol::target::TargetResponse;
 use openshard_protocol::version::ClientVersion;
-use openshard_protocol::world::Point;
-use openshard_protocol::world::ResyncRequest;
-use openshard_protocol::world::StepSequence;
+use openshard_protocol::world::{
+    Point,
+    ResyncRequest,
+    StepSequence,
+};
 
 /// Where this client's own body is *drawn*, which is not where the
 /// [`WorldView`] says it is.
@@ -88,14 +123,14 @@ pub enum Movement {
     /// The shard accepted this locally numbered step and thereby confirmed its
     /// destination.
     Ack {
-        sequence: StepSequence,
+        sequence:  StepSequence,
         confirmed: openshard_client_net::walk::Predicted,
     },
     /// The shard refused a step and supplied the position to use instead.
     Reject {
         /// The refused pending step. Subsequent pending steps are invalidated
         /// by the correction, but this identity records the event's source.
-        sequence: StepSequence,
+        sequence:  StepSequence,
         confirmed: openshard_client_net::walk::Predicted,
     },
     /// A packet relocated the player independently of the walk handshake.
@@ -182,7 +217,7 @@ pub enum Update {
     /// [`Walk`] is the owner's. See [`fold`], which the owner calls, and this
     /// module's own docs for why the split moved.
     Mutation {
-        packet: Box<openshard_protocol::server_packet::ServerPacket>,
+        packet:   Box<openshard_protocol::server_packet::ServerPacket>,
         /// Stamped after decoding, before this packet waits for the window.
         received: Instant,
     },
@@ -257,7 +292,7 @@ pub enum Update {
         /// stamp. `None` is a cache that could not be written — the ground is
         /// still perfectly good to walk on, and it is the long routes that go
         /// without.
-        kept: Option<std::path::PathBuf>,
+        kept:     Option<std::path::PathBuf>,
     },
     /// The squares of ground a publish moved, for the world the window is
     /// holding.
@@ -304,7 +339,7 @@ pub enum Update {
         /// The artifact it was read from, or written to. What the HUD names, so
         /// that "which graph is this client running" is answerable without
         /// reading the terminal back.
-        path: std::path::PathBuf,
+        path:  std::path::PathBuf,
     },
     /// The graph could not be had, and why.
     ///
@@ -338,24 +373,24 @@ pub struct Updates {
 }
 
 struct UpdateMailbox {
-    pending: Mutex<PendingUpdates>,
+    pending:  Mutex<PendingUpdates>,
     /// Wakes the shard thread once the application has made room for another
     /// ordered update.
-    space: Condvar,
+    space:    Condvar,
     capacity: usize,
 }
 
 #[derive(Default)]
 struct PendingUpdates {
     /// Whether a platform wake-up is already in flight for this batch.
-    notified: bool,
+    notified:              bool,
     /// Every update whose order must be retained, across all mutation stages.
-    ordered: usize,
+    ordered:               usize,
     /// Whether this mailbox has already reported that it reached the
     /// ordered-update limit. One line establishes backpressure without making
     /// a sustained busy connection drown its normal log in identical warnings.
     backpressure_reported: bool,
-    stages: VecDeque<UpdateStage>,
+    stages:                VecDeque<UpdateStage>,
 }
 
 enum UpdateStage {
@@ -409,9 +444,11 @@ impl Updates {
         pending.ordered += 1;
         match pending.stages.back_mut() {
             Some(UpdateStage::Ordered(updates)) => updates.push_back(update),
-            _ => pending
-                .stages
-                .push_back(UpdateStage::Ordered(VecDeque::from([update]))),
+            _ => {
+                pending
+                    .stages
+                    .push_back(UpdateStage::Ordered(VecDeque::from([update])))
+            }
         }
         if pending.notified {
             false
@@ -440,8 +477,10 @@ impl Updates {
         self.mailbox.space.notify_all();
         stages
             .into_iter()
-            .flat_map(|stage| match stage {
-                UpdateStage::Ordered(updates) => updates,
+            .flat_map(|stage| {
+                match stage {
+                    UpdateStage::Ordered(updates) => updates,
+                }
             })
             .collect()
     }
@@ -823,7 +862,7 @@ enum Pending {
     /// drain is empty.
     Draining {
         /// What the abandoned fetch is still owed.
-        drain: Drain,
+        drain:   Drain,
         /// What to ask for once it is owed nothing.
         restart: Restart,
     },
@@ -1070,13 +1109,13 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                         snapshot: Box::new(held),
                         // The file it was just read out of, which is where a
                         // graph baked over it lives too.
-                        kept: Some(kept),
+                        kept:     Some(kept),
                     });
                     None
                 }
                 Ok(Decided::Asking(held)) => {
                     let asking = ChangesRequest {
-                        facet: notice.facet,
+                        facet:    notice.facet,
                         revision: WorldRevision(held.revision().get()),
                     };
                     if let Err(error) = socket.send(&asking.encode()).await {
@@ -1575,17 +1614,19 @@ pub(crate) fn fold(
                 unreachable!("only a WalkAck can confirm a pending step");
             };
             Some(Movement::Ack {
-                sequence: ack.sequence,
+                sequence:  ack.sequence,
                 confirmed: openshard_client_net::walk::Predicted { position, facing },
             })
         }
         Moved::Snapped { position, facing } => {
             let confirmed = openshard_client_net::walk::Predicted { position, facing };
             Some(match packet {
-                openshard_protocol::server_packet::ServerPacket::WalkReject(reject) => Movement::Reject {
-                    sequence: reject.sequence,
-                    confirmed,
-                },
+                openshard_protocol::server_packet::ServerPacket::WalkReject(reject) => {
+                    Movement::Reject {
+                        sequence: reject.sequence,
+                        confirmed,
+                    }
+                }
                 openshard_protocol::server_packet::ServerPacket::PlayerUpdate(_)
                 | openshard_protocol::server_packet::ServerPacket::PlayerStart(_) => {
                     Movement::Relocation { confirmed }
@@ -1602,26 +1643,46 @@ pub(crate) fn fold(
 #[cfg(test)]
 mod tests {
     use openshard_protocol::containers::{
-        AddToContainer, ContainedItem, ContainerContents, GridSlot, OpenContainer,
+        AddToContainer,
+        ContainedItem,
+        ContainerContents,
+        GridSlot,
+        OpenContainer,
     };
-    use openshard_protocol::direction::{Direction, Facing};
+    use openshard_protocol::direction::{
+        Direction,
+        Facing,
+    };
     use openshard_protocol::gump::GumpPoint;
     use openshard_protocol::mobile::Notoriety;
     use openshard_protocol::serial::Serial;
     use openshard_protocol::server_packet::ServerPacket;
-    use openshard_protocol::vendor::{BuyList, SellList};
-    use openshard_protocol::wire::{Graphic, Hue};
-    use openshard_protocol::world::{MapSize, PlayerStart, Point, StepSequence, WalkAck, WalkReject};
+    use openshard_protocol::vendor::{
+        BuyList,
+        SellList,
+    };
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
+    use openshard_protocol::world::{
+        MapSize,
+        PlayerStart,
+        Point,
+        StepSequence,
+        WalkAck,
+        WalkReject,
+    };
 
     use super::*;
 
     fn entered() -> (WorldView, Walk) {
         let start = PlayerStart {
-            serial: Serial::new(0x0000_002A).unwrap(),
-            body: Graphic(0x0190),
+            serial:   Serial::new(0x0000_002A).unwrap(),
+            body:     Graphic(0x0190),
             position: Point::new(100, 100, 0),
-            facing: Facing::walking(Direction::North),
-            map: MapSize::BRITANNIA,
+            facing:   Facing::walking(Direction::North),
+            map:      MapSize::BRITANNIA,
         };
         let view = WorldView::entered(start);
         let walk = Walk::new(view.player.position, view.player.facing);
@@ -1634,8 +1695,8 @@ mod tests {
     /// order, retires the wrong step.
     fn acked(sequence: u8) -> Update {
         Update::Mutation {
-            packet: Box::new(ServerPacket::WalkAck(WalkAck {
-                sequence: StepSequence(sequence),
+            packet:   Box::new(ServerPacket::WalkAck(WalkAck {
+                sequence:  StepSequence(sequence),
                 notoriety: Notoriety::Innocent,
             })),
             received: Instant::now(),
@@ -1866,7 +1927,7 @@ mod tests {
         walk.step(Facing::walking(Direction::North), |_, _| None).unwrap();
 
         let ack = ServerPacket::WalkAck(WalkAck {
-            sequence: StepSequence(0),
+            sequence:  StepSequence(0),
             notoriety: Notoriety::Innocent,
         });
         let folded = fold(&mut walk, &ack).unwrap();
@@ -1893,7 +1954,7 @@ mod tests {
         let reject = ServerPacket::WalkReject(WalkReject {
             sequence: StepSequence(0),
             position: Point::new(100, 100, 0),
-            facing: Facing::walking(Direction::North),
+            facing:   Facing::walking(Direction::North),
         });
         let folded = fold(&mut walk, &reject).unwrap();
         view.apply(&reject);
@@ -1920,12 +1981,12 @@ mod tests {
         let container = Serial::new(0x4000_0001).unwrap();
         let vendor = Serial::new(0x0000_002A).unwrap();
         let item = ContainedItem {
-            serial: Serial::new(0x4000_0002).unwrap(),
+            serial:  Serial::new(0x4000_0002).unwrap(),
             graphic: Graphic(0x0EED),
-            amount: openshard_protocol::items::ItemAmount(1),
-            at: GumpPoint { x: 20, y: 30 },
-            grid: GridSlot(0),
-            hue: Hue::NONE,
+            amount:  openshard_protocol::items::ItemAmount(1),
+            at:      GumpPoint { x: 20, y: 30 },
+            grid:    GridSlot(0),
+            hue:     Hue::NONE,
         };
         let packets = [
             ServerPacket::OpenContainer(OpenContainer {
@@ -1935,7 +1996,7 @@ mod tests {
             ServerPacket::AddToContainer(AddToContainer { item, container }),
             ServerPacket::ContainerContents(ContainerContents {
                 container: Some(container),
-                items: vec![item],
+                items:     vec![item],
             }),
             ServerPacket::BuyList(BuyList {
                 container,
@@ -1985,7 +2046,7 @@ mod tests {
         // that, so the thread reports it rather than guessing.
         let (_, mut walk) = entered();
         let ack = ServerPacket::WalkAck(WalkAck {
-            sequence: StepSequence(3),
+            sequence:  StepSequence(3),
             notoriety: Notoriety::Innocent,
         });
         assert!(fold(&mut walk, &ack).is_err());

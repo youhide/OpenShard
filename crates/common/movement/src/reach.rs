@@ -53,16 +53,16 @@ use crate::footing::Footing;
 pub struct Reach {
     /// How wide the flooded rectangle is, in tiles. The row stride of
     /// [`stood`](Self::stood).
-    width: u32,
+    width:  u32,
     /// How tall it is, in tiles.
     height: u32,
     /// The height a body stands at on each tile, or `None` where the flood
     /// never arrived. Row-major, `width` to a row.
-    stood: Vec<Option<i8>>,
+    stood:  Vec<Option<i8>>,
     /// How many tiles were reached, counted as the flood marked them — because
     /// the alternative is a caller counting 29 million `Option`s to print one
     /// percentage.
-    count: usize,
+    count:  usize,
 }
 
 impl Reach {
@@ -169,10 +169,16 @@ impl Reach {
 
 #[cfg(test)]
 mod tests {
-    use openshard_map::overlay::{Doors, Overlay};
+    use openshard_map::overlay::{
+        Doors,
+        Overlay,
+    };
 
     use super::*;
-    use crate::scene::{SIDE, Scene};
+    use crate::scene::{
+        SIDE,
+        Scene,
+    };
 
     /// The flood is the step rule's own reading: a wall across a scene is where
     /// it stops, and the half it started in is what it holds.

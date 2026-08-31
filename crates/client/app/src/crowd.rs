@@ -39,22 +39,53 @@ use std::time::Duration;
 
 use openshard_client_render::animation::AnimationClock;
 use openshard_client_render::follow::Gaze;
-use openshard_client_render::mobiles::{EquipmentLayer, Mobile};
+use openshard_client_render::mobiles::{
+    EquipmentLayer,
+    Mobile,
+};
 use openshard_movement::step_hold;
-use openshard_protocol::direction::{Direction, Facing};
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
 use openshard_protocol::feedback::{
-    ActionPhase, ActionStage, Animation, AnimationFrameCount, BalkState, CombatActionBalked,
-    CombatActionEnded, CombatActionKind, CombatActionOutcome, CombatActionPhase, CombatActionStage,
-    DEFAULT_ANIMATION_FRAME_MS, HarvestPreview, HarvestRefused, HarvestToolVisual, InterruptReason,
-    NewAnimation, SwingTiming,
+    ActionPhase,
+    ActionStage,
+    Animation,
+    AnimationFrameCount,
+    BalkState,
+    CombatActionBalked,
+    CombatActionEnded,
+    CombatActionKind,
+    CombatActionOutcome,
+    CombatActionPhase,
+    CombatActionStage,
+    DEFAULT_ANIMATION_FRAME_MS,
+    HarvestPreview,
+    HarvestRefused,
+    HarvestToolVisual,
+    InterruptReason,
+    NewAnimation,
+    SwingTiming,
 };
 use openshard_protocol::mobile::Equipment;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::{Graphic, Hue, Layer};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
 use openshard_protocol::world::Point;
-use openshard_tiles::{AnimId, TileData};
-use openshard_uofiles::anim::{AnimationFrameIndex, AnimationGroup, BodyKind};
+use openshard_tiles::{
+    AnimId,
+    TileData,
+};
+use openshard_uofiles::anim::{
+    AnimationFrameIndex,
+    AnimationGroup,
+    BodyKind,
+};
 
 /// The wire's list, as [`Mobile::equipment`] wants it.
 ///
@@ -71,15 +102,17 @@ use openshard_uofiles::anim::{AnimationFrameIndex, AnimationGroup, BodyKind};
 pub fn worn(equipment: &[Equipment], tiledata: &TileData) -> Vec<EquipmentLayer> {
     equipment
         .iter()
-        .map(|item| EquipmentLayer {
-            graphic: mount_picture(item.layer, item.graphic)
-                .unwrap_or_else(|| tiledata.static_tile(item.graphic.0).anim_id),
-            hue: item.hue,
-            // The wire's slot, carried through rather than resolved here: what
-            // it decides — hair on a ghost, and the order a paperdoll draws in —
-            // is the renderer's, and a layer this end reinterpreted would be a
-            // second opinion about a number the shard already stated.
-            layer: item.layer,
+        .map(|item| {
+            EquipmentLayer {
+                graphic: mount_picture(item.layer, item.graphic)
+                    .unwrap_or_else(|| tiledata.static_tile(item.graphic.0).anim_id),
+                hue:     item.hue,
+                // The wire's slot, carried through rather than resolved here: what
+                // it decides — hair on a ghost, and the order a paperdoll draws in —
+                // is the renderer's, and a layer this end reinterpreted would be a
+                // second opinion about a number the shard already stated.
+                layer:   item.layer,
+            }
         })
         .collect()
 }
@@ -140,9 +173,9 @@ pub const SPEECH_STACK: usize = 4;
 /// One line, and when [`Crowd::hear`] recorded it.
 #[derive(Clone, Debug)]
 struct Speech {
-    text: String,
-    font: Font,
-    hue: Hue,
+    text:    String,
+    font:    Font,
+    hue:     Hue,
     started: Duration,
 }
 
@@ -208,7 +241,7 @@ struct Glide {
     /// to it; the body at that instant is wherever the previous step had reached.
     /// Anchoring to the tile boundary instead is a discontinuity of exactly the
     /// arrival's error, once per tile.
-    from: Gaze,
+    from:     Gaze,
     /// How far into the step: `0.0` at [`Glide::from`], `1.0` at the tile.
     progress: f32,
 }
@@ -229,7 +262,7 @@ struct Step {
     /// [`openshard_client_render::mobiles::Glide::from`], which this becomes.
     /// The two are the same number when the previous step ended exactly as this
     /// one began, and every millisecond they differ by is a jump on screen.
-    from: Option<Gaze>,
+    from:    Option<Gaze>,
     /// The tile it was standing on when the step began.
     ///
     /// The *tile* and not the pixels, which is exactly the distinction
@@ -237,7 +270,7 @@ struct Step {
     /// last crossing had got to, and the ordering is a question about grid cells
     /// with no fractions in it. Read only while the glide is running, so its
     /// value on a move that was not a step (`from` absent) is never asked for.
-    was: Point,
+    was:     Point,
     /// When it started, on [`Crowd::now`]'s clock: the instant it was heard.
     ///
     /// What is *not* read off the arrival is when it ends — for the body this
@@ -245,7 +278,7 @@ struct Step {
     started: Duration,
     /// How long it takes — see [`glide_time`]. Never zero, which is what lets
     /// [`Tracked::glide`] divide.
-    takes: Duration,
+    takes:   Duration,
 }
 
 /// How long to spend crossing a tile, given the pace the wire claims and how
@@ -307,27 +340,33 @@ fn modern_action(kind: BodyKind, animation_type: u16, sub_action: u16) -> Option
     match animation_type {
         // Attack. The sub-action is ServUO's weapon motion; harvesting uses the
         // same ids because it deliberately asks for a particular tool swing.
-        0 => Some(match (human, sub_action) {
-            (true, 1) => (18, 7), // bow
-            (true, 2) => (19, 7), // crossbow
-            (true, 3) => (11, 5), // one-handed bash / mine
-            (true, 4) => (9, 7),  // one-handed slash
-            (true, 5) => (10, 7), // one-handed pierce
-            (true, 6) => (12, 5), // two-handed bash / fish
-            (true, 7) => (13, 6), // two-handed slash / chop
-            (true, 8) => (14, 7), // two-handed pierce
-            (true, _) => (31, 7), // wrestle / unknown
-            (false, _) => match kind {
-                BodyKind::Monster => (4, 4), // HighAnimationGroup.Attack1
-                BodyKind::Animal => (5, 4),  // LowAnimationGroup.Attack1
-                BodyKind::Human => unreachable!("human handled above"),
-            },
-        }),
-        3 => Some(match kind {
-            BodyKind::Monster => (2, 4), // HighAnimationGroup.Die1
-            BodyKind::Animal => (8, 4),  // LowAnimationGroup.Die1
-            BodyKind::Human => (21, 6),  // PeopleAnimationGroup.Die1
-        }),
+        0 => {
+            Some(match (human, sub_action) {
+                (true, 1) => (18, 7), // bow
+                (true, 2) => (19, 7), // crossbow
+                (true, 3) => (11, 5), // one-handed bash / mine
+                (true, 4) => (9, 7),  // one-handed slash
+                (true, 5) => (10, 7), // one-handed pierce
+                (true, 6) => (12, 5), // two-handed bash / fish
+                (true, 7) => (13, 6), // two-handed slash / chop
+                (true, 8) => (14, 7), // two-handed pierce
+                (true, _) => (31, 7), // wrestle / unknown
+                (false, _) => {
+                    match kind {
+                        BodyKind::Monster => (4, 4), // HighAnimationGroup.Attack1
+                        BodyKind::Animal => (5, 4),  // LowAnimationGroup.Attack1
+                        BodyKind::Human => unreachable!("human handled above"),
+                    }
+                }
+            })
+        }
+        3 => {
+            Some(match kind {
+                BodyKind::Monster => (2, 4), // HighAnimationGroup.Die1
+                BodyKind::Animal => (8, 4),  // LowAnimationGroup.Die1
+                BodyKind::Human => (21, 6),  // PeopleAnimationGroup.Die1
+            })
+        }
         9 => Some(if human { (32, 5) } else { (4, 4) }), // bow
         11 => Some(if human { (16, 7) } else { (12, 7) }), // spell
         _ => None,
@@ -368,18 +407,18 @@ fn action_on_mount(
 #[derive(Clone, Copy, Debug)]
 struct Tracked {
     /// Where the last packet put it.
-    at: Point,
+    at:                Point,
     /// Which way it was last seen facing.
     ///
     /// Kept for one rule only: a facing change with no position change is a
     /// turn, and a turn is a step that covers no ground — see [`Crowd::see`].
     /// The run flag is not kept with it, because it belongs to the step being
     /// taken rather than to the body.
-    facing: Direction,
+    facing:            Direction,
     /// Which body it was last seen as. Kept because a walk that ends has to
     /// know what "standing" means, and a horse and a player stop into different
     /// group numbers — see [`BodyKind::standing`].
-    body: Graphic,
+    body:              Graphic,
     /// Whether it stands in war mode.
     ///
     /// Kept for exactly [`Tracked::body`]'s reason, and it is the same sentence:
@@ -388,7 +427,7 @@ struct Tracked {
     /// that describes a mobile carries this — it is a bit of the `0x77`/`0x78`
     /// flag byte — so it is restated on each [`Crowd::see`] rather than
     /// remembered from whenever the stance last changed.
-    war: bool,
+    war:               bool,
     /// Whether it is in the saddle.
     ///
     /// Kept for [`Tracked::war`]'s own reason: [`Crowd::advance`] switches a
@@ -399,13 +438,13 @@ struct Tracked {
     /// belongs to the caller, see [`Mobile::equipment`] — so the caller states
     /// it here the same way it states `war`, rather than this module reaching
     /// into a list it does not otherwise read.
-    mounted: bool,
+    mounted:           bool,
     /// Whether this is an item corpse rather than a living mobile.
     ///
     /// Corpses borrow the mobile renderer because `0x2006`'s payload is a body
     /// id, not a stack count. Unlike a live body they hold the final frame of
     /// their death group forever.
-    corpse: bool,
+    corpse:            bool,
     /// Whether a newly-created corpse is still playing the death that made it.
     ///
     /// Combat sends the death animation immediately before the world tick
@@ -416,19 +455,19 @@ struct Tracked {
     /// into the ordinary held corpse pose when the action finishes.
     settles_as_corpse: bool,
     /// Which animation group is playing.
-    group: AnimationGroup,
+    group:             AnimationGroup,
     /// The step it is in the middle of.
     ///
     /// `None` for a body that is standing. Not an "unknown": a standing body
     /// genuinely has no step to finish, which is what [`Option`] is for here.
-    step: Option<Step>,
+    step:              Option<Step>,
     /// When the previous step was heard, kept after that step has finished.
     ///
     /// What the gap in [`glide_time`] is measured against, which is why it
     /// outlives [`Tracked::step`]: the pace a body is walking at is a property
     /// of the last two packets, not of the one still being drawn. `None` until a
     /// body has been seen to move at all.
-    stepped_at: Option<Duration>,
+    stepped_at:        Option<Duration>,
     /// Where the sprite is actually drawn, which trails [`Tracked::gaze_at`] by
     /// whatever the ease is holding.
     ///
@@ -436,43 +475,43 @@ struct Tracked {
     /// there is one of these per body — `docs/camera.md` D10. Equal to the
     /// unfiltered position under [`Ease::NONE`], which is what makes the
     /// baseline still exactly the baseline.
-    drawn: Gaze,
+    drawn:             Gaze,
     /// Its own animation clock.
     ///
     /// Per mobile, and reset when the group changes: one clock for everybody
     /// makes a standing crowd breathe in unison, which is wrong and looks it,
     /// and a clock carried across a group change starts the new animation
     /// wherever the old one happened to be.
-    clock: AnimationClock,
-    action: Option<ActionAnimation>,
+    clock:             AnimationClock,
+    action:            Option<ActionAnimation>,
     /// A backpack axe temporarily borrowed by the harvest animation's picture.
-    harvest_tool: Option<EquipmentLayer>,
+    harvest_tool:      Option<EquipmentLayer>,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct ActionAnimation {
     /// A fall is terminal: a late ordinary action must not pull a dead body
     /// back upright before its corpse has claimed the final frame.
-    death: bool,
-    frames: AnimationFrameCount,
-    repeats: u16,
-    forward: bool,
-    repeat: bool,
-    delay: Duration,
+    death:      bool,
+    frames:     AnimationFrameCount,
+    repeats:    u16,
+    forward:    bool,
+    repeat:     bool,
+    delay:      Duration,
     /// Exact duration of one complete cycle when the server supplied one.
     /// This lets a six-frame chop take 1.6 seconds instead of six default
     /// 80ms frames, while still using the same frame machine as locomotion.
-    cycle: Option<Duration>,
+    cycle:      Option<Duration>,
     /// Exact server interval for a timed action. It is rounded up to a complete
     /// animation loop before the state gives the body back to standing.
-    duration: Option<Duration>,
+    duration:   Option<Duration>,
     /// A cursor click has started this locally, but the shard has not yet
     /// accepted or refused it. It must keep looping while that answer is in
     /// flight; otherwise latency would make the predicted action end early.
     optimistic: bool,
     /// This action was started by the harvesting protocol, not ordinary combat.
-    harvest: bool,
-    elapsed: Duration,
+    harvest:    bool,
+    elapsed:    Duration,
 }
 
 impl ActionAnimation {
@@ -577,7 +616,7 @@ pub enum CommandedMove {
 #[derive(Clone, Copy, Debug)]
 struct Fall {
     /// The body mid-fall, as it stood when the shard named its corpse.
-    body: Tracked,
+    body:  Tracked,
     /// When that was, so an unclaimed pairing does not live for ever.
     heard: Duration,
 }
@@ -674,7 +713,7 @@ struct ActionRecord {
     running: Option<PendingAction>,
     /// How the last one ended and when, held for [`OUTCOME_HOLD`] from then.
     /// `None` until this body has finished an action in this client's sight.
-    ended: Option<(CombatActionOutcome, Duration)>,
+    ended:   Option<(CombatActionOutcome, Duration)>,
     /// What is stopping this body from beginning one at all.
     ///
     /// The third fact, and unlike the other two it has **no clock**: an outcome
@@ -683,7 +722,7 @@ struct ActionRecord {
     /// corner is held up for exactly as long as the corner is there. The shard
     /// sends it on the edge in both directions, so what ends it is being told it
     /// ended, and nothing else.
-    balked: Option<InterruptReason>,
+    balked:  Option<InterruptReason>,
 }
 
 /// What a body's combat action looks like right now, for whoever draws it.
@@ -702,14 +741,14 @@ pub struct ActionProgress {
     /// This is the half of a fight the client could never draw: a blow that
     /// vanished said nothing, and *"it landed"*, *"it missed"* and *"the wall
     /// got in the way"* were the same picture — nothing at all.
-    pub ended: Option<CombatActionOutcome>,
+    pub ended:   Option<CombatActionOutcome>,
     /// What is stopping this body from starting anything, if something is.
     ///
     /// The gap the other two left: a fighter who *wants* to act and cannot was
     /// drawn exactly like a fighter standing about, for as long as the obstacle
     /// lasted. An archer holding at a target behind a wall is the case a player
     /// meets first, and it read as the shard having quietly stopped.
-    pub balked: Option<InterruptReason>,
+    pub balked:  Option<InterruptReason>,
 }
 
 /// An action part way through, as a picture wants it.
@@ -1379,23 +1418,25 @@ impl Crowd {
                     action: None,
                     harvest_tool: None,
                 },
-                |dying| Tracked {
-                    at,
-                    body,
-                    war: false,
-                    mounted: false,
-                    corpse: false,
-                    settles_as_corpse: true,
-                    group,
-                    step: None,
-                    stepped_at: None,
-                    drawn: Gaze::on(at),
-                    // The death action owns the cadence; the ordinary clock is
-                    // not consulted until it has become a held corpse.
-                    clock: dying.clock,
-                    facing: dying.facing,
-                    action: dying.action,
-                    harvest_tool: dying.harvest_tool,
+                |dying| {
+                    Tracked {
+                        at,
+                        body,
+                        war: false,
+                        mounted: false,
+                        corpse: false,
+                        settles_as_corpse: true,
+                        group,
+                        step: None,
+                        stepped_at: None,
+                        drawn: Gaze::on(at),
+                        // The death action owns the cadence; the ordinary clock is
+                        // not consulted until it has become a held corpse.
+                        clock: dying.clock,
+                        facing: dying.facing,
+                        action: dying.action,
+                        harvest_tool: dying.harvest_tool,
+                    }
                 },
             )
         });
@@ -1564,8 +1605,8 @@ impl Crowd {
         let started = self.now;
         let record = self.actions.entry(phase.actor).or_insert(ActionRecord {
             running: None,
-            ended: None,
-            balked: None,
+            ended:   None,
+            balked:  None,
         });
         let released_from_held_draw = matches!(phase.phase, ActionPhase::Releasing { .. })
             && record.running.is_some_and(|running| {
@@ -1615,8 +1656,8 @@ impl Crowd {
         let at = self.now;
         let record = self.actions.entry(ended.actor).or_insert(ActionRecord {
             running: None,
-            ended: None,
-            balked: None,
+            ended:   None,
+            balked:  None,
         });
         record.running = None;
         record.ended = Some((ended.outcome, at));
@@ -1652,8 +1693,8 @@ impl Crowd {
     pub fn balk_action(&mut self, balked: CombatActionBalked) {
         let record = self.actions.entry(balked.actor).or_insert(ActionRecord {
             running: None,
-            ended: None,
-            balked: None,
+            ended:   None,
+            balked:  None,
         });
         record.balked = match balked.balk {
             BalkState::Blocked(reason) => Some(reason),
@@ -1700,19 +1741,19 @@ impl Crowd {
             return;
         }
         tracked.action = Some(ActionAnimation {
-            death: false,
-            frames: frame_count,
-            repeats: preview.cycles.max(1),
-            forward: true,
-            repeat: false,
-            delay: Duration::from_millis(DEFAULT_ANIMATION_FRAME_MS),
-            cycle: Some(Duration::from_millis(
+            death:      false,
+            frames:     frame_count,
+            repeats:    preview.cycles.max(1),
+            forward:    true,
+            repeat:     false,
+            delay:      Duration::from_millis(DEFAULT_ANIMATION_FRAME_MS),
+            cycle:      Some(Duration::from_millis(
                 u64::from(preview.duration.millis()) / u64::from(preview.cycles.max(1)),
             )),
-            duration: None,
+            duration:   None,
             optimistic: true,
-            harvest: true,
-            elapsed: Duration::ZERO,
+            harvest:    true,
+            elapsed:    Duration::ZERO,
         });
         tracked.harvest_tool = self.pending_harvest_tools.remove(&preview.serial);
         tracked.change_to(AnimationGroup(group));
@@ -1762,8 +1803,8 @@ impl Crowd {
             visual.serial,
             EquipmentLayer {
                 graphic: tiledata.static_tile(visual.graphic.0).anim_id,
-                hue: visual.hue,
-                layer: visual.layer,
+                hue:     visual.hue,
+                layer:   visual.layer,
             },
         );
     }
@@ -1939,23 +1980,27 @@ impl Crowd {
                 return None;
             }
             let fill = match action.phase {
-                ActionPhase::Arming { .. } => ActionFill::Arming {
-                    filled: match span.is_zero() {
-                        true => 1.0,
-                        false => (elapsed.as_secs_f32() / span.as_secs_f32()).clamp(0.0, 1.0),
-                    },
-                },
+                ActionPhase::Arming { .. } => {
+                    ActionFill::Arming {
+                        filled: match span.is_zero() {
+                            true => 1.0,
+                            false => (elapsed.as_secs_f32() / span.as_secs_f32()).clamp(0.0, 1.0),
+                        },
+                    }
+                }
                 ActionPhase::Armed { .. } => ActionFill::Armed,
                 // A zero interval is a lie the wire refuses to tell (see
                 // `CombatActionPhase`), so this is a division guard and not a
                 // case: a released action that takes no time has already
                 // arrived.
-                ActionPhase::Releasing { .. } => ActionFill::Releasing {
-                    filled: match span.is_zero() {
-                        true => 1.0,
-                        false => (elapsed.as_secs_f32() / span.as_secs_f32()).clamp(0.0, 1.0),
-                    },
-                },
+                ActionPhase::Releasing { .. } => {
+                    ActionFill::Releasing {
+                        filled: match span.is_zero() {
+                            true => 1.0,
+                            false => (elapsed.as_secs_f32() / span.as_secs_f32()).clamp(0.0, 1.0),
+                        },
+                    }
+                }
             };
             Some(RunningAction {
                 kind: action.kind,
@@ -1968,11 +2013,13 @@ impl Crowd {
         let balked = record.balked;
         match (running, ended, balked) {
             (None, None, None) => None,
-            (running, ended, balked) => Some(ActionProgress {
-                running,
-                ended,
-                balked,
-            }),
+            (running, ended, balked) => {
+                Some(ActionProgress {
+                    running,
+                    ended,
+                    balked,
+                })
+            }
         }
     }
 }
@@ -1981,17 +2028,17 @@ impl Crowd {
 /// not make it through the presentation boundary first.
 fn death_action(kind: BodyKind) -> ActionAnimation {
     ActionAnimation {
-        death: true,
-        frames: AnimationFrameCount(if matches!(kind, BodyKind::Human) { 6 } else { 4 }),
-        repeats: 1,
-        forward: true,
-        repeat: false,
-        delay: Duration::from_millis(DEFAULT_ANIMATION_FRAME_MS),
-        cycle: None,
-        duration: None,
+        death:      true,
+        frames:     AnimationFrameCount(if matches!(kind, BodyKind::Human) { 6 } else { 4 }),
+        repeats:    1,
+        forward:    true,
+        repeat:     false,
+        delay:      Duration::from_millis(DEFAULT_ANIMATION_FRAME_MS),
+        cycle:      None,
+        duration:   None,
         optimistic: false,
-        harvest: false,
-        elapsed: Duration::ZERO,
+        harvest:    false,
+        elapsed:    Duration::ZERO,
     }
 }
 
@@ -2040,10 +2087,12 @@ fn entry_move(kind: BodyKind, running: bool, war: bool, mounted: bool) -> Animat
     match (running, kind.running()) {
         (true, Some(running)) => running,
         (true, None) => kind.walking(),
-        (false, _) => match war {
-            true => kind.walking_at_war().unwrap_or(kind.walking()),
-            false => kind.walking(),
-        },
+        (false, _) => {
+            match war {
+                true => kind.walking_at_war().unwrap_or(kind.walking()),
+                false => kind.walking(),
+            }
+        }
     }
 }
 
@@ -2231,11 +2280,14 @@ fn is_one_step(from: Point, to: Point) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use openshard_movement::{RUN_HOLD, WALK_HOLD};
+    use openshard_movement::{
+        RUN_HOLD,
+        WALK_HOLD,
+    };
     use openshard_protocol::direction::Direction;
+    use openshard_protocol::feedback::InterruptReason;
 
     use super::*;
-    use openshard_protocol::feedback::InterruptReason;
 
     const PLAYER: u16 = 400;
     const HORSE: u16 = 204;
@@ -2299,29 +2351,29 @@ mod tests {
             false,
         );
         crowd.preview_harvest(HarvestPreview {
-            cursor_id: openshard_protocol::wire::CursorId(mobile.raw()),
-            serial: mobile,
-            action: 13,
+            cursor_id:   openshard_protocol::wire::CursorId(mobile.raw()),
+            serial:      mobile,
+            action:      13,
             frame_count: AnimationFrameCount(6),
-            duration: openshard_protocol::feedback::SwingDuration(4_800),
-            cycles: 3,
+            duration:    openshard_protocol::feedback::SwingDuration(4_800),
+            cycles:      3,
         });
         (crowd, who, mobile)
     }
 
     fn confirm_chop(crowd: &mut Crowd, mobile: Serial) {
         crowd.time_swing(SwingTiming {
-            serial: mobile,
+            serial:   mobile,
             duration: openshard_protocol::feedback::SwingDuration(4_800),
         });
         crowd.play(Animation {
-            serial: mobile,
-            action: 13,
-            frame_count: AnimationFrameCount(6),
+            serial:       mobile,
+            action:       13,
+            frame_count:  AnimationFrameCount(6),
             repeat_count: 1,
-            forward: true,
-            repeat: false,
-            delay: 0,
+            forward:      true,
+            repeat:       false,
+            delay:        0,
         });
     }
 
@@ -2379,10 +2431,10 @@ mod tests {
                 false,
             );
             crowd.play_new(NewAnimation {
-                serial: who.expect("a serial"),
+                serial:         who.expect("a serial"),
                 animation_type: 0,
-                action: 0,
-                delay: 0,
+                action:         0,
+                delay:          0,
             });
             assert_eq!(crowd.group_for(who), Some(AnimationGroup(expected_group)));
             crowd.advance(Duration::from_millis(80));
@@ -2441,10 +2493,10 @@ mod tests {
                 true,
             );
             crowd.play_new(NewAnimation {
-                serial: mobile,
+                serial:         mobile,
                 animation_type: 0,
-                action: sub_action,
-                delay: 0,
+                action:         sub_action,
+                delay:          0,
             });
 
             assert_eq!(
@@ -2491,13 +2543,13 @@ mod tests {
                 true,
             );
             crowd.play(Animation {
-                serial: mobile,
-                action: on_foot,
-                frame_count: AnimationFrameCount(on_foot_frames),
+                serial:       mobile,
+                action:       on_foot,
+                frame_count:  AnimationFrameCount(on_foot_frames),
                 repeat_count: 1,
-                forward: true,
-                repeat: false,
-                delay: 0,
+                forward:      true,
+                repeat:       false,
+                delay:        0,
             });
 
             assert_eq!(crowd.group_for(who), Some(AnimationGroup(expected_group)));
@@ -2525,14 +2577,14 @@ mod tests {
             true,
         );
         crowd.time_swing(SwingTiming {
-            serial: mobile,
+            serial:   mobile,
             duration: openshard_protocol::feedback::SwingDuration(1_600),
         });
         crowd.play_new(NewAnimation {
-            serial: mobile,
+            serial:         mobile,
             animation_type: 0,
-            action: 1,
-            delay: 0,
+            action:         1,
+            delay:          0,
         });
 
         assert_eq!(crowd.group_for(who), Some(AnimationGroup(27)));
@@ -2567,12 +2619,12 @@ mod tests {
             true,
         );
         crowd.preview_harvest(HarvestPreview {
-            cursor_id: openshard_protocol::wire::CursorId(mobile.raw()),
-            serial: mobile,
-            action: 13,
+            cursor_id:   openshard_protocol::wire::CursorId(mobile.raw()),
+            serial:      mobile,
+            action:      13,
             frame_count: AnimationFrameCount(6),
-            duration: openshard_protocol::feedback::SwingDuration(1_600),
-            cycles: 1,
+            duration:    openshard_protocol::feedback::SwingDuration(1_600),
+            cycles:      1,
         });
 
         assert_eq!(
@@ -2616,14 +2668,14 @@ mod tests {
                 false,
             );
             crowd.time_swing(SwingTiming {
-                serial: mobile,
+                serial:   mobile,
                 duration: openshard_protocol::feedback::SwingDuration(1_600),
             });
             crowd.play_new(NewAnimation {
-                serial: mobile,
+                serial:         mobile,
                 animation_type: 0,
-                action: 0,
-                delay: 0,
+                action:         0,
+                delay:          0,
             });
             let swinging = crowd.group_for(who);
             assert_ne!(swinging, Some(BodyKind::Human.standing()));
@@ -2689,8 +2741,8 @@ mod tests {
                 stage,
                 released_from_held_draw: false,
             }),
-            ended: None,
-            balked: None,
+            ended:   None,
+            balked:  None,
         })
     }
 
@@ -2816,8 +2868,8 @@ mod tests {
                 crowd.preparing(who),
                 Some(ActionProgress {
                     running: None,
-                    ended: Some(outcome),
-                    balked: None,
+                    ended:   Some(outcome),
+                    balked:  None,
                 }),
                 "a {outcome:?} left the wrong state on screen",
             );
@@ -2851,7 +2903,7 @@ mod tests {
         // Both on the same tick, in the order the shard sends them: the blow
         // resolves and the next one is committed in the same pass.
         crowd.end_action(CombatActionEnded {
-            actor: mobile,
+            actor:   mobile,
             outcome: CombatActionOutcome::Hit,
         });
         crowd.begin_action(swing);
@@ -2865,8 +2917,8 @@ mod tests {
                     stage: ActionStage::FIRST,
                     released_from_held_draw: false,
                 }),
-                ended: Some(CombatActionOutcome::Hit),
-                balked: None,
+                ended:   Some(CombatActionOutcome::Hit),
+                balked:  None,
             }),
         );
 
@@ -2926,14 +2978,14 @@ mod tests {
         let (mut crowd, who, mobile) = standing_crowd();
         crowd.balk_action(CombatActionBalked {
             actor: mobile,
-            balk: BalkState::Blocked(InterruptReason::OutOfReach),
+            balk:  BalkState::Blocked(InterruptReason::OutOfReach),
         });
         assert_eq!(
             crowd.preparing(who),
             Some(ActionProgress {
                 running: None,
-                ended: None,
-                balked: Some(InterruptReason::OutOfReach),
+                ended:   None,
+                balked:  Some(InterruptReason::OutOfReach),
             }),
         );
 
@@ -2947,7 +2999,7 @@ mod tests {
 
         crowd.balk_action(CombatActionBalked {
             actor: mobile,
-            balk: BalkState::Clear,
+            balk:  BalkState::Clear,
         });
         assert_eq!(crowd.preparing(who), None);
     }
@@ -2960,7 +3012,7 @@ mod tests {
         let (mut crowd, who, mobile) = standing_crowd();
         crowd.balk_action(CombatActionBalked {
             actor: mobile,
-            balk: BalkState::Blocked(InterruptReason::NoLineOfSight),
+            balk:  BalkState::Blocked(InterruptReason::NoLineOfSight),
         });
         crowd.begin_action(phase(
             mobile,
@@ -3079,7 +3131,7 @@ mod tests {
         let (mut crowd, who, mobile) = chopping_crowd();
         crowd.advance(Duration::from_millis(400));
         crowd.end_action(CombatActionEnded {
-            actor: mobile,
+            actor:   mobile,
             outcome: CombatActionOutcome::Interrupted(InterruptReason::Abandoned),
         });
         assert_eq!(
@@ -3104,14 +3156,14 @@ mod tests {
             false,
         );
         crowd.time_swing(SwingTiming {
-            serial: mobile,
+            serial:   mobile,
             duration: openshard_protocol::feedback::SwingDuration(4_800),
         });
         crowd.play_new(NewAnimation {
-            serial: mobile,
+            serial:         mobile,
             animation_type: 0,
-            action: 7,
-            delay: 0,
+            action:         7,
+            delay:          0,
         });
 
         // Six frames over 4800ms is eight hundred milliseconds a frame, and the
@@ -3176,14 +3228,14 @@ mod tests {
                     false,
                 );
                 crowd.time_swing(SwingTiming {
-                    serial: mobile,
+                    serial:   mobile,
                     duration: openshard_protocol::feedback::SwingDuration(duration),
                 });
                 crowd.play_new(NewAnimation {
-                    serial: mobile,
+                    serial:         mobile,
                     animation_type: 0,
-                    action: 4, // one-handed slash, seven frames
-                    delay: 0,
+                    action:         4, // one-handed slash, seven frames
+                    delay:          0,
                 });
 
                 crowd.advance(Duration::from_millis(u64::from(elapsed)));
@@ -3211,14 +3263,14 @@ mod tests {
             false,
         );
         crowd.time_swing(SwingTiming {
-            serial: mobile,
+            serial:   mobile,
             duration: openshard_protocol::feedback::SwingDuration(500),
         });
         crowd.play_new(NewAnimation {
-            serial: mobile,
+            serial:         mobile,
             animation_type: 0,
-            action: 7,
-            delay: 0,
+            action:         7,
+            delay:          0,
         });
 
         crowd.advance(Duration::from_millis(500));
@@ -3250,12 +3302,12 @@ mod tests {
             false,
         );
         crowd.preview_harvest(HarvestPreview {
-            cursor_id: openshard_protocol::wire::CursorId(mobile.raw()),
-            serial: mobile,
-            action: 13,
+            cursor_id:   openshard_protocol::wire::CursorId(mobile.raw()),
+            serial:      mobile,
+            action:      13,
             frame_count: AnimationFrameCount(6),
-            duration: openshard_protocol::feedback::SwingDuration(4_800),
-            cycles: 3,
+            duration:    openshard_protocol::feedback::SwingDuration(4_800),
+            cycles:      3,
         });
         assert_eq!(crowd.group_for(who), Some(AnimationGroup(13)));
         crowd.advance(Duration::from_millis(800));
@@ -3325,12 +3377,12 @@ mod tests {
             false,
         );
         crowd.preview_harvest(HarvestPreview {
-            cursor_id: openshard_protocol::wire::CursorId(mobile.raw()),
-            serial: mobile,
-            action: 13,
+            cursor_id:   openshard_protocol::wire::CursorId(mobile.raw()),
+            serial:      mobile,
+            action:      13,
             frame_count: AnimationFrameCount(6),
-            duration: openshard_protocol::feedback::SwingDuration(4_800),
-            cycles: 3,
+            duration:    openshard_protocol::feedback::SwingDuration(4_800),
+            cycles:      3,
         });
         crowd.advance(Duration::from_millis(100));
         crowd.refuse_harvest(HarvestRefused { serial: mobile });
@@ -3381,10 +3433,10 @@ mod tests {
             false,
         );
         crowd.play_new(NewAnimation {
-            serial: who.expect("a serial"),
+            serial:         who.expect("a serial"),
             animation_type: 0,
-            action: 0,
-            delay: 0,
+            action:         0,
+            delay:          0,
         });
         // A human unarmed attack has seven frames, while the running group may
         // have fewer.  Movement owns the displayed group, so this is the
@@ -4852,8 +4904,8 @@ mod tests {
         let skeleton = Graphic(0x0038);
         let equipment: std::rc::Rc<[EquipmentLayer]> = vec![EquipmentLayer {
             graphic: openshard_tiles::AnimId(0x01),
-            hue: Hue(0x0455),
-            layer: openshard_protocol::wire::Layer::TORSO,
+            hue:     Hue(0x0455),
+            layer:   openshard_protocol::wire::Layer::TORSO,
         }]
         .into();
         let corpse = crowd.corpse(
@@ -4898,10 +4950,10 @@ mod tests {
             false,
         );
         crowd.play_new(NewAnimation {
-            serial: mob.expect("a real mobile serial"),
+            serial:         mob.expect("a real mobile serial"),
             animation_type: 3,
-            action: 0,
-            delay: 80,
+            action:         0,
+            delay:          80,
         });
         // What the shard says next: this body becomes that corpse.
         crowd.died(
@@ -4955,20 +5007,20 @@ mod tests {
             false,
         );
         crowd.play_new(NewAnimation {
-            serial: mob.expect("a real mobile serial"),
+            serial:         mob.expect("a real mobile serial"),
             animation_type: 3,
-            action: 0,
-            delay: 80,
+            action:         0,
+            delay:          80,
         });
         crowd.advance(Duration::from_millis(80));
         crowd.play(Animation {
-            serial: mob.expect("a real mobile serial"),
-            action: 5, // LowAnimationGroup.Attack1
-            frame_count: AnimationFrameCount(4),
+            serial:       mob.expect("a real mobile serial"),
+            action:       5, // LowAnimationGroup.Attack1
+            frame_count:  AnimationFrameCount(4),
             repeat_count: 1,
-            forward: true,
-            repeat: false,
-            delay: 80,
+            forward:      true,
+            repeat:       false,
+            delay:        80,
         });
 
         assert_eq!(crowd.group_for(mob), Some(BodyKind::Animal.dying()));
@@ -5052,10 +5104,10 @@ mod tests {
                 false,
             );
             crowd.play_new(NewAnimation {
-                serial: who.expect("a real mobile serial"),
+                serial:         who.expect("a real mobile serial"),
                 animation_type: 3,
-                action: 0,
-                delay: 80,
+                action:         0,
+                delay:          80,
             });
         }
         // The first fell a frame before the second, and each was named with the
@@ -5120,10 +5172,10 @@ mod tests {
             false,
         );
         crowd.play_new(NewAnimation {
-            serial: mob.expect("a real mobile serial"),
+            serial:         mob.expect("a real mobile serial"),
             animation_type: 3,
-            action: 0,
-            delay: 80,
+            action:         0,
+            delay:          80,
         });
 
         let corpse = serial(0x4000_0001);
@@ -5161,10 +5213,10 @@ mod tests {
             false,
         );
         crowd.play_new(NewAnimation {
-            serial: mob.expect("a real mobile serial"),
+            serial:         mob.expect("a real mobile serial"),
             animation_type: 3,
-            action: 0,
-            delay: 80,
+            action:         0,
+            delay:          80,
         });
         crowd.died(
             mob.expect("a real mobile serial"),
@@ -5206,10 +5258,10 @@ mod tests {
             false,
         );
         crowd.play_new(NewAnimation {
-            serial: mob.expect("a real mobile serial"),
+            serial:         mob.expect("a real mobile serial"),
             animation_type: 3,
-            action: 0,
-            delay: 80,
+            action:         0,
+            delay:          80,
         });
         crowd.died(
             mob.expect("a real mobile serial"),

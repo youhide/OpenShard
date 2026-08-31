@@ -57,20 +57,44 @@
 //! subscribers, and `crates/client/app/src/link.rs` for the one client that acts
 //! on it.
 
-use openshard_basemap::patches;
-use openshard_gateway::ConnectionId;
 use std::collections::BTreeMap;
 
-use openshard_map::map::{LandCell, StaticItem};
-use openshard_map::patch::{Patch, PatchAuthor, PatchError, PatchOp, PatchTime, StaticId};
+use openshard_basemap::patches;
+use openshard_gateway::ConnectionId;
+use openshard_map::map::{
+    LandCell,
+    StaticItem,
+};
+use openshard_map::patch::{
+    Patch,
+    PatchAuthor,
+    PatchError,
+    PatchOp,
+    PatchTime,
+    StaticId,
+};
 use openshard_map::snapshot::MapRevision;
 use openshard_protocol::access::AccessLevel;
-use openshard_protocol::chunks::{Changes, ChunkAt, MAX_MOVED, PublishNotice, WorldRevision};
+use openshard_protocol::chunks::{
+    Changes,
+    ChunkAt,
+    MAX_MOVED,
+    PublishNotice,
+    WorldRevision,
+};
 use openshard_protocol::mapedit::{
-    EditTile, MapEditOp, MapEditOutcome, MapEditRefusal, MapEditReply, MapEditRequest,
+    EditTile,
+    MapEditOp,
+    MapEditOutcome,
+    MapEditRefusal,
+    MapEditReply,
+    MapEditRequest,
 };
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Facet;
 use openshard_state::WorldState;
 use openshard_tiles::LandTileId;
@@ -101,18 +125,22 @@ pub enum CommitError {
 impl std::fmt::Display for CommitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotOurWorld { facet } => write!(
-                f,
-                "facet {} is read from the client's files, and a world we do not own cannot be \
+            Self::NotOurWorld { facet } => {
+                write!(
+                    f,
+                    "facet {} is read from the client's files, and a world we do not own cannot be \
                  edited: import it with openshard-map-import and name it in world.base_sets",
-                facet.0
-            ),
+                    facet.0
+                )
+            }
             Self::Refused(source) => write!(f, "the patch was refused: {source}"),
-            Self::NotLogged(source) => write!(
-                f,
-                "the world was changed and the change could not be written down, so it was put \
+            Self::NotLogged(source) => {
+                write!(
+                    f,
+                    "the world was changed and the change could not be written down, so it was put \
                  back: {source}"
-            ),
+                )
+            }
         }
     }
 }
@@ -263,14 +291,16 @@ pub(crate) fn request(state: &mut WorldState, connection: ConnectionId, request:
     );
 
     match commit(state, request.facet, &patch) {
-        Ok(revision) => state.send_packet(
-            connection,
-            &ServerPacket::MapEditReply(MapEditReply {
-                facet: request.facet,
-                revision: WorldRevision(revision.get()),
-                outcome: MapEditOutcome::Accepted,
-            }),
-        ),
+        Ok(revision) => {
+            state.send_packet(
+                connection,
+                &ServerPacket::MapEditReply(MapEditReply {
+                    facet:    request.facet,
+                    revision: WorldRevision(revision.get()),
+                    outcome:  MapEditOutcome::Accepted,
+                }),
+            )
+        }
         Err(error) => {
             let reason = match error {
                 CommitError::NotOurWorld { .. } => MapEditRefusal::NotOurWorld,
@@ -334,7 +364,7 @@ fn compile(
                     .or_insert_with(|| map.land(x, y).expect("contains was checked"));
                 let now = LandCell {
                     tile: LandTileId(tile.get()),
-                    z: z.0,
+                    z:    z.0,
                 };
                 compiled.push(PatchOp::SetLand { x, y, was, now });
                 land.insert(at, now);
@@ -425,9 +455,11 @@ fn announce(state: &mut WorldState, facet: Facet, revision: MapRevision, patch: 
         Changes::These(
             touched
                 .iter()
-                .map(|at| ChunkAt {
-                    x: u16::try_from(at.x).expect("a facet of fewer than 65,536 chunks across"),
-                    y: u16::try_from(at.y).expect("a facet of fewer than 65,536 chunks down"),
+                .map(|at| {
+                    ChunkAt {
+                        x: u16::try_from(at.x).expect("a facet of fewer than 65,536 chunks across"),
+                        y: u16::try_from(at.y).expect("a facet of fewer than 65,536 chunks down"),
+                    }
                 })
                 .collect(),
         )

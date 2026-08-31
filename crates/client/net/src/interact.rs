@@ -13,7 +13,10 @@
 //! happens to share an id, and it will arrive with the UI that can show one.
 
 use openshard_protocol::containers::DoubleClick;
-use openshard_protocol::serial::{RawSerial, Serial};
+use openshard_protocol::serial::{
+    RawSerial,
+    Serial,
+};
 
 /// Use the object with this serial: the `0x06` to write to the socket.
 ///

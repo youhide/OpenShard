@@ -22,9 +22,12 @@ use openshard_client_net::connection::Event;
 use openshard_client_net::doll;
 use openshard_client_net::transport::enter_world;
 use openshard_client_net::view::WorldView;
+use openshard_e2e_shard::{
+    plan,
+    shard,
+    version,
+};
 use openshard_protocol::server_packet::ServerPacket;
-
-use openshard_e2e_shard::{plan, shard, version};
 
 /// Read packets into `view` until `done` says the answer has arrived, or fail.
 ///

@@ -1,5 +1,6 @@
-use super::*;
 use openshard_map::grid::Tile;
+
+use super::*;
 
 /// Turn a packet the world cares about into the command it means.
 ///
@@ -29,10 +30,12 @@ use openshard_map::grid::Tile;
 /// all; it closes the connection at the routing step instead.
 pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> Option<Command> {
     match packet {
-        ClientPacket::Walk(request) => Some(Command::Walk {
-            connection: id,
-            request,
-        }),
+        ClientPacket::Walk(request) => {
+            Some(Command::Walk {
+                connection: id,
+                request,
+            })
+        }
         // "Log Out" on the paperdoll. The client tells the server it is leaving
         // and then waits to be told it may — see `world::LogoutAck`. Queued like
         // everything else, so the answer comes out of a tick.
@@ -41,10 +44,12 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
         // else, so the answer is built from the world at one instant rather than
         // from whatever a socket thread could see.
         ClientPacket::ResyncRequest => Some(Command::Resync { connection: id }),
-        ClientPacket::StatusQuery(query) => Some(match query.kind {
-            StatusQueryKind::Skills => Command::RequestSkills { connection: id },
-            StatusQueryKind::Status => Command::RequestStatus { connection: id },
-        }),
+        ClientPacket::StatusQuery(query) => {
+            Some(match query.kind {
+                StatusQueryKind::Skills => Command::RequestSkills { connection: id },
+                StatusQueryKind::Status => Command::RequestStatus { connection: id },
+            })
+        }
         ClientPacket::Encoded(command) => {
             // The AoS "encoded command": the paperdoll's own buttons, which are
             // not gump replies — the paperdoll is drawn client-side and has no
@@ -62,57 +67,77 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
                 }
             }
         }
-        ClientPacket::GumpResponse(response) => Some(Command::GumpResponse {
-            connection: id,
-            response,
-        }),
-        ClientPacket::TargetResponse(response) => Some(Command::TargetResponse {
-            connection: id,
-            response,
-        }),
-        ClientPacket::PickUpItem(pickup) => Some(Command::PickUpItem {
-            connection: id,
-            serial: pickup.serial,
-            amount: pickup.amount.0,
-        }),
-        ClientPacket::DropItem(drop) => Some(Command::DropItem {
-            connection: id,
-            serial: drop.serial,
-            destination: drop.destination(),
-        }),
-        ClientPacket::SecureTrade(action) => match action {
-            SecureTradeAction::Cancel { container } => Some(Command::TradeCancel {
+        ClientPacket::GumpResponse(response) => {
+            Some(Command::GumpResponse {
                 connection: id,
-                container,
-            }),
-            SecureTradeAction::Accept { container, accepted } => Some(Command::TradeAction {
+                response,
+            })
+        }
+        ClientPacket::TargetResponse(response) => {
+            Some(Command::TargetResponse {
                 connection: id,
-                container,
-                accepted,
-            }),
-            // Virtual gold and platinum: an account balance this shard does not
-            // keep. Gold is an item, and it trades by being dragged into the
-            // window like anything else.
-            SecureTradeAction::UpdateGold { .. } => None,
-        },
+                response,
+            })
+        }
+        ClientPacket::PickUpItem(pickup) => {
+            Some(Command::PickUpItem {
+                connection: id,
+                serial:     pickup.serial,
+                amount:     pickup.amount.0,
+            })
+        }
+        ClientPacket::DropItem(drop) => {
+            Some(Command::DropItem {
+                connection:  id,
+                serial:      drop.serial,
+                destination: drop.destination(),
+            })
+        }
+        ClientPacket::SecureTrade(action) => {
+            match action {
+                SecureTradeAction::Cancel { container } => {
+                    Some(Command::TradeCancel {
+                        connection: id,
+                        container,
+                    })
+                }
+                SecureTradeAction::Accept { container, accepted } => {
+                    Some(Command::TradeAction {
+                        connection: id,
+                        container,
+                        accepted,
+                    })
+                }
+                // Virtual gold and platinum: an account balance this shard does not
+                // keep. Gold is an item, and it trades by being dragged into the
+                // window like anything else.
+                SecureTradeAction::UpdateGold { .. } => None,
+            }
+        }
         // The paperdoll bit comes off here, where the packet is read: it is
         // framing the client owns, and `interpret` is total, so nothing
         // downstream has to know which bit it was.
-        ClientPacket::DoubleClick(click) => Some(Command::DoubleClick {
-            connection: id,
-            request: click.interpret(),
-        }),
+        ClientPacket::DoubleClick(click) => {
+            Some(Command::DoubleClick {
+                connection: id,
+                request:    click.interpret(),
+            })
+        }
         // A vendor purchase, answered out of the tick like everything else.
-        ClientPacket::Buy(reply) => Some(Command::Buy {
-            connection: id,
-            vendor: reply.vendor,
-            purchases: reply.purchases,
-        }),
-        ClientPacket::Sell(reply) => Some(Command::Sell {
-            connection: id,
-            vendor: reply.vendor,
-            sales: reply.sales,
-        }),
+        ClientPacket::Buy(reply) => {
+            Some(Command::Buy {
+                connection: id,
+                vendor:     reply.vendor,
+                purchases:  reply.purchases,
+            })
+        }
+        ClientPacket::Sell(reply) => {
+            Some(Command::Sell {
+                connection: id,
+                vendor:     reply.vendor,
+                sales:      reply.sales,
+            })
+        }
         ClientPacket::Look(look) => {
             // A `0x09` naming nothing — zero, or `0xFFFF_FFFF` — is a click that
             // hit no object, which is an answer and not a reason to queue work.
@@ -128,140 +153,176 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
             debug!(%id, count = query.serials.len(), "0xD6 tooltip query");
             Some(Command::QueryProperties {
                 connection: id,
-                serials: query.serials,
+                serials:    query.serials,
             })
         }
-        ClientPacket::Equip(equip) => Some(Command::EquipItem {
-            connection: id,
-            item: equip.item,
-            layer: equip.layer,
-            mobile: equip.mobile,
-        }),
-        ClientPacket::WarMode(request) => Some(Command::WarMode {
-            connection: id,
-            war: request.war,
-        }),
-        ClientPacket::Attack(request) => Some(Command::Attack {
-            connection: id,
-            target: request.target,
-        }),
-        ClientPacket::Talk(talk) => Some(Command::Say {
-            connection: id,
-            mode: talk.mode,
-            hue: talk.hue,
-            font: talk.font,
-            text: talk.text,
-        }),
+        ClientPacket::Equip(equip) => {
+            Some(Command::EquipItem {
+                connection: id,
+                item:       equip.item,
+                layer:      equip.layer,
+                mobile:     equip.mobile,
+            })
+        }
+        ClientPacket::WarMode(request) => {
+            Some(Command::WarMode {
+                connection: id,
+                war:        request.war,
+            })
+        }
+        ClientPacket::Attack(request) => {
+            Some(Command::Attack {
+                connection: id,
+                target:     request.target,
+            })
+        }
+        ClientPacket::Talk(talk) => {
+            Some(Command::Say {
+                connection: id,
+                mode:       talk.mode,
+                hue:        talk.hue,
+                font:       talk.font,
+                text:       talk.text,
+            })
+        }
         // What a modern client actually sends when you type. Same `Say` as the
         // ASCII 0x03 once the words are out.
-        ClientPacket::UnicodeTalk(talk) => Some(Command::Say {
-            connection: id,
-            mode: talk.mode,
-            hue: talk.hue,
-            font: talk.font,
-            text: talk.text,
-        }),
+        ClientPacket::UnicodeTalk(talk) => {
+            Some(Command::Say {
+                connection: id,
+                mode:       talk.mode,
+                hue:        talk.hue,
+                font:       talk.font,
+                text:       talk.text,
+            })
+        }
         // `0xBF` is a whole family of extended commands; `ExtendedRequest` has
         // already picked the one subcommand this packet carries.
-        ClientPacket::Extended(request) => match request {
-            // interpret() is total, so it may run right here rather than waiting
-            // for a tick system to have the domain in hand — see
-            // `docs/protocol_newtypes.md`'s N4 containers amendment 2. A wire 0
-            // is never a legitimate spell id and queues nothing.
-            ExtendedRequest::Cast(cast) => cast.spell.interpret().map(|spell| Command::RequestCast {
-                connection: id,
-                spell,
-            }),
-            ExtendedRequest::ContextMenuRequest(request) => {
-                debug!(%id, serial = request.serial.0, "0xBF context-menu request");
-                Some(Command::ContextMenuRequest {
-                    connection: id,
-                    serial: request.serial,
-                })
-            }
-            ExtendedRequest::ContextMenuSelect(select) => Some(Command::ContextMenuSelect {
-                connection: id,
-                serial: select.serial,
-                index: select.index,
-            }),
-            ExtendedRequest::StatLock(request) => {
-                // The seam is where a client's byte becomes a stat: the status
-                // bar has three arrows, and a packet naming a fourth is dropped
-                // here rather than travelling into the tick to be ignored by a
-                // `_ =>` arm nobody can see from the packet.
-                match request.stat.validate() {
-                    Ok(stat) => Some(Command::SetStatLock {
+        ClientPacket::Extended(request) => {
+            match request {
+                // interpret() is total, so it may run right here rather than waiting
+                // for a tick system to have the domain in hand — see
+                // `docs/protocol_newtypes.md`'s N4 containers amendment 2. A wire 0
+                // is never a legitimate spell id and queues nothing.
+                ExtendedRequest::Cast(cast) => {
+                    cast.spell.interpret().map(|spell| {
+                        Command::RequestCast {
+                            connection: id,
+                            spell,
+                        }
+                    })
+                }
+                ExtendedRequest::ContextMenuRequest(request) => {
+                    debug!(%id, serial = request.serial.0, "0xBF context-menu request");
+                    Some(Command::ContextMenuRequest {
                         connection: id,
-                        stat,
-                        lock: StatLock::from_wire(request.lock.interpret()),
-                    }),
-                    Err(invalid) => {
-                        debug!(%id, %invalid, "0xBF 0x1A named no stat");
-                        None
+                        serial:     request.serial,
+                    })
+                }
+                ExtendedRequest::ContextMenuSelect(select) => {
+                    Some(Command::ContextMenuSelect {
+                        connection: id,
+                        serial:     select.serial,
+                        index:      select.index,
+                    })
+                }
+                ExtendedRequest::StatLock(request) => {
+                    // The seam is where a client's byte becomes a stat: the status
+                    // bar has three arrows, and a packet naming a fourth is dropped
+                    // here rather than travelling into the tick to be ignored by a
+                    // `_ =>` arm nobody can see from the packet.
+                    match request.stat.validate() {
+                        Ok(stat) => {
+                            Some(Command::SetStatLock {
+                                connection: id,
+                                stat,
+                                lock: StatLock::from_wire(request.lock.interpret()),
+                            })
+                        }
+                        Err(invalid) => {
+                            debug!(%id, %invalid, "0xBF 0x1A named no stat");
+                            None
+                        }
                     }
                 }
+                // Whole, rather than picked apart here: unlike the stat lock above
+                // there is no wire value to validate into a domain one — every arm
+                // names a serial the world has to look up anyway, so the seam has
+                // nothing to do that the tick is not better placed to do.
+                ExtendedRequest::Party(request) => {
+                    Some(Command::Party {
+                        connection: id,
+                        request,
+                    })
+                }
+                // The serial is not validated here: whether it names a house this
+                // player may see is the tick's question, and it has to look the
+                // entity up either way.
+                ExtendedRequest::DesignDetails(request) => {
+                    Some(Command::DesignDetails {
+                        connection: id,
+                        serial:     request.serial,
+                    })
+                }
+                // Whole, like the party request above: the facet is a byte the tick
+                // has to look up anyway, and a chunk it cannot cut is answered with
+                // a refusal rather than dropped — so there is nothing for a seam
+                // with no world in hand to decide.
+                ExtendedRequest::Chunks(request) => {
+                    Some(Command::RequestChunks {
+                        connection: id,
+                        facet:      request.facet,
+                        chunks:     request.chunks,
+                    })
+                }
+                // And the same for the question a client with a cache asks first:
+                // whether this shard can say what moved since that revision is a
+                // question about a world and a log, and neither is here.
+                ExtendedRequest::Changes(request) => {
+                    Some(Command::RequestChanges {
+                        connection: id,
+                        facet:      request.facet,
+                        revision:   request.revision,
+                    })
+                }
+                // Kept whole: authority, attribution, coordinates and the parent
+                // are all world/session questions.  This seam only attaches the
+                // connection id; the request deliberately carries no author.
+                ExtendedRequest::MapEdit(request) => {
+                    Some(Command::CommitMapEdit {
+                        connection: id,
+                        request,
+                    })
+                }
+                ExtendedRequest::Turn(request) => {
+                    Some(Command::Turn {
+                        connection: id,
+                        request,
+                    })
+                }
+                ExtendedRequest::CraftCatalogue(_) => Some(Command::OpenCraftCatalogue { connection: id }),
+                ExtendedRequest::Unknown(subcommand) => {
+                    debug!(%id, subcommand = format!("0x{subcommand:02X}"), "unhandled 0xBF");
+                    None
+                }
+                // `ExtendedRequest` is `#[non_exhaustive]` for callers outside this
+                // workspace; every variant that exists today is matched above.
+                _ => unreachable!("every ExtendedRequest variant is matched above"),
             }
-            // Whole, rather than picked apart here: unlike the stat lock above
-            // there is no wire value to validate into a domain one — every arm
-            // names a serial the world has to look up anyway, so the seam has
-            // nothing to do that the tick is not better placed to do.
-            ExtendedRequest::Party(request) => Some(Command::Party {
+        }
+        ClientPacket::UseSkill(request) => {
+            Some(Command::UseSkillButton {
                 connection: id,
-                request,
-            }),
-            // The serial is not validated here: whether it names a house this
-            // player may see is the tick's question, and it has to look the
-            // entity up either way.
-            ExtendedRequest::DesignDetails(request) => Some(Command::DesignDetails {
+                skill:      request.skill,
+            })
+        }
+        ClientPacket::SkillLock(request) => {
+            Some(Command::SetSkillLock {
                 connection: id,
-                serial: request.serial,
-            }),
-            // Whole, like the party request above: the facet is a byte the tick
-            // has to look up anyway, and a chunk it cannot cut is answered with
-            // a refusal rather than dropped — so there is nothing for a seam
-            // with no world in hand to decide.
-            ExtendedRequest::Chunks(request) => Some(Command::RequestChunks {
-                connection: id,
-                facet: request.facet,
-                chunks: request.chunks,
-            }),
-            // And the same for the question a client with a cache asks first:
-            // whether this shard can say what moved since that revision is a
-            // question about a world and a log, and neither is here.
-            ExtendedRequest::Changes(request) => Some(Command::RequestChanges {
-                connection: id,
-                facet: request.facet,
-                revision: request.revision,
-            }),
-            // Kept whole: authority, attribution, coordinates and the parent
-            // are all world/session questions.  This seam only attaches the
-            // connection id; the request deliberately carries no author.
-            ExtendedRequest::MapEdit(request) => Some(Command::CommitMapEdit {
-                connection: id,
-                request,
-            }),
-            ExtendedRequest::Turn(request) => Some(Command::Turn {
-                connection: id,
-                request,
-            }),
-            ExtendedRequest::CraftCatalogue(_) => Some(Command::OpenCraftCatalogue { connection: id }),
-            ExtendedRequest::Unknown(subcommand) => {
-                debug!(%id, subcommand = format!("0x{subcommand:02X}"), "unhandled 0xBF");
-                None
-            }
-            // `ExtendedRequest` is `#[non_exhaustive]` for callers outside this
-            // workspace; every variant that exists today is matched above.
-            _ => unreachable!("every ExtendedRequest variant is matched above"),
-        },
-        ClientPacket::UseSkill(request) => Some(Command::UseSkillButton {
-            connection: id,
-            skill: request.skill,
-        }),
-        ClientPacket::SkillLock(request) => Some(Command::SetSkillLock {
-            connection: id,
-            skill: request.skill,
-            lock: request.lock,
-        }),
+                skill:      request.skill,
+                lock:       request.lock,
+            })
+        }
         // A `0x12` text command that is not "use skill" reaches here as
         // Unknown, not an error — see `ClientPacket::decode`.
         ClientPacket::Unknown { id: 0x12, .. } => {
@@ -329,10 +390,10 @@ pub(crate) fn start_cities(facets: &[u8], start: Tile) -> Result<Vec<StartLocati
 
     if cities.is_empty() {
         cities.push(StartLocation {
-            area: "Britannia".to_owned(),
-            name: "Britain".to_owned(),
-            position: Point::new(start.x, start.y, 0),
-            map: Facet(fallback_facet),
+            area:               "Britannia".to_owned(),
+            name:               "Britain".to_owned(),
+            position:           Point::new(start.x, start.y, 0),
+            map:                Facet(fallback_facet),
             description_cliloc: ClilocId(0),
         });
     }
@@ -346,15 +407,15 @@ mod tests {
     #[test]
     fn a_map_edit_attaches_only_the_connection_before_entering_the_tick() {
         let request = openshard_protocol::mapedit::MapEditRequest {
-            facet: Facet(2),
+            facet:  Facet(2),
             parent: openshard_protocol::chunks::WorldRevision(7),
-            ops: vec![openshard_protocol::mapedit::MapEditOp::SetLand {
-                at: openshard_protocol::mapedit::EditTile {
+            ops:    vec![openshard_protocol::mapedit::MapEditOp::SetLand {
+                at:   openshard_protocol::mapedit::EditTile {
                     x: openshard_protocol::mapedit::EditX(3),
                     y: openshard_protocol::mapedit::EditY(4),
                 },
                 tile: openshard_protocol::mapedit::EditLandTile::from_wire(9).unwrap(),
-                z: openshard_protocol::mapedit::EditZ(5),
+                z:    openshard_protocol::mapedit::EditZ(5),
             }],
         };
         let connection = ConnectionId::from_raw(42);

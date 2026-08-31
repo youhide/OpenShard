@@ -22,11 +22,25 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use clap::Parser;
-use openshard_map::overlay::{Doors, Overlay};
-use openshard_movement::{Footing, MapTerrain, PathSearch, SearchExit, Weight, search_path, step_allowed};
+use openshard_map::overlay::{
+    Doors,
+    Overlay,
+};
+use openshard_movement::{
+    Footing,
+    MapTerrain,
+    PathSearch,
+    SearchExit,
+    Weight,
+    search_path,
+    step_allowed,
+};
 use openshard_protocol::world::Point;
 
 /// `N/D` off the command line, as the pair the run then prints back.
@@ -51,9 +65,9 @@ struct Cli {
     #[arg(long, env = "OPENSHARD_CLIENT")]
     client: PathBuf,
     #[arg(long, default_value_t = 1363)]
-    x: u16,
+    x:      u16,
     #[arg(long, default_value_t = 1600)]
-    y: u16,
+    y:      u16,
     #[arg(long, default_value_t = 96)]
     radius: u16,
     /// Node budget; repeat to compare several in one sweep.
@@ -73,7 +87,7 @@ struct Cli {
     /// than about a count. Diffing two dumps is what found the two that are
     /// not — and what showed they are the node budget rather than the rule.
     #[arg(long, value_name = "FILE")]
-    dump: Option<PathBuf>,
+    dump:   Option<PathBuf>,
     /// How far the search may over-trust its own estimate, as `N/D` — repeat to
     /// sweep several in one run.
     ///
@@ -100,12 +114,12 @@ struct Cli {
 
 #[derive(Clone, Copy)]
 struct Reading {
-    elapsed: Duration,
-    x: u16,
-    y: u16,
+    elapsed:     Duration,
+    x:           u16,
+    y:           u16,
     /// Chebyshev tiles from the origin — the measure the search steers by.
-    distance: u32,
-    explored: usize,
+    distance:    u32,
+    explored:    usize,
     /// Standing places the search's one table held — the finalised nodes and the
     /// frontier over them.
     ///
@@ -113,22 +127,22 @@ struct Reading {
     /// the node budget now, and what makes that reservation a fact rather than a
     /// guess is the ratio between this and [`Self::explored`] over a facet's
     /// worth of destinations.
-    written: usize,
+    written:     usize,
     route_steps: usize,
-    arrived: bool,
+    arrived:     bool,
     /// Whether the same search has an *approach* to offer where it has no
     /// route: `find_path_toward`'s answer, read off `find_path`'s search.
-    approaches: bool,
+    approaches:  bool,
     /// What the goal's own column has to say about this reading.
-    column: Column,
+    column:      Column,
     /// Whether the route walks over some column twice.
     ///
     /// The other half of N3b, counted rather than argued: **no tile-keyed
     /// search could ever produce one of these**, because the first visit closed
     /// the column for good. A route that comes back is a route that left a
     /// column, gained height, and returned to it a storey up.
-    revisits: bool,
-    exit: SearchExit,
+    revisits:    bool,
+    exit:        SearchExit,
 }
 
 /// What the goal's column is, for a destination the search did not arrive at.
@@ -146,7 +160,7 @@ struct Column {
     /// half of the same search still steers by a planar distance, so a search
     /// that reached the column left its route ending on it — which is what this
     /// tests for.
-    reached: bool,
+    reached:  bool,
     /// How many places to stand the column holds.
     ///
     /// A column with one surface cannot be reached at a height other than its
@@ -300,7 +314,7 @@ fn sweep(
             end = Some(at);
         }
         let column = Column {
-            reached: !search.arrived && end.is_some_and(|end| (end.x, end.y) == (x, y)),
+            reached:  !search.arrived && end.is_some_and(|end| (end.x, end.y) == (x, y)),
             surfaces: terrain.spans().surfaces(x, y).count(),
         };
         readings.push(Reading::new(x, y, distance, fastest, &search, column, revisits));

@@ -28,7 +28,10 @@
 //! group that stops part way; the bound check is not defensive, it is that file.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_protocol::wire::Graphic;
 
@@ -85,10 +88,10 @@ impl AnimationFrameCount {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Sequence {
     /// The offsets, of which only the first [`Sequence::count`] are in use.
-    frames: [i8; MAX_FRAMES],
+    frames:   [i8; MAX_FRAMES],
     /// How many of them there are. Never zero and never above [`MAX_FRAMES`] —
     /// [`AnimData::sequence`] answers `None` rather than handing back either.
-    count: AnimationFrameCount,
+    count:    AnimationFrameCount,
     /// How long each offset is shown, in units of [`FRAME_STEP`].
     ///
     /// Zero means one step: `AnimatedStaticsManager.Process` schedules
@@ -102,7 +105,7 @@ pub struct Sequence {
     /// the phase that makes neighbouring fires differ is baked into the offsets
     /// themselves. Named rather than skipped so that the next person to open the
     /// file does not conclude it was missed.
-    start: u8,
+    start:    u8,
 }
 
 impl Sequence {
@@ -218,7 +221,7 @@ pub enum AnimDataError {
     /// The file is there and unreadable.
     Read {
         /// What was being opened.
-        path: PathBuf,
+        path:   PathBuf,
         /// What the operating system said.
         source: std::io::Error,
     },

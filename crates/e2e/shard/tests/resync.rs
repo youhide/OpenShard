@@ -21,13 +21,23 @@ use std::time::Duration;
 
 use openshard_client_net::connection::Event;
 use openshard_client_net::transport::enter_world;
-use openshard_client_net::walk::{Moved, Walk};
+use openshard_client_net::walk::{
+    Moved,
+    Walk,
+};
+use openshard_e2e_shard::{
+    plan,
+    shard,
+    version,
+};
 use openshard_protocol::direction::Facing;
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::world::{ResyncRequest, StepSequence, WalkAck};
-
-use openshard_e2e_shard::{plan, shard, version};
+use openshard_protocol::world::{
+    ResyncRequest,
+    StepSequence,
+    WalkAck,
+};
 
 #[tokio::test]
 async fn a_lost_client_asks_where_it_is_and_the_shard_tells_it() {
@@ -46,7 +56,7 @@ async fn a_lost_client_asks_where_it_is_and_the_shard_tells_it() {
     // takes a wall and a slow link and this test is about the *repair*, not about
     // how the disagreement arose.
     let ack = ServerPacket::WalkAck(WalkAck {
-        sequence: StepSequence(9),
+        sequence:  StepSequence(9),
         notoriety: Notoriety::Innocent,
     });
     assert!(

@@ -15,22 +15,44 @@ use std::collections::BTreeMap;
 
 use openshard_gateway::ConnectionId;
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Body, Doors};
+use openshard_map::overlay::{
+    Body,
+    Doors,
+};
 use openshard_movement::scene::Scene;
 use openshard_protocol::access::AccessLevel;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::identity::AccountName;
-use openshard_protocol::serial::{Serial, SerialKind};
+use openshard_protocol::serial::{
+    Serial,
+    SerialKind,
+};
 use openshard_protocol::version::ClientVersion;
-use openshard_protocol::wire::{Graphic, MultiId};
-use openshard_protocol::world::{Facet, Point};
-use openshard_tiles::{TileData, TileFlags};
-use openshard_uofiles::multi::{Component, Multi, Multis};
-
-use super::*;
+use openshard_protocol::wire::{
+    Graphic,
+    MultiId,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 use openshard_state::components::HouseDesign;
 use openshard_state::connection::Connection;
-use openshard_state::{Client, FacetState};
+use openshard_state::{
+    Client,
+    FacetState,
+};
+use openshard_tiles::{
+    TileData,
+    TileFlags,
+};
+use openshard_uofiles::multi::{
+    Component,
+    Multi,
+    Multis,
+};
+
+use super::*;
 
 /// A reach no storey in these tests can be out of.
 ///
@@ -265,7 +287,7 @@ fn an_item(state: &mut WorldState, at: Point, container: bool) -> EntityId {
     state.registry.insert(
         entity,
         Drawn {
-            id: Graphic(0x0E3C),
+            id:  Graphic(0x0E3C),
             hue: openshard_protocol::wire::Hue(0),
         },
     );
@@ -1037,7 +1059,10 @@ fn a_full_list_refuses_a_new_name_and_takes_an_old_one() {
 /// would state.
 #[test]
 fn a_house_adopts_the_doors_standing_inside_it() {
-    use openshard_state::components::{Door, HouseDoor};
+    use openshard_state::components::{
+        Door,
+        HouseDoor,
+    };
 
     let mut state = world_with(cottage());
     let (actor, owner) = an_actor(&mut state);
@@ -1067,7 +1092,10 @@ fn a_house_adopts_the_doors_standing_inside_it() {
 /// separately placed item at the offset the house type defines.
 #[test]
 fn a_classic_house_places_its_door() {
-    use openshard_state::components::{Door, HouseDoor};
+    use openshard_state::components::{
+        Door,
+        HouseDoor,
+    };
 
     let mut state = world_with(cottage());
     let (actor, owner) = an_actor(&mut state);
@@ -1110,7 +1138,10 @@ fn a_classic_house_places_its_door() {
 
 #[test]
 fn an_imported_design_turns_its_closed_leaf_into_a_functional_door() {
-    use openshard_state::components::{Door, HouseDoor};
+    use openshard_state::components::{
+        Door,
+        HouseDoor,
+    };
 
     const FOUNDATION: u16 = 0x13EC;
     let mut state = world_with_extra_multi(Multi::new(FOUNDATION, cottage()));
@@ -1122,10 +1153,10 @@ fn an_imported_design_turns_its_closed_leaf_into_a_functional_door() {
         // A light-wood door: this family appears in the legacy cathedral and
         // is not one of the classic house fixture families.
         graphic: Graphic(0x06BD),
-        dx: 2,
-        dy: 1,
-        dz: 7,
-        flags: 1,
+        dx:      2,
+        dy:      1,
+        dz:      7,
+        flags:   1,
     });
 
     design::redesign(&mut state, actor, house, imported).expect("a non-empty imported design");
@@ -1156,7 +1187,10 @@ fn an_imported_design_turns_its_closed_leaf_into_a_functional_door() {
 /// is the odd member of the art pair.
 #[test]
 fn a_classic_house_variant_keeps_its_shared_fixtures() {
-    use openshard_state::components::{HouseDoor, HouseSign};
+    use openshard_state::components::{
+        HouseDoor,
+        HouseSign,
+    };
 
     let mut state = world_with_extra_multi(Multi::new(0x0065, cottage()));
     let (actor, owner) = an_actor(&mut state);
@@ -1181,7 +1215,10 @@ fn a_classic_house_variant_keeps_its_shared_fixtures() {
 /// art components are the authoritative frames for the functional fixtures.
 #[test]
 fn an_embedded_house_sign_and_doors_become_functional_fixtures() {
-    use openshard_state::components::{HouseDoor, HouseSign};
+    use openshard_state::components::{
+        HouseDoor,
+        HouseSign,
+    };
 
     let mut state = world_with_extra_multi(Multi::new(
         0x0087,
@@ -1356,12 +1393,12 @@ fn door_at(state: &mut WorldState, at: Point) -> EntityId {
     state.registry.insert(
         entity,
         Door {
-            closed: Graphic(0x06A5),
-            open: Graphic(0x06A6),
+            closed:   Graphic(0x06A5),
+            open:     Graphic(0x06A6),
             offset_x: 1,
             offset_y: 0,
-            link: None,
-            is_open: false,
+            link:     None,
+            is_open:  false,
             close_at: openshard_state::WorldTick::ZERO,
         },
     );
@@ -1389,7 +1426,7 @@ fn a_ban_puts_out_whoever_is_already_inside() {
         state.registry.insert(
             entity,
             Body {
-                id: Graphic(0x0190),
+                id:  Graphic(0x0190),
                 hue: openshard_protocol::wire::Hue(0),
             },
         );
@@ -1573,7 +1610,11 @@ fn a_row_button_reads_back_as_the_row_it_was_drawn_for() {
 /// is the half worth pinning: the drop path reads it with no terrain in hand.
 #[test]
 fn a_house_gets_its_allowance_from_its_own_footprint() {
-    use crate::storage::{LOCKDOWNS_PER_TILE, allowance, allowance_for};
+    use crate::storage::{
+        LOCKDOWNS_PER_TILE,
+        allowance,
+        allowance_for,
+    };
 
     let mut state = world_with(cottage());
     let (actor, owner) = an_actor(&mut state);
@@ -1594,7 +1635,12 @@ fn a_house_gets_its_allowance_from_its_own_footprint() {
 /// Lock down, secure, release — and the three rules that decide each.
 #[test]
 fn only_a_co_owner_pins_and_only_inside_the_house() {
-    use crate::storage::{StorageRefusal, lock_down, locked_down, release};
+    use crate::storage::{
+        StorageRefusal,
+        lock_down,
+        locked_down,
+        release,
+    };
 
     let mut state = world_with(cottage());
     let (actor, owner) = an_actor(&mut state);
@@ -1654,7 +1700,11 @@ fn only_a_co_owner_pins_and_only_inside_the_house() {
 /// The allowance is a ceiling and the ceiling refuses.
 #[test]
 fn a_full_house_takes_no_more_lockdowns() {
-    use crate::storage::{StorageRefusal, allowance, lock_down};
+    use crate::storage::{
+        StorageRefusal,
+        allowance,
+        lock_down,
+    };
 
     let mut state = world_with(cottage());
     let (actor, owner) = an_actor(&mut state);
@@ -1678,7 +1728,10 @@ fn a_full_house_takes_no_more_lockdowns() {
 /// anybody.
 #[test]
 fn a_secure_opens_for_the_standing_it_names() {
-    use crate::storage::{lock_down, may_open};
+    use crate::storage::{
+        lock_down,
+        may_open,
+    };
 
     let mut state = world_with(cottage());
     let (actor, owner) = an_actor(&mut state);
@@ -1728,7 +1781,12 @@ fn a_secure_opens_for_the_standing_it_names() {
 /// The storage ceiling counts what is in the secures, one level deep.
 #[test]
 fn the_storage_ceiling_counts_what_is_in_the_secures() {
-    use crate::storage::{allowance, has_room_for, lock_down, stored};
+    use crate::storage::{
+        allowance,
+        has_room_for,
+        lock_down,
+        stored,
+    };
 
     let mut state = world_with(cottage());
     let (actor, owner) = an_actor(&mut state);
@@ -1748,8 +1806,8 @@ fn the_storage_ceiling_counts_what_is_in_the_secures() {
             item,
             openshard_state::ItemLocation::contained(openshard_state::components::Contained {
                 container: chest_serial,
-                position: openshard_protocol::gump::GumpPoint::new(0, 0),
-                grid: openshard_protocol::containers::GridSlot(0),
+                position:  openshard_protocol::gump::GumpPoint::new(0, 0),
+                grid:      openshard_protocol::containers::GridSlot(0),
             }),
         )
         .unwrap();
@@ -1795,7 +1853,12 @@ fn a_house_wears_through_the_reference_stages() {
 /// The clock runs, the refresh stops it, and a period of zero turns it off.
 #[test]
 fn the_sweep_ages_a_house_and_a_refresh_undoes_it() {
-    use crate::decay::{Condition, age_and_collect, condition, refresh};
+    use crate::decay::{
+        Condition,
+        age_and_collect,
+        condition,
+        refresh,
+    };
 
     let mut state = world_with(cottage());
     state.gameplay.house_decay_ticks = 1000;
@@ -1855,7 +1918,7 @@ fn demolition_refuses_an_unreadable_shape_before_touching_the_house() {
         house,
         HouseDesign {
             components: vec![component(WALL, -20, 0, 0, true)],
-            revision: 7,
+            revision:   7,
         },
     );
 
@@ -1898,9 +1961,17 @@ fn demolition_refuses_an_unreadable_shape_before_touching_the_house() {
 /// it was holding is in the crate rather than gone.
 #[test]
 fn a_collapsed_house_leaves_a_crate_and_no_walls() {
-    use crate::decay::{CRATE_GRAPHIC, age_and_collect, demolish};
+    use openshard_state::components::{
+        Contained,
+        Container,
+    };
+
+    use crate::decay::{
+        CRATE_GRAPHIC,
+        age_and_collect,
+        demolish,
+    };
     use crate::storage::lock_down;
-    use openshard_state::components::{Contained, Container};
 
     let mut state = world_with(cottage());
     state.gameplay.house_decay_ticks = 10;
@@ -1922,8 +1993,8 @@ fn a_collapsed_house_leaves_a_crate_and_no_walls() {
         inside,
         openshard_state::ItemLocation::contained(Contained {
             container: chest_serial,
-            position: openshard_protocol::gump::GumpPoint::new(0, 0),
-            grid: openshard_protocol::containers::GridSlot(0),
+            position:  openshard_protocol::gump::GumpPoint::new(0, 0),
+            grid:      openshard_protocol::containers::GridSlot(0),
         }),
     )
     .unwrap();
@@ -2044,19 +2115,19 @@ fn forbid_housing(state: &mut WorldState, rect: openshard_state::RegionRect) {
         .facet_state_mut(Facet(0))
         .regions
         .set(vec![openshard_state::Region {
-            id: openshard_state::RegionId(0),
-            name: "a dungeon".into(),
+            id:       openshard_state::RegionId(0),
+            name:     "a dungeon".into(),
             priority: 0,
-            rects: vec![rect],
-            flags: openshard_state::RegionFlags {
-                no_housing: true,
-                guarded: false,
+            rects:    vec![rect],
+            flags:    openshard_state::RegionFlags {
+                no_housing:  true,
+                guarded:     false,
                 no_teleport: false,
-                no_recall: false,
-                safe: false,
+                no_recall:   false,
+                safe:        false,
             },
-            music: None,
-            light: None,
+            music:    None,
+            light:    None,
         }]);
 }
 
@@ -2198,19 +2269,19 @@ fn an_ordinary_region_takes_a_house() {
         .facet_state_mut(Facet(0))
         .regions
         .set(vec![openshard_state::Region {
-            id: openshard_state::RegionId(0),
-            name: "a town".into(),
+            id:       openshard_state::RegionId(0),
+            name:     "a town".into(),
             priority: 0,
-            rects: vec![openshard_state::RegionRect::new(5, 5, 12, 12)],
-            flags: openshard_state::RegionFlags {
-                guarded: true,
+            rects:    vec![openshard_state::RegionRect::new(5, 5, 12, 12)],
+            flags:    openshard_state::RegionFlags {
+                guarded:     true,
                 no_teleport: false,
-                no_recall: false,
-                no_housing: false,
-                safe: false,
+                no_recall:   false,
+                no_housing:  false,
+                safe:        false,
             },
-            music: None,
-            light: None,
+            music:    None,
+            light:    None,
         }]);
 
     assert!(place(&mut state, actor, at, Facet(0), COTTAGE, owner).is_ok());
@@ -2353,7 +2424,7 @@ fn a_redesign_refuses_an_unreadable_current_shape_without_committing() {
         house,
         HouseDesign {
             components: broken.clone(),
-            revision: 7,
+            revision:   7,
         },
     );
 
@@ -2523,12 +2594,12 @@ fn a_redesign_adopts_a_door_its_new_walls_now_stand_around() {
     state.registry.insert(
         door,
         openshard_state::components::Door {
-            closed: Graphic(0x0675),
-            open: Graphic(0x0676),
+            closed:   Graphic(0x0675),
+            open:     Graphic(0x0676),
             offset_x: 0,
             offset_y: 0,
-            link: None,
-            is_open: false,
+            link:     None,
+            is_open:  false,
             close_at: openshard_state::WorldTick::ZERO,
         },
     );

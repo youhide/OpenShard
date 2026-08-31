@@ -10,11 +10,28 @@
 //! Ignored and gated on `OPENSHARD_CLIENT`: no client files live in this
 //! repository, ever.
 
-use openshard_client_render::gump::{GumpArt, GumpPixel, PictureIndex};
+use openshard_client_render::gump::{
+    GumpArt,
+    GumpPixel,
+    PictureIndex,
+};
 use openshard_client_render::mobiles::EquipmentLayer;
-use openshard_client_render::paperdoll::{self, FEMALE_GUMP_OFFSET, MALE_GUMP_OFFSET, Wearer, Whose};
-use openshard_protocol::wire::{Graphic, Hue, Layer};
-use openshard_tiles::{AnimId, TileData};
+use openshard_client_render::paperdoll::{
+    self,
+    FEMALE_GUMP_OFFSET,
+    MALE_GUMP_OFFSET,
+    Wearer,
+    Whose,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
+use openshard_tiles::{
+    AnimId,
+    TileData,
+};
 use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::gumpart::Gumps;
 
@@ -84,8 +101,8 @@ fn a_dressed_body_draws_its_gump_first_and_its_backpack_last() {
         worn(Layer::BACKPACK, anim_id(&tiledata, 0x0E75)),
     ];
     let wearer = Wearer {
-        body: Graphic(MALE),
-        hue: Hue::NONE,
+        body:      Graphic(MALE),
+        hue:       Hue::NONE,
         equipment: &equipment,
     };
     let at = GumpPixel::new(100, 50);
@@ -270,8 +287,8 @@ fn a_layer_with_no_anim_id_draws_nothing() {
     };
     let equipment = [worn(Layer::RING, AnimId(0))];
     let wearer = Wearer {
-        body: Graphic(MALE),
-        hue: Hue::NONE,
+        body:      Graphic(MALE),
+        hue:       Hue::NONE,
         equipment: &equipment,
     };
     let doll = paperdoll::window(

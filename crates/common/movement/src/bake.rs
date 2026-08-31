@@ -10,16 +10,41 @@
 //! resolution is one function and not one per caller.
 
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufWriter, Read, Write};
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::fs::{
+    self,
+    File,
+    OpenOptions,
+};
+use std::io::{
+    self,
+    BufWriter,
+    Read,
+    Write,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
+use std::time::{
+    SystemTime,
+    UNIX_EPOCH,
+};
 
-use openshard_map::snapshot::{MapRevision, MapSnapshot};
-use openshard_protocol::world::{Facet, Point};
+use openshard_map::snapshot::{
+    MapRevision,
+    MapSnapshot,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 
 use crate::NavigationGraph;
-use crate::navigation::{Node, Region, Run};
+use crate::navigation::{
+    Node,
+    Region,
+    Run,
+};
 
 const MAGIC: &[u8; 8] = b"OSNAV\0\r\n";
 /// Increment whenever the bytes change shape, whatever the graph in them means.
@@ -45,19 +70,19 @@ const MAX_COLLECTION: usize = 100_000_000;
 /// Metadata for one input selected by the client-file loader.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InputStamp {
-    pub name: String,
-    pub bytes: u64,
+    pub name:        String,
+    pub bytes:       u64,
     pub modified_ns: u128,
 }
 
 /// Everything cheap to inspect that identifies graph-producing inputs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Stamp {
-    pub facet: Facet,
+    pub facet:           Facet,
     /// The immutable world revision the graph was built from.
-    pub revision: MapRevision,
+    pub revision:        MapRevision,
     pub routing_version: u32,
-    pub inputs: Vec<InputStamp>,
+    pub inputs:          Vec<InputStamp>,
 }
 
 /// Why a baked graph cannot be used.
@@ -76,11 +101,13 @@ impl fmt::Display for Error {
         match self {
             Self::Missing { path } => write!(f, "navigation artifact {} does not exist", path.display()),
             Self::Io { path, source } => write!(f, "navigation artifact {}: {source}", path.display()),
-            Self::Incompatible { path, reason } => write!(
-                f,
-                "navigation artifact {} is incompatible: {reason}",
-                path.display()
-            ),
+            Self::Incompatible { path, reason } => {
+                write!(
+                    f,
+                    "navigation artifact {} is incompatible: {reason}",
+                    path.display()
+                )
+            }
             Self::Stale { path, reason } => {
                 write!(f, "navigation artifact {} is stale: {reason}", path.display())
             }
@@ -262,7 +289,7 @@ pub enum SourceError {
     /// The install's map or statics could not be read.
     Install {
         /// The install directory.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: openshard_uofiles::map::MapError,
     },
@@ -277,11 +304,11 @@ pub enum SourceError {
     /// every coordinate plausible, every place wrong.
     WrongFacet {
         /// Which file said so.
-        path: PathBuf,
+        path:   PathBuf,
         /// The facet the caller asked for.
         wanted: Facet,
         /// The facet the file holds.
-        found: Facet,
+        found:  Facet,
     },
 }
 
@@ -292,12 +319,14 @@ impl fmt::Display for SourceError {
                 write!(f, "reading a facet from {}: {source}", path.display())
             }
             Self::BaseSet { source } => source.fmt(f),
-            Self::WrongFacet { path, wanted, found } => write!(
-                f,
-                "{} holds facet {}, and it was named for facet {wanted}",
-                path.display(),
-                found.0,
-            ),
+            Self::WrongFacet { path, wanted, found } => {
+                write!(
+                    f,
+                    "{} holds facet {}, and it was named for facet {wanted}",
+                    path.display(),
+                    found.0,
+                )
+            }
         }
     }
 }
@@ -333,13 +362,13 @@ pub struct FacetWorld {
     ///
     /// `None` is a world nobody has edited, and it is not the same as an empty
     /// log: an empty log is a file, and a file is an input to a stamp.
-    pub log: Option<PathBuf>,
+    pub log:      Option<PathBuf>,
     /// The revision the base set itself is at, before any patch — `None` for
     /// the install. What the log's header names, and what a caller appending a
     /// patch has to name.
-    pub base: Option<MapRevision>,
+    pub base:     Option<MapRevision>,
     /// How many patches were applied on the way. Zero for the install.
-    pub patches: usize,
+    pub patches:  usize,
 }
 
 impl FacetWorld {
@@ -382,9 +411,9 @@ impl FacetWorld {
                 } = openshard_basemap::load(base_set).map_err(|source| SourceError::BaseSet { source })?;
                 if snapshot.facet() != facet {
                     return Err(SourceError::WrongFacet {
-                        path: base_set.to_owned(),
+                        path:   base_set.to_owned(),
                         wanted: facet,
-                        found: snapshot.facet(),
+                        found:  snapshot.facet(),
                     });
                 }
                 Ok(Self {
@@ -424,13 +453,15 @@ impl FacetWorld {
     pub fn stamp(&self, client_dir: &Path, facet: Facet) -> Result<Stamp, Error> {
         let revision = self.snapshot.revision();
         match &self.base_set {
-            Some(base_set) => stamp_of_base_set(
-                base_set,
-                self.log.as_deref(),
-                &client_dir.join("tiledata.mul"),
-                facet,
-                revision,
-            ),
+            Some(base_set) => {
+                stamp_of_base_set(
+                    base_set,
+                    self.log.as_deref(),
+                    &client_dir.join("tiledata.mul"),
+                    facet,
+                    revision,
+                )
+            }
             None => stamp_of(client_dir, facet, revision),
         }
     }
@@ -515,12 +546,14 @@ fn nanos_since_epoch(path: &Path, modified: SystemTime) -> Result<u128, Error> {
     modified
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
-        .map_err(|source| Error::Incompatible {
-            path: path.into(),
-            reason: format!(
-                "input modification time precedes the Unix epoch by {:?}",
-                source.duration()
-            ),
+        .map_err(|source| {
+            Error::Incompatible {
+                path:   path.into(),
+                reason: format!(
+                    "input modification time precedes the Unix epoch by {:?}",
+                    source.duration()
+                ),
+            }
         })
 }
 
@@ -528,7 +561,7 @@ fn nanos_since_epoch(path: &Path, modified: SystemTime) -> Result<u128, Error> {
 pub fn save(path: &Path, graph: &NavigationGraph, stamp: &Stamp) -> Result<u64, Error> {
     if stamp.routing_version != ROUTING_VERSION {
         return Err(Error::Incompatible {
-            path: path.into(),
+            path:   path.into(),
             reason: "writer received an old routing stamp".into(),
         });
     }
@@ -548,7 +581,7 @@ pub fn save(path: &Path, graph: &NavigationGraph, stamp: &Stamp) -> Result<u64, 
         let hash = {
             let mut hashed = HashWriter {
                 inner: &mut out,
-                hash: FNV_OFFSET,
+                hash:  FNV_OFFSET,
             };
             encode(&mut hashed, graph, stamp).map_err(|source| io_error(temp.clone(), source))?;
             hashed.hash
@@ -582,7 +615,7 @@ pub fn save(path: &Path, graph: &NavigationGraph, stamp: &Stamp) -> Result<u64, 
 #[derive(Debug)]
 pub struct Loaded {
     /// The graph the file holds.
-    pub graph: NavigationGraph,
+    pub graph:    NavigationGraph,
     /// The revision it was built from — the world's own, or an ancestor of it.
     pub revision: MapRevision,
 }
@@ -663,12 +696,16 @@ fn read_artifact(path: &Path, expected: &Stamp, accept: Accept<'_>) -> Result<Lo
     if hash(&bytes[..payload_len]) != recorded {
         return Err(corrupt(path, "checksum mismatch"));
     }
-    decode(path, &bytes[..payload_len], expected, accept).map_err(|error| match error {
-        Error::Corrupt { path: empty, reason } if empty.as_os_str().is_empty() => Error::Corrupt {
-            path: path.into(),
-            reason,
-        },
-        other => other,
+    decode(path, &bytes[..payload_len], expected, accept).map_err(|error| {
+        match error {
+            Error::Corrupt { path: empty, reason } if empty.as_os_str().is_empty() => {
+                Error::Corrupt {
+                    path: path.into(),
+                    reason,
+                }
+            }
+            other => other,
+        }
     })
 }
 
@@ -691,7 +728,7 @@ fn hash(bytes: &[u8]) -> u64 {
 
 struct HashWriter<W> {
     inner: W,
-    hash: u64,
+    hash:  u64,
 }
 
 impl<W: Write> Write for HashWriter<W> {
@@ -780,28 +817,28 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp, accept: Accept<'_>) -> Re
 
     Ok(Loaded {
         revision: header.revision,
-        graph: NavigationGraph {
-            width: header.width,
-            height: header.height,
-            regions: payload.regions,
-            walkable: payload.walkable,
-            dead_nodes: dead.nodes,
+        graph:    NavigationGraph {
+            width:             header.width,
+            height:            header.height,
+            regions:           payload.regions,
+            walkable:          payload.walkable,
+            dead_nodes:        dead.nodes,
             dead_region_nodes: dead.region_nodes,
-            dead_edges: dead.edges,
-            nodes: payload.nodes,
-            region_runs: payload.region_runs,
-            region_nodes: payload.region_nodes,
-            edge_runs: payload.edge_runs,
-            edge_targets: payload.edge_targets,
-            edge_costs: payload.edge_costs,
+            dead_edges:        dead.edges,
+            nodes:             payload.nodes,
+            region_runs:       payload.region_runs,
+            region_nodes:      payload.region_nodes,
+            edge_runs:         payload.edge_runs,
+            edge_targets:      payload.edge_targets,
+            edge_costs:        payload.edge_costs,
         },
     })
 }
 
 struct DecodedHeader {
     revision: MapRevision,
-    width: u32,
-    height: u32,
+    width:    u32,
+    height:   u32,
 }
 
 fn decode_header(
@@ -936,12 +973,12 @@ fn stamp_agrees(actual: &Stamp, expected: &Stamp, accept: Accept<'_>) -> bool {
 }
 
 struct CollectionCounts {
-    regions: usize,
-    walkable: usize,
-    nodes: usize,
+    regions:      usize,
+    walkable:     usize,
+    nodes:        usize,
     region_nodes: usize,
-    edges: usize,
-    cells: usize,
+    edges:        usize,
+    cells:        usize,
 }
 
 fn decode_collection_counts(
@@ -987,14 +1024,14 @@ fn decode_collection_counts(
 }
 
 struct DecodedPayload {
-    regions: Vec<Region>,
-    walkable: Vec<u8>,
-    nodes: Vec<Node>,
-    region_runs: Vec<Run>,
+    regions:      Vec<Region>,
+    walkable:     Vec<u8>,
+    nodes:        Vec<Node>,
+    region_runs:  Vec<Run>,
     region_nodes: Vec<u32>,
-    edge_runs: Vec<Run>,
+    edge_runs:    Vec<Run>,
     edge_targets: Vec<u32>,
-    edge_costs: Vec<u16>,
+    edge_costs:   Vec<u16>,
 }
 
 fn decode_payload(r: &mut Reader<'_>, path: &Path, width: u32, height: u32) -> Result<DecodedPayload, Error> {
@@ -1002,9 +1039,9 @@ fn decode_payload(r: &mut Reader<'_>, path: &Path, width: u32, height: u32) -> R
     let mut regions = Vec::with_capacity(counts.regions);
     for _ in 0..counts.regions {
         regions.push(Region {
-            left: r.u16()?,
-            top: r.u16()?,
-            width: r.u16()?,
+            left:   r.u16()?,
+            top:    r.u16()?,
+            width:  r.u16()?,
             height: r.u16()?,
         });
     }
@@ -1065,9 +1102,9 @@ fn decode_nodes(
 }
 
 struct DeadCounts {
-    nodes: u32,
+    nodes:        u32,
     region_nodes: u32,
-    edges: u32,
+    edges:        u32,
 }
 
 fn validate_payload(
@@ -1086,9 +1123,9 @@ fn validate_payload(
         // What no run points at is garbage a publish left behind, and it is
         // counted rather than refused: a saved graph is allowed to be one an
         // edit has already moved. See `NavigationGraph::repack`.
-        nodes: (payload.nodes.len() - named) as u32,
+        nodes:        (payload.nodes.len() - named) as u32,
         region_nodes: (payload.region_nodes.len() - listed) as u32,
-        edges: (payload.edge_targets.len() - reachable) as u32,
+        edges:        (payload.edge_targets.len() - reachable) as u32,
     })
 }
 
@@ -1164,7 +1201,7 @@ fn inputs_besides<'a>(inputs: &'a [InputStamp], log: &str) -> Vec<&'a InputStamp
 
 struct Reader<'a> {
     bytes: &'a [u8],
-    at: usize,
+    at:    usize,
 }
 impl<'a> Reader<'a> {
     fn remaining(&self) -> usize {
@@ -1179,7 +1216,7 @@ impl<'a> Reader<'a> {
             Ok(())
         } else {
             Err(Error::Corrupt {
-                path: PathBuf::new(),
+                path:   PathBuf::new(),
                 reason: "collection size exceeds the payload".into(),
             })
         }
@@ -1190,9 +1227,11 @@ impl<'a> Reader<'a> {
             .at
             .checked_add(n)
             .filter(|&e| e <= self.bytes.len())
-            .ok_or_else(|| Error::Corrupt {
-                path: PathBuf::new(),
-                reason: "truncated payload".into(),
+            .ok_or_else(|| {
+                Error::Corrupt {
+                    path:   PathBuf::new(),
+                    reason: "truncated payload".into(),
+                }
             })?;
         let out = &self.bytes[self.at..end];
         self.at = end;
@@ -1208,13 +1247,15 @@ impl<'a> Reader<'a> {
         Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
     }
     fn count(&mut self) -> Result<usize, Error> {
-        let n = usize::try_from(self.u64()?).map_err(|_| Error::Corrupt {
-            path: PathBuf::new(),
-            reason: "collection length overflow".into(),
+        let n = usize::try_from(self.u64()?).map_err(|_| {
+            Error::Corrupt {
+                path:   PathBuf::new(),
+                reason: "collection length overflow".into(),
+            }
         })?;
         if n > MAX_COLLECTION {
             Err(Error::Corrupt {
-                path: PathBuf::new(),
+                path:   PathBuf::new(),
                 reason: "unreasonable collection length".into(),
             })
         } else {
@@ -1236,7 +1277,7 @@ fn take_runs(r: &mut Reader<'_>, count: usize) -> Result<Vec<Run>, Error> {
     let mut runs = Vec::with_capacity(count);
     for _ in 0..count {
         runs.push(Run {
-            base: r.u32()?,
+            base:  r.u32()?,
             count: r.u32()?,
         });
     }
@@ -1276,19 +1317,19 @@ fn put_u64(w: &mut impl Write, n: u64) -> io::Result<()> {
 }
 fn incompatible(path: &Path, reason: impl Into<String>) -> Error {
     Error::Incompatible {
-        path: path.into(),
+        path:   path.into(),
         reason: reason.into(),
     }
 }
 fn stale(path: &Path, reason: impl Into<String>) -> Error {
     Error::Stale {
-        path: path.into(),
+        path:   path.into(),
         reason: reason.into(),
     }
 }
 fn corrupt(path: &Path, reason: impl Into<String>) -> Error {
     Error::Corrupt {
-        path: path.into(),
+        path:   path.into(),
         reason: reason.into(),
     }
 }
@@ -1297,17 +1338,26 @@ fn corrupt(path: &Path, reason: impl Into<String>) -> Error {
 mod tests {
     use std::collections::BTreeSet;
 
+    use openshard_map::grid::Tile;
+    use openshard_map::overlay::{
+        Cover,
+        Doors,
+        Overlay,
+    };
+
     use super::*;
     use crate::scene::Scene;
-    use crate::{Footing, Weight, find_long_path};
-    use openshard_map::grid::Tile;
-    use openshard_map::overlay::{Cover, Doors, Overlay};
+    use crate::{
+        Footing,
+        Weight,
+        find_long_path,
+    };
 
     /// A bounded open grid with some tiles blocked: a real map for the ground,
     /// an overlay for what is in the way. See `navigation`'s twin of this — the
     /// same fixture, because both are the same world.
     struct Grid {
-        scene: Scene,
+        scene:   Scene,
         blocked: Overlay,
     }
 
@@ -1337,12 +1387,12 @@ mod tests {
 
     fn stamp() -> Stamp {
         Stamp {
-            facet: Facet(0),
-            revision: MapRevision::INITIAL,
+            facet:           Facet(0),
+            revision:        MapRevision::INITIAL,
             routing_version: ROUTING_VERSION,
-            inputs: vec![InputStamp {
-                name: "map0.mul".into(),
-                bytes: 42,
+            inputs:          vec![InputStamp {
+                name:        "map0.mul".into(),
+                bytes:       42,
                 modified_ns: 7,
             }],
         }
@@ -1486,8 +1536,8 @@ mod tests {
     /// set, the log beside it when there is one, and the tile table.
     fn base_set_stamp(revision: u64, log: Option<u64>) -> Stamp {
         let mut inputs = vec![InputStamp {
-            name: "felucca.osbase".into(),
-            bytes: 4096,
+            name:        "felucca.osbase".into(),
+            bytes:       4096,
             modified_ns: 11,
         }];
         if let Some(bytes) = log {
@@ -1498,8 +1548,8 @@ mod tests {
             });
         }
         inputs.push(InputStamp {
-            name: "tiledata.mul".into(),
-            bytes: 512,
+            name:        "tiledata.mul".into(),
+            bytes:       512,
             modified_ns: 13,
         });
         Stamp {

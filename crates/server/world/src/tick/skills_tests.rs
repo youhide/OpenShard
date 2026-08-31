@@ -9,19 +9,45 @@
 //! a cliloc block chosen by the wrong arithmetic reads as a plausible sentence
 //! about the wrong object, which no client will report.
 
-use super::tests::{START, enter, enter_as, packets_for, spawn_mobile_at, world};
-use super::*;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::RawSerial;
-use openshard_protocol::wire::{Graphic, Hue, RawSkillId};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    RawSkillId,
+};
 use openshard_protocol::world::Aggression;
 use openshard_skills::DEFAULT_SKILL_DELAY_TICKS;
 use openshard_state::Skill;
 use openshard_state::components::{
-    Combat, Contained, Corpse, CorpseBody, Drawn, Equipped, HearsGhosts, Hidden, Hitpoints, Mana, Meditating,
-    Name, POISON_POTION_GRAPHIC, PoisonCharges, Poisoned, Stealthing,
+    Combat,
+    Contained,
+    Corpse,
+    CorpseBody,
+    Drawn,
+    Equipped,
+    HearsGhosts,
+    Hidden,
+    Hitpoints,
+    Mana,
+    Meditating,
+    Name,
+    POISON_POTION_GRAPHIC,
+    PoisonCharges,
+    Poisoned,
+    Stealthing,
 };
+
+use super::tests::{
+    START,
+    enter,
+    enter_as,
+    packets_for,
+    spawn_mobile_at,
+    world,
+};
+use super::*;
 
 /// Give the player a skill outright, so a roll is a sure thing.
 fn train(world: &mut World, connection: ConnectionId, skill: Skill, value: u16) {
@@ -77,9 +103,9 @@ fn use_skill_on(
         connection,
         response: openshard_protocol::target::TargetResponse {
             cursor_id: openshard_protocol::wire::CursorId(cursor_id.raw()),
-            object: Some(target),
-            location: Point::new(START.x + 1, START.y, 0),
-            graphic: None,
+            object:    Some(target),
+            location:  Point::new(START.x + 1, START.y, 0),
+            graphic:   None,
             cancelled: false,
         },
     });
@@ -221,10 +247,10 @@ fn forensics_says_who_killed_a_body_and_who_has_been_through_it() {
 
     let victim = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 10, now);
     world.queue(Command::Damage {
-        serial: victim,
-        amount: 100,
+        serial:      victim,
+        amount:      100,
         damage_type: 0,
-        by: Some(player_serial),
+        by:          Some(player_serial),
     });
     world.tick(now);
     // The corpse the reap laid, remembering the player as its killer.
@@ -284,10 +310,10 @@ fn taking_something_off_a_corpse_makes_you_a_looter() {
     };
     let victim = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 10, now);
     world.queue(Command::Damage {
-        serial: victim,
-        amount: 100,
+        serial:      victim,
+        amount:      100,
         damage_type: 0,
-        by: Some(player_serial),
+        by:          Some(player_serial),
     });
     world.tick(now);
     let (corpse, _) = world
@@ -308,8 +334,8 @@ fn taking_something_off_a_corpse_makes_you_a_looter() {
 
     world.queue(Command::PickUpItem {
         connection: looter,
-        serial: RawSerial(loot_serial.raw()),
-        amount: 1,
+        serial:     RawSerial(loot_serial.raw()),
+        amount:     1,
     });
     world.tick(now);
     assert_eq!(
@@ -333,10 +359,10 @@ fn a_corpses_story_comes_back_after_a_restart() {
     };
     let victim = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 10, now);
     world.queue(Command::Damage {
-        serial: victim,
-        amount: 100,
+        serial:      victim,
+        amount:      100,
         damage_type: 0,
-        by: Some(player_serial),
+        by:          Some(player_serial),
     });
     world.tick(now);
     world.take_snapshot();
@@ -384,7 +410,7 @@ fn a_corpses_story_comes_back_after_a_restart() {
     assert_eq!(
         reborn.state.world_item(corpse).unwrap().payload,
         openshard_protocol::items::WorldItemPayload::Corpse {
-            body: Graphic(0x0190),
+            body:   Graphic(0x0190),
             // The way it fell came back with the story it is saved beside.
             facing: openshard_protocol::direction::Direction::South,
         },
@@ -405,11 +431,17 @@ fn meditation_enters_a_trance_and_a_step_breaks_it() {
     train(&mut world, player, Skill::Meditation, 1000);
     world.tick(now);
     // Spend some mana, or the answer is "you are at peace".
-    world.state.registry.insert(entity, Mana { current: 1, max: 50 });
+    world.state.registry.insert(
+        entity,
+        Mana {
+            current: 1,
+            max:     50,
+        },
+    );
 
     world.queue(Command::UseSkillButton {
         connection: player,
-        skill: RawSkillId(Skill::Meditation.id()),
+        skill:      RawSkillId(Skill::Meditation.id()),
     });
     world.tick(now);
     assert!(
@@ -419,13 +451,13 @@ fn meditation_enters_a_trance_and_a_step_breaks_it() {
     );
 
     world.queue(Command::Step {
-        serial: world.state.registry.serial_of(entity).unwrap(),
+        serial:    world.state.registry.serial_of(entity).unwrap(),
         direction: Direction::North.to_bits(),
     });
     world.tick(now);
     // The first Step turns; the second moves, and the move is what breaks it.
     world.queue(Command::Step {
-        serial: world.state.registry.serial_of(entity).unwrap(),
+        serial:    world.state.registry.serial_of(entity).unwrap(),
         direction: Direction::North.to_bits(),
     });
     world.tick(now);
@@ -450,14 +482,20 @@ fn meditation_wants_free_hands() {
     let owner = world.state.registry.serial_of(entity).unwrap();
     train(&mut world, player, Skill::Meditation, 1000);
     world.tick(now);
-    world.state.registry.insert(entity, Mana { current: 1, max: 50 });
+    world.state.registry.insert(
+        entity,
+        Mana {
+            current: 1,
+            max:     50,
+        },
+    );
 
     // A katana on the one-handed layer.
     let (sword, _) = world.state.registry.spawn_with_serial(SerialKind::Item).unwrap();
     world.state.registry.insert(
         sword,
         Drawn {
-            id: openshard_protocol::wire::Graphic(0x13FF),
+            id:  openshard_protocol::wire::Graphic(0x13FF),
             hue: openshard_protocol::wire::Hue(0),
         },
     );
@@ -466,7 +504,7 @@ fn meditation_wants_free_hands() {
         sword,
         openshard_state::ItemLocation::equipped(Equipped {
             mobile: owner,
-            layer: Layer(1),
+            layer:  Layer(1),
         }),
     )
     .unwrap();
@@ -474,7 +512,7 @@ fn meditation_wants_free_hands() {
 
     world.queue(Command::UseSkillButton {
         connection: player,
-        skill: RawSkillId(Skill::Meditation.id()),
+        skill:      RawSkillId(Skill::Meditation.id()),
     });
     world.tick(now);
     assert!(!world.state.registry.has::<Meditating>(entity));
@@ -508,7 +546,7 @@ fn a_trance_doubles_the_rate_mana_comes_back_at() {
     world.state.registry.insert(
         plate,
         Drawn {
-            id: openshard_protocol::wire::Graphic(0x1415),
+            id:  openshard_protocol::wire::Graphic(0x1415),
             hue: openshard_protocol::wire::Hue(0),
         },
     );
@@ -517,7 +555,7 @@ fn a_trance_doubles_the_rate_mana_comes_back_at() {
         plate,
         openshard_state::ItemLocation::equipped(Equipped {
             mobile: owner,
-            layer: Layer(0x0D),
+            layer:  Layer(0x0D),
         }),
     )
     .unwrap();
@@ -546,7 +584,7 @@ fn spirit_speak_lets_the_living_hear_the_dead_without_seeing_them() {
         ghost,
         openshard_state::components::Ghost {
             body: Body {
-                id: Graphic(0x0190),
+                id:  Graphic(0x0190),
                 hue: openshard_protocol::wire::Hue(0),
             },
         },
@@ -555,7 +593,7 @@ fn spirit_speak_lets_the_living_hear_the_dead_without_seeing_them() {
     assert!(!world.state.can_hear_mobile(listener, ghost), "not yet");
     world.queue(Command::UseSkillButton {
         connection: living,
-        skill: RawSkillId(Skill::SpiritSpeak.id()),
+        skill:      RawSkillId(Skill::SpiritSpeak.id()),
     });
     world.tick(now);
     assert!(
@@ -591,9 +629,9 @@ fn answer_cursor(world: &mut World, connection: ConnectionId, target: Serial, no
         connection,
         response: openshard_protocol::target::TargetResponse {
             cursor_id: openshard_protocol::wire::CursorId(cursor_id.raw()),
-            object: Some(target),
-            location: Point::new(START.x + 1, START.y, 0),
-            graphic: None,
+            object:    Some(target),
+            location:  Point::new(START.x + 1, START.y, 0),
+            graphic:   None,
             cancelled: false,
         },
     });
@@ -620,7 +658,7 @@ fn poisoning_coats_a_blade_and_the_blade_spends_its_doses() {
     world.state.registry.insert(
         potion_entity,
         PoisonCharges {
-            level: openshard_protocol::world::PoisonLevel::new(2),
+            level:   openshard_protocol::world::PoisonLevel::new(2),
             charges: 1,
         },
     );
@@ -639,8 +677,8 @@ fn poisoning_coats_a_blade_and_the_blade_spends_its_doses() {
     assert_eq!(
         world.state.registry.get::<PoisonCharges>(blade).copied(),
         Some(PoisonCharges {
-            level: openshard_protocol::world::PoisonLevel::new(2),
-            charges: 14
+            level:   openshard_protocol::world::PoisonLevel::new(2),
+            charges: 14,
         }),
         "18 - level*2 doses"
     );
@@ -657,18 +695,18 @@ fn poisoning_coats_a_blade_and_the_blade_spends_its_doses() {
         blade,
         openshard_state::ItemLocation::equipped(Equipped {
             mobile: owner,
-            layer: Layer(1),
+            layer:  Layer(1),
         }),
     )
     .unwrap();
     let victim = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 200, now);
     world.queue(Command::WarMode {
         connection: player,
-        war: true,
+        war:        true,
     });
     world.queue(Command::Attack {
         connection: player,
-        target: Some(victim),
+        target:     Some(victim),
     });
     // Swing until one lands — the to-hit roll can miss, and a miss spends nothing.
     let victim_entity = world.state.registry.entity_of(victim).unwrap();
@@ -703,7 +741,7 @@ fn poison_only_goes_on_a_bladed_or_piercing_weapon() {
     world.state.registry.insert(
         potion_entity,
         PoisonCharges {
-            level: openshard_protocol::world::PoisonLevel::new(0),
+            level:   openshard_protocol::world::PoisonLevel::new(0),
             charges: 1,
         },
     );
@@ -733,7 +771,7 @@ fn taste_identification_finds_the_poison_on_a_blade() {
     world.state.registry.insert(
         blade,
         PoisonCharges {
-            level: openshard_protocol::world::PoisonLevel::new(3),
+            level:   openshard_protocol::world::PoisonLevel::new(3),
             charges: 12,
         },
     );
@@ -797,11 +835,11 @@ fn a_trapped_chest_goes_off_when_it_is_opened_and_remove_trap_takes_it_off() {
         .map_or(0, |h| h.current);
 
     world.queue(Command::SpawnContainer {
-        graphic: openshard_protocol::wire::Graphic(0x0E3C),
-        gump: openshard_protocol::wire::Graphic(0x003C),
-        hue: openshard_protocol::wire::Hue(0),
+        graphic:  openshard_protocol::wire::Graphic(0x0E3C),
+        gump:     openshard_protocol::wire::Graphic(0x003C),
+        hue:      openshard_protocol::wire::Hue(0),
         position: Point::new(START.x + 1, START.y, 0),
-        facet: Facet(0),
+        facet:    Facet(0),
     });
     world.tick(now);
     let (chest, _) = world
@@ -813,7 +851,7 @@ fn a_trapped_chest_goes_off_when_it_is_opened_and_remove_trap_takes_it_off() {
     world.state.registry.insert(
         chest,
         openshard_state::components::Trap {
-            kind: openshard_state::components::TrapKind::Dart,
+            kind:  openshard_state::components::TrapKind::Dart,
             power: 20,
             level: 0,
         },
@@ -823,7 +861,7 @@ fn a_trapped_chest_goes_off_when_it_is_opened_and_remove_trap_takes_it_off() {
 
     world.queue(Command::DoubleClick {
         connection: player,
-        request: UseRequest::Use(RawSerial(chest_serial.raw())),
+        request:    UseRequest::Use(RawSerial(chest_serial.raw())),
     });
     world.tick(now);
     let hurt = world
@@ -844,7 +882,7 @@ fn a_trapped_chest_goes_off_when_it_is_opened_and_remove_trap_takes_it_off() {
     world.state.registry.insert(
         chest,
         openshard_state::components::Trap {
-            kind: openshard_state::components::TrapKind::Dart,
+            kind:  openshard_state::components::TrapKind::Dart,
             power: 0,
             level: 0,
         },
@@ -875,7 +913,7 @@ fn remove_trap_refuses_before_it_raises_a_cursor() {
     let entity = world.state.players[&player];
     world.queue(Command::UseSkillButton {
         connection: player,
-        skill: RawSkillId(Skill::RemoveTrap.id()),
+        skill:      RawSkillId(Skill::RemoveTrap.id()),
     });
     world.tick(now);
     assert!(
@@ -903,7 +941,7 @@ fn hiding_takes_you_off_every_screen_and_a_word_puts_you_back() {
     let _ = packets_for(&mut world, watcher);
     world.queue(Command::WarMode {
         connection: hider,
-        war: true,
+        war:        true,
     });
     world.tick(now);
     assert!(
@@ -917,7 +955,7 @@ fn hiding_takes_you_off_every_screen_and_a_word_puts_you_back() {
 
     world.queue(Command::UseSkillButton {
         connection: hider,
-        skill: RawSkillId(Skill::Hiding.id()),
+        skill:      RawSkillId(Skill::Hiding.id()),
     });
     world.tick(now);
     assert!(
@@ -950,10 +988,10 @@ fn hiding_takes_you_off_every_screen_and_a_word_puts_you_back() {
 
     world.queue(Command::Say {
         connection: hider,
-        mode: RawTalkMode(0),
-        hue: RawHue(0),
-        font: RawFont(3),
-        text: "here I am".to_owned(),
+        mode:       RawTalkMode(0),
+        hue:        RawHue(0),
+        font:       RawFont(3),
+        text:       "here I am".to_owned(),
     });
     world.tick(now);
     assert!(
@@ -967,11 +1005,11 @@ fn hiding_takes_you_off_every_screen_and_a_word_puts_you_back() {
     let target = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
     world.queue(Command::WarMode {
         connection: hider,
-        war: true,
+        war:        true,
     });
     world.queue(Command::Attack {
         connection: hider,
-        target: Some(target),
+        target:     Some(target),
     });
     world.tick(now);
     assert!(
@@ -999,7 +1037,7 @@ fn stealth_buys_a_few_quiet_steps_and_no_more() {
 
     world.queue(Command::UseSkillButton {
         connection: player,
-        skill: RawSkillId(Skill::Stealth.id()),
+        skill:      RawSkillId(Skill::Stealth.id()),
     });
     world.tick(now);
     assert_eq!(
@@ -1045,7 +1083,7 @@ fn detecting_hidden_strips_a_worse_hider_and_not_a_better_one() {
 
     world.queue(Command::UseSkillButton {
         connection: seeker,
-        skill: RawSkillId(Skill::DetectHidden.id()),
+        skill:      RawSkillId(Skill::DetectHidden.id()),
     });
     world.tick(now);
     assert!(
@@ -1063,7 +1101,7 @@ fn give_instrument(world: &mut World, connection: ConnectionId, graphic: Graphic
     world.state.registry.insert(
         item,
         Drawn {
-            id: graphic,
+            id:  graphic,
             hue: Hue(0),
         },
     );
@@ -1072,8 +1110,8 @@ fn give_instrument(world: &mut World, connection: ConnectionId, graphic: Graphic
         item,
         openshard_state::ItemLocation::contained(Contained {
             container: backpack,
-            position: GumpPoint::new(20, 20),
-            grid: GridSlot(0),
+            position:  GumpPoint::new(20, 20),
+            grid:      GridSlot(0),
         }),
     )
     .unwrap();
@@ -1128,7 +1166,7 @@ fn a_bard_with_no_instrument_gets_no_cursor() {
     world.tick(now);
     world.queue(Command::UseSkillButton {
         connection: bard,
-        skill: RawSkillId(Skill::Provocation.id()),
+        skill:      RawSkillId(Skill::Provocation.id()),
     });
     world.tick(now);
     assert!(!world.state.has_target(entity));
@@ -1152,8 +1190,8 @@ fn discordance_makes_a_creature_worse_at_everything_at_once() {
     let entity = world.state.registry.entity_of(creature).unwrap();
     world.queue(Command::SetSkill {
         serial: creature,
-        skill: Skill::Wrestling.id(),
-        value: 1000,
+        skill:  Skill::Wrestling.id(),
+        value:  1000,
     });
     world.tick(now);
     let before = openshard_skills::skill_value(&world.state, entity, Skill::Wrestling);
@@ -1183,7 +1221,7 @@ fn give_item(world: &mut World, connection: ConnectionId, graphic: Graphic) -> S
     world.state.registry.insert(
         item,
         Drawn {
-            id: graphic,
+            id:  graphic,
             hue: Hue(0),
         },
     );
@@ -1192,8 +1230,8 @@ fn give_item(world: &mut World, connection: ConnectionId, graphic: Graphic) -> S
         item,
         openshard_state::ItemLocation::contained(Contained {
             container: backpack,
-            position: GumpPoint::new(20, 20),
-            grid: GridSlot(0),
+            position:  GumpPoint::new(20, 20),
+            grid:      GridSlot(0),
         }),
     )
     .unwrap();
@@ -1218,7 +1256,7 @@ fn a_bandage_takes_time_and_then_mends() {
         entity,
         Hitpoints {
             current: 20,
-            max: 100,
+            max:     100,
         },
     );
     let _ = packets_for(&mut world, healer);
@@ -1226,7 +1264,7 @@ fn a_bandage_takes_time_and_then_mends() {
     // Double-click the bandage, then point it at yourself.
     world.queue(Command::DoubleClick {
         connection: healer,
-        request: UseRequest::Use(RawSerial(bandage.raw())),
+        request:    UseRequest::Use(RawSerial(bandage.raw())),
     });
     world.tick(now);
     assert!(
@@ -1272,11 +1310,11 @@ fn a_lockpick_opens_a_lock_it_is_good_enough_for() {
     let pick = give_item(&mut world, thief, openshard_skills::LOCKPICK_GRAPHIC);
 
     world.queue(Command::SpawnContainer {
-        graphic: openshard_protocol::wire::Graphic(0x0E3C),
-        gump: openshard_protocol::wire::Graphic(0x003C),
-        hue: openshard_protocol::wire::Hue(0),
+        graphic:  openshard_protocol::wire::Graphic(0x0E3C),
+        gump:     openshard_protocol::wire::Graphic(0x003C),
+        hue:      openshard_protocol::wire::Hue(0),
         position: Point::new(START.x + 1, START.y, 0),
-        facet: Facet(0),
+        facet:    Facet(0),
     });
     world.tick(now);
     let (chest, _) = world
@@ -1288,11 +1326,11 @@ fn a_lockpick_opens_a_lock_it_is_good_enough_for() {
     world.state.registry.insert(
         chest,
         openshard_state::components::Lock {
-            kind: openshard_state::LockKind::Key(
+            kind:           openshard_state::LockKind::Key(
                 openshard_state::KeyValue::new(42).expect("non-zero test key"),
             ),
             required_skill: 0,
-            max_skill: 500,
+            max_skill:      500,
         },
     );
     let chest_serial = world.state.registry.serial_of(chest).unwrap();
@@ -1300,7 +1338,7 @@ fn a_lockpick_opens_a_lock_it_is_good_enough_for() {
 
     world.queue(Command::DoubleClick {
         connection: thief,
-        request: UseRequest::Use(RawSerial(pick.raw())),
+        request:    UseRequest::Use(RawSerial(pick.raw())),
     });
     world.tick(now);
     let said = answer_cursor(&mut world, thief, chest_serial, now);
@@ -1392,19 +1430,19 @@ fn a_pet_hears_all_stay_and_stops() {
     world.state.registry.insert(
         pet,
         openshard_state::components::Pet {
-            owner: serial,
-            slots: openshard_protocol::world::FollowerSlots::ONE,
-            order: openshard_state::components::PetOrder::Follow,
+            owner:        serial,
+            slots:        openshard_protocol::world::FollowerSlots::ONE,
+            order:        openshard_state::components::PetOrder::Follow,
             order_target: None,
         },
     );
 
     world.queue(Command::Say {
         connection: owner,
-        mode: RawTalkMode(0),
-        hue: RawHue(0),
-        font: RawFont(3),
-        text: "all stay".to_owned(),
+        mode:       RawTalkMode(0),
+        hue:        RawHue(0),
+        font:       RawFont(3),
+        text:       "all stay".to_owned(),
     });
     world.tick(now);
     assert_eq!(
@@ -1426,35 +1464,35 @@ fn a_pet_hears_all_stay_and_stops() {
 /// Spawn a creature with a chosen body — what the tamable table is keyed by.
 fn spawn_mobile_body(world: &mut World, body: u16, at: Point, now: Instant) -> Serial {
     world.queue(Command::SpawnMobile {
-        body: openshard_protocol::wire::Graphic(body),
-        hue: openshard_protocol::wire::Hue(0),
-        hits: 50,
-        notoriety: Notoriety::from_bits(5),
-        damage: 5,
-        resistance: openshard_protocol::world::PhysicalResistance::new(0),
-        swing: 0,
-        sight: Sight(0),
-        aggression: Aggression::from_bits(0),
-        beat: 0,
-        ranged: None,
+        body:        openshard_protocol::wire::Graphic(body),
+        hue:         openshard_protocol::wire::Hue(0),
+        hits:        50,
+        notoriety:   Notoriety::from_bits(5),
+        damage:      5,
+        resistance:  openshard_protocol::world::PhysicalResistance::new(0),
+        swing:       0,
+        sight:       Sight(0),
+        aggression:  Aggression::from_bits(0),
+        beat:        0,
+        ranged:      None,
         ranged_kind: DamageType::Physical,
-        wander: false,
-        position: at,
-        facet: Facet(0),
-        name: None,
-        title: None,
-        shoe: 0,
-        fame: 0,
-        karma: 0,
-        night_home: None,
-        banker: false,
-        vendor: false,
-        healer: false,
-        equipment: Vec::new(),
-        skills: Vec::new(),
-        stock: Vec::new(),
-        escort_to: None,
-        quests: Vec::new(),
+        wander:      false,
+        position:    at,
+        facet:       Facet(0),
+        name:        None,
+        title:       None,
+        shoe:        0,
+        fame:        0,
+        karma:       0,
+        night_home:  None,
+        banker:      false,
+        vendor:      false,
+        healer:      false,
+        equipment:   Vec::new(),
+        skills:      Vec::new(),
+        stock:       Vec::new(),
+        escort_to:   None,
+        quests:      Vec::new(),
     });
     world.tick(now);
     world
@@ -1489,7 +1527,7 @@ fn a_shop_bottle_holds_the_poison_its_label_names() {
     world.state.registry.insert(
         labelled,
         Drawn {
-            id: POISON_POTION_GRAPHIC,
+            id:  POISON_POTION_GRAPHIC,
             hue: openshard_protocol::wire::Hue(0),
         },
     );
@@ -1535,9 +1573,9 @@ fn animal_lore_reads_a_pet_and_refuses_a_wild_thing_to_a_novice() {
     world.state.registry.insert(
         entity,
         openshard_state::components::Pet {
-            owner: serial,
-            slots: openshard_protocol::world::FollowerSlots::ONE,
-            order: openshard_state::components::PetOrder::Follow,
+            owner:        serial,
+            slots:        openshard_protocol::world::FollowerSlots::ONE,
+            order:        openshard_state::components::PetOrder::Follow,
             order_target: None,
         },
     );
@@ -1547,17 +1585,17 @@ fn animal_lore_reads_a_pet_and_refuses_a_wild_thing_to_a_novice() {
     let _ = packets_for(&mut world, looker);
     world.queue(Command::UseSkillButton {
         connection: looker,
-        skill: RawSkillId(Skill::AnimalLore.id()),
+        skill:      RawSkillId(Skill::AnimalLore.id()),
     });
     world.tick(now);
     let _ = packets_for(&mut world, looker);
     world.queue(Command::TargetResponse {
         connection: looker,
-        response: openshard_protocol::target::TargetResponse {
+        response:   openshard_protocol::target::TargetResponse {
             cursor_id: openshard_protocol::wire::CursorId(serial.raw()),
-            object: Some(horse),
-            location: Point::new(START.x + 1, START.y, 0),
-            graphic: None,
+            object:    Some(horse),
+            location:  Point::new(START.x + 1, START.y, 0),
+            graphic:   None,
             cancelled: false,
         },
     });

@@ -46,19 +46,51 @@
 //! was quietly arranging, in a place where forgetting it would have dropped a
 //! field from the packet rather than from the screen.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{
+    BTreeSet,
+    HashMap,
+};
 
 use openshard_client_net::action::GumpReply;
-use openshard_client_net::view::{OpenGump, WorldView};
-use openshard_client_render::gump::{self as gump_art, CAPTION_FONT, CaptionSource, GumpArt, GumpPixel, Hit};
+use openshard_client_net::view::{
+    OpenGump,
+    WorldView,
+};
+use openshard_client_render::gump::{
+    self as gump_art,
+    CAPTION_FONT,
+    CaptionSource,
+    GumpArt,
+    GumpPixel,
+    Hit,
+};
 use openshard_client_render::text;
-use openshard_protocol::gump::layout::{Element, Flag, Switch};
-use openshard_protocol::gump::{GumpId, RawButtonId, RawGumpId, RawGumpKey, RawSwitchId};
+use openshard_protocol::gump::layout::{
+    Element,
+    Flag,
+    Switch,
+};
+use openshard_protocol::gump::{
+    GumpId,
+    RawButtonId,
+    RawGumpId,
+    RawGumpKey,
+    RawSwitchId,
+};
 use openshard_protocol::localized;
 use openshard_protocol::wire::ClilocId;
 use openshard_uofiles::cliloc::ClilocNumber;
 
-use crate::panes::{Button, Effect, Input, Key, Line, PaneCtx, PaneFrame, Response};
+use crate::panes::{
+    Button,
+    Effect,
+    Input,
+    Key,
+    Line,
+    PaneCtx,
+    PaneFrame,
+    Response,
+};
 use crate::windows::Drawn;
 
 /// One open dialog: the page it is showing, what the player has set on it, and
@@ -74,10 +106,10 @@ pub struct DialogPane {
     /// A shop's serial, one kind over: the subject carries a key and the pane is
     /// handed it when the window opens, because everything the pane looks up —
     /// the layout, the text table, the reply key — is in the view under this id.
-    gump_id: GumpId,
+    gump_id:  GumpId,
     /// The page being shown. Page `0` is drawn on every page, so this starts at
     /// zero and a layout with no pages at all never leaves it.
-    page: GumpPage,
+    page:     GumpPage,
     /// The switches the player has turned over, by their id.
     ///
     /// **Absence means the layout's own `initial`** — see the module docs. So a
@@ -86,7 +118,7 @@ pub struct DialogPane {
     switches: HashMap<RawSwitchId, bool>,
     /// What has been typed into each field, by its id. Absent means the line the
     /// layout pointed the field at, for the same reason.
-    entries: HashMap<TextEntryId, String>,
+    entries:  HashMap<TextEntryId, String>,
     /// The button the mouse went down on.
     ///
     /// A [`Hit`] rather than a button id because that is what a press *is*:
@@ -99,7 +131,7 @@ pub struct DialogPane {
     /// window is only ever offered to this pane, and it can only be followed by
     /// the release that ends it — and the window it belongs to is the window
     /// this pane is in.
-    held: Option<Hit>,
+    held:     Option<Hit>,
     /// The field taking keystrokes, **if this window has the keyboard at all**.
     ///
     /// Two questions, and the other one is the manager's: which *window* the
@@ -110,7 +142,7 @@ pub struct DialogPane {
     /// land in, and it is read only when [`PaneFrame::has_keyboard`] says they
     /// are coming here — so a field left focused in a window the player has
     /// clicked away from draws no caret and takes no letter.
-    focus: Option<TextEntryId>,
+    focus:    Option<TextEntryId>,
 }
 
 /// A page inside one gump layout.
@@ -164,7 +196,7 @@ impl TextEntryId {
 pub struct Window {
     /// The pictures, the hit table and the boxes — everything the pointer is
     /// tested against.
-    pub art: gump_art::Window,
+    pub art:   gump_art::Window,
     /// The text over them, already resolved to strings.
     pub lines: Vec<Line>,
 }
@@ -173,7 +205,7 @@ pub struct Window {
 #[derive(Default, Clone, Copy)]
 pub struct WindowFlags {
     /// `{ nomove }`: the player may not drag it.
-    pub no_move: bool,
+    pub no_move:  bool,
     /// `{ noclose }`: the right button does not take it down, and it has to be
     /// answered by one of its own buttons.
     pub no_close: bool,
@@ -242,9 +274,11 @@ impl DialogPane {
         // Absent only if the shard has re-sent the dialog between the frame that
         // drew the box and the press that landed on it, in which case there is
         // nothing to turn over.
-        let Some(set) = gump.elements.iter().find_map(|element| match element {
-            Element::Check(check) if check.id == switch => Some(self.set(check)),
-            _ => None,
+        let Some(set) = gump.elements.iter().find_map(|element| {
+            match element {
+                Element::Check(check) if check.id == switch => Some(self.set(check)),
+                _ => None,
+            }
         }) else {
             return;
         };
@@ -271,9 +305,13 @@ impl DialogPane {
     /// the first keystroke copies the line the layout named, and every one after
     /// it appends to that copy.
     fn entry<'a>(&'a mut self, gump: &OpenGump, field: TextEntryId) -> &'a mut String {
-        let line = gump.elements.iter().find_map(|element| match element {
-            Element::TextEntry { entry_id, line, .. } if TextEntryId::new(*entry_id) == field => Some(*line),
-            _ => None,
+        let line = gump.elements.iter().find_map(|element| {
+            match element {
+                Element::TextEntry { entry_id, line, .. } if TextEntryId::new(*entry_id) == field => {
+                    Some(*line)
+                }
+                _ => None,
+            }
         });
         let start = line
             .and_then(|line| gump.line(line))
@@ -300,9 +338,11 @@ impl DialogPane {
         let mut switches: Vec<RawSwitchId> = gump
             .elements
             .iter()
-            .filter_map(|element| match element {
-                Element::Check(switch) | Element::Radio(switch) => self.set(switch).then_some(switch.id),
-                _ => None,
+            .filter_map(|element| {
+                match element {
+                    Element::Check(switch) | Element::Radio(switch) => self.set(switch).then_some(switch.id),
+                    _ => None,
+                }
             })
             .collect();
         switches.sort_unstable();
@@ -314,12 +354,14 @@ impl DialogPane {
         let mut text_entries: Vec<(u16, String)> = gump
             .elements
             .iter()
-            .filter_map(|element| match element {
-                Element::TextEntry { entry_id, line, .. } => {
-                    let field = TextEntryId::new(*entry_id);
-                    Some((field.raw(), self.typed(field, gump, *line).to_owned()))
+            .filter_map(|element| {
+                match element {
+                    Element::TextEntry { entry_id, line, .. } => {
+                        let field = TextEntryId::new(*entry_id);
+                        Some((field.raw(), self.typed(field, gump, *line).to_owned()))
+                    }
+                    _ => None,
                 }
-                _ => None,
             })
             .collect();
         text_entries.sort_unstable_by_key(|(id, _)| *id);
@@ -503,16 +545,18 @@ impl DialogPane {
                 // than shown as a placeholder.
                 let text = match caption.source {
                     CaptionSource::Line(line) => gump.line(line)?,
-                    CaptionSource::Cliloc(number) => frame
-                        .files
-                        .cliloc
-                        .and_then(|table| table.get(ClilocNumber::new(number)))
-                        .or_else(|| localized::fallback(ClilocId(number)))?,
+                    CaptionSource::Cliloc(number) => {
+                        frame
+                            .files
+                            .cliloc
+                            .and_then(|table| table.get(ClilocNumber::new(number)))
+                            .or_else(|| localized::fallback(ClilocId(number)))?
+                    }
                 };
                 Some(Line {
-                    at: caption.at,
+                    at:   caption.at,
                     font: CAPTION_FONT,
-                    hue: caption.hue,
+                    hue:  caption.hue,
                     clip: caption.clip,
                     text: text.to_owned(),
                 })
@@ -522,9 +566,9 @@ impl DialogPane {
             let id = TextEntryId::new(field.id);
             let typed = self.typed(id, gump, field.line);
             lines.push(Line {
-                at: field.at,
+                at:   field.at,
                 font: CAPTION_FONT,
-                hue: field.hue,
+                hue:  field.hue,
                 clip: Some(field.size),
                 text: typed.to_owned(),
             });
@@ -534,12 +578,12 @@ impl DialogPane {
                 // `text::gump_width` is for — the same walk `letters` advances
                 // by, so the caret lands where the next character will.
                 lines.push(Line {
-                    at: field.at.offset(GumpPixel::new(
+                    at:   field.at.offset(GumpPixel::new(
                         text::gump_width(typed, CAPTION_FONT, frame.files.font_atlas),
                         0,
                     )),
                     font: CAPTION_FONT,
-                    hue: field.hue,
+                    hue:  field.hue,
                     clip: None,
                     text: CARET.to_owned(),
                 });
@@ -582,9 +626,11 @@ impl DialogPane {
         let on: BTreeSet<RawSwitchId> = gump
             .elements
             .iter()
-            .filter_map(|element| match element {
-                Element::Check(switch) | Element::Radio(switch) => self.set(switch).then_some(switch.id),
-                _ => None,
+            .filter_map(|element| {
+                match element {
+                    Element::Check(switch) | Element::Radio(switch) => self.set(switch).then_some(switch.id),
+                    _ => None,
+                }
             })
             .collect();
         let art = gump_art::window(
@@ -631,13 +677,15 @@ impl DialogPane {
                 self.press(gump, laid_out, ctx)
             }
             Input::Release(Button::Left) => self.release(ctx),
-            Input::Key(key) => match self.gump(ctx.frame.view) {
-                Some(gump) => self.key(key, gump),
-                // The shard has taken the dialog away and the window has not
-                // been reconciled off the list yet: there is nothing to type
-                // into.
-                None => Response::ignored(),
-            },
+            Input::Key(key) => {
+                match self.gump(ctx.frame.view) {
+                    Some(gump) => self.key(key, gump),
+                    // The shard has taken the dialog away and the window has not
+                    // been reconciled off the list yet: there is nothing to type
+                    // into.
+                    None => Response::ignored(),
+                }
+            }
             // The right button is the manager's close, which for this kind is
             // the one close that travels — see `DialogPane::dismiss`. A
             // modal's answer is the shard's dialog asking nothing of the
@@ -657,9 +705,17 @@ const CARET: &str = "|";
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_protocol::gump::layout::parse;
-    use openshard_protocol::gump::{ButtonId, GumpButton, GumpKey, GumpLayout, GumpPoint, SwitchId};
+    use openshard_protocol::gump::{
+        ButtonId,
+        GumpButton,
+        GumpKey,
+        GumpLayout,
+        GumpPoint,
+        SwitchId,
+    };
+
+    use super::*;
 
     fn admin_menu() -> OpenGump {
         let mut layout = GumpLayout::new();
@@ -673,11 +729,11 @@ mod tests {
         layout.text_entry(30, 180, 120, 20, 1153, 7, "Britain");
         let (string, lines) = layout.finish();
         OpenGump {
-            key: GumpKey(0x2A),
-            gump_id: GumpId(0x00AD_0001),
-            at: GumpPoint::new(100, 100),
+            key:      GumpKey(0x2A),
+            gump_id:  GumpId(0x00AD_0001),
+            at:       GumpPoint::new(100, 100),
             elements: parse(string),
-            lines: lines.to_vec(),
+            lines:    lines.to_vec(),
         }
     }
 
@@ -700,12 +756,12 @@ mod tests {
         assert!(pane.switches.is_empty(), "nothing is remembered until it is done");
 
         let check = Switch {
-            x: 30,
-            y: 100,
-            off: 210,
-            on: 211,
+            x:       30,
+            y:       100,
+            off:     210,
+            on:      211,
             initial: false,
-            id: RawSwitchId(1),
+            id:      RawSwitchId(1),
         };
         assert!(!pane.set(&check), "the layout said off");
 
@@ -856,11 +912,11 @@ mod tests {
         layout.background(0, 0, 100, 100, 5054);
         let (string, lines) = layout.finish();
         let gump = OpenGump {
-            key: GumpKey(1),
-            gump_id: GumpId(2),
-            at: GumpPoint::new(0, 0),
+            key:      GumpKey(1),
+            gump_id:  GumpId(2),
+            at:       GumpPoint::new(0, 0),
             elements: parse(string),
-            lines: lines.to_vec(),
+            lines:    lines.to_vec(),
         };
 
         assert!(pane(&gump).dismiss(&gump).is_none());
@@ -911,12 +967,12 @@ mod tests {
         let files = fixture::Install::shipping([]);
 
         let with_keyboard = PaneFrame {
-            view: &view,
-            files: files.files(),
-            cursor: GumpPixel::new(0, 0),
-            hand: None,
+            view:         &view,
+            files:        files.files(),
+            cursor:       GumpPixel::new(0, 0),
+            hand:         None,
             has_keyboard: true,
-            has_prompt: false,
+            has_prompt:   false,
         };
         let Some(Drawn::Dialog(drawn)) = pane.layout(&with_keyboard) else {
             panic!("a dialog whose gump is still in the view lays itself out");

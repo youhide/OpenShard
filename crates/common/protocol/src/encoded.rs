@@ -10,8 +10,14 @@
 //! two agree.
 
 use crate::codec::PacketWriter;
-use crate::error::{DecodeError, expect_id};
-use crate::packet::{PacketLength, frame_body};
+use crate::error::{
+    DecodeError,
+    expect_id,
+};
+use crate::packet::{
+    PacketLength,
+    frame_body,
+};
 
 /// `0xD7` — a client request named by its subcommand.
 ///
@@ -26,7 +32,7 @@ pub struct EncodedCommand {
     /// sent it from the connection, the same shape as [`RawGumpKey`]'s echo.
     ///
     /// [`RawGumpKey`]: crate::gump::RawGumpKey
-    pub serial: RawEncodedSerial,
+    pub serial:     RawEncodedSerial,
     /// Which command, exactly as sent. See [`RawEncodedSubcommand::interpret`].
     pub subcommand: RawEncodedSubcommand,
 }

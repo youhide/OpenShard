@@ -9,9 +9,15 @@
 //! only touches this half can be written and tested against it alone.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{
+    BTreeMap,
+    VecDeque,
+};
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_client_net::view::WorldView;
 use openshard_client_render::animate::StaticAnimations;
@@ -24,11 +30,20 @@ use openshard_client_render::statics::StaticGeometry;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::feedback::GraphicalEffect;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Point;
 
-use crate::crowd::{Crowd, Who};
-use crate::{link, resources};
+use crate::crowd::{
+    Crowd,
+    Who,
+};
+use crate::{
+    link,
+    resources,
+};
 
 /// How long a damage number remains over the mobile it struck.
 pub const DAMAGE_NUMBER_HOLD: Duration = Duration::from_secs(1);
@@ -47,11 +62,11 @@ pub const HEALTH_ESTIMATE_LAG: Duration = Duration::from_millis(450);
 /// A short-lived combat number shown over a mobile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DamageNumber {
-    pub serial: Serial,
-    pub amount: DamageAmount,
+    pub serial:  Serial,
+    pub amount:  DamageAmount,
     /// Colour distinguishes damage received by the local player from damage
     /// shown over another mobile.
-    pub hue: Hue,
+    pub hue:     Hue,
     pub elapsed: Duration,
 }
 
@@ -72,10 +87,10 @@ const EFFECT_TILES_PER_SECOND: f32 = 15.0;
 #[derive(Clone, Copy, Debug)]
 pub struct FlyingEffect {
     /// The shot's own sprite.
-    pub art: Graphic,
-    pub from: Point,
-    pub to: Point,
-    pub elapsed: Duration,
+    pub art:      Graphic,
+    pub from:     Point,
+    pub to:       Point,
+    pub elapsed:  Duration,
     /// How long the whole flight takes — [`EFFECT_TILES_PER_SECOND`] applied to
     /// the endpoints' tile distance, computed once at spawn.
     pub duration: Duration,
@@ -99,8 +114,8 @@ impl FlyingEffect {
 /// a hit, a heal, and a sequence of DoT ticks.
 #[derive(Clone, Copy, Debug)]
 pub struct HealthEstimate {
-    from: u16,
-    target: u16,
+    from:    u16,
+    target:  u16,
     elapsed: Duration,
 }
 
@@ -143,10 +158,10 @@ pub struct WorldState {
     /// The sole app-thread owner of player movement.  Presentation, planning,
     /// camera following, and the HUD query this rather than maintaining their
     /// own position records.
-    pub motion: PlayerMotion,
+    pub motion:        PlayerMotion,
     /// The renderer-facing projection rebuilt from authoritative state and
     /// prediction before a frame is drawn.
-    pub presentation: PresentationWorld,
+    pub presentation:  PresentationWorld,
     /// The other bodies a step of ours has to get past, as the shard last
     /// stated their tiles — [`crate::clutter::crowd`]'s answer, kept.
     ///
@@ -167,17 +182,17 @@ pub struct WorldState {
     /// It stops being refreshed when the shard is lost, along with every other
     /// projection here: `App::walk` is what stops the body from moving over a
     /// world nobody is describing any more, and nothing plans a step once it has.
-    pub bodies: Vec<Point>,
+    pub bodies:        Vec<Point>,
     /// Whether a world picture is safe to show. The offline viewer starts
     /// ready; a connected client becomes ready only when the shard has sent its
     /// first complete [`WorldView`]. Until then the presentation's placeholder
     /// is state for startup mechanics, not a picture for the player.
-    pub render_ready: bool,
+    pub render_ready:  bool,
     /// What the connection is doing, for the status strip.
-    pub connection: String,
+    pub connection:    String,
     /// The shard: whether there is one, and — if there is not — whether there
     /// ever was.
-    pub shard: Shard,
+    pub shard:         Shard,
 }
 
 /// What is on the other end of this client, in the one field that decides it.
@@ -237,32 +252,32 @@ impl Shard {
 pub struct PresentationWorld {
     /// Static animation state and its flame clock, advanced whenever
     /// presentation time progresses.
-    pub tile_animations: StaticAnimations,
-    pub flame_clock: Duration,
+    pub tile_animations:       StaticAnimations,
+    pub flame_clock:           Duration,
     /// The player's rendered body. Its position and facing are projected from
     /// [`PlayerMotion`]; body, hue and equipment come from the shard.
-    pub player: Mobile,
+    pub player:                Mobile,
     /// The guarded cutaway tile. It may deliberately lag a doomed prediction.
-    pub cutaway_at: Point,
+    pub cutaway_at:            Point,
     /// Persistent opacity for world objects moving into or out of cutaway.
-    pub cutaway_fades: openshard_client_render::cutaway::Fades,
+    pub cutaway_fades:         openshard_client_render::cutaway::Fades,
     /// Last reusable map-static collection. Dynamic server items remain live.
     pub static_geometry_cache: Option<StaticGeometryCache>,
     /// Per-block and per-building interior topology. It is changed only while
     /// a frame resolves its immutable picture policy.
-    pub interior_cache: RefCell<InteriorCache>,
+    pub interior_cache:        RefCell<InteriorCache>,
     /// Render mobiles beside the identity their animation clocks use.
-    pub others: Vec<(Who, Mobile)>,
+    pub others:                Vec<(Who, Mobile)>,
     /// Item corpses projected through the mobile renderer. Their serial remains
     /// an item serial, so double-clicking one still opens its loot container.
-    pub corpses: Vec<(Who, Mobile)>,
+    pub corpses:               Vec<(Who, Mobile)>,
     /// Ground-item render data and the parallel wire serials used for picks.
-    pub items: Vec<GroundItem>,
-    pub item_serials: Vec<Serial>,
+    pub items:                 Vec<GroundItem>,
+    pub item_serials:          Vec<Serial>,
     /// Whether the matching item is a piece expanded from a server multi
     /// (normally a house). This stays parallel to [`Self::items`] so the World
     /// tab can independently hide houses and ordinary ground items.
-    pub item_houses: Vec<bool>,
+    pub item_houses:           Vec<bool>,
     /// The house a `0x99` cursor is drawing under the pointer, expanded into its
     /// pieces. Empty whenever no multi cursor is up.
     ///
@@ -275,26 +290,26 @@ pub struct PresentationWorld {
     ///
     /// It is chained onto `items` at the one call that hands them to
     /// `frame::Inputs`, so the renderer never learns there were two lists.
-    pub multi_preview: Vec<GroundItem>,
+    pub multi_preview:         Vec<GroundItem>,
     /// Damage numbers are presentation events, not authoritative world state.
-    pub damage_numbers: Vec<DamageNumber>,
+    pub damage_numbers:        Vec<DamageNumber>,
     /// Presentation-only delayed health, keyed by the mobile the shard named.
-    pub health_estimates: BTreeMap<Serial, HealthEstimate>,
+    pub health_estimates:      BTreeMap<Serial, HealthEstimate>,
     /// Animation and glide history, which belongs to presentation rather than
     /// authoritative state.
-    pub crowd: Crowd,
+    pub crowd:                 Crowd,
     /// Everything this client has been told about fighting, with the gaps in
     /// between visible — the recorder behind *"there was a stall right here"*.
     ///
     /// Beside the crowd and aged with it on purpose: a timestamp in the log and
     /// the fill of a bar have to be the same clock, or a gap read out of one
     /// says nothing about the other. See [`combat_log`](crate::combat_log).
-    pub combat_log: crate::combat_log::CombatLog,
+    pub combat_log:            crate::combat_log::CombatLog,
     /// Arrows and bolts in flight, aged and culled the way [`damage_numbers`]
     /// are — a `0x70` is an event, not a fact to keep past its own flight.
     ///
     /// [`damage_numbers`]: Self::damage_numbers
-    pub effects: Vec<FlyingEffect>,
+    pub effects:               Vec<FlyingEffect>,
 }
 
 /// Every input that can change cached map-static geometry.
@@ -304,13 +319,13 @@ pub struct PresentationWorld {
 /// lists in [`StaticGeometryCache`].
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct StaticGeometryCacheKey {
-    camera: Camera,
-    cutaway: Cutaway,
-    interior: Option<u64>,
-    atlas_revision: u64,
-    player_mask: Option<u64>,
-    has_occlusion: bool,
-    animation_tick: u128,
+    camera:            Camera,
+    cutaway:           Cutaway,
+    interior:          Option<u64>,
+    atlas_revision:    u64,
+    player_mask:       Option<u64>,
+    has_occlusion:     bool,
+    animation_tick:    u128,
     items_fingerprint: u64,
 }
 
@@ -344,21 +359,21 @@ impl StaticGeometryCacheKey {
 /// for non-animated, fully opaque collections with no fade in progress.
 #[derive(Debug)]
 pub struct StaticGeometryCache {
-    key: StaticGeometryCacheKey,
+    key:      StaticGeometryCacheKey,
     geometry: StaticGeometry,
 }
 
 /// The durable map work behind one building picture.
 #[derive(Default, Debug)]
 pub struct InteriorCache {
-    pub index: openshard_client_render::interiors::Index,
+    pub index:     openshard_client_render::interiors::Index,
     pub buildings: BTreeMap<u32, InteriorBuilding>,
 }
 
 /// A complete, immutable room/floor graph for one label in the facet artifact.
 #[derive(Debug)]
 pub struct InteriorBuilding {
-    pub rooms: openshard_client_render::interiors::StitchedRooms,
+    pub rooms:     openshard_client_render::interiors::StitchedRooms,
     pub buildings: openshard_client_render::interiors::Buildings,
 }
 
@@ -436,10 +451,10 @@ impl PresentationWorld {
         // rather than vanishing the instant it is drawn.
         let seconds = (tiles / EFFECT_TILES_PER_SECOND).max(0.05);
         self.effects.push(FlyingEffect {
-            art: effect.art,
-            from: effect.from_point,
-            to: effect.to_point,
-            elapsed: Duration::ZERO,
+            art:      effect.art,
+            from:     effect.from_point,
+            to:       effect.to_point,
+            elapsed:  Duration::ZERO,
             duration: Duration::from_secs_f32(seconds),
         });
     }
@@ -495,7 +510,7 @@ pub(crate) fn advance_presentation_to(
 pub struct AuthoritativeWorld {
     /// The last thing the server said, whole. Kept for the HUD and as the sole
     /// source from which this app rebuilds render projections.
-    pub view: Option<WorldView>,
+    pub view:          Option<WorldView>,
     /// The walk handshake, beside the view it belongs to.
     ///
     /// This end's half of `0x02`/`0x22`/`0x21`: which steps are in flight, what
@@ -508,7 +523,7 @@ pub struct AuthoritativeWorld {
     /// `None` until a world is entered, and that absence is the fact: an
     /// offline viewer never has one, and there is no walk to answer with
     /// before the shard has said where the body is.
-    pub walk: Option<openshard_client_net::walk::Walk>,
+    pub walk:          Option<openshard_client_net::walk::Walk>,
     /// Whether the shard's facet has been compared with the one loaded. See
     /// `App::entered`: once, because it cannot change without a `0xBF 0x08`
     /// nothing here reads yet.
@@ -524,7 +539,7 @@ pub struct AuthoritativeWorld {
     ///
     /// Empty on every shard where nobody has designed a house, which is every
     /// shard today.
-    pub designs: std::collections::HashMap<Serial, HouseShape>,
+    pub designs:       std::collections::HashMap<Serial, HouseShape>,
 }
 
 /// A designed house's picture, as this client holds it.
@@ -532,7 +547,7 @@ pub struct AuthoritativeWorld {
 pub struct HouseShape {
     /// The revision the `0xD8` that filled this carried. Compared against the
     /// one `WorldView::designs` holds to decide whether to ask again.
-    pub revision: u32,
+    pub revision:   u32,
     /// The tiles the house draws as.
     pub components: Vec<openshard_uofiles::multi::Component>,
 }
@@ -546,7 +561,7 @@ pub struct HouseShape {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerMotion {
     network: NetworkMotion,
-    game: GameMotion,
+    game:    GameMotion,
     /// Whether the player is in the saddle, for [`GameMotion::start`]'s hold
     /// alone — the one fact about appearance that is also a fact about
     /// movement, since a mount changes how long a tile actually takes and not
@@ -572,12 +587,12 @@ struct NetworkMotion {
     pub confirmed: openshard_client_net::walk::Predicted,
     /// The end of the locally accepted step chain.
     pub predicted: openshard_client_net::walk::Predicted,
-    pending: VecDeque<PendingStep>,
+    pending:       VecDeque<PendingStep>,
     /// The transition currently drawn, followed by transitions accepted while
     /// the application was busy.  Predictions have protocol identity and must
     /// not be collapsed into one longer, faster glide.
-    transitions: VecDeque<MotionTransition>,
-    corrected: bool,
+    transitions:   VecDeque<MotionTransition>,
+    corrected:     bool,
 }
 
 /// A local step waiting for the one protocol outcome that can retire it.
@@ -590,7 +605,7 @@ struct PendingStep {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct MotionTransition {
     from: openshard_client_net::walk::Predicted,
-    to: openshard_client_net::walk::Predicted,
+    to:   openshard_client_net::walk::Predicted,
 }
 
 /// Continuous player pose, separate from the protocol's integer-grid state.
@@ -600,8 +615,8 @@ pub struct GameMotion {
     /// The exact pose produced by the movement clock.  It remains separate
     /// from `drawn`: the next step must begin on schedule even while the
     /// picture deliberately eases a few pixels behind it.
-    walked: Gaze,
-    drawn: Gaze,
+    walked:     Gaze,
+    drawn:      Gaze,
     transition: Option<GameTransition>,
     /// How long the body has stood on its tile **since a crossing ended**.
     ///
@@ -624,7 +639,7 @@ pub struct GameMotion {
     ///
     /// Capped at [`STOOD_STILL`] so a body standing in a bank for an hour does
     /// not accumulate a number; the band would refuse it anyway.
-    since: Option<Duration>,
+    since:      Option<Duration>,
 }
 
 /// The longest gap [`GameMotion::since`] bothers to remember.
@@ -636,19 +651,19 @@ const STOOD_STILL: Duration = openshard_movement::WALK_HOLD;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct GameTransition {
-    from: Gaze,
-    to: Gaze,
+    from:    Gaze,
+    to:      Gaze,
     elapsed: Duration,
-    takes: Duration,
+    takes:   Duration,
 }
 
 /// Named values for interfaces that report movement without inspecting a
 /// `Mobile` or interpolation clock.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HudMotionState {
-    pub confirmed: openshard_client_net::walk::Predicted,
-    pub predicted: openshard_client_net::walk::Predicted,
-    pub route_origin: Point,
+    pub confirmed:     openshard_client_net::walk::Predicted,
+    pub predicted:     openshard_client_net::walk::Predicted,
+    pub route_origin:  Point,
     pub pending_steps: usize,
 }
 
@@ -659,10 +674,10 @@ pub struct MotionRenderState {
     /// The discrete endpoint of the transition currently being rendered.  It
     /// is intentionally not necessarily the newest local prediction: later
     /// numbered steps may be queued behind this one.
-    pub rendered: openshard_client_net::walk::Predicted,
-    pub predicted: openshard_client_net::walk::Predicted,
+    pub rendered:   openshard_client_net::walk::Predicted,
+    pub predicted:  openshard_client_net::walk::Predicted,
     pub transition: Option<(Point, Point)>,
-    pub corrected: bool,
+    pub corrected:  bool,
 }
 
 /// One internally consistent motion observation for diagnostics.  Keeping the
@@ -670,12 +685,12 @@ pub struct MotionRenderState {
 /// a fresh logical prediction with a stale presentation clock.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MotionSnapshot {
-    pub confirmed: openshard_client_net::walk::Predicted,
-    pub predicted: openshard_client_net::walk::Predicted,
-    pub rendered: Gaze,
-    pub route_origin: Point,
+    pub confirmed:     openshard_client_net::walk::Predicted,
+    pub predicted:     openshard_client_net::walk::Predicted,
+    pub rendered:      Gaze,
+    pub route_origin:  Point,
     pub pending_steps: usize,
-    pub transition: Option<(Point, Point)>,
+    pub transition:    Option<(Point, Point)>,
 }
 
 impl PlayerMotion {
@@ -683,17 +698,17 @@ impl PlayerMotion {
         let standing = openshard_client_net::walk::Predicted { position: at, facing };
         Self {
             network: NetworkMotion {
-                confirmed: standing,
-                predicted: standing,
-                pending: VecDeque::new(),
+                confirmed:   standing,
+                predicted:   standing,
+                pending:     VecDeque::new(),
                 transitions: VecDeque::new(),
-                corrected: false,
+                corrected:   false,
             },
-            game: GameMotion {
-                walked: Gaze::on(at),
-                drawn: Gaze::on(at),
+            game:    GameMotion {
+                walked:     Gaze::on(at),
+                drawn:      Gaze::on(at),
                 transition: None,
-                since: None,
+                since:      None,
             },
             mounted: false,
         }
@@ -829,9 +844,9 @@ impl PlayerMotion {
     /// The stable movement snapshot for HUDs and diagnostics.
     pub fn hud_state(&self) -> HudMotionState {
         HudMotionState {
-            confirmed: self.network.confirmed,
-            predicted: self.network.predicted,
-            route_origin: self.route_origin(),
+            confirmed:     self.network.confirmed,
+            predicted:     self.network.predicted,
+            route_origin:  self.route_origin(),
             pending_steps: self.network.pending.len(),
         }
     }
@@ -841,22 +856,22 @@ impl PlayerMotion {
     pub fn render_state(&self) -> MotionRenderState {
         let active = self.network.transitions.front().copied();
         MotionRenderState {
-            rendered: active.map_or(self.network.predicted, |transition| transition.to),
-            predicted: self.network.predicted,
+            rendered:   active.map_or(self.network.predicted, |transition| transition.to),
+            predicted:  self.network.predicted,
             transition: active.map(|transition| (transition.from.position, transition.to.position)),
-            corrected: self.network.corrected,
+            corrected:  self.network.corrected,
         }
     }
 
     /// Capture all diagnostic movement values from this one state owner.
     pub fn snapshot(&self) -> MotionSnapshot {
         MotionSnapshot {
-            confirmed: self.network.confirmed,
-            predicted: self.network.predicted,
-            rendered: self.game.drawn,
-            route_origin: self.route_origin(),
+            confirmed:     self.network.confirmed,
+            predicted:     self.network.predicted,
+            rendered:      self.game.drawn,
+            route_origin:  self.route_origin(),
             pending_steps: self.network.pending.len(),
-            transition: self
+            transition:    self
                 .network
                 .transitions
                 .front()
@@ -1027,15 +1042,15 @@ impl GameMotion {
         self.transition = Some(GameTransition {
             // Starting from the last continuous pose preserves continuity if a
             // trusted source supplies consecutive steps faster than a frame.
-            from: self.walked,
-            to: Gaze::on(to),
+            from:    self.walked,
+            to:      Gaze::on(to),
             elapsed: Duration::ZERO,
             // Scheduled by when it should *end* and not by how long it takes:
             // whatever the body has been standing since the last crossing
             // finished comes out of this one, so a late ask costs the walk a
             // little speed rather than a pause per tile. See
             // [`GameMotion::since`].
-            takes: openshard_movement::crossing_left(
+            takes:   openshard_movement::crossing_left(
                 nominal.saturating_sub(self.since.unwrap_or(Duration::ZERO)),
                 nominal,
             ),
@@ -1289,11 +1304,12 @@ pub(crate) fn doors_a_step_needs(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_client_render::mobiles::Mobile;
     use openshard_protocol::direction::Direction;
     use openshard_protocol::wire::Hue;
     use openshard_uofiles::anim::BodyKind;
+
+    use super::*;
 
     /// **A ghost walks through a shut door, and the door key has no say in it.**
     ///
@@ -1368,9 +1384,9 @@ mod tests {
     fn presentation_clocks_retain_the_interval_delivered_with_an_update() {
         let at = Point::new(10, 10, 0);
         let mut presentation = PresentationWorld {
-            tile_animations: StaticAnimations::default(),
-            flame_clock: Duration::ZERO,
-            player: Mobile {
+            tile_animations:       StaticAnimations::default(),
+            flame_clock:           Duration::ZERO,
+            player:                Mobile {
                 at,
                 body: openshard_protocol::wire::Graphic(400),
                 group: BodyKind::of(openshard_protocol::wire::Graphic(400)).standing(),
@@ -1382,21 +1398,21 @@ mod tests {
                 drawn: Gaze::on(at),
                 equipment: Vec::new().into(),
             },
-            cutaway_at: at,
-            cutaway_fades: openshard_client_render::cutaway::Fades::default(),
+            cutaway_at:            at,
+            cutaway_fades:         openshard_client_render::cutaway::Fades::default(),
             static_geometry_cache: None,
-            interior_cache: RefCell::default(),
-            others: Vec::new(),
-            corpses: Vec::new(),
-            items: Vec::new(),
-            item_serials: Vec::new(),
-            item_houses: Vec::new(),
-            multi_preview: Vec::new(),
-            damage_numbers: Vec::new(),
-            effects: Vec::new(),
-            health_estimates: BTreeMap::new(),
-            crowd: Crowd::default(),
-            combat_log: crate::combat_log::CombatLog::default(),
+            interior_cache:        RefCell::default(),
+            others:                Vec::new(),
+            corpses:               Vec::new(),
+            items:                 Vec::new(),
+            item_serials:          Vec::new(),
+            item_houses:           Vec::new(),
+            multi_preview:         Vec::new(),
+            damage_numbers:        Vec::new(),
+            effects:               Vec::new(),
+            health_estimates:      BTreeMap::new(),
+            crowd:                 Crowd::default(),
+            combat_log:            crate::combat_log::CombatLog::default(),
         };
         let update_interval = Duration::from_millis(750);
         let mut last_advance = Instant::now();
@@ -1428,7 +1444,7 @@ mod tests {
         motion.accept_network(Some(link::Movement::Relocation {
             confirmed: openshard_client_net::walk::Predicted {
                 position: Point::new(101, 100, 7),
-                facing: Facing::running(openshard_protocol::direction::Direction::East),
+                facing:   Facing::running(openshard_protocol::direction::Direction::East),
             },
         }));
 
@@ -1449,7 +1465,7 @@ mod tests {
             link::Body {
                 predicted: openshard_client_net::walk::Predicted {
                     position: Point::new(101, 100, 0),
-                    facing: Facing::walking(openshard_protocol::direction::Direction::East),
+                    facing:   Facing::walking(openshard_protocol::direction::Direction::East),
                 },
                 corrected: false,
             },
@@ -1477,7 +1493,7 @@ mod tests {
             link::Body {
                 predicted: openshard_client_net::walk::Predicted {
                     position: Point::new(101, 100, 0),
-                    facing: east,
+                    facing:   east,
                 },
                 corrected: false,
             },
@@ -1488,7 +1504,7 @@ mod tests {
             link::Body {
                 predicted: openshard_client_net::walk::Predicted {
                     position: Point::new(102, 100, 0),
-                    facing: east,
+                    facing:   east,
                 },
                 corrected: false,
             },
@@ -1497,10 +1513,10 @@ mod tests {
         );
 
         motion.accept_network(Some(link::Movement::Ack {
-            sequence: openshard_protocol::world::StepSequence(1),
+            sequence:  openshard_protocol::world::StepSequence(1),
             confirmed: openshard_client_net::walk::Predicted {
                 position: Point::new(101, 100, 0),
-                facing: east,
+                facing:   east,
             },
         }));
 
@@ -1519,7 +1535,7 @@ mod tests {
             link::Body {
                 predicted: openshard_client_net::walk::Predicted {
                     position: Point::new(101, 100, 0),
-                    facing: east,
+                    facing:   east,
                 },
                 corrected: false,
             },
@@ -1530,7 +1546,7 @@ mod tests {
             link::Body {
                 predicted: openshard_client_net::walk::Predicted {
                     position: Point::new(102, 100, 0),
-                    facing: east,
+                    facing:   east,
                 },
                 corrected: false,
             },
@@ -1539,10 +1555,10 @@ mod tests {
         );
         let rejected = openshard_client_net::walk::Predicted {
             position: Point::new(100, 100, 0),
-            facing: north,
+            facing:   north,
         };
         motion.accept_network(Some(link::Movement::Reject {
-            sequence: openshard_protocol::world::StepSequence(1),
+            sequence:  openshard_protocol::world::StepSequence(1),
             confirmed: rejected,
         }));
 
@@ -1642,9 +1658,11 @@ mod tests {
         let first = Point::new(101, 100, 0);
         let second = Point::new(101, 99, 0);
         let mut motion = PlayerMotion::new(start, east);
-        let local = |position, facing| link::Body {
-            predicted: openshard_client_net::walk::Predicted { position, facing },
-            corrected: false,
+        let local = |position, facing| {
+            link::Body {
+                predicted: openshard_client_net::walk::Predicted { position, facing },
+                corrected: false,
+            }
         };
 
         motion.accept_local(
@@ -1686,9 +1704,11 @@ mod tests {
         let start = Point::new(100, 100, 0);
         let end = Point::new(101, 100, 0);
         let mut motion = PlayerMotion::new(start, east);
-        let local = |position, facing| link::Body {
-            predicted: openshard_client_net::walk::Predicted { position, facing },
-            corrected: false,
+        let local = |position, facing| {
+            link::Body {
+                predicted: openshard_client_net::walk::Predicted { position, facing },
+                corrected: false,
+            }
         };
 
         motion.accept_local(
@@ -1793,7 +1813,7 @@ mod tests {
         let end = Point::new(101, 100, 0);
         let destination = openshard_client_net::walk::Predicted {
             position: end,
-            facing: east,
+            facing:   east,
         };
 
         let mut online = PlayerMotion::new(start, east);
@@ -1806,7 +1826,7 @@ mod tests {
             false,
         );
         online.accept_network(Some(link::Movement::Ack {
-            sequence: openshard_protocol::world::StepSequence(17),
+            sequence:  openshard_protocol::world::StepSequence(17),
             confirmed: destination,
         }));
 
@@ -1822,8 +1842,8 @@ mod tests {
     #[test]
     fn health_estimate_moves_from_confirmed_damage_to_the_new_health() {
         let mut estimate = HealthEstimate {
-            from: 80,
-            target: 50,
+            from:    80,
+            target:  50,
             elapsed: Duration::ZERO,
         };
         assert_eq!(estimate.shown(), 80);

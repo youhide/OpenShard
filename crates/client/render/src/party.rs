@@ -28,9 +28,19 @@
 
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 
-use crate::gump::{self, GumpArt, GumpAtlas, GumpPixel, Picture, PictureIndex};
+use crate::gump::{
+    self,
+    GumpArt,
+    GumpAtlas,
+    GumpPixel,
+    Picture,
+    PictureIndex,
+};
 use crate::text::GumpLabel;
 
 /// The background, as a `resizepic`: nine pieces from `0x0A28` to `0x0A30`.
@@ -108,7 +118,7 @@ pub enum Hit {
 /// One line this window writes.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Line {
-    pub at: GumpPixel,
+    pub at:   GumpPixel,
     pub text: String,
     pub font: Font,
     /// The box it is cropped to, or `None` for a heading that stands on its own.
@@ -119,10 +129,10 @@ impl Line {
     #[must_use]
     pub fn label(&self) -> GumpLabel<'_> {
         GumpLabel {
-            at: self.at,
+            at:   self.at,
             text: &self.text,
             font: self.font,
-            hue: HUE,
+            hue:  HUE,
             clip: self.clip,
         }
     }
@@ -135,11 +145,11 @@ pub struct Window {
     /// order.
     pub pictures: Vec<Picture>,
     /// The headings and the names.
-    pub lines: Vec<Line>,
+    pub lines:    Vec<Line>,
     /// Which pictures answer the mouse — [`crate::confirm::Window::hits`]'s
     /// shape, and the same reason: what is drawn and what is clicked are one
     /// list.
-    hits: Vec<(PictureIndex, Hit)>,
+    hits:         Vec<(PictureIndex, Hit)>,
 }
 
 impl Window {
@@ -201,13 +211,13 @@ pub fn window(
     let mut hits: Vec<(PictureIndex, Hit)> = Vec::new();
     let mut lines = vec![
         Line {
-            at: at.offset(TITLE_AT),
+            at:   at.offset(TITLE_AT),
             text: "Party Manifest".to_owned(),
             font: FONT,
             clip: None,
         },
         Line {
-            at: at.offset(KICK_HEADING_AT),
+            at:   at.offset(KICK_HEADING_AT),
             text: "Kick".to_owned(),
             font: HEADING_FONT,
             clip: None,
@@ -235,7 +245,7 @@ pub fn window(
             hits.push((PictureIndex::new(pictures.len() - 1), Hit::Kick(row)));
         }
         lines.push(Line {
-            at: at.offset(GumpPixel::new(NAME_AT, y + 1)),
+            at:   at.offset(GumpPixel::new(NAME_AT, y + 1)),
             // By serial, because that is all the roster carries: a `0xBF 0x06`
             // sub-command names its members by serial and never by name, and
             // this client may have neither clicked nor hovered any of them. The
@@ -254,7 +264,7 @@ pub fn window(
         hits.push((PictureIndex::new(pictures.len() - 1), hit));
         if !caption.is_empty() {
             lines.push(Line {
-                at: at.offset(GumpPixel::new(CAPTION_AT, corner.y)),
+                at:   at.offset(GumpPixel::new(CAPTION_AT, corner.y)),
                 text: caption.to_owned(),
                 font: FONT,
                 clip: None,
@@ -288,10 +298,10 @@ pub fn window(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use openshard_uofiles::color::Color16;
     use openshard_uofiles::image::Image;
+
+    use super::*;
 
     fn member(serial: u32) -> Serial {
         Serial::new(serial).unwrap()
@@ -310,14 +320,16 @@ mod tests {
     /// An atlas holding every picture this window draws, each a solid block of
     /// the size the real art is — which is what the hit test measures against.
     fn shipping() -> GumpAtlas {
-        let sizes = |art: GumpArt| match art {
-            GumpArt::Gump(Graphic(0x0A28 | 0x0A2A | 0x0A2E | 0x0A30)) => (44, 44),
-            GumpArt::Gump(Graphic(0x0A29 | 0x0A2F)) => (427, 44),
-            GumpArt::Gump(Graphic(0x0A2B | 0x0A2D)) => (44, 316),
-            GumpArt::Gump(Graphic(0x0A2C)) => (427, 316),
-            GumpArt::Gump(Graphic(0x0475)) => (272, 26),
-            GumpArt::Gump(Graphic(0x00F2 | 0x00F3)) => (63, 23),
-            _ => (30, 22),
+        let sizes = |art: GumpArt| {
+            match art {
+                GumpArt::Gump(Graphic(0x0A28 | 0x0A2A | 0x0A2E | 0x0A30)) => (44, 44),
+                GumpArt::Gump(Graphic(0x0A29 | 0x0A2F)) => (427, 44),
+                GumpArt::Gump(Graphic(0x0A2B | 0x0A2D)) => (44, 316),
+                GumpArt::Gump(Graphic(0x0A2C)) => (427, 316),
+                GumpArt::Gump(Graphic(0x0475)) => (272, 26),
+                GumpArt::Gump(Graphic(0x00F2 | 0x00F3)) => (63, 23),
+                _ => (30, 22),
+            }
         };
         GumpAtlas::pack(art_of().map(|art| {
             let (width, height) = sizes(art);
@@ -409,9 +421,11 @@ mod tests {
         let drawn: Vec<Graphic> = window
             .pictures
             .iter()
-            .filter_map(|picture| match picture.graphic {
-                GumpArt::Gump(graphic) if graphic == ADD.1 || graphic == LEAVE.0 => Some(graphic),
-                _ => None,
+            .filter_map(|picture| {
+                match picture.graphic {
+                    GumpArt::Gump(graphic) if graphic == ADD.1 || graphic == LEAVE.0 => Some(graphic),
+                    _ => None,
+                }
             })
             .collect();
         assert_eq!(drawn, vec![LEAVE.0, ADD.1]);

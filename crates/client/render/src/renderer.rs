@@ -5,14 +5,32 @@
 //! It never asks for an adapter and never presents: a surface belongs to the
 //! application, and a test has no surface at all.
 
-use crate::atlas::{DirtyRows, LandAtlas, StaticAtlas, StaticAtlasPage, StaticAtlasPages, TexmapAtlas};
+use std::time::{
+    Duration,
+    Instant,
+};
 
-use crate::camera::{Projection, TILE_HEIGHT, TILE_WIDTH, Z_STEP};
+use crate::atlas::{
+    DirtyRows,
+    LandAtlas,
+    StaticAtlas,
+    StaticAtlasPage,
+    StaticAtlasPages,
+    TexmapAtlas,
+};
+use crate::camera::{
+    Projection,
+    TILE_HEIGHT,
+    TILE_WIDTH,
+    Z_STEP,
+};
 use crate::ground::GroundQuad;
 use crate::hue::HueRamp;
-use crate::mesh_face::{MeshFaceRow, MeshFaceVertex};
+use crate::mesh_face::{
+    MeshFaceRow,
+    MeshFaceVertex,
+};
 use crate::sprite::SpriteQuad;
-use std::time::{Duration, Instant};
 
 /// What an untouched pixel is left as.
 ///
@@ -30,10 +48,10 @@ pub const CLEAR: wgpu::Color = wgpu::Color {
 /// CPU work performed by the most recent ground render call.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct GroundCpuCosts {
-    pub uniforms: Duration,
+    pub uniforms:  Duration,
     pub serialize: Duration,
-    pub upload: Duration,
-    pub pass: Duration,
+    pub upload:    Duration,
+    pub pass:      Duration,
 }
 
 /// Bytes of the ground pass's uniform block: the target's size, the land
@@ -64,14 +82,14 @@ pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 #[derive(Clone, Copy, Debug)]
 pub struct Target<'a> {
     /// What to draw into.
-    pub view: &'a wgpu::TextureView,
+    pub view:       &'a wgpu::TextureView,
     /// The depth buffer both passes share.
     ///
     /// Shared on purpose: it is the only thing that makes the ground pass and
     /// the statics pass agree about what covers what. A pass with its own
     /// buffer would be back to "everything drawn later wins", which puts every
     /// wall in front of every hill.
-    pub depth: &'a wgpu::TextureView,
+    pub depth:      &'a wgpu::TextureView,
     /// Where every pass writes what it drew, beside the picture: which tile the
     /// pixel came from, and where in the world its fragment is.
     ///
@@ -79,11 +97,11 @@ pub struct Target<'a> {
     /// draws: it is one answer per pixel about one frame, and a pass that wrote
     /// its own would leave the lighting reading the ground's tile under a wall's
     /// picture. See [`crate::gbuffer`].
-    pub gbuffer: &'a crate::gbuffer::Views,
+    pub gbuffer:    &'a crate::gbuffer::Views,
     /// Its width in real pixels.
-    pub width: u32,
+    pub width:      u32,
     /// Its height in real pixels.
-    pub height: u32,
+    pub height:     u32,
     /// How the world's own virtual pixels land on those real ones — see
     /// [`crate::camera::Projection`].
     ///
@@ -126,25 +144,25 @@ impl<'a> Target<'a> {
 /// error that names neither side.
 pub fn depth_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("depth"),
-        size: wgpu::Extent3d {
-            width: width.max(1),
-            height: height.max(1),
+        label:           Some("depth"),
+        size:            wgpu::Extent3d {
+            width:                 width.max(1),
+            height:                height.max(1),
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: DEPTH_FORMAT,
+        sample_count:    1,
+        dimension:       wgpu::TextureDimension::D2,
+        format:          DEPTH_FORMAT,
         // Composite capture copies an already rendered map-only depth block and
         // later samples that exact per-pixel ordering while writing it into the
         // current frame.  Keeping this on the common depth allocation avoids a
         // second, lossy depth representation for LOD.
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+        usage:           wgpu::TextureUsages::RENDER_ATTACHMENT
             | wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::COPY_SRC
             | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
+        view_formats:    &[],
     })
 }
 
@@ -166,11 +184,11 @@ pub fn depth_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Te
 /// silently: the depths were right and the first writer kept the pixel.
 pub(crate) fn depth_state() -> wgpu::DepthStencilState {
     wgpu::DepthStencilState {
-        format: DEPTH_FORMAT,
+        format:              DEPTH_FORMAT,
         depth_write_enabled: Some(true),
-        depth_compare: Some(wgpu::CompareFunction::LessEqual),
-        stencil: wgpu::StencilState::default(),
-        bias: wgpu::DepthBiasState::default(),
+        depth_compare:       Some(wgpu::CompareFunction::LessEqual),
+        stencil:             wgpu::StencilState::default(),
+        bias:                wgpu::DepthBiasState::default(),
     }
 }
 
@@ -181,8 +199,8 @@ pub(crate) fn depth_state() -> wgpu::DepthStencilState {
 /// picture beside it: an id is an identity, and averaging two of them names a
 /// third row nothing was drawn from.
 pub(crate) const IDS_TARGET: wgpu::ColorTargetState = wgpu::ColorTargetState {
-    format: crate::gbuffer::IDS_FORMAT,
-    blend: None,
+    format:     crate::gbuffer::IDS_FORMAT,
+    blend:      None,
     write_mask: wgpu::ColorWrites::ALL,
 };
 
@@ -193,8 +211,8 @@ pub(crate) const IDS_TARGET: wgpu::ColorTargetState = wgpu::ColorTargetState {
 /// two positions averaged is a point on neither surface, floating in the air
 /// between them.
 pub(crate) const POSITION_TARGET: wgpu::ColorTargetState = wgpu::ColorTargetState {
-    format: crate::gbuffer::POSITION_FORMAT,
-    blend: None,
+    format:     crate::gbuffer::POSITION_FORMAT,
+    blend:      None,
     write_mask: wgpu::ColorWrites::ALL,
 };
 
@@ -204,30 +222,30 @@ pub(crate) const POSITION_TARGET: wgpu::ColorTargetState = wgpu::ColorTargetStat
 /// No blending, and the argument sharpens once more: the average of two unit
 /// vectors is not a unit vector, so a blended normal is not a direction at all.
 pub(crate) const NORMAL_TARGET: wgpu::ColorTargetState = wgpu::ColorTargetState {
-    format: crate::gbuffer::NORMAL_FORMAT,
-    blend: None,
+    format:     crate::gbuffer::NORMAL_FORMAT,
+    blend:      None,
     write_mask: wgpu::ColorWrites::ALL,
 };
 
 /// Draws ground.
 #[derive(Debug)]
 pub struct GroundRenderer {
-    pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
-    uniforms: wgpu::Buffer,
-    quad: wgpu::Buffer,
-    instances: wgpu::Buffer,
+    pipeline:           wgpu::RenderPipeline,
+    bind_group:         wgpu::BindGroup,
+    uniforms:           wgpu::Buffer,
+    quad:               wgpu::Buffer,
+    instances:          wgpu::Buffer,
     /// Quads the instance buffer can hold before it has to be replaced.
-    capacity: u64,
+    capacity:           u64,
     /// CPU staging bytes for the instance upload. Reused between frames so a
     /// wide zoom does not allocate several megabytes for every redraw.
-    instance_bytes: Vec<u8>,
+    instance_bytes:     Vec<u8>,
     /// Last immutable detail-ground list uploaded through `render_loaded`.
     /// While the camera and composite ownership stay fixed, the list is
     /// byte-for-byte identical, so serializing its instance rows again only
     /// burns CPU. Ordinary `render` invalidates this because it shares the
     /// destination buffer.
-    loaded_quads: Vec<GroundQuad>,
+    loaded_quads:       Vec<GroundQuad>,
     loaded_cache_valid: bool,
     /// The two atlas textures, kept rather than only viewed.
     ///
@@ -236,9 +254,9 @@ pub struct GroundRenderer {
     /// [`GroundRenderer::upload_changes`]. Dropping them here meant a new
     /// graphic at the edge of the view had to build a whole new renderer, which
     /// recreates the pipeline behind it for two sprites' worth of pixels.
-    land_texture: wgpu::Texture,
-    texmap_texture: wgpu::Texture,
-    last_cpu: GroundCpuCosts,
+    land_texture:       wgpu::Texture,
+    texmap_texture:     wgpu::Texture,
+    last_cpu:           GroundCpuCosts,
 }
 
 impl GroundRenderer {
@@ -320,79 +338,79 @@ impl GroundRenderer {
         });
 
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("viewport"),
-            size: UNIFORM_BYTES,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            label:              Some("viewport"),
+            size:               UNIFORM_BYTES,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("ground"),
+            label:   Some("ground"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                    binding:    0,
                     visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding:    1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding:    2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
+                    ty:         wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding:    3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
             ],
         });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("ground"),
-            layout: &layout,
+            label:   Some("ground"),
+            layout:  &layout,
             entries: &[
                 wgpu::BindGroupEntry {
-                    binding: 0,
+                    binding:  0,
                     resource: uniforms.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 1,
+                    binding:  1,
                     resource: wgpu::BindingResource::TextureView(&view),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding:  2,
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding:  3,
                     resource: wgpu::BindingResource::TextureView(&texmap_view),
                 },
             ],
         });
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("ground"),
+            label:  Some("ground"),
             // `src/shaders/ground.wesl`, compiled to plain WGSL by `build.rs`
             // — the pilot for `docs/lighting_raymarch.md`'s shared `place`
             // format module.
@@ -400,28 +418,28 @@ impl GroundRenderer {
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("ground"),
+            label:              Some("ground"),
             bind_group_layouts: &[Some(&layout)],
             // No immediate data: everything per-frame travels in the uniform
             // block, which WebGL2 supports and push constants do not.
-            immediate_size: 0,
+            immediate_size:     0,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("ground"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+            label:          Some("ground"),
+            layout:         Some(&pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
+                buffers:             &[
                     // The unit quad.
                     Some(wgpu::VertexBufferLayout {
                         array_stride: 8,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
+                        step_mode:    wgpu::VertexStepMode::Vertex,
+                        attributes:   &[wgpu::VertexAttribute {
+                            format:          wgpu::VertexFormat::Float32x2,
+                            offset:          0,
                             shader_location: 0,
                         }],
                     }),
@@ -440,31 +458,31 @@ impl GroundRenderer {
                     // `GroundRenderer::instances_buffer`.
                     Some(wgpu::VertexBufferLayout {
                         array_stride: GroundQuad::STRIDE,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &[
+                        step_mode:    wgpu::VertexStepMode::Instance,
+                        attributes:   &[
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 0,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          0,
                                 shader_location: 1,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 8,
+                                format:          wgpu::VertexFormat::Float32x4,
+                                offset:          8,
                                 shader_location: 2,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 24,
+                                format:          wgpu::VertexFormat::Float32x4,
+                                offset:          24,
                                 shader_location: 3,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 40,
+                                format:          wgpu::VertexFormat::Float32x4,
+                                offset:          40,
                                 shader_location: 4,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32,
-                                offset: 56,
+                                format:          wgpu::VertexFormat::Float32,
+                                offset:          56,
                                 shader_location: 5,
                             },
                             // And the first of `Place::packed`'s two words —
@@ -475,19 +493,19 @@ impl GroundRenderer {
                             // which is per pixel, and a per-instance value the
                             // vertex stage already has costs nothing to carry.
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Uint32,
-                                offset: 60,
+                                format:          wgpu::VertexFormat::Uint32,
+                                offset:          60,
                                 shader_location: 6,
                             },
                         ],
                     }),
                 ],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[
+                targets:             &[
                     Some(wgpu::ColorTargetState {
                         format,
                         // No blending: the shader discards transparent texels,
@@ -502,26 +520,26 @@ impl GroundRenderer {
                     Some(NORMAL_TARGET),
                 ],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+            primitive:      wgpu::PrimitiveState {
+                topology:           wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
+                front_face:         wgpu::FrontFace::Ccw,
                 // Quads are emitted in one winding and never seen from behind.
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
+                cull_mode:          None,
+                unclipped_depth:    false,
+                polygon_mode:       wgpu::PolygonMode::Fill,
+                conservative:       false,
             },
-            depth_stencil: Some(depth_state()),
-            multisample: wgpu::MultisampleState::default(),
+            depth_stencil:  Some(depth_state()),
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
 
         let quad = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("unit quad"),
-            size: std::mem::size_of_val(&QUAD) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            label:              Some("unit quad"),
+            size:               std::mem::size_of_val(&QUAD) as u64,
+            usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let mut quad_bytes = Vec::with_capacity(QUAD.len() * 4);
@@ -697,11 +715,11 @@ impl GroundRenderer {
             label: Some("ground"),
             color_attachments: &[
                 Some(wgpu::RenderPassColorAttachment {
-                    view: target.view,
-                    depth_slice: None,
+                    view:           target.view,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: if clear {
+                    ops:            wgpu::Operations {
+                        load:  if clear {
                             wgpu::LoadOp::Clear(CLEAR)
                         } else {
                             wgpu::LoadOp::Load
@@ -713,11 +731,11 @@ impl GroundRenderer {
                 // reason the depth buffer is: this is the frame's first pass,
                 // and what it leaves is what the passes after it load.
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.ids,
-                    depth_slice: None,
+                    view:           &target.gbuffer.ids,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: if clear {
+                    ops:            wgpu::Operations {
+                        load:  if clear {
                             wgpu::LoadOp::Clear(crate::gbuffer::IDS_CLEAR)
                         } else {
                             wgpu::LoadOp::Load
@@ -726,11 +744,11 @@ impl GroundRenderer {
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.position,
-                    depth_slice: None,
+                    view:           &target.gbuffer.position,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: if clear {
+                    ops:            wgpu::Operations {
+                        load:  if clear {
                             wgpu::LoadOp::Clear(crate::gbuffer::POSITION_CLEAR)
                         } else {
                             wgpu::LoadOp::Load
@@ -739,11 +757,11 @@ impl GroundRenderer {
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.normal,
-                    depth_slice: None,
+                    view:           &target.gbuffer.normal,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: if clear {
+                    ops:            wgpu::Operations {
+                        load:  if clear {
                             wgpu::LoadOp::Clear(crate::gbuffer::NORMAL_CLEAR)
                         } else {
                             wgpu::LoadOp::Load
@@ -756,9 +774,9 @@ impl GroundRenderer {
             // pass. Whatever runs after it loads what this left behind, which
             // is how one ordering spans two passes.
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: target.depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: if clear {
+                view:        target.depth,
+                depth_ops:   Some(wgpu::Operations {
+                    load:  if clear {
                         wgpu::LoadOp::Clear(1.0)
                     } else {
                         wgpu::LoadOp::Load
@@ -887,18 +905,18 @@ pub struct SpriteRenderer {
 /// WebGL2 without relying on texture-array support or its layer limits.
 #[derive(Debug)]
 struct SpriteAtlasPage {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    bind_group: wgpu::BindGroup,
+    texture:            wgpu::Texture,
+    view:               wgpu::TextureView,
+    bind_group:         wgpu::BindGroup,
     cutaway_bind_group: wgpu::BindGroup,
 }
 
 /// A buffer for `boxes` of [`crate::impostor::Volume`].
 fn new_volume_buffer(device: &wgpu::Device, boxes: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("statics volumes"),
-        size: boxes * crate::impostor::Volume::STRIDE,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        label:              Some("statics volumes"),
+        size:               boxes * crate::impostor::Volume::STRIDE,
+        usage:              wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }
@@ -920,27 +938,27 @@ fn static_bind_group(
         layout,
         entries: &[
             wgpu::BindGroupEntry {
-                binding: 0,
+                binding:  0,
                 resource: uniforms.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
-                binding: 1,
+                binding:  1,
                 resource: wgpu::BindingResource::TextureView(atlas),
             },
             wgpu::BindGroupEntry {
-                binding: 2,
+                binding:  2,
                 resource: wgpu::BindingResource::Sampler(sampler),
             },
             wgpu::BindGroupEntry {
-                binding: 3,
+                binding:  3,
                 resource: wgpu::BindingResource::TextureView(ramp),
             },
             wgpu::BindGroupEntry {
-                binding: 4,
+                binding:  4,
                 resource: wgpu::BindingResource::Sampler(sampler),
             },
             wgpu::BindGroupEntry {
-                binding: 5,
+                binding:  5,
                 resource: volumes.as_entire_binding(),
             },
         ],
@@ -1036,17 +1054,17 @@ impl SpriteRenderer {
         });
 
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("statics viewport"),
-            size: STATIC_UNIFORM_BYTES,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            label:              Some("statics viewport"),
+            size:               STATIC_UNIFORM_BYTES,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("statics"),
+            label:   Some("statics"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                    binding:    0,
                     // **Both stages, and the fragment one is not decoration.**
                     // The vertex stage turns virtual pixels into clip space with
                     // it; the fragment stage reads `scale` alone, for the one
@@ -1057,58 +1075,58 @@ impl SpriteRenderer {
                     // quantum is a texel and the box's is a fragment, and the
                     // ratio between the two is this number.
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding:    1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding:    2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
+                    ty:         wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding:    3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 4,
+                    binding:    4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
+                    ty:         wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count:      None,
                 },
                 // The frame's boxes — `docs/lighting_rebuild.md` phase 6c. Read
                 // by the fragment stage alone: a quad's rectangle is the
                 // sprite's own and the geometry under it is a *per fragment*
                 // question.
                 wgpu::BindGroupLayoutEntry {
-                    binding: 5,
+                    binding:    5,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
             ],
         });
@@ -1132,31 +1150,31 @@ impl SpriteRenderer {
         );
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("statics"),
+            label:  Some("statics"),
             // `src/shaders/statics.wesl`, compiled to plain WGSL by `build.rs`.
             source: wgpu::ShaderSource::Wgsl(include_str!(concat!(env!("OUT_DIR"), "/statics.wgsl")).into()),
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("statics"),
+            label:              Some("statics"),
             bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
+            immediate_size:     0,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("statics"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+            label:          Some("statics"),
+            layout:         Some(&pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
+                buffers:             &[
                     Some(wgpu::VertexBufferLayout {
                         array_stride: 8,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
+                        step_mode:    wgpu::VertexStepMode::Vertex,
+                        attributes:   &[wgpu::VertexAttribute {
+                            format:          wgpu::VertexFormat::Float32x2,
+                            offset:          0,
                             shader_location: 0,
                         }],
                     }),
@@ -1165,38 +1183,38 @@ impl SpriteRenderer {
                     // linking this to the shader's `@location`s.
                     Some(wgpu::VertexBufferLayout {
                         array_stride: SpriteQuad::STRIDE,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &[
+                        step_mode:    wgpu::VertexStepMode::Instance,
+                        attributes:   &[
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 0,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          0,
                                 shader_location: 1,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 8,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          8,
                                 shader_location: 2,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 16,
+                                format:          wgpu::VertexFormat::Float32x4,
+                                offset:          16,
                                 shader_location: 3,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32,
-                                offset: 32,
+                                format:          wgpu::VertexFormat::Float32,
+                                offset:          32,
                                 shader_location: 4,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Uint32,
-                                offset: 36,
+                                format:          wgpu::VertexFormat::Uint32,
+                                offset:          36,
                                 shader_location: 5,
                             },
                             // The tile and height, as
                             // `crate::place::Place::packed` wrote them.
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Uint32x2,
-                                offset: 40,
+                                format:          wgpu::VertexFormat::Uint32x2,
+                                offset:          40,
                                 shader_location: 6,
                             },
                             // A corner static's paired shadow row — see
@@ -1206,8 +1224,8 @@ impl SpriteRenderer {
                             // mobile pass shares this same layout and simply
                             // never reads it.
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Uint32,
-                                offset: 48,
+                                format:          wgpu::VertexFormat::Uint32,
+                                offset:          48,
                                 shader_location: 7,
                             },
                             // Which run of the volume buffer this instance's own
@@ -1217,19 +1235,19 @@ impl SpriteRenderer {
                             // `SpriteQuad::write` puts where the row was padding
                             // to its stride anyway.
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Uint32x2,
-                                offset: 56,
+                                format:          wgpu::VertexFormat::Uint32x2,
+                                offset:          56,
                                 shader_location: 8,
                             },
                         ],
                     }),
                 ],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[
+                targets:             &[
                     Some(wgpu::ColorTargetState {
                         format,
                         // No blending: the shader discards transparent texels,
@@ -1244,19 +1262,19 @@ impl SpriteRenderer {
                     Some(NORMAL_TARGET),
                 ],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+            primitive:      wgpu::PrimitiveState {
+                topology:           wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
+                front_face:         wgpu::FrontFace::Ccw,
+                cull_mode:          None,
+                unclipped_depth:    false,
+                polygon_mode:       wgpu::PolygonMode::Fill,
+                conservative:       false,
             },
-            depth_stencil: Some(depth_state()),
-            multisample: wgpu::MultisampleState::default(),
+            depth_stencil:  Some(depth_state()),
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
 
         // The same static shader and four outputs, but a different contract
@@ -1264,75 +1282,75 @@ impl SpriteRenderer {
         // reading the settled opaque depth. Thus it sees a wall in front of the
         // body, but never changes what later opaque-only passes see.
         let cutaway_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("cutaway statics"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+            label:          Some("cutaway statics"),
+            layout:         Some(&pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
+                buffers:             &[
                     Some(wgpu::VertexBufferLayout {
                         array_stride: 8,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
+                        step_mode:    wgpu::VertexStepMode::Vertex,
+                        attributes:   &[wgpu::VertexAttribute {
+                            format:          wgpu::VertexFormat::Float32x2,
+                            offset:          0,
                             shader_location: 0,
                         }],
                     }),
                     Some(wgpu::VertexBufferLayout {
                         array_stride: SpriteQuad::STRIDE,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &[
+                        step_mode:    wgpu::VertexStepMode::Instance,
+                        attributes:   &[
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 0,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          0,
                                 shader_location: 1,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 8,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          8,
                                 shader_location: 2,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 16,
+                                format:          wgpu::VertexFormat::Float32x4,
+                                offset:          16,
                                 shader_location: 3,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32,
-                                offset: 32,
+                                format:          wgpu::VertexFormat::Float32,
+                                offset:          32,
                                 shader_location: 4,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Uint32,
-                                offset: 36,
+                                format:          wgpu::VertexFormat::Uint32,
+                                offset:          36,
                                 shader_location: 5,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Uint32x2,
-                                offset: 40,
+                                format:          wgpu::VertexFormat::Uint32x2,
+                                offset:          40,
                                 shader_location: 6,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Uint32,
-                                offset: 48,
+                                format:          wgpu::VertexFormat::Uint32,
+                                offset:          48,
                                 shader_location: 7,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Uint32x2,
-                                offset: 56,
+                                format:          wgpu::VertexFormat::Uint32x2,
+                                offset:          56,
                                 shader_location: 8,
                             },
                         ],
                     }),
                 ],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[
+                targets:             &[
                     Some(wgpu::ColorTargetState {
                         format,
                         blend: None,
@@ -1343,25 +1361,25 @@ impl SpriteRenderer {
                     Some(NORMAL_TARGET),
                 ],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+            primitive:      wgpu::PrimitiveState {
+                topology:           wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
+                front_face:         wgpu::FrontFace::Ccw,
+                cull_mode:          None,
+                unclipped_depth:    false,
+                polygon_mode:       wgpu::PolygonMode::Fill,
+                conservative:       false,
             },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
+            depth_stencil:  Some(wgpu::DepthStencilState {
+                format:              DEPTH_FORMAT,
                 depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
+                depth_compare:       Some(wgpu::CompareFunction::LessEqual),
+                stencil:             wgpu::StencilState::default(),
+                bias:                wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
 
         // The same sprites as shapes. Built here, where the bind group layout
@@ -1370,48 +1388,48 @@ impl SpriteRenderer {
         // attributes are simply not declared. A vertex buffer may carry more
         // than a pipeline reads.
         let mask_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("silhouette"),
+            label:  Some("silhouette"),
             source: wgpu::ShaderSource::Wgsl(include_str!("silhouette.wgsl").into()),
         });
         let mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("silhouette"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &mask_shader,
-                entry_point: Some("vs_main"),
+            label:          Some("silhouette"),
+            layout:         Some(&pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &mask_shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
+                buffers:             &[
                     Some(wgpu::VertexBufferLayout {
                         array_stride: 8,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
+                        step_mode:    wgpu::VertexStepMode::Vertex,
+                        attributes:   &[wgpu::VertexAttribute {
+                            format:          wgpu::VertexFormat::Float32x2,
+                            offset:          0,
                             shader_location: 0,
                         }],
                     }),
                     Some(wgpu::VertexBufferLayout {
                         array_stride: SpriteQuad::STRIDE,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &[
+                        step_mode:    wgpu::VertexStepMode::Instance,
+                        attributes:   &[
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 0,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          0,
                                 shader_location: 1,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 8,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          8,
                                 shader_location: 2,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 16,
+                                format:          wgpu::VertexFormat::Float32x4,
+                                offset:          16,
                                 shader_location: 3,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32,
-                                offset: 32,
+                                format:          wgpu::VertexFormat::Float32,
+                                offset:          32,
                                 shader_location: 4,
                             },
                         ],
@@ -1423,56 +1441,56 @@ impl SpriteRenderer {
                     // has no business carrying a highlight's identity.
                     Some(wgpu::VertexBufferLayout {
                         array_stride: 4,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Uint32,
-                            offset: 0,
+                        step_mode:    wgpu::VertexStepMode::Instance,
+                        attributes:   &[wgpu::VertexAttribute {
+                            format:          wgpu::VertexFormat::Uint32,
+                            offset:          0,
                             shader_location: 5,
                         }],
                     }),
                 ],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &mask_shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &mask_shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
+                targets:             &[Some(wgpu::ColorTargetState {
                     // Never `format`: the mask is ids, not colour — see
                     // [`crate::outline::MASK_FORMAT`].
-                    format: crate::outline::MASK_FORMAT,
-                    blend: None,
+                    format:     crate::outline::MASK_FORMAT,
+                    blend:      None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+            primitive:      wgpu::PrimitiveState {
+                topology:           wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
+                front_face:         wgpu::FrontFace::Ccw,
+                cull_mode:          None,
+                unclipped_depth:    false,
+                polygon_mode:       wgpu::PolygonMode::Fill,
+                conservative:       false,
             },
             // Tested against the world's depth and *not* written: the ordering
             // was settled by the passes that drew the picture, and a silhouette
             // that wrote depth would settle it again, differently, for whatever
             // pass came after. See [`SpriteRenderer::render_mask`].
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
+            depth_stencil:  Some(wgpu::DepthStencilState {
+                format:              DEPTH_FORMAT,
                 depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
+                depth_compare:       Some(wgpu::CompareFunction::LessEqual),
+                stencil:             wgpu::StencilState::default(),
+                bias:                wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
 
         let quad = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("unit quad"),
-            size: std::mem::size_of_val(&QUAD) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            label:              Some("unit quad"),
+            size:               std::mem::size_of_val(&QUAD) as u64,
+            usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let mut quad_bytes = Vec::with_capacity(QUAD.len() * 4);
@@ -1790,48 +1808,48 @@ impl SpriteRenderer {
             label: Some("statics"),
             color_attachments: &[
                 Some(wgpu::RenderPassColorAttachment {
-                    view: target.view,
-                    depth_slice: None,
+                    view:           target.view,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 // Loaded, not cleared: the ground pass wrote the tiles under
                 // these sprites, and a wall keeps only the pixels it drew.
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.ids,
-                    depth_slice: None,
+                    view:           &target.gbuffer.ids,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.position,
-                    depth_slice: None,
+                    view:           &target.gbuffer.position,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.normal,
-                    depth_slice: None,
+                    view:           &target.gbuffer.normal,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 }),
             ],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: target.depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                view:        target.depth,
+                depth_ops:   Some(wgpu::Operations {
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -1935,46 +1953,46 @@ impl SpriteRenderer {
             label: Some("cutaway statics"),
             color_attachments: &[
                 Some(wgpu::RenderPassColorAttachment {
-                    view: target.view,
-                    depth_slice: None,
+                    view:           target.view,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(CLEAR),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(CLEAR),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.ids,
-                    depth_slice: None,
+                    view:           &target.gbuffer.ids,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(crate::gbuffer::IDS_CLEAR),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(crate::gbuffer::IDS_CLEAR),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.position,
-                    depth_slice: None,
+                    view:           &target.gbuffer.position,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(crate::gbuffer::POSITION_CLEAR),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(crate::gbuffer::POSITION_CLEAR),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.normal,
-                    depth_slice: None,
+                    view:           &target.gbuffer.normal,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(crate::gbuffer::NORMAL_CLEAR),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(crate::gbuffer::NORMAL_CLEAR),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
             ],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: target.depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                view:        target.depth,
+                depth_ops:   Some(wgpu::Operations {
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -2095,20 +2113,20 @@ impl SpriteRenderer {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("silhouette"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: mask,
-                depth_slice: None,
+                view:           mask,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
+                ops:            wgpu::Operations {
                     // Zero is "nothing here", so clearing is what makes last
                     // frame's ring go away when the cursor moves off.
-                    load: wgpu::LoadOp::Clear(CLEAR),
+                    load:  wgpu::LoadOp::Clear(CLEAR),
                     store: wgpu::StoreOp::Store,
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: target.depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                view:        target.depth,
+                depth_ops:   Some(wgpu::Operations {
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -2152,12 +2170,12 @@ impl SpriteRenderer {
 /// ever invalidate, so it is built once, at window setup, and never rebuilt.
 #[derive(Debug)]
 pub struct MeshFaceRenderer {
-    pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
-    uniforms: wgpu::Buffer,
-    vertices: wgpu::Buffer,
-    capacity: u64,
-    rows: wgpu::Buffer,
+    pipeline:      wgpu::RenderPipeline,
+    bind_group:    wgpu::BindGroup,
+    uniforms:      wgpu::Buffer,
+    vertices:      wgpu::Buffer,
+    capacity:      u64,
+    rows:          wgpu::Buffer,
     rows_capacity: u64,
 }
 
@@ -2165,36 +2183,36 @@ impl MeshFaceRenderer {
     /// Build the pipeline.
     pub fn new(device: &wgpu::Device) -> Self {
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mesh face viewport"),
-            size: STATIC_UNIFORM_BYTES,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            label:              Some("mesh face viewport"),
+            size:               STATIC_UNIFORM_BYTES,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("mesh face"),
+            label:   Some("mesh face"),
             entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
+                binding:    0,
                 visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
+                ty:         wgpu::BindingType::Buffer {
+                    ty:                 wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: None,
+                    min_binding_size:   None,
                 },
-                count: None,
+                count:      None,
             }],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("mesh face"),
-            layout: &layout,
+            label:   Some("mesh face"),
+            layout:  &layout,
             entries: &[wgpu::BindGroupEntry {
-                binding: 0,
+                binding:  0,
                 resource: uniforms.as_entire_binding(),
             }],
         });
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("mesh face"),
+            label:  Some("mesh face"),
             // `src/shaders/mesh_face.wesl`, compiled to plain WGSL by `build.rs`.
             source: wgpu::ShaderSource::Wgsl(
                 include_str!(concat!(env!("OUT_DIR"), "/mesh_face.wgsl")).into(),
@@ -2202,49 +2220,49 @@ impl MeshFaceRenderer {
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("mesh face"),
+            label:              Some("mesh face"),
             bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
+            immediate_size:     0,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mesh face"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+            label:          Some("mesh face"),
+            layout:         Some(&pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 // One raw vertex at a time — not a unit quad plus per-instance
                 // data: a face's true screen shape is an arbitrary projected
                 // quadrilateral, not an axis-aligned rectangle a shader could
                 // reconstruct from an origin and a size.
-                buffers: &[Some(wgpu::VertexBufferLayout {
+                buffers:             &[Some(wgpu::VertexBufferLayout {
                     array_stride: MeshFaceVertex::STRIDE,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
+                    step_mode:    wgpu::VertexStepMode::Vertex,
+                    attributes:   &[
                         wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
+                            format:          wgpu::VertexFormat::Float32x2,
+                            offset:          0,
                             shader_location: 0,
                         },
                         wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: 8,
+                            format:          wgpu::VertexFormat::Float32x3,
+                            offset:          8,
                             shader_location: 1,
                         },
                         wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32,
-                            offset: 20,
+                            format:          wgpu::VertexFormat::Float32,
+                            offset:          20,
                             shader_location: 2,
                         },
                         wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Uint32,
-                            offset: 24,
+                            format:          wgpu::VertexFormat::Uint32,
+                            offset:          24,
                             shader_location: 3,
                         },
                         wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 28,
+                            format:          wgpu::VertexFormat::Float32x2,
+                            offset:          28,
                             shader_location: 4,
                         },
                         // And this face's own measured normal — the one
@@ -2252,28 +2270,28 @@ impl MeshFaceRenderer {
                         // rather than a stance. See
                         // [`MeshFaceVertex::normal`].
                         wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: 36,
+                            format:          wgpu::VertexFormat::Float32x3,
+                            offset:          36,
                             shader_location: 5,
                         },
                         // And this face's own albedo — `docs/lighting_rebuild.md`
                         // phase 6d. See [`MeshFaceVertex::colour`].
                         wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: 48,
+                            format:          wgpu::VertexFormat::Float32x3,
+                            offset:          48,
                             shader_location: 6,
                         },
                     ],
                 })],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[
+                targets:             &[
                     Some(wgpu::ColorTargetState {
-                        format: crate::blit::WORLD_FORMAT,
-                        blend: None,
+                        format:     crate::blit::WORLD_FORMAT,
+                        blend:      None,
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
                     Some(IDS_TARGET),
@@ -2281,19 +2299,19 @@ impl MeshFaceRenderer {
                     Some(NORMAL_TARGET),
                 ],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
+            primitive:      wgpu::PrimitiveState {
+                topology:           wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
+                front_face:         wgpu::FrontFace::Ccw,
+                cull_mode:          None,
+                unclipped_depth:    false,
+                polygon_mode:       wgpu::PolygonMode::Fill,
+                conservative:       false,
             },
-            depth_stencil: Some(depth_state()),
-            multisample: wgpu::MultisampleState::default(),
+            depth_stencil:  Some(depth_state()),
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
 
         Self {
@@ -2385,46 +2403,46 @@ impl MeshFaceRenderer {
             // it, whatever the ground pass already drew stays underneath.
             color_attachments: &[
                 Some(wgpu::RenderPassColorAttachment {
-                    view: target.view,
-                    depth_slice: None,
+                    view:           target.view,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.ids,
-                    depth_slice: None,
+                    view:           &target.gbuffer.ids,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.position,
-                    depth_slice: None,
+                    view:           &target.gbuffer.position,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.normal,
-                    depth_slice: None,
+                    view:           &target.gbuffer.normal,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 }),
             ],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: target.depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                view:        target.depth,
+                depth_ops:   Some(wgpu::Operations {
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -2450,18 +2468,18 @@ const INITIAL_MESH_FACES: u64 = 64;
 
 fn new_mesh_vertex_buffer(device: &wgpu::Device, vertices: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("mesh face vertices"),
-        size: vertices * MeshFaceVertex::STRIDE,
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        label:              Some("mesh face vertices"),
+        size:               vertices * MeshFaceVertex::STRIDE,
+        usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }
 
 fn new_mesh_row_buffer(device: &wgpu::Device, rows: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("mesh face rows"),
-        size: rows * MeshFaceRow::STRIDE,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        label:              Some("mesh face rows"),
+        size:               rows * MeshFaceRow::STRIDE,
+        usage:              wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }
@@ -2474,9 +2492,9 @@ const STATIC_UNIFORM_BYTES: u64 = 32;
 /// quads they belong to — the two are written together and grow together.
 fn new_ring_buffer(device: &wgpu::Device, quads: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("silhouette rings"),
-        size: quads * 4,
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        label:              Some("silhouette rings"),
+        size:               quads * 4,
+        usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }
@@ -2488,9 +2506,9 @@ fn new_ring_buffer(device: &wgpu::Device, quads: u64) -> wgpu::Buffer {
 // for the ground pass — step 7.
 pub(crate) fn new_static_instance_buffer(device: &wgpu::Device, quads: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("static instances"),
-        size: quads * SpriteQuad::STRIDE,
-        usage: wgpu::BufferUsages::VERTEX
+        label:              Some("static instances"),
+        size:               quads * SpriteQuad::STRIDE,
+        usage:              wgpu::BufferUsages::VERTEX
             | wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_DST
             | wgpu::BufferUsages::COPY_SRC,
@@ -2516,32 +2534,32 @@ pub(crate) fn upload(
     pixels: &[u8],
 ) -> wgpu::Texture {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some(label),
-        size: wgpu::Extent3d {
+        label:           Some(label),
+        size:            wgpu::Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING
+        sample_count:    1,
+        dimension:       wgpu::TextureDimension::D2,
+        format:          wgpu::TextureFormat::Rgba8Unorm,
+        usage:           wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::COPY_DST
             | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        view_formats:    &[],
     });
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
-            texture: &texture,
+            texture:   &texture,
             mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    wgpu::TextureAspect::All,
         },
         pixels,
         wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(width * 4),
+            offset:         0,
+            bytes_per_row:  Some(width * 4),
             rows_per_image: Some(height),
         },
         wgpu::Extent3d {
@@ -2588,8 +2606,8 @@ pub(crate) fn write_rows(
         },
         &pixels[from..to],
         wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(width * 4),
+            offset:         0,
+            bytes_per_row:  Some(width * 4),
             rows_per_image: Some(bottom - top),
         },
         wgpu::Extent3d {
@@ -2606,9 +2624,11 @@ pub(crate) fn write_rows(
 // `GroundRenderer::instances_buffer`.
 fn new_instance_buffer(device: &wgpu::Device, quads: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("ground instances"),
-        size: quads * GroundQuad::STRIDE,
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        label:              Some("ground instances"),
+        size:               quads * GroundQuad::STRIDE,
+        usage:              wgpu::BufferUsages::VERTEX
+            | wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }

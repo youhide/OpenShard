@@ -8,14 +8,28 @@ use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
 
+use super::{
+    for_each_static_in,
+    on_screen,
+    place,
+    quad_of,
+};
 use crate::animate::StaticAnimations;
-use crate::atlas::{AtlasPixel, StaticArt};
-use crate::camera::{self, Camera, RealPixel, TILE_HEIGHT, TileBounds, WorldPixel};
+use crate::atlas::{
+    AtlasPixel,
+    StaticArt,
+};
+use crate::camera::{
+    self,
+    Camera,
+    RealPixel,
+    TILE_HEIGHT,
+    TileBounds,
+    WorldPixel,
+};
 use crate::cutaway::Cutaway;
 use crate::depth;
 use crate::sprite::SpriteQuad;
-
-use super::{for_each_static_in, on_screen, place, quad_of};
 
 /// One static of the map, named by where it stands and what it is.
 ///
@@ -24,7 +38,7 @@ use super::{for_each_static_in, on_screen, place, quad_of};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PickedStatic {
     /// Where it stands.
-    pub at: Point,
+    pub at:      Point,
     /// Its placed graphic (the start of an animation cycle, if animated).
     pub graphic: Graphic,
 }
@@ -89,7 +103,7 @@ pub fn pick_with_interior<'a>(
         if hit.is_none_or(|best| placed.order >= best.order) {
             hit = Some(depth::Hit {
                 order: placed.order,
-                what: PickedStatic { at, graphic },
+                what:  PickedStatic { at, graphic },
             });
         }
     });

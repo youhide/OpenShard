@@ -12,13 +12,30 @@
 
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::gump::{
-    ButtonId, CloseGump, GUMP_WHITE, GumpAnswer, GumpButton, GumpDisplay, GumpId, GumpKey, GumpLayout,
+    ButtonId,
+    CloseGump,
+    GUMP_WHITE,
+    GumpAnswer,
+    GumpButton,
+    GumpDisplay,
+    GumpId,
+    GumpKey,
+    GumpLayout,
     GumpPoint,
 };
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::wire::{Graphic, SoundId};
+use openshard_protocol::wire::{
+    Graphic,
+    SoundId,
+};
 use openshard_state::components::{
-    Combat, CriminalUntil, Position, RECALL_RUNE_GRAPHIC, RuneMark, Runebook, RunebookEntry,
+    Combat,
+    CriminalUntil,
+    Position,
+    RECALL_RUNE_GRAPHIC,
+    RuneMark,
+    Runebook,
+    RunebookEntry,
 };
 
 use super::*;
@@ -415,21 +432,21 @@ impl World {
             connection,
             &ServerPacket::CloseGump(CloseGump {
                 gump_id: RUNEBOOK_GUMP,
-                button: ButtonId::CLOSE_BOX,
+                button:  ButtonId::CLOSE_BOX,
             }),
         );
         self.state.send_packet(
             connection,
             &ServerPacket::GumpDisplay(GumpDisplay {
-                serial: self
+                serial:  self
                     .state
                     .registry
                     .serial_of(player)
                     .map_or(GumpKey::STANDALONE, GumpKey::on),
                 gump_id: RUNEBOOK_GUMP,
-                at: GumpPoint::new(60, 60),
-                layout: text.to_owned(),
-                lines: lines.to_vec(),
+                at:      GumpPoint::new(60, 60),
+                layout:  text.to_owned(),
+                lines:   lines.to_vec(),
             }),
         );
         if let Some(row) = self.state.row_of_mut(player) {
@@ -611,12 +628,14 @@ impl World {
             magic::SpellEffect::GateTravel => {
                 self.open_gate_to(player, entry.facet, entry.destination);
             }
-            _ => self.travel_to(
-                player,
-                entry.facet,
-                entry.destination,
-                magic::TravelKind::RecallFrom,
-            ),
+            _ => {
+                self.travel_to(
+                    player,
+                    entry.facet,
+                    entry.destination,
+                    magic::TravelKind::RecallFrom,
+                )
+            }
         }
     }
 }

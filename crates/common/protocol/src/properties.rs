@@ -20,10 +20,21 @@
 //! carries, per Sphere, so a client that requested a list can match it to the
 //! revision it was told about.
 
-use crate::codec::{CodecError, PacketReader, PacketWriter};
+use crate::codec::{
+    CodecError,
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
-use crate::serial::{RawSerial, Serial};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+};
+use crate::serial::{
+    RawSerial,
+    Serial,
+};
 use crate::version::ClientVersion;
 use crate::wire::ClilocId;
 
@@ -36,7 +47,7 @@ use crate::wire::ClilocId;
 #[derive(Clone, Debug)]
 pub struct PropertyList {
     writer: PacketWriter,
-    hash: u32,
+    hash:   u32,
 }
 
 impl PropertyList {
@@ -126,7 +137,7 @@ pub struct TooltipRevision {
     /// accumulator the *server* computes ([`PropertyList::add_hash`]) and only
     /// the *client* ever reads back, which is class D's shape reversed. See
     /// "Amendments forced by N7" in `docs/protocol_newtypes.md`.
-    pub hash: u32,
+    pub hash:   u32,
 }
 
 impl EncodePacket for TooltipRevision {
@@ -145,7 +156,7 @@ impl DecodePacket for TooltipRevision {
     fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
         Ok(Self {
             serial: read_serial(reader)?,
-            hash: reader.u32()?,
+            hash:   reader.u32()?,
         })
     }
 }
@@ -161,7 +172,7 @@ impl DecodePacket for TooltipRevision {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct PropertyEntry {
     /// The localized string this line is.
-    pub cliloc: ClilocId,
+    pub cliloc:    ClilocId,
     /// Its substitutions, tab-separated, empty when the string takes none.
     pub arguments: String,
 }
@@ -177,9 +188,9 @@ pub struct PropertyEntry {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct PropertyListReply {
     /// The object this list describes.
-    pub serial: Serial,
+    pub serial:  Serial,
     /// The revision the server computed for it, the same value its [`TooltipRevision`] carried.
-    pub hash: u32,
+    pub hash:    u32,
     /// The lines, in the order the server wrote them. The first is the name.
     pub entries: Vec<PropertyEntry>,
 }
@@ -213,7 +224,7 @@ impl DecodePacket for PropertyListReply {
             }
             let byte_count = usize::from(reader.u16()?);
             entries.push(PropertyEntry {
-                cliloc: ClilocId(cliloc),
+                cliloc:    ClilocId(cliloc),
                 arguments: utf16_le(reader.bytes(byte_count)?)?,
             });
         }
@@ -332,7 +343,10 @@ fn string_hash(value: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::{decode_packet, encode_packet};
+    use crate::packet::{
+        decode_packet,
+        encode_packet,
+    };
 
     fn version() -> ClientVersion {
         ClientVersion::new(7, 0, 45, 65)
@@ -442,15 +456,15 @@ mod tests {
             reply.entries,
             vec![
                 PropertyEntry {
-                    cliloc: ClilocId(1_020_000 + 0x0EED),
+                    cliloc:    ClilocId(1_020_000 + 0x0EED),
                     arguments: String::new(),
                 },
                 PropertyEntry {
-                    cliloc: ClilocId(1_050_045),
+                    cliloc:    ClilocId(1_050_045),
                     arguments: " \tLord British\t [OSS]".to_owned(),
                 },
                 PropertyEntry {
-                    cliloc: ClilocId(1_042_971),
+                    cliloc:    ClilocId(1_042_971),
                     arguments: "Warlord, The Silver Serpent".to_owned(),
                 },
             ]
@@ -487,7 +501,7 @@ mod tests {
         // had gone stale.
         let revision = TooltipRevision {
             serial: Serial::new(0x0000_00AB).unwrap(),
-            hash: 0xDEAD_BEEF,
+            hash:   0xDEAD_BEEF,
         };
         let bytes = encode_packet(&revision, version());
         assert_eq!(

@@ -14,17 +14,17 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct TemplateFile {
-    format: String,
+    format:     String,
     components: Vec<TemplateComponent>,
 }
 
 #[derive(Deserialize)]
 struct TemplateComponent {
     graphic: u16,
-    dx: i16,
-    dy: i16,
-    dz: i16,
-    flags: u64,
+    dx:      i16,
+    dy:      i16,
+    dz:      i16,
+    flags:   u64,
 }
 
 /// Read every `openshard-house-design/v1` JSON file in `directory`.
@@ -85,10 +85,10 @@ pub fn load_directory(directory: &Path) -> Result<BTreeMap<String, Vec<Component
                 }
                 Ok(Component {
                     graphic: Graphic(component.graphic),
-                    dx: component.dx,
-                    dy: component.dy,
-                    dz: component.dz,
-                    flags: component.flags,
+                    dx:      component.dx,
+                    dy:      component.dy,
+                    dz:      component.dz,
+                    flags:   component.flags,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

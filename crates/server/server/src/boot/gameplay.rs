@@ -2,7 +2,10 @@
 
 use openshard_config::Config;
 use openshard_map::grid::Tile;
-use openshard_protocol::login::{CharacterListFlags, SupportedFeatures};
+use openshard_protocol::login::{
+    CharacterListFlags,
+    SupportedFeatures,
+};
 use openshard_world::Gameplay;
 use openshard_world::tick::screen::CharacterScreen;
 
@@ -90,11 +93,11 @@ pub(crate) fn character_list_flags_of(config: &Config) -> CharacterListFlags {
 /// What the login character screen offers for this configured world.
 pub(crate) fn character_screen_of(config: &Config) -> Result<CharacterScreen, &'static str> {
     Ok(CharacterScreen {
-        starts: crate::dispatch::start_cities(
+        starts:   crate::dispatch::start_cities(
             &config.world.facets,
             Tile::new(config.world.start.x, config.world.start.y),
         )?,
-        flags: character_list_flags_of(config),
+        flags:    character_list_flags_of(config),
         features: supported_features_of(config),
     })
 }

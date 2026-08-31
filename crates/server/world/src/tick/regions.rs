@@ -16,10 +16,24 @@
 use openshard_entities::EntityId;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::world::{Facet, MusicId, PlayMusic};
-use openshard_state::components::{Client, InRegion, Position};
-use openshard_state::{Region, RegionId};
-use tracing::{info, warn};
+use openshard_protocol::world::{
+    Facet,
+    MusicId,
+    PlayMusic,
+};
+use openshard_state::components::{
+    Client,
+    InRegion,
+    Position,
+};
+use openshard_state::{
+    Region,
+    RegionId,
+};
+use tracing::{
+    info,
+    warn,
+};
 
 use super::World;
 use crate::events::RegionChanged;
@@ -29,11 +43,11 @@ use crate::events::RegionChanged;
 struct Crossing {
     entity: EntityId,
     serial: Serial,
-    facet: Facet,
-    from: Option<RegionId>,
-    to: Option<RegionId>,
-    name: String,
-    music: Option<u16>,
+    facet:  Facet,
+    from:   Option<RegionId>,
+    to:     Option<RegionId>,
+    name:   String,
+    music:  Option<u16>,
 }
 
 impl World {
@@ -94,28 +108,27 @@ impl World {
             .facets
             .iter()
             .flat_map(|(&facet, state)| {
-                state
-                    .regions
-                    .iter()
-                    .map(move |region| openshard_persistence::RegionRecord {
+                state.regions.iter().map(move |region| {
+                    openshard_persistence::RegionRecord {
                         // `.0` at the record seam: a saved facet is a SQL column.
-                        facet: facet.0,
-                        id: region.id.0,
-                        name: region.name.clone(),
-                        priority: region.priority,
-                        rects: region
+                        facet:       facet.0,
+                        id:          region.id.0,
+                        name:        region.name.clone(),
+                        priority:    region.priority,
+                        rects:       region
                             .rects
                             .iter()
                             .map(|r| (r.x, r.y, r.width, r.height, r.z_min, r.z_max))
                             .collect(),
-                        guarded: region.flags.guarded,
+                        guarded:     region.flags.guarded,
                         no_teleport: region.flags.no_teleport,
-                        no_recall: region.flags.no_recall,
-                        no_housing: region.flags.no_housing,
-                        safe: region.flags.safe,
-                        music: region.music,
-                        light: region.light,
-                    })
+                        no_recall:   region.flags.no_recall,
+                        no_housing:  region.flags.no_housing,
+                        safe:        region.flags.safe,
+                        music:       region.music,
+                        light:       region.light,
+                    }
+                })
             })
             .collect()
     }
@@ -133,32 +146,32 @@ impl World {
                 .entry(Facet(record.facet))
                 .or_default()
                 .push(openshard_state::Region {
-                    id: RegionId(record.id),
-                    name: record.name,
+                    id:       RegionId(record.id),
+                    name:     record.name,
                     priority: record.priority,
-                    rects: record
+                    rects:    record
                         .rects
                         .into_iter()
-                        .map(
-                            |(x, y, width, height, z_min, z_max)| openshard_state::RegionRect {
+                        .map(|(x, y, width, height, z_min, z_max)| {
+                            openshard_state::RegionRect {
                                 x,
                                 y,
                                 width,
                                 height,
                                 z_min,
                                 z_max,
-                            },
-                        )
+                            }
+                        })
                         .collect(),
-                    flags: openshard_state::RegionFlags {
-                        guarded: record.guarded,
+                    flags:    openshard_state::RegionFlags {
+                        guarded:     record.guarded,
                         no_teleport: record.no_teleport,
-                        no_recall: record.no_recall,
-                        no_housing: record.no_housing,
-                        safe: record.safe,
+                        no_recall:   record.no_recall,
+                        no_housing:  record.no_housing,
+                        safe:        record.safe,
                     },
-                    music: record.music,
-                    light: record.light,
+                    music:    record.music,
+                    light:    record.light,
                 });
         }
         for (facet, mut regions) in by_facet {
@@ -208,7 +221,7 @@ impl World {
             self.state.registry.insert(
                 crossing.entity,
                 InRegion {
-                    facet: crossing.facet,
+                    facet:  crossing.facet,
                     region: crossing.to,
                 },
             );
@@ -216,10 +229,10 @@ impl World {
             self.state.bus.send(RegionChanged {
                 entity: crossing.entity,
                 serial: crossing.serial,
-                facet: crossing.facet,
-                from: crossing.from,
-                to: crossing.to,
-                name: crossing.name,
+                facet:  crossing.facet,
+                from:   crossing.from,
+                to:     crossing.to,
+                name:   crossing.name,
             });
         }
     }

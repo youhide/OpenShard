@@ -1,5 +1,6 @@
-use super::*;
 use openshard_protocol::wire::Graphic;
+
+use super::*;
 
 /// How often the world ticks.
 ///
@@ -34,7 +35,10 @@ const _: () = assert!(
 pub(super) const BODY_HUMAN_MALE: Graphic = Graphic(0x0190);
 /// The graphic and gump of a starting backpack.  They belong to `items`, where
 /// staff-created backpacks use the same pair.
-pub(super) use openshard_items::{BACKPACK_GRAPHIC, BACKPACK_GUMP};
+pub(super) use openshard_items::{
+    BACKPACK_GRAPHIC,
+    BACKPACK_GUMP,
+};
 /// The skin hue a character gets when nothing else chose one — the same one
 /// Sphere hands a body with no stored colour.
 pub(super) const DEFAULT_HUE: u16 = 0x83EA;

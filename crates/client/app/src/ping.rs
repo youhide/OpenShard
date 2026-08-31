@@ -7,19 +7,22 @@
 //! looks indistinguishable from a slow shard.
 
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_protocol::world::StepSequence;
 
 #[derive(Default)]
 pub(crate) struct Ping {
-    sent: BTreeMap<StepSequence, Instant>,
+    sent:   BTreeMap<StepSequence, Instant>,
     latest: Option<Sample>,
 }
 
 #[derive(Clone, Copy)]
 struct Sample {
-    transport: Duration,
+    transport:    Duration,
     app_delivery: Duration,
 }
 
@@ -31,7 +34,7 @@ impl Ping {
     pub(crate) fn acknowledged(&mut self, sequence: StepSequence, received: Instant, applied: Instant) {
         if let Some(sent) = self.sent.remove(&sequence) {
             self.latest = Some(Sample {
-                transport: received.saturating_duration_since(sent),
+                transport:    received.saturating_duration_since(sent),
                 app_delivery: applied.saturating_duration_since(received),
             });
         }

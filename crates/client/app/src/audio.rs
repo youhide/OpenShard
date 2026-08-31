@@ -6,15 +6,35 @@
 //! optional asset leaves the world playable and is reported once, rather than
 //! making a headless run or an incomplete client install fail at startup.
 
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::collections::{
+    HashMap,
+    HashSet,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::wire::{Graphic, SoundId};
-use openshard_protocol::world::{MusicId, Point, Weather, WeatherChange};
-use openshard_uofiles::anim::{BodyKind, is_ghost};
+use openshard_protocol::wire::{
+    Graphic,
+    SoundId,
+};
+use openshard_protocol::world::{
+    MusicId,
+    Point,
+    Weather,
+    WeatherChange,
+};
+use openshard_uofiles::anim::{
+    BodyKind,
+    is_ghost,
+};
 
 /// A locally inferred human footfall.
 ///
@@ -26,13 +46,13 @@ use openshard_uofiles::anim::{BodyKind, is_ghost};
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Footstep {
     /// `None` is the offline player before a shard assigns a serial.
-    pub who: Option<Serial>,
-    pub body: Graphic,
-    pub at: Point,
+    pub who:     Option<Serial>,
+    pub body:    Graphic,
+    pub at:      Point,
     pub running: bool,
     pub mounted: bool,
-    pub hidden: bool,
-    pub dead: bool,
+    pub hidden:  bool,
+    pub dead:    bool,
 }
 
 /// Owns the optional platform output and the installed client audio assets.
@@ -194,29 +214,29 @@ fn weather_point(listener: Point, index: usize) -> Point {
 
 #[cfg(not(target_arch = "wasm32"))]
 struct NativeAudio {
-    output: rodio::MixerDeviceSink,
-    effects: openshard_uofiles::sound::SoundArchive,
-    music: rodio::Player,
-    tracks: HashMap<String, PathBuf>,
-    music_names: HashMap<MusicId, Track>,
+    output:         rodio::MixerDeviceSink,
+    effects:        openshard_uofiles::sound::SoundArchive,
+    music:          rodio::Player,
+    tracks:         HashMap<String, PathBuf>,
+    music_names:    HashMap<MusicId, Track>,
     /// The file to start again when the music player runs dry — `None` while
     /// nothing is playing, and while what is playing is a track the install
     /// marks as playing once.
-    looping: Option<PathBuf>,
-    effect_volume: f32,
-    footsteps: HashMap<Option<Serial>, FootstepState>,
-    unheard: HashSet<SoundId>,
+    looping:        Option<PathBuf>,
+    effect_volume:  f32,
+    footsteps:      HashMap<Option<Serial>, FootstepState>,
+    unheard:        HashSet<SoundId>,
     missing_tracks: HashSet<MusicId>,
-    weather: Option<WeatherAudio>,
+    weather:        Option<WeatherAudio>,
 }
 
 /// A client-owned weather ambience. ClassicUO places these effects around the
 /// player rather than waiting for a server `0x54` sound packet.
 #[cfg(not(target_arch = "wasm32"))]
 struct WeatherAudio {
-    weather: Weather,
-    next: Instant,
-    sound_index: usize,
+    weather:      Weather,
+    next:         Instant,
+    sound_index:  usize,
     offset_index: usize,
 }
 
@@ -225,7 +245,7 @@ struct WeatherAudio {
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, Default)]
 struct FootstepState {
-    next: Option<std::time::Instant>,
+    next:   Option<std::time::Instant>,
     offset: u16,
 }
 
@@ -237,7 +257,7 @@ struct FootstepState {
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Track {
-    name: String,
+    name:    String,
     looping: bool,
 }
 
@@ -335,9 +355,9 @@ impl NativeAudio {
         }
         let now = Instant::now();
         self.weather = Some(WeatherAudio {
-            weather: change.weather,
-            next: now + weather_delay(0),
-            sound_index: 1,
+            weather:      change.weather,
+            next:         now + weather_delay(0),
+            sound_index:  1,
             offset_index: 1,
         });
         self.play_sound(sound, weather_point(listener, 0), listener);
@@ -661,18 +681,26 @@ fn classic_track(track: MusicId) -> Option<Track> {
     ];
     let (name, looping) = CLASSIC.get(usize::from(track.0))?;
     Some(Track {
-        name: (*name).to_owned(),
+        name:    (*name).to_owned(),
         looping: *looping,
     })
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
-    use std::num::{NonZeroU16, NonZeroU32};
+    use std::num::{
+        NonZeroU16,
+        NonZeroU32,
+    };
 
-    use openshard_protocol::wire::{Graphic, SoundId};
-    use openshard_protocol::world::MusicId;
-    use openshard_protocol::world::Point;
+    use openshard_protocol::wire::{
+        Graphic,
+        SoundId,
+    };
+    use openshard_protocol::world::{
+        MusicId,
+        Point,
+    };
 
     /// A short buffer of silence — enough to be a source, and nothing is ever
     /// asked to play it.
@@ -775,8 +803,8 @@ mod tests {
             Some((
                 MusicId(9),
                 super::Track {
-                    name: "britainpos".to_owned(),
-                    looping: true
+                    name:    "britainpos".to_owned(),
+                    looping: true,
                 }
             ))
         );
@@ -785,8 +813,8 @@ mod tests {
             Some((
                 MusicId(10),
                 super::Track {
-                    name: "britain1".to_owned(),
-                    looping: false
+                    name:    "britain1".to_owned(),
+                    looping: false,
                 }
             ))
         );
@@ -860,14 +888,16 @@ mod tests {
 
     #[test]
     fn classic_footsteps_alternate_and_keep_their_mounted_cadence() {
-        let step = |mounted, running| super::Footstep {
-            who: None,
-            body: Graphic(400),
-            at: Point::new(0, 0, 0),
-            running,
-            mounted,
-            hidden: false,
-            dead: false,
+        let step = |mounted, running| {
+            super::Footstep {
+                who: None,
+                body: Graphic(400),
+                at: Point::new(0, 0, 0),
+                running,
+                mounted,
+                hidden: false,
+                dead: false,
+            }
         };
         let mut state = super::FootstepState::default();
         assert_eq!(

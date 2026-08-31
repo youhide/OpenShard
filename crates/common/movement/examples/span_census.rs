@@ -26,9 +26,9 @@ use openshard_movement::surfaces::stand_surfaces;
 #[derive(Debug, Parser)]
 struct Cli {
     #[arg(short, long, env = "OPENSHARD_CLIENT", value_name = "DIR")]
-    client: PathBuf,
+    client:  PathBuf,
     #[arg(long, default_value_t = 0)]
-    facet: u8,
+    facet:   u8,
     /// Longest span list to report individually; everything above is one bucket.
     #[arg(long, default_value_t = 16)]
     buckets: usize,
@@ -43,16 +43,16 @@ struct Cli {
 /// save.
 #[derive(Default)]
 struct Split {
-    land: u64,
-    statics: u64,
+    land:        u64,
+    statics:     u64,
     /// Columns holding at least one static surface.
-    columns: u64,
+    columns:     u64,
     /// Columns holding a static surface *and* a land one under it.
-    mixed: u64,
+    mixed:       u64,
     /// Columns with no statics at all — nothing to stand on above the ground,
     /// and nothing to bump into. The only population a step rule can answer
     /// from the land grid alone.
-    bare: u64,
+    bare:        u64,
     /// Blocks whose whole 8x8 holds no statics.
     bare_blocks: u64,
 }

@@ -339,15 +339,7 @@ mod tests {
             None,
         );
         assert_eq!(
-            spawn_item(
-                &mut state,
-                GOLD_GRAPHIC,
-                Hue::NONE,
-                u16::MAX,
-                true,
-                at,
-                Facet(0),
-            ),
+            spawn_item(&mut state, GOLD_GRAPHIC, Hue::NONE, u16::MAX, true, at, Facet(0),),
             None,
         );
         assert_eq!(

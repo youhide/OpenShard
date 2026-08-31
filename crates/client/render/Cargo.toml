@@ -56,7 +56,7 @@ workspace = true
 wesl = "0.4"
 
 [dev-dependencies]
-pollster = "0.4.0"
+pollster = "1.0.1"
 proptest.workspace = true
 # `examples/shard/mod.rs`: the shard's own database, so a scene tool draws what
 # the *server* placed and not only what the client's files hold. Dev-only, and
@@ -65,7 +65,7 @@ proptest.workspace = true
 # the two tables are read by SQL rather than through its `Store`. The same
 # version and the same `bundled` feature as that crate, so the workspace builds
 # one SQLite.
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 # Where the shard keeps its world: `[persistence].database` out of the operator's
 # own `openshard.toml`, rather than a path a tool's caller retypes.
 openshard-config.workspace = true

@@ -21,12 +21,14 @@
 
 use std::collections::BTreeMap;
 
-use openshard_client_pathtrace::aabb as pt_aabb;
-use openshard_client_pathtrace::camera as pt_camera;
-use openshard_client_pathtrace::light as pt_light;
-use openshard_client_pathtrace::scene as pt_scene;
-use openshard_client_pathtrace::trace as pt_trace;
-use openshard_client_pathtrace::vector as pt_vector;
+use openshard_client_pathtrace::{
+    aabb as pt_aabb,
+    camera as pt_camera,
+    light as pt_light,
+    scene as pt_scene,
+    trace as pt_trace,
+    vector as pt_vector,
+};
 use openshard_client_render::camera::WorldSpot;
 use openshard_client_render::light;
 use openshard_client_render::place::Stance;
@@ -34,7 +36,10 @@ use openshard_client_render::place::Stance;
 // `super`, not `crate`: this module is reached from two different crate roots —
 // an example and a test — and only a relative path is true in both.
 use super::boxes::BoxSpec;
-use super::{Drawn, Shade};
+use super::{
+    Drawn,
+    Shade,
+};
 
 /// What the surfaces of a scene are worth, in linear reflectance.
 ///
@@ -61,7 +66,7 @@ pub struct Albedos {
     /// target, which did not exist before that phase. Still [`INVENTED`](
     /// Self::INVENTED) on a scene with no boxes in it — `scene_flat`'s whole
     /// point — where there is nothing on the engine's side to read.
-    pub body: [f64; 3],
+    pub body:   [f64; 3],
 }
 
 impl Albedos {
@@ -76,7 +81,7 @@ impl Albedos {
     /// is a thing a call site *says*.
     pub const INVENTED: Self = Self {
         ground: [0.42, 0.44, 0.40],
-        body: [0.72, 0.70, 0.66],
+        body:   [0.72, 0.70, 0.66],
     };
 }
 
@@ -136,7 +141,7 @@ pub enum Body {
 /// One constant so that the tool a person points at a scene and the gate that
 /// runs under `cargo test` cannot drift into judging two different flames.
 pub const ENGINE_FLAME: Body = Body::Sphere {
-    radius: light::FLAME_RADIUS as f64,
+    radius:  light::FLAME_RADIUS as f64,
     samples: 64,
 };
 
@@ -166,13 +171,13 @@ pub const PENUMBRA_ALLOWED: f64 = 1.0 / light::SHADOW_RAYS as f64;
 /// Two things are taken from the renderer to build it, and both arrive as
 /// **values rather than as formulas** — see `docs/lighting_reference.md`.
 pub struct Mirror {
-    pub scene: pt_scene::Scene,
+    pub scene:  pt_scene::Scene,
     pub camera: pt_camera::Parallel,
-    pub flame: pt_light::Light,
+    pub flame:  pt_light::Light,
     /// How many paths a pixel [`Mirror::render`] asks for, which the emitter
     /// decides: a point is exact in one and a sphere is an estimate in any
     /// number.
-    samples: u32,
+    samples:    u32,
 }
 
 /// A scene to mirror, and everything about it the reference cannot invent.
@@ -183,26 +188,26 @@ pub struct Mirror {
 /// that made up any of them would be judging a different scene and reporting the
 /// difference as the renderer's.
 pub struct Mirrored<'a> {
-    pub boxes: &'a [BoxSpec],
-    pub light_at: WorldSpot,
+    pub boxes:        &'a [BoxSpec],
+    pub light_at:     WorldSpot,
     pub light_radius: f64,
     /// `light::Light::color`, widened. Per channel, a plain multiplier.
-    pub colour: [f64; 3],
+    pub colour:       [f64; 3],
     /// `light::Light::intensity`, widened. **Not the reference's own knob**: a
     /// tracer rendering the same scene at six times the brightness makes a
     /// picture nobody can lay beside a frame.
-    pub intensity: f64,
-    pub albedos: Albedos,
+    pub intensity:    f64,
+    pub albedos:      Albedos,
     /// What shape the flame is, and how hard the reference works at it. See
     /// [`Body`] — a comparison with an occluder in it wants the engine's own
     /// sphere, and one without cannot tell the difference.
-    pub body: Body,
+    pub body:         Body,
     /// The *renderer's* own world-to-pixel map, handed over as a black box for
     /// [`pt_camera::Parallel::measure`] to recover. This is the one thing the
     /// tracer takes from the render crate, and taking it as values rather than
     /// as a formula is what stops the reference camera from drifting into being
     /// nobody's camera.
-    pub to_pixel: &'a dyn Fn(WorldSpot) -> (f64, f64),
+    pub to_pixel:     &'a dyn Fn(WorldSpot) -> (f64, f64),
 }
 
 impl Mirror {
@@ -237,16 +242,18 @@ impl Mirror {
         let scene = pt_scene::Scene {
             bodies: boxes
                 .iter()
-                .map(|b| pt_scene::Body {
-                    shape: pt_aabb::Aabb::between(
-                        isotropic(b.min.0, b.min.1, b.min.2),
-                        isotropic(b.max.0, b.max.1, b.max.2),
-                    ),
-                    albedo: albedos.body,
+                .map(|b| {
+                    pt_scene::Body {
+                        shape:  pt_aabb::Aabb::between(
+                            isotropic(b.min.0, b.min.1, b.min.2),
+                            isotropic(b.max.0, b.max.1, b.max.2),
+                        ),
+                        albedo: albedos.body,
+                    }
                 })
                 .collect(),
             ground: Some(pt_scene::Ground {
-                z: 0.0,
+                z:      0.0,
                 albedo: albedos.ground,
             }),
         };
@@ -334,9 +341,9 @@ impl Mirror {
 /// What the renderer left on the pixels, as the comparison needs it.
 pub struct Frame<'a> {
     /// The pixel grid the renderer wrote and the tracer must have read.
-    pub size: pt_trace::ImageSize,
+    pub size:      pt_trace::ImageSize,
     /// The `place` attachment, decoded — who drew each pixel.
-    pub drawn: &'a [Drawn],
+    pub drawn:     &'a [Drawn],
     /// The frame's own debug view, read back, `RGBA8` — **and which view it is
     /// depends on the question**.
     ///
@@ -346,7 +353,7 @@ pub struct Frame<'a> {
     /// thrown away. One field rather than one per view because a comparison reads
     /// exactly one picture, and because a `Frame` carrying two would let a caller
     /// hand a gate the view it was not written for.
-    pub picture: &'a [u8],
+    pub picture:   &'a [u8],
     /// Which box and stance each mesh-face instance row is, as the tool that
     /// pushed the rows recorded it rather than as anybody's guess about the
     /// order they went in.
@@ -429,7 +436,7 @@ impl std::fmt::Display for Span {
 /// scene rather than against a memory of the picture.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Disagreed {
-    pub count: usize,
+    pub count:  usize,
     /// Where the *engine's* own fragments are — off the position plane, which is
     /// the point the shader lit.
     pub engine: Span,
@@ -448,36 +455,36 @@ pub struct Verdict {
     /// therefore had an opinion. Asserted non-trivial by [`compare`]: a
     /// detector that silently compares nothing reads exactly like a detector
     /// that found nothing.
-    pub compared: usize,
+    pub compared:         usize,
     /// Of those, the ones that disagree away from any edge. **This is the
     /// number.** Anything else has an explanation that is not the walk.
-    pub interior: usize,
+    pub interior:         usize,
     /// And the ones that disagree within a pixel of a shadow's own edge, which
     /// half a pixel of sampling difference explains.
-    pub edge: usize,
+    pub edge:             usize,
     /// Pixels the two disagree about *which surface is there*, on a silhouette
     /// — the same half a pixel, deciding which of two surfaces a ray meets.
-    pub silhouette: usize,
+    pub silhouette:       usize,
     /// And the ones that do not sit on one, which nothing sub-pixel explains.
     pub interior_surface: usize,
     /// What those were, by name.
-    pub surface_pairs: BTreeMap<String, Disagreed>,
+    pub surface_pairs:    BTreeMap<String, Disagreed>,
     /// Pixels of a surface whose own normal points away from the flame, and how
     /// many of those the frame draws lit.
-    pub back_facing: usize,
-    pub back_facing_lit: usize,
+    pub back_facing:      usize,
+    pub back_facing_lit:  usize,
     /// How many compared pixels the *choice of light model* decides — the two
     /// models rendered and subtracted, rather than inferred from a back-face
     /// count.
-    pub model_decides: usize,
+    pub model_decides:    usize,
     /// Pixels with nothing the two have a common vocabulary for: the cleared
     /// background, or a stance the tracer's scene has no counterpart for.
-    pub nothing_drawn: usize,
+    pub nothing_drawn:    usize,
     /// The frame's own lit/shadowed decision and the tracer's, one bit a pixel,
     /// `None` where the pixel was not compared. The picture and the comparison
     /// are the same data.
-    pub engine_lit: Vec<Option<bool>>,
-    pub traced_lit: Vec<Option<bool>>,
+    pub engine_lit:       Vec<Option<bool>>,
+    pub traced_lit:       Vec<Option<bool>>,
     /// And what the *frame* says is there, per pixel — the same map the
     /// comparison's own precondition is taken on.
     ///
@@ -486,12 +493,12 @@ pub struct Verdict {
     /// picture from `examples/boxes.rs`, which centres on the scene's tile bounds
     /// where the gate centres on one named tile — one tile of offset, and an
     /// overlay that agreed with the geometry everywhere except where it mattered.
-    pub engine_surface: Vec<Option<pt_scene::Surface>>,
+    pub engine_surface:   Vec<Option<pt_scene::Surface>>,
     /// Why each pixel is in the comparison or is not — the counts above, kept per
     /// pixel so a picture can say which of them a region is. See [`Judged`].
-    pub judged: Vec<Judged>,
+    pub judged:           Vec<Judged>,
     /// A handful of each kind of disagreement, in words, for a person.
-    pub examples: Vec<String>,
+    pub examples:         Vec<String>,
     pub surface_examples: Vec<String>,
 }
 
@@ -656,16 +663,16 @@ const NOT_COMPARED: u8 = 96;
 pub struct Penumbra {
     /// Pixels where both sides say the flame partly reaches: the penumbra, which
     /// is the only place this comparison has anything to be about.
-    pub compared: usize,
+    pub compared:   usize,
     /// The largest and the mean difference over those, as fractions of the whole
     /// flame.
-    pub worst: f64,
-    pub mean: f64,
+    pub worst:      f64,
+    pub mean:       f64,
     /// Where the worst one is, for a person with the picture open.
-    pub worst_at: (u32, u32),
+    pub worst_at:   (u32, u32),
     /// And the same two numbers for the reference against itself, one seed
     /// against another, over the same pixels.
-    pub noise: f64,
+    pub noise:      f64,
     pub noise_mean: f64,
     /// The mean difference **with its sign**: how much brighter the engine's
     /// penumbra is than the reference's, on average.
@@ -678,11 +685,11 @@ pub struct Penumbra {
     /// penumbra sitting a pixel to one side of where it belongs. Those are what
     /// this phase could actually have got wrong, and they show up here at ten
     /// times their size in [`Penumbra::mean`].
-    pub bias: f64,
+    pub bias:       f64,
     /// How many of the compared pixels are past what sampling explains: the
     /// caller's own `allowed` for the engine's side, plus the reference's
     /// measured disagreement with itself at that same pixel.
-    pub over: usize,
+    pub over:       usize,
 }
 
 impl Penumbra {
@@ -749,14 +756,14 @@ pub fn penumbra(
     );
     let (width, height) = (size.width, size.height);
     let mut found = Penumbra {
-        compared: 0,
-        worst: 0.0,
-        mean: 0.0,
-        worst_at: (0, 0),
-        noise: 0.0,
+        compared:   0,
+        worst:      0.0,
+        mean:       0.0,
+        worst_at:   (0, 0),
+        noise:      0.0,
         noise_mean: 0.0,
-        bias: 0.0,
-        over: 0,
+        bias:       0.0,
+        over:       0,
     };
     let (mut total, mut noise_total, mut signed) = (0.0, 0.0, 0.0);
     for pixel in 0..(width * height) as usize {
@@ -836,17 +843,17 @@ pub fn penumbra(
 /// intensity.
 pub struct Shading {
     /// Pixels both sides had an opinion about and neither was clipping at.
-    pub compared: usize,
+    pub compared:   usize,
     /// And the ones dropped because one side or the other was at full scale. A
     /// clamped pixel agrees with anything brighter than itself, so counting one
     /// as agreement would let a frame that is twice too bright read as perfect
     /// wherever it is bright enough.
-    pub clamped: usize,
+    pub clamped:    usize,
     /// The largest and the mean difference over the compared pixels, in shares of
     /// a channel's full scale.
-    pub worst: f64,
-    pub worst_at: (u32, u32),
-    pub mean: f64,
+    pub worst:      f64,
+    pub worst_at:   (u32, u32),
+    pub mean:       f64,
     /// The mean difference **with its sign**: how much brighter the engine is
     /// than the reference, on average.
     ///
@@ -856,13 +863,13 @@ pub struct Shading {
     /// rather than at each sample point is precisely a wrong model, and it is
     /// signed — it overestimates, because it credits every ray with the cosine of
     /// the one direction the flame's middle happens to lie in.
-    pub bias: f64,
+    pub bias:       f64,
     /// What the reference disagrees with *itself* by over the same pixels, one
     /// seed against another. The scale everything above is read against.
     pub noise_mean: f64,
     /// How many compared pixels are past `allowed` plus the reference's own
     /// measured noise at that pixel.
-    pub over: usize,
+    pub over:       usize,
 }
 
 impl Shading {
@@ -931,14 +938,14 @@ pub fn shading(
     }
 
     let mut found = Shading {
-        compared: 0,
-        clamped: 0,
-        worst: 0.0,
-        worst_at: (0, 0),
-        mean: 0.0,
-        bias: 0.0,
+        compared:   0,
+        clamped:    0,
+        worst:      0.0,
+        worst_at:   (0, 0),
+        mean:       0.0,
+        bias:       0.0,
         noise_mean: 0.0,
-        over: 0,
+        over:       0,
     };
     let (mut total, mut signed, mut noise_total) = (0.0, 0.0, 0.0);
     for y in 0..height {
@@ -1043,12 +1050,13 @@ pub fn probe(traced: &pt_trace::Image, frame: Frame<'_>, at: pt_trace::ImagePixe
                 None => "nothing".to_owned(),
             },
             match seen {
-                Some(seen) => format!(
-                    "({:8.3}, {:8.3}, {:6.3})",
-                    seen.at.x,
-                    seen.at.y,
-                    seen.at.z * f64::from(light::Z_PER_TILE)
-                ),
+                Some(seen) =>
+                    format!(
+                        "({:8.3}, {:8.3}, {:6.3})",
+                        seen.at.x,
+                        seen.at.y,
+                        seen.at.z * f64::from(light::Z_PER_TILE)
+                    ),
                 None => "—".to_owned(),
             },
         ));
@@ -1176,25 +1184,25 @@ pub fn compare(engine_model: &pt_trace::Image, physical: &pt_trace::Image, frame
     let mut engine_surface: Vec<Option<pt_scene::Surface>> = vec![None; (width * height) as usize];
     let mut traced_surfaces: Vec<Option<pt_scene::Surface>> = vec![None; (width * height) as usize];
     let mut verdict = Verdict {
-        compared: 0,
-        interior: 0,
-        edge: 0,
-        silhouette: 0,
+        compared:         0,
+        interior:         0,
+        edge:             0,
+        silhouette:       0,
         interior_surface: 0,
-        surface_pairs: BTreeMap::new(),
-        back_facing: 0,
-        back_facing_lit: 0,
-        model_decides: 0,
-        nothing_drawn: 0,
-        engine_lit: Vec::new(),
-        traced_lit: Vec::new(),
-        engine_surface: Vec::new(),
+        surface_pairs:    BTreeMap::new(),
+        back_facing:      0,
+        back_facing_lit:  0,
+        model_decides:    0,
+        nothing_drawn:    0,
+        engine_lit:       Vec::new(),
+        traced_lit:       Vec::new(),
+        engine_surface:   Vec::new(),
         // `NothingDrawn` is the fallthrough and the loop below names every other
         // case, so a pixel keeps this exactly when the frame drew nothing the
         // tracer has a word for — which is the same condition the count above is
         // taken on, one loop earlier.
-        judged: vec![Judged::NothingDrawn; (width * height) as usize],
-        examples: Vec::new(),
+        judged:           vec![Judged::NothingDrawn; (width * height) as usize],
+        examples:         Vec::new(),
         surface_examples: Vec::new(),
     };
 
@@ -1268,7 +1276,7 @@ pub fn compare(engine_model: &pt_trace::Image, physical: &pt_trace::Image, frame
                             .seen
                             .map(|seen| (seen.at.x, seen.at.y, seen.at.z * f64::from(light::Z_PER_TILE)));
                         let found = verdict.surface_pairs.entry(what).or_insert(Disagreed {
-                            count: 0,
+                            count:  0,
                             engine: Span::EMPTY,
                             traced: Span::EMPTY,
                         });

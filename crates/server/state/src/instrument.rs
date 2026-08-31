@@ -8,7 +8,10 @@
 //! lives on the item as an [`Instrument`](crate::Instrument).
 
 use openshard_protocol::item_kind::ItemKindId;
-use openshard_protocol::wire::{Graphic, SoundId};
+use openshard_protocol::wire::{
+    Graphic,
+    SoundId,
+};
 
 /// One instrument class: the graphic, and the two sounds it makes.
 #[derive(Debug, Clone, Copy)]
@@ -16,9 +19,9 @@ pub struct InstrumentData {
     /// The item graphic this row describes.
     pub graphic: Graphic,
     /// What it sounds like played well — ServUO's `SuccessSound`.
-    pub well: SoundId,
+    pub well:    SoundId,
     /// And badly.
-    pub badly: SoundId,
+    pub badly:   SoundId,
 }
 
 /// How many tunes a fresh instrument holds — ServUO's `InitMinUses`/`InitMaxUses`,
@@ -64,8 +67,8 @@ static INSTRUMENTS: &[InstrumentData] = &[
 const fn i(graphic: u16, well: u16, badly: u16) -> InstrumentData {
     InstrumentData {
         graphic: Graphic(graphic),
-        well: SoundId(well),
-        badly: SoundId(badly),
+        well:    SoundId(well),
+        badly:   SoundId(badly),
     }
 }
 

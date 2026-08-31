@@ -15,17 +15,39 @@
 //! line, which is the only way to be sure a page chain is right.
 
 use openshard_entities::EntityId;
-use openshard_protocol::gump::id;
 use openshard_protocol::gump::{
-    ButtonId, CloseGump, GUMP_DARK_GREEN, GUMP_LIGHT_GREEN, GUMP_RED, GUMP_WHITE, GumpButton, GumpDisplay,
-    GumpId, GumpKey, GumpLayout, GumpPoint, SwitchId,
+    ButtonId,
+    CloseGump,
+    GUMP_DARK_GREEN,
+    GUMP_LIGHT_GREEN,
+    GUMP_RED,
+    GUMP_WHITE,
+    GumpButton,
+    GumpDisplay,
+    GumpId,
+    GumpKey,
+    GumpLayout,
+    GumpPoint,
+    SwitchId,
+    id,
 };
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::wire::ClilocId;
-use openshard_state::components::{Client, QuestLog};
-use openshard_state::quest::{ObjectiveKind, QuestDef, QuestKey};
-use openshard_state::{QuestGumpContext, QuestSection, WorldState};
+use openshard_state::components::{
+    Client,
+    QuestLog,
+};
+use openshard_state::quest::{
+    ObjectiveKind,
+    QuestDef,
+    QuestKey,
+};
+use openshard_state::{
+    QuestGumpContext,
+    QuestSection,
+    WorldState,
+};
 
 /// The gump id the quest window answers under. Distinctive, so a reply is never
 /// mistaken for the admin menu's or a pack dialog's.
@@ -169,14 +191,14 @@ pub(crate) fn show(state: &mut WorldState, player: EntityId, context: QuestGumpC
     // first in every branch of `OnResponse`, and this is that.
     let close = ServerPacket::CloseGump(CloseGump {
         gump_id: QUEST_GUMP,
-        button: ButtonId::CLOSE_BOX,
+        button:  ButtonId::CLOSE_BOX,
     });
     let packet = ServerPacket::GumpDisplay(GumpDisplay {
-        serial: GumpKey::on(serial),
+        serial:  GumpKey::on(serial),
         gump_id: QUEST_GUMP,
-        at: GumpPoint::new(i32::from(WINDOW_X), i32::from(WINDOW_Y)),
-        layout: string.to_owned(),
-        lines: lines.to_vec(),
+        at:      GumpPoint::new(i32::from(WINDOW_X), i32::from(WINDOW_Y)),
+        layout:  string.to_owned(),
+        lines:   lines.to_vec(),
     });
     state.send_packet(connection, &close);
     state.send_packet(connection, &packet);
@@ -683,11 +705,11 @@ pub(crate) fn show_resign(state: &mut WorldState, player: EntityId, key: &QuestK
 
     let (string, lines) = layout.finish();
     let packet = ServerPacket::GumpDisplay(GumpDisplay {
-        serial: GumpKey::on(serial),
+        serial:  GumpKey::on(serial),
         gump_id: QUEST_RESIGN_GUMP,
-        at: GumpPoint::new(120, 50),
-        layout: string.to_owned(),
-        lines: lines.to_vec(),
+        at:      GumpPoint::new(120, 50),
+        layout:  string.to_owned(),
+        lines:   lines.to_vec(),
     });
     state.send_packet(connection, &packet);
 }

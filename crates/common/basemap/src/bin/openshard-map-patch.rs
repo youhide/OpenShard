@@ -28,12 +28,34 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
-use openshard_basemap::{Loaded, load, patches};
-use openshard_map::map::{LandCell, StaticItem};
-use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime, StaticId};
-use openshard_map::snapshot::{MapRevision, MapSnapshot};
-use openshard_protocol::wire::{Graphic, Hue};
+use clap::{
+    Parser,
+    Subcommand,
+};
+use openshard_basemap::{
+    Loaded,
+    load,
+    patches,
+};
+use openshard_map::map::{
+    LandCell,
+    StaticItem,
+};
+use openshard_map::patch::{
+    Patch,
+    PatchAuthor,
+    PatchOp,
+    PatchTime,
+    StaticId,
+};
+use openshard_map::snapshot::{
+    MapRevision,
+    MapSnapshot,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_tiles::LandTileId;
 
 #[derive(Debug, Parser)]
@@ -46,12 +68,12 @@ struct Cli {
     base_set: PathBuf,
     /// Who is committing. Attribution, not authority.
     #[arg(long, default_value = "unnamed", value_name = "NAME")]
-    author: String,
+    author:   String,
     /// Say what would be committed, and commit nothing.
     #[arg(long)]
-    dry_run: bool,
+    dry_run:  bool,
     #[command(subcommand)]
-    what: What,
+    what:     What,
 }
 
 #[derive(Debug, Subcommand)]
@@ -60,43 +82,43 @@ enum What {
     SetLand {
         /// Where.
         #[arg(long)]
-        x: u16,
+        x:    u16,
         /// Where.
         #[arg(long)]
-        y: u16,
+        y:    u16,
         /// The land graphic to put there.
         #[arg(long)]
         tile: u16,
         /// The height to put it at.
         #[arg(long, allow_negative_numbers = true)]
-        z: i8,
+        z:    i8,
     },
     /// Put a static on a tile, after everything already standing on it.
     AddStatic {
         /// Where.
         #[arg(long)]
-        x: u16,
+        x:       u16,
         /// Where.
         #[arg(long)]
-        y: u16,
+        y:       u16,
         /// The static graphic.
         #[arg(long)]
         graphic: u16,
         /// Its base height.
         #[arg(long, allow_negative_numbers = true)]
-        z: i8,
+        z:       i8,
         /// Its colour, zero for none.
         #[arg(long, default_value_t = 0)]
-        hue: u16,
+        hue:     u16,
     },
     /// Take one static off a tile.
     RemoveStatic {
         /// Where.
         #[arg(long)]
-        x: u16,
+        x:   u16,
         /// Where.
         #[arg(long)]
-        y: u16,
+        y:   u16,
         /// Which one on the tile, counted from zero in the order `list` prints.
         #[arg(long, default_value_t = 0)]
         nth: u16,
@@ -206,31 +228,35 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 fn build(world: &MapSnapshot, what: &What) -> Result<PatchOp, Box<dyn std::error::Error>> {
     let map = world.map();
     Ok(match *what {
-        What::SetLand { x, y, tile, z } => PatchOp::set_land(
-            map,
-            x,
-            y,
-            LandCell {
-                tile: LandTileId(tile),
-                z,
-            },
-        )?,
+        What::SetLand { x, y, tile, z } => {
+            PatchOp::set_land(
+                map,
+                x,
+                y,
+                LandCell {
+                    tile: LandTileId(tile),
+                    z,
+                },
+            )?
+        }
         What::AddStatic {
             x,
             y,
             graphic,
             z,
             hue,
-        } => PatchOp::add_static(
-            map,
-            StaticItem {
-                tile: Graphic(graphic),
-                x,
-                y,
-                z,
-                hue: Hue(hue),
-            },
-        )?,
+        } => {
+            PatchOp::add_static(
+                map,
+                StaticItem {
+                    tile: Graphic(graphic),
+                    x,
+                    y,
+                    z,
+                    hue: Hue(hue),
+                },
+            )?
+        }
         What::RemoveStatic { x, y, nth } => PatchOp::remove_static(map, x, y, StaticId(nth))?,
         What::List { .. } | What::Show => unreachable!("handled before the world is read"),
     })

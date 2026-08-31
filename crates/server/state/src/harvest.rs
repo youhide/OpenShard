@@ -18,8 +18,16 @@
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-use openshard_protocol::wire::{ClilocId, Graphic, Hue, SoundId};
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
+use openshard_protocol::wire::{
+    ClilocId,
+    Graphic,
+    Hue,
+    SoundId,
+};
 use openshard_protocol::world::Facet;
 
 use crate::WorldTick;
@@ -77,22 +85,22 @@ impl TileSet {
 pub struct HarvestResource {
     /// The skill needed to work this at all, in tenths. Below it the vein falls
     /// back, and there is no roll.
-    pub req_skill: i32,
+    pub req_skill:      i32,
     /// The bottom of the band the roll is made against, in tenths.
-    pub min_skill: i32,
+    pub min_skill:      i32,
     /// And the top.
-    pub max_skill: i32,
+    pub max_skill:      i32,
     /// The cliloc said on a success — "You have found some iron ore."
     pub success_cliloc: ClilocId,
     /// The item art the yield is made of.
-    pub graphic: Graphic,
+    pub graphic:        Graphic,
     /// And its hue — ServUO's `CraftResources.GetHue`, which is the *only* thing
     /// telling valorite ore from iron.
-    pub hue: Hue,
+    pub hue:            Hue,
     /// Semantic kind paid out by this row, where the resource has migrated.
-    pub item_kind: Option<ItemKindId>,
+    pub item_kind:      Option<ItemKindId>,
     /// Semantic material grade paid out with that kind.
-    pub material: Option<MaterialId>,
+    pub material:       Option<MaterialId>,
 }
 
 /// Which of a definition's `resources` a vein points at.
@@ -112,16 +120,16 @@ pub struct VeinIdx(pub usize);
 #[derive(Clone, Copy, Debug)]
 pub struct HarvestVein {
     /// How likely this vein is under any given bank, in hundredths of a percent.
-    pub chance: u32,
+    pub chance:          u32,
     /// How often a swing at it yields the fallback instead, in hundredths of a
     /// percent. ServUO's `ChanceToFallback`, and it is what stops a valorite vein
     /// being pure valorite.
     pub fallback_chance: u32,
     /// Index into the definition's `resources`.
-    pub primary: ResourceIdx,
+    pub primary:         ResourceIdx,
     /// What it yields instead, where it has one. Iron, for every ore vein but
     /// iron's own.
-    pub fallback: Option<ResourceIdx>,
+    pub fallback:        Option<ResourceIdx>,
 }
 
 /// The clilocs one definition speaks with. ServUO keeps these as loose `object`
@@ -130,74 +138,74 @@ pub struct HarvestVein {
 #[derive(Clone, Copy, Debug)]
 pub struct HarvestMessages {
     /// The bank is empty, said when the swing is *begun*.
-    pub no_resources: ClilocId,
+    pub no_resources:       ClilocId,
     /// The bank ran empty *during* the swing — somebody else got there first.
-    pub double_harvest: ClilocId,
+    pub double_harvest:     ClilocId,
     /// Too far away, said when the swing is begun.
-    pub out_of_range: ClilocId,
+    pub out_of_range:       ClilocId,
     /// Walked away mid-swing. A different line from `out_of_range`, and the
     /// difference is the point: one is a mistake, the other is giving up.
     pub timed_out_of_range: ClilocId,
     /// The roll failed — "You loosen some rocks but fail to find any useable ore."
-    pub fail: ClilocId,
+    pub fail:               ClilocId,
     /// The yield would not fit in the pack.
-    pub pack_full: ClilocId,
+    pub pack_full:          ClilocId,
     /// The tool is spent.
-    pub tool_broke: ClilocId,
+    pub tool_broke:         ClilocId,
 }
 
 /// One harvesting system — ServUO's `HarvestDefinition`.
 #[derive(Clone, Copy, Debug)]
 pub struct HarvestDef {
     /// Which of the four this is.
-    pub kind: HarvestKind,
+    pub kind:             HarvestKind,
     /// The skill rolled, and trained.
-    pub skill: Skill,
+    pub skill:            Skill,
     /// A bank covers `bank_w` × `bank_h` tiles.
-    pub bank_w: u16,
+    pub bank_w:           u16,
     /// The other side of the bank.
-    pub bank_h: u16,
+    pub bank_h:           u16,
     /// The least a fresh bank holds.
-    pub min_total: u16,
+    pub min_total:        u16,
     /// And the most.
-    pub max_total: u16,
+    pub max_total:        u16,
     /// The soonest an emptied bank repays, in ticks.
-    pub min_respawn: u64,
+    pub min_respawn:      u64,
     /// And the latest.
-    pub max_respawn: u64,
+    pub max_respawn:      u64,
     /// Which tiles this works on.
-    pub tiles: TileSet,
+    pub tiles:            TileSet,
     /// How far the harvester may stand, in tiles.
-    pub max_range: u32,
+    pub max_range:        u32,
     /// How much a successful swing takes out of the bank.
-    pub consumed: u16,
+    pub consumed:         u16,
     /// And how much on Felucca, which pays double for the danger.
     pub consumed_felucca: u16,
     /// Whether a yield too big for the pack falls at the harvester's feet rather
     /// than being lost — ServUO's `PlaceAtFeetIfFull`.
-    pub place_at_feet: bool,
+    pub place_at_feet:    bool,
     /// The gesture each beat plays.
-    pub action: HarvestAction,
+    pub action:           HarvestAction,
     /// The sounds each beat may play, rolled between. Fishing has none.
-    pub sounds: &'static [SoundId],
+    pub sounds:           &'static [SoundId],
     /// How many beats one harvest takes.
-    pub beats: u16,
+    pub beats:            u16,
     /// How long a beat is, in ticks.
-    pub beat_ticks: u64,
+    pub beat_ticks:       u64,
     /// How far into a beat its sound plays, in ticks — ServUO's
     /// `EffectSoundDelay`, and the reason a fishing line has eight seconds of
     /// silence before the splash.
-    pub sound_ticks: u64,
+    pub sound_ticks:      u64,
     /// What it says when it will not work.
-    pub messages: HarvestMessages,
+    pub messages:         HarvestMessages,
     /// What its veins can yield.
-    pub resources: &'static [HarvestResource],
+    pub resources:        &'static [HarvestResource],
     /// And the veins themselves.
-    pub veins: &'static [HarvestVein],
+    pub veins:            &'static [HarvestVein],
     /// Whether a bank re-rolls its vein when it repays — ServUO's
     /// `RandomizeVeins`, which is `Core.ML`. Off, the vein is a fixed property of
     /// the ground.
-    pub randomize_veins: bool,
+    pub randomize_veins:  bool,
 }
 
 /// The gesture a harvest beat plays. A semantic, resolved to wire ids by
@@ -271,7 +279,7 @@ const fn definitions(ml: bool) -> &'static [HarvestDef] {
 pub struct ToolData {
     /// The skill it harvests with. `Mining` covers both ore and sand: which of the
     /// two a swing is comes from the *tile*, not the tool, exactly as in ServUO.
-    pub skill: Skill,
+    pub skill:    Skill,
     /// The fewest swings a fresh one holds — ServUO's `InitMinUses`.
     pub min_uses: u16,
     /// And the most.
@@ -292,7 +300,7 @@ pub fn tool_data(graphic: Graphic) -> Option<ToolData> {
     // the weapon table already knows which weapons those are.
     if crate::weapon::weapon_data(graphic).is_some_and(|w| w.is_axe) {
         return Some(ToolData {
-            skill: Skill::Lumberjacking,
+            skill:    Skill::Lumberjacking,
             min_uses: AXE_MIN_USES,
             max_uses: AXE_MAX_USES,
         });
@@ -346,13 +354,13 @@ static TOOLS: &[(Graphic, ToolData)] = &[
 #[derive(Clone, Copy, Debug)]
 pub struct Bank {
     /// What a full bank holds, rolled once between the definition's bounds.
-    pub maximum: u16,
+    pub maximum:      u16,
     /// What is left.
-    pub current: u16,
+    pub current:      u16,
     /// The tick it repays on, once something has been taken.
     pub next_respawn: WorldTick,
     /// Which vein this block holds, as an index into the definition's `veins`.
-    pub vein: VeinIdx,
+    pub vein:         VeinIdx,
 }
 
 /// Every facet's harvest banks.
@@ -530,112 +538,112 @@ static DEFINITIONS_PRE_ML: &[HarvestDef] = &[ORE, SAND, LUMBER_PRE_ML, FISHING];
 
 /// Mining, for ore and stone.
 const ORE: HarvestDef = HarvestDef {
-    kind: HarvestKind::Ore,
-    skill: Skill::Mining,
-    bank_w: 8,
-    bank_h: 8,
-    min_total: 10,
-    max_total: 34,
-    min_respawn: 10 * MINUTE,
-    max_respawn: 20 * MINUTE,
-    tiles: TileSet::List(MOUNTAIN_AND_CAVE_TILES),
-    max_range: 2,
-    consumed: 1,
+    kind:             HarvestKind::Ore,
+    skill:            Skill::Mining,
+    bank_w:           8,
+    bank_h:           8,
+    min_total:        10,
+    max_total:        34,
+    min_respawn:      10 * MINUTE,
+    max_respawn:      20 * MINUTE,
+    tiles:            TileSet::List(MOUNTAIN_AND_CAVE_TILES),
+    max_range:        2,
+    consumed:         1,
     consumed_felucca: 2,
-    place_at_feet: false,
-    action: HarvestAction::Mine,
-    sounds: &[SoundId(0x125), SoundId(0x126)],
-    beats: 1,
-    beat_ticks: BEAT_TICKS,
-    sound_ticks: SOUND_TICKS,
-    messages: HarvestMessages {
-        no_resources: ClilocId(503_040),       // There is no metal here to mine.
-        double_harvest: ClilocId(503_042),     // Someone has gotten to the metal before you.
-        out_of_range: ClilocId(500_446),       // That is too far away.
+    place_at_feet:    false,
+    action:           HarvestAction::Mine,
+    sounds:           &[SoundId(0x125), SoundId(0x126)],
+    beats:            1,
+    beat_ticks:       BEAT_TICKS,
+    sound_ticks:      SOUND_TICKS,
+    messages:         HarvestMessages {
+        no_resources:       ClilocId(503_040), // There is no metal here to mine.
+        double_harvest:     ClilocId(503_042), // Someone has gotten to the metal before you.
+        out_of_range:       ClilocId(500_446), // That is too far away.
         timed_out_of_range: ClilocId(503_041), // You have moved too far away to continue mining.
-        fail: ClilocId(503_043),               // You loosen some rocks but fail to find any useable ore.
-        pack_full: ClilocId(1_010_481),        // Your backpack is full, so the ore you mined is lost.
-        tool_broke: ClilocId(1_044_038),       // You have worn out your tool!
+        fail:               ClilocId(503_043), // You loosen some rocks but fail to find any useable ore.
+        pack_full:          ClilocId(1_010_481), // Your backpack is full, so the ore you mined is lost.
+        tool_broke:         ClilocId(1_044_038), // You have worn out your tool!
     },
-    resources: ORES,
-    veins: ORE_VEINS,
-    randomize_veins: false,
+    resources:        ORES,
+    veins:            ORE_VEINS,
+    randomize_veins:  false,
 };
 
 /// Mining, for sand.
 const SAND: HarvestDef = HarvestDef {
-    kind: HarvestKind::Sand,
-    skill: Skill::Mining,
-    bank_w: 8,
-    bank_h: 8,
-    min_total: 6,
-    max_total: 13,
-    min_respawn: 10 * MINUTE,
-    max_respawn: 20 * MINUTE,
-    tiles: TileSet::List(SAND_TILES),
-    max_range: 2,
-    consumed: 1,
+    kind:             HarvestKind::Sand,
+    skill:            Skill::Mining,
+    bank_w:           8,
+    bank_h:           8,
+    min_total:        6,
+    max_total:        13,
+    min_respawn:      10 * MINUTE,
+    max_respawn:      20 * MINUTE,
+    tiles:            TileSet::List(SAND_TILES),
+    max_range:        2,
+    consumed:         1,
     consumed_felucca: 2,
-    place_at_feet: false,
-    action: HarvestAction::Mine,
-    sounds: &[SoundId(0x125), SoundId(0x126)],
-    beats: 6,
-    beat_ticks: BEAT_TICKS,
-    sound_ticks: SOUND_TICKS,
-    messages: HarvestMessages {
-        no_resources: ClilocId(1_044_629),     // There is no sand here to mine.
-        double_harvest: ClilocId(1_044_629),   // There is no sand here to mine.
-        out_of_range: ClilocId(500_446),       // That is too far away.
-        timed_out_of_range: ClilocId(503_041), // You have moved too far away to continue mining.
-        fail: ClilocId(1_044_630), // You dig for a while but fail to find any of sufficient quality.
-        pack_full: ClilocId(1_044_632), // Your backpack can't hold the sand, and it is lost!
-        tool_broke: ClilocId(1_044_038), // You have worn out your tool!
+    place_at_feet:    false,
+    action:           HarvestAction::Mine,
+    sounds:           &[SoundId(0x125), SoundId(0x126)],
+    beats:            6,
+    beat_ticks:       BEAT_TICKS,
+    sound_ticks:      SOUND_TICKS,
+    messages:         HarvestMessages {
+        no_resources:       ClilocId(1_044_629), // There is no sand here to mine.
+        double_harvest:     ClilocId(1_044_629), // There is no sand here to mine.
+        out_of_range:       ClilocId(500_446),   // That is too far away.
+        timed_out_of_range: ClilocId(503_041),   // You have moved too far away to continue mining.
+        fail:               ClilocId(1_044_630), // You dig for a while but fail to find any of sufficient quality.
+        pack_full:          ClilocId(1_044_632), // Your backpack can't hold the sand, and it is lost!
+        tool_broke:         ClilocId(1_044_038), // You have worn out your tool!
     },
-    resources: SANDS,
-    veins: ONE_VEIN,
-    randomize_veins: false,
+    resources:        SANDS,
+    veins:            ONE_VEIN,
+    randomize_veins:  false,
 };
 
 /// Lumberjacking, from Mondain's Legacy on: seven woods, and a vein that re-rolls
 /// when the bank repays.
 const LUMBER_ML: HarvestDef = HarvestDef {
-    kind: HarvestKind::Lumber,
-    skill: Skill::Lumberjacking,
+    kind:             HarvestKind::Lumber,
+    skill:            Skill::Lumberjacking,
     // A tree owns its own stock. Nearby trunks must not make one another empty:
     // the click names a particular static, so depletion follows that tile.
-    bank_w: 1,
-    bank_h: 1,
-    min_total: 20,
-    max_total: 45,
-    min_respawn: 20 * MINUTE,
-    max_respawn: 30 * MINUTE,
-    tiles: TileSet::List(TREE_TILES),
-    max_range: 2,
+    bank_w:           1,
+    bank_h:           1,
+    min_total:        20,
+    max_total:        45,
+    min_respawn:      20 * MINUTE,
+    max_respawn:      30 * MINUTE,
+    tiles:            TileSet::List(TREE_TILES),
+    max_range:        2,
     // One deliberately long chopping job replaces two of the old short jobs.
     // Throughput stays the same, while the player targets the tree half as often.
-    consumed: 20,
+    consumed:         20,
     consumed_felucca: 40,
-    place_at_feet: false,
-    action: HarvestAction::Chop,
-    sounds: &[SoundId(0x13E)],
+    place_at_feet:    false,
+    action:           HarvestAction::Chop,
+    sounds:           &[SoundId(0x13E)],
     // Six 1.6-second beats give the chop six uninterrupted full cycles before
     // the larger bundle of logs arrives. Each impact sound falls 0.9 seconds
     // into its own cycle, matching the reference's per-effect sound timer.
-    beats: 6,
-    beat_ticks: BEAT_TICKS,
-    sound_ticks: SOUND_TICKS,
-    messages: HarvestMessages {
-        no_resources: ClilocId(500_493),   // There's not enough wood here to harvest.
-        double_harvest: ClilocId(500_493), // There's not enough wood here to harvest.
-        out_of_range: ClilocId(500_446),   // That is too far away.
+    beats:            6,
+    beat_ticks:       BEAT_TICKS,
+    sound_ticks:      SOUND_TICKS,
+    messages:         HarvestMessages {
+        no_resources:       ClilocId(500_493), // There's not enough wood here to harvest.
+        double_harvest:     ClilocId(500_493), // There's not enough wood here to harvest.
+        out_of_range:       ClilocId(500_446), // That is too far away.
         timed_out_of_range: ClilocId(500_446), // That is too far away.
-        fail: ClilocId(500_495), // You hack at the tree for a while, but fail to produce any useable wood.
-        pack_full: ClilocId(500_497), // You can't place any wood into your backpack!
-        tool_broke: ClilocId(500_499), // You broke your axe.
+        fail:               ClilocId(500_495), // You hack at the tree for a while, but fail to produce any useable wood.
+        pack_full:          ClilocId(500_497), // You can't place any wood into your backpack!
+        tool_broke:         ClilocId(500_499), // You broke your axe.
     },
-    resources: WOODS,
-    veins: WOOD_VEINS,
-    randomize_veins: true,
+    resources:        WOODS,
+    veins:            WOOD_VEINS,
+    randomize_veins:  true,
 };
 
 /// Lumberjacking before Mondain's Legacy: a tree is a tree, and a log is a log.
@@ -652,42 +660,42 @@ const LUMBER_PRE_ML: HarvestDef = HarvestDef {
 
 /// Fishing.
 const FISHING: HarvestDef = HarvestDef {
-    kind: HarvestKind::Fish,
-    skill: Skill::Fishing,
-    bank_w: 8,
-    bank_h: 8,
-    min_total: 5,
-    max_total: 15,
-    min_respawn: 10 * MINUTE,
-    max_respawn: 20 * MINUTE,
-    tiles: TileSet::Ranges(WATER_TILES),
-    max_range: 4,
-    consumed: 1,
+    kind:             HarvestKind::Fish,
+    skill:            Skill::Fishing,
+    bank_w:           8,
+    bank_h:           8,
+    min_total:        5,
+    max_total:        15,
+    min_respawn:      10 * MINUTE,
+    max_respawn:      20 * MINUTE,
+    tiles:            TileSet::Ranges(WATER_TILES),
+    max_range:        4,
+    consumed:         1,
     consumed_felucca: 1,
     // The one definition that catches its yield rather than digging it out: a fish
     // too big for the pack lands at your feet instead of being thrown back.
-    place_at_feet: true,
-    action: HarvestAction::Fish,
-    sounds: &[],
-    beats: 1,
+    place_at_feet:    true,
+    action:           HarvestAction::Fish,
+    sounds:           &[],
+    beats:            1,
     // ServUO gives fishing an `EffectDelay` of zero and an eight-second
     // `EffectSoundDelay`, which together are one long cast rather than a beat and
     // a splash. The beat is that eight seconds; there is no sound to place inside
     // it.
-    beat_ticks: TICKS_PER_SECOND * 8,
-    sound_ticks: 0,
-    messages: HarvestMessages {
-        no_resources: ClilocId(503_172),       // The fish don't seem to be biting here.
-        double_harvest: ClilocId(503_172),     // The fish don't seem to be biting here.
-        out_of_range: ClilocId(500_976),       // You need to be closer to the water to fish!
+    beat_ticks:       TICKS_PER_SECOND * 8,
+    sound_ticks:      0,
+    messages:         HarvestMessages {
+        no_resources:       ClilocId(503_172), // The fish don't seem to be biting here.
+        double_harvest:     ClilocId(503_172), // The fish don't seem to be biting here.
+        out_of_range:       ClilocId(500_976), // You need to be closer to the water to fish!
         timed_out_of_range: ClilocId(500_976), // You need to be closer to the water to fish!
-        fail: ClilocId(503_171),               // You fish a while, but fail to catch anything.
-        pack_full: ClilocId(503_176),          // You do not have room in your backpack for a fish.
-        tool_broke: ClilocId(503_174),         // You broke your fishing pole.
+        fail:               ClilocId(503_171), // You fish a while, but fail to catch anything.
+        pack_full:          ClilocId(503_176), // You do not have room in your backpack for a fish.
+        tool_broke:         ClilocId(503_174), // You broke your fishing pole.
     },
-    resources: FISHES,
-    veins: ONE_VEIN,
-    randomize_veins: false,
+    resources:        FISHES,
+    veins:            ONE_VEIN,
+    randomize_veins:  false,
 };
 
 /// The nine ores, from ServUO's `Mining` resource table with
@@ -729,14 +737,14 @@ pub const FISH_GRAPHIC: Graphic = Graphic(0x09CC);
 /// An ore row, so the table above reads as data.
 const fn ore(req: i32, min: i32, max: i32, cliloc: u32, hue: u16, material: u16) -> HarvestResource {
     HarvestResource {
-        req_skill: req,
-        min_skill: min,
-        max_skill: max,
+        req_skill:      req,
+        min_skill:      min,
+        max_skill:      max,
         success_cliloc: ClilocId(cliloc),
-        graphic: ORE_GRAPHIC,
-        hue: Hue(hue),
-        item_kind: Some(ItemKindId(2)),
-        material: Some(MaterialId(material)),
+        graphic:        ORE_GRAPHIC,
+        hue:            Hue(hue),
+        item_kind:      Some(ItemKindId(2)),
+        material:       Some(MaterialId(material)),
     }
 }
 
@@ -769,27 +777,27 @@ static WOODS: &[HarvestResource] = &[
 
 /// The one wood a pre-ML tree gives, ServUO's `500498` line.
 static PLAIN_WOOD: &[HarvestResource] = &[HarvestResource {
-    req_skill: 0,
-    min_skill: 0,
-    max_skill: 1000,
+    req_skill:      0,
+    min_skill:      0,
+    max_skill:      1000,
     success_cliloc: ClilocId(500_498), // You put some logs in your backpack.
-    graphic: LOG_GRAPHIC,
-    hue: Hue(0),
-    item_kind: Some(ItemKindId(3)),
-    material: Some(MaterialId(20)),
+    graphic:        LOG_GRAPHIC,
+    hue:            Hue(0),
+    item_kind:      Some(ItemKindId(3)),
+    material:       Some(MaterialId(20)),
 }];
 
 /// A wood row.
 const fn wood(req: i32, min: i32, max: i32, cliloc: u32, hue: u16, material: u16) -> HarvestResource {
     HarvestResource {
-        req_skill: req,
-        min_skill: min,
-        max_skill: max,
+        req_skill:      req,
+        min_skill:      min,
+        max_skill:      max,
         success_cliloc: ClilocId(cliloc),
-        graphic: LOG_GRAPHIC,
-        hue: Hue(hue),
-        item_kind: Some(ItemKindId(3)),
-        material: Some(MaterialId(material)),
+        graphic:        LOG_GRAPHIC,
+        hue:            Hue(hue),
+        item_kind:      Some(ItemKindId(3)),
+        material:       Some(MaterialId(material)),
     }
 }
 
@@ -807,34 +815,34 @@ static WOOD_VEINS: &[HarvestVein] = &[
 
 /// Sand, one grade, and it wants a real miner: ServUO bands it `70.0..100.0`.
 static SANDS: &[HarvestResource] = &[HarvestResource {
-    req_skill: 1000,
-    min_skill: 700,
-    max_skill: 1000,
+    req_skill:      1000,
+    min_skill:      700,
+    max_skill:      1000,
     success_cliloc: ClilocId(1_044_631), // You carefully dig up some workable sand.
-    graphic: SAND_GRAPHIC,
-    hue: Hue(0),
-    item_kind: None,
-    material: None,
+    graphic:        SAND_GRAPHIC,
+    hue:            Hue(0),
+    item_kind:      None,
+    material:       None,
 }];
 
 /// Fish, one grade, banded so a beginner still catches something.
 static FISHES: &[HarvestResource] = &[HarvestResource {
-    req_skill: 0,
-    min_skill: 0,
-    max_skill: 1200,
+    req_skill:      0,
+    min_skill:      0,
+    max_skill:      1200,
     success_cliloc: ClilocId(1_043_297), // You pull out a heavy and beautiful fish!
-    graphic: FISH_GRAPHIC,
-    hue: Hue(0),
-    item_kind: None,
-    material: None,
+    graphic:        FISH_GRAPHIC,
+    hue:            Hue(0),
+    item_kind:      None,
+    material:       None,
 }];
 
 /// The single vein the one-resource definitions have.
 static ONE_VEIN: &[HarvestVein] = &[HarvestVein {
-    chance: 10_000,
+    chance:          10_000,
     fallback_chance: 0,
-    primary: ResourceIdx(0),
-    fallback: None,
+    primary:         ResourceIdx(0),
+    fallback:        None,
 }];
 
 /// A vein row.

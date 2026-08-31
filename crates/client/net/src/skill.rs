@@ -1,7 +1,11 @@
 //! What the skill window's own gestures send: the lock arrow and the "use
 //! skill" button.
 
-use openshard_protocol::skill::{SkillLock, SkillLockRequest, UseSkillRequest};
+use openshard_protocol::skill::{
+    SkillLock,
+    SkillLockRequest,
+    UseSkillRequest,
+};
 use openshard_protocol::wire::RawSkillId;
 
 /// Ask to set a skill's lock: the `0x3A` to write to the socket.

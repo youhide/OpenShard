@@ -18,8 +18,14 @@
 
 use std::fmt;
 
-use crate::codec::{PacketReader, PacketWriter};
-use crate::error::{DecodeError, expect_id};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
+use crate::error::{
+    DecodeError,
+    expect_id,
+};
 use crate::feature::Feature;
 use crate::version::ClientVersion;
 
@@ -97,7 +103,7 @@ pub enum FrameError {
     /// the limit for its direction.
     BadLength {
         /// The packet id.
-        id: u8,
+        id:      u8,
         /// The length the packet claimed.
         claimed: usize,
     },
@@ -114,7 +120,8 @@ impl fmt::Display for FrameError {
     }
 }
 
-impl std::error::Error for FrameError {}
+impl std::error::Error for FrameError {
+}
 
 /// What a framing attempt found.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -322,7 +329,7 @@ pub enum FramedClientPacketError {
         /// How many bytes the packet needs in total.
         needed: usize,
         /// How many bytes the buffer actually held.
-        got: usize,
+        got:    usize,
     },
     /// The buffer held a complete packet, but more bytes followed it. This
     /// type names exactly one packet, so a caller with a whole TCP read must
@@ -346,15 +353,18 @@ impl fmt::Display for FramedClientPacketError {
             Self::TrailingBytes {
                 packet_len,
                 buffer_len,
-            } => write!(
-                f,
-                "buffer holds {buffer_len} bytes but the packet at its front is only {packet_len}"
-            ),
+            } => {
+                write!(
+                    f,
+                    "buffer holds {buffer_len} bytes but the packet at its front is only {packet_len}"
+                )
+            }
         }
     }
 }
 
-impl std::error::Error for FramedClientPacketError {}
+impl std::error::Error for FramedClientPacketError {
+}
 
 impl FramedClientPacket {
     /// Check that `bytes` is exactly one whole client-to-server packet under
@@ -369,14 +379,18 @@ impl FramedClientPacket {
     pub fn new(bytes: Vec<u8>, version: Option<ClientVersion>) -> Result<Self, FramedClientPacketError> {
         match frame_client_packet(&bytes, version) {
             Ok(Frame::Complete(len)) if len == bytes.len() => Ok(Self(bytes)),
-            Ok(Frame::Complete(len)) => Err(FramedClientPacketError::TrailingBytes {
-                packet_len: len,
-                buffer_len: bytes.len(),
-            }),
-            Ok(Frame::Incomplete { needed }) => Err(FramedClientPacketError::Incomplete {
-                needed,
-                got: bytes.len(),
-            }),
+            Ok(Frame::Complete(len)) => {
+                Err(FramedClientPacketError::TrailingBytes {
+                    packet_len: len,
+                    buffer_len: bytes.len(),
+                })
+            }
+            Ok(Frame::Incomplete { needed }) => {
+                Err(FramedClientPacketError::Incomplete {
+                    needed,
+                    got: bytes.len(),
+                })
+            }
             Err(error) => Err(FramedClientPacketError::Framing(error)),
         }
     }
@@ -783,8 +797,8 @@ mod tests {
             assert_eq!(
                 frame_client_packet(&[0xAD, high, low, 0x00], None),
                 Err(FrameError::BadLength {
-                    id: 0xAD,
-                    claimed: claimed as usize
+                    id:      0xAD,
+                    claimed: claimed as usize,
                 }),
                 "0xAD claiming {claimed} must be rejected"
             );
@@ -797,8 +811,8 @@ mod tests {
         assert_eq!(
             frame_client_packet(&[0xBF, high, low], None),
             Err(FrameError::BadLength {
-                id: 0xBF,
-                claimed: u16::MAX as usize
+                id:      0xBF,
+                claimed: u16::MAX as usize,
             })
         );
     }
@@ -889,7 +903,10 @@ mod tests {
         );
         assert_eq!(
             FramedClientPacket::new(fourteen, Some(modern)),
-            Err(FramedClientPacketError::Incomplete { needed: 15, got: 14 }),
+            Err(FramedClientPacketError::Incomplete {
+                needed: 15,
+                got:    14,
+            }),
             "a grid-capable client's 0x08 is never just fourteen"
         );
     }

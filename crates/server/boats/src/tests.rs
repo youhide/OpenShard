@@ -8,17 +8,30 @@
 
 use std::collections::BTreeMap;
 
-use openshard_movement::scene::Scene;
 // `Terrain` is in scope for its *methods*: the tests below ask a `LiveTerrain`
 // whether a step is allowed. Nothing here implements it any more.
 use openshard_map::overlay::Doors;
 use openshard_movement::Walker;
-use openshard_protocol::direction::{Direction, Facing};
-use openshard_protocol::serial::{Serial, SerialKind};
-use openshard_protocol::wire::{Graphic, MultiId};
+use openshard_movement::scene::Scene;
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
+use openshard_protocol::serial::{
+    Serial,
+    SerialKind,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    MultiId,
+};
 use openshard_state::FacetState;
 use openshard_tiles::TileFlags;
-use openshard_uofiles::multi::{Component, Multi, Multis};
+use openshard_uofiles::multi::{
+    Component,
+    Multi,
+    Multis,
+};
 
 use super::*;
 

@@ -19,7 +19,6 @@
 //!   reference client does: icons in a bag overlap, and re-sorting them here
 //!   would put a different one on top than the server's own client shows.
 
-use crate::items::{HIGHLIGHT_HUE, displayed_graphic};
 use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::serial::Serial;
@@ -27,7 +26,16 @@ use openshard_protocol::wire::Graphic;
 use openshard_tiles::TileData;
 
 use crate::atlas::FontAtlas;
-use crate::gump::{GumpArt, GumpAtlas, GumpPixel, Picture};
+use crate::gump::{
+    GumpArt,
+    GumpAtlas,
+    GumpPixel,
+    Picture,
+};
+use crate::items::{
+    HIGHLIGHT_HUE,
+    displayed_graphic,
+};
 
 /// The compact client-side control shown beneath a loot container.
 ///
@@ -95,7 +103,7 @@ pub const fn action_face(lit: bool) -> Graphic {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ActionButton {
     /// Top-left corner in gump pixels.
-    pub at: GumpPixel,
+    pub at:   GumpPixel,
     /// Width and height of the clickable button — [`ACTION_UP`]'s own.
     pub size: (i32, i32),
 }
@@ -166,9 +174,9 @@ pub fn size(atlas: &GumpAtlas, gump: Graphic) -> Option<(i32, i32)> {
 /// space.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ContentBounds {
-    pub left: i32,
-    pub top: i32,
-    pub right: i32,
+    pub left:   i32,
+    pub top:    i32,
+    pub right:  i32,
     pub bottom: i32,
 }
 
@@ -293,7 +301,7 @@ fn action_size(atlas: &GumpAtlas) -> Option<(i32, i32)> {
 pub fn take_all_button(atlas: &GumpAtlas, gump: Graphic, at: GumpPixel) -> Option<ActionButton> {
     let (_, height) = size(atlas, gump)?;
     Some(ActionButton {
-        at: at.offset(GumpPixel::new(0, height + 4)),
+        at:   at.offset(GumpPixel::new(0, height + 4)),
         size: action_size(atlas)?,
     })
 }
@@ -302,7 +310,7 @@ pub fn take_all_button(atlas: &GumpAtlas, gump: Graphic, at: GumpPixel) -> Optio
 pub fn stack_all_button(atlas: &GumpAtlas, gump: Graphic, at: GumpPixel) -> Option<ActionButton> {
     let (_, height) = size(atlas, gump)?;
     Some(ActionButton {
-        at: at.offset(GumpPixel::new(0, height + 4)),
+        at:   at.offset(GumpPixel::new(0, height + 4)),
         size: action_size(atlas)?,
     })
 }

@@ -54,21 +54,40 @@
 //! OPENSHARD_CLIENT=... cargo test -p openshard-boats --test moored_boat boat_art_survey -- --nocapture --ignored
 //! ```
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+    HashSet,
+};
 use std::path::PathBuf;
 
-use openshard_entities::{EntityId, Registry};
+use openshard_entities::{
+    EntityId,
+    Registry,
+};
 use openshard_map::grid::Tile;
 use openshard_map::map::WorldMap;
-use openshard_map::overlay::{Cover, Doors, Overlay};
+use openshard_map::overlay::{
+    Cover,
+    Doors,
+    Overlay,
+};
 use openshard_movement::spans::SpanIndex;
-use openshard_movement::{Footing, MAX_STEP_UP, MapTerrain, step_allowed};
+use openshard_movement::{
+    Footing,
+    MAX_STEP_UP,
+    MapTerrain,
+    step_allowed,
+};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_state::boat::Plank;
 use openshard_tiles::TileData;
-use openshard_uofiles::multi::{Component, Multis};
+use openshard_uofiles::multi::{
+    Component,
+    Multis,
+};
 
 /// The multi ids a ship can have.
 ///
@@ -109,7 +128,7 @@ fn client_dir() -> Option<PathBuf> {
 /// piece of it is.
 struct Install {
     multis: Multis,
-    tiles: TileData,
+    tiles:  TileData,
 }
 
 fn real_install() -> Option<Install> {
@@ -172,15 +191,15 @@ fn the_reading_that_was(art: &openshard_tiles::StaticTile, z: i8) -> Cover {
 struct Invented {
     graphic: Graphic,
     /// Its own z within the ship, and how tall the table says it is.
-    z: i8,
-    height: u8,
+    z:       i8,
+    height:  u8,
 }
 
 /// Everything one ship's art says, under both readings.
 struct Ship {
-    id: u16,
+    id:            u16,
     /// Drawn components — the signature tile every multi opens with is not one.
-    drawn: usize,
+    drawn:         usize,
     /// What each disagreement costs this ship, by count.
     disagreements: BTreeMap<Disagreement, usize>,
     /// The surfaces the shared reading puts on the ship — the deck, as every
@@ -188,14 +207,14 @@ struct Ship {
     real_surfaces: BTreeSet<i32>,
     /// The art the ship turns into a floor by itself, and how many tiles each
     /// piece of it covers.
-    invented_art: BTreeMap<Invented, usize>,
+    invented_art:  BTreeMap<Invented, usize>,
     /// The two overlays, holding the same ship read two ways. `aboard`'s own
     /// choice function is asked of both rather than reimplemented here.
-    shard: Overlay,
-    shared: Overlay,
+    shard:         Overlay,
+    shared:        Overlay,
     /// The ship's tiles, keyed by the pair rather than by [`Tile`] — which is a
     /// grid coordinate and deliberately not ordered.
-    tiles: BTreeSet<(u16, u16)>,
+    tiles:         BTreeSet<(u16, u16)>,
 }
 
 /// Read one ship both ways.
@@ -297,12 +316,12 @@ fn read(install: &Install, id: u16, boat: EntityId) -> Option<Ship> {
 struct Boarding {
     /// Feet heights, over any tile, where both readings answer and the ship's
     /// is the lower — a body put under the deck every other reader sees.
-    lower: usize,
+    lower:         usize,
     /// The worst of those: tile, the feet it happened from, and how far below.
-    worst: Option<((u16, u16), i32, i32)>,
+    worst:         Option<((u16, u16), i32, i32)>,
     /// Feet heights where the shared reading refuses and the ship answers —
     /// footing conjured where the map has open water and the art has a rope.
-    conjured: usize,
+    conjured:      usize,
     /// Which feet heights those were, so a reader can see whether a real pier
     /// stands at one of them.
     conjured_from: BTreeSet<i32>,
@@ -313,9 +332,9 @@ struct Boarding {
 
 fn board(ship: &Ship) -> Boarding {
     let mut out = Boarding {
-        lower: 0,
-        worst: None,
-        conjured: 0,
+        lower:         0,
+        worst:         None,
+        conjured:      0,
         conjured_from: BTreeSet::new(),
         phantom_tiles: 0,
     };
@@ -467,9 +486,9 @@ const PIERS_WALKED: usize = 20_000;
 
 /// One facet, and the three tables a step over it is decided by.
 struct Harbour {
-    map: WorldMap,
-    tiles: TileData,
-    spans: SpanIndex,
+    map:    WorldMap,
+    tiles:  TileData,
+    spans:  SpanIndex,
     multis: Multis,
 }
 
@@ -588,11 +607,11 @@ fn moor_both(
 /// One step, spelled out, so a count can be checked against a case.
 struct Example {
     /// The pier it was taken from.
-    pier: (u16, u16),
+    pier:  (u16, u16),
     /// The tile it landed on.
-    onto: (u16, u16),
+    onto:  (u16, u16),
     /// The height the body arrived at.
-    at: i32,
+    at:    i32,
     /// Every surface the ship lays on that tile.
     decks: Vec<i32>,
 }
@@ -605,16 +624,16 @@ struct Example {
 /// would report itself correct.
 struct Walk {
     /// Steps the bare map refused and the ship made legal — a boarding.
-    boarded: usize,
+    boarded:        usize,
     /// Of those, the ones that put the body exactly on the ship's deck. A
     /// boarding, however far down it was: a pier stands over the water and a
     /// hull floats in it, so stepping aboard is a step *down* by construction.
-    onto_deck: usize,
+    onto_deck:      usize,
     /// **The fall.** The body lands below the ship's own deck at that tile —
     /// inside the hull, with the planking over its head.
-    under_deck: usize,
+    under_deck:     usize,
     /// The worst of those: the pier it was walked off, and how far under.
-    worst_under: Option<((u16, u16), i32)>,
+    worst_under:    Option<((u16, u16), i32)>,
     /// Steps the ship made legal **without supplying the landing**: the height
     /// the body arrived at is the map's own — a piling, a pier plank over
     /// water, the shore — and what the ship changed was a *diagonal's flank*,
@@ -624,31 +643,31 @@ struct Walk {
     /// One of those, spelled out. A count alone cannot be told apart from a
     /// defect in this survey's own arithmetic — which is how the first two
     /// versions of this classification were caught.
-    an_example: Option<Example>,
+    an_example:     Option<Example>,
     /// How far a pier deck stands above the deck a body boards onto.
     ///
     /// `boats.md`'s open question, which its own fixture names: *what a real
     /// sloop's deck actually stands at over real water*.
-    drops: Vec<i32>,
+    drops:          Vec<i32>,
     /// Steps the bare map already allowed whose answer the ship *lowered*.
     ///
     /// Should be nothing: where the map answers, only `climbed` speaks, and it
     /// takes surfaces strictly above the ground. A landing that went down here
     /// would be a defect in the rule rather than in the art.
-    lowered: usize,
+    lowered:        usize,
 }
 
 impl Walk {
     fn nothing_yet() -> Self {
         Self {
-            boarded: 0,
-            onto_deck: 0,
-            under_deck: 0,
-            worst_under: None,
+            boarded:        0,
+            onto_deck:      0,
+            under_deck:     0,
+            worst_under:    None,
             not_a_boarding: 0,
-            an_example: None,
-            drops: Vec::new(),
-            lowered: 0,
+            an_example:     None,
+            drops:          Vec::new(),
+            lowered:        0,
         }
     }
 }
@@ -739,16 +758,16 @@ fn walk_off(
 struct Swim {
     /// Tiles of open water beside a hull where a swimmer can float at all. A
     /// zero anywhere below means nothing was tried unless this one is large.
-    alongside: usize,
+    alongside:   usize,
     /// Steps from one of those toward a tile the ship covers.
-    tried: usize,
+    tried:       usize,
     /// Refused: the tile is a wall to a swimmer, whatever is on it.
-    refused: usize,
+    refused:     usize,
     /// Allowed, and the body arrives on the deck.
-    onto_deck: usize,
+    onto_deck:   usize,
     /// **Allowed, and the body arrives below the deck** — floating in the sea
     /// with its own ship over its head, which is the prediction.
-    under_deck: usize,
+    under_deck:  usize,
     /// The worst of those: the water it swam from, and how far under.
     worst_under: Option<((u16, u16), i32)>,
 }
@@ -756,11 +775,11 @@ struct Swim {
 impl Swim {
     const fn nothing_yet() -> Self {
         Self {
-            alongside: 0,
-            tried: 0,
-            refused: 0,
-            onto_deck: 0,
-            under_deck: 0,
+            alongside:   0,
+            tried:       0,
+            refused:     0,
+            onto_deck:   0,
+            under_deck:  0,
             worst_under: None,
         }
     }

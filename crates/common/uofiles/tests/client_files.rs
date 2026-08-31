@@ -16,16 +16,42 @@
 //! The install these numbers were taken from is client 7.0.116.0.
 
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::{Graphic, Hue};
-use openshard_tiles::{LAND_TILE_COUNT, LandTileId, TextureId, TileData};
-use openshard_uofiles::anim::{Anim, AnimationDirection, AnimationKey, BodyDef, BodyKind, DIRECTIONS};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
+use openshard_tiles::{
+    LAND_TILE_COUNT,
+    LandTileId,
+    TextureId,
+    TileData,
+};
+use openshard_uofiles::anim::{
+    Anim,
+    AnimationDirection,
+    AnimationKey,
+    BodyDef,
+    BodyKind,
+    DIRECTIONS,
+};
 use openshard_uofiles::art::Art;
 use openshard_uofiles::equipconv::EquipConv;
-use openshard_uofiles::font::{AsciiFonts, CHARS_PER_FONT, FONT_COUNT, GLYPH_BASE};
+use openshard_uofiles::font::{
+    AsciiFonts,
+    CHARS_PER_FONT,
+    FONT_COUNT,
+    GLYPH_BASE,
+};
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::skillgrp::SkillGroups;
-use openshard_uofiles::skills::{SkillId, Skills};
-use openshard_uofiles::texmaps::{TEXTURE_COUNT, TexMaps};
+use openshard_uofiles::skills::{
+    SkillId,
+    Skills,
+};
+use openshard_uofiles::texmaps::{
+    TEXTURE_COUNT,
+    TexMaps,
+};
 use openshard_uofiles::tiledata::TileDataFormat;
 
 /// The client directory, or `None` to skip.
@@ -1070,7 +1096,10 @@ fn every_shipped_skill_is_filed_under_a_group_that_has_a_name() {
 /// looking correct and 309 of 326 multis disagreeing.
 #[test]
 fn the_two_multi_readers_agree_with_each_other() {
-    use openshard_uofiles::multi::{MultiFormat, Multis};
+    use openshard_uofiles::multi::{
+        MultiFormat,
+        Multis,
+    };
 
     let Some(dir) = client_dir() else {
         return;

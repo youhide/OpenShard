@@ -24,7 +24,10 @@
 
 use openshard_protocol::packet::encode_packet;
 use openshard_protocol::properties::PropertyQueryRequest;
-use openshard_protocol::serial::{RawSerial, Serial};
+use openshard_protocol::serial::{
+    RawSerial,
+    Serial,
+};
 use openshard_protocol::version::ClientVersion;
 
 /// Ask for the property lists of `serials`: the `0xD6` to write to the socket.

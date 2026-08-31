@@ -29,8 +29,20 @@ use std::time::Instant;
 
 use crate::app::App;
 use crate::hand::Hand;
-use crate::panes::{Button, Effect, Input, Modifiers, PaneCtx, PaneFiles, PaneFrame, Response};
-use crate::windows::{Asking, WindowSubject};
+use crate::panes::{
+    Button,
+    Effect,
+    Input,
+    Modifiers,
+    PaneCtx,
+    PaneFiles,
+    PaneFrame,
+    Response,
+};
+use crate::windows::{
+    Asking,
+    WindowSubject,
+};
 
 impl App {
     /// Offer one input to the window layer, and carry out whatever it asked
@@ -196,16 +208,20 @@ impl App {
         // follows the pointer, because a player may raise a bag over the window
         // that is typing or waiting.
         let addressed = match input {
-            Input::Key(_) => match keyboard {
-                Some(subject) => Some(subject),
-                None => return Response::ignored(),
-            },
-            Input::Answered(_) => match prompt {
-                Some(subject) => Some(subject),
-                // The world's own press, or none at all: `manager_gestures`
-                // above has already answered whichever it is.
-                None => return Response::ignored(),
-            },
+            Input::Key(_) => {
+                match keyboard {
+                    Some(subject) => Some(subject),
+                    None => return Response::ignored(),
+                }
+            }
+            Input::Answered(_) => {
+                match prompt {
+                    Some(subject) => Some(subject),
+                    // The world's own press, or none at all: `manager_gestures`
+                    // above has already answered whichever it is.
+                    None => return Response::ignored(),
+                }
+            }
             _ => None,
         };
         // No world, no windows: `sync_own_windows` has already emptied the list,
@@ -233,7 +249,7 @@ impl App {
         let window_scale = self.window_scale();
         let modifiers = Modifiers {
             shift: self.input.shift_held,
-            ctrl: self.input.ctrl_held,
+            ctrl:  self.input.ctrl_held,
         };
         let now = Instant::now();
         let hand = self.windows.hand;

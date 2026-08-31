@@ -21,28 +21,73 @@
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::craft::{
-    CraftCatalogue, CraftCatalogueComponent, CraftCatalogueRow, CraftText, CraftWeaponKind,
-    CraftWeaponProperties, CraftWorkbench, CraftWorkbenchComponent, CraftWorkbenchGroup,
-    CraftWorkbenchMaterial, CraftWorkbenchPage, CraftWorkbenchRecipe,
+    CraftCatalogue,
+    CraftCatalogueComponent,
+    CraftCatalogueRow,
+    CraftText,
+    CraftWeaponKind,
+    CraftWeaponProperties,
+    CraftWorkbench,
+    CraftWorkbenchComponent,
+    CraftWorkbenchGroup,
+    CraftWorkbenchMaterial,
+    CraftWorkbenchPage,
+    CraftWorkbenchRecipe,
 };
 use openshard_protocol::gump::{
-    ButtonId, CloseGump, GumpAnswer, GumpButton, GumpDisplay, GumpId, GumpKey, GumpLayout, GumpPoint,
-    GumpResponse, RawGumpId,
+    ButtonId,
+    CloseGump,
+    GumpAnswer,
+    GumpButton,
+    GumpDisplay,
+    GumpId,
+    GumpKey,
+    GumpLayout,
+    GumpPoint,
+    GumpResponse,
+    RawGumpId,
 };
-use openshard_protocol::item_kind::{ItemSelector, MaterialRule};
+use openshard_protocol::item_kind::{
+    ItemSelector,
+    MaterialRule,
+};
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_state::components::{Client, Drawn, Position, Tool};
-use openshard_state::weapon::{WeaponKind, weapon_data, weapon_data_for_kind};
-use openshard_state::{CraftGumpContext, CraftGumpPage, WorldState, kind_from_drawn};
+use openshard_protocol::wire::{
+    ClilocId,
+    Graphic,
+    Hue,
+};
+use openshard_state::components::{
+    Client,
+    Drawn,
+    Position,
+    Tool,
+};
+use openshard_state::weapon::{
+    WeaponKind,
+    weapon_data,
+    weapon_data_for_kind,
+};
+use openshard_state::{
+    CraftGumpContext,
+    CraftGumpPage,
+    WorldState,
+    kind_from_drawn,
+};
 
 use crate::chance::chance;
-use crate::consume;
-use crate::craft;
 use crate::defs::system;
-use crate::environment;
 use crate::recipe::Recipe;
-use crate::system::{CraftSystemDef, SystemId, Text};
-use openshard_protocol::wire::{ClilocId, Graphic, Hue};
+use crate::system::{
+    CraftSystemDef,
+    SystemId,
+    Text,
+};
+use crate::{
+    consume,
+    craft,
+    environment,
+};
 
 /// The window's own id. Distinct from the quest log's, so the two claims of a
 /// `0xB1` cannot be confused.
@@ -204,10 +249,12 @@ pub fn open(state: &mut WorldState, player: EntityId, context: CraftGumpContext)
     };
     let layout = match context.page {
         CraftGumpPage::Catalogue => catalogue(),
-        CraftGumpPage::Details(recipe) => match def.recipes.get(usize::from(recipe)) {
-            Some(recipe) => details(state, player, def, recipe, &context),
-            None => return,
-        },
+        CraftGumpPage::Details(recipe) => {
+            match def.recipes.get(usize::from(recipe)) {
+                Some(recipe) => details(state, player, def, recipe, &context),
+                None => return,
+            }
+        }
         _ => main(state, player, def, &context),
     };
     let (string, lines) = layout.finish();
@@ -217,7 +264,7 @@ pub fn open(state: &mut WorldState, player: EntityId, context: CraftGumpContext)
         connection,
         &ServerPacket::CloseGump(CloseGump {
             gump_id: CRAFT_GUMP,
-            button: ButtonId::CLOSE_BOX,
+            button:  ButtonId::CLOSE_BOX,
         }),
     );
     if context.page == CraftGumpPage::Catalogue {
@@ -234,11 +281,11 @@ pub fn open(state: &mut WorldState, player: EntityId, context: CraftGumpContext)
     state.send_packet(
         connection,
         &ServerPacket::GumpDisplay(GumpDisplay {
-            serial: GumpKey::on(serial),
+            serial:  GumpKey::on(serial),
             gump_id: CRAFT_GUMP,
-            at: GumpPoint::new(WINDOW_X, WINDOW_Y),
-            layout: string.to_owned(),
-            lines: lines.to_vec(),
+            at:      GumpPoint::new(WINDOW_X, WINDOW_Y),
+            layout:  string.to_owned(),
+            lines:   lines.to_vec(),
         }),
     );
     if let Some(row) = state.row_of_mut(player) {
@@ -257,12 +304,12 @@ pub fn open_catalogue(state: &mut WorldState, player: EntityId) {
         state,
         player,
         CraftGumpContext {
-            system: 0,
-            tool: player,
-            group: 0,
+            system:  0,
+            tool:    player,
+            group:   0,
             sub_res: 0,
-            page: CraftGumpPage::Catalogue,
-            notice: None,
+            page:    CraftGumpPage::Catalogue,
+            notice:  None,
         },
     );
 }
@@ -277,7 +324,7 @@ pub fn close(state: &mut WorldState, player: EntityId) {
             connection,
             &ServerPacket::CloseGump(CloseGump {
                 gump_id: CRAFT_GUMP,
-                button: ButtonId::CLOSE_BOX,
+                button:  ButtonId::CLOSE_BOX,
             }),
         );
     }
@@ -378,12 +425,14 @@ fn main(
     groups(&mut layout, def, context.group);
     match context.page {
         CraftGumpPage::Resources => resources(&mut layout, state, player, def),
-        _ => items(
-            &mut layout,
-            def,
-            context.group,
-            state.registry.has::<Tool>(context.tool),
-        ),
+        _ => {
+            items(
+                &mut layout,
+                def,
+                context.group,
+                state.registry.has::<Tool>(context.tool),
+            )
+        }
     }
     layout
 }
@@ -433,58 +482,62 @@ fn catalogue_data(state: &WorldState, player: EntityId) -> CraftCatalogue {
     let facilities = environment::around(state, player);
     CraftCatalogue {
         gump_id: CRAFT_GUMP,
-        rows: catalogue_recipes()
+        rows:    catalogue_recipes()
             .enumerate()
-            .map(|(index, (system, recipe))| CraftCatalogueRow {
-                button: button_id(kind::DETAILS, ButtonIndex::from_position(index)).0,
-                result: recipe.graphic,
-                result_hue: recipe.hue,
-                result_item_kind: recipe.kind,
-                name: text_cliloc(recipe.name),
-                skill: recipe
-                    .skills
-                    .first()
-                    .map_or(ClilocId(0), |requirement| skill_label(requirement.skill)),
-                skill_min: recipe
-                    .skills
-                    .first()
-                    .map(|requirement| requirement.min - recipe.min_skill_offset)
-                    .unwrap_or_default()
-                    .clamp(0, i32::from(u16::MAX)) as u16,
-                ready: catalogue_ready(state, player, system, recipe, &stock, facilities),
-                weapon: recipe
-                    .kind
-                    .and_then(weapon_data_for_kind)
-                    .or_else(|| {
-                        recipe
-                            .kind
-                            .is_none()
-                            .then(|| weapon_data(recipe.graphic))
-                            .flatten()
-                    })
-                    .map(|weapon| CraftWeaponProperties {
-                        combat_skill: skill_label(weapon.skill.skill()),
-                        kind: craft_weapon_kind(weapon.kind),
-                        damage_min: weapon.aos_min,
-                        damage_max: weapon.aos_max,
-                        speed_centis: weapon.ml_speed,
-                        range: weapon.range.map(|range| range.get()),
-                    }),
-                components: recipe
-                    .resources
-                    .iter()
-                    .map(|resource| {
-                        let identity = catalogue_resource_identity(system, resource);
-                        CraftCatalogueComponent {
-                            item_kind: identity.map(|(kind, _)| kind),
-                            material: identity.and_then(|(_, material)| material),
-                            graphic: resource.graphic,
-                            hue: axis_hue(system, resource, 0),
-                            name: text_cliloc(resource.name),
-                            amount: resource.amount,
-                        }
-                    })
-                    .collect(),
+            .map(|(index, (system, recipe))| {
+                CraftCatalogueRow {
+                    button:           button_id(kind::DETAILS, ButtonIndex::from_position(index)).0,
+                    result:           recipe.graphic,
+                    result_hue:       recipe.hue,
+                    result_item_kind: recipe.kind,
+                    name:             text_cliloc(recipe.name),
+                    skill:            recipe
+                        .skills
+                        .first()
+                        .map_or(ClilocId(0), |requirement| skill_label(requirement.skill)),
+                    skill_min:        recipe
+                        .skills
+                        .first()
+                        .map(|requirement| requirement.min - recipe.min_skill_offset)
+                        .unwrap_or_default()
+                        .clamp(0, i32::from(u16::MAX)) as u16,
+                    ready:            catalogue_ready(state, player, system, recipe, &stock, facilities),
+                    weapon:           recipe
+                        .kind
+                        .and_then(weapon_data_for_kind)
+                        .or_else(|| {
+                            recipe
+                                .kind
+                                .is_none()
+                                .then(|| weapon_data(recipe.graphic))
+                                .flatten()
+                        })
+                        .map(|weapon| {
+                            CraftWeaponProperties {
+                                combat_skill: skill_label(weapon.skill.skill()),
+                                kind:         craft_weapon_kind(weapon.kind),
+                                damage_min:   weapon.aos_min,
+                                damage_max:   weapon.aos_max,
+                                speed_centis: weapon.ml_speed,
+                                range:        weapon.range.map(|range| range.get()),
+                            }
+                        }),
+                    components:       recipe
+                        .resources
+                        .iter()
+                        .map(|resource| {
+                            let identity = catalogue_resource_identity(system, resource);
+                            CraftCatalogueComponent {
+                                item_kind: identity.map(|(kind, _)| kind),
+                                material:  identity.and_then(|(_, material)| material),
+                                graphic:   resource.graphic,
+                                hue:       axis_hue(system, resource, 0),
+                                name:      text_cliloc(resource.name),
+                                amount:    resource.amount,
+                            }
+                        })
+                        .collect(),
+                }
             })
             .collect(),
     }
@@ -506,27 +559,28 @@ fn workbench_data(
         .groups
         .iter()
         .enumerate()
-        .map(|(index, name)| CraftWorkbenchGroup {
-            button: button_id(kind::GROUP, ButtonIndex::from_position(index)).0,
-            name: craft_text(*name),
-            selected: u16::try_from(index).ok() == Some(context.group),
+        .map(|(index, name)| {
+            CraftWorkbenchGroup {
+                button:   button_id(kind::GROUP, ButtonIndex::from_position(index)).0,
+                name:     craft_text(*name),
+                selected: u16::try_from(index).ok() == Some(context.group),
+            }
         })
         .collect();
     let selected_material = def.sub_res.and_then(|axis| {
-        axis.entries
-            .get(usize::from(context.sub_res))
-            .map(|entry| CraftWorkbenchMaterial {
-                button: button_id(
+        axis.entries.get(usize::from(context.sub_res)).map(|entry| {
+            CraftWorkbenchMaterial {
+                button:    button_id(
                     kind::RESOURCE,
                     ButtonIndex::from_position(usize::from(context.sub_res)),
                 )
                 .0,
                 item_kind: Some(axis.item_kind),
-                material: Some(entry.material),
-                graphic: axis.graphic,
-                hue: entry.hue,
-                name: craft_text(entry.name),
-                carried: carried_axis(
+                material:  Some(entry.material),
+                graphic:   axis.graphic,
+                hue:       entry.hue,
+                name:      craft_text(entry.name),
+                carried:   carried_axis(
                     state,
                     player,
                     axis.item_kind,
@@ -534,8 +588,9 @@ fn workbench_data(
                     axis.graphic,
                     entry.hue,
                 ),
-                selected: true,
-            })
+                selected:  true,
+            }
+        })
     });
     let tool = state.registry.get::<Tool>(context.tool);
     let tool_uses = tool.map(|tool| tool.uses_left);
@@ -544,31 +599,35 @@ fn workbench_data(
     let facilities = facility_mask(def.needs);
     let present_facilities = facility_mask_found(nearby);
     let page = match context.page {
-        CraftGumpPage::Resources => CraftWorkbenchPage::Resources {
-            materials: def.sub_res.map_or_else(Vec::new, |axis| {
-                axis.entries
-                    .iter()
-                    .enumerate()
-                    .map(|(index, entry)| CraftWorkbenchMaterial {
-                        button: button_id(kind::RESOURCE, ButtonIndex::from_position(index)).0,
-                        item_kind: Some(axis.item_kind),
-                        material: Some(entry.material),
-                        graphic: axis.graphic,
-                        hue: entry.hue,
-                        name: craft_text(entry.name),
-                        carried: carried_axis(
-                            state,
-                            player,
-                            axis.item_kind,
-                            entry.material,
-                            axis.graphic,
-                            entry.hue,
-                        ),
-                        selected: index == usize::from(context.sub_res),
-                    })
-                    .collect()
-            }),
-        },
+        CraftGumpPage::Resources => {
+            CraftWorkbenchPage::Resources {
+                materials: def.sub_res.map_or_else(Vec::new, |axis| {
+                    axis.entries
+                        .iter()
+                        .enumerate()
+                        .map(|(index, entry)| {
+                            CraftWorkbenchMaterial {
+                                button:    button_id(kind::RESOURCE, ButtonIndex::from_position(index)).0,
+                                item_kind: Some(axis.item_kind),
+                                material:  Some(entry.material),
+                                graphic:   axis.graphic,
+                                hue:       entry.hue,
+                                name:      craft_text(entry.name),
+                                carried:   carried_axis(
+                                    state,
+                                    player,
+                                    axis.item_kind,
+                                    entry.material,
+                                    axis.graphic,
+                                    entry.hue,
+                                ),
+                                selected:  index == usize::from(context.sub_res),
+                            }
+                        })
+                        .collect()
+                }),
+            }
+        }
         CraftGumpPage::Details(recipe) => {
             let recipe = def
                 .recipes
@@ -576,7 +635,7 @@ fn workbench_data(
                 .expect("craft context only opens detail pages for real recipes");
             let odds = chance(state, player, def, recipe);
             CraftWorkbenchPage::Details {
-                recipe: workbench_recipe(
+                recipe:                workbench_recipe(
                     state,
                     player,
                     def,
@@ -585,23 +644,25 @@ fn workbench_data(
                     None,
                     state.registry.has::<Tool>(context.tool).then_some(detail::MAKE.0),
                 ),
-                success_per_mille: u16::try_from(odds.success).unwrap_or(u16::MAX),
+                success_per_mille:     u16::try_from(odds.success).unwrap_or(u16::MAX),
                 exceptional_per_mille: recipe
                     .markable
                     .then(|| u16::try_from(odds.exceptional).unwrap_or(u16::MAX)),
             }
         }
-        CraftGumpPage::Items | CraftGumpPage::Catalogue => CraftWorkbenchPage::Items {
-            recipes: def
-                .recipes
-                .iter()
-                .filter(|recipe| recipe.group == context.group)
-                .enumerate()
-                .map(|(index, recipe)| {
-                    workbench_recipe(state, player, def, context, recipe, Some(index), None)
-                })
-                .collect(),
-        },
+        CraftGumpPage::Items | CraftGumpPage::Catalogue => {
+            CraftWorkbenchPage::Items {
+                recipes: def
+                    .recipes
+                    .iter()
+                    .filter(|recipe| recipe.group == context.group)
+                    .enumerate()
+                    .map(|(index, recipe)| {
+                        workbench_recipe(state, player, def, context, recipe, Some(index), None)
+                    })
+                    .collect(),
+            }
+        }
     };
     CraftWorkbench {
         gump_id: CRAFT_GUMP,
@@ -689,11 +750,11 @@ fn workbench_recipe(
         details_button: index.map(|index| button_id(kind::DETAILS, index).0),
         result: CraftWorkbenchComponent {
             item_kind: recipe.kind,
-            graphic: recipe.graphic,
-            hue: recipe.hue,
-            name: craft_text(recipe.name),
-            amount: recipe.amount,
-            carried: None,
+            graphic:   recipe.graphic,
+            hue:       recipe.hue,
+            name:      craft_text(recipe.name),
+            amount:    recipe.amount,
+            carried:   None,
         },
         skills: recipe
             .skills
@@ -745,10 +806,12 @@ fn catalogue_resource_identity(
             kind,
             material: MaterialRule::Exact(material),
         }) => Some((kind, Some(material))),
-        _ => kind_from_drawn(Drawn {
-            id: resource.graphic,
-            hue: resource.hue,
-        }),
+        _ => {
+            kind_from_drawn(Drawn {
+                id:  resource.graphic,
+                hue: resource.hue,
+            })
+        }
     }
 }
 
@@ -1417,23 +1480,25 @@ fn handle_list_button(
             next.page = CraftGumpPage::Items;
             open(state, player, next);
         }
-        kind::MISC => match index {
-            misc::RESOURCES => {
-                let mut next = context;
-                next.page = CraftGumpPage::Resources;
-                open(state, player, next);
+        kind::MISC => {
+            match index {
+                misc::RESOURCES => {
+                    let mut next = context;
+                    next.page = CraftGumpPage::Resources;
+                    open(state, player, next);
+                }
+                misc::REFRESH => open(state, player, context),
+                misc::CANCEL => {
+                    state
+                        .registry
+                        .remove::<openshard_state::components::Crafting>(player);
+                    let mut next = context;
+                    next.page = CraftGumpPage::Items;
+                    open(state, player, next);
+                }
+                _ => {}
             }
-            misc::REFRESH => open(state, player, context),
-            misc::CANCEL => {
-                state
-                    .registry
-                    .remove::<openshard_state::components::Crafting>(player);
-                let mut next = context;
-                next.page = CraftGumpPage::Items;
-                open(state, player, next);
-            }
-            _ => {}
-        },
+        }
         _ => {}
     }
 }

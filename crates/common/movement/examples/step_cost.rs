@@ -30,13 +30,30 @@
 
 use std::hint::black_box;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use clap::Parser;
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Doors, Overlay};
-use openshard_movement::spans::{SpanIndex, Spans};
-use openshard_movement::{Footing, MapTerrain, SearchExit, Weight, search_path, step_allowed, steps_out_of};
+use openshard_map::overlay::{
+    Doors,
+    Overlay,
+};
+use openshard_movement::spans::{
+    SpanIndex,
+    Spans,
+};
+use openshard_movement::{
+    Footing,
+    MapTerrain,
+    SearchExit,
+    Weight,
+    search_path,
+    step_allowed,
+    steps_out_of,
+};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 
@@ -45,9 +62,9 @@ struct Cli {
     #[arg(short, long, env = "OPENSHARD_CLIENT", value_name = "DIR")]
     client: PathBuf,
     #[arg(long, default_value_t = 1500)]
-    x: u16,
+    x:      u16,
     #[arg(long, default_value_t = 1900)]
-    y: u16,
+    y:      u16,
     /// Half-width of the square of tiles walked, in tiles.
     #[arg(long, default_value_t = 64)]
     radius: u16,

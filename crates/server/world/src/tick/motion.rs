@@ -2,13 +2,13 @@ use super::*;
 
 #[derive(Clone, Copy)]
 struct PlayerWalk {
-    connection: ConnectionId,
-    entity: EntityId,
-    serial: Serial,
-    facet: Facet,
-    from: Point,
-    request: WalkRequest,
-    mounted: bool,
+    connection:   ConnectionId,
+    entity:       EntityId,
+    serial:       Serial,
+    facet:        Facet,
+    from:         Point,
+    request:      WalkRequest,
+    mounted:      bool,
     leaving_seat: bool,
 }
 
@@ -152,8 +152,8 @@ impl World {
         // is irrelevant, and the request remains typed until after its outcome
         // has been decided, so this conversion cannot reintroduce the race.
         let legacy = WalkRequest {
-            facing: request.facing,
-            sequence: request.sequence,
+            facing:       request.facing,
+            sequence:     request.sequence,
             fastwalk_key: openshard_protocol::world::RawFastwalkKey(0),
         };
         let turned = PlayerWalk {
@@ -247,7 +247,7 @@ impl World {
             &ServerPacket::WalkReject(WalkReject {
                 sequence: request.sequence.interpret(),
                 position: walker.position,
-                facing: walker.facing,
+                facing:   walker.facing,
             }),
         );
     }
@@ -396,7 +396,7 @@ impl World {
         self.state.send_packet(
             connection,
             &ServerPacket::WalkAck(WalkAck {
-                sequence: request.sequence.interpret(),
+                sequence:  request.sequence.interpret(),
                 notoriety: Notoriety::Innocent,
             }),
         );

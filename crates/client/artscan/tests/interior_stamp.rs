@@ -13,14 +13,31 @@
 //! and see whether the stamp moves. No install and no bake: the files below are
 //! written by hand, and the base set is a world of ours four tiles square.
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_client_artscan::interiors;
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, WorldMap};
-use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
-use openshard_map::snapshot::{MapRevision, MapSnapshot};
-use openshard_movement::bake::{FacetWorld, WorldSource};
+use openshard_map::map::{
+    LandCell,
+    WorldMap,
+};
+use openshard_map::patch::{
+    Patch,
+    PatchAuthor,
+    PatchOp,
+    PatchTime,
+};
+use openshard_map::snapshot::{
+    MapRevision,
+    MapSnapshot,
+};
+use openshard_movement::bake::{
+    FacetWorld,
+    WorldSource,
+};
 use openshard_protocol::world::Facet;
 use openshard_tiles::LandTileId;
 
@@ -46,9 +63,11 @@ fn install(tag: &str) -> PathBuf {
 fn base_set(dir: &Path) -> (PathBuf, PathBuf) {
     let path = dir.join("world.osbase");
     let log = openshard_basemap::patches::log_path(&path);
-    let map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
-        tile: LandTileId(3),
-        z: 0,
+    let map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| {
+        LandCell {
+            tile: LandTileId(3),
+            z:    0,
+        }
     });
     openshard_basemap::write(
         &path,
@@ -126,7 +145,7 @@ fn a_committed_patch_moves_the_stamp() {
     let world = FacetWorld::read(&dir, WorldSource::BaseSet(&path), FACET).expect("the base set");
     let raised = LandCell {
         tile: LandTileId(3),
-        z: 40,
+        z:    40,
     };
     let op = PatchOp::set_land(world.snapshot.map(), 1, 1, raised).expect("a tile of this world");
     let patch = Patch::new(

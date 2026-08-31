@@ -36,7 +36,11 @@
 //! in the Community Pack is *logic* — loot tables, two item behaviours — and not
 //! content, so this module is finished until something new is written.
 
-use openshard_state::{dialogue, quest, region};
+use openshard_state::{
+    dialogue,
+    quest,
+    region,
+};
 use openshard_world::Command;
 
 /// Every command the shard's own content lays down, before the first tick.
@@ -95,9 +99,11 @@ pub fn verb(action: &str) -> Vec<Command> {
     let regions = region::shipped()
         .into_iter()
         .filter(|set| set.verb == action)
-        .map(|set| Command::RegisterRegions {
-            facet: set.facet,
-            regions: set.regions,
+        .map(|set| {
+            Command::RegisterRegions {
+                facet:   set.facet,
+                regions: set.regions,
+            }
         });
     let spawners = openshard_world::spawner::shipped()
         .into_iter()
@@ -119,21 +125,20 @@ pub fn verb(action: &str) -> Vec<Command> {
         .filter(|set| set.verb == action)
         .flat_map(|set| {
             let batch = Command::Decorate {
-                facet: set.facet,
-                statics: set.statics.to_vec(),
-                doors: set.doors.to_vec(),
+                facet:      set.facet,
+                statics:    set.statics.to_vec(),
+                doors:      set.doors.to_vec(),
                 containers: set.containers.to_vec(),
             };
-            let scans = set
-                .door_regions
-                .iter()
-                .map(move |&(x, y, width, height)| Command::GenerateDoors {
+            let scans = set.door_regions.iter().map(move |&(x, y, width, height)| {
+                Command::GenerateDoors {
                     facet: set.facet,
                     x,
                     y,
                     width,
                     height,
-                });
+                }
+            });
             std::iter::once(batch).chain(scans)
         });
     // The three destructive menu rows name actions rather than datasets, but
@@ -143,9 +148,11 @@ pub fn verb(action: &str) -> Vec<Command> {
     let clear = match action {
         "clear" => vec![Command::ClearSpawners],
         "clear:deco" => vec![Command::ClearDecorations],
-        "clear:regions" => vec![Command::ClearRegions {
-            facet: openshard_protocol::world::Facet(0),
-        }],
+        "clear:regions" => {
+            vec![Command::ClearRegions {
+                facet: openshard_protocol::world::Facet(0),
+            }]
+        }
         _ => Vec::new(),
     };
     regions
@@ -158,8 +165,9 @@ pub fn verb(action: &str) -> Vec<Command> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_state::WorldTick;
+
+    use super::*;
 
     /// What CI gets, since the equivalence test below skips without the pack:
     /// the shard's content reaches the world as one registration carrying every
@@ -271,7 +279,7 @@ mod tests {
         assert!(matches!(
             verb("clear:regions").as_slice(),
             [Command::ClearRegions {
-                facet: openshard_protocol::world::Facet(0)
+                facet: openshard_protocol::world::Facet(0),
             }]
         ));
     }
@@ -290,9 +298,11 @@ mod tests {
     fn only_spawners(commands: Vec<Command>) -> Vec<openshard_world::spawner::Spawner> {
         commands
             .into_iter()
-            .filter_map(|command| match command {
-                Command::RegisterSpawner { spawner } => Some(spawner),
-                _ => None,
+            .filter_map(|command| {
+                match command {
+                    Command::RegisterSpawner { spawner } => Some(spawner),
+                    _ => None,
+                }
             })
             .collect()
     }

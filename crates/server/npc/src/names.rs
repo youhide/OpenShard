@@ -61,8 +61,9 @@ pub fn townsperson_name(rng: &mut Rng, title: &str, female: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashSet;
+
+    use super::*;
 
     #[test]
     fn a_full_name_carries_the_trade_after_the_person() {

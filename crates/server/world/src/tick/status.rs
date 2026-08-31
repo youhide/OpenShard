@@ -19,9 +19,13 @@
 //! entities, walked off `state.players`, not the world — and sends only what
 //! changed. It reads `state.ticks` and components, never a clock, so it replays.
 
-use super::*;
 use openshard_config::CombatEra;
-use openshard_state::components::{Riding, body_is_female};
+use openshard_state::components::{
+    Riding,
+    body_is_female,
+};
+
+use super::*;
 
 /// How often the derived numbers are recomputed, in ticks: twice a second. Fast
 /// enough that gold falling out of a purchase reads as immediate, slow enough
@@ -60,21 +64,25 @@ impl World {
         let hits = hits.map_or(
             Vitals {
                 current: DEFAULT_HITPOINTS,
-                max: DEFAULT_HITPOINTS,
+                max:     DEFAULT_HITPOINTS,
             },
-            |h| Vitals {
-                current: h.current,
-                max: h.max,
+            |h| {
+                Vitals {
+                    current: h.current,
+                    max:     h.max,
+                }
             },
         );
         let mana = mana.map_or(
             Vitals {
                 current: DEFAULT_MANA,
-                max: DEFAULT_MANA,
+                max:     DEFAULT_MANA,
             },
-            |m| Vitals {
-                current: m.current,
-                max: m.max,
+            |m| {
+                Vitals {
+                    current: m.current,
+                    max:     m.max,
+                }
             },
         );
         // The real pool if the mobile carries one; otherwise dexterity, so an NPC
@@ -82,11 +90,13 @@ impl World {
         let stamina = stamina.map_or(
             Vitals {
                 current: dexterity,
-                max: dexterity,
+                max:     dexterity,
             },
-            |s| Vitals {
-                current: s.current,
-                max: s.max,
+            |s| {
+                Vitals {
+                    current: s.current,
+                    max:     s.max,
+                }
             },
         );
         let derived = self.derived_status(entity);
@@ -124,7 +134,7 @@ impl World {
             // what is in the bank as well. Off is UO's own answer (the box is
             // virtual, so its gold never reaches the total), which is why a banker
             // has to be asked for a balance.
-            gold: items::total_gold(&self.state, entity)
+            gold:      items::total_gold(&self.state, entity)
                 + if self.state.gameplay.bank_gold_in_status {
                     items::banked_gold(&self.state, entity)
                 } else {
@@ -133,7 +143,7 @@ impl World {
             // Pre-AoS this field *is* the armour rating; from AoS the client
             // labels it physical resistance, which is the resistance component's
             // to answer (the AoS per-piece resist data is a separate port).
-            armor: if self.state.gameplay.combat_era >= CombatEra::new(2) {
+            armor:     if self.state.gameplay.combat_era >= CombatEra::new(2) {
                 self.state
                     .registry
                     .get::<Resistance>(entity)
@@ -141,7 +151,7 @@ impl World {
             } else {
                 openshard_state::armor::worn_armor_rating(&self.state, entity)
             },
-            weight: items::total_weight(&self.state, entity, BODY_WEIGHT),
+            weight:    items::total_weight(&self.state, entity, BODY_WEIGHT),
             // A mount takes a follower slot in both references. Real pet slots
             // wait on taming; this is the one follower the engine can have today,
             // and reporting it is truer than reporting none.

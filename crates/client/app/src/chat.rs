@@ -6,17 +6,35 @@
 
 use openshard_client_render::atlas::TextSize;
 use openshard_client_render::geometry::Rect;
-use openshard_client_render::gump::{self as gump_art, GumpPixel, Scissor};
+use openshard_client_render::gump::{
+    self as gump_art,
+    GumpPixel,
+    Scissor,
+};
 use openshard_client_render::sprite::SpriteQuad;
-use openshard_client_render::text::{self, GumpLabel};
-use openshard_commands::{PREFIX, StaffCommand};
+use openshard_client_render::text::{
+    self,
+    GumpLabel,
+};
+use openshard_commands::{
+    PREFIX,
+    StaffCommand,
+};
 use openshard_protocol::access::AccessLevel;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 
 use crate::window::Screen;
 use crate::{
-    CHAT_LINE_HEIGHT, CHAT_LINES, CHAT_MARGIN, desk, profile, resources, scaled_gump_quads, shell, world,
+    CHAT_LINE_HEIGHT,
+    CHAT_LINES,
+    CHAT_MARGIN,
+    desk,
+    profile,
+    resources,
+    scaled_gump_quads,
+    shell,
+    world,
 };
 
 /// Which channel the typed line goes to when Enter is pressed.
@@ -118,9 +136,9 @@ const PLATE_SHADE: f32 = 0.25;
 fn plate_of(box_: Scissor, to_real: f32) -> SpriteQuad {
     gump_art::plate(
         Rect {
-            x: (box_.at.x as f32 * to_real).round(),
-            y: (box_.at.y as f32 * to_real).round(),
-            width: box_.width as f32 * to_real,
+            x:      (box_.at.x as f32 * to_real).round(),
+            y:      (box_.at.y as f32 * to_real).round(),
+            width:  box_.width as f32 * to_real,
             height: box_.height as f32 * to_real,
         },
         Hue::NONE,
@@ -181,20 +199,24 @@ pub(crate) fn line_height(
     density: f32,
 ) -> i32 {
     match truetype {
-        true => ttf_font.map_or_else(
-            || fonts.speech.pixels().round() as i32,
-            |font| {
-                let real = font
-                    .line_metrics(fonts.speech.scaled(density).pixels())
-                    .line_height;
-                (real as f32 / density).round() as i32
-            },
-        ),
-        false => (font_atlas
-            .glyph_ink_height(bitmap_font, b'M')
-            .map_or(CHAT_LINE_HEIGHT, |height| i32::from(height) + 2) as f32
-            * fonts.bitmap_speech_scale())
-        .round() as i32,
+        true => {
+            ttf_font.map_or_else(
+                || fonts.speech.pixels().round() as i32,
+                |font| {
+                    let real = font
+                        .line_metrics(fonts.speech.scaled(density).pixels())
+                        .line_height;
+                    (real as f32 / density).round() as i32
+                },
+            )
+        }
+        false => {
+            (font_atlas
+                .glyph_ink_height(bitmap_font, b'M')
+                .map_or(CHAT_LINE_HEIGHT, |height| i32::from(height) + 2) as f32
+                * fonts.bitmap_speech_scale())
+            .round() as i32
+        }
     }
 }
 
@@ -270,10 +292,13 @@ pub(crate) fn channel_width(
 ) -> i32 {
     let widest = Channel::ALL
         .iter()
-        .map(|channel| match ttf {
-            Some((atlas, size)) => text::gump_width_ttf(channel.label(), atlas, size),
-            None => {
-                (text::gump_width(channel.label(), bitmap_font, font_atlas) as f32 * magnify).round() as i32
+        .map(|channel| {
+            match ttf {
+                Some((atlas, size)) => text::gump_width_ttf(channel.label(), atlas, size),
+                None => {
+                    (text::gump_width(channel.label(), bitmap_font, font_atlas) as f32 * magnify).round()
+                        as i32
+                }
             }
         })
         .max()
@@ -304,8 +329,8 @@ pub(crate) fn channel_width(
 /// the pointer's side can measure once and this can stay pure arithmetic.
 pub(crate) fn channel_button(canvas_height: i32, line_height: i32, channel_width: i32) -> Scissor {
     Scissor {
-        at: GumpPixel::new(CHAT_MARGIN, canvas_height - CHAT_MARGIN - line_height),
-        width: channel_width + CHAT_MARGIN * 2,
+        at:     GumpPixel::new(CHAT_MARGIN, canvas_height - CHAT_MARGIN - line_height),
+        width:  channel_width + CHAT_MARGIN * 2,
         height: line_height,
     }
 }
@@ -340,7 +365,7 @@ pub(crate) enum Offer {
 /// One line of the popup, ready to draw.
 pub(crate) struct Row {
     /// What it says.
-    pub(crate) text: String,
+    pub(crate) text:        String,
     /// Whether it is the one Tab would take.
     ///
     /// Drawn on a plate — [`gump_art::plate`] at [`PLATE_SHADE`], as wide as
@@ -382,10 +407,12 @@ impl Offer {
             Self::Nothing => Vec::new(),
             // A whole command with its arguments spelled out: the same sentence
             // the shard answers a mistyped command with, before it is mistyped.
-            Self::Arguments(command) => vec![Row {
-                text: describe(*command),
-                highlighted: false,
-            }],
+            Self::Arguments(command) => {
+                vec![Row {
+                    text:        describe(*command),
+                    highlighted: false,
+                }]
+            }
             // `refresh` never builds this variant empty — an offer of nothing is
             // `Nothing` — but the slice below would panic rather than draw an
             // empty popup if it ever did, and that is not a trade worth taking.
@@ -404,7 +431,7 @@ impl Offer {
                 // match rather than as one of them.
                 if shown == 0 {
                     return vec![Row {
-                        text: format!("  ... {} more", of.len()),
+                        text:        format!("  ... {} more", of.len()),
                         highlighted: false,
                     }];
                 }
@@ -416,16 +443,18 @@ impl Offer {
                 let mut rows: Vec<Row> = of[start..end]
                     .iter()
                     .enumerate()
-                    .map(|(row, command)| Row {
-                        text: format!(
-                            "{} {}",
-                            match start + row == *at {
-                                true => '>',
-                                false => ' ',
-                            },
-                            describe(*command)
-                        ),
-                        highlighted: start + row == *at,
+                    .map(|(row, command)| {
+                        Row {
+                            text:        format!(
+                                "{} {}",
+                                match start + row == *at {
+                                    true => '>',
+                                    false => ' ',
+                                },
+                                describe(*command)
+                            ),
+                            highlighted: start + row == *at,
+                        }
                     })
                     .collect();
                 // What did not fit, counted rather than dropped silently: a list
@@ -436,7 +465,7 @@ impl Offer {
                     rows.insert(
                         0,
                         Row {
-                            text: format!("  ... {hidden} more"),
+                            text:        format!("  ... {hidden} more"),
                             highlighted: false,
                         },
                     );
@@ -451,12 +480,14 @@ impl Offer {
 fn describe(command: StaffCommand) -> String {
     match command.arguments().is_empty() {
         true => format!("{PREFIX}{}  -  {}", command.name(), command.summary()),
-        false => format!(
-            "{PREFIX}{} {}  -  {}",
-            command.name(),
-            command.arguments(),
-            command.summary()
-        ),
+        false => {
+            format!(
+                "{PREFIX}{} {}  -  {}",
+                command.name(),
+                command.arguments(),
+                command.summary()
+            )
+        }
     }
 }
 
@@ -473,10 +504,10 @@ pub(crate) struct Chat {
     /// per byte (see `text::collect`), and every cursor and edit position here
     /// is a byte offset into this string for exactly that reason — a `char`
     /// index would have to be translated back at every glyph anyway.
-    pub(crate) typed: String,
+    pub(crate) typed:   String,
     /// Where the caret sits: a byte offset into `typed`, always on a `char`
     /// boundary.
-    pub(crate) cursor: usize,
+    pub(crate) cursor:  usize,
     /// Whether a keystroke that is not a hotkey reaches this line rather than
     /// the character. Opened by Enter, the reference client's own gesture —
     /// there is no mouse hit test for it, so nothing else about picking has
@@ -499,12 +530,12 @@ pub(crate) struct Chat {
     ///
     /// Never written from outside: every path that changes the line ends in
     /// [`refresh`](Self::refresh), so the offer cannot be stale. See [`Offer`].
-    pub(crate) offer: Offer,
+    pub(crate) offer:   Offer,
     /// Whether Escape has put the popup away for the line as it stands.
     ///
     /// Cleared by the next edit, because the player who types another letter is
     /// asking a new question and the old refusal was about the old one.
-    dismissed: bool,
+    dismissed:          bool,
 }
 
 impl Chat {
@@ -931,12 +962,14 @@ pub(crate) fn draw_chat_and_speech(
     };
     let labels: Vec<GumpLabel<'_>> = rows
         .iter()
-        .map(|(at, hue, font, text)| GumpLabel {
-            at: *at,
-            text,
-            font: *font,
-            hue: *hue,
-            clip: None,
+        .map(|(at, hue, font, text)| {
+            GumpLabel {
+                at: *at,
+                text,
+                font: *font,
+                hue: *hue,
+                clip: None,
+            }
         })
         .collect();
     // The channel, on a plate, at the left end of the line — see
@@ -994,9 +1027,11 @@ pub(crate) fn draw_chat_and_speech(
         };
         let mut real_labels: Vec<GumpLabel<'_>> = labels
             .iter()
-            .map(|label| GumpLabel {
-                at: to_real(label.at),
-                ..*label
+            .map(|label| {
+                GumpLabel {
+                    at: to_real(label.at),
+                    ..*label
+                }
             })
             .collect();
         // The button's box, in gump pixels like every other layout answer here,
@@ -1018,26 +1053,26 @@ pub(crate) fn draw_chat_and_speech(
         );
         let line_at = to_real(line_starts_at(button));
         real_labels.push(GumpLabel {
-            at: to_real(GumpPixel::new(button.at.x + CHAT_MARGIN, button.at.y)),
+            at:   to_real(GumpPixel::new(button.at.x + CHAT_MARGIN, button.at.y)),
             text: channel_label,
             font: Font::DEFAULT,
-            hue: Hue(chat_style.hue),
+            hue:  Hue(chat_style.hue),
             clip: None,
         });
         real_labels.push(GumpLabel {
-            at: line_at,
+            at:   line_at,
             text: &prompt,
             font: Font::DEFAULT,
-            hue: Hue(chat_style.hue),
+            hue:  Hue(chat_style.hue),
             clip: None,
         });
         if chat.focused && blink_on {
             let caret_x = text::gump_width_ttf(&chat.typed[..chat.cursor], atlas, speech_size);
             real_labels.push(GumpLabel {
-                at: GumpPixel::new(line_at.x + caret_x, line_at.y),
+                at:   GumpPixel::new(line_at.x + caret_x, line_at.y),
                 text: caret_text,
                 font: Font::DEFAULT,
-                hue: Hue(chat_style.hue),
+                hue:  Hue(chat_style.hue),
                 clip: None,
             });
         }
@@ -1056,9 +1091,9 @@ pub(crate) fn draw_chat_and_speech(
             let at = to_real(rows[index].0);
             hud_quads.push(gump_art::plate(
                 Rect {
-                    x: at.x as f32,
-                    y: at.y as f32,
-                    width: widest as f32,
+                    x:      at.x as f32,
+                    y:      at.y as f32,
+                    width:  widest as f32,
                     height: (line_height as f32 * scale).round(),
                 },
                 Hue::NONE,
@@ -1080,13 +1115,13 @@ pub(crate) fn draw_chat_and_speech(
                 encoder,
                 gump_art::Frame {
                     target: view,
-                    width: window.config.width,
+                    width:  window.config.width,
                     height: window.config.height,
                     // Not `scale`: `hud_quads` are already in real
                     // pixels, so the shader's own multiply — the one
                     // `window_text_quads` below still needs, being in gump
                     // pixels — would double it.
-                    scale: 1.0,
+                    scale:  1.0,
                 },
                 &hud_quads,
             );
@@ -1156,9 +1191,9 @@ pub(crate) fn draw_chat_and_speech(
             let at = rows[index].0;
             window_text_quads.push(gump_art::plate(
                 Rect {
-                    x: at.x as f32,
-                    y: at.y as f32,
-                    width: widest as f32 * magnify,
+                    x:      at.x as f32,
+                    y:      at.y as f32,
+                    width:  widest as f32 * magnify,
                     height: line_height as f32,
                 },
                 Hue::NONE,
@@ -1188,7 +1223,10 @@ pub(crate) fn draw_chat_and_speech(
 
 #[cfg(test)]
 mod tests {
-    use openshard_client_render::atlas::{FontAtlas, GlyphKey};
+    use openshard_client_render::atlas::{
+        FontAtlas,
+        GlyphKey,
+    };
     use openshard_client_render::gump::GumpPixel;
     use openshard_commands::StaffCommand;
     use openshard_protocol::access::AccessLevel;
@@ -1196,7 +1234,11 @@ mod tests {
     use openshard_uofiles::color::Color16;
     use openshard_uofiles::image::Image;
 
-    use super::{Channel, Chat, Offer};
+    use super::{
+        Channel,
+        Chat,
+        Offer,
+    };
 
     /// The authority these tests type under: a game master, because the
     /// completer has nothing at all to offer anybody else — that rule is

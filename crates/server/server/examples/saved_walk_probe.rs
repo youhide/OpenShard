@@ -12,11 +12,31 @@ use openshard_events::Cursor;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::access::AccessLevel;
 use openshard_protocol::direction::Facing;
-use openshard_protocol::identity::{AccountName, CharacterName};
+use openshard_protocol::identity::{
+    AccountName,
+    CharacterName,
+};
 use openshard_protocol::version::ClientVersion;
-use openshard_protocol::world::{RawFastwalkKey, RawStepSequence, WalkRequest};
-use openshard_server::boot::{load_config, load_world, open_store, restore_saved_world};
-use openshard_world::{Character, Command, Entering, MobileMoved, PlayerEntered, PlayerRefused, StepRefused};
+use openshard_protocol::world::{
+    RawFastwalkKey,
+    RawStepSequence,
+    WalkRequest,
+};
+use openshard_server::boot::{
+    load_config,
+    load_world,
+    open_store,
+    restore_saved_world,
+};
+use openshard_world::{
+    Character,
+    Command,
+    Entering,
+    MobileMoved,
+    PlayerEntered,
+    PlayerRefused,
+    StepRefused,
+};
 
 #[derive(Debug, Parser)]
 #[command(about = "Probe one real server step from a saved character")]

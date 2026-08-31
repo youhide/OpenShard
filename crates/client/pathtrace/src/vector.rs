@@ -4,7 +4,13 @@
 //! this crate exists partly to say whether a disagreement is a rounding
 //! disagreement — which it cannot do from inside the same precision.
 
-use std::ops::{Add, Div, Mul, Neg, Sub};
+use std::ops::{
+    Add,
+    Div,
+    Mul,
+    Neg,
+    Sub,
+};
 
 /// Which of the three world axes — the thing every `0..3` loop and
 /// `match axis { 0 => .., 1 => .., _ => .. }` in this crate has secretly

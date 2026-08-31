@@ -10,20 +10,44 @@
 //! they are pure. What is here is everything that needs a world: a forge on the
 //! ground, ingots in a pack, a tick counter, and a save.
 
-use super::tests::{START, enter, packets_for, world};
-use super::*;
 use openshard_crafting::SystemId;
 use openshard_movement::scene::Scene;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
 use openshard_protocol::serial::RawSerial;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::version::ClientVersion;
-use openshard_protocol::wire::{Graphic, Hue};
-use openshard_state::components::{Contained, CraftedBy, Crafting, ItemKind, Material, Quality, Tool};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
+use openshard_state::components::{
+    Contained,
+    CraftedBy,
+    Crafting,
+    ItemKind,
+    Material,
+    Quality,
+    Tool,
+};
 use openshard_state::harvest::ORE_GRAPHIC;
-use openshard_state::{CraftGumpContext, CraftGumpPage, Skill};
+use openshard_state::{
+    CraftGumpContext,
+    CraftGumpPage,
+    Skill,
+};
+
+use super::tests::{
+    START,
+    enter,
+    packets_for,
+    world,
+};
+use super::*;
 
 /// A smith's tongs, one of the graphics that opens the blacksmithy window.
 const TONGS: Graphic = Graphic(0x0FBB);
@@ -89,8 +113,8 @@ fn give(world: &mut World, connection: ConnectionId, graphic: Graphic, hue: Hue,
         item,
         openshard_state::ItemLocation::contained(Contained {
             container: backpack,
-            position: GumpPoint::new(20, 20),
-            grid: GridSlot(0),
+            position:  GumpPoint::new(20, 20),
+            grid:      GridSlot(0),
         }),
     )
     .unwrap();
@@ -202,11 +226,11 @@ fn craft_in_system(
     world.queue(Command::GumpResponse {
         connection,
         response: openshard_protocol::gump::GumpResponse {
-            serial: openshard_protocol::gump::RawGumpKey(serial.raw()),
-            gump_id: openshard_protocol::gump::RawGumpId(openshard_crafting::CRAFT_GUMP.0),
+            serial:       openshard_protocol::gump::RawGumpKey(serial.raw()),
+            gump_id:      openshard_protocol::gump::RawGumpId(openshard_crafting::CRAFT_GUMP.0),
             // ServUO's `1 + kind + index * 7`, kind 1 being "make".
-            button: openshard_protocol::gump::RawButtonId(1 + 1 + u32::try_from(row).unwrap() * 7),
-            switches: Vec::new(),
+            button:       openshard_protocol::gump::RawButtonId(1 + 1 + u32::try_from(row).unwrap() * 7),
+            switches:     Vec::new(),
             text_entries: Vec::new(),
         },
     });
@@ -282,9 +306,7 @@ fn output_serial_exhaustion_currently_spends_successful_craft_ingredients() {
     world
         .state
         .registry
-        .reserve_serial(
-            Serial::new(openshard_protocol::serial::ITEM_MAX).expect("the final item serial"),
-        );
+        .reserve_serial(Serial::new(openshard_protocol::serial::ITEM_MAX).expect("the final item serial"));
 
     craft(&mut world, connection, tongs, recipe, 0, now);
     finish(&mut world, connection, now);
@@ -516,7 +538,7 @@ fn a_valorite_order_cannot_be_paid_in_iron() {
         .find_map(|(item, drawn)| {
             (*drawn
                 == Drawn {
-                    id: Graphic(0x0F61),
+                    id:  Graphic(0x0F61),
                     hue: VALORITE,
                 })
             .then_some(item)
@@ -1023,10 +1045,10 @@ fn a_gump_reply_for_a_window_the_server_never_opened_makes_nothing() {
     world.queue(Command::GumpResponse {
         connection,
         response: openshard_protocol::gump::GumpResponse {
-            serial: openshard_protocol::gump::RawGumpKey(serial.raw()),
-            gump_id: openshard_protocol::gump::RawGumpId(openshard_crafting::CRAFT_GUMP.0),
-            button: openshard_protocol::gump::RawButtonId(2), // "make", row 0
-            switches: Vec::new(),
+            serial:       openshard_protocol::gump::RawGumpKey(serial.raw()),
+            gump_id:      openshard_protocol::gump::RawGumpId(openshard_crafting::CRAFT_GUMP.0),
+            button:       openshard_protocol::gump::RawButtonId(2), // "make", row 0
+            switches:     Vec::new(),
             text_entries: Vec::new(),
         },
     });
@@ -1065,9 +1087,9 @@ fn an_exceptional_piece_is_still_exceptional_after_a_restart() {
         Some(owner),
         openshard_persistence::ItemLocation::Ground {
             facet: 0,
-            x: START.x,
-            y: START.y,
-            z: 0,
+            x:     START.x,
+            y:     START.y,
+            z:     0,
         },
     )
     .expect("a swept item");
@@ -1088,9 +1110,9 @@ fn an_exceptional_piece_is_still_exceptional_after_a_restart() {
         Some(owner),
         openshard_persistence::ItemLocation::Ground {
             facet: 0,
-            x: START.x,
-            y: START.y,
-            z: 0,
+            x:     START.x,
+            y:     START.y,
+            z:     0,
         },
     )
     .expect("a swept item");
@@ -1174,9 +1196,9 @@ fn a_semantic_item_record_restores_without_reinterpreting_its_art() {
         None,
         openshard_persistence::ItemLocation::Ground {
             facet: 0,
-            x: START.x,
-            y: START.y,
-            z: 0,
+            x:     START.x,
+            y:     START.y,
+            z:     0,
         },
     )
     .expect("typed item saves");
@@ -1198,7 +1220,7 @@ fn a_semantic_item_record_restores_without_reinterpreting_its_art() {
     assert_eq!(
         restored.state.registry.get::<Drawn>(item),
         Some(&Drawn {
-            id: Graphic(0x0F61),
+            id:  Graphic(0x0F61),
             hue: VALORITE,
         })
     );
@@ -1224,9 +1246,9 @@ fn a_pre_item_kind_record_migrates_through_its_audited_presentation() {
         None,
         openshard_persistence::ItemLocation::Ground {
             facet: 0,
-            x: START.x,
-            y: START.y,
-            z: 0,
+            x:     START.x,
+            y:     START.y,
+            z:     0,
         },
     )
     .expect("ore saves");
@@ -1250,7 +1272,7 @@ fn a_pre_item_kind_record_migrates_through_its_audited_presentation() {
     assert_eq!(
         restored.state.registry.get::<Drawn>(ore),
         Some(&Drawn {
-            id: ORE_GRAPHIC,
+            id:  ORE_GRAPHIC,
             hue: VALORITE,
         }),
         "migration retains the old record's visible projection"
@@ -1277,9 +1299,9 @@ fn a_corrupt_semantic_record_is_not_retyped_from_its_drawing() {
         None,
         openshard_persistence::ItemLocation::Ground {
             facet: 0,
-            x: START.x,
-            y: START.y,
-            z: 0,
+            x:     START.x,
+            y:     START.y,
+            z:     0,
         },
     )
     .expect("sword saves");
@@ -1300,7 +1322,7 @@ fn a_corrupt_semantic_record_is_not_retyped_from_its_drawing() {
     assert_eq!(
         restored.state.registry.get::<Drawn>(item),
         Some(&Drawn {
-            id: Graphic(0x1415),
+            id:  Graphic(0x1415),
             hue: VALORITE,
         })
     );
@@ -1342,13 +1364,12 @@ fn double_clicking_the_tongs_is_what_opens_the_window() {
         packets.iter().any(|packet| packet[0] == 0xB0),
         "and the client was sent one"
     );
-    let workbench =
-        packets
-            .iter()
-            .find_map(|packet| match ServerPacket::decode(packet, ClientVersion::TOL) {
-                Ok(Some(ServerPacket::CraftWorkbench(workbench))) => Some(workbench),
-                _ => None,
-            });
+    let workbench = packets.iter().find_map(|packet| {
+        match ServerPacket::decode(packet, ClientVersion::TOL) {
+            Ok(Some(ServerPacket::CraftWorkbench(workbench))) => Some(workbench),
+            _ => None,
+        }
+    });
     assert!(
         workbench.is_some(),
         "the normal craft gump has the typed egui workbench payload"
@@ -1430,9 +1451,11 @@ fn the_private_catalogue_opens_without_a_tool_and_selects_a_recipe() {
     world.tick(now + TICK_INTERVAL);
     let catalogue = packets_for(&mut world, connection)
         .into_iter()
-        .find_map(|packet| match ServerPacket::decode(&packet, ClientVersion::TOL) {
-            Ok(Some(ServerPacket::CraftCatalogue(catalogue))) => Some(catalogue),
-            _ => None,
+        .find_map(|packet| {
+            match ServerPacket::decode(&packet, ClientVersion::TOL) {
+                Ok(Some(ServerPacket::CraftCatalogue(catalogue))) => Some(catalogue),
+                _ => None,
+            }
         });
     assert!(catalogue.is_some_and(|catalogue| {
         catalogue.rows.iter().any(|row| {
@@ -1454,13 +1477,13 @@ fn the_private_catalogue_opens_without_a_tool_and_selects_a_recipe() {
     world.queue(Command::GumpResponse {
         connection,
         response: openshard_protocol::gump::GumpResponse {
-            serial: openshard_protocol::gump::RawGumpKey(serial.raw()),
-            gump_id: openshard_protocol::gump::RawGumpId(openshard_crafting::CRAFT_GUMP.0),
+            serial:       openshard_protocol::gump::RawGumpKey(serial.raw()),
+            gump_id:      openshard_protocol::gump::RawGumpId(openshard_crafting::CRAFT_GUMP.0),
             // The first flattened catalogue row is a details button: `1 +
             // kind(2) + index(0) * 7`. It names the first smithing recipe,
             // without making a craft system a UI parent of the item.
-            button: openshard_protocol::gump::RawButtonId(3),
-            switches: Vec::new(),
+            button:       openshard_protocol::gump::RawButtonId(3),
+            switches:     Vec::new(),
             text_entries: Vec::new(),
         },
     });
@@ -1480,10 +1503,10 @@ fn the_private_catalogue_opens_without_a_tool_and_selects_a_recipe() {
     world.queue(Command::GumpResponse {
         connection,
         response: openshard_protocol::gump::GumpResponse {
-            serial: openshard_protocol::gump::RawGumpKey(serial.raw()),
-            gump_id: openshard_protocol::gump::RawGumpId(openshard_crafting::CRAFT_GUMP.0),
-            button: openshard_protocol::gump::RawButtonId(1), // detail-page MAKE
-            switches: Vec::new(),
+            serial:       openshard_protocol::gump::RawGumpKey(serial.raw()),
+            gump_id:      openshard_protocol::gump::RawGumpId(openshard_crafting::CRAFT_GUMP.0),
+            button:       openshard_protocol::gump::RawButtonId(1), // detail-page MAKE
+            switches:     Vec::new(),
             text_entries: Vec::new(),
         },
     });

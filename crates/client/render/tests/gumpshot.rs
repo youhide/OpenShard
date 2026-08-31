@@ -26,22 +26,60 @@
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use openshard_client_model::Skill as SkillLine;
 use openshard_client_render::atlas::FontAtlas;
-use openshard_client_render::gump::{self, ArtFiles, GumpArt, GumpAtlas, GumpPixel, Picture, Scissor};
+use openshard_client_render::gump::{
+    self,
+    ArtFiles,
+    GumpArt,
+    GumpAtlas,
+    GumpPixel,
+    Picture,
+    Scissor,
+};
 use openshard_client_render::mobiles::EquipmentLayer;
-use openshard_client_render::paperdoll::{self, Wearer, Whose};
-use openshard_client_render::skills::{self, Standing, Tree};
-use openshard_client_render::text::{self, GumpLabel};
-use openshard_client_render::{container, renderer};
-use openshard_protocol::containers::{ContainedItem, GridSlot};
+use openshard_client_render::paperdoll::{
+    self,
+    Wearer,
+    Whose,
+};
+use openshard_client_render::skills::{
+    self,
+    Standing,
+    Tree,
+};
+use openshard_client_render::text::{
+    self,
+    GumpLabel,
+};
+use openshard_client_render::{
+    container,
+    renderer,
+};
+use openshard_protocol::containers::{
+    ContainedItem,
+    GridSlot,
+};
 use openshard_protocol::gump::layout::parse;
-use openshard_protocol::gump::{ButtonId, GumpButton, GumpLayout, GumpPoint, SwitchId};
+use openshard_protocol::gump::{
+    ButtonId,
+    GumpButton,
+    GumpLayout,
+    GumpPoint,
+    SwitchId,
+};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::skill::SkillLock;
-use openshard_protocol::wire::{Graphic, Hue, Layer};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
 use openshard_tiles::TileData;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::equipconv::EquipConv;
@@ -62,25 +100,25 @@ const FEMALE: u16 = 0x0191;
 /// The files every scene below is drawn out of, or `None` where no client is
 /// installed.
 struct Client {
-    gumps: Gumps,
-    art: Art,
+    gumps:      Gumps,
+    art:        Art,
     equip_conv: EquipConv,
-    tiledata: TileData,
+    tiledata:   TileData,
     /// `fonts.mul`, packed: the face a window's own text is drawn in.
-    fonts: FontAtlas,
+    fonts:      FontAtlas,
 }
 
 fn client() -> Option<Client> {
     let dir = PathBuf::from(std::env::var_os("OPENSHARD_CLIENT")?);
     let fonts = AsciiFonts::open(&dir).expect("fonts.mul");
     Some(Client {
-        gumps: Gumps::open(&dir).expect("gumpartLegacyMUL.uop"),
-        art: Art::open(&dir).expect("artLegacyMUL.uop"),
+        gumps:      Gumps::open(&dir).expect("gumpartLegacyMUL.uop"),
+        art:        Art::open(&dir).expect("artLegacyMUL.uop"),
         // Optional in an install, and its absence resolves nothing — which is
         // the ordinary case for most rows anyway.
         equip_conv: EquipConv::load(dir.join("Equipconv.def")).unwrap_or_default(),
-        tiledata: openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul"),
-        fonts: FontAtlas::build(&fonts).expect("ten faces of small glyphs fit an atlas"),
+        tiledata:   openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul"),
+        fonts:      FontAtlas::build(&fonts).expect("ten faces of small glyphs fit an atlas"),
     })
 }
 
@@ -166,8 +204,8 @@ fn paperdolls(client: &Client, out: &Path) {
         ),
     ] {
         let wearer = Wearer {
-            body: Graphic(body),
-            hue: Hue::NONE,
+            body:      Graphic(body),
+            hue:       Hue::NONE,
             equipment: &equipment,
         };
         let at = GumpPixel::new(0, 0);
@@ -196,13 +234,15 @@ fn paperdolls(client: &Client, out: &Path) {
 /// A container: one background out of `gumpart` with the world's own art on it.
 fn bag(client: &Client, out: &Path) {
     const BACKPACK: Graphic = Graphic(0x003C);
-    let item = |serial: u32, graphic: u16, x: i32, y: i32| ContainedItem {
-        serial: Serial::new(serial).unwrap(),
-        graphic: Graphic(graphic),
-        amount: openshard_protocol::items::ItemAmount(1),
-        at: GumpPoint::new(x, y),
-        grid: GridSlot(0),
-        hue: Hue::NONE,
+    let item = |serial: u32, graphic: u16, x: i32, y: i32| {
+        ContainedItem {
+            serial:  Serial::new(serial).unwrap(),
+            graphic: Graphic(graphic),
+            amount:  openshard_protocol::items::ItemAmount(1),
+            at:      GumpPoint::new(x, y),
+            grid:    GridSlot(0),
+            hue:     Hue::NONE,
+        }
     };
     let contents = [
         item(0x4000_0001, 0x0E75, 40, 40),
@@ -239,8 +279,8 @@ fn bag(client: &Client, out: &Path) {
             Some((button, container::action_face(lit))),
         );
         let caption = GumpLabel {
-            at: button.label_at(),
-            hue: Hue(0x0386),
+            at:   button.label_at(),
+            hue:  Hue(0x0386),
             clip: None,
             text: container::STACK_ALL_LABEL,
             font: openshard_protocol::speech::Font(1),
@@ -329,11 +369,11 @@ fn skill_window(client: &Client, out: &Path) {
             Some(Standing {
                 skill: SkillLine {
                     value: u16::from(id.0) * 10,
-                    base: 0,
-                    lock: SkillLock::Up,
-                    cap: 1000,
+                    base:  0,
+                    lock:  SkillLock::Up,
+                    cap:   1000,
                 },
-                lock: match id.0 % 3 {
+                lock:  match id.0 % 3 {
                     0 => SkillLock::Up,
                     1 => SkillLock::Down,
                     _ => SkillLock::Locked,

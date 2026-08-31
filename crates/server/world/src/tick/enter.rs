@@ -1,28 +1,29 @@
+use openshard_protocol::wire::Hue;
+
 use super::command::GuildSeat;
 use super::*;
-use openshard_protocol::wire::Hue;
 
 struct ResolvedCharacter {
     requested_facet: Facet,
-    saved_serial: Option<Serial>,
-    saved_position: Option<Point>,
-    saved_facing: Option<Facing>,
-    appearance: Option<Appearance>,
-    sheet: Option<Box<CharacterSheet>>,
+    saved_serial:    Option<Serial>,
+    saved_position:  Option<Point>,
+    saved_facing:    Option<Facing>,
+    appearance:      Option<Appearance>,
+    sheet:           Option<Box<CharacterSheet>>,
 }
 
 struct ActiveEntry {
-    connection: ConnectionId,
-    version: ClientVersion,
-    account: AccountName,
-    name: CharacterName,
-    access: AccessLevel,
-    entity: EntityId,
-    serial: Serial,
-    facet: Facet,
-    position: Point,
-    facing: Facing,
-    body: Body,
+    connection:      ConnectionId,
+    version:         ClientVersion,
+    account:         AccountName,
+    name:            CharacterName,
+    access:          AccessLevel,
+    entity:          EntityId,
+    serial:          Serial,
+    facet:           Facet,
+    position:        Point,
+    facing:          Facing,
+    body:            Body,
     logged_out_dead: bool,
 }
 
@@ -115,7 +116,7 @@ impl World {
             .unwrap_or_else(|| Facing::walking(Direction::South));
         let look = resolved.appearance.unwrap_or_else(Appearance::default_human);
         let body = Body {
-            id: look.body,
+            id:  look.body,
             hue: look.hue,
         };
         let logged_out_dead = resolved.sheet.as_ref().is_some_and(|sheet| sheet.dead);
@@ -152,36 +153,43 @@ impl World {
         character: Character,
     ) -> ResolvedCharacter {
         match character {
-            Character::Saved => self
-                .roster
-                .get(account, name)
-                .and_then(StoredCharacter::from_record)
-                .map_or_else(
-                    || ResolvedCharacter {
-                        requested_facet: self.state.default_facet,
-                        saved_serial: None,
-                        saved_position: None,
-                        saved_facing: None,
-                        appearance: None,
-                        sheet: None,
-                    },
-                    |stored| ResolvedCharacter {
-                        requested_facet: stored.facet,
-                        saved_serial: Some(stored.serial),
-                        saved_position: Some(stored.position),
-                        saved_facing: Some(stored.facing),
-                        appearance: Some(stored.appearance),
-                        sheet: Some(Box::new(stored.sheet)),
-                    },
-                ),
-            Character::Fresh(fresh) => ResolvedCharacter {
-                requested_facet: fresh.facet,
-                saved_serial: None,
-                saved_position: fresh.start,
-                saved_facing: None,
-                appearance: fresh.appearance,
-                sheet: fresh.sheet,
-            },
+            Character::Saved => {
+                self.roster
+                    .get(account, name)
+                    .and_then(StoredCharacter::from_record)
+                    .map_or_else(
+                        || {
+                            ResolvedCharacter {
+                                requested_facet: self.state.default_facet,
+                                saved_serial:    None,
+                                saved_position:  None,
+                                saved_facing:    None,
+                                appearance:      None,
+                                sheet:           None,
+                            }
+                        },
+                        |stored| {
+                            ResolvedCharacter {
+                                requested_facet: stored.facet,
+                                saved_serial:    Some(stored.serial),
+                                saved_position:  Some(stored.position),
+                                saved_facing:    Some(stored.facing),
+                                appearance:      Some(stored.appearance),
+                                sheet:           Some(Box::new(stored.sheet)),
+                            }
+                        },
+                    )
+            }
+            Character::Fresh(fresh) => {
+                ResolvedCharacter {
+                    requested_facet: fresh.facet,
+                    saved_serial:    None,
+                    saved_position:  fresh.start,
+                    saved_facing:    None,
+                    appearance:      fresh.appearance,
+                    sheet:           fresh.sheet,
+                }
+            }
         }
     }
 
@@ -257,8 +265,8 @@ impl World {
         self.state.registry.insert(
             entity,
             Stats {
-                strength: DEFAULT_HITPOINTS,
-                dexterity: DEFAULT_DEXTERITY,
+                strength:     DEFAULT_HITPOINTS,
+                dexterity:    DEFAULT_DEXTERITY,
                 intelligence: DEFAULT_MANA,
             },
         );
@@ -266,21 +274,21 @@ impl World {
             entity,
             Hitpoints {
                 current: DEFAULT_HITPOINTS,
-                max: DEFAULT_HITPOINTS,
+                max:     DEFAULT_HITPOINTS,
             },
         );
         self.state.registry.insert(
             entity,
             Mana {
                 current: DEFAULT_MANA,
-                max: DEFAULT_MANA,
+                max:     DEFAULT_MANA,
             },
         );
         self.state.registry.insert(
             entity,
             Stamina {
                 current: DEFAULT_DEXTERITY,
-                max: DEFAULT_DEXTERITY,
+                max:     DEFAULT_DEXTERITY,
             },
         );
     }
@@ -315,21 +323,21 @@ impl World {
             entity,
             Hitpoints {
                 current: strength,
-                max: strength,
+                max:     strength,
             },
         );
         self.state.registry.insert(
             entity,
             Mana {
                 current: intelligence,
-                max: intelligence,
+                max:     intelligence,
             },
         );
         self.state.registry.insert(
             entity,
             Stamina {
                 current: dexterity,
-                max: dexterity,
+                max:     dexterity,
             },
         );
 
@@ -383,7 +391,7 @@ impl World {
                 openshard_state::components::GuildMember {
                     guild: seat.guild,
                     title: seat.title,
-                    rank: seat.rank,
+                    rank:  seat.rank,
                 },
             );
         }
@@ -406,8 +414,8 @@ impl World {
         self.state.registry.insert(
             entity,
             openshard_state::components::StatLocks {
-                strength: openshard_state::StatLock::from_bits(locks.strength),
-                dexterity: openshard_state::StatLock::from_bits(locks.dexterity),
+                strength:     openshard_state::StatLock::from_bits(locks.strength),
+                dexterity:    openshard_state::StatLock::from_bits(locks.dexterity),
                 intelligence: openshard_state::StatLock::from_bits(locks.intelligence),
             },
         );
@@ -423,8 +431,8 @@ impl World {
         self.state.registry.insert(
             entity,
             openshard_state::components::LastStatGain {
-                strength: restore_gain(locks.strength_age),
-                dexterity: restore_gain(locks.dexterity_age),
+                strength:     restore_gain(locks.strength_age),
+                dexterity:    restore_gain(locks.dexterity_age),
                 intelligence: restore_gain(locks.intelligence_age),
             },
         );
@@ -530,7 +538,7 @@ impl World {
         self.state.send_packet(
             entry.connection,
             &ServerPacket::SeasonChange(SeasonChange {
-                season: self.state.gameplay.season,
+                season:     self.state.gameplay.season,
                 play_sound: false,
             }),
         );
@@ -577,9 +585,9 @@ impl World {
     fn finish_entry(&mut self, entry: &ActiveEntry) {
         self.state.bus.send(PlayerEntered {
             connection: entry.connection,
-            entity: entry.entity,
-            serial: entry.serial,
-            position: entry.position,
+            entity:     entry.entity,
+            serial:     entry.serial,
+            position:   entry.position,
         });
         info!(
             serial = %entry.serial,

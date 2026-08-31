@@ -43,7 +43,7 @@ pub const SURFACE_BIAS: f64 = 1e-8;
 /// One solid thing.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Body {
-    pub shape: Aabb,
+    pub shape:  Aabb,
     /// The fraction of each channel it reflects. Diffuse throughout — this
     /// crate has no specular term, because nothing it is checking has one.
     pub albedo: [f64; 3],
@@ -56,7 +56,7 @@ pub struct Body {
 /// a thing the renderer being checked has an edge for either.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Ground {
-    pub z: f64,
+    pub z:      f64,
     pub albedo: [f64; 3],
 }
 
@@ -77,11 +77,11 @@ pub enum Surface {
 pub struct Hit {
     pub surface: Surface,
     /// How far along the ray, in multiples of its direction vector.
-    pub t: f64,
-    pub at: Vec3,
+    pub t:       f64,
+    pub at:      Vec3,
     /// The outward normal of the face that was hit — facing the ray.
-    pub normal: Vec3,
-    pub albedo: [f64; 3],
+    pub normal:  Vec3,
+    pub albedo:  [f64; 3],
 }
 
 /// Everything a ray can meet.
@@ -209,18 +209,23 @@ impl Scene {
 
 #[cfg(test)]
 mod tests {
-    use super::{Body, Ground, Scene, Surface};
+    use super::{
+        Body,
+        Ground,
+        Scene,
+        Surface,
+    };
     use crate::aabb::Aabb;
     use crate::vector::Vec3;
 
     fn one_box() -> Scene {
         Scene {
             bodies: vec![Body {
-                shape: Aabb::between(Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, 0.5, 2.0)),
+                shape:  Aabb::between(Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, 0.5, 2.0)),
                 albedo: [0.8; 3],
             }],
             ground: Some(Ground {
-                z: 0.0,
+                z:      0.0,
                 albedo: [0.5; 3],
             }),
         }
@@ -284,7 +289,7 @@ mod tests {
         // reference into a picture with no shadows in it at all.
         let mut scene = one_box();
         scene.bodies.push(Body {
-            shape: Aabb::between(Vec3::new(1.5, -0.5, 0.0), Vec3::new(2.5, 0.5, 2.0)),
+            shape:  Aabb::between(Vec3::new(1.5, -0.5, 0.0), Vec3::new(2.5, 0.5, 2.0)),
             albedo: [0.8; 3],
         });
         let light = Vec3::new(6.0, 0.0, 1.0);

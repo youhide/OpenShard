@@ -78,7 +78,11 @@
 
 use std::time::Duration;
 
-use wgpu_profiler::{GpuProfiler, GpuProfilerSettings, GpuTimerQueryResult};
+use wgpu_profiler::{
+    GpuProfiler,
+    GpuProfilerSettings,
+    GpuTimerQueryResult,
+};
 
 /// What the GPU spent inside one scope.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -92,7 +96,7 @@ pub struct Pass {
     /// top level only and not count a nested scope twice.
     pub depth: usize,
     /// The GPU's own elapsed time between this scope's two timestamps.
-    pub cost: Duration,
+    pub cost:  Duration,
 }
 
 /// The GPU half of a frame's cost: a timestamp query around each pass, and the
@@ -107,9 +111,9 @@ pub struct Gpu {
     profiler: GpuProfiler,
     /// The last frame whose queries came back, flattened depth-first — which is
     /// the order the passes were recorded in, so the panel reads down the frame.
-    passes: Vec<Pass>,
+    passes:   Vec<Pass>,
     /// The sum of the top-level scopes in `passes`.
-    total: Duration,
+    total:    Duration,
 }
 
 impl Gpu {
@@ -147,16 +151,18 @@ impl Gpu {
         // library's own figure and is comfortably more than the two this client
         // is ever behind by.
         let settings = GpuProfilerSettings {
-            enable_timer_queries: true,
-            enable_debug_groups: true,
+            enable_timer_queries:   true,
+            enable_debug_groups:    true,
             max_num_pending_frames: 3,
         };
         match GpuProfiler::new(device, settings) {
-            Ok(profiler) => Some(Self {
-                profiler,
-                passes: Vec::new(),
-                total: Duration::ZERO,
-            }),
+            Ok(profiler) => {
+                Some(Self {
+                    profiler,
+                    passes: Vec::new(),
+                    total: Duration::ZERO,
+                })
+            }
             // A profiler that would not start is a diagnostic that is absent,
             // not a frame that failed: the client goes on drawing without it.
             Err(error) => {
@@ -268,11 +274,13 @@ fn flatten(results: &[GpuTimerQueryResult], depth: usize, into: &mut Vec<Pass>) 
     for result in results {
         if let Some(time) = &result.time {
             match Duration::try_from_secs_f64(time.end - time.start) {
-                Ok(cost) => into.push(Pass {
-                    label: result.label.clone(),
-                    depth,
-                    cost,
-                }),
+                Ok(cost) => {
+                    into.push(Pass {
+                        label: result.label.clone(),
+                        depth,
+                        cost,
+                    })
+                }
                 Err(error) => {
                     // These values have crossed the GPU/driver boundary. A bad
                     // sample is not a client invariant and must neither panic
@@ -353,10 +361,10 @@ mod tests {
     /// A result with a time, in seconds, and whatever is nested inside it.
     fn query(label: &str, start: f64, end: f64, nested: Vec<GpuTimerQueryResult>) -> GpuTimerQueryResult {
         GpuTimerQueryResult {
-            label: label.to_string(),
-            pid: std::process::id(),
-            tid: std::thread::current().id(),
-            time: Some(start..end),
+            label:          label.to_string(),
+            pid:            std::process::id(),
+            tid:            std::thread::current().id(),
+            time:           Some(start..end),
             nested_queries: nested,
         }
     }
@@ -441,10 +449,10 @@ mod tests {
     #[test]
     fn a_scope_with_no_timestamp_is_left_out_rather_than_recorded_as_zero() {
         let results = vec![GpuTimerQueryResult {
-            label: "ground".to_string(),
-            pid: std::process::id(),
-            tid: std::thread::current().id(),
-            time: None,
+            label:          "ground".to_string(),
+            pid:            std::process::id(),
+            tid:            std::thread::current().id(),
+            time:           None,
             nested_queries: Vec::new(),
         }];
         let mut passes = Vec::new();

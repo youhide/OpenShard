@@ -7,8 +7,13 @@
 
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::craft::OpenCraftCatalogue;
-use openshard_protocol::gump::GumpPoint;
-use openshard_protocol::gump::{RawButtonId, RawGumpId, RawGumpKey, RawSwitchId};
+use openshard_protocol::gump::{
+    GumpPoint,
+    RawButtonId,
+    RawGumpId,
+    RawGumpKey,
+    RawSwitchId,
+};
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::mapedit::MapEditRequest;
 use openshard_protocol::serial::Serial;
@@ -16,16 +21,19 @@ use openshard_protocol::skill::SkillLock;
 use openshard_protocol::speech::TalkMode;
 use openshard_protocol::target::TargetResponse;
 use openshard_protocol::version::ClientVersion;
-use openshard_protocol::wire::{RawLayer, RawSkillId};
+use openshard_protocol::wire::{
+    RawLayer,
+    RawSkillId,
+};
 use openshard_protocol::world::Point;
 
 /// A reply to a shard-owned gump.
 #[derive(Clone, Debug)]
 pub struct GumpReply {
-    pub key: RawGumpKey,
-    pub gump_id: RawGumpId,
-    pub button: RawButtonId,
-    pub switches: Vec<RawSwitchId>,
+    pub key:          RawGumpKey,
+    pub gump_id:      RawGumpId,
+    pub button:       RawButtonId,
+    pub switches:     Vec<RawSwitchId>,
     pub text_entries: Vec<(u16, String)>,
 }
 
@@ -48,30 +56,30 @@ pub enum Outgoing {
     Paperdoll(Serial),
     Target(TargetResponse),
     PickUp {
-        item: Serial,
+        item:   Serial,
         amount: ItemAmount,
     },
     DropInto {
-        item: Serial,
+        item:      Serial,
         container: Serial,
-        at: GumpPoint,
+        at:        GumpPoint,
     },
     DropOnGround {
         item: Serial,
-        at: Point,
+        at:   Point,
     },
     Equip {
-        item: Serial,
-        layer: RawLayer,
+        item:   Serial,
+        layer:  RawLayer,
         mobile: Serial,
     },
     Buy {
-        vendor: Serial,
+        vendor:    Serial,
         purchases: Vec<(Serial, u16)>,
     },
     Sell {
         vendor: Serial,
-        sales: Vec<(Serial, u16)>,
+        sales:  Vec<(Serial, u16)>,
     },
     WarMode(bool),
     Attack(Serial),
@@ -84,7 +92,7 @@ pub enum Outgoing {
     Virtue(Serial),
     SkillLock {
         skill: RawSkillId,
-        lock: SkillLock,
+        lock:  SkillLock,
     },
     UseSkill(RawSkillId),
     /// Open the tool-free craft catalogue through OpenShard's private `0xBF`
@@ -93,7 +101,7 @@ pub enum Outgoing {
     /// Cast a spell selected from a spellbook this client opened.
     CastSpell {
         spellbook: Serial,
-        spell: SpellId,
+        spell:     SpellId,
     },
     /// Ask for the tooltips of these objects, in one `0xD6`. Driven by the
     /// hover — see [`crate::properties`] for why not by everything on screen.
@@ -129,13 +137,15 @@ impl Outgoing {
     pub fn encode(self, player: Serial, version: ClientVersion) -> Vec<u8> {
         match self {
             Self::Say { text, mode } => crate::talk::say(&text, mode),
-            Self::AnswerGump(reply) => crate::talk::answer_gump(
-                reply.key,
-                reply.gump_id,
-                reply.button,
-                reply.switches,
-                reply.text_entries,
-            ),
+            Self::AnswerGump(reply) => {
+                crate::talk::answer_gump(
+                    reply.key,
+                    reply.gump_id,
+                    reply.button,
+                    reply.switches,
+                    reply.text_entries,
+                )
+            }
             Self::Use(serial) => crate::interact::use_object(serial),
             Self::Paperdoll(serial) => crate::interact::paperdoll(serial),
             Self::Target(response) => crate::target::answer(response),
@@ -164,10 +174,12 @@ impl Outgoing {
             Self::PartyAccept => crate::party::accept(),
             Self::PartyDecline => crate::party::decline(),
             Self::PartyRemove(member) => crate::party::remove(member),
-            Self::QueryDesign(house) => openshard_protocol::design::DesignDetailsRequest {
-                serial: openshard_protocol::serial::RawSerial(house.raw()),
+            Self::QueryDesign(house) => {
+                openshard_protocol::design::DesignDetailsRequest {
+                    serial: openshard_protocol::serial::RawSerial(house.raw()),
+                }
+                .encode()
             }
-            .encode(),
             Self::CommitMapEdit(request) => request.encode(),
         }
     }
@@ -177,7 +189,14 @@ impl Outgoing {
 mod tests {
     use openshard_protocol::chunks::WorldRevision;
     use openshard_protocol::extended::ExtendedRequest;
-    use openshard_protocol::mapedit::{EditLandTile, EditTile, EditX, EditY, EditZ, MapEditOp};
+    use openshard_protocol::mapedit::{
+        EditLandTile,
+        EditTile,
+        EditX,
+        EditY,
+        EditZ,
+        MapEditOp,
+    };
     use openshard_protocol::serial::Serial;
     use openshard_protocol::world::Facet;
 
@@ -204,15 +223,15 @@ mod tests {
     #[test]
     fn a_map_edit_action_survives_the_extended_envelope() {
         let request = MapEditRequest {
-            facet: Facet(0),
+            facet:  Facet(0),
             parent: WorldRevision(12),
-            ops: vec![MapEditOp::SetLand {
-                at: EditTile {
+            ops:    vec![MapEditOp::SetLand {
+                at:   EditTile {
                     x: EditX(100),
                     y: EditY(200),
                 },
                 tile: EditLandTile::from_wire(9).expect("a land tile"),
-                z: EditZ(-3),
+                z:    EditZ(-3),
             }],
         };
         let bytes = Outgoing::CommitMapEdit(request.clone())

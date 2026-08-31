@@ -25,10 +25,19 @@
 //! of the first. `tick::decor` answers that now — against the world rather than
 //! against this file, because the file legitimately repeats itself.
 
-use openshard_protocol::wire::{Graphic, Hue};
-use openshard_protocol::world::{Facet, Point};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 
-use crate::{DecorContainer, DecorDoor};
+use crate::{
+    DecorContainer,
+    DecorDoor,
+};
 
 /// One facet's decoration, and the admin verb that lays it.
 ///
@@ -39,15 +48,15 @@ use crate::{DecorContainer, DecorDoor};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DecorSet {
     /// What the staff menu's button sends: `decorate:felucca`.
-    pub verb: &'static str,
+    pub verb:         &'static str,
     /// Which facet all of it belongs to.
-    pub facet: Facet,
+    pub facet:        Facet,
     /// The plain statics.
-    pub statics: &'static [(Graphic, Hue, Point)],
+    pub statics:      &'static [(Graphic, Hue, Point)],
     /// The doors that open.
-    pub doors: &'static [DecorDoor],
+    pub doors:        &'static [DecorDoor],
     /// The containers that hold something.
-    pub containers: &'static [DecorContainer],
+    pub containers:   &'static [DecorContainer],
     /// The boxes `doorgen` scans, as `(x, y, width, height)`.
     pub door_regions: &'static [(u16, u16, u16, u16)],
 }

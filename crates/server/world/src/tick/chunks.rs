@@ -39,15 +39,29 @@
 use openshard_basemap::patches;
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
-use openshard_map::chunk::{Chunk, ChunkCoord};
+use openshard_map::chunk::{
+    Chunk,
+    ChunkCoord,
+};
 use openshard_map::codec;
 use openshard_protocol::chunks::{
-    Changes, ChangesReply, ChunkAt, ChunkData, ChunkRefused, FacetBlocks, MAX_MOVED, Refusal, WorldNotice,
+    Changes,
+    ChangesReply,
+    ChunkAt,
+    ChunkData,
+    ChunkRefused,
+    FacetBlocks,
+    MAX_MOVED,
+    Refusal,
+    WorldNotice,
     WorldRevision,
 };
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::world::Facet;
-use tracing::{debug, warn};
+use tracing::{
+    debug,
+    warn,
+};
 
 use super::World;
 
@@ -94,9 +108,11 @@ impl World {
         let answers = self.chunk_answers(facet, wanted);
         let bytes: usize = answers
             .iter()
-            .filter_map(|packet| match packet {
-                ServerPacket::ChunkData(data) => Some(data.blob.len()),
-                _ => None,
+            .filter_map(|packet| {
+                match packet {
+                    ServerPacket::ChunkData(data) => Some(data.blob.len()),
+                    _ => None,
+                }
             })
             .sum();
         debug!(
@@ -270,9 +286,11 @@ impl World {
             .iter()
             .filter(|patch| patch.revision().get() > held.0)
             .flat_map(|patch| patch.touched_chunks())
-            .map(|at| ChunkAt {
-                x: u16::try_from(at.x).expect("a facet of fewer than 65,536 chunks across"),
-                y: u16::try_from(at.y).expect("a facet of fewer than 65,536 chunks down"),
+            .map(|at| {
+                ChunkAt {
+                    x: u16::try_from(at.x).expect("a facet of fewer than 65,536 chunks across"),
+                    y: u16::try_from(at.y).expect("a facet of fewer than 65,536 chunks down"),
+                }
             })
             .collect();
         moved.sort_unstable();

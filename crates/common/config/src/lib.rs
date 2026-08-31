@@ -33,35 +33,52 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::net::{IpAddr, SocketAddr, SocketAddrV4};
-use std::path::{Path, PathBuf};
+use std::net::{
+    IpAddr,
+    SocketAddr,
+    SocketAddrV4,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use openshard_protocol::identity::{AccountName, CharacterName, PlaintextPassword};
-use openshard_protocol::world::{Facet, Season};
-use serde::{Deserialize, Serialize};
+use openshard_protocol::identity::{
+    AccountName,
+    CharacterName,
+    PlaintextPassword,
+};
+use openshard_protocol::world::{
+    Facet,
+    Season,
+};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 /// A whole shard configuration.
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Network and identity.
-    pub server: ServerConfig,
+    pub server:      ServerConfig,
     /// Where the client's map files live.
     #[serde(default)]
-    pub world: WorldConfig,
+    pub world:       WorldConfig,
     /// Accounts, for as long as there is no database.
     #[serde(default)]
-    pub accounts: Vec<AccountConfig>,
+    pub accounts:    Vec<AccountConfig>,
     /// Where the world is kept between restarts.
     #[serde(default)]
     pub persistence: PersistenceConfig,
     /// The rules knobs — combat era, timers, ranges — an operator tunes without a
     /// rebuild. The Sphere `sphere.ini` equivalents, validated at load.
     #[serde(default)]
-    pub gameplay: GameplayConfig,
+    pub gameplay:    GameplayConfig,
     /// What the shard does when it stops keeping its own declared tick rate.
     #[serde(default)]
-    pub watchdog: WatchdogConfig,
+    pub watchdog:    WatchdogConfig,
 }
 
 /// What the shard does when it stops being the thing it says it is.
@@ -402,10 +419,10 @@ pub struct GameplayConfig {
 pub struct ActionSpeedsConfig {
     /// A blow's pace.
     #[serde(default = "default_swing_speed_percent")]
-    pub swing: u16,
+    pub swing:  u16,
     /// A shot's pace.
     #[serde(default = "default_shot_speed_percent")]
-    pub shot: u16,
+    pub shot:   u16,
     /// An innate ranged attack's pace.
     #[serde(default = "default_breath_speed_percent")]
     pub breath: u16,
@@ -448,7 +465,7 @@ pub struct StageSharesConfig {
     pub ready: u8,
     /// The effort — bending the bow, cocking the arm.
     #[serde(default)]
-    pub load: u8,
+    pub load:  u8,
 }
 
 /// The whole stage table, keyed by what the action is.
@@ -461,10 +478,10 @@ pub struct StageSharesConfig {
 pub struct ActionStagesConfig {
     /// How a blow divides.
     #[serde(default = "default_swing_stages")]
-    pub swing: StageSharesConfig,
+    pub swing:  StageSharesConfig,
     /// How a shot divides.
     #[serde(default = "default_shot_stages")]
-    pub shot: StageSharesConfig,
+    pub shot:   StageSharesConfig,
     /// How an innate ranged attack divides.
     #[serde(default = "default_breath_stages")]
     pub breath: StageSharesConfig,
@@ -521,7 +538,7 @@ pub struct ConditionRulesConfig {
     pub mounted: Option<ActionEffectConfig>,
     /// What a wound taken while the action runs does.
     #[serde(default)]
-    pub struck: Option<ActionEffectConfig>,
+    pub struck:  Option<ActionEffectConfig>,
     /// What losing the line to the committed target does.
     #[serde(default)]
     pub blinded: Option<ActionEffectConfig>,
@@ -537,10 +554,10 @@ pub struct ConditionRulesConfig {
 pub struct ActionRulesConfig {
     /// A blow's rules.
     #[serde(default = "default_swing_rules")]
-    pub swing: ConditionRulesConfig,
+    pub swing:  ConditionRulesConfig,
     /// A shot's rules.
     #[serde(default = "default_shot_rules")]
-    pub shot: ConditionRulesConfig,
+    pub shot:   ConditionRulesConfig,
     /// An innate ranged attack's rules — a dragon's breath.
     #[serde(default = "default_breath_rules")]
     pub breath: ConditionRulesConfig,
@@ -700,7 +717,7 @@ const fn no_rules() -> ConditionRulesConfig {
         running: None,
         walking: None,
         mounted: None,
-        struck: None,
+        struck:  None,
         blinded: None,
     }
 }
@@ -762,8 +779,8 @@ impl ActionRulesConfig {
     #[must_use]
     pub const fn shipped() -> Self {
         Self {
-            swing: default_swing_rules(),
-            shot: default_shot_rules(),
+            swing:  default_swing_rules(),
+            shot:   default_shot_rules(),
             breath: default_breath_rules(),
         }
     }
@@ -809,8 +826,8 @@ impl ActionStagesConfig {
     #[must_use]
     pub const fn shipped() -> Self {
         Self {
-            swing: default_swing_stages(),
-            shot: default_shot_stages(),
+            swing:  default_swing_stages(),
+            shot:   default_shot_stages(),
             breath: default_breath_stages(),
         }
     }
@@ -846,8 +863,8 @@ impl ActionSpeedsConfig {
     #[must_use]
     pub const fn shipped() -> Self {
         Self {
-            swing: default_swing_speed_percent(),
-            shot: default_shot_speed_percent(),
+            swing:  default_swing_speed_percent(),
+            shot:   default_shot_speed_percent(),
             breath: default_breath_speed_percent(),
         }
     }
@@ -999,12 +1016,12 @@ pub struct WorldConfig {
 impl Default for WorldConfig {
     fn default() -> Self {
         Self {
-            client_files: String::new(),
-            start: StartConfig::default(),
-            facets: default_facets(),
-            base_sets: BTreeMap::new(),
+            client_files:  String::new(),
+            start:         StartConfig::default(),
+            facets:        default_facets(),
+            base_sets:     BTreeMap::new(),
             free_movement: BTreeMap::new(),
-            seed: None,
+            seed:          None,
         }
     }
 }
@@ -1136,7 +1153,7 @@ fn default_save_seconds() -> u64 {
 impl Default for PersistenceConfig {
     fn default() -> Self {
         Self {
-            database: String::new(),
+            database:     String::new(),
             save_seconds: default_save_seconds(),
         }
     }
@@ -1176,8 +1193,8 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            name: "OpenShard".to_owned(),
-            listen: SocketAddr::from(([0, 0, 0, 0], 2593)),
+            name:      "OpenShard".to_owned(),
+            listen:    SocketAddr::from(([0, 0, 0, 0], 2593)),
             advertise: SocketAddr::from(([127, 0, 0, 1], 2593)),
         }
     }
@@ -1187,7 +1204,11 @@ impl Default for ServerConfig {
 /// object — this crate does not depend on `serde` inside `openshard-protocol`,
 /// so the impl lives here instead of on the type.
 mod account_name {
-    use serde::{Deserialize, Deserializer, Serializer};
+    use serde::{
+        Deserialize,
+        Deserializer,
+        Serializer,
+    };
 
     use super::AccountName;
 
@@ -1203,7 +1224,11 @@ mod account_name {
 /// (De)serialize a [`PlaintextPassword`] as the bare TOML string. See
 /// [`account_name`] for why this lives here rather than on the type.
 mod plaintext_password {
-    use serde::{Deserialize, Deserializer, Serializer};
+    use serde::{
+        Deserialize,
+        Deserializer,
+        Serializer,
+    };
 
     use super::PlaintextPassword;
 
@@ -1223,7 +1248,11 @@ mod plaintext_password {
 /// config typo that deserves to be refused. See [`account_name`] for why this
 /// lives here rather than on the type.
 mod season {
-    use serde::{Deserialize, Deserializer, Serializer};
+    use serde::{
+        Deserialize,
+        Deserializer,
+        Serializer,
+    };
 
     use super::Season;
 
@@ -1245,7 +1274,12 @@ mod season {
 /// (De)serialize a `Vec<CharacterName>` as a TOML array of bare strings. See
 /// [`account_name`] for why this lives here rather than on the type.
 mod character_names {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{
+        Deserialize,
+        Deserializer,
+        Serialize,
+        Serializer,
+    };
 
     use super::CharacterName;
 
@@ -1291,11 +1325,11 @@ pub struct RawAccessLevel(pub String);
 pub struct AccountConfig {
     /// The account name. Case-insensitive at login.
     #[serde(with = "account_name")]
-    pub name: AccountName,
+    pub name:       AccountName,
     /// The password, in plaintext. Hashed on first boot and then ignored; see
     /// the type docs.
     #[serde(with = "plaintext_password")]
-    pub password: PlaintextPassword,
+    pub password:   PlaintextPassword,
     /// Character names on this account.
     #[serde(default, with = "character_names")]
     pub characters: Vec<CharacterName>,
@@ -1308,7 +1342,7 @@ pub struct AccountConfig {
     /// unrecognised value there is logged and treated as `player`, never a
     /// silent grant.
     #[serde(default)]
-    pub access: RawAccessLevel,
+    pub access:     RawAccessLevel,
 }
 
 /// The widest a shard name can be. The 0xA8 field is 32 bytes.
@@ -1321,14 +1355,14 @@ pub enum ConfigError {
     /// The file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
     /// The file is not valid TOML, or does not match the schema.
     Parse {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: toml::de::Error,
     },
@@ -1381,7 +1415,7 @@ pub enum ConfigError {
     /// never land.
     SlowPercentTooHigh {
         /// Which kind of action the row is for.
-        kind: &'static str,
+        kind:    &'static str,
         /// The percentage given.
         percent: u16,
     },
@@ -1389,7 +1423,7 @@ pub enum ConfigError {
     /// leaving the release — which is the part that lands — nothing at all.
     StageSharesOversubscribed {
         /// Which kind of action the row is for.
-        kind: &'static str,
+        kind:    &'static str,
         /// What the two shares add up to.
         claimed: u16,
     },
@@ -1439,7 +1473,7 @@ pub enum ConfigError {
     /// more than all three together — a ceiling nothing can reach.
     StatCapBelowIndividual {
         /// The cap on all three stats.
-        total: u16,
+        total:      u16,
         /// The cap given for one.
         individual: u16,
     },
@@ -1478,65 +1512,87 @@ impl fmt::Display for ConfigError {
         match self {
             Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
             Self::Parse { path, source } => write!(f, "cannot parse {}: {source}", path.display()),
-            Self::AdvertisedUnspecified => f.write_str(
-                "server.advertise is a wildcard address; it must be the address clients dial \
+            Self::AdvertisedUnspecified => {
+                f.write_str(
+                    "server.advertise is a wildcard address; it must be the address clients dial \
                  (your public IP behind NAT, or 127.0.0.1 for a local-only shard) — it is not \
                  the same as server.listen",
-            ),
+                )
+            }
             Self::AdvertisedPortZero => f.write_str("server.advertise needs a real port"),
-            Self::AdvertisedNotIpv4 => f.write_str(
-                "server.advertise is IPv6; the UO relay packet has four bytes for an address \
+            Self::AdvertisedNotIpv4 => {
+                f.write_str(
+                    "server.advertise is IPv6; the UO relay packet has four bytes for an address \
                  and no way to carry one",
-            ),
-            Self::BadShardName { length } => write!(
-                f,
-                "server.name is {length} bytes; it must be 1 to {MAX_SHARD_NAME} to fit the \
+                )
+            }
+            Self::BadShardName { length } => {
+                write!(
+                    f,
+                    "server.name is {length} bytes; it must be 1 to {MAX_SHARD_NAME} to fit the \
                  0xA8 packet",
-            ),
-            Self::DuplicateAccount { name } => write!(
-                f,
-                "two accounts are named {:?}; names are case-insensitive",
-                name.0
-            ),
+                )
+            }
+            Self::DuplicateAccount { name } => {
+                write!(
+                    f,
+                    "two accounts are named {:?}; names are case-insensitive",
+                    name.0
+                )
+            }
             Self::EmptyAccountName => f.write_str("an account has an empty name"),
-            Self::UnknownCombatEra { era } => write!(
-                f,
-                "gameplay.combat_era is {era}; only Sphere's 0 (custom), 1 (pre-AoS), \
+            Self::UnknownCombatEra { era } => {
+                write!(
+                    f,
+                    "gameplay.combat_era is {era}; only Sphere's 0 (custom), 1 (pre-AoS), \
                  2 (AoS), 3 (SE) and 4 (ML) are implemented",
-            ),
+                )
+            }
             Self::ZeroSpeedScaleFactor => f.write_str("gameplay.speed_scale_factor must not be zero"),
-            Self::CriticalChanceTooHigh { chance } => write!(
-                f,
-                "gameplay.critical_chance is {chance}; it must be at most 1000 per-mille"
-            ),
-            Self::StatGainChanceTooHigh { chance } => write!(
-                f,
-                "gameplay.stat_gain_chance is {chance}; it must be at most 1000 per-mille"
-            ),
-            Self::SlowPercentTooHigh { kind, percent } => write!(
-                f,
-                "gameplay.action_rules.{kind} slows by {percent}%; it must be at most \
+            Self::CriticalChanceTooHigh { chance } => {
+                write!(
+                    f,
+                    "gameplay.critical_chance is {chance}; it must be at most 1000 per-mille"
+                )
+            }
+            Self::StatGainChanceTooHigh { chance } => {
+                write!(
+                    f,
+                    "gameplay.stat_gain_chance is {chance}; it must be at most 1000 per-mille"
+                )
+            }
+            Self::SlowPercentTooHigh { kind, percent } => {
+                write!(
+                    f,
+                    "gameplay.action_rules.{kind} slows by {percent}%; it must be at most \
                  {MAX_SLOW_PERCENT}% — beyond that the impact is pushed so far out that \
                  nobody watching will see the action land, which reads as a shard that \
                  swallowed the blow rather than as the setting doing its job"
-            ),
-            Self::StageSharesOversubscribed { kind, claimed } => write!(
-                f,
-                "gameplay.action_stages.{kind} gives its stages {claimed}% of the interval; \
+                )
+            }
+            Self::StageSharesOversubscribed { kind, claimed } => {
+                write!(
+                    f,
+                    "gameplay.action_stages.{kind} gives its stages {claimed}% of the interval; \
                  ready + load must be at most 100 — the release is what is left over, \
                  and it is the stretch the impact happens in"
-            ),
-            Self::ZeroActionSpeed { kind } => write!(
-                f,
-                "gameplay.action_speed.{kind} is 0; it is a percentage of the interval \
+                )
+            }
+            Self::ZeroActionSpeed { kind } => {
+                write!(
+                    f,
+                    "gameplay.action_speed.{kind} is 0; it is a percentage of the interval \
                  the weapon formula gives, and zero is not a fast action but no action — \
                  the impact would land on the tick it was committed on, with nothing \
                  drawn, nothing measured and no moment in which it could be spoiled"
-            ),
-            Self::CriticalDamageBelowNormal { percent } => write!(
-                f,
-                "gameplay.critical_damage_percent is {percent}; it must be at least 100"
-            ),
+                )
+            }
+            Self::CriticalDamageBelowNormal { percent } => {
+                write!(
+                    f,
+                    "gameplay.critical_damage_percent is {percent}; it must be at least 100"
+                )
+            }
             Self::ZeroLodRadius => {
                 f.write_str("gameplay.lod_radius must not be zero when gameplay.lod is on")
             }
@@ -1547,39 +1603,51 @@ impl fmt::Display for ConfigError {
             Self::UnknownExpansion { expansion } => {
                 write!(f, "gameplay.expansion \"{expansion}\" is not one of aos, se, ml")
             }
-            Self::BadNpcHours { work, home } => write!(
-                f,
-                "gameplay.npc_work_hour {work} and npc_home_hour {home} must both be under 24 \
+            Self::BadNpcHours { work, home } => {
+                write!(
+                    f,
+                    "gameplay.npc_work_hour {work} and npc_home_hour {home} must both be under 24 \
                  with work before home; a working day that wraps midnight is not supported",
-            ),
-            Self::ZeroSkillCap => f.write_str(
-                "gameplay.skill_cap and total_skill_cap must not be zero; the skill gain \
+                )
+            }
+            Self::ZeroSkillCap => {
+                f.write_str(
+                    "gameplay.skill_cap and total_skill_cap must not be zero; the skill gain \
                  chance is a fraction of the headroom under each",
-            ),
+                )
+            }
             Self::ZeroStatCap => f.write_str("gameplay.stat_cap and stat_cap_individual must not be zero"),
-            Self::StatCapBelowIndividual { total, individual } => write!(
-                f,
-                "gameplay.stat_cap_individual {individual} is above stat_cap {total}; one \
+            Self::StatCapBelowIndividual { total, individual } => {
+                write!(
+                    f,
+                    "gameplay.stat_cap_individual {individual} is above stat_cap {total}; one \
                  stat cannot be allowed more than all three together",
-            ),
-            Self::BaseSetWithoutClientFiles { facet } => write!(
-                f,
-                "world.base_sets names facet {}, but world.client_files is empty: a base set \
+                )
+            }
+            Self::BaseSetWithoutClientFiles { facet } => {
+                write!(
+                    f,
+                    "world.base_sets names facet {}, but world.client_files is empty: a base set \
                  holds the map, and tiledata.mul still holds what a tile is",
-                facet.0,
-            ),
-            Self::BaseSetForUnloadedFacet { facet } => write!(
-                f,
-                "world.base_sets names facet {}, which world.facets does not load; the entry \
+                    facet.0,
+                )
+            }
+            Self::BaseSetForUnloadedFacet { facet } => {
+                write!(
+                    f,
+                    "world.base_sets names facet {}, which world.facets does not load; the entry \
                  would do nothing and the facet it was meant for would come from the install",
-                facet.0,
-            ),
-            Self::EmptyBaseSetPath { facet } => write!(
-                f,
-                "world.base_sets has an empty path for facet {}; it must name the file \
+                    facet.0,
+                )
+            }
+            Self::EmptyBaseSetPath { facet } => {
+                write!(
+                    f,
+                    "world.base_sets has an empty path for facet {}; it must name the file \
                  openshard-map-import wrote",
-                facet.0,
-            ),
+                    facet.0,
+                )
+            }
         }
     }
 }
@@ -1598,13 +1666,17 @@ impl Config {
     /// Read and validate a config file.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let path = path.as_ref();
-        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
-            path: path.to_owned(),
-            source,
+        let text = std::fs::read_to_string(path).map_err(|source| {
+            ConfigError::Read {
+                path: path.to_owned(),
+                source,
+            }
         })?;
-        let config: Self = toml::from_str(&text).map_err(|source| ConfigError::Parse {
-            path: path.to_owned(),
-            source,
+        let config: Self = toml::from_str(&text).map_err(|source| {
+            ConfigError::Parse {
+                path: path.to_owned(),
+                source,
+            }
         })?;
         config.validate()?;
         Ok(config)
@@ -1820,7 +1892,7 @@ fn validate_caps(gameplay: &GameplayConfig) -> Result<(), ConfigError> {
     }
     if gameplay.stat_cap_individual > gameplay.stat_cap {
         return Err(ConfigError::StatCapBelowIndividual {
-            total: gameplay.stat_cap,
+            total:      gameplay.stat_cap,
             individual: gameplay.stat_cap_individual,
         });
     }

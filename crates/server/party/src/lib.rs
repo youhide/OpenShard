@@ -39,14 +39,30 @@ mod membership;
 #[cfg(test)]
 mod tests;
 
-pub use chat::{say_privately, say_to_party};
-pub use membership::{accept, decline, disband, invite, on_logout, remove, set_can_loot};
-
+pub use chat::{
+    say_privately,
+    say_to_party,
+};
+pub use membership::{
+    accept,
+    decline,
+    disband,
+    invite,
+    on_logout,
+    remove,
+    set_can_loot,
+};
 use openshard_entities::EntityId;
-use openshard_protocol::party::{PartyMemberList, PartyRemoveMember};
+use openshard_protocol::party::{
+    PartyMemberList,
+    PartyRemoveMember,
+};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_state::{PartyId, WorldState};
+use openshard_state::{
+    PartyId,
+    WorldState,
+};
 
 /// Why a party operation was refused.
 ///

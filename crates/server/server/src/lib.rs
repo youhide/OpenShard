@@ -42,34 +42,88 @@
 //! breaks a module that does.
 
 use std::collections::HashMap;
-use std::net::{SocketAddr, SocketAddrV4};
+use std::net::{
+    SocketAddr,
+    SocketAddrV4,
+};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-
-use openshard_config::{Config, DEFAULT_TOML};
-use openshard_gateway::{
-    ClientGatewayServer, ConnectionId, Event, OutboxTx, Packet, PacketError, ServerEvent, ServerEventRx,
-    Shutdown, VersionTx,
+use std::time::{
+    Duration,
+    Instant,
 };
-use openshard_login::{DevAccounts, LoginServer, LoginSession, Outcome, Response};
-use openshard_persistence::{AccountRecord, PgStore, Snapshot, SqliteStore, Store};
+
+use openshard_config::{
+    Config,
+    DEFAULT_TOML,
+};
+use openshard_gateway::{
+    ClientGatewayServer,
+    ConnectionId,
+    Event,
+    OutboxTx,
+    Packet,
+    PacketError,
+    ServerEvent,
+    ServerEventRx,
+    Shutdown,
+    VersionTx,
+};
+use openshard_login::{
+    DevAccounts,
+    LoginServer,
+    LoginSession,
+    Outcome,
+    Response,
+};
+use openshard_persistence::{
+    AccountRecord,
+    PgStore,
+    Snapshot,
+    SqliteStore,
+    Store,
+};
+use openshard_protocol::access::AccessLevel;
 use openshard_protocol::client_packet::ClientPacket;
 use openshard_protocol::encoded::EncodedSubcommand;
 use openshard_protocol::extended::ExtendedRequest;
-use openshard_protocol::login::{ClientLoginDecodeError, LoginStagePacket, StartLocation};
+use openshard_protocol::huffman;
+use openshard_protocol::login::{
+    ClientLoginDecodeError,
+    LoginStagePacket,
+    StartLocation,
+};
 use openshard_protocol::mobile::StatusQueryKind;
 use openshard_protocol::trade::SecureTradeAction;
 use openshard_protocol::wire::ClilocId;
-use openshard_protocol::world::{Facet, Point};
-use openshard_protocol::{access::AccessLevel, huffman};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 use openshard_state::facet_rules::FacetRules;
 use openshard_world::{
-    AdminMenuAction, Command, PlayerEntered, PlayerLeaving, PlayerLeft, PlayerRefused, RestoredCharacters,
-    RestoredItems, StatLock, TICK_INTERVAL, World,
+    AdminMenuAction,
+    Command,
+    PlayerEntered,
+    PlayerLeaving,
+    PlayerLeft,
+    PlayerRefused,
+    RestoredCharacters,
+    RestoredItems,
+    StatLock,
+    TICK_INTERVAL,
+    World,
 };
-use tokio::sync::{Semaphore, mpsc};
-use tracing::{debug, error, info, warn};
+use tokio::sync::{
+    Semaphore,
+    mpsc,
+};
+use tracing::{
+    debug,
+    error,
+    info,
+    warn,
+};
 
 pub mod boot;
 pub mod shard;
@@ -83,11 +137,25 @@ mod session;
 mod testing;
 mod verify;
 
-use boot::{load_config, load_world, open_store};
+use boot::{
+    load_config,
+    load_world,
+    open_store,
+};
 use dispatch::dispatch_world_packet;
-use session::{PhaseSync, Session, Sessions};
-use shard::{Reins, run_shard};
-use verify::{Verdict, Verifier};
+use session::{
+    PhaseSync,
+    Session,
+    Sessions,
+};
+use shard::{
+    Reins,
+    run_shard,
+};
+use verify::{
+    Verdict,
+    Verifier,
+};
 
 /// Where the config lives, relative to the working directory.
 pub const CONFIG_PATH: &str = "openshard.toml";

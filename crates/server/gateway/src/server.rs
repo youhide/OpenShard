@@ -8,15 +8,31 @@
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{
+    AtomicU64,
+    Ordering,
+};
 
 use openshard_protocol::version::ClientVersion;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{
+    AsyncRead,
+    AsyncReadExt,
+    AsyncWrite,
+    AsyncWriteExt,
+};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{
+    debug,
+    info,
+    warn,
+};
 
-use crate::connection::{Connection, ConnectionError, Event};
+use crate::connection::{
+    Connection,
+    ConnectionError,
+    Event,
+};
 use crate::shutdown::Shutdown;
 
 /// Identifies a connection for the lifetime of the process.
@@ -127,25 +143,25 @@ pub enum ServerEvent {
     /// A client connected. Nothing has been read yet.
     Connected {
         /// Who.
-        id: ConnectionId,
+        id:      ConnectionId,
         /// From where.
         address: SocketAddr,
         /// Send bytes back through this.
-        outbox: OutboxTx,
+        outbox:  OutboxTx,
         /// Tell the framer the client's version through this. See [`VersionTx`].
         control: VersionTx,
     },
     /// The connection produced something.
     Received {
         /// Who.
-        id: ConnectionId,
+        id:    ConnectionId,
         /// What.
         event: Event,
     },
     /// The connection is gone. No further events will carry this id.
     Disconnected {
         /// Who.
-        id: ConnectionId,
+        id:     ConnectionId,
         /// Why, or `None` for a clean close.
         reason: Option<String>,
     },
@@ -220,13 +236,13 @@ impl SessionIdFabric {
 /// means [`Gate::new`] must be called inside the runtime that will serve.
 #[derive(Clone, Debug)]
 pub struct Gate {
-    events: ServerEventTx,
+    events:      ServerEventTx,
     session_ids: SessionIdFabric,
     /// Where connection tasks are spawned. See the note above.
-    reader: tokio::runtime::Handle,
+    reader:      tokio::runtime::Handle,
     /// Handed to every connection this gate serves, so that a stop reaches a
     /// socket nobody is speaking on. See [`Shutdown`].
-    shutdown: Shutdown,
+    shutdown:    Shutdown,
 }
 
 impl Gate {
@@ -311,7 +327,7 @@ impl Gate {
 #[derive(Debug)]
 pub struct ClientGatewayServer {
     listener: TcpListener,
-    gate: Gate,
+    gate:     Gate,
 }
 
 impl ClientGatewayServer {

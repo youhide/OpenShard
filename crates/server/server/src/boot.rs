@@ -1,9 +1,15 @@
-use super::*;
 use openshard_map::grid::Tile;
+
+use super::*;
 
 mod gameplay;
 #[allow(unused_imports)] // Kept as boot's crate-visible configuration API.
-pub(crate) use gameplay::{character_list_flags_of, character_screen_of, gameplay_of, supported_features_of};
+pub(crate) use gameplay::{
+    character_list_flags_of,
+    character_screen_of,
+    gameplay_of,
+    supported_features_of,
+};
 
 /// Load the config, writing the shipped default if there is none.
 ///
@@ -101,7 +107,7 @@ fn configured_world(config: &Config) -> Result<World, Box<dyn std::error::Error>
 /// both are finished by the time the loop starts.
 pub(crate) struct Restored {
     pub(crate) accounts: DevAccounts,
-    pub(crate) world: World,
+    pub(crate) world:    World,
 }
 
 /// Fill a freshly built world from the store and the config, in the one order
@@ -444,9 +450,9 @@ async fn restore_world(store: &Store, world: World, pinned_seed: Option<u64>) ->
 /// the artifact of another — and both files exist, so it would not notice.
 struct FacetSource {
     /// The facet, at the revision its source recorded.
-    map: openshard_map::snapshot::MapSnapshot,
+    map:             openshard_map::snapshot::MapSnapshot,
     /// What the navigation artifact must have been built from.
-    stamp: openshard_movement::bake::Stamp,
+    stamp:           openshard_movement::bake::Stamp,
     /// Where that artifact is.
     navigation_path: std::path::PathBuf,
     /// The patch log beside the base set, when there is one on disk.
@@ -455,15 +461,15 @@ struct FacetSource {
     /// edits was stamped over a shorter log than the world now has, and it is the
     /// log itself that says how to carry it forward. `None` is a facet out of the
     /// install, or a world of ours nobody has edited yet — neither can be behind.
-    log: Option<std::path::PathBuf>,
+    log:             Option<std::path::PathBuf>,
     /// The command that makes it, for the error that says it is missing.
-    rebake: String,
+    rebake:          String,
     /// Where this facet's world lives, when it is a world of ours.
     ///
     /// `None` for a facet read out of the install: there is nowhere beside it to
     /// keep a patch log, so it is a facet nothing can edit while the shard runs.
     /// See [`openshard_state::WorldHome`].
-    home: Option<openshard_state::WorldHome>,
+    home:            Option<openshard_state::WorldHome>,
 }
 
 /// The ruleset `facet` runs under: the operator's answer where there is one, and
@@ -524,10 +530,12 @@ fn facet_source(
     let stamp = world.stamp(dir, facet)?;
     let navigation_path = world.navigation_path(dir);
     let rebake = match base_set {
-        Some(base_set) => format!(
-            "OPENSHARD_CLIENT={dir:?} {bake} -- --facet {facet} --base-set {:?}",
-            base_set.display()
-        ),
+        Some(base_set) => {
+            format!(
+                "OPENSHARD_CLIENT={dir:?} {bake} -- --facet {facet} --base-set {:?}",
+                base_set.display()
+            )
+        }
         None => format!("OPENSHARD_CLIENT={dir:?} {bake} -- --facet {facet}"),
     };
     Ok(FacetSource {
@@ -545,10 +553,12 @@ fn facet_source(
                 // same number after a restart, and a hash of the *bytes on disk*
                 // is that whether or not a patch has moved the world since.
                 // See `openshard_basemap::identity_of`.
-                openshard_basemap::identity_of(base_set).map(|identity| openshard_state::WorldHome {
-                    base_set: base_set.to_owned(),
-                    base: world.base.expect("a facet read from a base set has one"),
-                    identity,
+                openshard_basemap::identity_of(base_set).map(|identity| {
+                    openshard_state::WorldHome {
+                        base_set: base_set.to_owned(),
+                        base: world.base.expect("a facet read from a base set has one"),
+                        identity,
+                    }
                 })
             })
             .transpose()?,
@@ -560,7 +570,7 @@ fn facet_source(
 /// What a navigation artifact missed while it sat on disk.
 struct Missed {
     /// The revision it was built from.
-    from: openshard_map::snapshot::MapRevision,
+    from:   openshard_map::snapshot::MapRevision,
     /// The chunks every patch committed since then touched, each one once.
     chunks: Vec<openshard_map::chunk::ChunkCoord>,
 }
@@ -737,11 +747,13 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
                     .map_err(|reason| format!("{reason}\nrecreate it with: {rebake}"))?;
                 (loaded.graph, behind)
             }
-            _ => (
-                openshard_movement::bake::load(&navigation_path, &stamp)
-                    .map_err(|error| format!("{error}\ncreate it with: {rebake}"))?,
-                None,
-            ),
+            _ => {
+                (
+                    openshard_movement::bake::load(&navigation_path, &stamp)
+                        .map_err(|error| format!("{error}\ncreate it with: {rebake}"))?,
+                    None,
+                )
+            }
         };
         if coarse.dimensions() != (map.map().width(), map.map().height()) {
             return Err(format!(
@@ -765,11 +777,13 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
         if facet.0 == 0 {
             match map.map().land(start.x, start.y) {
                 Some(cell) => info!(x = start.x, y = start.y, z = cell.z, "start position"),
-                None => warn!(
-                    x = start.x,
-                    y = start.y,
-                    "world.start is off the map; characters will spawn in nowhere"
-                ),
+                None => {
+                    warn!(
+                        x = start.x,
+                        y = start.y,
+                        "world.start is off the map; characters will spawn in nowhere"
+                    )
+                }
             }
         }
         info!(
@@ -799,21 +813,25 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
             // what is in memory is the world as it stands, and the next boot pays
             // this again rather than getting it wrong.
             match openshard_movement::bake::save(&navigation_path, graph, &stamp) {
-                Ok(bytes) => info!(
-                    facet = facet.0,
-                    from = missed.from.get(),
-                    to = stamp.revision.get(),
-                    chunks = missed.chunks.len(),
-                    ?took,
-                    bytes,
-                    "navigation artifact caught up with the patch log"
-                ),
-                Err(error) => warn!(
-                    facet = facet.0,
-                    %error,
-                    "the caught-up navigation artifact could not be written back; the shard runs \
-                     on the graph in memory and the next start will catch it up again"
-                ),
+                Ok(bytes) => {
+                    info!(
+                        facet = facet.0,
+                        from = missed.from.get(),
+                        to = stamp.revision.get(),
+                        chunks = missed.chunks.len(),
+                        ?took,
+                        bytes,
+                        "navigation artifact caught up with the patch log"
+                    )
+                }
+                Err(error) => {
+                    warn!(
+                        facet = facet.0,
+                        %error,
+                        "the caught-up navigation artifact could not be written back; the shard runs \
+                         on the graph in memory and the next start will catch it up again"
+                    )
+                }
             }
         }
     }

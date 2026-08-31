@@ -85,10 +85,19 @@ impl World {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::tick::tests::{enter, serial_of, world};
-    use openshard_state::components::{Amount, Hitpoints};
     use std::time::Instant;
+
+    use openshard_state::components::{
+        Amount,
+        Hitpoints,
+    };
+
+    use super::*;
+    use crate::tick::tests::{
+        enter,
+        serial_of,
+        world,
+    };
 
     /// A logged-in player, and two of `graphic` in its pack.
     fn player_holding(world: &mut World, now: Instant, graphic: Graphic) -> (EntityId, EntityId) {

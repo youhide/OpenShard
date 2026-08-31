@@ -14,7 +14,12 @@
 //! overlapping. That is what makes this a handful of arithmetic rather than a
 //! mesh pipeline: no index buffer, no back-face culling, nothing to cull against.
 
-use crate::camera::{Camera, RealPoint, WorldSpot, project_exact};
+use crate::camera::{
+    Camera,
+    RealPoint,
+    WorldSpot,
+    project_exact,
+};
 
 /// A box standing in the world: two opposite corners in the world's own units.
 ///
@@ -217,7 +222,10 @@ impl Solid {
 /// wireframe are looked at against each other — a red plane standing inside an
 /// amber box is a defect, and it is invisible if the two chose their own reds.
 pub fn kind_colour(solid: &crate::occlusion::Solid) -> [f32; 3] {
-    use crate::occlusion::{Edges, OPAQUE};
+    use crate::occlusion::{
+        Edges,
+        OPAQUE,
+    };
 
     match (solid.opacity < OPAQUE, solid.edges) {
         // A pane, whatever shape it is: the one thing here that is about how
@@ -329,9 +337,10 @@ pub fn standing(occlusion: &crate::occlusion::Occlusion, cut: Cut) -> Vec<(Solid
 
 #[cfg(test)]
 mod tests {
+    use openshard_protocol::world::Point;
+
     use super::*;
     use crate::camera::Camera;
-    use openshard_protocol::world::Point;
 
     fn camera() -> Camera {
         Camera::new(
@@ -391,17 +400,19 @@ mod tests {
     #[test]
     fn height_is_four_pixels_a_unit_and_the_ground_is_twenty_two() {
         let camera = camera();
-        let flat = |z: f64| Solid {
-            min: WorldSpot {
-                x: 1500.0,
-                y: 1600.0,
-                z: 0.0,
-            },
-            max: WorldSpot {
-                x: 1501.0,
-                y: 1601.0,
-                z,
-            },
+        let flat = |z: f64| {
+            Solid {
+                min: WorldSpot {
+                    x: 1500.0,
+                    y: 1600.0,
+                    z: 0.0,
+                },
+                max: WorldSpot {
+                    x: 1501.0,
+                    y: 1601.0,
+                    z,
+                },
+            }
         };
         let north_of = |solid: Solid| solid.faces(&camera)[0].1[0];
         let ground = north_of(flat(0.0));
@@ -434,16 +445,22 @@ mod tests {
     /// a superset would be a second opinion about the grid.
     #[test]
     fn the_whole_grid_is_the_grid_above_your_feet_plus_the_floor_you_stand_on() {
+        use openshard_protocol::wire::Graphic;
+        use openshard_tiles::{
+            StaticTile,
+            TileFlags,
+        };
+
         use crate::camera::TileBounds;
         use crate::cutaway::Cutaway;
         use crate::occlusion::Builder;
-        use openshard_protocol::wire::Graphic;
-        use openshard_tiles::{StaticTile, TileFlags};
 
-        let tile = |flags: u64, height: u8| StaticTile {
-            flags: TileFlags::new(flags),
-            height,
-            ..StaticTile::default()
+        let tile = |flags: u64, height: u8| {
+            StaticTile {
+                flags: TileFlags::new(flags),
+                height,
+                ..StaticTile::default()
+            }
         };
         let mut grid = Builder::new(TileBounds {
             min_x: 100,

@@ -46,9 +46,17 @@
 use openshard_client_render::animate::StaticAnimations;
 use openshard_client_render::debug::View;
 use openshard_client_render::facing::Face;
-use openshard_client_render::occlusion::{self, Occlusion, OwnerId};
+use openshard_client_render::occlusion::{
+    self,
+    Occlusion,
+    OwnerId,
+};
 use openshard_client_render::place::Kind;
-use openshard_client_render::{items, plan, scene};
+use openshard_client_render::{
+    items,
+    plan,
+    scene,
+};
 
 /// The flicker's instant, as everywhere else: a fixture that differed by which
 /// tenth of a second it was asked in is not a fixture.
@@ -104,7 +112,7 @@ fn named_by(occlusion: &Occlusion, x: i32, y: i32, owner: OwnerId) -> Vec<occlus
 #[derive(Debug, Default)]
 struct Census {
     /// Rows examined.
-    rows: usize,
+    rows:      usize,
     /// Of those, rows whose tile holds more than one solid.
     ambiguous: usize,
 }

@@ -5,7 +5,11 @@
 //! while subtracting two instants produces the elapsed number of ticks.
 
 use std::fmt;
-use std::ops::{Add, AddAssign, Sub};
+use std::ops::{
+    Add,
+    AddAssign,
+    Sub,
+};
 
 /// An absolute instant on the deterministic world clock.
 ///

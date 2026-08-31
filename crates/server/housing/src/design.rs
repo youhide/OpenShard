@@ -26,10 +26,22 @@
 //! a checklist.
 
 use openshard_entities::EntityId;
-use openshard_protocol::wire::{Graphic, MultiId};
-use openshard_protocol::world::{Facet, Point};
+use openshard_protocol::wire::{
+    Graphic,
+    MultiId,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 use openshard_state::WorldState;
-use openshard_state::components::{House, HouseDesign, HouseSign, Position, Standing};
+use openshard_state::components::{
+    House,
+    HouseDesign,
+    HouseSign,
+    Position,
+    Standing,
+};
 use openshard_uofiles::multi::Component;
 
 /// The floor a foundation is finished in, as four graphics.

@@ -22,11 +22,21 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::speech::{Font, TalkMode, UnicodeMessage};
+use openshard_protocol::speech::{
+    Font,
+    TalkMode,
+    UnicodeMessage,
+};
 use openshard_protocol::wire::Hue;
-use openshard_state::{GuildId, WorldState};
+use openshard_state::{
+    GuildId,
+    WorldState,
+};
 
-use crate::{Refusal, roster};
+use crate::{
+    Refusal,
+    roster,
+};
 
 /// The language tag every line this engine sends carries — `openshard-chat`'s
 /// own, repeated rather than shared because that crate does not depend on this

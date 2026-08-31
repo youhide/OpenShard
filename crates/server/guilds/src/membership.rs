@@ -8,9 +8,25 @@
 //! `REMOVE_PLAYERS` says you may dismiss, not that you may dismiss *them*.
 
 use openshard_entities::EntityId;
-use openshard_state::{GuildCandidate, GuildId, GuildMember, Rank, WorldState};
+use openshard_state::{
+    GuildCandidate,
+    GuildId,
+    GuildMember,
+    Rank,
+    WorldState,
+};
 
-use crate::{RankFlags, Refusal, announce, may, may_lead, outranks, rank_of, recolour_guild, roster};
+use crate::{
+    RankFlags,
+    Refusal,
+    announce,
+    may,
+    may_lead,
+    outranks,
+    rank_of,
+    recolour_guild,
+    roster,
+};
 
 /// The longest a guild's name may be. ServUO's `GuildNamePrompt`.
 pub const NAME_LIMIT: usize = 40;
@@ -377,7 +393,10 @@ pub fn disband(state: &mut WorldState, leader: EntityId) -> Result<(), Refusal> 
 
 #[cfg(test)]
 mod tests {
-    use super::{ABBREVIATION_LIMIT, clip};
+    use super::{
+        ABBREVIATION_LIMIT,
+        clip,
+    };
 
     #[test]
     fn a_name_is_trimmed_and_cut_on_a_character_boundary() {

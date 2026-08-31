@@ -60,24 +60,48 @@
 //! ```
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_client_render::animate::StaticAnimations;
-use openshard_client_render::atlas::{LandAtlas, StaticAtlas, TexmapAtlas};
-use openshard_client_render::blit::{Blit, ViewportRect};
-use openshard_client_render::camera::{Camera, RealPixel, Zoom};
+use openshard_client_render::atlas::{
+    LandAtlas,
+    StaticAtlas,
+    TexmapAtlas,
+};
+use openshard_client_render::blit::{
+    Blit,
+    ViewportRect,
+};
+use openshard_client_render::camera::{
+    Camera,
+    RealPixel,
+    Zoom,
+};
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::geometry::Vec2;
-use openshard_client_render::light::{self, Lighting};
-use openshard_client_render::renderer::{self, GroundRenderer, SpriteRenderer, Target};
+use openshard_client_render::hue::HueRamp;
+use openshard_client_render::light::{
+    self,
+    Lighting,
+};
+use openshard_client_render::renderer::{
+    self,
+    GroundRenderer,
+    SpriteRenderer,
+    Target,
+};
 use openshard_client_render::solids::SolidsRenderer;
-use openshard_client_render::{ground, statics};
+use openshard_client_render::{
+    ground,
+    statics,
+};
 use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::texmaps::TexMaps;
-
-use openshard_client_render::hue::HueRamp;
 
 /// The window this is measured for, in physical pixels: a 1080p display with
 /// nothing docked over the world.
@@ -167,7 +191,7 @@ fn frame_point_and_zoom() -> (Point, Zoom) {
 
 /// One case's reading.
 struct Reading {
-    what: &'static str,
+    what:      &'static str,
     /// The fastest batch, divided back down to one pass.
     per_frame: Duration,
 }
@@ -212,9 +236,9 @@ fn measure(
         ground_instances,
         zoom,
         rect: ViewportRect {
-            x: 0,
-            y: 0,
-            width: VIEWPORT.0,
+            x:      0,
+            y:      0,
+            width:  VIEWPORT.0,
             height: VIEWPORT.1,
         },
     };
@@ -249,9 +273,9 @@ fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture
     let (width, height) = (texture.width(), texture.height());
     assert_eq!(width * 4 % 256, 0, "a row copy has to be 256-byte aligned");
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("readback"),
-        size: u64::from(width) * u64::from(height) * 4,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("readback"),
+        size:               u64::from(width) * u64::from(height) * 4,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -265,8 +289,8 @@ fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
+                offset:         0,
+                bytes_per_row:  Some(width * 4),
                 rows_per_image: Some(height),
             },
         },
@@ -424,8 +448,8 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
     let surface = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("surface"),
         size: wgpu::Extent3d {
-            width: VIEWPORT.0,
-            height: VIEWPORT.1,
+            width:                 VIEWPORT.0,
+            height:                VIEWPORT.1,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -623,9 +647,9 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
                 ground_instances: ground_pass.instances_buffer(),
                 zoom,
                 rect: ViewportRect {
-                    x: 0,
-                    y: 0,
-                    width: VIEWPORT.0,
+                    x:      0,
+                    y:      0,
+                    width:  VIEWPORT.0,
                     height: VIEWPORT.1,
                 },
             },
@@ -670,11 +694,11 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
     let mut solids_pass = SolidsRenderer::new(&device, format);
     let solids_frame = openshard_client_render::solids::Frame {
         target: &surface_view,
-        size: VIEWPORT,
-        rect: ViewportRect {
-            x: 0,
-            y: 0,
-            width: VIEWPORT.0,
+        size:   VIEWPORT,
+        rect:   ViewportRect {
+            x:      0,
+            y:      0,
+            width:  VIEWPORT.0,
             height: VIEWPORT.1,
         },
     };
@@ -705,7 +729,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
         solids_fastest = solids_fastest.min(solids_batch(REPEATS));
     }
     let solids = Reading {
-        what: "solids",
+        what:      "solids",
         per_frame: solids_fastest / REPEATS,
     };
 

@@ -23,8 +23,12 @@
 //! field, so that converting real quests later is transcription rather than
 //! design.
 
-use openshard_protocol::wire::{Graphic, Hue};
 use std::collections::HashMap;
+
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 
 /// The stable identifier of a quest definition.
 ///
@@ -81,7 +85,7 @@ pub enum ObjectiveKind {
         /// Who to take it to, by name. A name and not a serial: the destination is
         /// written before anything has been spawned, and a name still means the
         /// same thing after a restart.
-        to: String,
+        to:      String,
     },
     /// Walk someone to a named region. ServUO's `EscortObjective`.
     Escort {
@@ -94,11 +98,11 @@ pub enum ObjectiveKind {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ObjectiveDef {
     /// What it asks.
-    pub kind: ObjectiveKind,
+    pub kind:    ObjectiveKind,
     /// How many. At least 1; an objective asking for none is complete on sight.
-    pub count: u16,
+    pub count:   u16,
     /// What to call the thing, in the gump — "sewer rat", "spiders' silk".
-    pub name: String,
+    pub name:    String,
     /// How long the player has, in seconds. `0` is untimed, which is the norm.
     pub seconds: u32,
 }
@@ -119,11 +123,11 @@ pub enum RewardKind {
     /// An item into the backpack.
     Item {
         /// Its graphic.
-        graphic: Graphic,
+        graphic:   Graphic,
         /// Its hue, or [`Hue`]`(0)`.
-        hue: Hue,
+        hue:       Hue,
         /// How many.
-        amount: u16,
+        amount:    u16,
         /// Whether it merges onto a like pile.
         stackable: bool,
     },
@@ -147,28 +151,28 @@ pub struct RewardDef {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct QuestDef {
     /// Its id, and the key a player's progress is saved under.
-    pub key: QuestKey,
+    pub key:                QuestKey,
     /// The quest's name, in the log and the offer.
-    pub title: String,
+    pub title:              String,
     /// What it asks, in prose.
-    pub description: String,
+    pub description:        String,
     /// What the giver says when the offer is refused.
-    pub refuse: String,
+    pub refuse:             String,
     /// What the giver says when the quest is in progress but not done.
-    pub uncomplete: String,
+    pub uncomplete:         String,
     /// What the giver says on turn-in.
-    pub complete: String,
+    pub complete:           String,
     /// What is said when a timed objective runs out.
-    pub failed: String,
+    pub failed:             String,
     /// What it asks for.
-    pub objectives: Vec<ObjectiveDef>,
+    pub objectives:         Vec<ObjectiveDef>,
     /// What it pays.
-    pub rewards: Vec<RewardDef>,
+    pub rewards:            Vec<RewardDef>,
     /// Whether *every* objective must be met (ServUO's `AllObjectives`), or any
     /// one of them is enough.
-    pub all_objectives: bool,
+    pub all_objectives:     bool,
     /// Whether it can only ever be done once by a character.
-    pub done_once: bool,
+    pub done_once:          bool,
     /// How long before it may be taken again, in seconds. `0` is immediately —
     /// unless [`done_once`](Self::done_once), which outranks it.
     pub restart_delay_secs: u32,
@@ -177,18 +181,18 @@ pub struct QuestDef {
 impl Default for QuestDef {
     fn default() -> Self {
         Self {
-            key: QuestKey::default(),
-            title: String::new(),
-            description: String::new(),
-            refuse: String::new(),
-            uncomplete: String::new(),
-            complete: String::new(),
-            failed: String::new(),
-            objectives: Vec::new(),
-            rewards: Vec::new(),
+            key:                QuestKey::default(),
+            title:              String::new(),
+            description:        String::new(),
+            refuse:             String::new(),
+            uncomplete:         String::new(),
+            complete:           String::new(),
+            failed:             String::new(),
+            objectives:         Vec::new(),
+            rewards:            Vec::new(),
             // ServUO's default: a quest asks for everything on its list.
-            all_objectives: true,
-            done_once: false,
+            all_objectives:     true,
+            done_once:          false,
             restart_delay_secs: 0,
         }
     }
@@ -202,7 +206,7 @@ impl Default for QuestDef {
 /// the newer source has deleted still on offer.
 #[derive(Clone, Default, Debug)]
 pub struct QuestDefs {
-    defs: Vec<QuestDef>,
+    defs:   Vec<QuestDef>,
     by_key: HashMap<QuestKey, usize>,
 }
 
@@ -318,7 +322,7 @@ mod tests {
         assert_eq!(
             escort.objectives[0].kind,
             ObjectiveKind::Escort {
-                region: String::new()
+                region: String::new(),
             },
             "the escort objective must leave its destination to the engine"
         );

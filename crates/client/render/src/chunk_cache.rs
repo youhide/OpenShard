@@ -4,17 +4,23 @@
 //! built.  Callers keep their concrete storage and fallback rules; these two
 //! values own only the duplicated queue and byte-budget decisions.
 
-use std::cell::{Cell, RefCell};
+use std::cell::{
+    Cell,
+    RefCell,
+};
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
 
 /// A bounded, coalescing hand-off between requesters and one producer.
 #[derive(Debug)]
 pub struct WorkQueue<K: Copy + Ord> {
     max_outstanding: usize,
-    work_per_turn: usize,
-    pending: BTreeSet<K>,
-    in_flight: BTreeSet<K>,
+    work_per_turn:   usize,
+    pending:         BTreeSet<K>,
+    in_flight:       BTreeSet<K>,
 }
 
 impl<K: Copy + Ord> WorkQueue<K> {
@@ -169,7 +175,7 @@ impl<K: Copy + Ord> WorkQueue<K> {
 
 #[derive(Clone, Copy, Debug)]
 struct BudgetEntry {
-    bytes: u64,
+    bytes:     u64,
     last_used: u64,
 }
 
@@ -197,8 +203,8 @@ impl<K> Default for LruEviction<K> {
 #[derive(Debug)]
 pub struct LruBudget<K: Copy + Ord> {
     max_bytes: u64,
-    clock: Cell<u64>,
-    entries: RefCell<BTreeMap<K, BudgetEntry>>,
+    clock:     Cell<u64>,
+    entries:   RefCell<BTreeMap<K, BudgetEntry>>,
     protected: BTreeSet<K>,
     /// The sum of every entry's bytes, carried rather than recomputed.
     ///
@@ -206,7 +212,7 @@ pub struct LruBudget<K: Copy + Ord> {
     /// anything to do at all, and summing a map to answer "no" makes the
     /// cheap answer cost the same as the expensive one. Maintained by every
     /// path that changes `entries`, which is why they are the only four.
-    retained: u64,
+    retained:  u64,
 }
 
 impl<K: Copy + Ord> LruBudget<K> {

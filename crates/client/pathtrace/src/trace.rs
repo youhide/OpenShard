@@ -11,10 +11,20 @@
 //! "fast exact path" would be two implementations again, and the one that gets
 //! compared against the renderer would be the one nobody looks at.
 
-use crate::camera::{Parallel, Ray};
-use crate::light::{Light, LightIdx};
+use crate::camera::{
+    Parallel,
+    Ray,
+};
+use crate::light::{
+    Light,
+    LightIdx,
+};
 use crate::rng::Stream;
-use crate::scene::{SURFACE_BIAS, Scene, Surface};
+use crate::scene::{
+    SURFACE_BIAS,
+    Scene,
+    Surface,
+};
 use crate::vector::Vec3;
 
 /// Which light model this render computes.
@@ -68,7 +78,7 @@ pub enum Brdf {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Settings {
     /// Which light model to compute — physics, or the engine's own.
-    pub brdf: Brdf,
+    pub brdf:    Brdf,
     /// Paths per pixel.
     pub samples: u32,
     /// How many times a path may bounce off a surface after the first. `0` is
@@ -79,10 +89,10 @@ pub struct Settings {
     /// anything. Both an environment light and, at `bounces > 0`, the only
     /// thing that makes ambient occlusion visible: a crevice is dark because
     /// its bounces find geometry where an open surface's find sky.
-    pub sky: [f64; 3],
+    pub sky:     [f64; 3],
     /// Names the render. The same seed and the same scene give the same image
     /// on any machine — see [`crate::rng`].
-    pub seed: u64,
+    pub seed:    u64,
 }
 
 impl Settings {
@@ -99,11 +109,11 @@ impl Settings {
     /// `Brdf::Flat` out loud.
     pub fn degenerate() -> Self {
         Self {
-            brdf: Brdf::Lambert,
+            brdf:    Brdf::Lambert,
             samples: 1,
             bounces: 0,
-            sky: [0.0; 3],
-            seed: 0,
+            sky:     [0.0; 3],
+            seed:    0,
         }
     }
 }
@@ -114,8 +124,8 @@ pub struct Seen {
     pub surface: Surface,
     /// The world point the pixel's own ray met — the point every shadow ray
     /// from this pixel starts at.
-    pub at: Vec3,
-    pub normal: Vec3,
+    pub at:      Vec3,
+    pub normal:  Vec3,
 }
 
 /// How much of one emitter one pixel could see.
@@ -139,7 +149,7 @@ pub struct Visibility {
     /// Zero when nothing faces under a model that has a facing, so this alone
     /// cannot tell a surface in shadow from one turned away — read it with the
     /// two flags below, which is why they are here.
-    pub reached: f64,
+    pub reached:      f64,
     /// Whether the emitter's falloff reaches this point at all.
     ///
     /// Separate from `reached` being zero, and the distinction is load-bearing:
@@ -162,14 +172,14 @@ pub struct Visibility {
     /// exactly the pixels that variant goes on to light anyway. That is what
     /// lets one render answer both "does the engine's own model agree here"
     /// and "which pixels does the choice of model decide".
-    pub faces_light: bool,
+    pub faces_light:  bool,
 }
 
 /// One pixel's worth of answer.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Pixel {
     /// [`None`] where the camera ray left the scene without meeting anything.
-    pub seen: Option<Seen>,
+    pub seen:     Option<Seen>,
     /// Linear radiance, per channel, before any tone mapping. Unbounded above:
     /// clamping here would throw away the one thing an exposure knob is for.
     pub radiance: [f64; 3],
@@ -183,7 +193,7 @@ pub struct Pixel {
 /// width of one frame with the height of another.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ImageSize {
-    pub width: u32,
+    pub width:  u32,
     pub height: u32,
 }
 
@@ -218,13 +228,13 @@ impl ImagePixel {
 /// A rendered frame.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Image {
-    pub size: ImageSize,
+    pub size:   ImageSize,
     /// Row-major, `width * height` of them.
     pub pixels: Vec<Pixel>,
-    lights: usize,
+    lights:     usize,
     /// `width * height * lights`, pixel-major.
     visibility: Vec<Visibility>,
-    exact: bool,
+    exact:      bool,
 }
 
 impl Image {
@@ -270,11 +280,11 @@ impl Image {
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 struct Tally {
     /// Samples the emitter produced at all: the rest were out of its own reach.
-    arrived: u32,
+    arrived:    u32,
     /// Of those, the ones on the lit side of the surface. A geometric fact,
     /// counted the same under every [`Brdf`] — including the one that does not
     /// act on it.
-    facing: u32,
+    facing:     u32,
     /// Of those, the ones this model would light the surface from: `facing`
     /// under [`Brdf::Lambert`], `arrived` under [`Brdf::Flat`].
     ///
@@ -284,7 +294,7 @@ struct Tally {
     /// reading over 1 — or reading 0 on every pixel a model does light.
     considered: u32,
     /// And of those, the ones nothing stood in the way of.
-    reached: u32,
+    reached:    u32,
 }
 
 /// Render `scene`, from `camera`, at `size`.
@@ -363,7 +373,7 @@ fn render_pixel(
     let Some(first) = scene.hit(ray.at, ray.direction, f64::NEG_INFINITY) else {
         visibility.fill(Visibility::default());
         return Pixel {
-            seen: None,
+            seen:     None,
             radiance: settings.sky,
         };
     };
@@ -381,10 +391,10 @@ fn render_pixel(
 
     let samples = f64::from(settings.samples);
     Pixel {
-        seen: Some(Seen {
+        seen:     Some(Seen {
             surface: first.surface,
-            at: first.at,
-            normal: first.normal,
+            at:      first.at,
+            normal:  first.normal,
         }),
         radiance: [total[0] / samples, total[1] / samples, total[2] / samples],
     }
@@ -394,7 +404,7 @@ fn render_pixel(
 fn record_visibility(lights: &[Light], first: crate::scene::Hit, tally: &[Tally], into: &mut [Visibility]) {
     for ((answer, light), counted) in into.iter_mut().zip(lights).zip(tally) {
         *answer = Visibility {
-            reached: match counted.considered {
+            reached:      match counted.considered {
                 0 => 0.0,
                 considered => f64::from(counted.reached) / f64::from(considered),
             },
@@ -402,7 +412,7 @@ fn record_visibility(lights: &[Light], first: crate::scene::Hit, tally: &[Tally]
             // falloff alone: a sphere half in reach is a shape this flag cannot
             // describe and must not pretend to.
             within_reach: light.falloff.at((light.at - first.at).length()).is_some(),
-            faces_light: counted.facing > 0,
+            faces_light:  counted.facing > 0,
         };
     }
 }
@@ -547,12 +557,30 @@ fn cosine_hemisphere(normal: Vec3, stream: &mut Stream) -> Vec3 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Brdf, ImagePixel, ImageSize, Settings, Visibility, cosine_hemisphere, render};
+    use super::{
+        Brdf,
+        ImagePixel,
+        ImageSize,
+        Settings,
+        Visibility,
+        cosine_hemisphere,
+        render,
+    };
     use crate::aabb::Aabb;
     use crate::camera::Parallel;
-    use crate::light::{Emitter, Falloff, Light, LightIdx};
+    use crate::light::{
+        Emitter,
+        Falloff,
+        Light,
+        LightIdx,
+    };
     use crate::rng::Stream;
-    use crate::scene::{Body, Ground, Scene, Surface};
+    use crate::scene::{
+        Body,
+        Ground,
+        Scene,
+        Surface,
+    };
     use crate::vector::Vec3;
 
     /// Straight down, one world unit to a pixel, `(0, 0)` at world `(0, 0)`.
@@ -579,11 +607,11 @@ mod tests {
     fn one_box_scene() -> Scene {
         Scene {
             bodies: vec![Body {
-                shape: Aabb::between(Vec3::new(10.0, 10.0, 0.0), Vec3::new(12.0, 12.0, 3.0)),
+                shape:  Aabb::between(Vec3::new(10.0, 10.0, 0.0), Vec3::new(12.0, 12.0, 3.0)),
                 albedo: [0.8; 3],
             }],
             ground: Some(Ground {
-                z: 0.0,
+                z:      0.0,
                 albedo: [0.5; 3],
             }),
         }
@@ -923,11 +951,11 @@ mod tests {
         let (scene, camera) = (one_box_scene(), top_down());
         let lights = [torch(TORCH, Emitter::Sphere { radius: 1.5 })];
         let settings = Settings {
-            brdf: Brdf::Lambert,
+            brdf:    Brdf::Lambert,
             samples: 16,
             bounces: 2,
-            sky: [0.2; 3],
-            seed: 4242,
+            sky:     [0.2; 3],
+            seed:    4242,
         };
         let first = render(&scene, &camera, &lights, &settings, FRAME);
         let again = render(&scene, &camera, &lights, &settings, FRAME);

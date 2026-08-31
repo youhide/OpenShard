@@ -37,11 +37,19 @@
 //! widgets in points and a bitmap cannot be reinterpreted into them. See
 //! `client/app/src/gump.rs` for the decision this replaces.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
 use std::fmt;
 
 use openshard_protocol::gump::layout::Element;
-use openshard_protocol::gump::{GUMP_WHITE, GumpButton, RawButtonId, RawSwitchId};
+use openshard_protocol::gump::{
+    GUMP_WHITE,
+    GumpButton,
+    RawButtonId,
+    RawSwitchId,
+};
 use openshard_protocol::speech::Font;
 
 /// A position in a gump's `pictures` list, never a button id or a list index
@@ -59,16 +67,35 @@ impl PictureIndex {
         self.0
     }
 }
-use openshard_protocol::wire::{Graphic, Hue};
-use openshard_uofiles::art::{Art, ArtError};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
+use openshard_uofiles::art::{
+    Art,
+    ArtError,
+};
 use openshard_uofiles::color::Color16;
-use openshard_uofiles::gumpart::{GumpError, Gumps};
+use openshard_uofiles::gumpart::{
+    GumpError,
+    Gumps,
+};
 use openshard_uofiles::image::Image;
 
-use crate::atlas::{AtlasError, AtlasPixel, Sprite, StaticAtlas};
+use crate::atlas::{
+    AtlasError,
+    AtlasPixel,
+    Sprite,
+    StaticAtlas,
+};
 use crate::geometry::Rect;
 use crate::hue::HueRamp;
-use crate::renderer::{QUAD, new_static_instance_buffer, upload, write_rows};
+use crate::renderer::{
+    QUAD,
+    new_static_instance_buffer,
+    upload,
+    write_rows,
+};
 use crate::sprite::SpriteQuad;
 
 /// A point in gump space: the reference client's own interface pixels, before
@@ -149,9 +176,9 @@ impl GumpArtPixel {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Scissor {
     /// The box's top-left corner, in the same gump pixels the pictures are in.
-    pub at: GumpPixel,
+    pub at:     GumpPixel,
     /// How wide it is.
-    pub width: i32,
+    pub width:  i32,
     /// How tall it is.
     pub height: i32,
 }
@@ -189,16 +216,16 @@ impl Scissor {
             return None;
         }
         let cut = crate::atlas::Region {
-            u: region.u + region.du * (left - rect.x) / rect.width,
-            v: region.v + region.dv * (top - rect.y) / rect.height,
+            u:  region.u + region.du * (left - rect.x) / rect.width,
+            v:  region.v + region.dv * (top - rect.y) / rect.height,
             du: region.du * (right - left) / rect.width,
             dv: region.dv * (bottom - top) / rect.height,
         };
         Some((
             Rect {
-                x: left,
-                y: top,
-                width: right - left,
+                x:      left,
+                y:      top,
+                width:  right - left,
                 height: bottom - top,
             },
             cut,
@@ -214,13 +241,15 @@ impl Scissor {
     /// hit test reading a different box from the one that drew would answer for
     /// a row that is not on the screen.
     pub fn cut(self, quads: &mut Vec<SpriteQuad>) {
-        quads.retain_mut(|quad| match self.crop(quad.rect, quad.region) {
-            Some((rect, region)) => {
-                quad.rect = rect;
-                quad.region = region;
-                true
+        quads.retain_mut(|quad| {
+            match self.crop(quad.rect, quad.region) {
+                Some((rect, region)) => {
+                    quad.rect = rect;
+                    quad.region = region;
+                    true
+                }
+                None => false,
             }
-            None => false,
         });
     }
 }
@@ -355,7 +384,7 @@ impl From<AtlasError> for GumpAtlasError {
 /// already in cache.
 #[derive(Debug)]
 pub struct GumpAtlas {
-    packed: StaticAtlas,
+    packed:    StaticAtlas,
     /// Every picture ever offered, whether or not the client ships art for it,
     /// and the slot the packer under this knows it by.
     ///
@@ -370,7 +399,7 @@ pub struct GumpAtlas {
     /// [`GumpArt`]), so what goes down to it is a **slot this atlas handed out**
     /// — a number with no meaning outside these two fields, which is why it
     /// never leaves them.
-    slots: BTreeMap<GumpArt, Graphic>,
+    slots:     BTreeMap<GumpArt, Graphic>,
     /// The next slot to hand out.
     next_slot: u16,
 }
@@ -379,9 +408,9 @@ impl GumpAtlas {
     /// An atlas holding nothing, ready to be grown into.
     pub fn empty() -> Self {
         Self {
-            packed: StaticAtlas::pack(std::iter::empty())
+            packed:    StaticAtlas::pack(std::iter::empty())
                 .expect("packing no pictures cannot overflow an atlas"),
-            slots: BTreeMap::new(),
+            slots:     BTreeMap::new(),
             next_slot: 0,
         }
     }
@@ -415,7 +444,7 @@ impl GumpAtlas {
         for (art, image) in pictures {
             let Some(slot) = atlas.slot(art) else {
                 return Err(GumpAtlasError::Atlas(AtlasError::Full {
-                    wanted: usize::from(u16::MAX) + 2,
+                    wanted:   usize::from(u16::MAX) + 2,
                     capacity: usize::from(u16::MAX) + 1,
                 }));
             };
@@ -474,7 +503,7 @@ impl GumpAtlas {
             }
             let Some(slot) = self.slot(*art) else {
                 return Err(GumpAtlasError::Atlas(AtlasError::Full {
-                    wanted: self.slots.len() + 1,
+                    wanted:   self.slots.len() + 1,
                     capacity: usize::from(u16::MAX) + 1,
                 }));
             };
@@ -486,7 +515,7 @@ impl GumpAtlas {
         for art in fresh {
             if self.slot(art).is_none() {
                 return Err(GumpAtlasError::Atlas(AtlasError::Full {
-                    wanted: self.slots.len() + 1,
+                    wanted:   self.slots.len() + 1,
                     capacity: usize::from(u16::MAX) + 1,
                 }));
             }
@@ -547,9 +576,9 @@ pub struct Picture {
     /// Which picture, and which of the two files it comes out of.
     pub graphic: GumpArt,
     /// Its top-left corner, in the window's own gump pixels.
-    pub at: GumpPixel,
+    pub at:      GumpPixel,
     /// The hue to tint it with, or [`Hue::NONE`].
-    pub hue: Hue,
+    pub hue:     Hue,
     /// Opacity applied after the hue.  Ordinary gump art is opaque; a
     /// paperdoll's pending equipment preview is deliberately translucent.
     pub opacity: u8,
@@ -561,14 +590,14 @@ pub struct Picture {
     /// reference tiles with a scissor rectangle and never scales gump art,
     /// which is what keeps a border's pixels its own size in a window of any
     /// width.
-    pub tiled: Option<(i32, i32)>,
+    pub tiled:   Option<(i32, i32)>,
     /// The exact size this one picture occupies, or `None` for its native
     /// sprite dimensions.
     ///
     /// This is deliberately separate from [`Self::tiled`]: tiling preserves
     /// the source pixels for frames and backgrounds, while this resamples one
     /// icon to fit a control.  A picture cannot be both.
-    pub scaled: Option<(i32, i32)>,
+    pub scaled:  Option<(i32, i32)>,
     /// The box outside which this picture is neither drawn nor picked, or `None`
     /// to let it stand wherever it was placed.
     ///
@@ -645,10 +674,10 @@ impl Picture {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ItemCell {
     /// Top-left corner of the cell.
-    pub at: GumpPixel,
+    pub at:      GumpPixel,
     /// Outer dimensions of the cell.
-    pub width: i32,
-    pub height: i32,
+    pub width:   i32,
+    pub height:  i32,
     /// Empty space left around the fitted icon on every edge.
     pub padding: i32,
 }
@@ -724,9 +753,9 @@ pub fn collect(pictures: &[Picture], atlas: &GumpAtlas) -> Vec<SpriteQuad> {
         // the only path that repeats source pixels.
         if picture.scaled.is_some() {
             let rect = Rect {
-                x: picture.at.x as f32,
-                y: picture.at.y as f32,
-                width: width as f32,
+                x:      picture.at.x as f32,
+                y:      picture.at.y as f32,
+                width:  width as f32,
                 height: height as f32,
             };
             let cut = match picture.scissor {
@@ -757,17 +786,17 @@ pub fn collect(pictures: &[Picture], atlas: &GumpAtlas) -> Vec<SpriteQuad> {
             while x < width {
                 let columns = (width - x).min(art_width);
                 let rect = Rect {
-                    x: (picture.at.x + x) as f32,
-                    y: (picture.at.y + y) as f32,
-                    width: columns as f32,
+                    x:      (picture.at.x + x) as f32,
+                    y:      (picture.at.y + y) as f32,
+                    width:  columns as f32,
                     height: rows as f32,
                 };
                 // The clipped part of the region, from the same corner: a
                 // half-drawn repetition shows the *left* of the art, which
                 // is what a scissor rectangle would have left of it.
                 let region = crate::atlas::Region {
-                    u: sprite.region.u,
-                    v: sprite.region.v,
+                    u:  sprite.region.u,
+                    v:  sprite.region.v,
                     du: sprite.region.du * columns as f32 / art_width as f32,
                     dv: sprite.region.dv * rows as f32 / art_height as f32,
                 };
@@ -872,8 +901,8 @@ pub fn plate(rect: Rect, hue: Hue, shade: Shade) -> SpriteQuad {
     SpriteQuad {
         rect,
         region: crate::atlas::Region {
-            u: shade.brightness(),
-            v: 0.0,
+            u:  shade.brightness(),
+            v:  0.0,
             du: 0.0,
             dv: 0.0,
         },
@@ -929,9 +958,9 @@ pub fn plate(rect: Rect, hue: Hue, shade: Shade) -> SpriteQuad {
 pub fn place(quads: &mut [SpriteQuad], at: GumpPixel, magnify: f32) {
     for quad in quads {
         quad.rect = Rect {
-            x: quad.rect.x * magnify + at.x as f32,
-            y: quad.rect.y * magnify + at.y as f32,
-            width: quad.rect.width * magnify,
+            x:      quad.rect.x * magnify + at.x as f32,
+            y:      quad.rect.y * magnify + at.y as f32,
+            width:  quad.rect.width * magnify,
             height: quad.rect.height * magnify,
         };
     }
@@ -1132,14 +1161,14 @@ pub const CAPTION_FONT: Font = Font(1);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Caption {
     /// Its top-left corner, in the window's own gump pixels.
-    pub at: GumpPixel,
+    pub at:     GumpPixel,
     /// The hue the layout asked for.
-    pub hue: Hue,
+    pub hue:    Hue,
     /// Where the text comes from.
     pub source: CaptionSource,
     /// The box it is clipped to — `{ croppedtext }` — or `None` for anything
     /// else, which overflows rather than clipping.
-    pub clip: Option<(i32, i32)>,
+    pub clip:   Option<(i32, i32)>,
 }
 
 /// Which table a [`Caption`]'s text is a key into.
@@ -1191,15 +1220,15 @@ pub enum Hit {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Field {
     /// Its top-left corner, in the window's own gump pixels.
-    pub at: GumpPixel,
+    pub at:   GumpPixel,
     /// How wide and how tall the box is.
     pub size: (i32, i32),
     /// The id its contents come back to the server under.
-    pub id: u16,
+    pub id:   u16,
     /// Which line of the gump's text table it starts out holding.
     pub line: usize,
     /// The hue its text is drawn in, already a wire hue — see [`text_hue`].
-    pub hue: Hue,
+    pub hue:  Hue,
 }
 
 /// Which field the cursor is in, if any.
@@ -1238,10 +1267,10 @@ pub struct Window {
     /// test came from two different walks is exactly what
     /// [`crate::container::pick`]'s docs refuse. A background's nine pieces, a
     /// `{ gumppic }` and a caption are simply not in it.
-    pub hits: BTreeMap<PictureIndex, Hit>,
+    pub hits:     BTreeMap<PictureIndex, Hit>,
     /// The boxes the player can type into, which are not pictures at all — see
     /// [`Field`].
-    pub fields: Vec<Field>,
+    pub fields:   Vec<Field>,
 }
 
 impl Window {
@@ -1344,36 +1373,44 @@ pub fn window(
                 width,
                 height,
                 gump,
-            } => drawn.pictures.extend(resize(
-                atlas,
-                Graphic(*gump as u16),
-                at.offset(GumpPixel::new(*x, *y)),
-                *width,
-                *height,
-            )),
-            Element::Image { x, y, gump, hue } => drawn.pictures.push(
-                Picture::plain(art(*gump), at.offset(GumpPixel::new(*x, *y)))
-                    .hued(Hue(hue.unwrap_or(0) as u16)),
-            ),
+            } => {
+                drawn.pictures.extend(resize(
+                    atlas,
+                    Graphic(*gump as u16),
+                    at.offset(GumpPixel::new(*x, *y)),
+                    *width,
+                    *height,
+                ))
+            }
+            Element::Image { x, y, gump, hue } => {
+                drawn.pictures.push(
+                    Picture::plain(art(*gump), at.offset(GumpPixel::new(*x, *y)))
+                        .hued(Hue(hue.unwrap_or(0) as u16)),
+                )
+            }
             Element::ImageTiled {
                 x,
                 y,
                 width,
                 height,
                 gump,
-            } => drawn
-                .pictures
-                .push(Picture::plain(art(*gump), at.offset(GumpPixel::new(*x, *y))).tiled(*width, *height)),
+            } => {
+                drawn.pictures.push(
+                    Picture::plain(art(*gump), at.offset(GumpPixel::new(*x, *y))).tiled(*width, *height),
+                )
+            }
             Element::Rect {
                 x,
                 y,
                 width,
                 height,
                 color,
-            } => drawn.pictures.push(
-                Picture::plain(GumpArt::Solid(Color16(*color)), at.offset(GumpPixel::new(*x, *y)))
-                    .scaled(*width, *height),
-            ),
+            } => {
+                drawn.pictures.push(
+                    Picture::plain(GumpArt::Solid(Color16(*color)), at.offset(GumpPixel::new(*x, *y)))
+                        .scaled(*width, *height),
+                )
+            }
             Element::Button {
                 x,
                 y,
@@ -1420,13 +1457,15 @@ pub fn window(
             // container, a reagent on a shopping list, the picture beside a
             // quest's text. The same art the ground draws it with, at its own
             // size and with no world transform on it at all.
-            Element::Item { x, y, graphic, hue } => drawn.pictures.push(
-                Picture::plain(
-                    GumpArt::Item(Graphic(*graphic as u16)),
-                    at.offset(GumpPixel::new(*x, *y)),
+            Element::Item { x, y, graphic, hue } => {
+                drawn.pictures.push(
+                    Picture::plain(
+                        GumpArt::Item(Graphic(*graphic as u16)),
+                        at.offset(GumpPixel::new(*x, *y)),
+                    )
+                    .hued(Hue(hue.unwrap_or(0) as u16)),
                 )
-                .hued(Hue(hue.unwrap_or(0) as u16)),
-            ),
+            }
             Element::ItemFitted {
                 x,
                 y,
@@ -1441,12 +1480,14 @@ pub fn window(
                     drawn.pictures.push(picture.hued(Hue(hue.unwrap_or(0) as u16)));
                 }
             }
-            Element::Label { x, y, hue, line } => drawn.captions.push(Caption {
-                at: at.offset(GumpPixel::new(*x, *y)),
-                hue: text_hue(*hue),
-                source: CaptionSource::Line(*line),
-                clip: None,
-            }),
+            Element::Label { x, y, hue, line } => {
+                drawn.captions.push(Caption {
+                    at:     at.offset(GumpPixel::new(*x, *y)),
+                    hue:    text_hue(*hue),
+                    source: CaptionSource::Line(*line),
+                    clip:   None,
+                })
+            }
             Element::CroppedLabel {
                 x,
                 y,
@@ -1454,12 +1495,14 @@ pub fn window(
                 height,
                 hue,
                 line,
-            } => drawn.captions.push(Caption {
-                at: at.offset(GumpPixel::new(*x, *y)),
-                hue: text_hue(*hue),
-                source: CaptionSource::Line(*line),
-                clip: Some((*width, *height)),
-            }),
+            } => {
+                drawn.captions.push(Caption {
+                    at:     at.offset(GumpPixel::new(*x, *y)),
+                    hue:    text_hue(*hue),
+                    source: CaptionSource::Line(*line),
+                    clip:   Some((*width, *height)),
+                })
+            }
             // `{ htmlgump }` — wire-carried text, the same table `{ text }`
             // reads, just longer and wrapped rather than one line. The wire
             // form carries no separate hue (a real client colours it, if at
@@ -1473,12 +1516,14 @@ pub fn window(
                 height,
                 line,
                 ..
-            } => drawn.captions.push(Caption {
-                at: at.offset(GumpPixel::new(*x, *y)),
-                hue: text_hue(GUMP_WHITE),
-                source: CaptionSource::Line(*line),
-                clip: Some((*width, *height)),
-            }),
+            } => {
+                drawn.captions.push(Caption {
+                    at:     at.offset(GumpPixel::new(*x, *y)),
+                    hue:    text_hue(GUMP_WHITE),
+                    source: CaptionSource::Line(*line),
+                    clip:   Some((*width, *height)),
+                })
+            }
             // The `xmfhtml*` family — a cliloc number, not a line: nothing
             // travelled on the wire for this one, so resolving it needs the
             // client's own `Cliloc.enu`, which whoever draws `drawn.captions`
@@ -1489,12 +1534,14 @@ pub fn window(
                 width,
                 height,
                 cliloc,
-            } => drawn.captions.push(Caption {
-                at: at.offset(GumpPixel::new(*x, *y)),
-                hue: text_hue(GUMP_WHITE),
-                source: CaptionSource::Cliloc(*cliloc),
-                clip: Some((*width, *height)),
-            }),
+            } => {
+                drawn.captions.push(Caption {
+                    at:     at.offset(GumpPixel::new(*x, *y)),
+                    hue:    text_hue(GUMP_WHITE),
+                    source: CaptionSource::Cliloc(*cliloc),
+                    clip:   Some((*width, *height)),
+                })
+            }
             Element::TextEntry {
                 x,
                 y,
@@ -1503,13 +1550,15 @@ pub fn window(
                 hue,
                 entry_id,
                 line,
-            } => drawn.fields.push(Field {
-                at: at.offset(GumpPixel::new(*x, *y)),
-                size: (*width, *height),
-                id: *entry_id,
-                line: *line,
-                hue: text_hue(*hue),
-            }),
+            } => {
+                drawn.fields.push(Field {
+                    at:   at.offset(GumpPixel::new(*x, *y)),
+                    size: (*width, *height),
+                    id:   *entry_id,
+                    line: *line,
+                    hue:  text_hue(*hue),
+                })
+            }
             // Everything else is either state the caller already read (a flag),
             // text this crate cannot lay out yet (html), or the translucent
             // rectangle the module docs above account for.
@@ -1544,7 +1593,7 @@ pub struct Frame<'a> {
     /// it and before egui paints anything over it.
     pub target: &'a wgpu::TextureView,
     /// Its width in real pixels.
-    pub width: u32,
+    pub width:  u32,
     /// Its height in real pixels.
     pub height: u32,
     /// Real pixels per gump pixel.
@@ -1554,7 +1603,7 @@ pub struct Frame<'a> {
     /// fractional scale doubles some of its rows and not others, which shows up
     /// as a border that is two pixels thick along one edge of a window and one
     /// along the other.
-    pub scale: f32,
+    pub scale:  f32,
 }
 
 /// Bytes of the gump pass's uniform block: the target's size and the scale,
@@ -1569,13 +1618,13 @@ const INITIAL_QUADS: u64 = 256;
 /// The pass that draws [`collect`]'s quads.
 #[derive(Debug)]
 pub struct GumpRenderer {
-    pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
-    uniforms: wgpu::Buffer,
-    quad: wgpu::Buffer,
-    instances: wgpu::Buffer,
+    pipeline:      wgpu::RenderPipeline,
+    bind_group:    wgpu::BindGroup,
+    uniforms:      wgpu::Buffer,
+    quad:          wgpu::Buffer,
+    instances:     wgpu::Buffer,
     /// Quads the instance buffer can hold before it has to be replaced.
-    capacity: u64,
+    capacity:      u64,
     /// The atlas texture, kept so that it can be grown into rather than
     /// replaced — see [`GumpRenderer::upload_rows`].
     atlas_texture: wgpu::Texture,
@@ -1622,112 +1671,112 @@ impl GumpRenderer {
         });
 
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gump screen"),
-            size: GUMP_UNIFORM_BYTES,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            label:              Some("gump screen"),
+            size:               GUMP_UNIFORM_BYTES,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("gumps"),
+            label:   Some("gumps"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                    binding:    0,
                     visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding:    1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding:    2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
+                    ty:         wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding:    3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 4,
+                    binding:    4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
+                    ty:         wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count:      None,
                 },
             ],
         });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("gumps"),
-            layout: &layout,
+            label:   Some("gumps"),
+            layout:  &layout,
             entries: &[
                 wgpu::BindGroupEntry {
-                    binding: 0,
+                    binding:  0,
                     resource: uniforms.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 1,
+                    binding:  1,
                     resource: wgpu::BindingResource::TextureView(&view),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding:  2,
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding:  3,
                     resource: wgpu::BindingResource::TextureView(&ramp_view),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 4,
+                    binding:  4,
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
             ],
         });
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("gumps"),
+            label:  Some("gumps"),
             source: wgpu::ShaderSource::Wgsl(include_str!("gump.wgsl").into()),
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("gumps"),
+            label:              Some("gumps"),
             bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
+            immediate_size:     0,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("gumps"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+            label:          Some("gumps"),
+            layout:         Some(&pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
+                buffers:             &[
                     Some(wgpu::VertexBufferLayout {
                         array_stride: 8,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
+                        step_mode:    wgpu::VertexStepMode::Vertex,
+                        attributes:   &[wgpu::VertexAttribute {
+                            format:          wgpu::VertexFormat::Float32x2,
+                            offset:          0,
                             shader_location: 0,
                         }],
                     }),
@@ -1736,46 +1785,46 @@ impl GumpRenderer {
                     // than the quad having a second layout to keep in step.
                     Some(wgpu::VertexBufferLayout {
                         array_stride: SpriteQuad::STRIDE,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &[
+                        step_mode:    wgpu::VertexStepMode::Instance,
+                        attributes:   &[
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 0,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          0,
                                 shader_location: 1,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 8,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          8,
                                 shader_location: 2,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 16,
+                                format:          wgpu::VertexFormat::Float32x4,
+                                offset:          16,
                                 shader_location: 3,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Uint32,
-                                offset: 36,
+                                format:          wgpu::VertexFormat::Uint32,
+                                offset:          36,
                                 shader_location: 4,
                             },
                         ],
                     }),
                 ],
             },
-            primitive: wgpu::PrimitiveState {
+            primitive:      wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
                 ..Default::default()
             },
             // None, and that is the point of this pass: the world's depth
             // buffer ordered the world, and the interface is drawn on the
             // result in the order it is listed.
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+            depth_stencil:  None,
+            multisample:    wgpu::MultisampleState::default(),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
+                targets:             &[Some(wgpu::ColorTargetState {
                     format,
                     // No blending: gump art is opaque where it is drawn at all
                     // and the shader discards where it is not, so there is
@@ -1785,13 +1834,13 @@ impl GumpRenderer {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
 
         let quad = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gump quad"),
-            size: std::mem::size_of_val(&QUAD) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            label:              Some("gump quad"),
+            size:               std::mem::size_of_val(&QUAD) as u64,
+            usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let mut quad_bytes = Vec::with_capacity(QUAD.len() * 4);
@@ -1862,12 +1911,12 @@ impl GumpRenderer {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("gumps"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: frame.target,
-                depth_slice: None,
+                view:           frame.target,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
+                ops:            wgpu::Operations {
                     // Loaded: the world is already on this surface.
-                    load: wgpu::LoadOp::Load,
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -1916,11 +1965,11 @@ impl GumpRenderer {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("gump layer"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: frame.target,
-                depth_slice: None,
+                view:           frame.target,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                ops:            wgpu::Operations {
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -1981,9 +2030,9 @@ mod tests {
         assert_eq!(
             quads[0].rect,
             Rect {
-                x: 104.0,
-                y: 212.0,
-                width: 32.0,
+                x:      104.0,
+                y:      212.0,
+                width:  32.0,
                 height: 16.0,
             }
         );
@@ -1997,11 +2046,11 @@ mod tests {
     #[test]
     fn a_rect_layout_element_becomes_a_scaled_generated_solid() {
         let elements = [Element::Rect {
-            x: 12,
-            y: 18,
-            width: 40,
+            x:      12,
+            y:      18,
+            width:  40,
             height: 28,
-            color: 0x18C6,
+            color:  0x18C6,
         }];
         assert_eq!(
             art_of(&elements),
@@ -2044,8 +2093,8 @@ mod tests {
     fn a_scissor_cuts_a_picture_rather_than_squeezing_it() {
         let atlas = atlas_of([(Graphic(1), block(20, 20))]);
         let scissor = Scissor {
-            at: GumpPixel::new(100, 110),
-            width: 100,
+            at:     GumpPixel::new(100, 110),
+            width:  100,
             height: 100,
         };
         let whole = collect(
@@ -2093,8 +2142,8 @@ mod tests {
         let local = [
             Picture::plain(GumpArt::Gump(Graphic(1)), GumpPixel::new(0, 0)),
             Picture::plain(GumpArt::Gump(Graphic(2)), GumpPixel::new(15, 15)).inside(Scissor {
-                at: GumpPixel::new(15, 15),
-                width: 10,
+                at:     GumpPixel::new(15, 15),
+                width:  10,
                 height: 10,
             }),
         ];
@@ -2229,8 +2278,8 @@ mod tests {
     fn a_picture_outside_its_scissor_is_not_drawn() {
         let atlas = atlas_of([(Graphic(1), block(20, 20))]);
         let scissor = Scissor {
-            at: GumpPixel::new(100, 100),
-            width: 50,
+            at:     GumpPixel::new(100, 100),
+            width:  50,
             height: 50,
         };
         let quads = collect(
@@ -2248,8 +2297,8 @@ mod tests {
     fn a_scrolled_out_row_is_not_picked_where_it_is_not_drawn() {
         let atlas = atlas_of([(Graphic(1), block(20, 20))]);
         let scissor = Scissor {
-            at: GumpPixel::new(100, 100),
-            width: 50,
+            at:     GumpPixel::new(100, 100),
+            width:  50,
             height: 50,
         };
         let row = [Picture::plain(GumpArt::Gump(Graphic(1)), GumpPixel::new(100, 140)).inside(scissor)];
@@ -2272,8 +2321,8 @@ mod tests {
     fn a_tiled_picture_is_cut_repetition_by_repetition() {
         let atlas = atlas_of([(Graphic(1), block(10, 10))]);
         let scissor = Scissor {
-            at: GumpPixel::new(0, 0),
-            width: 25,
+            at:     GumpPixel::new(0, 0),
+            width:  25,
             height: 10,
         };
         let quads = collect(
@@ -2296,8 +2345,8 @@ mod tests {
     fn cutting_quads_is_the_same_box_from_the_other_side() {
         let atlas = atlas_of([(Graphic(1), block(20, 20))]);
         let scissor = Scissor {
-            at: GumpPixel::new(0, 0),
-            width: 100,
+            at:     GumpPixel::new(0, 0),
+            width:  100,
             height: 15,
         };
         let mut quads = collect(
@@ -2479,24 +2528,24 @@ mod tests {
         ]);
         let elements = vec![
             Element::Image {
-                x: 0,
-                y: 0,
+                x:    0,
+                y:    0,
                 gump: 10,
-                hue: None,
+                hue:  None,
             },
             Element::Page(1),
             Element::Image {
-                x: 0,
-                y: 0,
+                x:    0,
+                y:    0,
                 gump: 11,
-                hue: None,
+                hue:  None,
             },
             Element::Page(2),
             Element::Image {
-                x: 0,
-                y: 0,
+                x:    0,
+                y:    0,
                 gump: 12,
-                hue: None,
+                hue:  None,
             },
         ];
         let showing = window(&elements, GumpPixel::default(), 2, &BTreeSet::new(), None, &atlas);
@@ -2512,14 +2561,16 @@ mod tests {
     #[test]
     fn a_held_button_draws_its_pressed_art() {
         let atlas = atlas_of((0..4).map(|piece| (Graphic(20 + piece), block(4, 4))));
-        let button = |normal, pressed, id| Element::Button {
-            x: 0,
-            y: 0,
-            normal,
-            pressed,
-            kind: openshard_protocol::gump::GumpButton::Reply,
-            page: 0,
-            id: RawButtonId(id),
+        let button = |normal, pressed, id| {
+            Element::Button {
+                x: 0,
+                y: 0,
+                normal,
+                pressed,
+                kind: openshard_protocol::gump::GumpButton::Reply,
+                page: 0,
+                id: RawButtonId(id),
+            }
         };
         let elements = vec![button(20, 21, 1), button(22, 23, 2)];
         let showing = window(
@@ -2545,12 +2596,12 @@ mod tests {
     fn a_switch_is_drawn_from_the_set_and_not_from_its_initial() {
         let atlas = atlas_of((0..2).map(|piece| (Graphic(30 + piece), block(4, 4))));
         let elements = vec![Element::Check(Switch {
-            x: 0,
-            y: 0,
-            off: 30,
-            on: 31,
+            x:       0,
+            y:       0,
+            off:     30,
+            on:      31,
             initial: false,
-            id: RawSwitchId(7),
+            id:      RawSwitchId(7),
         })];
         let mut set = BTreeSet::new();
         set.insert(RawSwitchId(7));
@@ -2618,22 +2669,24 @@ mod tests {
     #[test]
     fn a_button_says_whether_its_click_reaches_the_server() {
         let atlas = atlas_of((0..9).map(|piece| (Graphic(100 + piece), block(8, 8))));
-        let button = |normal, kind, page, id| Element::Button {
-            x: 0,
-            y: 0,
-            normal,
-            pressed: normal + 1,
-            kind,
-            page,
-            id: RawButtonId(id),
+        let button = |normal, kind, page, id| {
+            Element::Button {
+                x: 0,
+                y: 0,
+                normal,
+                pressed: normal + 1,
+                kind,
+                page,
+                id: RawButtonId(id),
+            }
         };
         let elements = vec![
             Element::Background {
-                x: 0,
-                y: 0,
-                width: 40,
+                x:      0,
+                y:      0,
+                width:  40,
                 height: 40,
-                gump: 100,
+                gump:   100,
             },
             button(100, openshard_protocol::gump::GumpButton::Reply, 0, 13),
             button(102, openshard_protocol::gump::GumpButton::Page, 2, 0),
@@ -2662,13 +2715,15 @@ mod tests {
     #[test]
     fn a_switch_says_which_kind_of_switch_it_is() {
         let atlas = atlas_of((0..2).map(|piece| (Graphic(30 + piece), block(4, 4))));
-        let switch = |id| Switch {
-            x: 0,
-            y: 0,
-            off: 30,
-            on: 31,
-            initial: false,
-            id: RawSwitchId(id),
+        let switch = |id| {
+            Switch {
+                x:       0,
+                y:       0,
+                off:     30,
+                on:      31,
+                initial: false,
+                id:      RawSwitchId(id),
+            }
         };
         let elements = vec![Element::Check(switch(1)), Element::Radio(switch(2))];
         let showing = window(&elements, GumpPixel::default(), 0, &BTreeSet::new(), None, &atlas);
@@ -2689,9 +2744,9 @@ mod tests {
     fn a_caption_takes_the_hue_the_layout_asked_for_plus_one() {
         let atlas = atlas_of([]);
         let elements = vec![Element::Label {
-            x: 3,
-            y: 4,
-            hue: 0x0480,
+            x:    3,
+            y:    4,
+            hue:  0x0480,
             line: 0,
         }];
         let showing = window(
@@ -2712,10 +2767,10 @@ mod tests {
     #[test]
     fn a_tilepic_asks_for_an_item_and_not_a_gump() {
         let elements = [Element::Item {
-            x: 44,
-            y: 65,
+            x:       44,
+            y:       65,
             graphic: 0x0A28,
-            hue: Some(0x21),
+            hue:     Some(0x21),
         }];
         assert_eq!(
             art_of(&elements).into_iter().collect::<Vec<_>>(),

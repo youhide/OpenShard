@@ -68,9 +68,20 @@
 //! real client reads it from the foundation's own multi. See
 //! [`DesignDetail::decode`].
 
-use crate::codec::{PacketReader, PacketWriter};
-use crate::error::{DecodeError, expect_id};
-use crate::packet::{DecodePacket, EncodePacket, PacketLength, frame_body};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
+use crate::error::{
+    DecodeError,
+    expect_id,
+};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+    frame_body,
+};
 use crate::serial::RawSerial;
 use crate::version::ClientVersion;
 use crate::wire::Graphic;
@@ -96,11 +107,11 @@ pub struct DesignTile {
     /// The static's art id.
     pub graphic: Graphic,
     /// East, from the house's origin.
-    pub dx: i8,
+    pub dx:      i8,
     /// South, from the house's origin.
-    pub dy: i8,
+    pub dy:      i8,
     /// Up, from the ground the house stands on.
-    pub dz: i8,
+    pub dz:      i8,
 }
 
 /// `0xBF` subcommand `0x1D` — "this house is at this revision".
@@ -117,7 +128,7 @@ pub struct DesignTile {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DesignRevision {
     /// The house.
-    pub serial: RawSerial,
+    pub serial:   RawSerial,
     /// What its design is at now.
     pub revision: Revision,
 }
@@ -174,7 +185,7 @@ impl DecodePacket for DesignRevision {
             });
         }
         Ok(Self {
-            serial: RawSerial(reader.u32()?),
+            serial:   RawSerial(reader.u32()?),
             revision: Revision(reader.u32()?),
         })
     }
@@ -248,7 +259,7 @@ const DEFLATE_LEVEL: u8 = 6;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DesignDetail<'a> {
     /// The house.
-    pub serial: RawSerial,
+    pub serial:   RawSerial,
     /// Which revision this is the shape of. The same number
     /// [`DesignRevision`] announces, and the client's cache key.
     pub revision: Revision,
@@ -256,7 +267,7 @@ pub struct DesignDetail<'a> {
     /// because the client asked; clear when the shard volunteered it.
     pub response: bool,
     /// Every tile of the design, in any order.
-    pub tiles: &'a [DesignTile],
+    pub tiles:    &'a [DesignTile],
 }
 
 /// A design read back off the wire.
@@ -266,14 +277,14 @@ pub struct DesignDetail<'a> {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Design {
     /// The house.
-    pub serial: RawSerial,
+    pub serial:   RawSerial,
     /// Which revision this is the shape of.
     pub revision: Revision,
     /// Whether the shard asked to be acknowledged.
     pub response: bool,
     /// Every tile, in the order the planes gave them up — which is not the
     /// order they were sent in. A design is a set.
-    pub tiles: Vec<DesignTile>,
+    pub tiles:    Vec<DesignTile>,
 }
 
 /// The grid a design's tiles are laid out on, in tiles.
@@ -284,11 +295,11 @@ pub struct Design {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DesignBounds {
     /// The westmost `dx` any tile has.
-    pub x_min: i8,
+    pub x_min:  i8,
     /// The northmost `dy`.
-    pub y_min: i8,
+    pub y_min:  i8,
     /// How many tiles across.
-    pub width: usize,
+    pub width:  usize,
     /// How many tiles down. The grid stride.
     pub height: usize,
 }
@@ -404,7 +415,7 @@ fn slot_of(tile: DesignTile, bounds: DesignBounds, floor: bool) -> Slot {
 /// One plane, ready to be written: its index byte, what it was before deflating,
 /// and what it is after.
 struct Plane {
-    index: u8,
+    index:    u8,
     inflated: usize,
     deflated: Vec<u8>,
 }
@@ -543,7 +554,7 @@ impl DesignDetail<'_> {
         if compression != Self::COMPRESSION {
             return Err(DecodeError::Unsupported {
                 packet: Self::ID,
-                form: "a compression type other than zlib",
+                form:   "a compression type other than zlib",
             });
         }
         let response = reader.bool()?;
@@ -600,9 +611,9 @@ fn read_plane(
         for entry in buffer.as_chunks::<5>().0 {
             tiles.push(DesignTile {
                 graphic: Graphic(u16::from_be_bytes([entry[0], entry[1]])),
-                dx: entry[2] as i8,
-                dy: entry[3] as i8,
-                dz: entry[4] as i8,
+                dx:      entry[2] as i8,
+                dy:      entry[3] as i8,
+                dz:      entry[4] as i8,
             });
         }
         return Ok(());
@@ -716,7 +727,7 @@ mod tests {
     #[test]
     fn a_revision_is_thirteen_bytes_and_reads_back() {
         let sent = DesignRevision {
-            serial: RawSerial(0x4000_0123),
+            serial:   RawSerial(0x4000_0123),
             revision: Revision(0xDEAD_BEEF),
         };
         let bytes = sent.encode();
@@ -737,7 +748,7 @@ mod tests {
     #[test]
     fn another_extended_subcommand_is_not_a_revision() {
         let mut bytes = DesignRevision {
-            serial: RawSerial(1),
+            serial:   RawSerial(1),
             revision: Revision(1),
         }
         .encode();
@@ -750,7 +761,7 @@ mod tests {
     #[test]
     fn a_truncated_revision_is_refused_not_panicked() {
         let full = DesignRevision {
-            serial: RawSerial(7),
+            serial:   RawSerial(7),
             revision: Revision(9),
         }
         .encode();
@@ -773,10 +784,10 @@ mod tests {
             tile(0x0009, 2, 2, 0),
         ];
         let detail = DesignDetail {
-            serial: RawSerial(0x4000_0001),
+            serial:   RawSerial(0x4000_0001),
             revision: Revision(4),
             response: true,
-            tiles: &tiles,
+            tiles:    &tiles,
         };
         let bytes = detail.encode(floors_below(0x1000));
         let bounds = DesignBounds::of(&tiles).unwrap();
@@ -802,10 +813,10 @@ mod tests {
             tile(0x2001, 4, 4, 7),
         ];
         let detail = DesignDetail {
-            serial: RawSerial(2),
+            serial:   RawSerial(2),
             revision: Revision(1),
             response: false,
-            tiles: &tiles,
+            tiles:    &tiles,
         };
         let bytes = detail.encode(floors_below(0x1000));
         let bounds = DesignBounds::of(&tiles).unwrap();
@@ -820,10 +831,10 @@ mod tests {
     fn a_tile_at_an_unusual_height_goes_through_the_stair_buffer() {
         let tiles = vec![tile(0x0020, 1, 1, 0), tile(0x0021, 2, 3, 13)];
         let detail = DesignDetail {
-            serial: RawSerial(3),
+            serial:   RawSerial(3),
             revision: Revision(2),
             response: false,
-            tiles: &tiles,
+            tiles:    &tiles,
         };
         let bytes = detail.encode(floors_below(0x1000));
         let bounds = DesignBounds::of(&tiles).unwrap();
@@ -838,10 +849,10 @@ mod tests {
     fn overlapping_tiles_survive_through_the_stair_buffer() {
         let tiles = vec![tile(0x0030, 1, 1, 0), tile(0x0031, 1, 1, 0)];
         let detail = DesignDetail {
-            serial: RawSerial(3),
+            serial:   RawSerial(3),
             revision: Revision(2),
             response: false,
-            tiles: &tiles,
+            tiles:    &tiles,
         };
         let bytes = detail.encode(floors_below(0x1000));
         let bounds = DesignBounds::of(&tiles).unwrap();
@@ -860,10 +871,10 @@ mod tests {
             tile(0x2032, -3, -3, 27),
         ];
         let detail = DesignDetail {
-            serial: RawSerial(4),
+            serial:   RawSerial(4),
             revision: Revision(3),
             response: false,
-            tiles: &tiles,
+            tiles:    &tiles,
         };
         let bytes = detail.encode(floors_below(0x1000));
         let bounds = DesignBounds::of(&tiles).unwrap();
@@ -881,16 +892,16 @@ mod tests {
             tile(0x2032, 8, 1, 7),
         ];
         let foundation = DesignBounds {
-            x_min: -2,
-            y_min: -2,
-            width: 5,
+            x_min:  -2,
+            y_min:  -2,
+            width:  5,
             height: 5,
         };
         let bytes = DesignDetail {
-            serial: RawSerial(5),
+            serial:   RawSerial(5),
             revision: Revision(1),
             response: false,
-            tiles: &tiles,
+            tiles:    &tiles,
         }
         .encode_with_bounds(foundation, floors_below(0x1000));
         let back = DesignDetail::decode(&bytes, foundation).unwrap();
@@ -905,9 +916,9 @@ mod tests {
     #[test]
     fn a_full_foundation_keeps_its_floor_and_roof_rows() {
         let foundation = DesignBounds {
-            x_min: -5,
-            y_min: -5,
-            width: 12,
+            x_min:  -5,
+            y_min:  -5,
+            width:  12,
             height: 12,
         };
         let mut tiles = Vec::new();
@@ -918,10 +929,10 @@ mod tests {
             tiles.push(tile(0x0597, 6, y, 47));
         }
         let bytes = DesignDetail {
-            serial: RawSerial(6),
+            serial:   RawSerial(6),
             revision: Revision(1),
             response: true,
-            tiles: &tiles,
+            tiles:    &tiles,
         }
         .encode_with_bounds(foundation, |graphic| graphic.0 == 0x049C);
 
@@ -935,10 +946,10 @@ mod tests {
     fn the_header_is_laid_out_where_the_client_looks_for_it() {
         let tiles = vec![tile(0x0006, 0, 0, 0)];
         let bytes = DesignDetail {
-            serial: RawSerial(0x0000_ABCD),
+            serial:   RawSerial(0x0000_ABCD),
             revision: Revision(0x0000_0007),
             response: true,
-            tiles: &tiles,
+            tiles:    &tiles,
         }
         .encode(floors_below(0x1000));
 
@@ -971,7 +982,7 @@ mod tests {
     #[test]
     fn a_plane_longer_than_a_byte_folds_its_length_into_the_shared_nibble() {
         let plane = Plane {
-            index: 0x20,
+            index:    0x20,
             inflated: 0x123,
             deflated: vec![0; 0x45],
         };
@@ -993,17 +1004,17 @@ mod tests {
     #[test]
     fn an_empty_design_encodes_no_planes() {
         let bytes = DesignDetail {
-            serial: RawSerial(5),
+            serial:   RawSerial(5),
             revision: Revision(0),
             response: false,
-            tiles: &[],
+            tiles:    &[],
         }
         .encode(floors_below(0x1000));
         assert_eq!(bytes[17], 0, "no planes");
         let bounds = DesignBounds {
-            x_min: 0,
-            y_min: 0,
-            width: 1,
+            x_min:  0,
+            y_min:  0,
+            width:  1,
             height: 1,
         };
         assert!(DesignDetail::decode(&bytes, bounds).unwrap().tiles.is_empty());
@@ -1015,10 +1026,10 @@ mod tests {
     fn a_truncated_design_is_refused_not_panicked() {
         let tiles = vec![tile(0x0006, 0, 0, 0), tile(0x0007, 1, 1, 7)];
         let full = DesignDetail {
-            serial: RawSerial(6),
+            serial:   RawSerial(6),
             revision: Revision(1),
             response: false,
-            tiles: &tiles,
+            tiles:    &tiles,
         }
         .encode(floors_below(0x1000));
         let bounds = DesignBounds::of(&tiles).unwrap();
@@ -1033,10 +1044,10 @@ mod tests {
     fn a_plane_that_will_not_inflate_fails_the_whole_design() {
         let tiles = vec![tile(0x0006, 0, 0, 0)];
         let mut bytes = DesignDetail {
-            serial: RawSerial(7),
+            serial:   RawSerial(7),
             revision: Revision(1),
             response: false,
-            tiles: &tiles,
+            tiles:    &tiles,
         }
         .encode(floors_below(0x1000));
         // Past the header and the plane's own four bytes: the blob itself.

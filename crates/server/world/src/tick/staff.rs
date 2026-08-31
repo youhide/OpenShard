@@ -1,7 +1,11 @@
-use super::*;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
-use openshard_state::{Drawn, kind_from_drawn};
+use openshard_state::{
+    Drawn,
+    kind_from_drawn,
+};
+
+use super::*;
 
 impl World {
     /// Act on a targeting cursor's answer. Looks up what the cursor was raised for
@@ -125,14 +129,16 @@ impl World {
                     .object
                     .and_then(|serial| self.state.registry.entity_of(serial));
                 match target {
-                    Some(target) => match openshard_guilds::invite(&mut self.state, actor, target) {
-                        Ok(()) => {
-                            self.notify_self(actor, "They have been asked.");
-                            self.state
-                                .system_message(target, "You have been asked to join a guild.");
+                    Some(target) => {
+                        match openshard_guilds::invite(&mut self.state, actor, target) {
+                            Ok(()) => {
+                                self.notify_self(actor, "They have been asked.");
+                                self.state
+                                    .system_message(target, "You have been asked to join a guild.");
+                            }
+                            Err(refusal) => self.notify_self(actor, refusal.message()),
                         }
-                        Err(refusal) => self.notify_self(actor, refusal.message()),
-                    },
+                    }
                     None => self.notify_self(actor, "That cannot join a guild."),
                 }
             }
@@ -143,14 +149,16 @@ impl World {
                     .object
                     .and_then(|serial| self.state.registry.entity_of(serial));
                 match target {
-                    Some(target) => match openshard_party::invite(&mut self.state, actor, target) {
-                        Ok(()) => {
-                            self.notify_self(actor, "They have been asked along.");
-                            self.state
-                                .system_message(target, "You have been invited to join a party.");
+                    Some(target) => {
+                        match openshard_party::invite(&mut self.state, actor, target) {
+                            Ok(()) => {
+                                self.notify_self(actor, "They have been asked along.");
+                                self.state
+                                    .system_message(target, "You have been invited to join a party.");
+                            }
+                            Err(refusal) => self.notify_self(actor, refusal.message()),
                         }
-                        Err(refusal) => self.notify_self(actor, refusal.message()),
-                    },
+                    }
                     None => self.notify_self(actor, "That cannot join a party."),
                 }
             }
@@ -276,56 +284,60 @@ impl World {
             crate::admin::ButtonAction::OpenItemCreator => {
                 crate::admin::open_item_creator(&mut self.state, actor);
             }
-            crate::admin::ButtonAction::CreateItem => match crate::admin::item_request(&response) {
-                Ok(item) => {
-                    let Some(serial) = self.state.registry.serial_of(actor) else {
-                        return;
-                    };
-                    let created = if let Some((kind, material)) = kind_from_drawn(Drawn {
-                        id: item.graphic,
-                        hue: item.hue,
-                    }) {
-                        // F1's free-form art fields stay useful for client assets
-                        // that have not entered the registry. A known projection,
-                        // however, is created from its durable identity rather
-                        // than through a legacy art/hue compatibility path.
-                        items::give_kind_to_backpack(
-                            &mut self.state,
-                            serial,
-                            kind,
-                            material,
-                            item.amount,
-                            item.stackable,
-                        )
-                    } else {
-                        items::give_to_backpack(
-                            &mut self.state,
-                            serial,
-                            item.graphic,
-                            item.hue,
-                            item.amount,
-                            item.stackable,
-                        )
-                    };
-                    if created {
-                        gm::notify(
-                            &mut self.state,
-                            actor,
-                            &format!(
-                                "Created {} of {:#06x} in your backpack.",
-                                item.amount, item.graphic.0
-                            ),
-                        );
-                    } else {
-                        gm::notify(&mut self.state, actor, "Your backpack cannot hold that item.");
+            crate::admin::ButtonAction::CreateItem => {
+                match crate::admin::item_request(&response) {
+                    Ok(item) => {
+                        let Some(serial) = self.state.registry.serial_of(actor) else {
+                            return;
+                        };
+                        let created = if let Some((kind, material)) = kind_from_drawn(Drawn {
+                            id:  item.graphic,
+                            hue: item.hue,
+                        }) {
+                            // F1's free-form art fields stay useful for client assets
+                            // that have not entered the registry. A known projection,
+                            // however, is created from its durable identity rather
+                            // than through a legacy art/hue compatibility path.
+                            items::give_kind_to_backpack(
+                                &mut self.state,
+                                serial,
+                                kind,
+                                material,
+                                item.amount,
+                                item.stackable,
+                            )
+                        } else {
+                            items::give_to_backpack(
+                                &mut self.state,
+                                serial,
+                                item.graphic,
+                                item.hue,
+                                item.amount,
+                                item.stackable,
+                            )
+                        };
+                        if created {
+                            gm::notify(
+                                &mut self.state,
+                                actor,
+                                &format!(
+                                    "Created {} of {:#06x} in your backpack.",
+                                    item.amount, item.graphic.0
+                                ),
+                            );
+                        } else {
+                            gm::notify(&mut self.state, actor, "Your backpack cannot hold that item.");
+                        }
                     }
+                    Err(message) => gm::notify(&mut self.state, actor, message),
                 }
-                Err(message) => gm::notify(&mut self.state, actor, message),
-            },
-            crate::admin::ButtonAction::PlaceCreature => match crate::admin::creature_kind(&response) {
-                Ok(kind) => crate::admin::begin_creature_placement(&mut self.state, actor, kind),
-                Err(message) => gm::notify(&mut self.state, actor, message),
-            },
+            }
+            crate::admin::ButtonAction::PlaceCreature => {
+                match crate::admin::creature_kind(&response) {
+                    Ok(kind) => crate::admin::begin_creature_placement(&mut self.state, actor, kind),
+                    Err(message) => gm::notify(&mut self.state, actor, message),
+                }
+            }
         }
     }
 }
@@ -344,8 +356,8 @@ impl World {
             if let Some(backpack) = items::backpack_of(&self.state, thief) {
                 let contained = openshard_state::components::Contained {
                     container: backpack,
-                    position: GumpPoint::new(60, 60),
-                    grid: GridSlot(0),
+                    position:  GumpPoint::new(60, 60),
+                    grid:      GridSlot(0),
                 };
                 relocate_item(
                     &mut self.state,

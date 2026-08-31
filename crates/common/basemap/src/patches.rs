@@ -54,9 +54,15 @@
 //! live publish that C2 builds.
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use openshard_map::codec::{self, PatchDecodeError};
+use openshard_map::codec::{
+    self,
+    PatchDecodeError,
+};
 use openshard_map::patch::Patch;
 use openshard_map::snapshot::MapRevision;
 use openshard_protocol::world::Facet;
@@ -92,14 +98,14 @@ pub enum LogError {
     /// The file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
     /// The file could not be written.
     Write {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
@@ -111,18 +117,18 @@ pub enum LogError {
     /// The file is a log of a layout this build does not read.
     Version {
         /// Which file.
-        path: PathBuf,
+        path:  PathBuf,
         /// What it says it is.
         found: u8,
     },
     /// The log is of a different facet than the base set it was found beside.
     WrongFacet {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// The facet the base set is.
         wanted: Facet,
         /// The facet the log says it is for.
-        found: Facet,
+        found:  Facet,
     },
     /// The log was written over a different revision of the world.
     ///
@@ -131,36 +137,36 @@ pub enum LogError {
     /// carry what they replace as well.
     WrongBase {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// The revision the base set is at.
         wanted: MapRevision,
         /// The revision the log says it lies over.
-        found: MapRevision,
+        found:  MapRevision,
     },
     /// The file ends in the middle of a record.
     Truncated {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Which record, counted from zero.
-        at: usize,
+        at:     usize,
         /// How many bytes that record wants.
         wanted: usize,
         /// How many are left.
-        found: usize,
+        found:  usize,
     },
     /// A record's bytes are not the bytes its checksum was taken over.
     Corrupt {
         /// Which file.
         path: PathBuf,
         /// Which record.
-        at: usize,
+        at:   usize,
     },
     /// A record is not a patch.
     Patch {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Which record.
-        at: usize,
+        at:     usize,
         /// Why it is not one.
         source: PatchDecodeError,
     },
@@ -178,46 +184,58 @@ impl std::fmt::Display for LogError {
                     path.display()
                 )
             }
-            Self::Version { path, found } => write!(
-                f,
-                "{} is a version {found} patch log, and this build reads version {VERSION}",
-                path.display()
-            ),
-            Self::WrongFacet { path, wanted, found } => write!(
-                f,
-                "patch log {} is for facet {}, and it lies beside a base set of facet {}",
-                path.display(),
-                found.0,
-                wanted.0
-            ),
-            Self::WrongBase { path, wanted, found } => write!(
-                f,
-                "patch log {} was written over revision {} of this facet, and the base set beside \
+            Self::Version { path, found } => {
+                write!(
+                    f,
+                    "{} is a version {found} patch log, and this build reads version {VERSION}",
+                    path.display()
+                )
+            }
+            Self::WrongFacet { path, wanted, found } => {
+                write!(
+                    f,
+                    "patch log {} is for facet {}, and it lies beside a base set of facet {}",
+                    path.display(),
+                    found.0,
+                    wanted.0
+                )
+            }
+            Self::WrongBase { path, wanted, found } => {
+                write!(
+                    f,
+                    "patch log {} was written over revision {} of this facet, and the base set beside \
                  it is revision {}",
-                path.display(),
-                found.get(),
-                wanted.get()
-            ),
+                    path.display(),
+                    found.get(),
+                    wanted.get()
+                )
+            }
             Self::Truncated {
                 path,
                 at,
                 wanted,
                 found,
-            } => write!(
-                f,
-                "patch log {} ends inside record {at}, which wants {wanted} bytes and has {found}",
-                path.display()
-            ),
-            Self::Corrupt { path, at } => write!(
-                f,
-                "record {at} of patch log {} does not match its checksum",
-                path.display()
-            ),
-            Self::Patch { path, at, source } => write!(
-                f,
-                "record {at} of patch log {} is not a patch: {source}",
-                path.display()
-            ),
+            } => {
+                write!(
+                    f,
+                    "patch log {} ends inside record {at}, which wants {wanted} bytes and has {found}",
+                    path.display()
+                )
+            }
+            Self::Corrupt { path, at } => {
+                write!(
+                    f,
+                    "record {at} of patch log {} does not match its checksum",
+                    path.display()
+                )
+            }
+            Self::Patch { path, at, source } => {
+                write!(
+                    f,
+                    "record {at} of patch log {} is not a patch: {source}",
+                    path.display()
+                )
+            }
         }
     }
 }
@@ -271,7 +289,7 @@ fn check_header(path: &Path, header: &[u8], facet: Facet, base: MapRevision) -> 
     }
     if header[4] != VERSION {
         return Err(LogError::Version {
-            path: path.to_owned(),
+            path:  path.to_owned(),
             found: header[4],
         });
     }
@@ -286,9 +304,9 @@ fn check_header(path: &Path, header: &[u8], facet: Facet, base: MapRevision) -> 
     let over = MapRevision::decoded(u64::from_le_bytes(header[6..14].try_into().expect("eight bytes")));
     if over != base {
         return Err(LogError::WrongBase {
-            path: path.to_owned(),
+            path:   path.to_owned(),
             wanted: base,
-            found: over,
+            found:  over,
         });
     }
     Ok(())
@@ -300,36 +318,38 @@ fn read_records(path: &Path, bytes: &[u8]) -> Result<Vec<Patch>, LogError> {
     let mut read = 0;
     while read < bytes.len() {
         let at = patches.len();
-        let frame = bytes
-            .get(read..read + FRAME_BYTES)
-            .ok_or_else(|| LogError::Truncated {
+        let frame = bytes.get(read..read + FRAME_BYTES).ok_or_else(|| {
+            LogError::Truncated {
                 path: path.to_owned(),
                 at,
                 wanted: FRAME_BYTES,
                 found: bytes.len() - read,
-            })?;
+            }
+        })?;
         let length = u32::from_le_bytes(frame[..4].try_into().expect("four bytes")) as usize;
         let checksum = u32::from_le_bytes(frame[4..].try_into().expect("four bytes"));
 
         let from = read + FRAME_BYTES;
-        let payload = bytes
-            .get(from..from + length)
-            .ok_or_else(|| LogError::Truncated {
+        let payload = bytes.get(from..from + length).ok_or_else(|| {
+            LogError::Truncated {
                 path: path.to_owned(),
                 at,
                 wanted: FRAME_BYTES + length,
                 found: bytes.len() - read,
-            })?;
+            }
+        })?;
         if fnv1a(payload) != checksum {
             return Err(LogError::Corrupt {
                 path: path.to_owned(),
                 at,
             });
         }
-        patches.push(codec::decode_patch(payload).map_err(|source| LogError::Patch {
-            path: path.to_owned(),
-            at,
-            source,
+        patches.push(codec::decode_patch(payload).map_err(|source| {
+            LogError::Patch {
+                path: path.to_owned(),
+                at,
+                source,
+            }
         })?);
         read = from + length;
     }
@@ -355,9 +375,11 @@ pub fn append(path: &Path, facet: Facet, base: MapRevision, patch: &Patch) -> Re
         header.push(VERSION);
         header.push(facet.0);
         header.extend_from_slice(&base.get().to_le_bytes());
-        std::fs::write(path, &header).map_err(|source| LogError::Write {
-            path: path.to_owned(),
-            source,
+        std::fs::write(path, &header).map_err(|source| {
+            LogError::Write {
+                path: path.to_owned(),
+                source,
+            }
         })?;
     } else {
         // The header of the file we are about to write into, checked against
@@ -380,9 +402,11 @@ pub fn append(path: &Path, facet: Facet, base: MapRevision, patch: &Patch) -> Re
         file.write_all(frame)?;
         file.flush()
     };
-    append(&record).map_err(|source| LogError::Write {
-        path: path.to_owned(),
-        source,
+    append(&record).map_err(|source| {
+        LogError::Write {
+            path: path.to_owned(),
+            source,
+        }
     })
 }
 
@@ -397,9 +421,11 @@ fn read_header(path: &Path, facet: Facet, base: MapRevision) -> Result<(), LogEr
 /// The first bytes of a file, or the error of a file too short to have them.
 fn read_exact(path: &Path, into: &mut [u8]) -> Result<(), LogError> {
     use std::io::Read;
-    let mut file = std::fs::File::open(path).map_err(|source| LogError::Read {
-        path: path.to_owned(),
-        source,
+    let mut file = std::fs::File::open(path).map_err(|source| {
+        LogError::Read {
+            path: path.to_owned(),
+            source,
+        }
     })?;
     file.read_exact(into).map_err(|source| {
         if source.kind() == std::io::ErrorKind::UnexpectedEof {

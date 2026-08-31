@@ -100,11 +100,23 @@
 //! install would move every wall's face by a rule nobody could see.
 
 use std::collections::BTreeMap;
-use std::fmt::{self, Write};
+use std::fmt::{
+    self,
+    Write,
+};
 
 use openshard_protocol::wire::Graphic;
 
-use crate::facing::{Block, Blocks, Face, Facing, Footprint, Hole, Prism, Span};
+use crate::facing::{
+    Block,
+    Blocks,
+    Face,
+    Facing,
+    Footprint,
+    Hole,
+    Prism,
+    Span,
+};
 use crate::occlusion::Shape;
 
 /// The version of this file format.
@@ -161,9 +173,9 @@ pub const FORMAT: u32 = 5;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Stamp {
     /// The art container's file name, as the tool found it.
-    pub art: String,
+    pub art:      String,
     /// Its length in bytes.
-    pub bytes: u64,
+    pub bytes:    u64,
     /// [`crate::facing::DETECTOR`] at the time it was written.
     pub detector: u32,
 }
@@ -175,7 +187,7 @@ struct Row {
     /// `None` is a graphic nothing may be said about — which is only ever written
     /// down when a person said so, since a derived refusal is the absence of a
     /// row.
-    shape: Shape,
+    shape:    Shape,
     /// Whether a person wrote this row. The tool leaves it alone.
     authored: bool,
 }
@@ -191,21 +203,21 @@ pub struct ArtTable {
     /// What it was measured from, or `None` for a sheet of overrides — a file
     /// with rows and no install behind them, which is what ships in this
     /// repository. A table with no stamp is never [`fresh`](Self::fresh).
-    stamp: Option<Stamp>,
+    stamp:    Option<Stamp>,
     /// How many graphics with art were offered to the detector. Zero for an
     /// override sheet, and the reason an absent row means "refused" for a
     /// measured table and nothing at all for a sheet.
     examined: usize,
-    rows: BTreeMap<Graphic, Row>,
+    rows:     BTreeMap<Graphic, Row>,
 }
 
 impl ArtTable {
     /// An empty table that says what it is about to be measured from.
     pub fn measured(stamp: Stamp) -> Self {
         Self {
-            stamp: Some(stamp),
+            stamp:    Some(stamp),
             examined: 0,
-            rows: BTreeMap::new(),
+            rows:     BTreeMap::new(),
         }
     }
 
@@ -231,13 +243,15 @@ impl ArtTable {
             // without the plane there is nothing to write down, and
             // `aperture_of` refuses one for the same reason at the other end.
             (None, None, None) => self.rows.remove(&graphic),
-            _ => self.rows.insert(
-                graphic,
-                Row {
-                    shape,
-                    authored: false,
-                },
-            ),
+            _ => {
+                self.rows.insert(
+                    graphic,
+                    Row {
+                        shape,
+                        authored: false,
+                    },
+                )
+            }
         };
     }
 
@@ -415,10 +429,12 @@ impl ArtTable {
             }
             let footprint = match row.shape.footprint {
                 None => String::new(),
-                Some(footprint) => format!(
-                    " footprint {} {} {} {}",
-                    footprint.x.min, footprint.x.max, footprint.y.min, footprint.y.max
-                ),
+                Some(footprint) => {
+                    format!(
+                        " footprint {} {} {} {}",
+                        footprint.x.min, footprint.x.max, footprint.y.min, footprint.y.max
+                    )
+                }
             };
             let authored = if row.authored { " authored" } else { "" };
             writeln!(
@@ -492,11 +508,13 @@ impl ArtTable {
         // detector version behind it is a claim about art with no claim about the
         // rules that read it, and half a stamp would pass `fresh` half the time.
         table.stamp = match (art, detector) {
-            (Some((name, bytes)), Some(detector)) => Some(Stamp {
-                art: name,
-                bytes,
-                detector,
-            }),
+            (Some((name, bytes)), Some(detector)) => {
+                Some(Stamp {
+                    art: name,
+                    bytes,
+                    detector,
+                })
+            }
             (None, None) => None,
             _ => return Err(TableError::HalfStamped),
         };
@@ -546,9 +564,11 @@ fn row(
     at: usize,
 ) -> Result<(Graphic, Row), TableError> {
     let digits = head.strip_prefix("0x").unwrap_or(head);
-    let graphic = u16::from_str_radix(digits, 16).map_err(|_| TableError::Line {
-        at,
-        detail: "a row starts with a graphic in hex",
+    let graphic = u16::from_str_radix(digits, 16).map_err(|_| {
+        TableError::Line {
+            at,
+            detail: "a row starts with a graphic in hex",
+        }
     })?;
     let bad = TableError::Line {
         at,
@@ -589,10 +609,10 @@ fn row(
             }
             let mut span = || number::<u8>(words, at, "a hole is `near far bottom top`");
             Some(Hole {
-                near: span()?,
-                far: span()?,
+                near:   span()?,
+                far:    span()?,
                 bottom: span()?,
-                top: span()?,
+                top:    span()?,
             })
         }
         _ => None,
@@ -721,7 +741,7 @@ pub enum TableError {
     /// A line this could not read, and what was expected on it.
     Line {
         /// Which line, counting from one.
-        at: usize,
+        at:     usize,
         /// What was wanted there.
         detail: &'static str,
     },
@@ -740,7 +760,8 @@ impl fmt::Display for TableError {
     }
 }
 
-impl std::error::Error for TableError {}
+impl std::error::Error for TableError {
+}
 
 #[cfg(test)]
 mod tests {
@@ -748,8 +769,8 @@ mod tests {
 
     fn stamp() -> Stamp {
         Stamp {
-            art: "artLegacyMUL.uop".to_string(),
-            bytes: 447_160_596,
+            art:      "artLegacyMUL.uop".to_string(),
+            bytes:    447_160_596,
             detector: crate::facing::DETECTOR,
         }
     }
@@ -774,10 +795,10 @@ mod tests {
         table.derive(
             Graphic(0x003C),
             Shape {
-                facing: Some(Facing::One(Face::East)),
-                hole: Some(WINDOW),
-                prism: None,
-                blocks: Blocks::EMPTY,
+                facing:    Some(Facing::One(Face::East)),
+                hole:      Some(WINDOW),
+                prism:     None,
+                blocks:    Blocks::EMPTY,
                 footprint: None,
             },
         );
@@ -785,7 +806,7 @@ mod tests {
             Graphic(0x0104),
             Shape::faced(Facing::Corner {
                 right: Face::East,
-                left: Face::South,
+                left:  Face::South,
             }),
         );
         table.derive(Graphic(0x0009), Shape::UNREAD);
@@ -806,10 +827,10 @@ mod tests {
     /// `0x003C`'s own hole, as the detector reads it off a real install: the
     /// middle third of the tile, from ten `z` above the sill to fifteen.
     const WINDOW: Hole = Hole {
-        near: 93,
-        far: 185,
+        near:   93,
+        far:    185,
         bottom: 10,
-        top: 15,
+        top:    15,
     };
 
     /// A graphic the detector refused has no row, and that is how a reader tells
@@ -985,13 +1006,13 @@ mod tests {
         table.derive(
             Graphic(0x0166),
             Shape {
-                facing: Some(Facing::Corner {
+                facing:    Some(Facing::Corner {
                     right: Face::East,
-                    left: Face::South,
+                    left:  Face::South,
                 }),
-                hole: None,
-                prism: Some(stair),
-                blocks: Blocks::EMPTY,
+                hole:      None,
+                prism:     Some(stair),
+                blocks:    Blocks::EMPTY,
                 footprint: None,
             },
         );
@@ -1007,7 +1028,7 @@ mod tests {
             read.facing(Graphic(0x0166)),
             Some(Facing::Corner {
                 right: Face::East,
-                left: Face::South,
+                left:  Face::South,
             }),
             "the corner is still there: which of the two is believed is the grid's call",
         );

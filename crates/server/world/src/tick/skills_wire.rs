@@ -6,12 +6,26 @@
 //! here in `world` because drawing a mobile's state on a screen is the world's
 //! job, the same seam `send_status` (`0x11`) sits on.
 
-use super::*;
-use openshard_protocol::skill::{SkillEntry, SkillLock, SkillUpdate, SkillsFull, skill_count};
+use openshard_protocol::skill::{
+    SkillEntry,
+    SkillLock,
+    SkillUpdate,
+    SkillsFull,
+    skill_count,
+};
 use openshard_protocol::wire::RawSkillId;
 use openshard_skills::SkillChanged;
-use openshard_state::components::{ItemKind, Skills, StatLocks};
-use openshard_state::{Skill, StatLock};
+use openshard_state::components::{
+    ItemKind,
+    Skills,
+    StatLocks,
+};
+use openshard_state::{
+    Skill,
+    StatLock,
+};
+
+use super::*;
 
 impl World {
     /// A client moved a skill's up/down/lock arrow: store it. ServUO's
@@ -86,8 +100,8 @@ impl World {
             &ServerPacket::StatLocks(openshard_protocol::mobile::StatLocks {
                 serial,
                 locks: StatLockBits {
-                    strength: locks.strength.to_wire(),
-                    dexterity: locks.dexterity.to_wire(),
+                    strength:     locks.strength.to_wire(),
+                    dexterity:    locks.dexterity.to_wire(),
                     intelligence: locks.intelligence.to_wire(),
                 },
             }),
@@ -104,13 +118,13 @@ impl World {
     fn skill_entry(&self, entity: EntityId, skill: Skill) -> SkillEntry {
         let skills = self.state.registry.get::<Skills>(entity);
         SkillEntry {
-            id: skill.id(),
+            id:    skill.id(),
             value: openshard_skills::skill_value(&self.state, entity, skill),
-            base: skills.map_or(0, |s| s.get(skill)),
-            lock: skills.map_or(SkillLock::Up, |s| s.lock(skill)),
+            base:  skills.map_or(0, |s| s.get(skill)),
+            lock:  skills.map_or(SkillLock::Up, |s| s.lock(skill)),
             // Per skill, not one number for the sheet: a cap is the mobile's own,
             // and only falls back to the shard's for a mobile with no sheet yet.
-            cap: skills.map_or(self.state.gameplay.skill_cap, |s| s.cap(skill)),
+            cap:   skills.map_or(self.state.gameplay.skill_cap, |s| s.cap(skill)),
         }
     }
 
@@ -237,11 +251,12 @@ impl World {
     fn open_craft_window(&mut self, player: EntityId, tool: EntityId) {
         let system = match self.state.registry.get::<ItemKind>(tool) {
             Some(kind) => crafting::tool_system_for_kind(kind.0),
-            None => self
-                .state
-                .registry
-                .get::<Drawn>(tool)
-                .and_then(|graphic| crafting::tool_system(graphic.id)),
+            None => {
+                self.state
+                    .registry
+                    .get::<Drawn>(tool)
+                    .and_then(|graphic| crafting::tool_system(graphic.id))
+            }
         };
         let Some(system) = system else {
             return;

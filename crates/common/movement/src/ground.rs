@@ -41,11 +41,24 @@
 //! to every function that writes it, and a table that arrives after the ground
 //! did needs [`Ground::rebake`].
 
-use openshard_map::chunk::{Chunk, ChunkCoord};
+use openshard_map::chunk::{
+    Chunk,
+    ChunkCoord,
+};
 use openshard_map::overlay::Overlay;
-use openshard_map::patch::{Patch, PatchError, Undo};
-use openshard_map::snapshot::{MapRevision, MapSnapshot};
-use openshard_map::world::{ChunksError, World};
+use openshard_map::patch::{
+    Patch,
+    PatchError,
+    Undo,
+};
+use openshard_map::snapshot::{
+    MapRevision,
+    MapSnapshot,
+};
+use openshard_map::world::{
+    ChunksError,
+    World,
+};
 use openshard_tiles::TileData;
 
 use crate::spans::SpanIndex;
@@ -246,20 +259,29 @@ impl Ground {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use openshard_map::grid::{BlockExtent, Tile};
-    use openshard_map::map::{LandCell, WorldMap};
+    use openshard_map::grid::{
+        BlockExtent,
+        Tile,
+    };
+    use openshard_map::map::{
+        LandCell,
+        WorldMap,
+    };
     use openshard_map::overlay::Cover;
     use openshard_protocol::world::Facet;
     use openshard_tiles::LandTileId;
+
+    use super::*;
 
     /// One block of flat ground at `z`.
     fn facet(z: i8) -> MapSnapshot {
         MapSnapshot::new(
             Facet(0),
-            WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-                tile: LandTileId(0),
-                z,
+            WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+                LandCell {
+                    tile: LandTileId(0),
+                    z,
+                }
             }),
         )
     }
@@ -345,7 +367,7 @@ mod tests {
                 y,
                 LandCell {
                     tile: LandTileId(0),
-                    z: 30,
+                    z:    30,
                 },
             )
             .expect("a tile on the map")

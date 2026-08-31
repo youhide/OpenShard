@@ -8,11 +8,21 @@
 
 use crate::access::OPENSHARD_SUBCOMMANDS;
 use crate::chunks::WorldRevision;
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+};
 use crate::version::ClientVersion;
-use crate::wire::{Graphic, Hue};
+use crate::wire::{
+    Graphic,
+    Hue,
+};
 use crate::world::Facet;
 
 /// The most operations one commit request may carry.
@@ -91,27 +101,27 @@ pub enum MapEditOp {
     /// Replace one land cell.
     SetLand {
         /// Where.
-        at: EditTile,
+        at:   EditTile,
         /// New land tile.
         tile: EditLandTile,
         /// New height.
-        z: EditZ,
+        z:    EditZ,
     },
     /// Add one static after the statics already standing on its tile.
     AddStatic {
         /// Where.
-        at: EditTile,
+        at:      EditTile,
         /// Static art id.
         graphic: Graphic,
         /// Base height.
-        z: EditZ,
+        z:       EditZ,
         /// Tint, or zero.
-        hue: Hue,
+        hue:     Hue,
     },
     /// Remove one static by its ordinal at this point in the request.
     RemoveStatic {
         /// Where.
-        at: EditTile,
+        at:    EditTile,
         /// Which static on that tile.
         which: EditStaticId,
     },
@@ -143,16 +153,20 @@ impl MapEditOp {
                     z: EditZ(reader.u8()? as i8),
                 }
             }
-            Self::ADD_STATIC => Self::AddStatic {
-                at,
-                graphic: Graphic(reader.u16()?),
-                z: EditZ(reader.u8()? as i8),
-                hue: Hue(reader.u16()?),
-            },
-            Self::REMOVE_STATIC => Self::RemoveStatic {
-                at,
-                which: EditStaticId(reader.u16()?),
-            },
+            Self::ADD_STATIC => {
+                Self::AddStatic {
+                    at,
+                    graphic: Graphic(reader.u16()?),
+                    z: EditZ(reader.u8()? as i8),
+                    hue: Hue(reader.u16()?),
+                }
+            }
+            Self::REMOVE_STATIC => {
+                Self::RemoveStatic {
+                    at,
+                    which: EditStaticId(reader.u16()?),
+                }
+            }
             other => {
                 return Err(DecodeError::UnknownValue {
                     field: "map-edit operation",
@@ -191,11 +205,11 @@ impl MapEditOp {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MapEditRequest {
     /// Which facet to edit, still an input until the shard looks it up.
-    pub facet: Facet,
+    pub facet:  Facet,
     /// The exact published revision the editor drew and built ordinals against.
     pub parent: WorldRevision,
     /// Canonical operations, in application order.
-    pub ops: Vec<MapEditOp>,
+    pub ops:    Vec<MapEditOp>,
 }
 
 impl MapEditRequest {
@@ -327,12 +341,12 @@ pub enum MapEditOutcome {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct MapEditReply {
     /// Which requested facet this answers.
-    pub facet: Facet,
+    pub facet:    Facet,
     /// The new revision on acceptance, or the current revision on refusal.
     /// Zero means the facet/revision did not exist or was not disclosed.
     pub revision: WorldRevision,
     /// Accepted or a typed refusal.
-    pub outcome: MapEditOutcome,
+    pub outcome:  MapEditOutcome,
 }
 
 impl MapEditReply {
@@ -425,28 +439,28 @@ mod tests {
     #[test]
     fn a_request_round_trips_through_the_extended_dispatch() {
         let sent = MapEditRequest {
-            facet: Facet(2),
+            facet:  Facet(2),
             parent: WorldRevision(41),
-            ops: vec![
+            ops:    vec![
                 MapEditOp::SetLand {
-                    at: EditTile {
+                    at:   EditTile {
                         x: EditX(12),
                         y: EditY(34),
                     },
                     tile: tile(0x123),
-                    z: EditZ(-7),
+                    z:    EditZ(-7),
                 },
                 MapEditOp::AddStatic {
-                    at: EditTile {
+                    at:      EditTile {
                         x: EditX(12),
                         y: EditY(34),
                     },
                     graphic: Graphic(0x0edd),
-                    z: EditZ(5),
-                    hue: Hue(9),
+                    z:       EditZ(5),
+                    hue:     Hue(9),
                 },
                 MapEditOp::RemoveStatic {
-                    at: EditTile {
+                    at:    EditTile {
                         x: EditX(8),
                         y: EditY(9),
                     },
@@ -486,9 +500,9 @@ mod tests {
     #[test]
     fn trailing_bytes_are_not_silently_ignored() {
         let mut bytes = MapEditRequest {
-            facet: Facet(0),
+            facet:  Facet(0),
             parent: WorldRevision(1),
-            ops: Vec::new(),
+            ops:    Vec::new(),
         }
         .encode();
         bytes.push(0xaa);
@@ -501,14 +515,14 @@ mod tests {
     fn accepted_and_refused_replies_round_trip_through_server_dispatch() {
         for sent in [
             MapEditReply {
-                facet: Facet(0),
+                facet:    Facet(0),
                 revision: WorldRevision(8),
-                outcome: MapEditOutcome::Accepted,
+                outcome:  MapEditOutcome::Accepted,
             },
             MapEditReply {
-                facet: Facet(1),
+                facet:    Facet(1),
                 revision: WorldRevision(7),
-                outcome: MapEditOutcome::Refused(MapEditRefusal::Conflict),
+                outcome:  MapEditOutcome::Refused(MapEditRefusal::Conflict),
             },
         ] {
             let packet = ServerPacket::MapEditReply(sent);

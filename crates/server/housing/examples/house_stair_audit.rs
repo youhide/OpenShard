@@ -21,18 +21,46 @@
 //! and asks the production step rule whether every tread has a legal entry from
 //! at least one neighbouring surface.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{
+    HashMap,
+    HashSet,
+};
 use std::path::PathBuf;
 use std::time::Instant;
 
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Cover, Doors, Overlay};
-use openshard_movement::{Bodies, Footing, MapTerrain, PLAYER_HEIGHT, Walker, can_stand, step_allowed};
-use openshard_protocol::direction::{Direction, Facing};
+use openshard_map::overlay::{
+    Cover,
+    Doors,
+    Overlay,
+};
+use openshard_movement::{
+    Bodies,
+    Footing,
+    MapTerrain,
+    PLAYER_HEIGHT,
+    Walker,
+    can_stand,
+    step_allowed,
+};
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
 use openshard_protocol::wire::Graphic;
-use openshard_protocol::world::{Facet, Point, RawFastwalkKey, RawStepSequence, WalkRequest};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+    RawFastwalkKey,
+    RawStepSequence,
+    WalkRequest,
+};
 use openshard_tiles::TileData;
-use openshard_uofiles::multi::{Component, Multi, Multis};
+use openshard_uofiles::multi::{
+    Component,
+    Multi,
+    Multis,
+};
 
 /// Every classic house this shard permits and equips with its declared doors.
 /// Foundations are absent: their first design derives its own stair strip at
@@ -49,29 +77,29 @@ const BORDER: i32 = 1;
 #[derive(Clone, Copy)]
 struct Stair {
     component: usize,
-    graphic: u16,
-    offset_x: i16,
-    offset_y: i16,
-    offset_z: i16,
-    at: Point,
-    stand_z: i32,
+    graphic:   u16,
+    offset_x:  i16,
+    offset_y:  i16,
+    offset_z:  i16,
+    at:        Point,
+    stand_z:   i32,
 }
 
 struct Inspect {
-    multi: u16,
+    multi:  u16,
     origin: Point,
     target: Tile,
 }
 
 struct Cli {
-    client: PathBuf,
+    client:   PathBuf,
     base_set: Option<PathBuf>,
-    inspect: Option<Inspect>,
-    saved: Option<Saved>,
+    inspect:  Option<Inspect>,
+    saved:    Option<Saved>,
 }
 
 struct Saved {
-    database: PathBuf,
+    database:  PathBuf,
     character: String,
 }
 
@@ -112,7 +140,7 @@ fn cli() -> Result<Cli, String> {
                 .map(|arg| number(arg))
                 .collect::<Result<Vec<_>, _>>()?;
             Some(Inspect {
-                multi: numbers[0],
+                multi:  numbers[0],
                 origin: Point::new(numbers[1], numbers[2], 0),
                 target: Tile::new(numbers[3], numbers[4]),
             })
@@ -133,7 +161,7 @@ fn cli() -> Result<Cli, String> {
                 .get(character_at + 1)
                 .ok_or_else(|| "missing name after --character".to_owned())?;
             Ok::<_, String>(Saved {
-                database: PathBuf::from(database),
+                database:  PathBuf::from(database),
                 character: character.clone(),
             })
         })
@@ -227,7 +255,11 @@ fn inspect_saved_step(
     multis: &Multis,
     saved: &Saved,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use rusqlite::{Connection, OpenFlags, params};
+    use rusqlite::{
+        Connection,
+        OpenFlags,
+        params,
+    };
 
     let database = Connection::open_with_flags(
         &saved.database,
@@ -283,19 +315,21 @@ fn inspect_saved_step(
             .query_map([house_serial], |row| {
                 Ok(Component {
                     graphic: Graphic(row.get(0)?),
-                    dx: row.get(1)?,
-                    dy: row.get(2)?,
-                    dz: row.get(3)?,
-                    flags: row.get(4)?,
+                    dx:      row.get(1)?,
+                    dy:      row.get(2)?,
+                    dz:      row.get(3)?,
+                    flags:   row.get(4)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
         let components = match design.is_empty() {
-            true => multis
-                .get(multi)
-                .ok_or_else(|| format!("saved house {house_serial} names missing multi {multi:#06x}"))?
-                .components
-                .as_slice(),
+            true => {
+                multis
+                    .get(multi)
+                    .ok_or_else(|| format!("saved house {house_serial} names missing multi {multi:#06x}"))?
+                    .components
+                    .as_slice()
+            }
             false => design.as_slice(),
         };
         for (index, component) in components.iter().copied().enumerate().filter(|(_, c)| c.drawn()) {
@@ -413,8 +447,8 @@ fn inspect_saved_step(
     let mut walker = Walker::new(from, request_facing);
     let request_answer = walker.request(
         WalkRequest {
-            facing: request_facing,
-            sequence: RawStepSequence(0),
+            facing:       request_facing,
+            sequence:     RawStepSequence(0),
             fastwalk_key: RawFastwalkKey(0),
         },
         &live,

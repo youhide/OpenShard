@@ -39,7 +39,7 @@ pub struct PartyId(pub Serial);
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Party {
     /// Who leads it, which is also its id.
-    pub leader: Serial,
+    pub leader:     Serial,
     /// Everyone in it, **in order**, the leader first.
     ///
     /// A `Vec` and not a set: the order is on the wire. `PartyMemberList` sends
@@ -51,7 +51,7 @@ pub struct Party {
     /// [`PartyMember`](crate::components::PartyMember) is the reverse index —
     /// "which party is *this* mobile in" — and the crate above is what keeps the
     /// two in step, exactly as it does for a guild's roster.
-    pub members: Vec<Serial>,
+    pub members:    Vec<Serial>,
     /// Who has been asked and has not answered.
     ///
     /// On the party as well as on the candidate, unlike a guild's invitation
@@ -121,10 +121,12 @@ impl Parties {
     /// declined — see `openshard_party::decline`.
     pub fn open(&mut self, leader: Serial) -> PartyId {
         let id = PartyId(leader);
-        self.parties.entry(id).or_insert_with(|| Party {
-            leader,
-            members: vec![leader],
-            candidates: Vec::new(),
+        self.parties.entry(id).or_insert_with(|| {
+            Party {
+                leader,
+                members: vec![leader],
+                candidates: Vec::new(),
+            }
         });
         id
     }

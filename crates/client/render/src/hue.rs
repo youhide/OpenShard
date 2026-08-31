@@ -25,8 +25,14 @@
 use std::fmt;
 
 use openshard_protocol::wire::Hue;
-use openshard_uofiles::color::{Color16, Rgb8};
-use openshard_uofiles::hues::{COLORS_PER_HUE, Hues};
+use openshard_uofiles::color::{
+    Color16,
+    Rgb8,
+};
+use openshard_uofiles::hues::{
+    COLORS_PER_HUE,
+    Hues,
+};
 
 /// Every hue the client knows, packed as a `COLORS_PER_HUE`-wide,
 /// `count`-tall RGBA8 grid: row `n` is `Hue(n + 1)`'s ramp.

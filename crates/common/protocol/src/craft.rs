@@ -5,12 +5,27 @@
 //! let them make. This private `0xBF` request opens the read-only catalogue.
 
 use crate::access::OPENSHARD_SUBCOMMANDS;
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::error::DecodeError;
 use crate::gump::GumpId;
-use crate::item_kind::{ItemKindId, MaterialId};
-use crate::packet::{DecodePacket, EncodePacket, PacketLength, frame_body};
-use crate::wire::{ClilocId, Graphic, Hue};
+use crate::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+    frame_body,
+};
+use crate::wire::{
+    ClilocId,
+    Graphic,
+    Hue,
+};
 
 /// `0xBF.0xE015` — open the craft catalogue without selecting a tool.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -45,12 +60,12 @@ pub struct CraftCatalogueComponent {
     /// Durable input type for a migrated recipe row.
     pub item_kind: Option<ItemKindId>,
     /// Required material when that input is materialized.
-    pub material: Option<MaterialId>,
-    pub graphic: Graphic,
-    pub hue: Hue,
+    pub material:  Option<MaterialId>,
+    pub graphic:   Graphic,
+    pub hue:       Hue,
     /// Localized material name for a human-readable tooltip.
-    pub name: ClilocId,
-    pub amount: u16,
+    pub name:      ClilocId,
+    pub amount:    u16,
 }
 
 /// Combat family used by an item which can be wielded. The catalogue keeps
@@ -89,10 +104,12 @@ impl CraftWeaponKind {
             4 => Ok(Self::Polearm),
             5 => Ok(Self::Staff),
             6 => Ok(Self::Ranged),
-            value => Err(DecodeError::UnknownValue {
-                field: "craft weapon kind",
-                value: u32::from(value),
-            }),
+            value => {
+                Err(DecodeError::UnknownValue {
+                    field: "craft weapon kind",
+                    value: u32::from(value),
+                })
+            }
         }
     }
 }
@@ -101,14 +118,14 @@ impl CraftWeaponKind {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CraftWeaponProperties {
     pub combat_skill: ClilocId,
-    pub kind: CraftWeaponKind,
-    pub damage_min: u16,
-    pub damage_max: u16,
+    pub kind:         CraftWeaponKind,
+    pub damage_min:   u16,
+    pub damage_max:   u16,
     /// Milliseconds would be needless precision; the authoritative ML number
     /// is centiseconds and remains that unit on the wire.
     pub speed_centis: u16,
     /// A ranged weapon's distance in tiles. `None` means melee.
-    pub range: Option<u8>,
+    pub range:        Option<u8>,
 }
 
 /// One locally-scrollable catalogue row.  It contains data, not coordinates:
@@ -116,19 +133,19 @@ pub struct CraftWeaponProperties {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CraftCatalogueRow {
     /// The normal craft-gump reply id for opening this recipe's details.
-    pub button: u32,
-    pub result: Graphic,
-    pub result_hue: Hue,
+    pub button:           u32,
+    pub result:           Graphic,
+    pub result_hue:       Hue,
     /// Durable output type for a migrated recipe row.
     pub result_item_kind: Option<ItemKindId>,
-    pub name: ClilocId,
-    pub skill: ClilocId,
+    pub name:             ClilocId,
+    pub skill:            ClilocId,
     /// The lowest effective skill value allowed to attempt the primary skill
     /// check, in tenths of a percent.
-    pub skill_min: u16,
-    pub ready: bool,
-    pub weapon: Option<CraftWeaponProperties>,
-    pub components: Vec<CraftCatalogueComponent>,
+    pub skill_min:        u16,
+    pub ready:            bool,
+    pub weapon:           Option<CraftWeaponProperties>,
+    pub components:       Vec<CraftCatalogueComponent>,
 }
 
 /// `0xBF.0xE016` — the complete compact data model for a craft catalogue.
@@ -140,7 +157,7 @@ pub struct CraftCatalogueRow {
 pub struct CraftCatalogue {
     /// The gump shell this data belongs to.
     pub gump_id: GumpId,
-    pub rows: Vec<CraftCatalogueRow>,
+    pub rows:    Vec<CraftCatalogueRow>,
 }
 
 /// A localized label used by the interactive craft workbench.
@@ -160,49 +177,49 @@ pub struct CraftWorkbenchComponent {
     /// Durable definition identity when the recipe row has been migrated.
     /// Art below remains a rendering projection.
     pub item_kind: Option<ItemKindId>,
-    pub graphic: Graphic,
-    pub hue: Hue,
-    pub name: CraftText,
-    pub amount: u16,
+    pub graphic:   Graphic,
+    pub hue:       Hue,
+    pub name:      CraftText,
+    pub amount:    u16,
     /// The amount currently in the player's pack. `None` is used for a result.
-    pub carried: Option<u32>,
+    pub carried:   Option<u32>,
 }
 
 /// A category button owned by the server's existing craft-gump reply scheme.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CraftWorkbenchGroup {
-    pub button: u32,
-    pub name: CraftText,
+    pub button:   u32,
+    pub name:     CraftText,
     pub selected: bool,
 }
 
 /// A material-axis choice, including its live pack count.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CraftWorkbenchMaterial {
-    pub button: u32,
+    pub button:    u32,
     /// Resource kind this axis selects (for example ingot, board or leather).
     /// `None` keeps the packet compatible with an unaudited legacy axis.
     pub item_kind: Option<ItemKindId>,
     /// Durable material identity. `None` is an unregistered legacy axis row;
     /// graphic/hue below remain only its rendering projection.
-    pub material: Option<MaterialId>,
-    pub graphic: Graphic,
-    pub hue: Hue,
-    pub name: CraftText,
-    pub carried: u32,
-    pub selected: bool,
+    pub material:  Option<MaterialId>,
+    pub graphic:   Graphic,
+    pub hue:       Hue,
+    pub name:      CraftText,
+    pub carried:   u32,
+    pub selected:  bool,
 }
 
 /// A craft recipe as presented by a tool-specific workbench.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CraftWorkbenchRecipe {
-    pub make_button: Option<u32>,
-    pub details_button: Option<u32>,
-    pub result: CraftWorkbenchComponent,
-    pub skills: Vec<(CraftText, u16)>,
-    pub components: Vec<CraftWorkbenchComponent>,
+    pub make_button:       Option<u32>,
+    pub details_button:    Option<u32>,
+    pub result:            CraftWorkbenchComponent,
+    pub skills:            Vec<(CraftText, u16)>,
+    pub components:        Vec<CraftWorkbenchComponent>,
     pub use_all_resources: bool,
-    pub markable: bool,
+    pub markable:          bool,
 }
 
 /// The page the interactive workbench is currently showing.
@@ -215,8 +232,8 @@ pub enum CraftWorkbenchPage {
         materials: Vec<CraftWorkbenchMaterial>,
     },
     Details {
-        recipe: CraftWorkbenchRecipe,
-        success_per_mille: u16,
+        recipe:                CraftWorkbenchRecipe,
+        success_per_mille:     u16,
         exceptional_per_mille: Option<u16>,
     },
 }
@@ -228,20 +245,20 @@ pub enum CraftWorkbenchPage {
 /// and presentation.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CraftWorkbench {
-    pub gump_id: GumpId,
-    pub title: CraftText,
-    pub groups: Vec<CraftWorkbenchGroup>,
-    pub selected_material: Option<CraftWorkbenchMaterial>,
-    pub tool_uses: Option<u16>,
-    pub tool_carried: bool,
+    pub gump_id:             GumpId,
+    pub title:               CraftText,
+    pub groups:              Vec<CraftWorkbenchGroup>,
+    pub selected_material:   Option<CraftWorkbenchMaterial>,
+    pub tool_uses:           Option<u16>,
+    pub tool_carried:        bool,
     /// Bit set: forge, anvil, fire, oven, mill, water respectively.
     pub required_facilities: u8,
-    pub present_facilities: u8,
-    pub notice: Option<CraftText>,
-    pub materials_button: Option<u32>,
-    pub refresh_button: u32,
-    pub cancel_button: u32,
-    pub page: CraftWorkbenchPage,
+    pub present_facilities:  u8,
+    pub notice:              Option<CraftText>,
+    pub materials_button:    Option<u32>,
+    pub refresh_button:      u32,
+    pub cancel_button:       u32,
+    pub page:                CraftWorkbenchPage,
 }
 
 impl CraftWorkbench {
@@ -268,10 +285,12 @@ fn read_craft_text(reader: &mut PacketReader<'_>) -> Result<CraftText, DecodeErr
     match reader.u8()? {
         0 => Ok(CraftText::Cliloc(ClilocId(reader.u32()?))),
         1 => Ok(CraftText::Literal(reader.null_terminated_string()?)),
-        value => Err(DecodeError::UnknownValue {
-            field: "craft text kind",
-            value: u32::from(value),
-        }),
+        value => {
+            Err(DecodeError::UnknownValue {
+                field: "craft text kind",
+                value: u32::from(value),
+            })
+        }
     }
 }
 
@@ -329,14 +348,14 @@ fn write_material(out: &mut PacketWriter, material: &CraftWorkbenchMaterial) {
 
 fn read_material(reader: &mut PacketReader<'_>) -> Result<CraftWorkbenchMaterial, DecodeError> {
     Ok(CraftWorkbenchMaterial {
-        button: reader.u32()?,
+        button:    reader.u32()?,
         item_kind: ItemKindId::new(reader.u32()?),
-        material: MaterialId::new(reader.u16()?),
-        graphic: Graphic(reader.u16()?),
-        hue: Hue(reader.u16()?),
-        name: read_craft_text(reader)?,
-        carried: reader.u32()?,
-        selected: reader.bool()?,
+        material:  MaterialId::new(reader.u16()?),
+        graphic:   Graphic(reader.u16()?),
+        hue:       Hue(reader.u16()?),
+        name:      read_craft_text(reader)?,
+        carried:   reader.u32()?,
+        selected:  reader.bool()?,
     })
 }
 
@@ -508,8 +527,8 @@ impl DecodePacket for CraftWorkbench {
         let groups = (0..reader.u8()?)
             .map(|_| {
                 Ok(CraftWorkbenchGroup {
-                    button: reader.u32()?,
-                    name: read_craft_text(reader)?,
+                    button:   reader.u32()?,
+                    name:     read_craft_text(reader)?,
                     selected: reader.bool()?,
                 })
             })
@@ -560,16 +579,20 @@ impl DecodePacket for CraftWorkbench {
         let refresh_button = reader.u32()?;
         let cancel_button = reader.u32()?;
         let page = match reader.u8()? {
-            0 => CraftWorkbenchPage::Items {
-                recipes: (0..reader.u16()?)
-                    .map(|_| read_recipe(reader))
-                    .collect::<Result<Vec<_>, DecodeError>>()?,
-            },
-            1 => CraftWorkbenchPage::Resources {
-                materials: (0..reader.u8()?)
-                    .map(|_| read_material(reader))
-                    .collect::<Result<Vec<_>, DecodeError>>()?,
-            },
+            0 => {
+                CraftWorkbenchPage::Items {
+                    recipes: (0..reader.u16()?)
+                        .map(|_| read_recipe(reader))
+                        .collect::<Result<Vec<_>, DecodeError>>()?,
+                }
+            }
+            1 => {
+                CraftWorkbenchPage::Resources {
+                    materials: (0..reader.u8()?)
+                        .map(|_| read_material(reader))
+                        .collect::<Result<Vec<_>, DecodeError>>()?,
+                }
+            }
             2 => {
                 let recipe = read_recipe(reader)?;
                 let success_per_mille = reader.u16()?;
@@ -689,17 +712,19 @@ impl DecodePacket for CraftCatalogue {
             let ready = reader.u8()? != 0;
             let weapon = match reader.u8()? {
                 0 => None,
-                1 => Some(CraftWeaponProperties {
-                    combat_skill: ClilocId(reader.u32()?),
-                    kind: CraftWeaponKind::decode(reader.u8()?)?,
-                    damage_min: reader.u16()?,
-                    damage_max: reader.u16()?,
-                    speed_centis: reader.u16()?,
-                    range: match reader.u8()? {
-                        0 => None,
-                        range => Some(range),
-                    },
-                }),
+                1 => {
+                    Some(CraftWeaponProperties {
+                        combat_skill: ClilocId(reader.u32()?),
+                        kind:         CraftWeaponKind::decode(reader.u8()?)?,
+                        damage_min:   reader.u16()?,
+                        damage_max:   reader.u16()?,
+                        speed_centis: reader.u16()?,
+                        range:        match reader.u8()? {
+                            0 => None,
+                            range => Some(range),
+                        },
+                    })
+                }
                 value => {
                     return Err(DecodeError::UnknownValue {
                         field: "craft weapon presence",
@@ -711,11 +736,11 @@ impl DecodePacket for CraftCatalogue {
                 .map(|_| {
                     Ok(CraftCatalogueComponent {
                         item_kind: ItemKindId::new(reader.u32()?),
-                        material: MaterialId::new(reader.u16()?),
-                        graphic: Graphic(reader.u16()?),
-                        hue: Hue(reader.u16()?),
-                        name: ClilocId(reader.u32()?),
-                        amount: reader.u16()?,
+                        material:  MaterialId::new(reader.u16()?),
+                        graphic:   Graphic(reader.u16()?),
+                        hue:       Hue(reader.u16()?),
+                        name:      ClilocId(reader.u32()?),
+                        amount:    reader.u16()?,
                     })
                 })
                 .collect::<Result<Vec<_>, DecodeError>>()?;
@@ -738,15 +763,17 @@ impl DecodePacket for CraftCatalogue {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::extended::ExtendedRequest;
     use crate::gump::GumpId;
     use crate::packet::encode_packet;
     use crate::server_packet::ServerPacket;
     use crate::version::ClientVersion;
-    use crate::wire::{ClilocId, Graphic, Hue};
-
-    use crate::extended::ExtendedRequest;
-
-    use super::*;
+    use crate::wire::{
+        ClilocId,
+        Graphic,
+        Hue,
+    };
 
     #[test]
     fn the_catalogue_request_round_trips_through_the_extended_envelope() {
@@ -760,30 +787,30 @@ mod tests {
     fn catalogue_rows_round_trip_in_their_own_extended_packet() {
         let sent = CraftCatalogue {
             gump_id: GumpId(0x00AD_0001),
-            rows: vec![CraftCatalogueRow {
-                button: 8,
-                result: Graphic(0x13EB),
-                result_hue: Hue::NONE,
+            rows:    vec![CraftCatalogueRow {
+                button:           8,
+                result:           Graphic(0x13EB),
+                result_hue:       Hue::NONE,
                 result_item_kind: Some(ItemKindId(4)),
-                name: ClilocId(1_022_036),
-                skill: ClilocId(1_044_067),
-                skill_min: 300,
-                ready: true,
-                weapon: Some(CraftWeaponProperties {
+                name:             ClilocId(1_022_036),
+                skill:            ClilocId(1_044_067),
+                skill_min:        300,
+                ready:            true,
+                weapon:           Some(CraftWeaponProperties {
                     combat_skill: ClilocId(1_044_100),
-                    kind: CraftWeaponKind::Slashing,
-                    damage_min: 11,
-                    damage_max: 14,
+                    kind:         CraftWeaponKind::Slashing,
+                    damage_min:   11,
+                    damage_max:   14,
                     speed_centis: 350,
-                    range: None,
+                    range:        None,
                 }),
-                components: vec![CraftCatalogueComponent {
+                components:       vec![CraftCatalogueComponent {
                     item_kind: Some(ItemKindId(1)),
-                    material: Some(MaterialId(1)),
-                    graphic: Graphic(0x1BF2),
-                    hue: Hue::NONE,
-                    name: ClilocId(1_045_000),
-                    amount: 3,
+                    material:  Some(MaterialId(1)),
+                    graphic:   Graphic(0x1BF2),
+                    hue:       Hue::NONE,
+                    name:      ClilocId(1_045_000),
+                    amount:    3,
                 }],
             }],
         };
@@ -797,56 +824,56 @@ mod tests {
     #[test]
     fn workbench_pages_round_trip_through_the_extended_envelope() {
         let sent = CraftWorkbench {
-            gump_id: GumpId(0x00AD_0001),
-            title: CraftText::Literal("Blacksmithy".to_owned()),
-            groups: vec![CraftWorkbenchGroup {
-                button: 1,
-                name: CraftText::Cliloc(ClilocId(1_044_010)),
+            gump_id:             GumpId(0x00AD_0001),
+            title:               CraftText::Literal("Blacksmithy".to_owned()),
+            groups:              vec![CraftWorkbenchGroup {
+                button:   1,
+                name:     CraftText::Cliloc(ClilocId(1_044_010)),
                 selected: true,
             }],
-            selected_material: Some(CraftWorkbenchMaterial {
-                button: 36,
+            selected_material:   Some(CraftWorkbenchMaterial {
+                button:    36,
                 item_kind: Some(ItemKindId(1)),
-                material: Some(MaterialId(1)),
-                graphic: Graphic(0x1BF2),
-                hue: Hue::NONE,
-                name: CraftText::Literal("Iron".to_owned()),
-                carried: 42,
-                selected: true,
+                material:  Some(MaterialId(1)),
+                graphic:   Graphic(0x1BF2),
+                hue:       Hue::NONE,
+                name:      CraftText::Literal("Iron".to_owned()),
+                carried:   42,
+                selected:  true,
             }),
-            tool_uses: Some(50),
-            tool_carried: true,
+            tool_uses:           Some(50),
+            tool_carried:        true,
             required_facilities: 3,
-            present_facilities: 1,
-            notice: Some(CraftText::Literal("An anvil is required.".to_owned())),
-            materials_button: Some(7),
-            refresh_button: 14,
-            cancel_button: 84,
-            page: CraftWorkbenchPage::Details {
-                recipe: CraftWorkbenchRecipe {
-                    make_button: Some(1),
-                    details_button: None,
-                    result: CraftWorkbenchComponent {
+            present_facilities:  1,
+            notice:              Some(CraftText::Literal("An anvil is required.".to_owned())),
+            materials_button:    Some(7),
+            refresh_button:      14,
+            cancel_button:       84,
+            page:                CraftWorkbenchPage::Details {
+                recipe:                CraftWorkbenchRecipe {
+                    make_button:       Some(1),
+                    details_button:    None,
+                    result:            CraftWorkbenchComponent {
                         item_kind: Some(ItemKindId(4)),
-                        graphic: Graphic(0x13EB),
-                        hue: Hue::NONE,
-                        name: CraftText::Literal("Longsword".to_owned()),
-                        amount: 1,
-                        carried: None,
+                        graphic:   Graphic(0x13EB),
+                        hue:       Hue::NONE,
+                        name:      CraftText::Literal("Longsword".to_owned()),
+                        amount:    1,
+                        carried:   None,
                     },
-                    skills: vec![(CraftText::Literal("Blacksmithy".to_owned()), 300)],
-                    components: vec![CraftWorkbenchComponent {
+                    skills:            vec![(CraftText::Literal("Blacksmithy".to_owned()), 300)],
+                    components:        vec![CraftWorkbenchComponent {
                         item_kind: Some(ItemKindId(1)),
-                        graphic: Graphic(0x1BF2),
-                        hue: Hue::NONE,
-                        name: CraftText::Literal("Iron".to_owned()),
-                        amount: 12,
-                        carried: Some(42),
+                        graphic:   Graphic(0x1BF2),
+                        hue:       Hue::NONE,
+                        name:      CraftText::Literal("Iron".to_owned()),
+                        amount:    12,
+                        carried:   Some(42),
                     }],
                     use_all_resources: false,
-                    markable: true,
+                    markable:          true,
                 },
-                success_per_mille: 675,
+                success_per_mille:     675,
                 exceptional_per_mille: Some(75),
             },
         };

@@ -30,13 +30,21 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use openshard_client_render::gump::{self as gump_art, GumpPixel};
-use openshard_client_render::skills;
-use openshard_client_render::vendor;
+use openshard_client_render::gump::{
+    self as gump_art,
+    GumpPixel,
+};
+use openshard_client_render::{
+    skills,
+    vendor,
+};
 use openshard_protocol::gump::GumpId;
 use openshard_protocol::serial::Serial;
 
-use crate::hand::{Hand, ItemPress};
+use crate::hand::{
+    Hand,
+    ItemPress,
+};
 
 /// Where the first container window opens, and how far each one after it is
 /// offset.
@@ -76,10 +84,10 @@ pub struct OwnWindow {
     /// What it is a window over.
     pub subject: WindowSubject,
     /// Its top-left corner on the surface.
-    pub at: GumpPixel,
+    pub at:      GumpPixel,
     /// The window's own state and its own input handling — see
     /// [`crate::panes`].
-    pub pane: crate::panes::AnyPane,
+    pub pane:    crate::panes::AnyPane,
 }
 
 impl OwnWindow {
@@ -222,7 +230,7 @@ pub struct WindowHold {
     pub pointer: GumpPixel,
     /// Where that window's top-left corner was at that same moment, in the
     /// same pixels — [`OwnWindow::at`] as it stood before the drag.
-    pub window: GumpPixel,
+    pub window:  GumpPixel,
 }
 
 /// What a window is over: a bag's contents, a body, or a dialog the shard
@@ -423,7 +431,7 @@ pub enum Asking {
 pub struct StackPass {
     pub container: Serial,
     /// Source serial of the last merge, until a full container refresh removes it.
-    pub awaiting: Option<(Serial, Instant)>,
+    pub awaiting:  Option<(Serial, Instant)>,
 }
 
 impl Drawn {
@@ -457,7 +465,7 @@ pub struct Windows {
     /// one: the pass has no depth, so the last window in the list is the one
     /// drawn over the others and the first one picking finds. One list and
     /// not two, because a bag dragged over a paperdoll has to stay over it.
-    pub own_windows: Vec<OwnWindow>,
+    pub own_windows:    Vec<OwnWindow>,
     /// A window this end has closed, ahead of the shard thread's own
     /// [`view::WorldView`](openshard_client_net::view::WorldView) agreeing.
     ///
@@ -496,11 +504,11 @@ pub struct Windows {
     /// pickable until it has been drawn once, which is also the frame its
     /// art is packed on and so the frame it first has any pixels to be
     /// picked by.
-    pub drawn_windows: Vec<(WindowSubject, Drawn)>,
+    pub drawn_windows:  Vec<(WindowSubject, Drawn)>,
     /// What the pointer is doing to a window's frame — see [`WindowGrip`],
     /// which is the whole of a window drag and the reason this is a machine
     /// with named states rather than a pair of numbers.
-    pub grip: WindowGrip,
+    pub grip:           WindowGrip,
     /// What is on the cursor, or `None` for an empty hand.
     ///
     /// **One resource with one owner**, decision 7 — the mirror of the shard's
@@ -515,7 +523,7 @@ pub struct Windows {
     /// was a press that had sent nothing. That state is a pane's now — see
     /// [`ItemPress`](crate::hand::ItemPress) — which is why the field is
     /// called what it is: what is left here is the hand.
-    pub hand: Option<Hand>,
+    pub hand:           Option<Hand>,
     /// The press on an item lying in the *world*, which no pane holds because
     /// the ground is not a window.
     ///
@@ -524,7 +532,7 @@ pub struct Windows {
     /// it becomes ([`ItemPress::dragged`](crate::hand::ItemPress::dragged)).
     /// It is here rather than beside the picking state because the hand it
     /// turns into is here.
-    pub world_press: Option<ItemPress>,
+    pub world_press:    Option<ItemPress>,
     /// Who the client's own amount prompt is addressed to, or `None` while no
     /// prompt is up.
     ///
@@ -538,9 +546,9 @@ pub struct Windows {
     ///
     /// It replaces `split_pending`, which was a `bool` on a client that could
     /// only ever have one presser.
-    pub prompt: Option<Asking>,
+    pub prompt:         Option<Asking>,
     /// An automatic sequence of ordinary lift/drop requests, one per fresh snapshot.
-    pub stack_pass: Option<StackPass>,
+    pub stack_pass:     Option<StackPass>,
     /// Which window the keys are going to, or `None` for the world.
     ///
     /// **One resource with one owner**, the shape decision 7 gives the hand and
@@ -555,7 +563,7 @@ pub struct Windows {
     /// [`App::keyboard_window`](crate::app::App::keyboard_window) rather than
     /// directly, because a window can leave the list between the answer that
     /// took it down and the frame that tidies up.
-    pub keyboard: Option<WindowSubject>,
+    pub keyboard:       Option<WindowSubject>,
 }
 
 /// Open one of the windows the shard does not know about, if it is not open
@@ -634,9 +642,11 @@ pub fn open_split_window(
     // Filed under the pile, so a second question about the same one cannot be
     // asked — the reference's `GetGump<SplitMenuGump>(item)` guard, which is
     // what that keying is for.
-    if own_windows.iter().any(|window| match window.subject {
-        WindowSubject::Split { item, .. } => item == prompt.item,
-        _ => false,
+    if own_windows.iter().any(|window| {
+        match window.subject {
+            WindowSubject::Split { item, .. } => item == prompt.item,
+            _ => false,
+        }
     }) {
         return;
     }
@@ -678,33 +688,36 @@ pub fn reconcile_own_windows(
     own_windows: &mut Vec<OwnWindow>,
     locally_closed: &mut HashSet<WindowSubject>,
 ) {
-    locally_closed.retain(|subject| match *subject {
-        WindowSubject::Container(serial) => view.containers.contains_key(&serial),
-        WindowSubject::Vendor(serial) => {
-            view.vendor_buys.contains_key(&serial) || view.vendor_sells.contains_key(&serial)
+    locally_closed.retain(|subject| {
+        match *subject {
+            WindowSubject::Container(serial) => view.containers.contains_key(&serial),
+            WindowSubject::Vendor(serial) => {
+                view.vendor_buys.contains_key(&serial) || view.vendor_sells.contains_key(&serial)
+            }
+            WindowSubject::Paperdoll(serial) => view.paperdolls.contains_key(&serial),
+            WindowSubject::Dialog(gump_id) => {
+                view.gumps.iter().any(|gump| gump.gump_id == gump_id)
+                    && !view.craft_catalogues.contains_key(&gump_id)
+                    && !view.craft_workbenches.contains_key(&gump_id)
+            }
+            WindowSubject::Skills
+            | WindowSubject::Status
+            | WindowSubject::Minimap
+            | WindowSubject::WorldMap => false,
+            WindowSubject::Spellbook(serial) => view.spellbooks.contains_key(&serial),
+            // Nothing in the view holds the picker open, so there is nothing for an
+            // overlay entry to be ahead *of* — the same as the two kinds above.
+            WindowSubject::Split { .. } => false,
+            // A question dismissed without an answer stays dismissed for exactly as
+            // long as the fact behind it stands — a dialog's rule, one kind over.
+            // Nothing tells the shard a plate was closed, so only the view settling
+            // the question can clear the overlay and let the window open again.
+            WindowSubject::Confirm(question) => question.stands(view),
+            // And the manifest, for the question's reason: the roster is what holds
+            // it open, so a window closed by hand stays closed only until the party
+            // itself is gone.
+            WindowSubject::Party => crate::panes::party::in_a_party(view),
         }
-        WindowSubject::Paperdoll(serial) => view.paperdolls.contains_key(&serial),
-        WindowSubject::Dialog(gump_id) => {
-            view.gumps.iter().any(|gump| gump.gump_id == gump_id)
-                && !view.craft_catalogues.contains_key(&gump_id)
-                && !view.craft_workbenches.contains_key(&gump_id)
-        }
-        WindowSubject::Skills | WindowSubject::Status | WindowSubject::Minimap | WindowSubject::WorldMap => {
-            false
-        }
-        WindowSubject::Spellbook(serial) => view.spellbooks.contains_key(&serial),
-        // Nothing in the view holds the picker open, so there is nothing for an
-        // overlay entry to be ahead *of* — the same as the two kinds above.
-        WindowSubject::Split { .. } => false,
-        // A question dismissed without an answer stays dismissed for exactly as
-        // long as the fact behind it stands — a dialog's rule, one kind over.
-        // Nothing tells the shard a plate was closed, so only the view settling
-        // the question can clear the overlay and let the window open again.
-        WindowSubject::Confirm(question) => question.stands(view),
-        // And the manifest, for the question's reason: the roster is what holds
-        // it open, so a window closed by hand stays closed only until the party
-        // itself is gone.
-        WindowSubject::Party => crate::panes::party::in_a_party(view),
     });
     own_windows.retain(|window| {
         if locally_closed.contains(&window.subject) {

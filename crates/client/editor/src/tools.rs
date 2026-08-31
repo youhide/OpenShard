@@ -9,9 +9,20 @@
 use std::collections::BTreeMap;
 use std::num::NonZeroU8;
 
-use openshard_map::map::{LandCell, StaticItem, WorldMap};
-use openshard_map::patch::{PatchError, PatchOp, StaticId};
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_map::map::{
+    LandCell,
+    StaticItem,
+    WorldMap,
+};
+use openshard_map::patch::{
+    PatchError,
+    PatchOp,
+    StaticId,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_tiles::LandTileId;
 
 /// The small read surface a gesture needs from either the base map or a draft
@@ -126,7 +137,7 @@ impl BrushRadius {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Brush {
     /// Shape of a dab.
-    pub shape: BrushShape,
+    pub shape:  BrushShape,
     /// Distance from its centre to its edge.
     pub radius: BrushRadius,
 }
@@ -235,11 +246,11 @@ pub enum StaticHeight {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct StaticPlacement {
     /// Static art id.
-    pub tile: Graphic,
+    pub tile:   Graphic,
     /// How its base height is chosen.
     pub height: StaticHeight,
     /// Tint, or [`Hue::NONE`].
-    pub hue: Hue,
+    pub hue:    Hue,
 }
 
 /// One active editor tool.
@@ -270,10 +281,10 @@ pub enum Tool {
 /// Static overlays retain ordinal changes after additions and removals.
 #[derive(Debug)]
 pub struct Gesture<'map> {
-    map: Box<dyn GestureView + 'map>,
-    ops: Vec<PatchOp>,
+    map:      Box<dyn GestureView + 'map>,
+    ops:      Vec<PatchOp>,
     land_ops: BTreeMap<TilePoint, usize>,
-    statics: BTreeMap<TilePoint, Vec<StaticItem>>,
+    statics:  BTreeMap<TilePoint, Vec<StaticItem>>,
 }
 
 impl<'map> Gesture<'map> {
@@ -285,10 +296,10 @@ impl<'map> Gesture<'map> {
 
     pub(crate) fn from_view(map: impl GestureView + 'map) -> Self {
         Self {
-            map: Box::new(map),
-            ops: Vec::new(),
+            map:      Box::new(map),
+            ops:      Vec::new(),
             land_ops: BTreeMap::new(),
-            statics: BTreeMap::new(),
+            statics:  BTreeMap::new(),
         }
     }
 
@@ -303,22 +314,30 @@ impl<'map> Gesture<'map> {
     /// [`PatchError::NoSuchStatic`] when removal names no current item.
     pub fn apply(&mut self, tool: Tool, brush: Brush, centre: TilePoint) -> Result<(), PatchError> {
         match tool {
-            Tool::PaintLand(tile) => self.apply_land(brush, centre, move |mut cell| {
-                cell.tile = tile;
-                cell
-            }),
-            Tool::Raise(strength) => self.apply_land(brush, centre, move |mut cell| {
-                cell.z = saturating_raise(cell.z, strength);
-                cell
-            }),
-            Tool::Lower(strength) => self.apply_land(brush, centre, move |mut cell| {
-                cell.z = saturating_lower(cell.z, strength);
-                cell
-            }),
-            Tool::Flatten(target) => self.apply_land(brush, centre, move |mut cell| {
-                cell.z = target.0;
-                cell
-            }),
+            Tool::PaintLand(tile) => {
+                self.apply_land(brush, centre, move |mut cell| {
+                    cell.tile = tile;
+                    cell
+                })
+            }
+            Tool::Raise(strength) => {
+                self.apply_land(brush, centre, move |mut cell| {
+                    cell.z = saturating_raise(cell.z, strength);
+                    cell
+                })
+            }
+            Tool::Lower(strength) => {
+                self.apply_land(brush, centre, move |mut cell| {
+                    cell.z = saturating_lower(cell.z, strength);
+                    cell
+                })
+            }
+            Tool::Flatten(target) => {
+                self.apply_land(brush, centre, move |mut cell| {
+                    cell.z = target.0;
+                    cell
+                })
+            }
             Tool::PlaceStatic(placement) => self.place_static(centre, placement)?,
             Tool::RemoveStatic(which) => self.remove_static(centre, which)?,
         }
@@ -445,9 +464,11 @@ mod tests {
     }
 
     fn flat(z: i8) -> WorldMap {
-        map(|_, _| LandCell {
-            tile: LandTileId(3),
-            z,
+        map(|_, _| {
+            LandCell {
+                tile: LandTileId(3),
+                z,
+            }
         })
     }
 
@@ -500,15 +521,15 @@ mod tests {
         assert_eq!(
             gesture.finish(),
             vec![PatchOp::SetLand {
-                x: 2,
-                y: 2,
+                x:   2,
+                y:   2,
                 was: LandCell {
                     tile: LandTileId(3),
-                    z: 10,
+                    z:    10,
                 },
                 now: LandCell {
                     tile: LandTileId(3),
-                    z: 12,
+                    z:    12,
                 },
             }]
         );
@@ -516,9 +537,11 @@ mod tests {
 
     #[test]
     fn raise_and_lower_saturate_at_i8_limits() {
-        let map = map(|x, _| LandCell {
-            tile: LandTileId(3),
-            z: if x == 0 { i8::MAX - 1 } else { i8::MIN + 1 },
+        let map = map(|x, _| {
+            LandCell {
+                tile: LandTileId(3),
+                z:    if x == 0 { i8::MAX - 1 } else { i8::MIN + 1 },
+            }
         });
         let strength = HeightStrength::new(20).unwrap();
         let mut gesture = Gesture::new(&map);
@@ -547,9 +570,11 @@ mod tests {
 
     #[test]
     fn flatten_preserves_land_art_and_reads_nonuniform_was_cells() {
-        let map = map(|x, y| LandCell {
-            tile: LandTileId(x + y * 8),
-            z: i8::try_from(x + y).unwrap(),
+        let map = map(|x, y| {
+            LandCell {
+                tile: LandTileId(x + y * 8),
+                z:    i8::try_from(x + y).unwrap(),
+            }
         });
         let mut gesture = Gesture::new(&map);
         gesture
@@ -575,18 +600,18 @@ mod tests {
         let mut map = flat(4);
         let old = StaticItem {
             tile: Graphic(10),
-            x: 5,
-            y: 6,
-            z: 8,
-            hue: Hue::NONE,
+            x:    5,
+            y:    6,
+            z:    8,
+            hue:  Hue::NONE,
         };
         map.place_static(old);
         let mut gesture = Gesture::new(&map);
         let at = TilePoint::new(5, 6);
         let placed = StaticPlacement {
-            tile: Graphic(20),
+            tile:   Graphic(20),
             height: StaticHeight::OnGround,
-            hue: Hue(30),
+            hue:    Hue(30),
         };
         gesture
             .apply(Tool::PlaceStatic(placed), Brush::default(), at)
@@ -600,10 +625,10 @@ mod tests {
 
         let added = StaticItem {
             tile: Graphic(20),
-            x: 5,
-            y: 6,
-            z: 4,
-            hue: Hue(30),
+            x:    5,
+            y:    6,
+            z:    4,
+            hue:  Hue(30),
         };
         assert_eq!(
             gesture.finish(),
@@ -611,11 +636,11 @@ mod tests {
                 PatchOp::AddStatic { item: added },
                 PatchOp::RemoveStatic {
                     which: StaticId(1),
-                    was: added,
+                    was:   added,
                 },
                 PatchOp::RemoveStatic {
                     which: StaticId(0),
-                    was: old,
+                    was:   old,
                 },
             ]
         );
@@ -632,9 +657,9 @@ mod tests {
         gesture
             .apply(
                 Tool::PlaceStatic(StaticPlacement {
-                    tile: Graphic(20),
+                    tile:   Graphic(20),
                     height: StaticHeight::Fixed(target),
-                    hue: Hue::NONE,
+                    hue:    Hue::NONE,
                 }),
                 Brush::default(),
                 TilePoint::new(2, 2),
@@ -651,7 +676,7 @@ mod tests {
         assert!(matches!(
             gesture.ops()[1],
             PatchOp::AddStatic {
-                item: StaticItem { z: -7, .. }
+                item: StaticItem { z: -7, .. },
             }
         ));
     }
@@ -664,9 +689,9 @@ mod tests {
         assert_eq!(
             gesture.apply(
                 Tool::PlaceStatic(StaticPlacement {
-                    tile: Graphic(1),
+                    tile:   Graphic(1),
                     height: StaticHeight::Fixed(TargetHeight(2)),
-                    hue: Hue::NONE,
+                    hue:    Hue::NONE,
                 }),
                 Brush::default(),
                 off_map,

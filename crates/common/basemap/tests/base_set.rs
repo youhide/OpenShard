@@ -4,11 +4,26 @@
 //! chunks: three of its four chunks are edge chunks, so a reader that assumed
 //! every chunk was eight blocks by eight would fail here rather than on Tokuno.
 
-use openshard_basemap::{BaseError, Identity, read, write};
+use openshard_basemap::{
+    BaseError,
+    Identity,
+    read,
+    write,
+};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, StaticItem, WorldMap};
-use openshard_map::snapshot::{MapRevision, MapSnapshot};
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_map::map::{
+    LandCell,
+    StaticItem,
+    WorldMap,
+};
+use openshard_map::snapshot::{
+    MapRevision,
+    MapSnapshot,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Facet;
 use openshard_tiles::LandTileId;
 
@@ -35,9 +50,11 @@ fn a_map() -> WorldMap {
             wide: BLOCKS,
             down: BLOCKS,
         },
-        |x, y| LandCell {
-            tile: LandTileId(u16::try_from(u32::from(x) * TILES + u32::from(y)).unwrap()),
-            z: (i32::from(x) - i32::from(y)) as i8,
+        |x, y| {
+            LandCell {
+                tile: LandTileId(u16::try_from(u32::from(x) * TILES + u32::from(y)).unwrap()),
+                z:    (i32::from(x) - i32::from(y)) as i8,
+            }
         },
     );
     let last = u16::try_from(TILES).unwrap() - 1;
@@ -58,10 +75,10 @@ fn a_map() -> WorldMap {
     for n in 0..2u16 {
         map.place_static(StaticItem {
             tile: Graphic(0x200 + n),
-            x: 20,
-            y: 21,
-            z: 5,
-            hue: Hue(n),
+            x:    20,
+            y:    21,
+            z:    5,
+            hue:  Hue(n),
         });
     }
     map
@@ -178,7 +195,7 @@ fn a_world_is_named_by_its_own_content() {
         4,
         LandCell {
             tile: LandTileId(0x3FF),
-            z: 12,
+            z:    12,
         },
     );
     let moved = MapSnapshot::new(FACET, moved);

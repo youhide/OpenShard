@@ -4,11 +4,22 @@
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::serial::Serial;
-use openshard_state::components::{Client, Escortable, QuestGiver};
-use openshard_state::{QuestGumpContext, QuestKey, QuestSection, WorldState};
+use openshard_state::components::{
+    Client,
+    Escortable,
+    QuestGiver,
+};
+use openshard_state::{
+    QuestGumpContext,
+    QuestKey,
+    QuestSection,
+    WorldState,
+};
 
-use crate::gump;
-use crate::offer;
+use crate::{
+    gump,
+    offer,
+};
 
 /// How close a giver has to be to hear "quest" — the banker's range, and the
 /// same reason: a keyword answered from across the town square is a keyword
@@ -36,11 +47,11 @@ pub fn open_log_for(state: &mut WorldState, player: EntityId) {
         state,
         player,
         QuestGumpContext {
-            quest: None,
-            section: QuestSection::Main,
-            offer: false,
+            quest:     None,
+            section:   QuestSection::Main,
+            offer:     false,
             completed: false,
-            giver: None,
+            giver:     None,
         },
     );
 }

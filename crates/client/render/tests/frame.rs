@@ -15,18 +15,49 @@ use std::path::PathBuf;
 
 use openshard_client_render::animate::StaticAnimations;
 use openshard_client_render::atlas::{
-    AnimAtlas, AnimationKey, FrameKey, LandAtlas, StaticAtlas, StaticAtlasPage, StaticAtlasPages, TexmapAtlas,
+    AnimAtlas,
+    AnimationKey,
+    FrameKey,
+    LandAtlas,
+    StaticAtlas,
+    StaticAtlasPage,
+    StaticAtlasPages,
+    TexmapAtlas,
 };
-use openshard_client_render::blit::{Blit, ViewportRect};
-use openshard_client_render::camera::ViewPoint;
-use openshard_client_render::camera::{Camera, Projection, RealPixel, WorldPoint, Zoom};
+use openshard_client_render::blit::{
+    Blit,
+    ViewportRect,
+};
+use openshard_client_render::camera::{
+    Camera,
+    Projection,
+    RealPixel,
+    ViewPoint,
+    WorldPoint,
+    Zoom,
+};
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::debug::View;
-use openshard_client_render::geometry::{Rect, Vec2};
-use openshard_client_render::ground::{self, GroundQuad};
+use openshard_client_render::geometry::{
+    Rect,
+    Vec2,
+};
+use openshard_client_render::ground::{
+    self,
+    GroundQuad,
+};
 use openshard_client_render::hue::HueRamp;
-use openshard_client_render::impostor::{Fringe, Range, Volume};
-use openshard_client_render::light::{Light, Lighting, Surface, WorldVec};
+use openshard_client_render::impostor::{
+    Fringe,
+    Range,
+    Volume,
+};
+use openshard_client_render::light::{
+    Light,
+    Lighting,
+    Surface,
+    WorldVec,
+};
 
 /// The reach the lighting tests give their flame, in tiles.
 ///
@@ -38,25 +69,77 @@ use openshard_client_render::light::{Light, Lighting, Surface, WorldVec};
 const TORCH_TILES: f32 = 3.0;
 use openshard_client_render::camera::TileBounds;
 use openshard_client_render::composite::{
-    CaptureSource, CompositeCache, CompositeKey, CompositeProducerJob, CompositeQuad, CompositeRenderer,
-    CompositeTier, CompositeWorkQueue, ImmutableRevision, MapBlockBounds,
+    CaptureSource,
+    CompositeCache,
+    CompositeKey,
+    CompositeProducerJob,
+    CompositeQuad,
+    CompositeRenderer,
+    CompositeTier,
+    CompositeWorkQueue,
+    ImmutableRevision,
+    MapBlockBounds,
 };
-use openshard_client_render::gbuffer;
-use openshard_client_render::mobiles::{self, Mobile};
-use openshard_client_render::occlusion::{self, Builder, Occlusion, OwnerId, Shape, SolidId};
-use openshard_client_render::outline::{self, Outline, Ring};
-use openshard_client_render::place::{Kind, Place};
-use openshard_client_render::renderer::{self, GroundRenderer, SpriteRenderer, Target};
-use openshard_client_render::sprite::{SpriteQuad, split_corners};
-use openshard_client_render::statics;
+use openshard_client_render::mobiles::{
+    self,
+    Mobile,
+};
+use openshard_client_render::occlusion::{
+    self,
+    Builder,
+    Occlusion,
+    OwnerId,
+    Shape,
+    SolidId,
+};
+use openshard_client_render::outline::{
+    self,
+    Outline,
+    Ring,
+};
+use openshard_client_render::place::{
+    Kind,
+    Place,
+};
+use openshard_client_render::renderer::{
+    self,
+    GroundRenderer,
+    SpriteRenderer,
+    Target,
+};
+use openshard_client_render::sprite::{
+    SpriteQuad,
+    split_corners,
+};
+use openshard_client_render::{
+    gbuffer,
+    statics,
+};
 use openshard_map::grid::BlockCoord;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_tiles::{LandTileId, StaticTile, TileFlags};
-use openshard_uofiles::anim::{Anim, AnimFrame, AnimationDirection, AnimationFrameIndex, AnimationGroup};
-use openshard_uofiles::art::{Art, LAND_TILE_SIZE, land_row};
-use openshard_uofiles::color::{Color16, Rgb8};
+use openshard_tiles::{
+    LandTileId,
+    StaticTile,
+    TileFlags,
+};
+use openshard_uofiles::anim::{
+    Anim,
+    AnimFrame,
+    AnimationDirection,
+    AnimationFrameIndex,
+    AnimationGroup,
+};
+use openshard_uofiles::art::{
+    Art,
+    LAND_TILE_SIZE,
+    land_row,
+};
+use openshard_uofiles::color::{
+    Color16,
+    Rgb8,
+};
 use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::image::Image;
@@ -107,7 +190,7 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 
 /// A rendered frame, as RGBA8 rows.
 struct Frame {
-    width: u32,
+    width:  u32,
     pixels: Vec<u8>,
 }
 
@@ -115,7 +198,7 @@ struct Frame {
 /// it was composed over. The latter is read directly to prove translucent
 /// architecture did not replace the main identity that picking and masks use.
 struct CutawayFrame {
-    picture: Frame,
+    picture:  Frame,
     main_ids: Vec<u8>,
 }
 
@@ -287,15 +370,15 @@ fn render_both_with_cutaway(
     let cutaway_world_view = cutaway_world.create_view(&wgpu::TextureViewDescriptor::default());
 
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("readback"),
-        size: u64::from(width) * u64::from(height) * 4,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("readback"),
+        size:               u64::from(width) * u64::from(height) * 4,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let ids_readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("cutaway main ids readback"),
-        size: u64::from(width) * u64::from(height) * 4,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("cutaway main ids readback"),
+        size:               u64::from(width) * u64::from(height) * 4,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
 
@@ -361,22 +444,24 @@ fn render_both_with_cutaway(
     // They describe categories absent from this small harness, while statics and
     // ground use the renderers' real instance data above.
     let mesh_instances = openshard_client_render::blit::dummy_mesh_instances(device);
-    let frame = |world, gbuffer, face_instances| openshard_client_render::blit::Frame {
-        target: &view,
-        world,
-        gbuffer,
-        face_instances,
-        item_instances: face_instances,
-        mobile_instances: people.instances_buffer(),
-        mesh_instances: &mesh_instances,
-        ground_instances: renderer.instances_buffer(),
-        zoom: Zoom::ONE,
-        rect: ViewportRect {
-            x: 0,
-            y: 0,
-            width,
-            height,
-        },
+    let frame = |world, gbuffer, face_instances| {
+        openshard_client_render::blit::Frame {
+            target: &view,
+            world,
+            gbuffer,
+            face_instances,
+            item_instances: face_instances,
+            mobile_instances: people.instances_buffer(),
+            mesh_instances: &mesh_instances,
+            ground_instances: renderer.instances_buffer(),
+            zoom: Zoom::ONE,
+            rect: ViewportRect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
+        }
     };
     blit.render(
         device,
@@ -401,16 +486,16 @@ fn render_both_with_cutaway(
     }
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: &target,
+            texture:   &target,
             mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    wgpu::TextureAspect::All,
         },
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
+                offset:         0,
+                bytes_per_row:  Some(width * 4),
                 rows_per_image: Some(height),
             },
         },
@@ -422,16 +507,16 @@ fn render_both_with_cutaway(
     );
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: gbuffer.ids(),
+            texture:   gbuffer.ids(),
             mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    wgpu::TextureAspect::All,
         },
         wgpu::TexelCopyBufferInfo {
             buffer: &ids_readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
+                offset:         0,
+                bytes_per_row:  Some(width * 4),
                 rows_per_image: Some(height),
             },
         },
@@ -799,9 +884,9 @@ fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture
     let (width, height) = (texture.width(), texture.height());
     assert_eq!(width * 4 % 256, 0, "a row copy has to be 256-byte aligned");
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("readback"),
-        size: u64::from(width) * u64::from(height) * 4,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("readback"),
+        size:               u64::from(width) * u64::from(height) * 4,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -815,8 +900,8 @@ fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
+                offset:         0,
+                bytes_per_row:  Some(width * 4),
                 rows_per_image: Some(height),
             },
         },
@@ -857,9 +942,9 @@ fn read_texture(
     let row = width * bytes_per_texel;
     let stride = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("producer coverage readback"),
-        size: u64::from(stride) * u64::from(height),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("producer coverage readback"),
+        size:               u64::from(stride) * u64::from(height),
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -873,8 +958,8 @@ fn read_texture(
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(stride),
+                offset:         0,
+                bytes_per_row:  Some(stride),
                 rows_per_image: Some(height),
             },
         },
@@ -1051,16 +1136,16 @@ fn real_map_block_producer_keeps_every_owned_map_tile_after_restore() {
         Some(static_rows.drawn),
     );
     let source = CaptureSource {
-        color: &source_world,
-        ids: source_gbuffer.ids(),
-        position: source_gbuffer.position(),
-        normal: source_gbuffer.normal(),
-        depth: &source_depth_view,
+        color:      &source_world,
+        ids:        source_gbuffer.ids(),
+        position:   source_gbuffer.position(),
+        normal:     source_gbuffer.normal(),
+        depth:      &source_depth_view,
         depth_base: 0,
-        rect: ViewportRect {
-            x: 0,
-            y: 0,
-            width: size.width,
+        rect:       ViewportRect {
+            x:      0,
+            y:      0,
+            width:  size.width,
             height: size.height,
         },
     };
@@ -1085,46 +1170,46 @@ fn real_map_block_producer_keeps_every_owned_map_tile_after_restore() {
             label: Some("producer coverage restore clear"),
             color_attachments: &[
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &restored_world_view,
-                    depth_slice: None,
+                    view:           &restored_world_view,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &restored_views.ids,
-                    depth_slice: None,
+                    view:           &restored_views.ids,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(openshard_client_render::gbuffer::IDS_CLEAR),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(openshard_client_render::gbuffer::IDS_CLEAR),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &restored_views.position,
-                    depth_slice: None,
+                    view:           &restored_views.position,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(openshard_client_render::gbuffer::POSITION_CLEAR),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(openshard_client_render::gbuffer::POSITION_CLEAR),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &restored_views.normal,
-                    depth_slice: None,
+                    view:           &restored_views.normal,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(openshard_client_render::gbuffer::NORMAL_CLEAR),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(openshard_client_render::gbuffer::NORMAL_CLEAR),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
             ],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &restored_depth_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
+                view:        &restored_depth_view,
+                depth_ops:   Some(wgpu::Operations {
+                    load:  wgpu::LoadOp::Clear(1.0),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -1277,14 +1362,16 @@ fn the_blit_at_zoom_one_is_the_world_image_texel_for_texel() {
     let region = atlas.region(TILE).expect("packed");
     let quads: Vec<GroundQuad> = [(40.0, 40.0), (150.0, 96.0)]
         .into_iter()
-        .map(|(x, y)| GroundQuad {
-            x,
-            y,
-            corners: [0.0; 4],
-            region,
-            texmap: None,
-            depth: 0.5,
-            place: Place::land(1, 1),
+        .map(|(x, y)| {
+            GroundQuad {
+                x,
+                y,
+                corners: [0.0; 4],
+                region,
+                texmap: None,
+                depth: 0.5,
+                place: Place::land(1, 1),
+            }
         })
         .collect();
 
@@ -1335,19 +1422,19 @@ fn the_blit_at_zoom_one_is_the_world_image_texel_for_texel() {
         // Qualified: this file has a `Frame` of its own, which is a read-back
         // picture rather than a blit's arguments.
         openshard_client_render::blit::Frame {
-            target: &surface_view,
-            world: &world_view,
-            gbuffer: &gbuffer_views,
+            target:           &surface_view,
+            world:            &world_view,
+            gbuffer:          &gbuffer_views,
             // Ground only: nothing here ever indexes either static/mobile
             // buffer, but the ground quads drawn above are real, so their id
             // has to resolve through the real buffer and not a dummy.
-            face_instances: &dummy_instances,
-            item_instances: &dummy_instances,
+            face_instances:   &dummy_instances,
+            item_instances:   &dummy_instances,
             mobile_instances: &dummy_instances,
-            mesh_instances: &dummy_mesh_instances,
+            mesh_instances:   &dummy_mesh_instances,
             ground_instances: ground_pass.instances_buffer(),
-            zoom: Zoom::ONE,
-            rect: ViewportRect {
+            zoom:             Zoom::ONE,
+            rect:             ViewportRect {
                 x: 0,
                 y: 0,
                 width,
@@ -1505,25 +1592,25 @@ fn a_light_brightens_its_own_pool_and_the_ambient_darkens_the_rest() {
     // zero against it — so a scene that puts one there is asking about a
     // degenerate case rather than about a torch.
     let lighting = Lighting {
-        ambient: openshard_client_render::light::NIGHT,
-        lights: vec![Light {
-            at: Vec2::new(f32::from(burning.0), f32::from(burning.1)),
-            z: openshard_client_render::light::FLAME_LIFT,
-            radius: TORCH_TILES,
-            color: [1.0, 0.7, 0.35],
+        ambient:      openshard_client_render::light::NIGHT,
+        lights:       vec![Light {
+            at:        Vec2::new(f32::from(burning.0), f32::from(burning.1)),
+            z:         openshard_client_render::light::FLAME_LIFT,
+            radius:    TORCH_TILES,
+            color:     [1.0, 0.7, 0.35],
             intensity: 1.0,
             // A fire on the ground, lighting every direction: what a beam does
             // is `a_carried_beam_lights_the_way_it_is_pointed`'s claim.
-            beam: None,
+            beam:      None,
         }],
         // Nothing stands in the way: what a wall does is
         // `a_wall_stops_the_light_behind_it`'s claim, not this one's.
-        occlusion: Occlusion::EMPTY,
-        sun: None,
-        view: View::Lit,
+        occlusion:    Occlusion::EMPTY,
+        sun:          None,
+        view:         View::Lit,
         flame_radius: openshard_client_render::light::FLAME_RADIUS,
-        shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
-        dead: false,
+        shadow_rays:  openshard_client_render::light::ShadowRays::DEFAULT,
+        dead:         false,
     };
     let dummy_instances = openshard_client_render::blit::dummy_instances(&device);
     let dummy_mesh_instances = openshard_client_render::blit::dummy_mesh_instances(&device);
@@ -1533,18 +1620,18 @@ fn a_light_brightens_its_own_pool_and_the_ambient_darkens_the_rest() {
         &queue,
         &mut encoder,
         openshard_client_render::blit::Frame {
-            target: &surface_view,
-            world: &world_view,
-            gbuffer: &gbuffer_views,
+            target:           &surface_view,
+            world:            &world_view,
+            gbuffer:          &gbuffer_views,
             // Ground only, and the ground quads drawn above are real, so
             // their id has to resolve through the real buffer.
-            face_instances: &dummy_instances,
-            item_instances: &dummy_instances,
+            face_instances:   &dummy_instances,
+            item_instances:   &dummy_instances,
             mobile_instances: &dummy_instances,
-            mesh_instances: &dummy_mesh_instances,
+            mesh_instances:   &dummy_mesh_instances,
             ground_instances: ground_pass.instances_buffer(),
-            zoom: Zoom::ONE,
-            rect: ViewportRect {
+            zoom:             Zoom::ONE,
+            rect:             ViewportRect {
                 x: 0,
                 y: 0,
                 width,
@@ -1722,11 +1809,11 @@ fn a_wall_stops_the_light_behind_it() {
     let mut blit = Blit::new(&device, format);
 
     let flame = Light {
-        at: Vec2::new(f32::from(FIRST), f32::from(ROW)),
+        at:        Vec2::new(f32::from(FIRST), f32::from(ROW)),
         // Where `light::gather` puts a flame on a tile — see the pool test's own
         // note. In the ground's own plane the cosine against it is zero and the
         // whole row would be dark with or without a wall in it.
-        z: openshard_client_render::light::FLAME_LIFT,
+        z:         openshard_client_render::light::FLAME_LIFT,
         // Six tiles, so that the far side of the wall is inside the pool and
         // dark only because the wall is there — a radius that fell short would
         // pass this test for the wrong reason.
@@ -1739,10 +1826,10 @@ fn a_wall_stops_the_light_behind_it() {
         // walled and open frames read alike and the test would have passed by
         // measuring nothing. Widening the reach is what puts a measurable
         // quantity back at the tile being asked about.
-        radius: 6.0,
-        color: [1.0, 1.0, 1.0],
+        radius:    6.0,
+        color:     [1.0, 1.0, 1.0],
         intensity: 1.0,
-        beam: None,
+        beam:      None,
     };
     let bounds = TileBounds {
         min_x: 90,
@@ -1770,18 +1857,18 @@ fn a_wall_stops_the_light_behind_it() {
             &queue,
             &mut encoder,
             openshard_client_render::blit::Frame {
-                target: &surface_view,
-                world: &world_view,
-                gbuffer: &gbuffer_views,
+                target:           &surface_view,
+                world:            &world_view,
+                gbuffer:          &gbuffer_views,
                 // Ground only, and the ground quads drawn above are real, so
                 // their id has to resolve through the real buffer.
-                face_instances: &dummy_instances,
-                item_instances: &dummy_instances,
+                face_instances:   &dummy_instances,
+                item_instances:   &dummy_instances,
                 mobile_instances: &dummy_instances,
-                mesh_instances: &dummy_mesh_instances,
+                mesh_instances:   &dummy_mesh_instances,
                 ground_instances: ground_pass.instances_buffer(),
-                zoom: Zoom::ONE,
-                rect: ViewportRect {
+                zoom:             Zoom::ONE,
+                rect:             ViewportRect {
                     x: 0,
                     y: 0,
                     width,
@@ -1894,18 +1981,18 @@ fn the_world_passes_are_built_for_the_world_texture_not_the_surface() {
     let atlas = StaticAtlas::pack([(GRAPHIC, art)]).expect("one sprite fits");
     let sprite = atlas.sprite(GRAPHIC).expect("packed");
     let quads = [SpriteQuad {
-        rect: Rect {
-            x: 4.0,
-            y: 4.0,
-            width: f32::from(sprite.width),
+        rect:    Rect {
+            x:      4.0,
+            y:      4.0,
+            width:  f32::from(sprite.width),
             height: f32::from(sprite.height),
         },
-        region: sprite.region,
-        depth: 0.5,
-        hue: 0,
-        place: Place::NOWHERE,
-        twin: 0,
-        owner: 0,
+        region:  sprite.region,
+        depth:   0.5,
+        hue:     0,
+        place:   Place::NOWHERE,
+        twin:    0,
+        owner:   0,
         volumes: openshard_client_render::impostor::Range::default(),
     }];
     let hue_ramp = HueRamp::build(&Hues::parse(&[0u8; 708]).expect("one empty group"));
@@ -1931,18 +2018,18 @@ fn the_world_passes_are_built_for_the_world_texture_not_the_surface() {
     // and only they — are built for.
     let surface_format = wgpu::TextureFormat::Rgba16Float;
     let surface = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("surface"),
-        size: wgpu::Extent3d {
+        label:           Some("surface"),
+        size:            wgpu::Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: surface_format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
+        sample_count:    1,
+        dimension:       wgpu::TextureDimension::D2,
+        format:          surface_format,
+        usage:           wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats:    &[],
     });
     let surface_view = surface.create_view(&wgpu::TextureViewDescriptor::default());
     let mut blit = Blit::new(&device, surface_format);
@@ -1959,16 +2046,16 @@ fn the_world_passes_are_built_for_the_world_texture_not_the_surface() {
         // Qualified: this file has a `Frame` of its own, which is a read-back
         // picture rather than a blit's arguments.
         openshard_client_render::blit::Frame {
-            target: &surface_view,
-            world: &world_view,
-            gbuffer: &gbuffer_views,
-            face_instances: sprites.instances_buffer(),
-            item_instances: sprites.instances_buffer(),
+            target:           &surface_view,
+            world:            &world_view,
+            gbuffer:          &gbuffer_views,
+            face_instances:   sprites.instances_buffer(),
+            item_instances:   sprites.instances_buffer(),
             mobile_instances: &dummy_instances,
-            mesh_instances: &dummy_mesh_instances,
+            mesh_instances:   &dummy_mesh_instances,
             ground_instances: &dummy_ground_instances,
-            zoom: Zoom::ONE,
-            rect: ViewportRect {
+            zoom:             Zoom::ONE,
+            rect:             ViewportRect {
                 x: 0,
                 y: 0,
                 width,
@@ -2013,18 +2100,18 @@ fn a_static_sprite_is_drawn_texel_for_texel_with_its_shape_intact() {
     let sprite = atlas.sprite(GRAPHIC).expect("packed");
 
     let quads = [SpriteQuad {
-        rect: Rect {
-            x: 10.0,
-            y: 20.0,
-            width: f32::from(sprite.width),
+        rect:    Rect {
+            x:      10.0,
+            y:      20.0,
+            width:  f32::from(sprite.width),
             height: f32::from(sprite.height),
         },
-        region: sprite.region,
-        depth: 0.5,
-        hue: 0,
-        place: Place::NOWHERE,
-        twin: 0,
-        owner: 0,
+        region:  sprite.region,
+        depth:   0.5,
+        hue:     0,
+        place:   Place::NOWHERE,
+        twin:    0,
+        owner:   0,
         volumes: openshard_client_render::impostor::Range::default(),
     }];
     let land = LandAtlas::pack([]).expect("nothing always fits");
@@ -2095,9 +2182,9 @@ fn a_cutaway_sprite_is_alpha_blended_over_the_picture_behind_it() {
         let sprite = atlas.sprite(graphic).expect("packed");
         SpriteQuad {
             rect: Rect {
-                x: 20.0,
-                y: 20.0,
-                width: 1.0,
+                x:      20.0,
+                y:      20.0,
+                width:  1.0,
                 height: 1.0,
             },
             region: sprite.region,
@@ -2206,20 +2293,22 @@ fn a_full_hue_replaces_the_pixel_by_its_red_channel_regardless_of_its_own_colour
     let land = LandAtlas::pack([]).expect("nothing always fits");
     let texmaps = TexmapAtlas::pack([]).expect("nothing always fits");
 
-    let quad = |hue: u32| SpriteQuad {
-        rect: Rect {
-            x: 0.0,
-            y: 0.0,
-            width: f32::from(sprite.width),
-            height: f32::from(sprite.height),
-        },
-        region: sprite.region,
-        depth: 0.5,
-        hue,
-        place: Place::NOWHERE,
-        twin: 0,
-        owner: 0,
-        volumes: openshard_client_render::impostor::Range::default(),
+    let quad = |hue: u32| {
+        SpriteQuad {
+            rect: Rect {
+                x:      0.0,
+                y:      0.0,
+                width:  f32::from(sprite.width),
+                height: f32::from(sprite.height),
+            },
+            region: sprite.region,
+            depth: 0.5,
+            hue,
+            place: Place::NOWHERE,
+            twin: 0,
+            owner: 0,
+            volumes: openshard_client_render::impostor::Range::default(),
+        }
     };
 
     let format = wgpu::TextureFormat::Rgba8Unorm;
@@ -2312,18 +2401,18 @@ fn a_font_contour_and_body_take_their_own_hue_rungs() {
     let land = LandAtlas::pack([]).expect("nothing fits trivially");
     let texmaps = TexmapAtlas::pack([]).expect("nothing fits trivially");
     let quad = SpriteQuad {
-        rect: Rect {
-            x: 0.0,
-            y: 0.0,
-            width: f32::from(sprite.width),
+        rect:    Rect {
+            x:      0.0,
+            y:      0.0,
+            width:  f32::from(sprite.width),
             height: f32::from(sprite.height),
         },
-        region: sprite.region,
-        depth: 0.5,
-        hue: 1,
-        place: Place::NOWHERE,
-        twin: 0,
-        owner: 0,
+        region:  sprite.region,
+        depth:   0.5,
+        hue:     1,
+        place:   Place::NOWHERE,
+        twin:    0,
+        owner:   0,
         volumes: openshard_client_render::impostor::Range::default(),
     };
     let frame = render_hued(
@@ -2381,9 +2470,9 @@ fn render_hued(
     });
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("hued readback"),
-        size: u64::from(width) * u64::from(height) * 4,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("hued readback"),
+        size:               u64::from(width) * u64::from(height) * 4,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let depth = renderer::depth_texture(device, width, height);
@@ -2399,16 +2488,16 @@ fn render_hued(
     statics.render(device, queue, &mut encoder, target_view, quads, &[], None);
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: &target,
+            texture:   &target,
             mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    wgpu::TextureAspect::All,
         },
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
+                offset:         0,
+                bytes_per_row:  Some(width * 4),
                 rows_per_image: Some(height),
             },
         },
@@ -2479,18 +2568,18 @@ fn every_pixel_names_the_tile_it_came_from() {
         place: Place::land(300, 400),
     }];
     let wall = [SpriteQuad {
-        rect: Rect {
-            x: 60.0,
-            y: 60.0,
-            width: f32::from(sprite.width),
+        rect:    Rect {
+            x:      60.0,
+            y:      60.0,
+            width:  f32::from(sprite.width),
             height: f32::from(sprite.height),
         },
-        region: sprite.region,
-        depth: 0.4,
-        hue: 0,
-        place: Place::of_static(Point::new(301, 400, 15)),
-        twin: 0,
-        owner: 0,
+        region:  sprite.region,
+        depth:   0.4,
+        hue:     0,
+        place:   Place::of_static(Point::new(301, 400, 15)),
+        twin:    0,
+        owner:   0,
         volumes: openshard_client_render::impostor::Range::default(),
     }];
 
@@ -2611,20 +2700,22 @@ fn a_floor_spreads_across_its_tile_and_a_wall_stands_up_it() {
     // against — the whole of the impostor's association, and the difference
     // between the two halves of this test: the floor has a lid, and the wall
     // below is deliberately given nothing.
-    let quad = |place, volumes| SpriteQuad {
-        rect: Rect {
-            x: ORIGIN,
-            y: ORIGIN,
-            width: f32::from(sprite.width),
-            height: f32::from(sprite.height),
-        },
-        region: sprite.region,
-        depth: 0.4,
-        hue: 0,
-        place,
-        twin: 0,
-        owner: 0,
-        volumes,
+    let quad = |place, volumes| {
+        SpriteQuad {
+            rect: Rect {
+                x:      ORIGIN,
+                y:      ORIGIN,
+                width:  f32::from(sprite.width),
+                height: f32::from(sprite.height),
+            },
+            region: sprite.region,
+            depth: 0.4,
+            hue: 0,
+            place,
+            twin: 0,
+            owner: 0,
+            volumes,
+        }
     };
     let at = Point::new(301, 400, 15);
     // Where in its tile a pixel is, and how high — both off the position plane
@@ -2908,28 +2999,30 @@ fn two_wall_tiles_in_a_row_name_one_continuous_surface() {
     );
 
     let tile = |x: u16| Point::new(x, 400, 0);
-    let quad = |at: Point, run: u32, dx: f32, dy: f32| SpriteQuad {
-        rect: Rect {
-            x: ORIGIN + dx,
-            y: ORIGIN + dy,
-            width: f32::from(sprite.width),
-            height: f32::from(sprite.height),
-        },
-        region: sprite.region,
-        depth: 0.4,
-        hue: 0,
-        place: Place {
-            stance: openshard_client_render::place::Stance::FaceSouth,
-            ..Place::of_static(at)
-        },
-        twin: 0,
-        owner: 0,
-        // The `n`th tile's panel is the `n`th box, which is what a quad's own
-        // range says and what makes each fragment meet its *own* wall.
-        volumes: Range {
-            offset: run,
-            count: 1,
-        },
+    let quad = |at: Point, run: u32, dx: f32, dy: f32| {
+        SpriteQuad {
+            rect:    Rect {
+                x:      ORIGIN + dx,
+                y:      ORIGIN + dy,
+                width:  f32::from(sprite.width),
+                height: f32::from(sprite.height),
+            },
+            region:  sprite.region,
+            depth:   0.4,
+            hue:     0,
+            place:   Place {
+                stance: openshard_client_render::place::Stance::FaceSouth,
+                ..Place::of_static(at)
+            },
+            twin:    0,
+            owner:   0,
+            // The `n`th tile's panel is the `n`th box, which is what a quad's own
+            // range says and what makes each fragment meet its *own* wall.
+            volumes: Range {
+                offset: run,
+                count:  1,
+            },
+        }
     };
     // The two panels the grid stands for a run of wall: a slab on the south edge
     // of each tile, `PANEL_THICKNESS` deep into the tile it stands on, as tall as
@@ -3047,7 +3140,10 @@ fn a_corner_s_pixel_carries_the_face_of_the_half_it_is_drawn_on() {
     let Some((device, queue)) = gpu() else {
         return;
     };
-    use openshard_client_render::facing::{Face, Facing};
+    use openshard_client_render::facing::{
+        Face,
+        Facing,
+    };
     use openshard_client_render::place::Stance;
 
     const GRAPHIC: Graphic = Graphic(1);
@@ -3073,7 +3169,7 @@ fn a_corner_s_pixel_carries_the_face_of_the_half_it_is_drawn_on() {
         sprite.facing,
         Some(Facing::Corner {
             right: RIGHT,
-            left: LEFT
+            left:  LEFT,
         }),
         "the atlas did not read the fixture as a corner",
     );
@@ -3103,21 +3199,21 @@ fn a_corner_s_pixel_carries_the_face_of_the_half_it_is_drawn_on() {
         &[],
         &statics,
         &[SpriteQuad {
-            rect: Rect {
-                x: ORIGIN,
-                y: ORIGIN,
-                width: f32::from(sprite.width),
+            rect:    Rect {
+                x:      ORIGIN,
+                y:      ORIGIN,
+                width:  f32::from(sprite.width),
                 height: f32::from(sprite.height),
             },
-            region: sprite.region,
-            depth: 0.4,
-            hue: 0,
-            place: Place {
+            region:  sprite.region,
+            depth:   0.4,
+            hue:     0,
+            place:   Place {
                 stance: Stance::of(&openshard_tiles::StaticTile::default(), sprite.facing),
                 ..Place::of_static(at)
             },
-            twin: 0,
-            owner: 0,
+            twin:    0,
+            owner:   0,
             volumes: Range { offset: 0, count: 2 },
         }],
         &corner,
@@ -3225,18 +3321,18 @@ fn a_billboards_normal_is_the_plane_it_is_drawn_on() {
         &[],
         &statics,
         &[SpriteQuad {
-            rect: Rect {
-                x: ORIGIN,
-                y: ORIGIN,
-                width: f32::from(sprite.width),
+            rect:    Rect {
+                x:      ORIGIN,
+                y:      ORIGIN,
+                width:  f32::from(sprite.width),
                 height: f32::from(sprite.height),
             },
-            region: sprite.region,
-            depth: 0.4,
-            hue: 0,
-            place: Place::of_mobile(at),
-            twin: 0,
-            owner: 0,
+            region:  sprite.region,
+            depth:   0.4,
+            hue:     0,
+            place:   Place::of_mobile(at),
+            twin:    0,
+            owner:   0,
             volumes: Range::default(),
         }],
         &[],
@@ -3309,7 +3405,7 @@ fn a_walking_billboard_is_lit_where_it_is_drawn_not_where_it_is_going() {
     let frame = AnimFrame {
         center_x: (SIZE / 2) as i16,
         center_y: 0,
-        image: Image::new(
+        image:    Image::new(
             SIZE,
             SIZE,
             vec![Color16(0b0_00000_11111_00000); usize::from(SIZE) * usize::from(SIZE)],
@@ -3485,14 +3581,14 @@ fn a_sprite_pixel_meets_the_same_box_on_both_sides() {
     // art named.
     let boxes = [
         Volume {
-            lo: WorldVec::new(300.0, 400.5, 0.0),
-            hi: WorldVec::new(301.0, 401.0, 3.0),
+            lo:    WorldVec::new(300.0, 400.5, 0.0),
+            hi:    WorldVec::new(301.0, 401.0, 3.0),
             solid: Some(occlusion::SolidId::new(7)),
             edges: occlusion::Edges::ANY,
         },
         Volume {
-            lo: WorldVec::new(300.0, 400.0, 0.0),
-            hi: WorldVec::new(301.0, 400.5, 6.0),
+            lo:    WorldVec::new(300.0, 400.0, 0.0),
+            hi:    WorldVec::new(301.0, 400.5, 6.0),
             solid: Some(occlusion::SolidId::new(11)),
             edges: occlusion::Edges::ANY,
         },
@@ -3504,28 +3600,28 @@ fn a_sprite_pixel_meets_the_same_box_on_both_sides() {
         // and `impostor::tests::a_lid_with_no_thickness_is_met_on_its_own_plane`
         // is where that case is constructed rather than hoped for.
         Volume {
-            lo: WorldVec::new(300.0, 400.0, 9.0),
-            hi: WorldVec::new(301.0, 401.0, 9.0),
+            lo:    WorldVec::new(300.0, 400.0, 9.0),
+            hi:    WorldVec::new(301.0, 401.0, 9.0),
             solid: Some(occlusion::SolidId::new(13)),
             edges: occlusion::Edges::NONE,
         },
     ];
     let quads = [SpriteQuad {
-        rect: Rect {
-            x: ORIGIN,
-            y: ORIGIN,
-            width: f32::from(sprite.width),
+        rect:    Rect {
+            x:      ORIGIN,
+            y:      ORIGIN,
+            width:  f32::from(sprite.width),
             height: f32::from(sprite.height),
         },
-        region: sprite.region,
-        depth: 0.4,
-        hue: 0,
-        place: Place::of_static(at),
-        twin: 0,
-        owner: 0,
+        region:  sprite.region,
+        depth:   0.4,
+        hue:     0,
+        place:   Place::of_static(at),
+        twin:    0,
+        owner:   0,
         volumes: Range {
             offset: 0,
-            count: boxes.len() as u32,
+            count:  boxes.len() as u32,
         },
     }];
     let places = render_places(
@@ -3760,34 +3856,34 @@ fn the_fringe_switch_draws_three_different_frames() {
     // counts. See `impostor::Volume::edges`.
     let boxes = [
         Volume {
-            lo: WorldVec::new(300.0, 400.8, 0.0),
-            hi: WorldVec::new(301.0, 401.0, 12.0),
+            lo:    WorldVec::new(300.0, 400.8, 0.0),
+            hi:    WorldVec::new(301.0, 401.0, 12.0),
             solid: Some(occlusion::SolidId::new(7)),
             edges: occlusion::Edges::SOUTH,
         },
         Volume {
-            lo: WorldVec::new(300.0, 400.0, 0.0),
-            hi: WorldVec::new(301.0, 401.0, 3.0),
+            lo:    WorldVec::new(300.0, 400.0, 0.0),
+            hi:    WorldVec::new(301.0, 401.0, 3.0),
             solid: Some(occlusion::SolidId::new(11)),
             edges: occlusion::Edges::ANY,
         },
     ];
     let quads = [SpriteQuad {
-        rect: Rect {
-            x: ORIGIN,
-            y: ORIGIN,
-            width: f32::from(sprite.width),
+        rect:    Rect {
+            x:      ORIGIN,
+            y:      ORIGIN,
+            width:  f32::from(sprite.width),
             height: f32::from(sprite.height),
         },
-        region: sprite.region,
-        depth: 0.4,
-        hue: 0,
-        place: Place::of_static(at),
-        twin: 0,
-        owner: 0,
+        region:  sprite.region,
+        depth:   0.4,
+        hue:     0,
+        place:   Place::of_static(at),
+        twin:    0,
+        owner:   0,
         volumes: Range {
             offset: 0,
-            count: boxes.len() as u32,
+            count:  boxes.len() as u32,
         },
     }];
 
@@ -3876,7 +3972,11 @@ fn a_sprite_fragment_is_a_point_of_the_primitive_it_names() {
     let Some((device, queue)) = gpu() else {
         return;
     };
-    use openshard_client_render::facing::{Face, Facing, Prism};
+    use openshard_client_render::facing::{
+        Face,
+        Facing,
+        Prism,
+    };
     use openshard_client_render::place::Stance;
 
     const SIZE: u32 = 640;
@@ -3941,7 +4041,7 @@ fn a_sprite_fragment_is_a_point_of_the_primitive_it_names() {
         &wall_tile,
         Shape::faced(Facing::Corner {
             right: Face::East,
-            left: Face::South,
+            left:  Face::South,
         }),
     );
     // A lone wall panel, unmerged: its own graphic, no neighbour to join.
@@ -4008,18 +4108,18 @@ fn a_sprite_fragment_is_a_point_of_the_primitive_it_names() {
         |x: u16, graphic: Graphic, tile: &StaticTile, shape: &Shape, quads: &mut Vec<SpriteQuad>| {
             let range = push_boxes(&mut boxes, &grid, x, 200, graphic, tile, shape);
             quads.push(SpriteQuad {
-                rect: Rect {
-                    x: origin_x,
-                    y: 20.0,
-                    width: f32::from(sprite.width),
+                rect:    Rect {
+                    x:      origin_x,
+                    y:      20.0,
+                    width:  f32::from(sprite.width),
                     height: f32::from(sprite.height),
                 },
-                region: sprite.region,
-                depth: 0.4,
-                hue: 0,
-                place: Place::of_static(Point::new(x, 200, 0)),
-                twin: 0,
-                owner: 0,
+                region:  sprite.region,
+                depth:   0.4,
+                hue:     0,
+                place:   Place::of_static(Point::new(x, 200, 0)),
+                twin:    0,
+                owner:   0,
                 volumes: range,
             });
             origin_x += f32::from(WIDE) + 20.0;
@@ -4040,7 +4140,7 @@ fn a_sprite_fragment_is_a_point_of_the_primitive_it_names() {
         &wall_tile,
         &Shape::faced(Facing::Corner {
             right: Face::East,
-            left: Face::South,
+            left:  Face::South,
         }),
         &mut quads,
     );
@@ -4167,11 +4267,13 @@ fn a_sprite_fragment_is_a_point_of_the_primitive_it_names() {
             let normal = gbuffer::unpack_normal(places.normal_at(x, y));
             match normal == [0.0; 3] {
                 true => bodies += 1,
-                false => assert_eq!(
-                    stance,
-                    stance_of(normal) as u32,
-                    "({x}, {y})'s stance does not agree with its own normal: {normal:?}",
-                ),
+                false => {
+                    assert_eq!(
+                        stance,
+                        stance_of(normal) as u32,
+                        "({x}, {y})'s stance does not agree with its own normal: {normal:?}",
+                    )
+                }
             }
             compared += 1;
         }
@@ -4221,7 +4323,10 @@ fn a_mesh_face_pixel_carries_the_mesh_face_sentinel() {
     let Some((device, queue)) = gpu() else {
         return;
     };
-    use openshard_client_render::mesh_face::{MeshFaceRow, MeshFaceVertex};
+    use openshard_client_render::mesh_face::{
+        MeshFaceRow,
+        MeshFaceVertex,
+    };
     use openshard_client_render::place::Stance;
 
     let land = LandAtlas::pack([]).expect("nothing always fits");
@@ -4233,15 +4338,17 @@ fn a_mesh_face_pixel_carries_the_mesh_face_sentinel() {
     // that a fragment lands and carries the sentinel.
     let tile = [300.0, 400.0];
     let world = [tile[0] + 0.5, tile[1] + 0.5, 15.0];
-    let corner = |x: f32, y: f32| MeshFaceVertex {
-        screen: ViewPoint::new(x, y),
-        world,
-        depth: 0.4,
-        id: 0,
-        tile,
-        normal: Stance::FaceEast.normal(),
-        // Not this test's subject — see `a_mesh_face_pixel_carries_its_exact_world_position`.
-        colour: [1.0, 1.0, 1.0],
+    let corner = |x: f32, y: f32| {
+        MeshFaceVertex {
+            screen: ViewPoint::new(x, y),
+            world,
+            depth: 0.4,
+            id: 0,
+            tile,
+            normal: Stance::FaceEast.normal(),
+            // Not this test's subject — see `a_mesh_face_pixel_carries_its_exact_world_position`.
+            colour: [1.0, 1.0, 1.0],
+        }
     };
     let vertices = [
         corner(54.0, 54.0),
@@ -4252,9 +4359,9 @@ fn a_mesh_face_pixel_carries_the_mesh_face_sentinel() {
         corner(54.0, 74.0),
     ];
     let rows = [MeshFaceRow {
-        tile: (300, 400),
+        tile:   (300, 400),
         stance: Stance::FaceEast,
-        solid: openshard_client_render::occlusion::SolidId::NOBODY,
+        solid:  openshard_client_render::occlusion::SolidId::NOBODY,
     }];
 
     let places = render_places(
@@ -4308,7 +4415,10 @@ fn a_mesh_face_pixel_carries_its_exact_world_position() {
     let Some((device, queue)) = gpu() else {
         return;
     };
-    use openshard_client_render::mesh_face::{MeshFaceRow, MeshFaceVertex};
+    use openshard_client_render::mesh_face::{
+        MeshFaceRow,
+        MeshFaceVertex,
+    };
     use openshard_client_render::place::Stance;
 
     let land = LandAtlas::pack([]).expect("nothing always fits");
@@ -4321,15 +4431,17 @@ fn a_mesh_face_pixel_carries_its_exact_world_position() {
     // prove nothing, so this one fails if anything on the path quantises.
     let tile = [300.0, 400.0];
     let world = [tile[0] + 0.3, tile[1] + 0.7, 15.1];
-    let corner = |x: f32, y: f32| MeshFaceVertex {
-        screen: ViewPoint::new(x, y),
-        world,
-        depth: 0.4,
-        id: 0,
-        tile,
-        normal: Stance::Flat.normal(),
-        // Not this test's subject — see `a_mesh_face_pixel_carries_the_mesh_face_sentinel`.
-        colour: [1.0, 1.0, 1.0],
+    let corner = |x: f32, y: f32| {
+        MeshFaceVertex {
+            screen: ViewPoint::new(x, y),
+            world,
+            depth: 0.4,
+            id: 0,
+            tile,
+            normal: Stance::Flat.normal(),
+            // Not this test's subject — see `a_mesh_face_pixel_carries_the_mesh_face_sentinel`.
+            colour: [1.0, 1.0, 1.0],
+        }
     };
     let vertices = [
         corner(54.0, 54.0),
@@ -4340,9 +4452,9 @@ fn a_mesh_face_pixel_carries_its_exact_world_position() {
         corner(54.0, 74.0),
     ];
     let rows = [MeshFaceRow {
-        tile: (300, 400),
+        tile:   (300, 400),
         stance: Stance::Flat,
-        solid: openshard_client_render::occlusion::SolidId::NOBODY,
+        solid:  openshard_client_render::occlusion::SolidId::NOBODY,
     }];
 
     let places = render_places(
@@ -4407,7 +4519,10 @@ fn two_mesh_faces_carry_their_own_two_normals() {
     let Some((device, queue)) = gpu() else {
         return;
     };
-    use openshard_client_render::mesh_face::{MeshFaceRow, MeshFaceVertex};
+    use openshard_client_render::mesh_face::{
+        MeshFaceRow,
+        MeshFaceVertex,
+    };
     use openshard_client_render::place::Stance;
 
     let land = LandAtlas::pack([]).expect("nothing always fits");
@@ -4420,15 +4535,17 @@ fn two_mesh_faces_carry_their_own_two_normals() {
     // coordinate to the pixel of the same number — see `Target::whole` — so
     // these are the pixels the two faces land on.
     let quad = |from: f32, id: u32, normal: [f32; 3]| {
-        let corner = |x: f32, y: f32| MeshFaceVertex {
-            screen: ViewPoint::new(x, y),
-            world: [tile[0] + 0.5, tile[1] + 0.5, 15.0],
-            depth: 0.4,
-            id,
-            tile,
-            normal,
-            // Not this test's subject — see `two_mesh_faces_carry_their_own_two_normals`.
-            colour: [1.0, 1.0, 1.0],
+        let corner = |x: f32, y: f32| {
+            MeshFaceVertex {
+                screen: ViewPoint::new(x, y),
+                world: [tile[0] + 0.5, tile[1] + 0.5, 15.0],
+                depth: 0.4,
+                id,
+                tile,
+                normal,
+                // Not this test's subject — see `two_mesh_faces_carry_their_own_two_normals`.
+                colour: [1.0, 1.0, 1.0],
+            }
         };
         let to = from + 20.0;
         [
@@ -4458,10 +4575,12 @@ fn two_mesh_faces_carry_their_own_two_normals() {
         .chain(quad(54.0, 1, top))
         .chain(quad(84.0, 2, riser))
         .collect();
-    let row = |stance| MeshFaceRow {
-        tile: (300, 400),
-        stance,
-        solid: openshard_client_render::occlusion::SolidId::NOBODY,
+    let row = |stance| {
+        MeshFaceRow {
+            tile: (300, 400),
+            stance,
+            solid: openshard_client_render::occlusion::SolidId::NOBODY,
+        }
     };
     // The slope's row carries `Flat`: a stance is four faces and a lid and
     // cannot name a hillside, which is exactly why the normal is a plane of its
@@ -4586,21 +4705,21 @@ fn render_places_with_fringe(
     let hue_ramp = HueRamp::build(&Hues::parse(&[0u8; 708]).expect("one empty group"));
 
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("ids"),
-        size: u64::from(size) * u64::from(size) * 4,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("ids"),
+        size:               u64::from(size) * u64::from(size) * 4,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let position_readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("positions"),
-        size: u64::from(size) * u64::from(size) * 16,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("positions"),
+        size:               u64::from(size) * u64::from(size) * 16,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let normal_readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("normals"),
-        size: u64::from(size) * u64::from(size) * 4,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("normals"),
+        size:               u64::from(size) * u64::from(size) * 4,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
 
@@ -4653,14 +4772,14 @@ fn render_places_with_fringe(
             wgpu::TexelCopyBufferInfo {
                 buffer,
                 layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(size * stride),
+                    offset:         0,
+                    bytes_per_row:  Some(size * stride),
                     rows_per_image: Some(size),
                 },
             },
             wgpu::Extent3d {
-                width: size,
-                height: size,
+                width:                 size,
+                height:                size,
                 depth_or_array_layers: 1,
             },
         );
@@ -4686,10 +4805,10 @@ fn render_places_with_fringe(
         bytes
     };
     Places {
-        width: size,
-        bytes: read(&readback),
+        width:     size,
+        bytes:     read(&readback),
         positions: read(&position_readback),
-        normals: read(&normal_readback),
+        normals:   read(&normal_readback),
     }
 }
 
@@ -4721,21 +4840,21 @@ fn render_places_with_mobile(
     let hue_ramp = HueRamp::build(&Hues::parse(&[0u8; 708]).expect("one empty group"));
 
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("ids"),
-        size: u64::from(size) * u64::from(size) * 4,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("ids"),
+        size:               u64::from(size) * u64::from(size) * 4,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let position_readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("positions"),
-        size: u64::from(size) * u64::from(size) * 16,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("positions"),
+        size:               u64::from(size) * u64::from(size) * 16,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let normal_readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("normals"),
-        size: u64::from(size) * u64::from(size) * 4,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("normals"),
+        size:               u64::from(size) * u64::from(size) * 4,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
 
@@ -4767,14 +4886,14 @@ fn render_places_with_mobile(
             wgpu::TexelCopyBufferInfo {
                 buffer,
                 layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(size * stride),
+                    offset:         0,
+                    bytes_per_row:  Some(size * stride),
                     rows_per_image: Some(size),
                 },
             },
             wgpu::Extent3d {
-                width: size,
-                height: size,
+                width:                 size,
+                height:                size,
                 depth_or_array_layers: 1,
             },
         );
@@ -4800,25 +4919,25 @@ fn render_places_with_mobile(
         bytes
     };
     Places {
-        width: size,
-        bytes: read(&readback),
+        width:     size,
+        bytes:     read(&readback),
         positions: read(&position_readback),
-        normals: read(&normal_readback),
+        normals:   read(&normal_readback),
     }
 }
 
 /// The G-buffer read back: three planes over one frame's pixels.
 struct Places {
-    width: u32,
+    width:     u32,
     /// The id plane — one `u32` a texel, `crate::gbuffer::pack_ids`'s layout.
-    bytes: Vec<u8>,
+    bytes:     Vec<u8>,
     /// The position plane over the same pixels — read back with the id one
     /// and never apart from it, because the two are one frame's answer and a
     /// fixture that copied them from different draws would compare a fragment
     /// against a different fragment.
     positions: Vec<u8>,
     /// And the normal plane over the same pixels, on the same terms.
-    normals: Vec<u8>,
+    normals:   Vec<u8>,
 }
 
 impl Places {
@@ -4914,18 +5033,18 @@ fn ground_in_front_hides_a_static_behind_it() {
         place: Place::land(1, 1),
     }];
     let wall = [SpriteQuad {
-        rect: Rect {
-            x: 64.0 - 30.0,
-            y: 64.0 - 30.0,
-            width: f32::from(sprite.width),
+        rect:    Rect {
+            x:      64.0 - 30.0,
+            y:      64.0 - 30.0,
+            width:  f32::from(sprite.width),
             height: f32::from(sprite.height),
         },
-        region: sprite.region,
-        depth: 0.6,
-        hue: 0,
-        place: Place::NOWHERE,
-        twin: 0,
-        owner: 0,
+        region:  sprite.region,
+        depth:   0.6,
+        hue:     0,
+        place:   Place::NOWHERE,
+        twin:    0,
+        owner:   0,
         volumes: openshard_client_render::impostor::Range::default(),
     }];
     let none = AnimAtlas::pack([]).expect("nothing always fits");
@@ -5035,18 +5154,18 @@ fn at_one_depth_the_later_pass_wins() {
         place: Place::land(1, 1),
     }];
     let flagstone = [SpriteQuad {
-        rect: Rect {
-            x: 64.0 - 30.0,
-            y: 64.0 - 30.0,
-            width: f32::from(sprite.width),
+        rect:    Rect {
+            x:      64.0 - 30.0,
+            y:      64.0 - 30.0,
+            width:  f32::from(sprite.width),
             height: f32::from(sprite.height),
         },
-        region: sprite.region,
-        depth: TIED,
-        hue: 0,
-        place: Place::NOWHERE,
-        twin: 0,
-        owner: 0,
+        region:  sprite.region,
+        depth:   TIED,
+        hue:     0,
+        place:   Place::NOWHERE,
+        twin:    0,
+        owner:   0,
         volumes: openshard_client_render::impostor::Range::default(),
     }];
     let none = AnimAtlas::pack([]).expect("nothing always fits");
@@ -5111,7 +5230,7 @@ fn a_mobile_is_drawn_over_the_ground_and_mirrors_with_its_facing() {
     let frame = AnimFrame {
         center_x: 1,
         center_y: 0,
-        image: Image::new(2, 1, vec![red, green]),
+        image:    Image::new(2, 1, vec![red, green]),
     };
     let atlas = AnimAtlas::pack([(
         FrameKey::new(
@@ -5142,17 +5261,17 @@ fn a_mobile_is_drawn_over_the_ground_and_mirrors_with_its_facing() {
     // have given it.
     let at = camera.to_screen(centre);
     let ground = [GroundQuad {
-        x: at.x as f32,
-        y: at.y as f32,
+        x:       at.x as f32,
+        y:       at.y as f32,
         corners: [0.0; 4],
-        region: land.region(LandTileId(1)).expect("packed"),
-        texmap: None,
-        depth: openshard_client_render::depth::Order {
-            tile: 200,
+        region:  land.region(LandTileId(1)).expect("packed"),
+        texmap:  None,
+        depth:   openshard_client_render::depth::Order {
+            tile:       200,
             priority_z: openshard_client_render::depth::land_priority_z([0; 4]),
         }
         .to_depth(openshard_client_render::depth::base_for(100, 100)),
-        place: Place::land(100, 100),
+        place:   Place::land(100, 100),
     }];
 
     let colours = |facing| {
@@ -5436,18 +5555,18 @@ fn a_magnified_sprite_translates_texel_for_texel() {
     let atlas = StaticAtlas::build(&art, [graphic]).expect("one sprite fits");
     let sprite = atlas.sprite(graphic).expect("just packed");
     let quads = vec![SpriteQuad {
-        rect: Rect {
-            x: (camera.render_width() as i32 / 2) as f32,
-            y: (camera.render_height() as i32 / 2) as f32,
-            width: f32::from(sprite.width),
+        rect:    Rect {
+            x:      (camera.render_width() as i32 / 2) as f32,
+            y:      (camera.render_height() as i32 / 2) as f32,
+            width:  f32::from(sprite.width),
             height: f32::from(sprite.height),
         },
-        region: sprite.region,
-        depth: 0.5,
-        hue: 0,
-        place: Place::NOWHERE,
-        twin: 0,
-        owner: 0,
+        region:  sprite.region,
+        depth:   0.5,
+        hue:     0,
+        place:   Place::NOWHERE,
+        twin:    0,
+        owner:   0,
         volumes: openshard_client_render::impostor::Range::default(),
     }];
 
@@ -5653,17 +5772,17 @@ fn dump_a_frame_of_britain() {
             // less two, so it is drawn over the body rather than beside it.
             let ground = Point::new(x, y, map.average_land_z(x, y).expect("inside the facet"));
             Mobile {
-                at: ground,
-                body: Graphic(400),
-                group: AnimationGroup(4),
-                facing: *facing,
-                frame: AnimationFrameIndex(0),
+                at:        ground,
+                body:      Graphic(400),
+                group:     AnimationGroup(4),
+                facing:    *facing,
+                frame:     AnimationFrameIndex(0),
                 // Standing, so there is no second tile to sort between.
-                from: None,
-                corpse: false,
-                hue: openshard_protocol::wire::Hue::NONE,
+                from:      None,
+                corpse:    false,
+                hue:       openshard_protocol::wire::Hue::NONE,
                 // Standing where the server put them: nothing here is walking.
-                drawn: openshard_client_render::follow::Gaze::on(ground),
+                drawn:     openshard_client_render::follow::Gaze::on(ground),
                 equipment: Vec::new().into(),
             }
         })
@@ -5756,18 +5875,18 @@ fn a_sprite_added_after_the_pass_was_built_is_drawn_from_the_rows_uploaded() {
 
     let sprite = atlas.sprite(LATE).expect("packed");
     let quads = [SpriteQuad {
-        rect: Rect {
-            x: 10.0,
-            y: 12.0,
-            width: f32::from(sprite.width),
+        rect:    Rect {
+            x:      10.0,
+            y:      12.0,
+            width:  f32::from(sprite.width),
             height: f32::from(sprite.height),
         },
-        region: sprite.region,
-        depth: 0.5,
-        hue: 0,
-        place: Place::NOWHERE,
-        twin: 0,
-        owner: 0,
+        region:  sprite.region,
+        depth:   0.5,
+        hue:     0,
+        place:   Place::NOWHERE,
+        twin:    0,
+        owner:   0,
         volumes: openshard_client_render::impostor::Range::default(),
     }];
 
@@ -5775,8 +5894,8 @@ fn a_sprite_added_after_the_pass_was_built_is_drawn_from_the_rows_uploaded() {
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("frame"),
         size: wgpu::Extent3d {
-            width: frame_width,
-            height: frame_height,
+            width:                 frame_width,
+            height:                frame_height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -5866,18 +5985,18 @@ fn a_second_static_atlas_page_draws_its_picture_and_gbuffer_row() {
     let hue_ramp = HueRamp::build(&Hues::parse(&[0u8; 708]).expect("one empty group"));
     let mut statics = SpriteRenderer::new_static_pages(&device, &queue, format, &atlas, &hue_ramp);
     let quads = [SpriteQuad {
-        rect: Rect {
-            x: 10.0,
-            y: 12.0,
-            width: 24.0,
+        rect:    Rect {
+            x:      10.0,
+            y:      12.0,
+            width:  24.0,
             height: 18.0,
         },
-        region: sprite.sprite.region,
-        depth: 0.5,
-        hue: 0,
-        place: Place::of_static(Point::new(7, 9, 0)),
-        twin: 0,
-        owner: 0,
+        region:  sprite.sprite.region,
+        depth:   0.5,
+        hue:     0,
+        place:   Place::of_static(Point::new(7, 9, 0)),
+        twin:    0,
+        owner:   0,
         volumes: Range::default(),
     }
     .with_static_atlas_page(sprite.page)];
@@ -5997,8 +6116,8 @@ fn render_outlined(
     let surface = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("surface"),
         size: wgpu::Extent3d {
-            width: surface_width,
-            height: surface_height,
+            width:                 surface_width,
+            height:                surface_height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -6010,9 +6129,9 @@ fn render_outlined(
     });
     let surface_view = surface.create_view(&wgpu::TextureViewDescriptor::default());
     let rect = ViewportRect {
-        x: 0,
-        y: 0,
-        width: surface_width,
+        x:      0,
+        y:      0,
+        width:  surface_width,
         height: surface_height,
     };
     // No mobile pass in this fixture: the dummy stands in for it.
@@ -6083,18 +6202,18 @@ fn a_ring_is_drawn_around_a_silhouette_and_not_over_it() {
     let sprite = atlas.sprite(GRAPHIC).expect("packed");
     let (x, y) = (40.0, 50.0);
     let quads = [SpriteQuad {
-        rect: Rect {
+        rect:    Rect {
             x,
             y,
             width: f32::from(SIDE),
             height: f32::from(SIDE),
         },
-        region: sprite.region,
-        depth: 0.5,
-        hue: 0,
-        place: Place::NOWHERE,
-        twin: 0,
-        owner: 0,
+        region:  sprite.region,
+        depth:   0.5,
+        hue:     0,
+        place:   Place::NOWHERE,
+        twin:    0,
+        owner:   0,
         volumes: openshard_client_render::impostor::Range::default(),
     }];
 
@@ -6167,20 +6286,22 @@ fn two_touching_silhouettes_are_ringed_separately() {
     // Edge to edge, sharing no pixel: the left one ends where the right begins.
     let quads: Vec<SpriteQuad> = [x, x + f32::from(SIDE)]
         .into_iter()
-        .map(|at| SpriteQuad {
-            rect: Rect {
-                x: at,
-                y,
-                width: f32::from(SIDE),
-                height: f32::from(SIDE),
-            },
-            region: sprite.region,
-            depth: 0.5,
-            hue: 0,
-            place: Place::NOWHERE,
-            twin: 0,
-            owner: 0,
-            volumes: openshard_client_render::impostor::Range::default(),
+        .map(|at| {
+            SpriteQuad {
+                rect:    Rect {
+                    x: at,
+                    y,
+                    width: f32::from(SIDE),
+                    height: f32::from(SIDE),
+                },
+                region:  sprite.region,
+                depth:   0.5,
+                hue:     0,
+                place:   Place::NOWHERE,
+                twin:    0,
+                owner:   0,
+                volumes: openshard_client_render::impostor::Range::default(),
+            }
         })
         .collect();
 
@@ -6240,18 +6361,18 @@ fn a_glow_reaches_past_the_ring_and_fades_with_distance() {
     let sprite = atlas.sprite(GRAPHIC).expect("packed");
     let (x, y) = (40.0, 50.0);
     let quads = [SpriteQuad {
-        rect: Rect {
+        rect:    Rect {
             x,
             y,
             width: f32::from(SIDE),
             height: f32::from(SIDE),
         },
-        region: sprite.region,
-        depth: 0.5,
-        hue: 0,
-        place: Place::NOWHERE,
-        twin: 0,
-        owner: 0,
+        region:  sprite.region,
+        depth:   0.5,
+        hue:     0,
+        place:   Place::NOWHERE,
+        twin:    0,
+        owner:   0,
         volumes: openshard_client_render::impostor::Range::default(),
     }];
 
@@ -6320,18 +6441,18 @@ fn a_minified_ring_keeps_every_side() {
     let sprite = atlas.sprite(GRAPHIC).expect("packed");
     let (x, y) = (40.0, 50.0);
     let quads = [SpriteQuad {
-        rect: Rect {
+        rect:    Rect {
             x,
             y,
             width: f32::from(SIDE),
             height: f32::from(SIDE),
         },
-        region: sprite.region,
-        depth: 0.5,
-        hue: 0,
-        place: Place::NOWHERE,
-        twin: 0,
-        owner: 0,
+        region:  sprite.region,
+        depth:   0.5,
+        hue:     0,
+        place:   Place::NOWHERE,
+        twin:    0,
+        owner:   0,
         volumes: openshard_client_render::impostor::Range::default(),
     }];
 
@@ -6407,20 +6528,22 @@ fn dump_a_glowing_sprite() {
     ])
     .expect("two sprites fit");
 
-    let quad = |graphic: Graphic, x: f32, y: f32, side: f32, depth: f32| SpriteQuad {
-        rect: Rect {
-            x,
-            y,
-            width: side,
-            height: side,
-        },
-        region: atlas.sprite(graphic).expect("packed").region,
-        depth,
-        hue: 0,
-        place: Place::NOWHERE,
-        twin: 0,
-        owner: 0,
-        volumes: openshard_client_render::impostor::Range::default(),
+    let quad = |graphic: Graphic, x: f32, y: f32, side: f32, depth: f32| {
+        SpriteQuad {
+            rect: Rect {
+                x,
+                y,
+                width: side,
+                height: side,
+            },
+            region: atlas.sprite(graphic).expect("packed").region,
+            depth,
+            hue: 0,
+            place: Place::NOWHERE,
+            twin: 0,
+            owner: 0,
+            volumes: openshard_client_render::impostor::Range::default(),
+        }
     };
     let backdrop = quad(BACKDROP, 16.0, 16.0, 96.0, 0.9);
     let item = quad(ITEM, 54.0, 54.0, 20.0, 0.5);
@@ -6490,7 +6613,7 @@ fn parity_place(px: u32, py: u32) -> (u16, u16, f32, f32) {
 #[derive(Clone, Copy)]
 struct Fixture {
     surface: Surface,
-    z: i8,
+    z:       i8,
     /// Which **solid** of the grid every pixel is a point of.
     ///
     /// [`None`] for every fixture that predates sub-tile lids, and that is the
@@ -6517,7 +6640,7 @@ struct Fixture {
     /// lid_it_is_not_under` is the one test in that shape, and its two pixels
     /// are picked around exactly this: the lit one really is on the tread named
     /// here, and the control one is not and is blocked by its own.
-    solid: Option<SolidId>,
+    solid:   Option<SolidId>,
     /// How far past the sub-tile fraction every fragment's *position* is written,
     /// while its **tile stays what [`parity_place`] says**.
     ///
@@ -6533,7 +6656,7 @@ struct Fixture {
     /// `docs/occluders.md`'s S4 turned from a rule's own subject into a fact
     /// nothing downstream may read: the walk seeds itself from the position and
     /// the tile is not passed to it at all.
-    drift: (f32, f32),
+    drift:   (f32, f32),
 }
 
 impl Fixture {
@@ -6542,9 +6665,9 @@ impl Fixture {
     fn ground() -> Self {
         Self {
             surface: Surface::Upright,
-            z: 0,
-            solid: None,
-            drift: (0.0, 0.0),
+            z:       0,
+            solid:   None,
+            drift:   (0.0, 0.0),
         }
     }
 }
@@ -6588,32 +6711,32 @@ fn parity_frame(
         *face_ids.entry((x, y)).or_insert_with(|| {
             let id = (face_rows.len() as u64 / openshard_client_render::sprite::SpriteQuad::STRIDE) as u32;
             SpriteQuad {
-                rect: Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    width: 0.0,
+                rect:    Rect {
+                    x:      0.0,
+                    y:      0.0,
+                    width:  0.0,
                     height: 0.0,
                 },
-                region: openshard_client_render::atlas::Region {
-                    u: 0.0,
-                    v: 0.0,
+                region:  openshard_client_render::atlas::Region {
+                    u:  0.0,
+                    v:  0.0,
                     du: 0.0,
                     dv: 0.0,
                 },
-                depth: 0.0,
-                hue: 0,
-                place: openshard_client_render::place::Place::land(x, y),
+                depth:   0.0,
+                hue:     0,
+                place:   openshard_client_render::place::Place::land(x, y),
                 // This sweep never asks for a corner `Stance`, so there is
                 // never a second half to point at — see
                 // `crate::sprite::split_corners` for the real pass's row.
-                twin: 0,
+                twin:    0,
                 // **Never read by the shader any more**, and the row carries it
                 // only because `SpriteQuad` has the field: what a fragment is a
                 // point of rides in the position plane now, per fragment, and
                 // `blit.wesl`'s owner-and-stance narrowing went with the scan
                 // that used it. `OwnerId::NONE`'s own word, which is what a row
                 // that means nothing by it should say.
-                owner: u32::from(OwnerId::NONE.raw()),
+                owner:   u32::from(OwnerId::NONE.raw()),
                 volumes: openshard_client_render::impostor::Range::default(),
             }
             .write(&mut face_rows);
@@ -6630,18 +6753,18 @@ fn parity_frame(
         *ground_ids.entry((x, y)).or_insert_with(|| {
             let id = (ground_rows.len() as u64 / openshard_client_render::ground::GroundQuad::STRIDE) as u32;
             openshard_client_render::ground::GroundQuad {
-                x: 0.0,
-                y: 0.0,
+                x:       0.0,
+                y:       0.0,
                 corners: [0.0; 4],
-                region: openshard_client_render::atlas::Region {
-                    u: 0.0,
-                    v: 0.0,
+                region:  openshard_client_render::atlas::Region {
+                    u:  0.0,
+                    v:  0.0,
                     du: 0.0,
                     dv: 0.0,
                 },
-                texmap: None,
-                depth: 0.0,
-                place: openshard_client_render::place::Place::land(x, y),
+                texmap:  None,
+                depth:   0.0,
+                place:   openshard_client_render::place::Place::land(x, y),
             }
             .write(&mut ground_rows);
             id
@@ -6665,22 +6788,28 @@ fn parity_frame(
                 // Land with no stance: what every fixture that predates surfaces
                 // is, and a billboard's answer — nothing is known about which way
                 // it looks, so every flame that reaches it lights it.
-                Surface::Upright => (
-                    openshard_client_render::place::Kind::Land,
-                    openshard_client_render::place::Stance::Upright,
-                ),
+                Surface::Upright => {
+                    (
+                        openshard_client_render::place::Kind::Land,
+                        openshard_client_render::place::Stance::Upright,
+                    )
+                }
                 // A floor, a rug, the top of a wall: it looks up, and that is the
                 // fixture decision 27 needed. Without one the shader could return
                 // any normal at all for a flat pixel and every parity test here
                 // would still pass.
-                Surface::Flat => (
-                    openshard_client_render::place::Kind::Static,
-                    openshard_client_render::place::Stance::Flat,
-                ),
-                Surface::Face(face) => (
-                    openshard_client_render::place::Kind::Static,
-                    openshard_client_render::place::Stance::face(face),
-                ),
+                Surface::Flat => {
+                    (
+                        openshard_client_render::place::Kind::Static,
+                        openshard_client_render::place::Stance::Flat,
+                    )
+                }
+                Surface::Face(face) => {
+                    (
+                        openshard_client_render::place::Kind::Static,
+                        openshard_client_render::place::Stance::face(face),
+                    )
+                }
             };
             // Both planes off one statement about the fragment — see
             // `openshard_client_render::gbuffer::Fragment`, which is the format
@@ -6721,8 +6850,8 @@ fn parity_frame(
             },
             bytes,
             wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * stride),
+                offset:         0,
+                bytes_per_row:  Some(width * stride),
                 rows_per_image: Some(height),
             },
             wgpu::Extent3d {
@@ -6740,18 +6869,18 @@ fn parity_frame(
     upload(gbuffer.normal(), &bytes, 4);
 
     let surface = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("surface"),
-        size: wgpu::Extent3d {
+        label:           Some("surface"),
+        size:            wgpu::Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: openshard_client_render::blit::WORLD_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        sample_count:    1,
+        dimension:       wgpu::TextureDimension::D2,
+        format:          openshard_client_render::blit::WORLD_FORMAT,
+        usage:           wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats:    &[],
     });
     let surface_view = surface.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -6762,11 +6891,11 @@ fn parity_frame(
     encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("white world"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: &world_view,
-            depth_slice: None,
+            view:           &world_view,
+            depth_slice:    None,
             resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+            ops:            wgpu::Operations {
+                load:  wgpu::LoadOp::Clear(wgpu::Color::WHITE),
                 store: wgpu::StoreOp::Store,
             },
         })],
@@ -6787,9 +6916,9 @@ fn parity_frame(
         None
     } else {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("parity face instances"),
-            size: face_rows.len() as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            label:              Some("parity face instances"),
+            size:               face_rows.len() as u64,
+            usage:              wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         queue.write_buffer(&buffer, 0, &face_rows);
@@ -6802,9 +6931,9 @@ fn parity_frame(
         None
     } else {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("parity ground instances"),
-            size: ground_rows.len() as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            label:              Some("parity ground instances"),
+            size:               ground_rows.len() as u64,
+            usage:              wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         queue.write_buffer(&buffer, 0, &ground_rows);
@@ -6815,17 +6944,17 @@ fn parity_frame(
         queue,
         &mut encoder,
         openshard_client_render::blit::Frame {
-            target: &surface_view,
-            world: &world_view,
-            gbuffer: &gbuffer_views,
-            face_instances: face_instances.as_ref().unwrap_or(&dummy_instances),
-            item_instances: &dummy_instances,
+            target:           &surface_view,
+            world:            &world_view,
+            gbuffer:          &gbuffer_views,
+            face_instances:   face_instances.as_ref().unwrap_or(&dummy_instances),
+            item_instances:   &dummy_instances,
             // No mobile pixels in this fixture: the dummy stands in for it.
             mobile_instances: &dummy_instances,
-            mesh_instances: &dummy_mesh_instances,
+            mesh_instances:   &dummy_mesh_instances,
             ground_instances: ground_instances.as_ref().unwrap_or(&dummy_ground_instances),
-            zoom: Zoom::ONE,
-            rect: ViewportRect {
+            zoom:             Zoom::ONE,
+            rect:             ViewportRect {
                 x: 0,
                 y: 0,
                 width,
@@ -6931,22 +7060,22 @@ fn the_shader_reads_a_primitive_at_no_fraction_a_byte_could_name() {
 
     let read = |offset: f64| {
         let lighting = Lighting {
-            ambient: openshard_client_render::light::NIGHT,
-            lights: Vec::new(),
-            occlusion: occlusion.clone(),
-            sun: Some(sun),
-            view: View::default(),
+            ambient:      openshard_client_render::light::NIGHT,
+            lights:       Vec::new(),
+            occlusion:    occlusion.clone(),
+            sun:          Some(sun),
+            view:         View::default(),
             flame_radius: openshard_client_render::light::FLAME_RADIUS,
-            shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
-            dead: false,
+            shadow_rays:  openshard_client_render::light::ShadowRays::DEFAULT,
+            dead:         false,
         };
         let fixture = Fixture {
             surface: Surface::Upright,
             // Inside the box's own span, which runs from just over 1 to just
             // under 9: a ray level with the fragment crosses it in `z`.
-            z: 4,
-            solid: None,
-            drift: (0.5, (min_y - f64::from(cy) + offset) as f32),
+            z:       4,
+            solid:   None,
+            drift:   (0.5, (min_y - f64::from(cy) + offset) as f32),
         };
         let frame = parity_frame(&device, &queue, &lighting, 64, 64, fixture);
         i32::from(frame.pixel(AT.0, AT.1)[0])
@@ -7129,13 +7258,13 @@ fn the_shader_does_not_stop_a_vertical_ray_with_a_lid_it_is_not_under() {
     let lighting = Lighting {
         ambient: openshard_client_render::light::NIGHT,
         lights: vec![Light {
-            at: over,
+            at:        over,
             // Well above the flight, so the ray runs up past every tread.
-            z: 15.0,
-            radius: 40.0,
-            color: [1.0, 1.0, 1.0],
+            z:         15.0,
+            radius:    40.0,
+            color:     [1.0, 1.0, 1.0],
             intensity: 1.0,
-            beam: None,
+            beam:      None,
         }],
         occlusion,
         sun: None,
@@ -7236,30 +7365,30 @@ fn the_shader_stops_a_vertical_ray_with_the_panel_it_stands_inside() {
 
     let frame = |grid: openshard_client_render::occlusion::Occlusion| {
         let lighting = Lighting {
-            ambient: openshard_client_render::light::NIGHT,
-            lights: vec![Light {
-                at: over,
-                z: 20.0,
-                radius: 40.0,
-                color: [1.0, 1.0, 1.0],
+            ambient:      openshard_client_render::light::NIGHT,
+            lights:       vec![Light {
+                at:        over,
+                z:         20.0,
+                radius:    40.0,
+                color:     [1.0, 1.0, 1.0],
                 intensity: 1.0,
-                beam: None,
+                beam:      None,
             }],
-            occlusion: grid,
-            sun: None,
-            view: View::default(),
+            occlusion:    grid,
+            sun:          None,
+            view:         View::default(),
             flame_radius: 0.0,
-            shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
-            dead: false,
+            shadow_rays:  openshard_client_render::light::ShadowRays::DEFAULT,
+            dead:         false,
         };
         let fixture = Fixture {
             // A point of nothing, looking nowhere: the wall is a different
             // static, so identity and D2 have nothing to say and what is left is
             // the shape alone.
             surface: Surface::Upright,
-            z: 0,
-            solid: None,
-            drift: (0.0, 0.0),
+            z:       0,
+            solid:   None,
+            drift:   (0.0, 0.0),
         };
         let frame = parity_frame(&device, &queue, &lighting, 64, 64, fixture);
         i32::from(frame.pixel(INSIDE.0, INSIDE.1)[0])
@@ -7277,12 +7406,12 @@ fn the_shader_stops_a_vertical_ray_with_the_panel_it_stands_inside() {
             ..openshard_tiles::StaticTile::default()
         },
         Shape {
-            facing: Some(openshard_client_render::facing::Facing::One(
+            facing:    Some(openshard_client_render::facing::Facing::One(
                 openshard_client_render::facing::Face::South,
             )),
-            hole: None,
-            prism: None,
-            blocks: openshard_client_render::facing::Blocks::EMPTY,
+            hole:      None,
+            prism:     None,
+            blocks:    openshard_client_render::facing::Blocks::EMPTY,
             footprint: None,
         },
     );
@@ -7382,12 +7511,12 @@ fn a_fragment_a_hair_inside_a_wall_is_shadowed_by_the_cell_it_drifted_into() {
             // Due west of both pixels, so the ray runs back across the tile the
             // drifted fragment claims and the wall it stands in is the only thing
             // between them.
-            at: Vec2::new(f32::from(cx) - 3.5, at.1),
-            z: 10.0,
-            radius: 12.0,
-            color: [1.0, 1.0, 1.0],
+            at:        Vec2::new(f32::from(cx) - 3.5, at.1),
+            z:         10.0,
+            radius:    12.0,
+            color:     [1.0, 1.0, 1.0],
             intensity: 3.0,
-            beam: None,
+            beam:      None,
         }],
         occlusion,
         sun: None,
@@ -7399,9 +7528,9 @@ fn a_fragment_a_hair_inside_a_wall_is_shadowed_by_the_cell_it_drifted_into() {
     let fixture = Fixture {
         surface: Surface::Upright,
         // Inside the body's own `0..20`, and level with the flame.
-        z: 10,
-        solid: None,
-        drift: (DRIFT, 0.0),
+        z:       10,
+        solid:   None,
+        drift:   (DRIFT, 0.0),
     };
 
     let (width, height) = (64, 64);
@@ -7582,11 +7711,11 @@ struct ExactWalkReport {
     /// A classification flip [`ground_truth_blocked`] backs `walk_cells`
     /// for — a genuine, new defect in `walk_the_record` this doc has not
     /// already catalogued, and the only thing these tests fail on.
-    bugs: Vec<String>,
+    bugs:        Vec<String>,
     /// A classification flip [`ground_truth_blocked`] backs
     /// `walk_the_record` for: an already-real `walk_cells` gap, the same
     /// family `docs/lighting_raymarch.md`'s session 9 found four of.
-    explained: usize,
+    explained:   usize,
     /// A classification flip this oracle cannot rule on — the marched path
     /// crossed a solid with an aperture, which it does not model.
     unexplained: usize,
@@ -7594,7 +7723,7 @@ struct ExactWalkReport {
     /// the straight segment only ever grazes the corner of — the accepted
     /// corner-grazing ambiguity, not a defect. See `blamed_tile_has_a_real_
     /// crossing`'s own doc comment.
-    grazed: usize,
+    grazed:      usize,
 }
 
 /// [`light::sample_exact`] against [`light::sample`], over one of decision
@@ -7623,9 +7752,9 @@ struct ExactWalkReport {
 /// is what fails these tests.
 fn exact_walk_disagreements(lighting: &Lighting, surface: Surface, z: i8) -> ExactWalkReport {
     let mut report = ExactWalkReport {
-        bugs: Vec::new(),
-        explained: 0,
-        grazed: 0,
+        bugs:        Vec::new(),
+        explained:   0,
+        grazed:      0,
         unexplained: 0,
     };
     for py in 0..64 {
@@ -7679,15 +7808,17 @@ fn exact_walk_disagreements(lighting: &Lighting, surface: Surface, z: i8) -> Exa
                     {
                         report.grazed += 1;
                     }
-                    Some(_) => report.bugs.push(format!(
-                        "({px}, {py}) light {index}: walk_cells {} ({:.4}), walk_the_record {} \
+                    Some(_) => {
+                        report.bugs.push(format!(
+                            "({px}, {py}) light {index}: walk_cells {} ({:.4}), walk_the_record {} \
                          ({:.4}), ground truth says {}",
-                        if a_blocked { "blocked" } else { "open" },
-                        a.through,
-                        if b_blocked { "blocked" } else { "open" },
-                        b.through,
-                        if a_blocked { "blocked" } else { "open" },
-                    )),
+                            if a_blocked { "blocked" } else { "open" },
+                            a.through,
+                            if b_blocked { "blocked" } else { "open" },
+                            b.through,
+                            if a_blocked { "blocked" } else { "open" },
+                        ))
+                    }
                 }
             }
             // The sun has no `target_tile` of its own to skip — `walk_sun`/
@@ -7886,17 +8017,17 @@ fn shadow_wanted(sample: &openshard_client_render::light::Sample, lighting: &Lig
 struct ShaderSweep {
     /// Pixels where the two backends said different things and neither boundary
     /// below excuses it.
-    bugs: Vec<String>,
+    bugs:     Vec<String>,
     /// How many pixels were compared at all.
     compared: usize,
     /// Pixels sitting on the rim of a pool — `d` within [`RIM`] of `1.0`, where
     /// "inside the pool" is decided by an `f32` comparison the two backends
     /// compute separately. A flip there is the rim being drawn a hair wider on
     /// one side, not a primitive going missing.
-    rim: usize,
+    rim:      usize,
     /// And pixels sitting on the cutoff, where `Blocked` and `Through` are the
     /// same answer to within a rounding of the same product.
-    cutoff: usize,
+    cutoff:   usize,
     /// How many pixels `light::sample` says are behind something — every ray of
     /// the nearest flame stopped.
     ///
@@ -7905,17 +8036,17 @@ struct ShaderSweep {
     /// compares four thousand pixels of "no flame reaches" and agrees about the
     /// walk on none of them. `docs/occluders.md`'s own "a gate can be vacuous
     /// three times over" is what this is here for.
-    blocked: usize,
+    blocked:  usize,
     /// And how many see the nearest flame at all — the other half of the same
     /// census: a fixture where *everything* is behind a wall compares one answer
     /// as surely as one where nothing is.
-    lit: usize,
+    lit:      usize,
     /// Of those, how many see part of a flame and not all of it: a penumbra
     /// pixel, where visibility is a count of eighths rather than nought or one.
     /// Printed and not asserted — a flame is a twentieth of a tile across and a
     /// fixture pixel an eighth of one, so a scene whose shadow edges fall
     /// between pixels legitimately has none.
-    partly: usize,
+    partly:   usize,
 }
 
 /// How near `d = 1` a fragment has to be for a `Unreached`/`Through` flip to be
@@ -7961,13 +8092,13 @@ fn shader_sweep(
     shown.view = View::Shadow;
     let frame = parity_frame(device, queue, &shown, width, height, fixture);
     let mut sweep = ShaderSweep {
-        bugs: Vec::new(),
+        bugs:     Vec::new(),
         compared: 0,
-        rim: 0,
-        cutoff: 0,
-        blocked: 0,
-        lit: 0,
-        partly: 0,
+        rim:      0,
+        cutoff:   0,
+        blocked:  0,
+        lit:      0,
+        partly:   0,
     };
     for py in 0..height {
         for px in 0..width {
@@ -8009,11 +8140,13 @@ fn shader_sweep(
                 {
                     sweep.cutoff += 1;
                 }
-                (wanted, drawn) => sweep.bugs.push(format!(
-                    "({px}, {py}) at ({:.4}, {:.4}, z {}): light::sample says {wanted:?}, the \
+                (wanted, drawn) => {
+                    sweep.bugs.push(format!(
+                        "({px}, {py}) at ({:.4}, {:.4}, z {}): light::sample says {wanted:?}, the \
                      shader drew {drawn:?}",
-                    spot.at.x, spot.at.y, spot.z,
-                )),
+                        spot.at.x, spot.at.y, spot.z,
+                    ))
+                }
             }
         }
     }
@@ -8232,25 +8365,25 @@ fn the_shader_meets_what_stands_at_the_corner_two_leaves_meet_at() {
 
     let frame = |grid: Occlusion| {
         let lighting = Lighting {
-            ambient: openshard_client_render::light::NIGHT,
-            lights: vec![Light {
+            ambient:      openshard_client_render::light::NIGHT,
+            lights:       vec![Light {
                 // On the anti-diagonal through the corner, and low enough that the
                 // segment crosses the corner column three quarters of a `z` up —
                 // inside the run's own height, where a flame overhead would clear
                 // it.
-                at: Vec2::new(f32::from(cx) - 3.0, f32::from(cy) + 3.0),
-                z: 3.0,
-                radius: 20.0,
-                color: [1.0, 1.0, 1.0],
+                at:        Vec2::new(f32::from(cx) - 3.0, f32::from(cy) + 3.0),
+                z:         3.0,
+                radius:    20.0,
+                color:     [1.0, 1.0, 1.0],
                 intensity: 1.0,
-                beam: None,
+                beam:      None,
             }],
-            occlusion: grid,
-            sun: None,
-            view: View::Shadow,
+            occlusion:    grid,
+            sun:          None,
+            view:         View::Shadow,
             flame_radius: 0.0,
-            shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
-            dead: false,
+            shadow_rays:  openshard_client_render::light::ShadowRays::DEFAULT,
+            dead:         false,
         };
         let frame = parity_frame(&device, &queue, &lighting, 64, 64, Fixture::ground());
         shadow_drawn(frame.pixel(ON_THE_PLANE.0, ON_THE_PLANE.1))

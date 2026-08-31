@@ -13,9 +13,9 @@ use openshard_protocol::world::Facet;
 #[command(version, about)]
 struct Cli {
     #[arg(short, long, env = "OPENSHARD_CLIENT", value_name = "DIR")]
-    client: PathBuf,
+    client:   PathBuf,
     #[arg(long, default_value_t = 0)]
-    facet: u8,
+    facet:    u8,
     /// Inspect the artifact of a base-set world instead of the install's.
     ///
     /// The same file `openshard-interiors-bake --base-set` flooded: without it
@@ -25,10 +25,10 @@ struct Cli {
     base_set: Option<PathBuf>,
     /// Map point as X,Y. May be repeated.
     #[arg(long = "at", required = true, value_parser = parse_point)]
-    points: Vec<(u16, u16)>,
+    points:   Vec<(u16, u16)>,
     /// Print a square of baked labels around each requested point.
     #[arg(long, default_value_t = 0)]
-    radius: u16,
+    radius:   u16,
 }
 
 fn parse_point(text: &str) -> Result<(u16, u16), String> {

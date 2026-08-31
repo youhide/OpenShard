@@ -93,9 +93,11 @@ fn main() {
         across_y[usize::from(footprint.y.max - footprint.y.min)] += 1;
     }
 
-    let share = |part: u32, whole: u32| match whole {
-        0 => 0.0,
-        _ => f64::from(part) / f64::from(whole) * 100.0,
+    let share = |part: u32, whole: u32| {
+        match whole {
+            0 => 0.0,
+            _ => f64::from(part) / f64::from(whole) * 100.0,
+        }
     };
     println!("pictures with art:     {with_art}");
     println!("read as a face:        {faced}  ({:.1}%)", share(faced, with_art));
@@ -204,9 +206,11 @@ fn placed(dir: &std::path::Path, art: &Art, cx: i32, cy: i32, radius: i32) {
     }
 
     let side = radius * 2 + 1;
-    let share = |part: u32, whole: u32| match whole {
-        0 => 0.0,
-        _ => f64::from(part) / f64::from(whole) * 100.0,
+    let share = |part: u32, whole: u32| {
+        match whole {
+            0 => 0.0,
+            _ => f64::from(part) / f64::from(whole) * 100.0,
+        }
     };
     println!("{total} statics on {side}x{side} tiles around ({cx}, {cy})\n");
     println!(

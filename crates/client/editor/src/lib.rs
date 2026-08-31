@@ -12,8 +12,16 @@ use std::fmt;
 use std::path::Path;
 
 use openshard_protocol::wire::Graphic;
-use openshard_tiles::{LAND_TILE_COUNT, LandTileId, STATIC_TILE_COUNT, TileData};
-use openshard_uofiles::art::{Art, ArtError};
+use openshard_tiles::{
+    LAND_TILE_COUNT,
+    LandTileId,
+    STATIC_TILE_COUNT,
+    TileData,
+};
+use openshard_uofiles::art::{
+    Art,
+    ArtError,
+};
 use openshard_uofiles::image::Image;
 use openshard_uofiles::tiledata::TileDataError;
 
@@ -91,10 +99,10 @@ impl KindFilter {
 /// and previews for the visible slice of the returned ids.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct PaletteState {
-    search: String,
-    filter: KindFilter,
-    selected: Option<AssetId>,
-    favorites: BTreeSet<AssetId>,
+    search:         String,
+    filter:         KindFilter,
+    selected:       Option<AssetId>,
+    favorites:      BTreeSet<AssetId>,
     favorites_only: bool,
 }
 
@@ -176,7 +184,7 @@ impl PaletteState {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CatalogEntry<'a> {
     /// Its typed tiledata/art id.
-    pub id: AssetId,
+    pub id:   AssetId,
     /// The client-supplied name, absent for empty and `NoName` records.
     pub name: Option<&'a str>,
 }
@@ -185,7 +193,7 @@ pub struct CatalogEntry<'a> {
 #[derive(Debug)]
 pub struct Catalog {
     tiles: TileData,
-    art: Art,
+    art:   Art,
 }
 
 impl Catalog {
@@ -275,10 +283,11 @@ impl Catalog {
         match query {
             Query::Everything => true,
             Query::Id(raw) => id.raw() == raw,
-            Query::Name(needle) => self
-                .entry(id)
-                .name
-                .is_some_and(|name| contains_ascii_case_insensitive(name, needle)),
+            Query::Name(needle) => {
+                self.entry(id)
+                    .name
+                    .is_some_and(|name| contains_ascii_case_insensitive(name, needle))
+            }
             Query::InvalidId => false,
         }
     }
@@ -364,7 +373,10 @@ fn contains_ascii_case_insensitive(name: &str, needle: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use openshard_tiles::{LandTile, StaticTile};
+    use openshard_tiles::{
+        LandTile,
+        StaticTile,
+    };
 
     use super::*;
 

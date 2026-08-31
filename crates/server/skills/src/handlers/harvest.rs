@@ -18,20 +18,66 @@
 
 use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::target::{TargetCursor, TargetKind};
-use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue, Layer, SoundId};
-use openshard_protocol::world::{Facet, Point};
-use openshard_state::components::{Client, Drawn, Equipped, Harvesting, ItemKind, Position, Tool};
-use openshard_state::harvest::{
-    Bank, HarvestAction, HarvestDef, HarvestKind, HarvestResource, TileSource, VeinIdx, definition_for,
-    tool_data, tool_data_for_kind,
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
 };
-use openshard_state::weapon::{LAYER_ONE_HANDED, weapon_data, weapon_data_for_kind, weapon_layer};
-use openshard_state::{Action, Skill, TargetPurpose, WorldState, in_range};
+use openshard_protocol::server_packet::ServerPacket;
+use openshard_protocol::target::{
+    TargetCursor,
+    TargetKind,
+};
+use openshard_protocol::wire::{
+    ClilocId,
+    CursorId,
+    Graphic,
+    Hue,
+    Layer,
+    SoundId,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
+use openshard_state::components::{
+    Client,
+    Drawn,
+    Equipped,
+    Harvesting,
+    ItemKind,
+    Position,
+    Tool,
+};
+use openshard_state::harvest::{
+    Bank,
+    HarvestAction,
+    HarvestDef,
+    HarvestKind,
+    HarvestResource,
+    TileSource,
+    VeinIdx,
+    definition_for,
+    tool_data,
+    tool_data_for_kind,
+};
+use openshard_state::weapon::{
+    LAYER_ONE_HANDED,
+    weapon_data,
+    weapon_data_for_kind,
+    weapon_layer,
+};
+use openshard_state::{
+    Action,
+    Skill,
+    TargetPurpose,
+    WorldState,
+    in_range,
+};
 
-use crate::check::{roll_skill_band, skill_value};
+use crate::check::{
+    roll_skill_band,
+    skill_value,
+};
 
 /// "You have worn out your tool!" — said before a cursor goes up, so a spent
 /// pickaxe never asks a question it cannot answer.
@@ -74,9 +120,9 @@ const FELUCCA: Facet = Facet(0);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct HarvestTarget {
     /// Where.
-    pub at: Point,
+    pub at:     Point,
     /// The tile graphic, raw.
-    pub tile: Graphic,
+    pub tile:   Graphic,
     /// Whether it came from the land table or the static table, which decides how
     /// the id is matched.
     pub source: TileSource,
@@ -102,18 +148,18 @@ pub struct Harvested {
     /// Who swung.
     pub harvester: EntityId,
     /// Which of the three systems.
-    pub kind: HarvestKind,
+    pub kind:      HarvestKind,
     /// Semantic kind that came out, if this resource row has migrated.
     pub item_kind: Option<ItemKindId>,
     /// Semantic material grade that came out with the kind.
-    pub material: Option<MaterialId>,
+    pub material:  Option<MaterialId>,
     /// The classic item art that came out, retained for legacy script and
     /// presentation adapters.
-    pub graphic: Graphic,
+    pub graphic:   Graphic,
     /// Its classic presentation hue.
-    pub hue: Hue,
+    pub hue:       Hue,
     /// How much.
-    pub amount: u16,
+    pub amount:    u16,
 }
 
 /// A double-clicked tool: put up the cursor that asks what to swing it at.
@@ -179,7 +225,7 @@ pub fn use_tool(state: &mut WorldState, harvester: EntityId, tool: EntityId) -> 
         connection,
         &ServerPacket::TargetCursor(TargetCursor {
             cursor_id: CursorId(serial.raw()),
-            kind: TargetKind::Location,
+            kind:      TargetKind::Location,
         }),
     );
     true
@@ -206,10 +252,12 @@ pub fn begin_harvest(
     // fishing pole still cannot mine, so the two have to agree.
     let matches_tool = match state.registry.get::<ItemKind>(tool) {
         Some(kind) => tool_data_for_kind(kind.0),
-        None => state
-            .registry
-            .get::<Drawn>(tool)
-            .and_then(|graphic| tool_data(graphic.id)),
+        None => {
+            state
+                .registry
+                .get::<Drawn>(tool)
+                .and_then(|graphic| tool_data(graphic.id))
+        }
     }
     .is_some_and(|data| data.skill == def.skill);
     if !matches_tool {
@@ -445,8 +493,10 @@ fn pay_out(
             openshard_items::spawn_item_kind(state, kind, resource.material, amount, true, at, facet)
                 .is_some()
         }
-        None => openshard_items::spawn_item(state, resource.graphic, resource.hue, amount, true, at, facet)
-            .is_some(),
+        None => {
+            openshard_items::spawn_item(state, resource.graphic, resource.hue, amount, true, at, facet)
+                .is_some()
+        }
     }
 }
 
@@ -649,10 +699,12 @@ fn within_reach(state: &WorldState, harvester: EntityId, at: Point, range: u32) 
 fn bad_target_line(state: &WorldState, tool: EntityId) -> ClilocId {
     let skill = match state.registry.get::<ItemKind>(tool) {
         Some(kind) => tool_data_for_kind(kind.0),
-        None => state
-            .registry
-            .get::<Drawn>(tool)
-            .and_then(|graphic| tool_data(graphic.id)),
+        None => {
+            state
+                .registry
+                .get::<Drawn>(tool)
+                .and_then(|graphic| tool_data(graphic.id))
+        }
     }
     .map(|data| data.skill);
     match skill {
@@ -705,8 +757,9 @@ pub fn resolve_harvest_target(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_state::harvest::definition;
+
+    use super::*;
 
     #[test]
     fn every_shipped_sound_table_is_a_representable_safe_roll() {

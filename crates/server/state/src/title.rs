@@ -21,14 +21,19 @@
 //! that the reduction applies to a loss as well as a gain — read quickly it looks
 //! like a bug, and "fixing" it would make infamy accelerate.
 
-use crate::WorldState;
-use crate::components::{Body, Fame, Karma};
 use openshard_entities::EntityId;
+
+use crate::WorldState;
+use crate::components::{
+    Body,
+    Fame,
+    Karma,
+};
 
 /// One band of the title table: a fame ceiling and the karma bands inside it.
 struct FameBand {
     /// The highest fame this band covers.
-    fame: i32,
+    fame:  i32,
     /// `(karma ceiling, title)`, in ascending order of karma. `{}` is the name and
     /// `{lord}` the Lord/Lady the top fame band earns.
     karma: &'static [(i32, &'static str)],
@@ -37,7 +42,7 @@ struct FameBand {
 /// ServUO's `m_FameEntries`, verbatim. Five fame bands of eleven karma bands each.
 const TITLES: &[FameBand] = &[
     FameBand {
-        fame: 1249,
+        fame:  1249,
         karma: &[
             (-10000, "The Outcast {}"),
             (-5000, "The Despicable {}"),
@@ -53,7 +58,7 @@ const TITLES: &[FameBand] = &[
         ],
     },
     FameBand {
-        fame: 2499,
+        fame:  2499,
         karma: &[
             (-10000, "The Wretched {}"),
             (-5000, "The Dastardly {}"),
@@ -69,7 +74,7 @@ const TITLES: &[FameBand] = &[
         ],
     },
     FameBand {
-        fame: 4999,
+        fame:  4999,
         karma: &[
             (-10000, "The Nefarious {}"),
             (-5000, "The Wicked {}"),
@@ -85,7 +90,7 @@ const TITLES: &[FameBand] = &[
         ],
     },
     FameBand {
-        fame: 9999,
+        fame:  9999,
         karma: &[
             (-10000, "The Dread {}"),
             (-5000, "The Evil {}"),
@@ -101,7 +106,7 @@ const TITLES: &[FameBand] = &[
         ],
     },
     FameBand {
-        fame: 10000,
+        fame:  10000,
         karma: &[
             (-10000, "The Dread {lord} {}"),
             (-5000, "The Evil {lord} {}"),

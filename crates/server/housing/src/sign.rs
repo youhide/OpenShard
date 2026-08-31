@@ -28,14 +28,34 @@
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::gump::{
-    ButtonId, CloseGump, GUMP_WHITE, GumpAnswer, GumpButton, GumpDisplay, GumpId, GumpKey, GumpLayout,
-    GumpPoint, GumpResponse,
+    ButtonId,
+    CloseGump,
+    GUMP_WHITE,
+    GumpAnswer,
+    GumpButton,
+    GumpDisplay,
+    GumpId,
+    GumpKey,
+    GumpLayout,
+    GumpPoint,
+    GumpResponse,
 };
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_state::components::{Client, House, Name};
+use openshard_state::components::{
+    Client,
+    House,
+    Name,
+};
 use openshard_state::{
-    HouseChange, HouseGumpContext, HouseGumpRow, HouseList, HouseStorage, Standing, TargetPurpose, WorldState,
+    HouseChange,
+    HouseGumpContext,
+    HouseGumpRow,
+    HouseList,
+    HouseStorage,
+    Standing,
+    TargetPurpose,
+    WorldState,
 };
 
 /// The id the house window answers under.
@@ -140,14 +160,14 @@ pub fn show(state: &mut WorldState, player: EntityId, house: EntityId) {
 
     let close = ServerPacket::CloseGump(CloseGump {
         gump_id: HOUSE_GUMP,
-        button: ButtonId::CLOSE_BOX,
+        button:  ButtonId::CLOSE_BOX,
     });
     let draw = ServerPacket::GumpDisplay(GumpDisplay {
-        serial: GumpKey::on(serial),
+        serial:  GumpKey::on(serial),
         gump_id: HOUSE_GUMP,
-        at: GumpPoint::new(WINDOW.0, WINDOW.1),
-        layout: string.to_owned(),
-        lines: lines.to_vec(),
+        at:      GumpPoint::new(WINDOW.0, WINDOW.1),
+        layout:  string.to_owned(),
+        lines:   lines.to_vec(),
     });
     state.send_packet(connection, &close);
     state.send_packet(connection, &draw);
@@ -356,31 +376,39 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
     };
     match pressed {
         button::CLOSE => {}
-        button::FRIEND => raise(
-            state,
-            HouseChange::Friend,
-            "Whom shall be a friend of this house?",
-        ),
+        button::FRIEND => {
+            raise(
+                state,
+                HouseChange::Friend,
+                "Whom shall be a friend of this house?",
+            )
+        }
         button::CO_OWNER => raise(state, HouseChange::CoOwner, "Whom shall co-own this house?"),
         button::DROP => raise(state, HouseChange::Drop, "Whom shall be removed?"),
         button::BAN => raise(state, HouseChange::Ban, "Whom shall be banned?"),
         button::UNBAN => raise(state, HouseChange::Unban, "Whose ban shall be lifted?"),
         button::LOCK_DOWN => pin(state, HouseStorage::LockDown, "What shall be locked down?"),
-        button::SECURE_CO_OWNERS => pin(
-            state,
-            HouseStorage::Secure(Standing::CoOwner),
-            "Which container shall the co-owners keep?",
-        ),
-        button::SECURE_FRIENDS => pin(
-            state,
-            HouseStorage::Secure(Standing::Friend),
-            "Which container shall your friends open?",
-        ),
-        button::SECURE_ANYONE => pin(
-            state,
-            HouseStorage::Secure(Standing::Stranger),
-            "Which container shall stand open to anyone?",
-        ),
+        button::SECURE_CO_OWNERS => {
+            pin(
+                state,
+                HouseStorage::Secure(Standing::CoOwner),
+                "Which container shall the co-owners keep?",
+            )
+        }
+        button::SECURE_FRIENDS => {
+            pin(
+                state,
+                HouseStorage::Secure(Standing::Friend),
+                "Which container shall your friends open?",
+            )
+        }
+        button::SECURE_ANYONE => {
+            pin(
+                state,
+                HouseStorage::Secure(Standing::Stranger),
+                "Which container shall stand open to anyone?",
+            )
+        }
         button::RELEASE => pin(state, HouseStorage::Release, "What shall be released?"),
         button::DEMOLISH => {
             // The owner's alone, re-asked here: the window outlives the standing

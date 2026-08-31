@@ -6,14 +6,26 @@
 //! duplicate the fixtures or reach across files for them — worse than one
 //! file that says up front it is about more than one thing.
 
+use openshard_client_render::{
+    camera,
+    mobiles,
+};
+use openshard_movement::{
+    Heading,
+    Lean,
+};
+use openshard_protocol::direction::Facing;
+
 use super::*;
 use crate::presentation::write_frame_dump;
-use crate::ui_command::{ask_between, on_screen};
-use crate::windows::{WindowSubject, reconcile_own_windows};
-use openshard_client_render::camera;
-use openshard_client_render::mobiles;
-use openshard_movement::{Heading, Lean};
-use openshard_protocol::direction::Facing;
+use crate::ui_command::{
+    ask_between,
+    on_screen,
+};
+use crate::windows::{
+    WindowSubject,
+    reconcile_own_windows,
+};
 
 /// Which way the cursor points, for the tests that are about the bearing
 /// and not about the ring it fell in.
@@ -71,11 +83,11 @@ fn doll(serial: u32) -> WindowSubject {
 /// carry a paperdoll or container entry for the tests below.
 fn bare_view() -> openshard_client_net::view::WorldView {
     openshard_client_net::view::WorldView::entered(openshard_protocol::world::PlayerStart {
-        serial: Serial::new(0x0000_002A).expect("a serial"),
-        body: Graphic(0x0190),
+        serial:   Serial::new(0x0000_002A).expect("a serial"),
+        body:     Graphic(0x0190),
         position: Point::new(1475, 1770, 20),
-        facing: Facing::walking(Direction::South),
-        map: openshard_protocol::world::MapSize::BRITANNIA,
+        facing:   Facing::walking(Direction::South),
+        map:      openshard_protocol::world::MapSize::BRITANNIA,
     })
 }
 
@@ -94,7 +106,7 @@ fn a_closed_paperdoll_does_not_reopen_on_an_unrelated_world_change() {
     view.paperdolls.insert(
         serial,
         openshard_client_net::view::Paperdoll {
-            title: "Someone".to_string(),
+            title:    "Someone".to_string(),
             can_lift: false,
         },
     );
@@ -169,7 +181,7 @@ fn a_window_carries_a_pane_of_its_own_kind_and_loses_it_with_the_window() {
     view.paperdolls.insert(
         serial,
         openshard_client_net::view::Paperdoll {
-            title: "Someone".to_string(),
+            title:    "Someone".to_string(),
             can_lift: false,
         },
     );
@@ -285,7 +297,7 @@ fn a_window_is_local_exactly_when_nothing_in_the_view_holds_it_open() {
     assert!(
         WindowSubject::Split {
             item: serial,
-            most: 5
+            most: 5,
         }
         .is_local(),
         "the amount picker is this client's own too — nothing in the view holds it up"
@@ -344,7 +356,7 @@ fn a_trade_gump_and_own_paperdoll_stay_open_together() {
     view.paperdolls.insert(
         player,
         openshard_client_net::view::Paperdoll {
-            title: "Someone".to_owned(),
+            title:    "Someone".to_owned(),
             can_lift: true,
         },
     );
@@ -483,8 +495,8 @@ fn a_frame_snapshot_reuses_a_mobiles_equipment() {
     );
     player.equipment = vec![openshard_client_render::mobiles::EquipmentLayer {
         graphic: openshard_tiles::AnimId(7005),
-        hue: Hue::NONE,
-        layer: openshard_protocol::wire::Layer::TUNIC,
+        hue:     Hue::NONE,
+        layer:   openshard_protocol::wire::Layer::TUNIC,
     }]
     .into();
 
@@ -530,9 +542,11 @@ fn a_cursor_inside_the_dead_zone_asks_for_nothing() {
         let (unit_x, unit_y) = (radians.cos(), radians.sin());
         // Just inside and just outside, in the same bearing: the pair is
         // what pins the radius rather than merely the existence of a zone.
-        let at = |distance: f64| camera::WorldPixel {
-            x: body.x + (unit_x * distance).round() as i32,
-            y: body.y + (unit_y * distance).round() as i32,
+        let at = |distance: f64| {
+            camera::WorldPixel {
+                x: body.x + (unit_x * distance).round() as i32,
+                y: body.y + (unit_y * distance).round() as i32,
+            }
         };
         assert_eq!(
             ask_between(body, at(DEAD_ZONE - 2.0)),
@@ -561,9 +575,11 @@ fn a_cursor_inside_the_turn_ring_asks_for_a_facing_and_no_ground() {
     for degrees in 0..360 {
         let radians = f64::from(degrees).to_radians();
         let (unit_x, unit_y) = (radians.cos(), radians.sin());
-        let at = |distance: f64| camera::WorldPixel {
-            x: body.x + (unit_x * distance).round() as i32,
-            y: body.y + (unit_y * distance).round() as i32,
+        let at = |distance: f64| {
+            camera::WorldPixel {
+                x: body.x + (unit_x * distance).round() as i32,
+                y: body.y + (unit_y * distance).round() as i32,
+            }
         };
         // Inside the ring and outside it, on one bearing: the pair is what
         // pins the radius rather than merely the existence of a zone.
@@ -588,9 +604,11 @@ fn a_cursor_inside_the_turn_ring_asks_for_a_facing_and_no_ground() {
     for direction in Direction::ALL {
         let (sx, sy) = on_screen(direction);
         let unit = f64::from(sx).hypot(f64::from(sy));
-        let at = |distance: f64| camera::WorldPixel {
-            x: body.x + (f64::from(sx) * distance / unit).round() as i32,
-            y: body.y + (f64::from(sy) * distance / unit).round() as i32,
+        let at = |distance: f64| {
+            camera::WorldPixel {
+                x: body.x + (f64::from(sx) * distance / unit).round() as i32,
+                y: body.y + (f64::from(sy) * distance / unit).round() as i32,
+            }
         };
         let inside = ask_between(body, at(TURN_ZONE - 2.0)).expect("outside the dead zone");
         let outside = ask_between(body, at(TURN_ZONE + 2.0)).expect("outside the dead zone");
@@ -687,9 +705,10 @@ fn a_step_stops_overshooting_further_out_than_the_dead_zone() {
 /// picture starts there, and hand a pane a click that landed outside it.
 #[test]
 fn a_windows_own_cursor_is_its_placement_and_its_scale_undone() {
+    use openshard_client_render::gump::GumpPixel;
+
     use crate::desk::WindowScale;
     use crate::windows::OwnWindow;
-    use openshard_client_render::gump::GumpPixel;
 
     let subject = WindowSubject::Skills;
     let window = OwnWindow {

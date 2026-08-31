@@ -14,8 +14,17 @@
 use openshard_entities::EntityId;
 use openshard_protocol::wire::ClilocId;
 use openshard_protocol::world::FollowerSlots;
-use openshard_state::components::{Body, Client, Ghost, Pet, Tamable};
-use openshard_state::{Skill, WorldState};
+use openshard_state::components::{
+    Body,
+    Client,
+    Ghost,
+    Pet,
+    Tamable,
+};
+use openshard_state::{
+    Skill,
+    WorldState,
+};
 
 use crate::check::roll_skill_band;
 
@@ -123,11 +132,11 @@ pub struct Tamed {
     /// The animal.
     pub creature: EntityId,
     /// Who was trying.
-    pub tamer: EntityId,
+    pub tamer:    EntityId,
     /// How many follower slots it fills.
-    pub slots: FollowerSlots,
+    pub slots:    FollowerSlots,
     /// Whether it turned on the tamer instead of accepting them.
-    pub angered: bool,
+    pub angered:  bool,
 }
 
 /// How many follower slots a mobile has already spent — the sum over its pets, plus

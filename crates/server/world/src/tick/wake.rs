@@ -36,7 +36,11 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::world::Facet;
-use openshard_state::components::{Brain, Npc, Position};
+use openshard_state::components::{
+    Brain,
+    Npc,
+    Position,
+};
 
 use super::World;
 

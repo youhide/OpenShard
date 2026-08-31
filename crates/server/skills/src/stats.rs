@@ -20,9 +20,18 @@
 
 use openshard_config::CombatEra;
 use openshard_entities::EntityId;
-use openshard_state::components::{LastStatGain, StatLock, StatLocks, Stats};
+use openshard_state::components::{
+    LastStatGain,
+    StatLock,
+    StatLocks,
+    Stats,
+};
 use openshard_state::skill::Skill;
-use openshard_state::{StatCode, WorldState, WorldTick};
+use openshard_state::{
+    StatCode,
+    WorldState,
+    WorldTick,
+};
 
 use crate::apply_stats;
 

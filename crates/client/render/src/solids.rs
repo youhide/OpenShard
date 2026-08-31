@@ -37,10 +37,14 @@
 //! stands in front of it, which for an instrument is the wanted answer rather
 //! than a compromise.
 
-use crate::blit::ViewportRect;
-use crate::camera::{Camera, RealPoint};
-use crate::solid::Solid;
 use std::sync::Arc;
+
+use crate::blit::ViewportRect;
+use crate::camera::{
+    Camera,
+    RealPoint,
+};
+use crate::solid::Solid;
 
 /// How much of the picture a face keeps under a solid.
 ///
@@ -78,12 +82,12 @@ pub struct Frame<'a> {
     pub target: &'a wgpu::TextureView,
     /// The whole target's size in physical pixels, which is what turns a pixel
     /// into clip space.
-    pub size: (u32, u32),
+    pub size:   (u32, u32),
     /// Where the world's own picture sits inside it. The corners a solid hands
     /// back are measured from *its* corner, and this is what puts them on the
     /// surface — it is also the scissor, so a box near the edge of the world
     /// cannot paint over the HUD strip beside it.
-    pub rect: ViewportRect,
+    pub rect:   ViewportRect,
 }
 
 /// One RGB colour per corner of a face, in [`Solid::faces`]'s own four-corner
@@ -112,7 +116,7 @@ pub struct Style {
     /// Off, what is left is the fills alone, unmixed with a line's own colour —
     /// see [`SolidsRenderer::render`]'s own doc for why that is what shows a
     /// face wrongly surviving behind one that should have hidden it.
-    pub edges: bool,
+    pub edges:  bool,
     /// A straight overwrite instead of blended in.
     ///
     /// A later, nearer face then genuinely hides an earlier, farther one
@@ -126,7 +130,7 @@ impl Default for Style {
     /// The live F5 overlay's own two answers: stroked, and translucent.
     fn default() -> Self {
         Self {
-            edges: true,
+            edges:  true,
             opaque: false,
         }
     }
@@ -135,7 +139,7 @@ impl Default for Style {
 /// The pass, and the buffers it reuses between frames.
 #[derive(Debug)]
 pub struct SolidsRenderer {
-    fills: wgpu::RenderPipeline,
+    fills:        wgpu::RenderPipeline,
     /// [`Self::fills`], but a straight overwrite instead of blended in.
     ///
     /// For a caller that wants what it draws *last* to actually hide what it
@@ -144,29 +148,29 @@ pub struct SolidsRenderer {
     /// runtime blend state, which `wgpu` bakes into the pipeline and cannot
     /// switch per draw.
     fills_opaque: wgpu::RenderPipeline,
-    edges: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
-    uniforms: wgpu::Buffer,
-    vertices: wgpu::Buffer,
-    capacity: u64,
+    edges:        wgpu::RenderPipeline,
+    bind_group:   wgpu::BindGroup,
+    uniforms:     wgpu::Buffer,
+    vertices:     wgpu::Buffer,
+    capacity:     u64,
     /// CPU vertices last uploaded to [`Self::vertices`].
     ///
     /// The solids overlay often stays open over a stationary world while it is
     /// inspected. Reprojecting thousands of corners and sending the same bytes
     /// to the GPU every frame is then pure work, so the last complete answer is
     /// retained until one of its inputs changes.
-    cached: Option<CachedVertices>,
+    cached:       Option<CachedVertices>,
 }
 
 #[derive(Debug)]
 struct CachedVertices {
-    camera: Camera,
-    rect: ViewportRect,
-    solids: Vec<(Solid, [f32; 3])>,
-    edges: bool,
-    bytes: Arc<[u8]>,
+    camera:     Camera,
+    rect:       ViewportRect,
+    solids:     Vec<(Solid, [f32; 3])>,
+    edges:      bool,
+    bytes:      Arc<[u8]>,
     fill_bytes: usize,
-    drawn: usize,
+    drawn:      usize,
 }
 
 impl SolidsRenderer {
@@ -178,77 +182,77 @@ impl SolidsRenderer {
     /// tells the three apart.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("solids"),
+            label:   Some("solids"),
             entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
+                binding:    0,
                 visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
+                ty:         wgpu::BindingType::Buffer {
+                    ty:                 wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: None,
+                    min_binding_size:   None,
                 },
-                count: None,
+                count:      None,
             }],
         });
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("solids"),
-            size: UNIFORM_BYTES,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            label:              Some("solids"),
+            size:               UNIFORM_BYTES,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("solids"),
-            layout: &layout,
+            label:   Some("solids"),
+            layout:  &layout,
             entries: &[wgpu::BindGroupEntry {
-                binding: 0,
+                binding:  0,
                 resource: uniforms.as_entire_binding(),
             }],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("solids"),
+            label:  Some("solids"),
             source: wgpu::ShaderSource::Wgsl(include_str!("solids.wgsl").into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("solids"),
+            label:              Some("solids"),
             bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
+            immediate_size:     0,
         });
         let pipeline = |topology, label, blend| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
+                label:          Some(label),
+                layout:         Some(&pipeline_layout),
+                vertex:         wgpu::VertexState {
+                    module:              &shader,
+                    entry_point:         Some("vs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[Some(wgpu::VertexBufferLayout {
+                    buffers:             &[Some(wgpu::VertexBufferLayout {
                         array_stride: VERTEX_BYTES as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[
+                        step_mode:    wgpu::VertexStepMode::Vertex,
+                        attributes:   &[
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 0,
+                                format:          wgpu::VertexFormat::Float32x2,
+                                offset:          0,
                                 shader_location: 0,
                             },
                             wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 8,
+                                format:          wgpu::VertexFormat::Float32x4,
+                                offset:          8,
                                 shader_location: 1,
                             },
                         ],
                     })],
                 },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_main"),
+                fragment:       Some(wgpu::FragmentState {
+                    module:              &shader,
+                    entry_point:         Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
+                    targets:             &[Some(wgpu::ColorTargetState {
                         format,
                         blend,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
-                primitive: wgpu::PrimitiveState {
+                primitive:      wgpu::PrimitiveState {
                     topology,
                     strip_index_format: None,
                     front_face: wgpu::FrontFace::Ccw,
@@ -264,10 +268,10 @@ impl SolidsRenderer {
                 // draws still occlude correctly without one: painted back to
                 // front (`solid::standing`'s own order), a later, nearer face
                 // simply overwrites every pixel of an earlier, farther one.
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
+                depth_stencil:  None,
+                multisample:    wgpu::MultisampleState::default(),
                 multiview_mask: None,
-                cache: None,
+                cache:          None,
             })
         };
         Self {
@@ -544,12 +548,12 @@ impl SolidsRenderer {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("solids"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: frame.target,
-                depth_slice: None,
+                view:           frame.target,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
+                ops:            wgpu::Operations {
                     // Loaded, never cleared: this pass draws over the frame.
-                    load: wgpu::LoadOp::Load,
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -605,9 +609,9 @@ fn write_vertex(bytes: &mut Vec<u8>, at: RealPoint, tint: [f32; 4]) {
 
 fn new_vertex_buffer(device: &wgpu::Device, vertices: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("solids"),
-        size: vertices * VERTEX_BYTES as u64,
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        label:              Some("solids"),
+        size:               vertices * VERTEX_BYTES as u64,
+        usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }

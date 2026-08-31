@@ -7,15 +7,30 @@
 //! a client makes about an item it can reach: `0x07` to pick it up and `0x08` to
 //! put it down.
 
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::direction::Direction;
 use crate::error::DecodeError;
 use crate::feature::Feature;
 use crate::gump::GumpPoint;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
-use crate::serial::{RawSerial, Serial};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+};
+use crate::serial::{
+    RawSerial,
+    Serial,
+};
 use crate::version::ClientVersion;
-use crate::wire::{Graphic, Hue, Layer, RawLayer};
+use crate::wire::{
+    Graphic,
+    Hue,
+    Layer,
+    RawLayer,
+};
 use crate::world::Point;
 
 /// Whether `graphic` is one of the classic weapon graphics whose hand use is
@@ -217,7 +232,7 @@ pub enum WorldItemPayload {
     Stack(ItemAmount),
     Corpse {
         /// The dead mobile's body graphic — which death animation to draw.
-        body: Graphic,
+        body:   Graphic,
         /// Which way it fell. The run bit is never set: the client masks it off
         /// (`(byte)Layer & 0x7F & 7`) and a corpse does not run.
         facing: Direction,
@@ -251,10 +266,12 @@ impl WorldItemPayload {
     const fn direction_byte(self) -> Option<u8> {
         match self {
             Self::Stack(_) => None,
-            Self::Corpse { facing, .. } => match facing.to_bits() {
-                0 => None,
-                bits => Some(bits),
-            },
+            Self::Corpse { facing, .. } => {
+                match facing.to_bits() {
+                    0 => None,
+                    bits => Some(bits),
+                }
+            }
         }
     }
 }
@@ -321,7 +338,7 @@ pub struct CorpseEquipmentItem {
     /// The layer occupied on the living body.
     pub layer: Layer,
     /// The item now held by the corpse container.
-    pub item: Serial,
+    pub item:  Serial,
 }
 
 /// `0x89` — connect a corpse container's items to the layers they were worn on.
@@ -335,7 +352,7 @@ pub struct CorpseEquipment {
     /// The `0x2006` world item which owns the equipment.
     pub corpse: Serial,
     /// The worn item and layer pairs, in the order the shard chose to send.
-    pub items: Vec<CorpseEquipmentItem>,
+    pub items:  Vec<CorpseEquipmentItem>,
 }
 
 impl EncodePacket for CorpseEquipment {
@@ -413,15 +430,15 @@ impl DecodePacket for CorpseEquipment {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WorldItem {
     /// The item's wire serial.
-    pub serial: Serial,
+    pub serial:   Serial,
     /// Its graphic (tiledata id).
-    pub graphic: Graphic,
+    pub graphic:  Graphic,
     /// Stack size, or the dead body's graphic for [`CORPSE_GRAPHIC`].
-    pub payload: WorldItemPayload,
+    pub payload:  WorldItemPayload,
     /// Where it lies.
     pub position: Point,
     /// Its hue, or [`Hue::NONE`] for none.
-    pub hue: Hue,
+    pub hue:      Hue,
     /// The flame this item burns with, if the sender named one.
     ///
     /// `None` is "the packet said nothing about light", which is what this shard
@@ -430,13 +447,13 @@ pub struct WorldItem {
     /// would ride in is the corpse's facing, and a corpse's facing belongs with
     /// its body in [`WorldItem::payload`]. The graphic decides which of the two
     /// the byte was, on the way out and on the way in.
-    pub light: Option<LightId>,
+    pub light:    Option<LightId>,
     /// What the client is told about handling and drawing it.
     ///
     /// [`ItemFlags::NONE`] for everything this shard sends — movability is
     /// decided here rather than announced — but a real shard sets `0x20` on most
     /// of the ground, so this is what stops those items being refused.
-    pub flags: ItemFlags,
+    pub flags:    ItemFlags,
 }
 
 impl EncodePacket for WorldItem {
@@ -541,7 +558,7 @@ impl DecodePacket for WorldItem {
         let corpse = graphic == CORPSE_GRAPHIC;
         let payload = if corpse {
             WorldItemPayload::Corpse {
-                body: Graphic(value),
+                body:   Graphic(value),
                 facing: byte.map_or(Direction::North, Direction::from_bits),
             }
         } else {
@@ -616,9 +633,9 @@ impl DecodePacket for PickUpItem {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DropItem {
     /// The item being dropped.
-    pub serial: RawSerial,
+    pub serial:    RawSerial,
     /// Where, when dropping on the ground.
-    pub position: Point,
+    pub position:  Point,
     /// Where the item is going: a container serial, a mobile serial to equip on,
     /// or [`DROP_TO_GROUND`].
     pub container: RawSerial,
@@ -664,7 +681,7 @@ pub enum DropDestination {
         /// What the item is going onto or into.
         item: Serial,
         /// Where in that item's gump the cursor was.
-        at: GumpPoint,
+        at:   GumpPoint,
     },
     /// Onto a mobile — the destination serial is a mobile's. Equipping it, or
     /// offering it in a trade; which one is the server's business.
@@ -699,10 +716,12 @@ impl DropItem {
             // widths differ (the wire is unsigned, gump offsets are signed for
             // layouts that hang off the left edge), so this widens rather than
             // reinterprets.
-            Some(serial) if serial.is_item() => DropDestination::Item {
-                item: serial,
-                at: GumpPoint::new(self.position.x as i32, self.position.y as i32),
-            },
+            Some(serial) if serial.is_item() => {
+                DropDestination::Item {
+                    item: serial,
+                    at:   GumpPoint::new(self.position.x as i32, self.position.y as i32),
+                }
+            }
             Some(serial) => DropDestination::Mobile(serial),
             None => DropDestination::Nowhere,
         }
@@ -804,9 +823,9 @@ impl DecodePacket for DragCancel {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct EquipItemRequest {
     /// The item being worn.
-    pub item: RawSerial,
+    pub item:   RawSerial,
     /// The layer to wear it on.
-    pub layer: RawLayer,
+    pub layer:  RawLayer,
     /// The mobile wearing it.
     pub mobile: RawSerial,
 }
@@ -816,8 +835,8 @@ impl DecodePacket for EquipItemRequest {
 
     fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
         Ok(Self {
-            item: RawSerial(reader.u32()?),
-            layer: RawLayer(reader.u8()?),
+            item:   RawSerial(reader.u32()?),
+            layer:  RawLayer(reader.u8()?),
             mobile: RawSerial(reader.u32()?),
         })
     }
@@ -830,15 +849,15 @@ impl DecodePacket for EquipItemRequest {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct EquipUpdate {
     /// The item now worn.
-    pub item: Serial,
+    pub item:    Serial,
     /// Its graphic.
     pub graphic: Graphic,
     /// Which layer.
-    pub layer: Layer,
+    pub layer:   Layer,
     /// The mobile wearing it.
-    pub mobile: Serial,
+    pub mobile:  Serial,
     /// Its hue.
-    pub hue: Hue,
+    pub hue:     Hue,
 }
 
 impl EncodePacket for EquipUpdate {
@@ -923,8 +942,16 @@ mod tests {
             "ordinary weapons retain tiledata's layer"
         );
     }
-    use crate::packet::{decode_packet, encode_packet};
-    use crate::serial::{ITEM_MAX, ITEM_MIN, MOBILE_MAX, MOBILE_MIN};
+    use crate::packet::{
+        decode_packet,
+        encode_packet,
+    };
+    use crate::serial::{
+        ITEM_MAX,
+        ITEM_MIN,
+        MOBILE_MAX,
+        MOBILE_MIN,
+    };
 
     fn version() -> ClientVersion {
         ClientVersion::new(7, 0, 45, 65)
@@ -948,13 +975,13 @@ mod tests {
         // No amount, no hue: serial, graphic, x, y, z and nothing optional.
         let packet = encode_packet(
             &WorldItem {
-                serial: item(),
-                graphic: Graphic(0x0EED), // a gold coin graphic
-                payload: WorldItemPayload::Stack(ItemAmount(1)),
+                serial:   item(),
+                graphic:  Graphic(0x0EED), // a gold coin graphic
+                payload:  WorldItemPayload::Stack(ItemAmount(1)),
                 position: Point::new(1000, 2000, 5),
-                hue: Hue::NONE,
-                light: None,
-                flags: ItemFlags::NONE,
+                hue:      Hue::NONE,
+                light:    None,
+                flags:    ItemFlags::NONE,
             },
             version(),
         );
@@ -976,13 +1003,13 @@ mod tests {
     fn a_hued_stack_carries_the_amount_and_hue_with_their_flags() {
         let packet = encode_packet(
             &WorldItem {
-                serial: Serial::new(0x4000_00AB).unwrap(),
-                graphic: Graphic(0x0EED),
-                payload: WorldItemPayload::Stack(ItemAmount(500)),
+                serial:   Serial::new(0x4000_00AB).unwrap(),
+                graphic:  Graphic(0x0EED),
+                payload:  WorldItemPayload::Stack(ItemAmount(500)),
                 position: Point::new(1000, 2000, 5),
-                hue: Hue(0x0021),
-                light: None,
-                flags: ItemFlags::NONE,
+                hue:      Hue(0x0021),
+                light:    None,
+                flags:    ItemFlags::NONE,
             },
             version(),
         );
@@ -1006,16 +1033,16 @@ mod tests {
     #[test]
     fn a_corpse_carries_its_body_in_the_stack_word() {
         let corpse = WorldItem {
-            serial: item(),
-            graphic: CORPSE_GRAPHIC,
-            payload: WorldItemPayload::Corpse {
-                body: Graphic(0x0190),
+            serial:   item(),
+            graphic:  CORPSE_GRAPHIC,
+            payload:  WorldItemPayload::Corpse {
+                body:   Graphic(0x0190),
                 facing: Direction::North,
             },
             position: Point::new(1000, 2000, 5),
-            hue: Hue::NONE,
-            light: None,
-            flags: ItemFlags::NONE,
+            hue:      Hue::NONE,
+            light:    None,
+            flags:    ItemFlags::NONE,
         };
 
         let packet = encode_packet(&corpse, version());
@@ -1034,16 +1061,16 @@ mod tests {
         // group *for a direction*: without this byte every corpse on the shard
         // lies the same way, whichever way it died facing.
         let corpse = WorldItem {
-            serial: item(),
-            graphic: CORPSE_GRAPHIC,
-            payload: WorldItemPayload::Corpse {
-                body: Graphic(0x0190),
+            serial:   item(),
+            graphic:  CORPSE_GRAPHIC,
+            payload:  WorldItemPayload::Corpse {
+                body:   Graphic(0x0190),
                 facing: Direction::West,
             },
             position: Point::new(1000, 2000, 5),
-            hue: Hue::NONE,
-            light: None,
-            flags: ItemFlags::NONE,
+            hue:      Hue::NONE,
+            light:    None,
+            flags:    ItemFlags::NONE,
         };
 
         let packet = encode_packet(&corpse, version());
@@ -1065,16 +1092,16 @@ mod tests {
         // the shorter is the one every client has been met with.
         let packet = encode_packet(
             &WorldItem {
-                serial: item(),
-                graphic: CORPSE_GRAPHIC,
-                payload: WorldItemPayload::Corpse {
-                    body: Graphic(0x0190),
+                serial:   item(),
+                graphic:  CORPSE_GRAPHIC,
+                payload:  WorldItemPayload::Corpse {
+                    body:   Graphic(0x0190),
                     facing: Direction::North,
                 },
                 position: Point::new(1000, 2000, 5),
-                hue: Hue::NONE,
-                light: None,
-                flags: ItemFlags::NONE,
+                hue:      Hue::NONE,
+                light:    None,
+                flags:    ItemFlags::NONE,
             },
             version(),
         );
@@ -1091,13 +1118,13 @@ mod tests {
         // be refused, which lost the item rather than the hint — and `0x20` is on
         // nearly everything lying on a real shard's ground.
         let lantern = WorldItem {
-            serial: item(),
-            graphic: Graphic(0x0A15),
-            payload: WorldItemPayload::Stack(ItemAmount(1)),
+            serial:   item(),
+            graphic:  Graphic(0x0A15),
+            payload:  WorldItemPayload::Stack(ItemAmount(1)),
             position: Point::new(1000, 2000, 5),
-            hue: Hue(0x0021),
-            light: Some(LightId(9)),
-            flags: ItemFlags::MOVABLE,
+            hue:      Hue(0x0021),
+            light:    Some(LightId(9)),
+            flags:    ItemFlags::MOVABLE,
         };
 
         let packet = encode_packet(&lantern, version());
@@ -1124,16 +1151,16 @@ mod tests {
         // corpse into both would make a re-encode send the facing as a light id.
         let packet = encode_packet(
             &WorldItem {
-                serial: item(),
-                graphic: CORPSE_GRAPHIC,
-                payload: WorldItemPayload::Corpse {
-                    body: Graphic(0x0190),
+                serial:   item(),
+                graphic:  CORPSE_GRAPHIC,
+                payload:  WorldItemPayload::Corpse {
+                    body:   Graphic(0x0190),
                     facing: Direction::West,
                 },
                 position: Point::new(1000, 2000, 5),
-                hue: Hue::NONE,
-                light: None,
-                flags: ItemFlags::NONE,
+                hue:      Hue::NONE,
+                light:    None,
+                flags:    ItemFlags::NONE,
             },
             version(),
         );
@@ -1144,7 +1171,7 @@ mod tests {
         assert_eq!(
             read.payload,
             WorldItemPayload::Corpse {
-                body: Graphic(0x0190),
+                body:   Graphic(0x0190),
                 facing: Direction::West,
             }
         );
@@ -1156,13 +1183,13 @@ mod tests {
         // as signed, so -5 has to go out as 0xFB, not clamp to 0.
         let packet = encode_packet(
             &WorldItem {
-                serial: item(),
-                graphic: Graphic(0x0001),
-                payload: WorldItemPayload::Stack(ItemAmount(1)),
+                serial:   item(),
+                graphic:  Graphic(0x0001),
+                payload:  WorldItemPayload::Stack(ItemAmount(1)),
                 position: Point::new(0, 0, -5),
-                hue: Hue::NONE,
-                light: None,
-                flags: ItemFlags::NONE,
+                hue:      Hue::NONE,
+                light:    None,
+                flags:    ItemFlags::NONE,
             },
             version(),
         );
@@ -1243,7 +1270,7 @@ mod tests {
             drop.destination(),
             DropDestination::Item {
                 item: Serial::new(0x4000_00FF).unwrap(),
-                at: GumpPoint::new(50, 60),
+                at:   GumpPoint::new(50, 60),
             },
         );
     }
@@ -1274,8 +1301,8 @@ mod tests {
         // in the ordering of the checks would show.
         let drop = |container: u32| {
             DropItem {
-                serial: RawSerial(0x4000_002A),
-                position: Point::new(1, 2, 3),
+                serial:    RawSerial(0x4000_002A),
+                position:  Point::new(1, 2, 3),
                 container: RawSerial(container),
             }
             .destination()
@@ -1298,7 +1325,7 @@ mod tests {
         assert_eq!(
             encode_packet(
                 &DragCancel {
-                    reason: DragCancelReason::OutOfRange
+                    reason: DragCancelReason::OutOfRange,
                 },
                 version()
             ),
@@ -1307,7 +1334,7 @@ mod tests {
         assert_eq!(
             encode_packet(
                 &DragCancel {
-                    reason: DragCancelReason::AlreadyHolding
+                    reason: DragCancelReason::AlreadyHolding,
                 },
                 version()
             ),
@@ -1370,11 +1397,11 @@ mod tests {
     fn an_equip_packet_is_fifteen_bytes() {
         let packet = encode_packet(
             &EquipUpdate {
-                item: Serial::new(0x4000_0002).unwrap(),
+                item:    Serial::new(0x4000_0002).unwrap(),
                 graphic: Graphic(0x13B9),
-                layer: Layer(1),
-                mobile: Serial::new(0x0000_0001).unwrap(),
-                hue: Hue(0x0021),
+                layer:   Layer(1),
+                mobile:  Serial::new(0x0000_0001).unwrap(),
+                hue:     Hue(0x0021),
             },
             version(),
         );
@@ -1398,11 +1425,11 @@ mod tests {
             items: vec![
                 CorpseEquipmentItem {
                     layer: Layer::TORSO,
-                    item: shirt,
+                    item:  shirt,
                 },
                 CorpseEquipmentItem {
                     layer: Layer::ONE_HANDED,
-                    item: weapon,
+                    item:  weapon,
                 },
             ],
         };

@@ -10,19 +10,43 @@
 //! produces a client drawing mobiles from a world it is no longer in, at
 //! coordinates that now mean somewhere else.
 
-use super::tests::{
-    START, add_empty_facet, add_empty_facet_sized, backpack_serial, enter, enter_as, enter_on_facet,
-    packets_for, serial_of, walk, world,
-};
-use super::*;
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::items::DropDestination;
 use openshard_protocol::serial::RawSerial;
 use openshard_state::components::{
-    CriminalUntil, Decays, InRegion, Mana, Moongate, Movement, Position, RECALL_RUNE_GRAPHIC, RuneMark,
-    SPELLBOOK_GRAPHIC, Spellbook,
+    CriminalUntil,
+    Decays,
+    InRegion,
+    Mana,
+    Moongate,
+    Movement,
+    Position,
+    RECALL_RUNE_GRAPHIC,
+    RuneMark,
+    SPELLBOOK_GRAPHIC,
+    Spellbook,
 };
-use openshard_state::{Region, RegionFlags, RegionId, RegionRect};
+use openshard_state::{
+    Region,
+    RegionFlags,
+    RegionId,
+    RegionRect,
+};
+
+use super::tests::{
+    START,
+    add_empty_facet,
+    add_empty_facet_sized,
+    backpack_serial,
+    enter,
+    enter_as,
+    enter_on_facet,
+    packets_for,
+    serial_of,
+    walk,
+    world,
+};
+use super::*;
 
 /// Ilshenar's shape, which is nothing like Britannia's — the whole reason the
 /// client has to be told.
@@ -282,18 +306,20 @@ fn the_same_region_id_on_two_facets_is_still_a_crossing() {
     let now = Instant::now();
     let mut world = world();
     add_empty_facet(&mut world, Facet(1));
-    let named = |name: &str| Region {
-        id: RegionId(0),
-        name: name.to_owned(),
-        priority: 50,
-        rects: vec![RegionRect::new(START.x - 20, START.y - 20, 40, 40)],
-        flags: RegionFlags::none(),
-        music: None,
-        light: None,
+    let named = |name: &str| {
+        Region {
+            id:       RegionId(0),
+            name:     name.to_owned(),
+            priority: 50,
+            rects:    vec![RegionRect::new(START.x - 20, START.y - 20, 40, 40)],
+            flags:    RegionFlags::none(),
+            music:    None,
+            light:    None,
+        }
     };
     for (facet, name) in [(0, "Britain"), (1, "Compassion")] {
         world.queue(Command::RegisterRegions {
-            facet: Facet(facet),
+            facet:   Facet(facet),
             regions: vec![named(name)],
         });
     }
@@ -305,8 +331,8 @@ fn the_same_region_id_on_two_facets_is_still_a_crossing() {
     assert_eq!(
         world.state.registry.get::<InRegion>(traveller),
         Some(&InRegion {
-            facet: Facet(0),
-            region: Some(RegionId(0))
+            facet:  Facet(0),
+            region: Some(RegionId(0)),
         }),
         "it is in Britain, region zero of facet zero"
     );
@@ -328,8 +354,8 @@ fn the_same_region_id_on_two_facets_is_still_a_crossing() {
     assert_eq!(
         world.state.registry.get::<InRegion>(traveller),
         Some(&InRegion {
-            facet: Facet(1),
-            region: Some(RegionId(0))
+            facet:  Facet(1),
+            region: Some(RegionId(0)),
         }),
         "and the memory now names the facet it is on"
     );
@@ -472,9 +498,9 @@ fn cast_at(world: &mut World, connection: ConnectionId, spell: u16, target: Seri
         connection,
         response: openshard_protocol::target::TargetResponse {
             cursor_id: openshard_protocol::wire::CursorId(cursor_id.raw()),
-            object: Some(target),
-            location: Point::new(0, 0, 0),
-            graphic: None,
+            object:    Some(target),
+            location:  Point::new(0, 0, 0),
+            graphic:   None,
             cancelled: false,
         },
     });
@@ -563,7 +589,7 @@ fn a_rune_on_the_floor_cannot_be_marked_but_can_be_recalled_from() {
     world.state.registry.insert(
         rune,
         RuneMark {
-            facet: Facet(0),
+            facet:       Facet(0),
             destination: Point::new(START.x + 5, START.y + 5, 0),
         },
     );
@@ -621,12 +647,14 @@ fn a_recall_onto_a_moored_deck_is_allowed_and_the_open_sea_is_not() {
         SLOOP,
         [(HULL, -1), (DECK, 0)]
             .into_iter()
-            .map(|(graphic, dx)| Component {
-                graphic: Graphic(graphic),
-                dx,
-                dy: 0,
-                dz: 0,
-                flags: 1,
+            .map(|(graphic, dx)| {
+                Component {
+                    graphic: Graphic(graphic),
+                    dx,
+                    dy: 0,
+                    dz: 0,
+                    flags: 1,
+                }
             })
             .collect(),
     );
@@ -640,7 +668,7 @@ fn a_recall_onto_a_moored_deck_is_allowed_and_the_open_sea_is_not() {
     world.state.registry.insert(
         rune,
         RuneMark {
-            facet: Facet(0),
+            facet:       Facet(0),
             destination: deck,
         },
     );
@@ -681,21 +709,21 @@ fn a_no_recall_region_bars_arriving_and_marking_but_not_leaving() {
     let (mut world, connection, caster, rune_serial) = caster_with_rune(now);
     let inside = Point::new(START.x + 3, START.y + 3, 0);
     world.queue(Command::RegisterRegions {
-        facet: Facet(0),
+        facet:   Facet(0),
         regions: vec![Region {
-            id: RegionId(0),
-            name: "Wrong".to_owned(),
+            id:       RegionId(0),
+            name:     "Wrong".to_owned(),
             priority: 50,
-            rects: vec![RegionRect::new(inside.x - 1, inside.y - 1, 3, 3)],
-            flags: RegionFlags {
-                no_recall: true,
-                guarded: false,
+            rects:    vec![RegionRect::new(inside.x - 1, inside.y - 1, 3, 3)],
+            flags:    RegionFlags {
+                no_recall:   true,
+                guarded:     false,
                 no_teleport: false,
-                no_housing: false,
-                safe: false,
+                no_housing:  false,
+                safe:        false,
             },
-            music: None,
-            light: None,
+            music:    None,
+            light:    None,
         }],
     });
     world.tick(now);
@@ -713,7 +741,7 @@ fn a_no_recall_region_bars_arriving_and_marking_but_not_leaving() {
     world.state.registry.insert(
         rune,
         RuneMark {
-            facet: Facet(0),
+            facet:       Facet(0),
             destination: inside,
         },
     );
@@ -731,7 +759,7 @@ fn a_no_recall_region_bars_arriving_and_marking_but_not_leaving() {
     world.state.registry.insert(
         rune,
         RuneMark {
-            facet: Facet(0),
+            facet:       Facet(0),
             destination: out,
         },
     );
@@ -755,7 +783,7 @@ fn a_rune_marked_on_another_facet_is_a_walk_unless_the_shard_says_otherwise() {
     world.state.registry.insert(
         rune,
         RuneMark {
-            facet: Facet(1),
+            facet:       Facet(1),
             destination: far,
         },
     );
@@ -782,7 +810,7 @@ fn a_criminal_cannot_recall_away_and_it_costs_them_nothing_to_find_out() {
     world.state.registry.insert(
         rune,
         RuneMark {
-            facet: Facet(0),
+            facet:       Facet(0),
             destination: Point::new(START.x + 9, START.y, 0),
         },
     );
@@ -826,7 +854,7 @@ fn a_gate_opens_at_both_ends_and_each_leads_to_the_other() {
     world.state.registry.insert(
         rune,
         RuneMark {
-            facet: Facet(0),
+            facet:       Facet(0),
             destination: there,
         },
     );
@@ -860,9 +888,9 @@ fn walking_into_a_gate_takes_you_through_it() {
         Facet(0),
         onto,
         Moongate {
-            facet: Facet(0),
+            facet:       Facet(0),
             destination: far,
-            expires_at: None,
+            expires_at:  None,
         },
     );
 
@@ -899,9 +927,9 @@ fn a_gate_closes_on_its_own_and_leaves_nothing_behind() {
             Facet(0),
             at,
             Moongate {
-                facet: Facet(0),
+                facet:       Facet(0),
                 destination: Point::new(START.x + 9, START.y, 0),
-                expires_at: Some(openshard_state::WorldTick::from_raw(3)),
+                expires_at:  Some(openshard_state::WorldTick::from_raw(3)),
             },
         )
         .expect("a gate");
@@ -935,9 +963,9 @@ fn a_gate_is_not_swept_into_the_save() {
         Facet(0),
         Point::new(START.x + 2, START.y, 0),
         Moongate {
-            facet: Facet(0),
+            facet:       Facet(0),
             destination: Point::new(START.x + 9, START.y, 0),
-            expires_at: Some(openshard_state::WorldTick::from_raw(9_999)),
+            expires_at:  Some(openshard_state::WorldTick::from_raw(9_999)),
         },
     );
     world.tick(now);
@@ -964,7 +992,7 @@ fn two_gates_never_stand_on_one_tile() {
     world.state.registry.insert(
         rune,
         RuneMark {
-            facet: Facet(0),
+            facet:       Facet(0),
             destination: there,
         },
     );
@@ -1129,7 +1157,7 @@ fn a_marked_rune_dropped_on_a_book_becomes_an_entry_and_is_consumed() {
         RawSerial(rune_serial.raw()),
         DropDestination::Item {
             item: book_serial,
-            at: GumpPoint::new(0, 0),
+            at:   GumpPoint::new(0, 0),
         },
     );
 
@@ -1183,7 +1211,7 @@ fn a_recall_scroll_recharges_a_book_and_the_surplus_stays_on_the_cursor() {
         RawSerial(scroll_serial.raw()),
         DropDestination::Item {
             item: book_serial,
-            at: GumpPoint::new(0, 0),
+            at:   GumpPoint::new(0, 0),
         },
     );
 
@@ -1213,7 +1241,7 @@ fn a_charge_takes_you_there_for_free_and_is_spent() {
         .cloned()
         .unwrap();
     owned.entries.push(openshard_state::components::RunebookEntry {
-        facet: Facet(0),
+        facet:       Facet(0),
         destination: there,
         description: "Britain".into(),
     });
@@ -1226,10 +1254,10 @@ fn a_charge_takes_you_there_for_free_and_is_spent() {
     world.queue(Command::GumpResponse {
         connection,
         response: openshard_protocol::gump::GumpResponse {
-            serial: openshard_protocol::gump::RawGumpKey(serial_of(&world, connection).raw()),
-            gump_id: openshard_protocol::gump::RawGumpId(0x0053_0001),
-            button: openshard_protocol::gump::RawButtonId(10), // BOOK_USE_CHARGE + slot 0
-            switches: Vec::new(),
+            serial:       openshard_protocol::gump::RawGumpKey(serial_of(&world, connection).raw()),
+            gump_id:      openshard_protocol::gump::RawGumpId(0x0053_0001),
+            button:       openshard_protocol::gump::RawButtonId(10), // BOOK_USE_CHARGE + slot 0
+            switches:     Vec::new(),
             text_entries: Vec::new(),
         },
     });
@@ -1269,10 +1297,10 @@ fn a_reply_for_a_row_the_book_does_not_hold_does_nothing() {
     world.queue(Command::GumpResponse {
         connection,
         response: openshard_protocol::gump::GumpResponse {
-            serial: openshard_protocol::gump::RawGumpKey(serial_of(&world, connection).raw()),
-            gump_id: openshard_protocol::gump::RawGumpId(0x0053_0001),
-            button: openshard_protocol::gump::RawButtonId(10 + 9), // a row an empty book has never had
-            switches: Vec::new(),
+            serial:       openshard_protocol::gump::RawGumpKey(serial_of(&world, connection).raw()),
+            gump_id:      openshard_protocol::gump::RawGumpId(0x0053_0001),
+            button:       openshard_protocol::gump::RawButtonId(10 + 9), // a row an empty book has never had
+            switches:     Vec::new(),
             text_entries: Vec::new(),
         },
     });

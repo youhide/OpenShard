@@ -18,14 +18,43 @@ use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_items as items;
 use openshard_persistence::record::HouseRecord;
-use openshard_protocol::serial::{RawSerial, Serial};
+use openshard_protocol::serial::{
+    RawSerial,
+    Serial,
+};
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::target::{MultiOffset, MultiTargetRequest, TargetKind};
-use openshard_protocol::wire::{CursorId, Graphic, Hue};
-use openshard_protocol::world::{Facet, Point};
-use openshard_state::components::{Client, Drawn, House, HouseDeed, HouseDesign, HouseSign, Position};
-use openshard_state::{ItemLocation as LiveItemLocation, TargetPurpose, establish_item_location};
-use tracing::{info, warn};
+use openshard_protocol::target::{
+    MultiOffset,
+    MultiTargetRequest,
+    TargetKind,
+};
+use openshard_protocol::wire::{
+    CursorId,
+    Graphic,
+    Hue,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
+use openshard_state::components::{
+    Client,
+    Drawn,
+    House,
+    HouseDeed,
+    HouseDesign,
+    HouseSign,
+    Position,
+};
+use openshard_state::{
+    ItemLocation as LiveItemLocation,
+    TargetPurpose,
+    establish_item_location,
+};
+use tracing::{
+    info,
+    warn,
+};
 
 use super::World;
 
@@ -129,7 +158,7 @@ impl World {
             self.state.registry.insert(
                 entity,
                 Drawn {
-                    id: openshard_protocol::wire::MultiId(record.multi).graphic(),
+                    id:  openshard_protocol::wire::MultiId(record.multi).graphic(),
                     hue: Hue(0),
                 },
             );
@@ -215,10 +244,10 @@ impl World {
             entry.0 = row.revision;
             entry.1.push(openshard_uofiles::multi::Component {
                 graphic: Graphic(row.graphic),
-                dx: row.dx,
-                dy: row.dy,
-                dz: row.dz,
-                flags: row.flags,
+                dx:      row.dx,
+                dy:      row.dy,
+                dz:      row.dz,
+                flags:   row.flags,
             });
         }
         let mut restored = 0;
@@ -278,7 +307,7 @@ impl World {
             self.state.registry.insert(
                 entity,
                 Drawn {
-                    id: multi.graphic(),
+                    id:  multi.graphic(),
                     hue: Hue(0),
                 },
             );

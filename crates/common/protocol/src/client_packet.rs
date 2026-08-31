@@ -7,23 +7,49 @@
 //! which did the same for the login conversation first. `dispatch` matches on
 //! the result and touches no raw packet buffer itself.
 
-use crate::combat::{AttackRequest, WarMode};
+use crate::combat::{
+    AttackRequest,
+    WarMode,
+};
 use crate::containers::DoubleClick;
 use crate::encoded::EncodedCommand;
 use crate::error::DecodeError;
 use crate::extended::ExtendedRequest;
 use crate::gump::GumpResponse;
-use crate::items::{DropItem, EquipItemRequest, PickUpItem};
-use crate::mobile::{LookRequest, StatusQuery};
-use crate::packet::{DecodePacket, decode_packet};
+use crate::items::{
+    DropItem,
+    EquipItemRequest,
+    PickUpItem,
+};
+use crate::mobile::{
+    LookRequest,
+    StatusQuery,
+};
+use crate::packet::{
+    DecodePacket,
+    decode_packet,
+};
 use crate::properties::PropertyQueryRequest;
-use crate::skill::{SkillLockRequest, UseSkillRequest};
-use crate::speech::{TalkRequest, UnicodeTalkRequest};
+use crate::skill::{
+    SkillLockRequest,
+    UseSkillRequest,
+};
+use crate::speech::{
+    TalkRequest,
+    UnicodeTalkRequest,
+};
 use crate::target::TargetResponse;
 use crate::trade::SecureTradeAction;
-use crate::vendor::{BuyReply, SellReply};
+use crate::vendor::{
+    BuyReply,
+    SellReply,
+};
 use crate::version::ClientVersion;
-use crate::world::{LogoutRequest, ResyncRequest, WalkRequest};
+use crate::world::{
+    LogoutRequest,
+    ResyncRequest,
+    WalkRequest,
+};
 
 /// One packet the world dispatcher understood, already decoded.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -90,7 +116,7 @@ pub enum ClientPacket {
     /// fact, never a silently dropped connection.
     Unknown {
         /// The packet id.
-        id: u8,
+        id:   u8,
         /// The whole packet, id byte included.
         body: Vec<u8>,
     },
@@ -112,93 +138,141 @@ impl ClientPacket {
             .first()
             .expect("packet is empty: caller skipped framing, which never produces one");
         match id {
-            WalkRequest::ID => decode_packet(packet, version)
-                .map(Self::Walk)
-                .map_err(ClientDecodeError::Walk),
+            WalkRequest::ID => {
+                decode_packet(packet, version)
+                    .map(Self::Walk)
+                    .map_err(ClientDecodeError::Walk)
+            }
             // A bare notification: the id is the whole of it, and the byte
             // behind it means nothing either way.
             LogoutRequest::ID => Ok(Self::LogoutRequest),
             ResyncRequest::ID => Ok(Self::ResyncRequest),
-            StatusQuery::ID => decode_packet(packet, version)
-                .map(Self::StatusQuery)
-                .map_err(ClientDecodeError::StatusQuery),
-            EncodedCommand::ID => EncodedCommand::decode(packet)
-                .map(Self::Encoded)
-                .map_err(ClientDecodeError::Encoded),
-            GumpResponse::ID => decode_packet(packet, version)
-                .map(Self::GumpResponse)
-                .map_err(ClientDecodeError::GumpResponse),
-            TargetResponse::ID => decode_packet(packet, version)
-                .map(Self::TargetResponse)
-                .map_err(ClientDecodeError::TargetResponse),
-            PickUpItem::ID => decode_packet(packet, version)
-                .map(Self::PickUpItem)
-                .map_err(ClientDecodeError::PickUpItem),
-            DropItem::ID => decode_packet(packet, version)
-                .map(Self::DropItem)
-                .map_err(ClientDecodeError::DropItem),
-            DoubleClick::ID => decode_packet(packet, version)
-                .map(Self::DoubleClick)
-                .map_err(ClientDecodeError::DoubleClick),
-            BuyReply::ID => decode_packet(packet, version)
-                .map(Self::Buy)
-                .map_err(ClientDecodeError::Buy),
-            SellReply::ID => decode_packet(packet, version)
-                .map(Self::Sell)
-                .map_err(ClientDecodeError::Sell),
-            LookRequest::ID => decode_packet(packet, version)
-                .map(Self::Look)
-                .map_err(ClientDecodeError::Look),
-            PropertyQueryRequest::ID => decode_packet(packet, version)
-                .map(Self::PropertyQuery)
-                .map_err(ClientDecodeError::PropertyQuery),
-            EquipItemRequest::ID => decode_packet(packet, version)
-                .map(Self::Equip)
-                .map_err(ClientDecodeError::Equip),
-            WarMode::ID => decode_packet(packet, version)
-                .map(Self::WarMode)
-                .map_err(ClientDecodeError::WarMode),
-            AttackRequest::ID => decode_packet(packet, version)
-                .map(Self::Attack)
-                .map_err(ClientDecodeError::Attack),
-            TalkRequest::ID => decode_packet(packet, version)
-                .map(Self::Talk)
-                .map_err(ClientDecodeError::Talk),
-            UnicodeTalkRequest::ID => decode_packet(packet, version)
-                .map(Self::UnicodeTalk)
-                .map_err(ClientDecodeError::UnicodeTalk),
-            ExtendedRequest::ID => ExtendedRequest::decode(packet)
-                .map(Self::Extended)
-                .map_err(ClientDecodeError::Extended),
-            UseSkillRequest::ID => match UseSkillRequest::decode(packet) {
-                Ok(Some(request)) => Ok(Self::UseSkill(request)),
-                // A text command that is not "use skill" — an emote, a `go` —
-                // is not this engine's business, the same as an id it has no
-                // handler for at all.
-                Ok(None) => Ok(Self::Unknown {
+            StatusQuery::ID => {
+                decode_packet(packet, version)
+                    .map(Self::StatusQuery)
+                    .map_err(ClientDecodeError::StatusQuery)
+            }
+            EncodedCommand::ID => {
+                EncodedCommand::decode(packet)
+                    .map(Self::Encoded)
+                    .map_err(ClientDecodeError::Encoded)
+            }
+            GumpResponse::ID => {
+                decode_packet(packet, version)
+                    .map(Self::GumpResponse)
+                    .map_err(ClientDecodeError::GumpResponse)
+            }
+            TargetResponse::ID => {
+                decode_packet(packet, version)
+                    .map(Self::TargetResponse)
+                    .map_err(ClientDecodeError::TargetResponse)
+            }
+            PickUpItem::ID => {
+                decode_packet(packet, version)
+                    .map(Self::PickUpItem)
+                    .map_err(ClientDecodeError::PickUpItem)
+            }
+            DropItem::ID => {
+                decode_packet(packet, version)
+                    .map(Self::DropItem)
+                    .map_err(ClientDecodeError::DropItem)
+            }
+            DoubleClick::ID => {
+                decode_packet(packet, version)
+                    .map(Self::DoubleClick)
+                    .map_err(ClientDecodeError::DoubleClick)
+            }
+            BuyReply::ID => {
+                decode_packet(packet, version)
+                    .map(Self::Buy)
+                    .map_err(ClientDecodeError::Buy)
+            }
+            SellReply::ID => {
+                decode_packet(packet, version)
+                    .map(Self::Sell)
+                    .map_err(ClientDecodeError::Sell)
+            }
+            LookRequest::ID => {
+                decode_packet(packet, version)
+                    .map(Self::Look)
+                    .map_err(ClientDecodeError::Look)
+            }
+            PropertyQueryRequest::ID => {
+                decode_packet(packet, version)
+                    .map(Self::PropertyQuery)
+                    .map_err(ClientDecodeError::PropertyQuery)
+            }
+            EquipItemRequest::ID => {
+                decode_packet(packet, version)
+                    .map(Self::Equip)
+                    .map_err(ClientDecodeError::Equip)
+            }
+            WarMode::ID => {
+                decode_packet(packet, version)
+                    .map(Self::WarMode)
+                    .map_err(ClientDecodeError::WarMode)
+            }
+            AttackRequest::ID => {
+                decode_packet(packet, version)
+                    .map(Self::Attack)
+                    .map_err(ClientDecodeError::Attack)
+            }
+            TalkRequest::ID => {
+                decode_packet(packet, version)
+                    .map(Self::Talk)
+                    .map_err(ClientDecodeError::Talk)
+            }
+            UnicodeTalkRequest::ID => {
+                decode_packet(packet, version)
+                    .map(Self::UnicodeTalk)
+                    .map_err(ClientDecodeError::UnicodeTalk)
+            }
+            ExtendedRequest::ID => {
+                ExtendedRequest::decode(packet)
+                    .map(Self::Extended)
+                    .map_err(ClientDecodeError::Extended)
+            }
+            UseSkillRequest::ID => {
+                match UseSkillRequest::decode(packet) {
+                    Ok(Some(request)) => Ok(Self::UseSkill(request)),
+                    // A text command that is not "use skill" — an emote, a `go` —
+                    // is not this engine's business, the same as an id it has no
+                    // handler for at all.
+                    Ok(None) => {
+                        Ok(Self::Unknown {
+                            id,
+                            body: packet.to_vec(),
+                        })
+                    }
+                    Err(error) => Err(ClientDecodeError::UseSkill(error)),
+                }
+            }
+            SkillLockRequest::ID => {
+                decode_packet(packet, version)
+                    .map(Self::SkillLock)
+                    .map_err(ClientDecodeError::SkillLock)
+            }
+            SecureTradeAction::ID => {
+                match SecureTradeAction::decode(packet) {
+                    Ok(Some(action)) => Ok(Self::SecureTrade(action)),
+                    // An action byte this end does not know: ServUO's own handler
+                    // falls through the same way, so this is unhandled, not
+                    // malformed.
+                    Ok(None) => {
+                        Ok(Self::Unknown {
+                            id,
+                            body: packet.to_vec(),
+                        })
+                    }
+                    Err(error) => Err(ClientDecodeError::SecureTrade(error)),
+                }
+            }
+            _ => {
+                Ok(Self::Unknown {
                     id,
                     body: packet.to_vec(),
-                }),
-                Err(error) => Err(ClientDecodeError::UseSkill(error)),
-            },
-            SkillLockRequest::ID => decode_packet(packet, version)
-                .map(Self::SkillLock)
-                .map_err(ClientDecodeError::SkillLock),
-            SecureTradeAction::ID => match SecureTradeAction::decode(packet) {
-                Ok(Some(action)) => Ok(Self::SecureTrade(action)),
-                // An action byte this end does not know: ServUO's own handler
-                // falls through the same way, so this is unhandled, not
-                // malformed.
-                Ok(None) => Ok(Self::Unknown {
-                    id,
-                    body: packet.to_vec(),
-                }),
-                Err(error) => Err(ClientDecodeError::SecureTrade(error)),
-            },
-            _ => Ok(Self::Unknown {
-                id,
-                body: packet.to_vec(),
-            }),
+                })
+            }
         }
     }
 }
@@ -285,8 +359,8 @@ mod tests {
         assert_eq!(
             packet,
             ClientPacket::Unknown {
-                id: 0xF3,
-                body: bytes.to_vec()
+                id:   0xF3,
+                body: bytes.to_vec(),
             }
         );
     }
@@ -313,8 +387,8 @@ mod tests {
         assert_eq!(
             packet,
             ClientPacket::Unknown {
-                id: 0x12,
-                body: bytes.clone()
+                id:   0x12,
+                body: bytes.clone(),
             }
         );
     }
@@ -348,7 +422,7 @@ mod tests {
     fn an_extended_command_round_trips_by_subcommand() {
         let packet = encode_packet(
             &crate::context::ContextMenu {
-                serial: crate::serial::Serial::new(1).unwrap(),
+                serial:  crate::serial::Serial::new(1).unwrap(),
                 entries: Vec::new(),
             },
             version(),

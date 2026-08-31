@@ -40,12 +40,19 @@
 //! same late primitive with a canopy-tile key, while profile-controlled
 //! transparency radii remain separate work.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{
+    BTreeMap,
+    HashMap,
+};
 
 use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_tiles::{StaticTile, TileData, TileFlags};
+use openshard_tiles::{
+    StaticTile,
+    TileData,
+    TileFlags,
+};
 
 use crate::depth;
 use crate::geometry::Rect;
@@ -89,9 +96,9 @@ pub const FOLIAGE_ALPHA_U8: u8 = (FOLIAGE_ALPHA * 255.0 + 0.5) as u8;
 /// graphic here, rather than whichever frame the atlas is showing.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct FadeKey {
-    at: (u16, u16, i8),
+    at:      (u16, u16, i8),
     graphic: Graphic,
-    item: bool,
+    item:    bool,
     foliage: bool,
 }
 
@@ -117,9 +124,9 @@ impl FadeKey {
     /// A canopy identity is the placed world tile, not an animated frame.
     pub const fn foliage(at: Point) -> Self {
         Self {
-            at: (at.x, at.y, at.z),
+            at:      (at.x, at.y, at.z),
             graphic: Graphic(0),
-            item: false,
+            item:    false,
             foliage: true,
         }
     }
@@ -183,9 +190,9 @@ const ASSUMED_HEIGHT: u8 = 10;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Cutaway {
     /// A static at or above this height is not drawn. `GameScene._maxZ`.
-    pub max_z: i32,
+    pub max_z:         i32,
     /// A land tile above this height is not drawn. `GameScene._maxGroundZ`.
-    pub max_ground_z: i32,
+    pub max_ground_z:  i32,
     /// No roof is drawn at all, wherever it stands. `GameScene._noDrawRoofs`.
     pub no_draw_roofs: bool,
 }
@@ -197,8 +204,8 @@ impl Cutaway {
     /// same way whether or not anything was cut — there is no "no limit" case
     /// to branch on, which is what the client's own `127` is for.
     pub const OPEN: Self = Self {
-        max_z: 127,
-        max_ground_z: 127,
+        max_z:         127,
+        max_ground_z:  127,
         no_draw_roofs: false,
     };
 
@@ -496,9 +503,9 @@ impl<'a> ItemStacks<'a> {
 pub struct Piece<'a> {
     /// The height the client tests against — for the land, the average of its
     /// four corners, which is what `Land.AverageZ` holds.
-    pub z: i8,
+    pub z:          i8,
     /// The static's tiledata, or `None` for the tile's own land.
-    pub tile: Option<&'a StaticTile>,
+    pub tile:       Option<&'a StaticTile>,
     /// Where it sorts against everything else on the tile. See
     /// [`crate::depth`].
     pub priority_z: i32,
@@ -542,16 +549,16 @@ fn stack_with_items<'a>(
     for item in map.statics_at(x, y) {
         let tile = tiledata.static_tile(item.tile.0);
         pieces.push(Piece {
-            z: item.z,
-            tile: Some(tile),
+            z:          item.z,
+            tile:       Some(tile),
             priority_z: depth::static_priority_z(item.z, tile),
         });
     }
     for item in items.at(x, y) {
         let tile = tiledata.static_tile(item.displayed().0);
         pieces.push(Piece {
-            z: item.at.z,
-            tile: Some(tile),
+            z:          item.at.z,
+            tile:       Some(tile),
             priority_z: depth::static_priority_z(item.at.z, tile),
         });
     }
@@ -718,8 +725,8 @@ mod tests {
     #[test]
     fn a_roof_goes_and_the_wall_under_it_stays() {
         let inside = Cutaway {
-            max_z: 40,
-            max_ground_z: 127,
+            max_z:         40,
+            max_ground_z:  127,
             no_draw_roofs: true,
         };
         // The roof itself, at the height the cutaway was taken from.
@@ -744,10 +751,10 @@ mod tests {
         let roof = GroundItem {
             // The second tile `UpdateMaxDrawZ` asks: where the roof over the
             // body is painted in the isometric projection.
-            at: Point::new(3, 3, 20),
+            at:      Point::new(3, 3, 20),
             graphic: ROOF,
-            hue: Hue::NONE,
-            amount: ItemAmount::ONE,
+            hue:     Hue::NONE,
+            amount:  ItemAmount::ONE,
         };
 
         assert_eq!(
@@ -770,8 +777,8 @@ mod tests {
     #[test]
     fn the_ground_is_cut_only_when_the_player_is_buried() {
         let buried = Cutaway {
-            max_z: 16,
-            max_ground_z: 16,
+            max_z:         16,
+            max_ground_z:  16,
             no_draw_roofs: true,
         };
         assert!(buried.shows_land(16), "the tile at head height still draws");
@@ -891,9 +898,11 @@ mod tests {
                 // the ground, a stair tread, the floor of the storey above.
                 let heights: Vec<i8> = stack(&map, &tiledata, x, y)
                     .into_iter()
-                    .map(|piece| match piece.tile {
-                        None => piece.z,
-                        Some(tile) => top_of(i32::from(piece.z), tile).clamp(-128, 127) as i8,
+                    .map(|piece| {
+                        match piece.tile {
+                            None => piece.z,
+                            Some(tile) => top_of(i32::from(piece.z), tile).clamp(-128, 127) as i8,
+                        }
                     })
                     .collect();
                 for z in heights {
@@ -919,8 +928,8 @@ mod tests {
     #[test]
     fn a_mobile_upstairs_is_cut_with_the_storey() {
         let inside = Cutaway {
-            max_z: 40,
-            max_ground_z: 127,
+            max_z:         40,
+            max_ground_z:  127,
             no_draw_roofs: true,
         };
         assert!(inside.shows_mobile(0));

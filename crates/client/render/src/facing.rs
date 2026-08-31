@@ -375,7 +375,7 @@ pub enum Facing {
         /// The face on the right half of the tile's column — `North` or `East`.
         right: Face,
         /// The face on the left half — `South` or `West`.
-        left: Face,
+        left:  Face,
     },
 }
 
@@ -395,10 +395,12 @@ impl Facing {
     pub fn on_half(self, across: f32) -> Face {
         match self {
             Self::One(face) => face,
-            Self::Corner { right, left } => match across > 0.0 {
-                true => right,
-                false => left,
-            },
+            Self::Corner { right, left } => {
+                match across > 0.0 {
+                    true => right,
+                    false => left,
+                }
+            }
         }
     }
 
@@ -799,13 +801,13 @@ pub fn measure_footprint(image: &Image) -> Result<Footprint, Refusal> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Hole {
     /// Where the hole starts along the run.
-    pub near: u8,
+    pub near:   u8,
     /// And where it ends.
-    pub far: u8,
+    pub far:    u8,
     /// The lowest `z` it reaches, above the static's base.
     pub bottom: u8,
     /// And the highest.
-    pub top: u8,
+    pub top:    u8,
 }
 
 /// The hole in a wall's face, or `None` where the art draws none.
@@ -888,10 +890,12 @@ pub fn aperture_of(image: &Image, facing: Facing) -> Option<Hole> {
             // Heights above this column's own base pixel, which is what makes
             // the 45° descent drop out: a hole level in the surface is a
             // constant here and a slanted one is not.
-            Gap::One(from, to) => Some((
-                i32::from(bottom) - i32::from(to),
-                i32::from(bottom) - i32::from(from),
-            )),
+            Gap::One(from, to) => {
+                Some((
+                    i32::from(bottom) - i32::from(to),
+                    i32::from(bottom) - i32::from(from),
+                ))
+            }
         };
         columns.push(Column { column, gap });
     }
@@ -946,13 +950,13 @@ pub fn aperture_of(image: &Image, facing: Facing) -> Option<Hole> {
     let end = edge(columns[first + to].column, 1.0);
     let step = |run: f32| (run.clamp(0.0, 1.0) * crate::occlusion::RUN_STEPS).round() as u8;
     Some(Hole {
-        near: step(start.min(end)),
-        far: step(start.max(end)),
+        near:   step(start.min(end)),
+        far:    step(start.max(end)),
         // Nearest rather than inwards: the span is already the inscribed one, and
         // rounding an inscribed rectangle inwards twice is a hole a `z` narrower
         // than the art's on both sides.
         bottom: (bottom as f32 / Z_STEP).round().clamp(0.0, 255.0) as u8,
-        top: (top as f32 / Z_STEP).round().clamp(0.0, 255.0) as u8,
+        top:    (top as f32 / Z_STEP).round().clamp(0.0, 255.0) as u8,
     })
 }
 
@@ -963,7 +967,7 @@ struct Column {
     column: u16,
     /// `(bottom, top)` of the transparent run inside it, in pixels above the
     /// base. `None` for a column of solid wall.
-    gap: Option<(i32, i32)>,
+    gap:    Option<(i32, i32)>,
 }
 
 /// What one column has inside its own picture.
@@ -1163,7 +1167,7 @@ struct BaseEdge {
     bottom: Vec<Option<u16>>,
     /// Per column: the first drawn row. Only the difference is read — see
     /// [`BaseEdge::standing`].
-    top: Vec<Option<u16>>,
+    top:    Vec<Option<u16>>,
 }
 
 impl BaseEdge {
@@ -1200,7 +1204,7 @@ fn base_edge(image: &Image) -> BaseEdge {
     let width = usize::from(image.width());
     let mut edge = BaseEdge {
         bottom: vec![None; width],
-        top: vec![None; width],
+        top:    vec![None; width],
     };
     for y in 0..image.height() {
         for x in 0..image.width() {
@@ -1338,9 +1342,11 @@ pub fn corner_silhouette(right: Face, left: Face, height: u16) -> Image {
         .pixels()
         .iter()
         .zip(b.pixels())
-        .map(|(over, under)| match over.is_transparent() {
-            true => *under,
-            false => *over,
+        .map(|(over, under)| {
+            match over.is_transparent() {
+                true => *under,
+                false => *over,
+            }
         })
         .collect();
     Image::new(a.width(), a.height(), pixels)
@@ -1371,13 +1377,13 @@ pub struct Prism {
     /// A [`Face`] and not a direction of its own, because it is the same four
     /// edges everything else here names, and because the two faces a camera can
     /// see are the two a stair is nearly always drawn climbing towards.
-    up: Face,
+    up:      Face,
     /// How tall each tread stands above the static's own base, in `z`, in the
     /// order they are climbed. Only the first [`Prism::treads`] entries mean
     /// anything.
     heights: [u8; MAX_TREADS as usize],
     /// How many of them there are: at least one, at most [`MAX_TREADS`].
-    count: u8,
+    count:   u8,
 }
 
 // **`SEAM_OVERLAP` lived here**, `0.15` of a `z` unit, and every riser was grown
@@ -1914,9 +1920,11 @@ pub fn best_prism(image: &Image) -> (Prism, f32) {
 fn earliest_of_best_interior(candidates: Vec<(Prism, f32, f32)>) -> Option<(Prism, f32)> {
     candidates
         .into_iter()
-        .fold(None, |acc: Option<(Prism, f32, f32)>, next| match acc {
-            Some(acc) if acc.2 >= next.2 => Some(acc),
-            _ => Some(next),
+        .fold(None, |acc: Option<(Prism, f32, f32)>, next| {
+            match acc {
+                Some(acc) if acc.2 >= next.2 => Some(acc),
+                _ => Some(next),
+            }
         })
         .map(|(prism, score, _)| (prism, score))
 }
@@ -2051,14 +2059,14 @@ impl Block {
 /// costs no allocation on the path from the table to the grid.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Blocks {
-    list: [Block; MAX_BLOCKS as usize],
+    list:  [Block; MAX_BLOCKS as usize],
     count: u8,
 }
 
 impl Blocks {
     /// No blocks — every graphic's state before a person authors one.
     pub const EMPTY: Self = Self {
-        list: [Block {
+        list:  [Block {
             x: Span::new(0, 0),
             y: Span::new(0, 0),
             z: Span::new(0, 0),
@@ -2148,11 +2156,11 @@ pub fn blocks_silhouette(blocks: &Blocks) -> Image {
 /// One prism [`best_prism`] scores a picture against, with its silhouette
 /// already drawn and counted.
 struct Candidate {
-    prism: Prism,
+    prism:      Prism,
     silhouette: Image,
     /// How many pixels that silhouette draws inside the 44-wide tile — the
     /// `either` term's floor and the `both` term's ceiling, see [`best_prism`].
-    drawn: u32,
+    drawn:      u32,
 }
 
 /// Every prism the search considers, in the order it considers them.
@@ -2356,9 +2364,11 @@ pub fn boundary_columns(up: Face, run: f32, z: u8) -> Vec<(u16, f32)> {
     buckets
         .into_iter()
         .enumerate()
-        .filter_map(|(column, rows)| match rows.is_empty() {
-            true => None,
-            false => Some((column as u16, rows.iter().sum::<f32>() / rows.len() as f32)),
+        .filter_map(|(column, rows)| {
+            match rows.is_empty() {
+                true => None,
+                false => Some((column as u16, rows.iter().sum::<f32>() / rows.len() as f32)),
+            }
         })
         .collect()
 }
@@ -2600,7 +2610,7 @@ mod tests {
     fn a_pixel_of_a_corner_belongs_to_the_face_on_its_own_half() {
         let corner = Facing::Corner {
             right: Face::East,
-            left: Face::South,
+            left:  Face::South,
         };
         assert_eq!(corner.on_half(10.0), Face::East);
         assert_eq!(corner.on_half(-10.0), Face::South);
@@ -2740,10 +2750,10 @@ mod tests {
     /// fifteen. Every fixture below is a variation on it, so that a number that
     /// moves can be compared with a real one.
     const WINDOW: Hole = Hole {
-        near: 93,
-        far: 185,
+        near:   93,
+        far:    185,
         bottom: 10,
-        top: 15,
+        top:    15,
     };
 
     /// A window is read back off its own picture, on every face.
@@ -2793,7 +2803,7 @@ mod tests {
                 &window,
                 Facing::Corner {
                     right: Face::East,
-                    left: Face::South,
+                    left:  Face::South,
                 },
             ),
             None,
@@ -2891,9 +2901,11 @@ mod tests {
             .pixels()
             .iter()
             .zip(b.pixels())
-            .map(|(over, under)| match over.is_transparent() {
-                true => *over,
-                false => *under,
+            .map(|(over, under)| {
+                match over.is_transparent() {
+                    true => *over,
+                    false => *under,
+                }
             })
             .collect();
         Image::new(a.width(), a.height(), pixels)
@@ -2929,10 +2941,10 @@ mod tests {
         assert_eq!(
             aperture_of(&chimney, Facing::One(Face::East)),
             Some(Hole {
-                near: 128,
-                far: 162,
+                near:   128,
+                far:    162,
                 bottom: 10,
-                top: 16,
+                top:    16,
             }),
         );
     }
@@ -3209,7 +3221,7 @@ mod tests {
                 facing_of(&prism_silhouette(&Prism::box_of(height))),
                 Some(Facing::Corner {
                     right: Face::East,
-                    left: Face::South
+                    left:  Face::South,
                 }),
                 "a box {height} tall",
             );

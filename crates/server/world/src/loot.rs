@@ -20,24 +20,27 @@
 //! not a listener, it is part of the tick, and a round trip through the bus would
 //! only put a frame between the corpse and what is in it.
 
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 
 /// One thing a corpse may hold.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Drop {
     /// The item tile.
-    pub graphic: Graphic,
+    pub graphic:   Graphic,
     /// Its colour.
-    pub hue: Hue,
+    pub hue:       Hue,
     /// The fewest that drop, at least one.
-    pub least: u16,
+    pub least:     u16,
     /// The most. Equal to `least` for a fixed count.
-    pub most: u16,
+    pub most:      u16,
     /// Whether it merges into a pile — gold, reagents, arrows — or is placed
     /// whole, like a weapon.
     pub stackable: bool,
     /// The chance it drops at all, as a percentage. `100` is always.
-    pub percent: u32,
+    pub percent:   u32,
 }
 
 include!(concat!(env!("OUT_DIR"), "/loot.rs"));

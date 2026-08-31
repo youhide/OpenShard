@@ -46,7 +46,10 @@ use openshard_client_render::arttable::ArtTable;
 use openshard_client_render::facing;
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
-use openshard_uofiles::color::{Color16, Rgb8};
+use openshard_uofiles::color::{
+    Color16,
+    Rgb8,
+};
 use openshard_uofiles::image::Image;
 
 /// The staircase's two statics — see `docs/lighting.md`'s backlog, "found on a

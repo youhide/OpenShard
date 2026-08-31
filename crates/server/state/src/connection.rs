@@ -17,15 +17,22 @@
 //! it gets a row of its own keyed by
 //! [`ConnectionId`](openshard_gateway::ConnectionId).
 
+use openshard_entities::EntityId;
 use openshard_protocol::access::AccessLevel;
 use openshard_protocol::identity::AccountName;
 use openshard_protocol::version::ClientVersion;
-use openshard_protocol::world::{Light, MusicId};
-
-use openshard_entities::EntityId;
+use openshard_protocol::world::{
+    Light,
+    MusicId,
+};
 
 use crate::runtime::{
-    CraftGumpContext, GuildGumpContext, HeldItem, HouseGumpContext, QuestGumpContext, TargetPurpose,
+    CraftGumpContext,
+    GuildGumpContext,
+    HeldItem,
+    HouseGumpContext,
+    QuestGumpContext,
+    TargetPurpose,
 };
 
 /// The derived half of a player's status bar, kept to compare against next time.
@@ -39,11 +46,11 @@ use crate::runtime::{
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct StatusSnapshot {
     /// Gold counted in the pack.
-    pub gold: u32,
+    pub gold:      u32,
     /// Armour summed off what is worn.
-    pub armor: u16,
+    pub armor:     u16,
     /// What the pack and everything in it weighs.
-    pub weight: u16,
+    pub weight:    u16,
     /// Pets and the mount under the rider.
     pub followers: u8,
 }
@@ -94,7 +101,7 @@ pub struct Connection {
     /// character, so it lives with the connection rather than the roster. Carried
     /// here because entering a character is a tick's job now, and the entity's
     /// `Access` component is written from this.
-    pub access: AccessLevel,
+    pub access:  AccessLevel,
 
     /// The item on this client's cursor, and where it was so a cancelled drag can
     /// put it back.
@@ -104,7 +111,7 @@ pub struct Connection {
     /// is why a connection that goes while dragging has to be noticed at all. An
     /// `Option` and not a map entry because a cursor holds one thing: that was
     /// always what the old map's `get` returning `None` meant.
-    pub held: Option<HeldItem>,
+    pub held:        Option<HeldItem>,
     /// The derived status numbers last sent, so the refresh pass sends only what
     /// changed. `None` before the first pass has run for this connection.
     pub last_status: Option<StatusSnapshot>,
@@ -113,11 +120,11 @@ pub struct Connection {
     /// Forgotten with the row, and that matters: a connection id can be reused,
     /// and a reconnect inheriting the last one's remembered light would be told
     /// nothing — it would sit in daylight inside a cave.
-    pub last_light: Option<Light>,
+    pub last_light:  Option<Light>,
     /// The music track this client is hearing, so a region crossing that does not
     /// change it does not restart it. Re-sending `0x6D` with the same id starts
     /// the track over.
-    pub last_music: Option<MusicId>,
+    pub last_music:  Option<MusicId>,
 
     /// The targeting cursor this client has up, and what the click is for.
     ///
@@ -132,33 +139,33 @@ pub struct Connection {
     /// A gump exists only while somebody is looking at it, and a reply naming a
     /// window this side never drew is a reply to nothing — which is the whole
     /// reason the context is kept rather than trusted off the packet.
-    pub quest_gump: Option<QuestGumpContext>,
+    pub quest_gump:     Option<QuestGumpContext>,
     /// The guild window this client has open, on which page, and what its rows
     /// meant. See [`GuildGumpContext`] for why the rows are remembered here.
-    pub guild_gump: Option<GuildGumpContext>,
+    pub guild_gump:     Option<GuildGumpContext>,
     /// The craft window this client has open, on which category and material.
     ///
     /// Carries more weight than the quest log's: the selected category, the
     /// chosen metal and the tool in hand all live here and never in the packet,
     /// so a reply cannot name a material the player did not pick.
-    pub craft_gump: Option<CraftGumpContext>,
+    pub craft_gump:     Option<CraftGumpContext>,
     /// The runebook this client has open.
-    pub runebook_gump: Option<EntityId>,
+    pub runebook_gump:  Option<EntityId>,
     /// The gate this client has a destination list open for. The `craft_gump`
     /// shape, and for the same reason: the reply carries a button and a switch,
     /// never *which* gate asked.
-    pub gate_gump: Option<EntityId>,
+    pub gate_gump:      Option<EntityId>,
     /// The healer this client has a "wouldst thou like to be resurrected?"
     /// confirm open for. The `gate_gump` shape: a reply carries only a button, so
     /// *which* healer asked has to live here, not in the packet.
-    pub healer_gump: Option<EntityId>,
+    pub healer_gump:    Option<EntityId>,
     /// The house sign this client has open, and what its rows meant.
     ///
     /// The `guild_gump` shape rather than the `gate_gump` one, because a house
     /// window has rows: three lists of people, each row offering to drop whoever
     /// is on it. Which serial row four named is what this side remembers
     /// drawing, and never the number in the packet.
-    pub house_gump: Option<HouseGumpContext>,
+    pub house_gump:     Option<HouseGumpContext>,
 }
 
 impl Connection {

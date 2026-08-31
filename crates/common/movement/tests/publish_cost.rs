@@ -56,14 +56,31 @@
 //! machine it ran on.
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
-use openshard_map::chunk::{Chunk, ChunkCoord};
-use openshard_map::map::{LandCell, StaticItem};
-use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
+use openshard_map::chunk::{
+    Chunk,
+    ChunkCoord,
+};
+use openshard_map::map::{
+    LandCell,
+    StaticItem,
+};
+use openshard_map::patch::{
+    Patch,
+    PatchAuthor,
+    PatchOp,
+    PatchTime,
+};
 use openshard_movement::ground::Ground;
 use openshard_movement::spans::SpanIndex;
-use openshard_tiles::{LandTileId, TileData};
+use openshard_tiles::{
+    LandTileId,
+    TileData,
+};
 
 /// The base set to measure over: `OPENSHARD_BASE_SET`, or the one the repo's own
 /// `openshard.toml` names, which is where `openshard-map-import` puts it.
@@ -161,7 +178,7 @@ fn what_one_setland_costs_at_each_end() {
     };
     let raised = LandCell {
         tile: LandTileId(3),
-        z: was.z.saturating_add(40),
+        z:    was.z.saturating_add(40),
     };
 
     // Not repeatable — the world it publishes into is the world it moved — so

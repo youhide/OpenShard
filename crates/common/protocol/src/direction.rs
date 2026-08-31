@@ -127,10 +127,12 @@ impl Direction {
     /// comes to disagree with the rule that refuses the step.
     pub const fn flanks(self) -> Option<[Self; 2]> {
         match self.is_diagonal() {
-            true => Some([
-                Self::from_bits(self.to_bits().wrapping_add(7)),
-                Self::from_bits(self.to_bits().wrapping_add(1)),
-            ]),
+            true => {
+                Some([
+                    Self::from_bits(self.to_bits().wrapping_add(7)),
+                    Self::from_bits(self.to_bits().wrapping_add(1)),
+                ])
+            }
             false => None,
         }
     }
@@ -162,7 +164,7 @@ pub struct Facing {
     /// Which way.
     pub direction: Direction,
     /// Whether the mobile is running rather than walking.
-    pub running: bool,
+    pub running:   bool,
 }
 
 impl Facing {
@@ -186,7 +188,7 @@ impl Facing {
     pub const fn from_bits(bits: u8) -> Self {
         Self {
             direction: Direction::from_bits(bits),
-            running: bits & RUNNING_BIT != 0,
+            running:   bits & RUNNING_BIT != 0,
         }
     }
 
@@ -238,10 +240,12 @@ mod tests {
         );
         for direction in Direction::ALL {
             match direction.flanks() {
-                Some(flanks) => assert!(
-                    flanks.iter().all(|flank| !flank.is_diagonal()),
-                    "{direction}'s flanks are cardinals"
-                ),
+                Some(flanks) => {
+                    assert!(
+                        flanks.iter().all(|flank| !flank.is_diagonal()),
+                        "{direction}'s flanks are cardinals"
+                    )
+                }
                 None => assert!(!direction.is_diagonal(), "{direction} squeezes between nothing"),
             }
         }

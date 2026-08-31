@@ -62,32 +62,83 @@
 //! the copy — see `docs/client.md`.
 
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
-use openshard_client_net::walk::{Predicted, Walk};
-use openshard_client_render::bench::{Cadence, Metrics, Sample};
-use openshard_client_render::camera::{Camera, TILE_HEIGHT, TILE_WIDTH};
+use openshard_client_net::walk::{
+    Predicted,
+    Walk,
+};
+use openshard_client_render::bench::{
+    Cadence,
+    Metrics,
+    Sample,
+};
+use openshard_client_render::camera::{
+    Camera,
+    TILE_HEIGHT,
+    TILE_WIDTH,
+};
 use openshard_client_render::chart;
 use openshard_client_render::control::Control;
-use openshard_client_render::follow::Gaze;
-use openshard_client_render::follow::Rig;
-use openshard_client_render::mobiles::{self, Mobile};
+use openshard_client_render::follow::{
+    Gaze,
+    Rig,
+};
+use openshard_client_render::mobiles::{
+    self,
+    Mobile,
+};
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Cover, Doors, Overlay};
-use openshard_movement::{Footing, WALK_HOLD, Walk as Handled, Walker, step_hold, step_progress};
-use openshard_protocol::direction::{Direction, Facing};
+use openshard_map::overlay::{
+    Cover,
+    Doors,
+    Overlay,
+};
+use openshard_movement::{
+    Footing,
+    WALK_HOLD,
+    Walk as Handled,
+    Walker,
+    step_hold,
+    step_progress,
+};
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
 use openshard_protocol::extended::ExtendedRequest;
 use openshard_protocol::mobile::Notoriety;
-use openshard_protocol::packet::{FramedClientPacket, decode_packet};
+use openshard_protocol::packet::{
+    FramedClientPacket,
+    decode_packet,
+};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::version::ClientVersion;
-use openshard_protocol::wire::{Graphic, Hue};
-use openshard_protocol::world::{Point, WalkAck, WalkReject, WalkRequest};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
+use openshard_protocol::world::{
+    Point,
+    WalkAck,
+    WalkReject,
+    WalkRequest,
+};
 
 use crate::GLIDE_INTERVAL;
-use crate::crowd::{Crowd, Ease, Who};
-use crate::link::{self, Body};
+use crate::crowd::{
+    Crowd,
+    Ease,
+    Who,
+};
+use crate::link::{
+    self,
+    Body,
+};
 use crate::net_command::project_motion;
 use crate::steer::Readings;
 use crate::world::PlayerMotion;
@@ -139,7 +190,7 @@ enum Input {
 #[derive(Clone, Copy, Debug)]
 struct Act {
     /// How long after the scenario started.
-    at: Duration,
+    at:    Duration,
     /// What the player did.
     input: Input,
 }
@@ -147,7 +198,7 @@ struct Act {
 /// A press at `millis`.
 const fn press(millis: u64, direction: Direction) -> Act {
     Act {
-        at: Duration::from_millis(millis),
+        at:    Duration::from_millis(millis),
         input: Input::Press(direction),
     }
 }
@@ -155,7 +206,7 @@ const fn press(millis: u64, direction: Direction) -> Act {
 /// A release at `millis`.
 const fn release(millis: u64, direction: Direction) -> Act {
     Act {
-        at: Duration::from_millis(millis),
+        at:    Duration::from_millis(millis),
         input: Input::Release(direction),
     }
 }
@@ -163,7 +214,7 @@ const fn release(millis: u64, direction: Direction) -> Act {
 /// Shift, at `millis`.
 const fn running(millis: u64, shift: bool) -> Act {
     Act {
-        at: Duration::from_millis(millis),
+        at:    Duration::from_millis(millis),
         input: Input::Running(shift),
     }
 }
@@ -171,7 +222,7 @@ const fn running(millis: u64, shift: bool) -> Act {
 /// Getting into the saddle, at `millis`.
 const fn mount(millis: u64, saddle: bool) -> Act {
     Act {
-        at: Duration::from_millis(millis),
+        at:    Duration::from_millis(millis),
         input: Input::Mounted(saddle),
     }
 }
@@ -181,13 +232,13 @@ const fn mount(millis: u64, saddle: bool) -> Act {
 #[derive(Clone, Copy, Debug)]
 struct Knot {
     /// When the crossing starts.
-    at: Duration,
+    at:    Duration,
     /// How long it takes — the hold of the pace being walked at.
     takes: Duration,
     /// The tile it leaves, in tiles.
-    from: (f64, f64),
+    from:  (f64, f64),
     /// The tile it arrives at.
-    to: (f64, f64),
+    to:    (f64, f64),
 }
 
 /// One tile crossed, on the intent timeline.
@@ -378,9 +429,9 @@ impl Oracle {
 struct Net {
     /// One way. A `0x02` takes this to reach the shard and its answer takes it
     /// to come back.
-    latency: Duration,
+    latency:     Duration,
     /// Added to each crossing, uniformly in `[0, jitter]`.
-    jitter: Duration,
+    jitter:      Duration,
     /// How late the event loop wakes, uniformly in `[0, wake_jitter]`. A real
     /// one is never early.
     wake_jitter: Duration,
@@ -429,7 +480,7 @@ fn field(walls: &[Tile]) -> Overlay {
 #[derive(Clone, Copy, Debug)]
 struct Leaf {
     /// The tile it fills while it is shut.
-    at: Point,
+    at:     Point,
     /// What a use packet names it by.
     serial: Serial,
     /// The other leaf of the same doorway, if the shard knows the two are a
@@ -439,9 +490,9 @@ struct Leaf {
     /// scenarios below hold it: only doors *generated* between static frames are
     /// linked (`world::tick::decor`), while every door placed from decoration
     /// data — which is every named door in a town — is placed with `link: None`.
-    link: Option<Serial>,
+    link:   Option<Serial>,
     /// Whether it has swung aside.
-    open: bool,
+    open:   bool,
 }
 
 /// What crosses the wire to the shard.
@@ -469,7 +520,7 @@ enum ToClient {
 /// The client, the wire and a shard, on one virtual clock.
 struct Sim {
     /// The virtual clock: everything here is an offset from the start.
-    now: Duration,
+    now:  Duration,
     /// One arbitrary real instant, because [`crate::steer::Steering`] and
     /// `WalkPace` take `Instant`s. Neither *reads* one — they only ever
     /// subtract two — so a base plus the virtual clock is a real clock as far as
@@ -479,58 +530,58 @@ struct Sim {
     steering: crate::steer::Steering,
     /// The client's prediction — `AuthoritativeWorld::walk`, on the app thread
     /// exactly as `App::step_online` holds it.
-    walk: Walk,
+    walk:     Walk,
     /// **Where the body actually is**, and the whole reason this harness is not
     /// a copy of `Crowd`: since `docs/movement_state_refactor.md` the local
     /// body's pose comes from this core and never from the crowd — see
     /// `PresentationWorld::project_local_motion`, which is the line that
     /// overwrites what the crowd would have said. A harness that sampled the
     /// crowd was measuring a code path the window no longer draws from.
-    motion: PlayerMotion,
-    crowd: Crowd,
+    motion:   PlayerMotion,
+    crowd:    Crowd,
     /// Whether the body is in a saddle.
     ///
     /// Restated into `Steering` and into every `accept_local` from here, which
     /// is what `App` does with the mount layer it reads out of the view — so
     /// the cadence and the glide cannot disagree about which of the four rates
     /// is being walked.
-    mounted: bool,
+    mounted:  bool,
     /// The body as `App` holds it: the tile, and the glide it was last drawn
     /// with.
-    player: Mobile,
+    player:   Mobile,
 
     /// The shard's side of the same walk — the real rules, sequence check and
     /// anti-speedhack bucket included.
-    shard: Walker,
+    shard:  Walker,
     /// What the *shard* refuses a step onto. See [`field`].
-    field: Overlay,
+    field:  Overlay,
     /// The doorway the shard holds, if this scenario has one.
     leaves: Vec<Leaf>,
 
     /// What the *client* can see of the ground. Empty in every scenario but the
     /// doorway ones, which is what makes the rollback scenarios a rollback: the
     /// wall in `field` is one this end finds out about only from a `0x21`.
-    seen: Overlay,
+    seen:        Overlay,
     /// Which way this client reads a shut leaf — `App::walking_doors`. Every
     /// scenario without a doorway reads `AsTheyStand` over an empty `seen`,
     /// which is the same ground either way.
-    doors: Doors,
+    doors:       Doors,
     /// The shut leaves this client can see, as `App::open_door_ahead` collects
     /// them out of its item list. A leaf drops out of here when the update
     /// saying it swung arrives.
-    shut: Vec<(Point, Serial)>,
+    shut:        Vec<(Point, Serial)>,
     /// Whether the auto-door setting is on.
-    auto_open: bool,
+    auto_open:   bool,
     /// The leaves already asked to open — `App::auto_opened_doors`.
     auto_opened: Vec<Serial>,
     /// Every leaf this client sent a use for, in the order it sent them. What
     /// says whether the auto-door reached *both* leaves of a doorway or only
     /// the one the step lands on.
-    used: Vec<Serial>,
+    used:        Vec<Serial>,
 
     /// `0x02`s and door uses crossing to the shard, and answers crossing back,
     /// by arrival.
-    to_shard: VecDeque<(Duration, ToShard)>,
+    to_shard:  VecDeque<(Duration, ToShard)>,
     to_client: VecDeque<(Duration, ToClient)>,
     /// The movement fact a folded packet carried, crossing the mpsc back into
     /// the window — `link::Update::Mutation`'s movement half.
@@ -546,11 +597,11 @@ struct Sim {
     rng: Rng,
 
     /// The window's own clocks, exactly as `App` keeps them.
-    next_tick: Duration,
+    next_tick:    Duration,
     last_advance: Duration,
 
     /// How many steps the shard refused, for the assertions.
-    refused: u32,
+    refused:    u32,
     /// When each step that *moved the body* was asked for.
     ///
     /// Turns are deliberately not counted: a turn covers no ground, costs the
@@ -561,9 +612,9 @@ struct Sim {
     stepped_at: Vec<Duration>,
     /// Steps this end refused to send, and why. Empty in every scenario where
     /// the shard is answering.
-    not_sent: Vec<(Duration, openshard_client_net::walk::NotSent)>,
+    not_sent:   Vec<(Duration, openshard_client_net::walk::NotSent)>,
     /// Where the body was *drawn*, every frame.
-    trace: Vec<(Duration, (f64, f64))>,
+    trace:      Vec<(Duration, (f64, f64))>,
 
     /// The camera, driven exactly as `App::draw` drives it.
     ///
@@ -578,7 +629,7 @@ struct Sim {
     /// scripted body, so the same [`Metrics`] can be run over both — which is
     /// the only thing that says the bench's synthetic walk is not a scene the
     /// rigs are being fitted to.
-    eyes: Vec<Sample>,
+    eyes:    Vec<Sample>,
 }
 
 impl Sim {
@@ -682,24 +733,24 @@ impl Sim {
         let east = Serial::new(0x0000_1001).unwrap();
         let leaves = vec![
             Leaf {
-                at: Point::new(1000, 999, 0),
+                at:     Point::new(1000, 999, 0),
                 serial: west,
-                link: linked.then_some(east),
-                open: false,
+                link:   linked.then_some(east),
+                open:   false,
             },
             Leaf {
-                at: Point::new(1001, 999, 0),
+                at:     Point::new(1001, 999, 0),
                 serial: east,
-                link: linked.then_some(west),
-                open: false,
+                link:   linked.then_some(west),
+                open:   false,
             },
         ];
         let walls = vec![Tile::new(999, 999), Tile::new(1002, 999)];
         // A round trip long enough that a refusal is a visible rubber-band and
         // short enough that a step and its answer both fit in the scenario.
         let net = Net {
-            latency: Duration::from_millis(40),
-            jitter: Duration::ZERO,
+            latency:     Duration::from_millis(40),
+            jitter:      Duration::ZERO,
             wake_jitter: Duration::ZERO,
         };
         let mut sim = Self::new(facing, net, 1, walls.clone());
@@ -834,10 +885,12 @@ impl Sim {
                 (request.sequence.interpret(), self.shard.turn(request))
             };
             let answer = match handled {
-                Handled::Turned { .. } | Handled::Moved { .. } => ServerPacket::WalkAck(WalkAck {
-                    sequence,
-                    notoriety: Notoriety::Innocent,
-                }),
+                Handled::Turned { .. } | Handled::Moved { .. } => {
+                    ServerPacket::WalkAck(WalkAck {
+                        sequence,
+                        notoriety: Notoriety::Innocent,
+                    })
+                }
                 // Every refusal is one `0x21`, whichever of the four it was:
                 // this stands in for the shard's wire behaviour, and the wire
                 // has one packet for all of them.
@@ -1168,7 +1221,7 @@ impl Sim {
 /// container packet arrive between the local prediction and its acknowledgement.
 struct MotionKernel {
     motion: PlayerMotion,
-    crowd: Crowd,
+    crowd:  Crowd,
     player: Mobile,
 }
 
@@ -1498,7 +1551,7 @@ fn double_click_container_packet_cannot_desynchronise_a_predicted_glide() {
 
     let container = ServerPacket::OpenContainer(openshard_protocol::containers::OpenContainer {
         container: Serial::new(0x4000_0001).unwrap(),
-        gump: Graphic(0x003C),
+        gump:      Graphic(0x003C),
     });
     let folded = link::fold(&mut wire, &container).expect("a container does not disturb Walk");
     assert!(
@@ -1638,7 +1691,7 @@ fn refusing_the_oldest_step_snaps_and_discards_the_entire_local_chain() {
     assert_eq!(kernel.motion.route_origin(), START);
 
     kernel.mutation(Some(link::Movement::Reject {
-        sequence: openshard_protocol::world::StepSequence(41),
+        sequence:  openshard_protocol::world::StepSequence(41),
         confirmed: Predicted {
             position: START,
             facing,
@@ -1850,8 +1903,8 @@ fn latency_and_jitter_do_not_reach_the_screen() {
     let oracle = Oracle::build(START, &script, until);
     for seed in 0..8 {
         let net = Net {
-            latency: Duration::from_millis(150),
-            jitter: Duration::from_millis(60),
+            latency:     Duration::from_millis(150),
+            jitter:      Duration::from_millis(60),
             wake_jitter: Duration::ZERO,
         };
         let mut sim = Sim::new(Direction::East, net, seed, Vec::new());
@@ -1872,7 +1925,7 @@ fn latency_and_jitter_do_not_reach_the_screen() {
 fn running_the_whole_way_is_never_refused_as_a_speedhack() {
     let script = vec![
         Act {
-            at: Duration::ZERO,
+            at:    Duration::ZERO,
             input: Input::Running(true),
         },
         press(0, Direction::East),
@@ -1881,8 +1934,8 @@ fn running_the_whole_way_is_never_refused_as_a_speedhack() {
     let until = Duration::from_millis(4_000);
     let oracle = Oracle::build(START, &script, until);
     let net = Net {
-        latency: Duration::from_millis(80),
-        jitter: Duration::from_millis(40),
+        latency:     Duration::from_millis(80),
+        jitter:      Duration::from_millis(40),
         wake_jitter: Duration::ZERO,
     };
     let mut sim = Sim::new(Direction::East, net, 7, Vec::new());
@@ -1911,8 +1964,8 @@ fn a_gallop_tracks_the_oracle_the_way_a_walk_does() {
     let until = Duration::from_millis(4_000);
     let oracle = Oracle::build(START, &script, until);
     let net = Net {
-        latency: Duration::from_millis(80),
-        jitter: Duration::from_millis(40),
+        latency:     Duration::from_millis(80),
+        jitter:      Duration::from_millis(40),
         wake_jitter: Duration::ZERO,
     };
     let mut sim = Sim::new(Direction::East, net, 11, Vec::new());
@@ -1968,8 +2021,8 @@ fn a_late_wake_is_spent_on_the_crossing_and_never_banked_as_standing_still() {
         let oracle = Oracle::build(START, &script, until);
         for seed in 0..8 {
             let net = Net {
-                latency: Duration::from_millis(60),
-                jitter: Duration::from_millis(20),
+                latency:     Duration::from_millis(60),
+                jitter:      Duration::from_millis(20),
                 wake_jitter: late,
             };
             let mut sim = Sim::new(Direction::East, net, seed, Vec::new());
@@ -2024,8 +2077,8 @@ fn a_loop_later_than_the_lookahead_keeps_the_cadence_it_cannot_keep_the_stride()
     let oracle = Oracle::build(START, &script, until);
     for seed in 0..8 {
         let net = Net {
-            latency: Duration::from_millis(60),
-            jitter: Duration::from_millis(20),
+            latency:     Duration::from_millis(60),
+            jitter:      Duration::from_millis(20),
             wake_jitter: late,
         };
         let mut sim = Sim::new(Direction::East, net, seed, Vec::new());
@@ -2099,8 +2152,8 @@ fn a_walk_that_starts_with_a_turn_leaves_at_once() {
     let until = Duration::from_millis(4_000);
     let oracle = Oracle::build(START, &script, until);
     let net = Net {
-        latency: Duration::from_millis(120),
-        jitter: Duration::from_millis(40),
+        latency:     Duration::from_millis(120),
+        jitter:      Duration::from_millis(40),
         wake_jitter: Duration::ZERO,
     };
     // Facing north, asked for east.
@@ -2130,8 +2183,8 @@ fn a_walk_that_turns_tracks_the_oracle_through_the_turn() {
     let until = Duration::from_millis(4_800);
     let oracle = Oracle::build(START, &script, until);
     let net = Net {
-        latency: Duration::from_millis(120),
-        jitter: Duration::from_millis(30),
+        latency:     Duration::from_millis(120),
+        jitter:      Duration::from_millis(30),
         wake_jitter: Duration::ZERO,
     };
     let mut sim = Sim::new(Direction::East, net, 3, Vec::new());
@@ -2158,8 +2211,8 @@ fn wake_up_jitter_does_not_accumulate() {
     let late = Duration::from_millis(20);
     for seed in 0..8 {
         let net = Net {
-            latency: Duration::from_millis(50),
-            jitter: Duration::ZERO,
+            latency:     Duration::from_millis(50),
+            jitter:      Duration::ZERO,
             wake_jitter: late,
         };
         let mut sim = Sim::new(Direction::East, net, seed, Vec::new());
@@ -2198,8 +2251,8 @@ fn wake_up_jitter_does_not_reach_the_speed() {
     let oracle = Oracle::build(START, &script, until);
     for seed in 0..8 {
         let net = Net {
-            latency: Duration::from_millis(60),
-            jitter: Duration::from_millis(20),
+            latency:     Duration::from_millis(60),
+            jitter:      Duration::from_millis(20),
             wake_jitter: Duration::from_millis(8),
         };
         let mut sim = Sim::new(Direction::East, net, seed, Vec::new());
@@ -2227,8 +2280,8 @@ fn a_refusal_puts_the_body_back_without_walking_it_back() {
     let script = ten_steps_east();
     let until = Duration::from_millis(4_000);
     let net = Net {
-        latency: Duration::from_millis(100),
-        jitter: Duration::ZERO,
+        latency:     Duration::from_millis(100),
+        jitter:      Duration::ZERO,
         wake_jitter: Duration::ZERO,
     };
     let mut sim = Sim::new(Direction::East, net, 11, vec![Tile::new(1004, 1000)]);
@@ -2416,8 +2469,8 @@ fn a_reversal_lets_the_step_under_way_finish() {
     let until = Duration::from_millis(2_400);
     let oracle = Oracle::build(START, &script, until);
     let net = Net {
-        latency: Duration::from_millis(120),
-        jitter: Duration::from_millis(30),
+        latency:     Duration::from_millis(120),
+        jitter:      Duration::from_millis(30),
         wake_jitter: Duration::ZERO,
     };
     let mut sim = Sim::new(Direction::East, net, 2, Vec::new());
@@ -2454,8 +2507,8 @@ fn walking_back_and_forth_never_jumps_the_camera() {
     let until = Duration::from_millis(270 * 20);
     let oracle = Oracle::build(START, &script, until);
     let net = Net {
-        latency: Duration::from_millis(90),
-        jitter: Duration::from_millis(20),
+        latency:     Duration::from_millis(90),
+        jitter:      Duration::from_millis(20),
         wake_jitter: Duration::ZERO,
     };
     let mut sim = Sim::new(Direction::East, net, 4, Vec::new());
@@ -2491,8 +2544,8 @@ fn walking_back_and_forth_never_jumps_the_camera() {
 fn the_reference_rig_puts_the_eye_on_the_body_every_frame() {
     let perfect = Net::default();
     let real = Net {
-        latency: Duration::from_millis(90),
-        jitter: Duration::from_millis(20),
+        latency:     Duration::from_millis(90),
+        jitter:      Duration::from_millis(20),
         wake_jitter: Duration::from_millis(9),
     };
 
@@ -2543,8 +2596,8 @@ fn the_reference_rig_puts_the_eye_on_the_body_every_frame() {
 #[test]
 fn a_gallop_moves_the_eye_four_times_as_fast_and_no_more_roughly() {
     let net = Net {
-        latency: Duration::from_millis(60),
-        jitter: Duration::from_millis(20),
+        latency:     Duration::from_millis(60),
+        jitter:      Duration::from_millis(20),
         wake_jitter: GLIDE_INTERVAL,
     };
     let seconds = Duration::from_millis(3_000);
@@ -2683,8 +2736,8 @@ fn mashing_the_arrows_never_outruns_a_walk() {
     }
     let until = Duration::from_millis(4_000);
     let net = Net {
-        latency: Duration::from_millis(100),
-        jitter: Duration::from_millis(40),
+        latency:     Duration::from_millis(100),
+        jitter:      Duration::from_millis(40),
         wake_jitter: Duration::ZERO,
     };
     for seed in 0..4 {
@@ -2791,8 +2844,8 @@ fn the_answers_a_rollback_left_on_the_wire_do_not_end_the_session() {
     // not something to assert against.
     let until = Duration::from_millis(6_500);
     let net = Net {
-        latency: Duration::from_millis(700),
-        jitter: Duration::from_millis(60),
+        latency:     Duration::from_millis(700),
+        jitter:      Duration::from_millis(60),
         wake_jitter: Duration::ZERO,
     };
     for seed in 0..6 {
@@ -2842,8 +2895,8 @@ fn a_shard_that_goes_quiet_stops_the_body_rather_than_the_prediction() {
     // A wire that swallows everything: the `0x02`s arrive an hour from now, so
     // nothing is ever answered.
     let net = Net {
-        latency: Duration::from_secs(3_600),
-        jitter: Duration::ZERO,
+        latency:     Duration::from_secs(3_600),
+        jitter:      Duration::ZERO,
         wake_jitter: Duration::ZERO,
     };
     let mut sim = Sim::new(Direction::East, net, 12, Vec::new());
@@ -2878,13 +2931,13 @@ fn a_shard_that_goes_quiet_stops_the_body_rather_than_the_prediction() {
 #[derive(Clone, Copy, Debug)]
 struct WalkFrame {
     /// When, from the press.
-    at: Duration,
+    at:   Duration,
     /// Where the oracle says the body should be, in world pixels.
     want: (f64, f64),
     /// Where it was drawn, in world pixels — the sprite's own gaze.
     body: (f64, f64),
     /// Where the eye was put, unrounded.
-    eye: (f64, f64),
+    eye:  (f64, f64),
 }
 
 /// Every frame of a run, against the oracle it is held to.
@@ -2894,10 +2947,10 @@ fn walk_frames(sim: &Sim, oracle: &Oracle) -> Vec<WalkFrame> {
         .map(|sample| {
             let want = oracle.at(sample.at);
             WalkFrame {
-                at: sample.at,
+                at:   sample.at,
                 want: tile_pixels(want),
                 body: sample.gaze.exact(),
-                eye: sample.state.exact(),
+                eye:  sample.state.exact(),
             }
         })
         .collect()
@@ -2958,8 +3011,8 @@ fn walked(rig: Rig, ease: Ease, net: Net, seed: u64) -> (Sim, Oracle) {
 /// A wire with a quiet desktop's wake jitter on it and a plausible shard behind
 /// it. What the dumps look at, because a perfect one has nothing to show.
 const LIVE: Net = Net {
-    latency: Duration::from_millis(60),
-    jitter: Duration::from_millis(20),
+    latency:     Duration::from_millis(60),
+    jitter:      Duration::from_millis(20),
     wake_jitter: Duration::from_millis(8),
 };
 
@@ -2972,42 +3025,48 @@ const LIVE: Net = Net {
 /// second is the speed, where the oracle is a flat line and every departure
 /// from it is a frame the world moved at the wrong rate.
 fn chart_of(name: &str, frames: &[WalkFrame]) -> String {
-    let offset = |of: fn(&WalkFrame) -> (f64, f64)| chart::Series {
-        name: String::new(),
-        points: frames
-            .iter()
-            .map(|frame| {
-                let (x, y) = of(frame);
-                (frame.at.as_secs_f64(), (x - frame.want.0).hypot(y - frame.want.1))
-            })
-            .collect(),
+    let offset = |of: fn(&WalkFrame) -> (f64, f64)| {
+        chart::Series {
+            name:   String::new(),
+            points: frames
+                .iter()
+                .map(|frame| {
+                    let (x, y) = of(frame);
+                    (frame.at.as_secs_f64(), (x - frame.want.0).hypot(y - frame.want.1))
+                })
+                .collect(),
+        }
     };
-    let speed = |of: fn(&WalkFrame) -> (f64, f64)| chart::Series {
-        name: String::new(),
-        points: speeds(frames, of)
-            .into_iter()
-            .map(|(at, speed)| (at.as_secs_f64(), speed))
-            .collect(),
+    let speed = |of: fn(&WalkFrame) -> (f64, f64)| {
+        chart::Series {
+            name:   String::new(),
+            points: speeds(frames, of)
+                .into_iter()
+                .map(|(at, speed)| (at.as_secs_f64(), speed))
+                .collect(),
+        }
     };
-    let named = |series: chart::Series, called: &str| chart::Series {
-        name: called.to_string(),
-        ..series
+    let named = |series: chart::Series, called: &str| {
+        chart::Series {
+            name: called.to_string(),
+            ..series
+        }
     };
     // What the oracle walks at: one tile per hold, and a tile is 44 pixels
     // across its diagonal — `sqrt(22² + 22²)` per `WALK_HOLD`.
     let nominal = 22.0f64.hypot(22.0) / WALK_HOLD.as_secs_f64();
     let panels = vec![
         chart::Panel {
-            title: "how far from where the oracle says, pixels".to_string(),
-            series: vec![
+            title:    "how far from where the oracle says, pixels".to_string(),
+            series:   vec![
                 named(offset(|frame| frame.body), "body"),
                 named(offset(|frame| frame.eye), "eye"),
             ],
             baseline: Some(0.0),
         },
         chart::Panel {
-            title: "speed, pixels per second".to_string(),
-            series: vec![
+            title:    "speed, pixels per second".to_string(),
+            series:   vec![
                 named(speed(|frame| frame.body), "body"),
                 named(speed(|frame| frame.eye), "eye"),
             ],
@@ -3044,16 +3103,16 @@ fn dump_the_walk() {
         (
             "wake_8ms",
             Net {
-                latency: Duration::ZERO,
-                jitter: Duration::ZERO,
+                latency:     Duration::ZERO,
+                jitter:      Duration::ZERO,
                 wake_jitter: Duration::from_millis(8),
             },
         ),
         (
             "live",
             Net {
-                latency: Duration::from_millis(60),
-                jitter: Duration::from_millis(20),
+                latency:     Duration::from_millis(60),
+                jitter:      Duration::from_millis(20),
                 wake_jitter: Duration::from_millis(8),
             },
         ),
@@ -3187,7 +3246,7 @@ fn dump_the_ramp() {
             speed.iter().map(|(_, at)| *at).fold(0.0f64, f64::max),
         );
         series.push(chart::Series {
-            name: name.to_string(),
+            name:   name.to_string(),
             points: speed
                 .into_iter()
                 .map(|(at, speed)| (at.as_secs_f64(), speed))

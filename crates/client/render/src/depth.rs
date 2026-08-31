@@ -26,7 +26,8 @@
 //! mobiles, corpses, effects and multis all adjust it, and each one belongs
 //! with whatever draws it.
 
-use openshard_protocol::{wire::Graphic, world::Point};
+use openshard_protocol::wire::Graphic;
+use openshard_protocol::world::Point;
 use openshard_tiles::StaticTile;
 
 /// Key units one step of tile depth (`x + y`) is worth.
@@ -54,7 +55,7 @@ const HALF_RANGE: f32 = (DEPTH_TILES * DEPTH_PER_TILE) as f32;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Order {
     /// `x + y`: how far down the screen the tile is. Larger is nearer.
-    pub tile: i32,
+    pub tile:       i32,
     /// The client's `PriorityZ`. Larger is nearer.
     pub priority_z: i32,
 }
@@ -78,7 +79,7 @@ pub struct Hit<T> {
     /// draws. Larger is nearer.
     pub order: Order,
     /// What was hit — a list's own way of naming one of its entries.
-    pub what: T,
+    pub what:  T,
 }
 
 impl Order {
@@ -190,7 +191,7 @@ pub fn static_order(at: Point, graphic: Graphic, tile: &StaticTile) -> Order {
     const PANEL_FOREGROUND_TILES: i32 = 4;
 
     Order {
-        tile: i32::from(at.x)
+        tile:       i32::from(at.x)
             + i32::from(at.y)
             + if graphic.0 == METAL_SIGNPOST {
                 PANEL_FOREGROUND_TILES
@@ -329,11 +330,11 @@ mod tests {
 
         let same_tile = base_for(100, 100);
         let order_flat = Order {
-            tile: same_tile,
+            tile:       same_tile,
             priority_z: flat,
         };
         let order_wall = Order {
-            tile: same_tile,
+            tile:       same_tile,
             priority_z: wall,
         };
         assert_eq!(order_flat.to_depth(same_tile), order_wall.to_depth(same_tile));
@@ -406,11 +407,11 @@ mod tests {
     fn a_corpse_stays_above_the_land_its_prone_frame_overlaps() {
         let corpse_at = Point::new(1349, 1890, 0);
         let foreground_land = Order {
-            tile: base_for(1349, 1891),
+            tile:       base_for(1349, 1891),
             priority_z: land_priority_z([0; 4]),
         };
         let corpse = Order {
-            tile: corpse_tile(corpse_at),
+            tile:       corpse_tile(corpse_at),
             priority_z: mobile_priority_z(0),
         };
         assert!(corpse > foreground_land);
@@ -422,22 +423,22 @@ mod tests {
     fn nearer_things_get_a_smaller_depth() {
         let base = base_for(1000, 1000);
         let far = Order {
-            tile: 1999,
+            tile:       1999,
             priority_z: 0,
         };
         let near = Order {
-            tile: 2001,
+            tile:       2001,
             priority_z: 0,
         };
         assert!(near.to_depth(base) < far.to_depth(base));
 
         // And on one tile, height decides the same way.
         let low = Order {
-            tile: 2000,
+            tile:       2000,
             priority_z: 0,
         };
         let high = Order {
-            tile: 2000,
+            tile:       2000,
             priority_z: 1,
         };
         assert!(high.to_depth(base) < low.to_depth(base));
@@ -446,7 +447,7 @@ mod tests {
     #[test]
     fn rebasing_cached_depth_matches_rendering_at_the_new_camera_base() {
         let order = Order {
-            tile: 2_137,
+            tile:       2_137,
             priority_z: 19,
         };
         let source_base = base_for(1_064, 1_065);
@@ -466,12 +467,12 @@ mod tests {
     fn one_step_of_priority_is_well_clear_of_the_buffers_resolution() {
         let base = base_for(1000, 1000);
         let step = Order {
-            tile: 2000,
+            tile:       2000,
             priority_z: 0,
         }
         .to_depth(base)
             - Order {
-                tile: 2000,
+                tile:       2000,
                 priority_z: 1,
             }
             .to_depth(base);
@@ -490,11 +491,11 @@ mod tests {
     fn a_tile_beyond_the_range_clamps_rather_than_wrapping() {
         let base = base_for(1000, 1000);
         let behind = Order {
-            tile: 0,
+            tile:       0,
             priority_z: 0,
         };
         let ahead = Order {
-            tile: 11_000,
+            tile:       11_000,
             priority_z: 0,
         };
         assert_eq!(behind.to_depth(base), 1.0);

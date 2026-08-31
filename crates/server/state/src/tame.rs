@@ -21,9 +21,9 @@ use crate::components::Tamable;
 
 /// One tamable kind: the body, the skill it takes, and the slots it fills.
 struct TameData {
-    body: Graphic,
+    body:      Graphic,
     min_skill: u16,
-    slots: FollowerSlots,
+    slots:     FollowerSlots,
 }
 
 /// The default a rideable body takes to tame, in tenths — a horse's 29.1, which is
@@ -36,14 +36,16 @@ pub fn tamable(body: Graphic) -> Option<Tamable> {
     if let Some(row) = TAMABLE.iter().find(|row| row.body == body) {
         return Some(Tamable {
             min_skill: row.min_skill,
-            slots: row.slots,
+            slots:     row.slots,
         });
     }
     // Anything you can ride, you can tame — asked of the mount table by body, which
     // is the direction `mount_item_for` answers.
-    openshard_protocol::mounts::mount_item_for(body).map(|_| Tamable {
-        min_skill: MOUNT_MIN_SKILL,
-        slots: FollowerSlots::ONE,
+    openshard_protocol::mounts::mount_item_for(body).map(|_| {
+        Tamable {
+            min_skill: MOUNT_MIN_SKILL,
+            slots:     FollowerSlots::ONE,
+        }
     })
 }
 

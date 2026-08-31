@@ -37,7 +37,7 @@ use crate::Command;
 pub struct TownsfolkSet {
     /// What the staff menu's button sends: `populate:felucca`. The same verb the
     /// spawn regions answer to — a populate lays both, as it always has.
-    pub verb: String,
+    pub verb:      String,
     /// One `SpawnMobile` per person.
     pub townsfolk: Vec<Command>,
 }
@@ -84,10 +84,12 @@ mod tests {
         // A shelf with no shop is stock nobody can reach; `build.rs` rejects it,
         // and this is the same statement about what the world receives.
         assert!(
-            people.iter().all(|c| matches!(
-                c,
-                Command::SpawnMobile { stock, vendor, .. } if stock.is_empty() || *vendor
-            )),
+            people.iter().all(|c| {
+                matches!(
+                    c,
+                    Command::SpawnMobile { stock, vendor, .. } if stock.is_empty() || *vendor
+                )
+            }),
             "someone carries stock without being a vendor"
         );
     }

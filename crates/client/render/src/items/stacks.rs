@@ -2,7 +2,10 @@
 
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
 
@@ -10,13 +13,13 @@ use openshard_tiles::TileData;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct GroundItem {
     /// Where it lies.
-    pub at: Point,
+    pub at:      Point,
     /// The base graphic the shard sent; pile artwork is selected at draw time.
     pub graphic: Graphic,
     /// Its hue, or [`Hue::NONE`] for none.
-    pub hue: Hue,
+    pub hue:     Hue,
     /// The amount in this ground pile.
-    pub amount: ItemAmount,
+    pub amount:  ItemAmount,
 }
 
 impl GroundItem {

@@ -19,21 +19,46 @@
 //!
 //! Layouts from SphereServer's `network/send.cpp` and `receive.cpp`.
 
-use std::{fmt, num::NonZeroU8};
+use std::fmt;
+use std::num::NonZeroU8;
 
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 use crate::access::OPENSHARD_SUBCOMMANDS;
-use crate::codec::{PacketReader, PacketWriter};
+use crate::codec::{
+    PacketReader,
+    PacketWriter,
+};
 use crate::direction::Facing;
-use crate::error::{DecodeError, WrongPacket};
+use crate::error::{
+    DecodeError,
+    WrongPacket,
+};
 use crate::identity::RawCharacterName;
 use crate::login::CHARACTER_NAME_LENGTH;
-use crate::mobile::{Notoriety, StatusFlags};
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
+use crate::mobile::{
+    Notoriety,
+    StatusFlags,
+};
+use crate::packet::{
+    DecodePacket,
+    EncodePacket,
+    PacketLength,
+};
 use crate::serial::Serial;
 use crate::version::ClientVersion;
-use crate::wire::{Graphic, Hue, RawCharacterSlot, RawClientIp, RawGraphic, RawHue, RawSkillId};
+use crate::wire::{
+    Graphic,
+    Hue,
+    RawCharacterSlot,
+    RawClientIp,
+    RawGraphic,
+    RawHue,
+    RawSkillId,
+};
 
 /// Where something is.
 ///
@@ -108,10 +133,10 @@ pub struct CharacterPlay {
     /// against the account's actual list — see [`RawCharacterName`]'s module
     /// docs; the lookup in the world (`tick::screen::play_character`) is the
     /// check.
-    pub name: RawCharacterName,
+    pub name:      RawCharacterName,
     /// Which slot, zero-based, into the list the server sent. Class D: the
     /// seam looks the character up by name, not by slot. See [`RawCharacterSlot`].
-    pub slot: RawCharacterSlot,
+    pub slot:      RawCharacterSlot,
     /// The client's own claimed IPv4. Never trusted or used. See [`RawClientIp`].
     pub client_ip: RawClientIp,
 }
@@ -214,43 +239,43 @@ pub struct SkillChoice {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CreateCharacter {
     /// The new character's name.
-    pub name: RawCharacterName,
+    pub name:           RawCharacterName,
     /// Client flags reported at creation. Class D — never trusted, never read.
-    pub flags: ClientFlags,
+    pub flags:          ClientFlags,
     /// The chosen profession, or the "advanced"/custom option. See
     /// [`RawProfession::interpret`].
-    pub profession: RawProfession,
+    pub profession:     RawProfession,
     /// The raw sex/race byte, exactly as sent. See [`RawSexRace::interpret`].
-    pub sex_race: RawSexRace,
+    pub sex_race:       RawSexRace,
     /// Starting strength, the client's own whole-point value.
-    pub strength: RawStatValue,
+    pub strength:       RawStatValue,
     /// Starting dexterity, the client's own whole-point value.
-    pub dexterity: RawStatValue,
+    pub dexterity:      RawStatValue,
     /// Starting intelligence, the client's own whole-point value.
-    pub intelligence: RawStatValue,
+    pub intelligence:   RawStatValue,
     /// The starting skills: three for `0x00`, four for `0xF8`.
-    pub skills: Vec<SkillChoice>,
+    pub skills:         Vec<SkillChoice>,
     /// Skin hue.
-    pub skin_hue: RawHue,
+    pub skin_hue:       RawHue,
     /// Hair graphic.
-    pub hair: RawGraphic,
+    pub hair:           RawGraphic,
     /// Hair hue.
-    pub hair_hue: RawHue,
+    pub hair_hue:       RawHue,
     /// Facial-hair graphic.
-    pub beard: RawGraphic,
+    pub beard:          RawGraphic,
     /// Facial-hair hue.
-    pub beard_hue: RawHue,
+    pub beard_hue:      RawHue,
     /// Which starting city the player picked, as an index into the list the
     /// character-list packet offered. No promotion method yet — see
     /// `docs/protocol_newtypes.md`.
     pub start_location: RawStartLocationIndex,
     /// Which character slot to fill. Class D — `create_character` fills the
     /// first free slot and does not read this. See [`RawCharacterSlot`].
-    pub slot: RawCharacterSlot,
+    pub slot:           RawCharacterSlot,
     /// Shirt hue.
-    pub shirt_hue: RawHue,
+    pub shirt_hue:      RawHue,
     /// Trousers hue.
-    pub pants_hue: RawHue,
+    pub pants_hue:      RawHue,
 }
 
 /// Client flags reported at character creation, exactly as sent. Never
@@ -485,7 +510,7 @@ impl CreateCharacter {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct MapSize {
     /// Width in tiles.
-    pub width: u16,
+    pub width:  u16,
     /// Height in tiles.
     pub height: u16,
 }
@@ -493,7 +518,7 @@ pub struct MapSize {
 impl MapSize {
     /// Britannia's, which is what Sphere sends when it has nothing better.
     pub const BRITANNIA: Self = Self {
-        width: 0x1800,
+        width:  0x1800,
         height: 0x1000,
     };
 
@@ -517,7 +542,7 @@ impl MapSize {
             _ => width,
         };
         Self {
-            width: width as u16,
+            width:  width as u16,
             height: height as u16,
         }
     }
@@ -530,16 +555,16 @@ impl MapSize {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PlayerStart {
     /// The player's serial.
-    pub serial: Serial,
+    pub serial:   Serial,
     /// The body graphic.
-    pub body: Graphic,
+    pub body:     Graphic,
     /// Where.
     pub position: Point,
     /// Which way, and whether running.
-    pub facing: Facing,
+    pub facing:   Facing,
     /// How big the facet this character is on is — not Britannia's, unless it
     /// is on Britannia.
-    pub map: MapSize,
+    pub map:      MapSize,
 }
 
 impl EncodePacket for PlayerStart {
@@ -593,7 +618,7 @@ impl DecodePacket for PlayerStart {
         reader.skip(4)?; // 0xFFFFFFFF
         reader.skip(4)?;
         let map = MapSize {
-            width: reader.u16()?,
+            width:  reader.u16()?,
             height: reader.u16()?,
         };
         // The six trailing zeros are not read: nothing follows them in the
@@ -617,17 +642,17 @@ impl DecodePacket for PlayerStart {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PlayerUpdate {
     /// The player's serial.
-    pub serial: Serial,
+    pub serial:   Serial,
     /// The body graphic.
-    pub body: Graphic,
+    pub body:     Graphic,
     /// The body hue.
-    pub hue: Hue,
+    pub hue:      Hue,
     /// Status flags: poisoned, invisible, warmode.
-    pub flags: StatusFlags,
+    pub flags:    StatusFlags,
     /// Where.
     pub position: Point,
     /// Which way, and whether running.
-    pub facing: Facing,
+    pub facing:   Facing,
 }
 
 impl EncodePacket for PlayerUpdate {
@@ -734,13 +759,13 @@ impl DecodePacket for DeathStatus {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DeathAnimation {
     /// The mobile that died.
-    pub killed: Serial,
+    pub killed:  Serial,
     /// The corpse it leaves.
     ///
     /// `None` for a death that leaves no body — ServUO writes a zero serial for
     /// one, and there genuinely is nothing to pair the fall with, which is not
     /// the same as a corpse whose serial we failed to learn.
-    pub corpse: Option<Serial>,
+    pub corpse:  Option<Serial>,
     /// Whether it fell in mid-run.
     ///
     /// A client with two death groups picks the second one for a running death
@@ -776,10 +801,12 @@ impl DecodePacket for DeathAnimation {
         let raw_corpse = reader.u32()?;
         let corpse = match raw_corpse {
             0 => None,
-            raw => Some(Serial::new(raw).ok_or(DecodeError::UnknownValue {
-                field: "0xAF death animation corpse serial",
-                value: raw,
-            })?),
+            raw => {
+                Some(Serial::new(raw).ok_or(DecodeError::UnknownValue {
+                    field: "0xAF death animation corpse serial",
+                    value: raw,
+                })?)
+            }
         };
         Ok(Self {
             killed,
@@ -835,9 +862,9 @@ pub struct RawFastwalkKey(pub u32);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WalkRequest {
     /// Which way, and whether running.
-    pub facing: Facing,
+    pub facing:       Facing,
     /// The client's sequence number for this step. See `openshard-movement`.
-    pub sequence: RawStepSequence,
+    pub sequence:     RawStepSequence,
     /// The fastwalk key. Never read — see [`RawFastwalkKey`].
     pub fastwalk_key: RawFastwalkKey,
 }
@@ -853,7 +880,7 @@ pub struct WalkRequest {
 pub struct TurnRequest {
     /// Which way to face. The running bit is retained so the acknowledged pose
     /// is exactly the pose the client predicted, though it never makes this move.
-    pub facing: Facing,
+    pub facing:   Facing,
     /// The shared walk/turn sequence number. Both request types use one ordered
     /// acknowledgement stream, so neither can overtake the other.
     pub sequence: RawStepSequence,
@@ -866,7 +893,7 @@ impl TurnRequest {
     /// Read the body after the extended envelope and subcommand.
     pub(crate) fn decode_body(reader: &mut PacketReader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
-            facing: Facing::from_bits(reader.u8()?),
+            facing:   Facing::from_bits(reader.u8()?),
             sequence: RawStepSequence(reader.u8()?),
         })
     }
@@ -887,8 +914,8 @@ impl DecodePacket for WalkRequest {
 
     fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
         Ok(Self {
-            facing: Facing::from_bits(reader.u8()?),
-            sequence: RawStepSequence(reader.u8()?),
+            facing:       Facing::from_bits(reader.u8()?),
+            sequence:     RawStepSequence(reader.u8()?),
             fastwalk_key: RawFastwalkKey(reader.u32()?),
         })
     }
@@ -956,7 +983,7 @@ impl ResyncRequest {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WalkAck {
     /// The sequence number being acknowledged.
-    pub sequence: StepSequence,
+    pub sequence:  StepSequence,
     /// Colours the player's own health bar.
     pub notoriety: Notoriety,
 }
@@ -983,7 +1010,7 @@ impl DecodePacket for WalkAck {
             // chose itself and the server echoed, so it is a `StepSequence`
             // already — there is nothing to interpret. `RawStepSequence` is the
             // other direction, where the byte is a client's claim.
-            sequence: StepSequence(reader.u8()?),
+            sequence:  StepSequence(reader.u8()?),
             // Lossy in exactly one place, and knowingly: `for_client` sends a
             // yellow bar as blue to a client older than 4.0.0, so decoding what
             // such a client was sent gives `Innocent` back. That is what
@@ -1004,7 +1031,7 @@ pub struct WalkReject {
     /// Where the client really is.
     pub position: Point,
     /// Which way it is really facing.
-    pub facing: Facing,
+    pub facing:   Facing,
 }
 
 impl EncodePacket for WalkReject {
@@ -1050,7 +1077,8 @@ impl EncodePacket for LoginComplete {
     const ID: u8 = 0x55;
     const LENGTH: PacketLength = PacketLength::Fixed(1);
 
-    fn encode_body(&self, _out: &mut PacketWriter, _version: ClientVersion) {}
+    fn encode_body(&self, _out: &mut PacketWriter, _version: ClientVersion) {
+    }
 }
 
 impl DecodePacket for LoginComplete {
@@ -1155,8 +1183,8 @@ impl Weather {
 /// separate packet shape.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WeatherChange {
-    pub weather: Weather,
-    pub intensity: u8,
+    pub weather:     Weather,
+    pub intensity:   u8,
     pub temperature: u8,
 }
 
@@ -1295,7 +1323,7 @@ impl Season {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SeasonChange {
     /// Which season.
-    pub season: Season,
+    pub season:     Season,
     /// Whether to play the season's own change sound.
     pub play_sound: bool,
 }
@@ -1703,8 +1731,13 @@ impl RangedRange {
 ///
 /// `None` stays the legacy numeric `0`, rather than becoming JSON `null`.
 pub mod ranged {
+    use serde::{
+        Deserialize,
+        Deserializer,
+        Serializer,
+    };
+
     use super::RangedRange;
-    use serde::{Deserialize, Deserializer, Serializer};
 
     /// Write `None` as `0` and a ranged reach as its numeric tile count.
     pub fn serialize<S: Serializer>(value: &Option<RangedRange>, serializer: S) -> Result<S::Ok, S::Error> {
@@ -1779,7 +1812,11 @@ mod tests {
     use super::*;
     use crate::direction::Direction;
     use crate::extended::ExtendedRequest;
-    use crate::packet::{client_packet_length, decode_packet, encode_packet};
+    use crate::packet::{
+        client_packet_length,
+        decode_packet,
+        encode_packet,
+    };
 
     fn version() -> ClientVersion {
         ClientVersion::new(7, 0, 45, 65)
@@ -1792,7 +1829,7 @@ mod tests {
     #[test]
     fn a_typed_turn_round_trips_without_becoming_a_walk_request() {
         let request = TurnRequest {
-            facing: Facing::running(Direction::East),
+            facing:   Facing::running(Direction::East),
             sequence: RawStepSequence(42),
         };
         let bytes = request.encode();
@@ -1814,40 +1851,40 @@ mod tests {
         assert_eq!(
             MapSize::for_client(Facet(0), 7168, 4096, old),
             MapSize {
-                width: 6144,
-                height: 4096
+                width:  6144,
+                height: 4096,
             },
             "Felucca, one patch below the boundary"
         );
         assert_eq!(
             MapSize::for_client(Facet(1), 7168, 4096, old),
             MapSize {
-                width: 6144,
-                height: 4096
+                width:  6144,
+                height: 4096,
             },
             "Trammel, the same rule"
         );
         assert_eq!(
             MapSize::for_client(Facet(0), 7168, 4096, ClientVersion::WIDE_MAP),
             MapSize {
-                width: 7168,
-                height: 4096
+                width:  7168,
+                height: 4096,
             },
             "the boundary itself is the new width, not the old one"
         );
         assert_eq!(
             MapSize::for_client(Facet(2), 7168, 4096, old),
             MapSize {
-                width: 7168,
-                height: 4096
+                width:  7168,
+                height: 4096,
             },
             "Ilshenar has no old-width rule to fall under"
         );
         assert_eq!(
             MapSize::for_client(Facet(0), 6144, 4096, old),
             MapSize {
-                width: 6144,
-                height: 4096
+                width:  6144,
+                height: 4096,
             },
             "a shard already on the old map files has nothing to clamp"
         );
@@ -1856,8 +1893,8 @@ mod tests {
     #[test]
     fn character_play_round_trips_at_the_declared_length() {
         let play = CharacterPlay {
-            name: RawCharacterName("Lord British".to_owned()),
-            slot: RawCharacterSlot(0),
+            name:      RawCharacterName("Lord British".to_owned()),
+            slot:      RawCharacterSlot(0),
             client_ip: RawClientIp(0x0A00_0001),
         };
         let bytes = play.encode();
@@ -1967,7 +2004,7 @@ mod tests {
             decoded.skills[0],
             SkillChoice {
                 skill: RawSkillId(1),
-                value: RawSkillValue(50)
+                value: RawSkillValue(50),
             }
         );
         assert_eq!(decoded.start_location, RawStartLocationIndex(0));
@@ -2026,11 +2063,11 @@ mod tests {
     #[test]
     fn player_start_matches_its_declared_length() {
         let start = PlayerStart {
-            serial: serial(),
-            body: Graphic(0x0190),
+            serial:   serial(),
+            body:     Graphic(0x0190),
             position: Point::new(1475, 1774, 0),
-            facing: facing(),
-            map: MapSize::BRITANNIA,
+            facing:   facing(),
+            map:      MapSize::BRITANNIA,
         };
         let bytes = encode_packet(&start, version());
         assert_eq!(bytes.len(), 37, "Sphere's PacketPlayerStart length");
@@ -2049,11 +2086,11 @@ mod tests {
         // byte. Writing z as a big-endian i16 would put -10 on the wire as
         // 0xFFF6, and the client would take 0xFF — a height of -1.
         let start = PlayerStart {
-            serial: serial(),
-            body: Graphic(0x0190),
+            serial:   serial(),
+            body:     Graphic(0x0190),
             position: Point::new(100, 100, -10),
-            facing: facing(),
-            map: MapSize::BRITANNIA,
+            facing:   facing(),
+            map:      MapSize::BRITANNIA,
         };
         let bytes = encode_packet(&start, version());
         assert_eq!(bytes[15], 0x00, "the high byte is padding, not sign");
@@ -2063,12 +2100,12 @@ mod tests {
     #[test]
     fn player_update_matches_its_declared_length() {
         let update = PlayerUpdate {
-            serial: serial(),
-            body: Graphic(0x0190),
-            hue: Hue(0x83EA),
-            flags: StatusFlags::NONE,
+            serial:   serial(),
+            body:     Graphic(0x0190),
+            hue:      Hue(0x83EA),
+            flags:    StatusFlags::NONE,
             position: Point::new(1475, 1774, -5),
-            facing: facing(),
+            facing:   facing(),
         };
         let bytes = encode_packet(&update, version());
         assert_eq!(bytes.len(), 19, "Sphere's PacketPlayerUpdate length");
@@ -2091,8 +2128,8 @@ mod tests {
         // The pairing is the whole packet: without it a client watching two
         // identical creatures fall on one tile cannot tell which corpse is which.
         let death = DeathAnimation {
-            killed: Serial::new(0x0000_02BC).unwrap(),
-            corpse: Some(Serial::new(0x4000_0001).unwrap()),
+            killed:  Serial::new(0x0000_02BC).unwrap(),
+            corpse:  Some(Serial::new(0x4000_0001).unwrap()),
             running: true,
         };
         let bytes = encode_packet(&death, version());
@@ -2116,8 +2153,8 @@ mod tests {
         // to survive as "no corpse" rather than as serial zero, which is not a
         // serial at all.
         let death = DeathAnimation {
-            killed: Serial::new(0x0000_02BC).unwrap(),
-            corpse: None,
+            killed:  Serial::new(0x0000_02BC).unwrap(),
+            corpse:  None,
             running: false,
         };
         let bytes = encode_packet(&death, version());
@@ -2133,8 +2170,8 @@ mod tests {
     #[test]
     fn walk_request_round_trips_at_the_declared_length() {
         let request = WalkRequest {
-            facing: facing(),
-            sequence: RawStepSequence(42),
+            facing:       facing(),
+            sequence:     RawStepSequence(42),
             fastwalk_key: RawFastwalkKey(0xDEAD_BEEF),
         };
         let bytes = request.encode();
@@ -2149,8 +2186,8 @@ mod tests {
     #[test]
     fn walk_request_keeps_the_running_bit_out_of_the_direction() {
         let bytes = WalkRequest {
-            facing: Facing::running(Direction::North),
-            sequence: RawStepSequence(0),
+            facing:       Facing::running(Direction::North),
+            sequence:     RawStepSequence(0),
             fastwalk_key: RawFastwalkKey(0),
         }
         .encode();
@@ -2166,7 +2203,7 @@ mod tests {
         assert_eq!(
             encode_packet(
                 &WalkAck {
-                    sequence: StepSequence(7),
+                    sequence:  StepSequence(7),
                     notoriety: Notoriety::Innocent,
                 },
                 version()
@@ -2178,7 +2215,7 @@ mod tests {
             &WalkReject {
                 sequence: StepSequence(7),
                 position: Point::new(1475, 1774, -5),
-                facing: facing(),
+                facing:   facing(),
             },
             version(),
         );
@@ -2207,7 +2244,7 @@ mod tests {
         assert_eq!(
             encode_packet(
                 &PlayMusic {
-                    track: MusicId(0x0102)
+                    track: MusicId(0x0102),
                 },
                 version()
             ),
@@ -2216,8 +2253,8 @@ mod tests {
         assert_eq!(
             encode_packet(
                 &SeasonChange {
-                    season: Season::Winter,
-                    play_sound: true
+                    season:     Season::Winter,
+                    play_sound: true,
                 },
                 version()
             ),
@@ -2226,8 +2263,8 @@ mod tests {
         assert_eq!(
             encode_packet(
                 &SeasonChange {
-                    season: Season::Spring,
-                    play_sound: false
+                    season:     Season::Spring,
+                    play_sound: false,
                 },
                 version()
             ),
@@ -2262,7 +2299,7 @@ mod tests {
         let packet = encode_server_change(
             Point::new(1495, 1629, -20),
             MapSize {
-                width: 2304,
+                width:  2304,
                 height: 1600,
             },
         );
@@ -2294,24 +2331,24 @@ mod tests {
         // object".
         let highest = Serial::new(crate::serial::ITEM_MAX).unwrap();
         let start = PlayerStart {
-            serial: highest,
-            body: Graphic(u16::MAX),
+            serial:   highest,
+            body:     Graphic(u16::MAX),
             position: Point::new(u16::MAX, u16::MAX, i8::MIN),
-            facing: Facing::walking(Direction::NorthWest),
-            map: MapSize {
-                width: u16::MAX,
+            facing:   Facing::walking(Direction::NorthWest),
+            map:      MapSize {
+                width:  u16::MAX,
                 height: u16::MAX,
             },
         };
         assert_eq!(encode_packet(&start, version()).len(), 37);
 
         let update = PlayerUpdate {
-            serial: highest,
-            body: Graphic(u16::MAX),
-            hue: Hue(u16::MAX),
-            flags: StatusFlags(u8::MAX),
+            serial:   highest,
+            body:     Graphic(u16::MAX),
+            hue:      Hue(u16::MAX),
+            flags:    StatusFlags(u8::MAX),
             position: Point::new(u16::MAX, u16::MAX, i8::MAX),
-            facing: Facing::walking(Direction::NorthWest),
+            facing:   Facing::walking(Direction::NorthWest),
         };
         assert_eq!(encode_packet(&update, version()).len(), 19);
     }
@@ -2335,7 +2372,7 @@ mod tests {
         // client being broken rather than as a server sending a colour it
         // cannot draw.
         let ack = WalkAck {
-            sequence: StepSequence(3),
+            sequence:  StepSequence(3),
             notoriety: Notoriety::Invulnerable,
         };
         let ancient = ClientVersion::new(3, 0, 0, 0);

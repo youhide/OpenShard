@@ -31,10 +31,20 @@
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::speech::{Font, SpokenMessage, TalkMode};
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::speech::{
+    Font,
+    SpokenMessage,
+    TalkMode,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_state::WorldState;
-use openshard_state::components::{Banker, Position};
+use openshard_state::components::{
+    Banker,
+    Position,
+};
 use openshard_state::sectors::in_range;
 
 pub mod dress;
@@ -45,15 +55,53 @@ mod pets;
 mod spawn;
 mod speech;
 mod vendor;
-pub use dress::{Appearance, FIXED_LAYERS, ShoeType, dress_townsperson};
-pub use guards::{call_guards, expire_guards, guard_keywords, hunt_with_guards};
-pub use live::{BEAT_JITTER_FRACTION, BEAT_TICKS, beat_jitter, first_beat, live, next_beat};
-pub use names::{personal_name, townsperson_name};
-pub use pets::{hear_pet_order, tame};
-pub use spawn::{MobileSpawned, SpawnSpec, spawn};
-pub use speech::{check_vendor_access, overhear};
+pub use dress::{
+    Appearance,
+    FIXED_LAYERS,
+    ShoeType,
+    dress_townsperson,
+};
+pub use guards::{
+    call_guards,
+    expire_guards,
+    guard_keywords,
+    hunt_with_guards,
+};
+pub use live::{
+    BEAT_JITTER_FRACTION,
+    BEAT_TICKS,
+    beat_jitter,
+    first_beat,
+    live,
+    next_beat,
+};
+pub use names::{
+    personal_name,
+    townsperson_name,
+};
+pub use pets::{
+    hear_pet_order,
+    tame,
+};
+pub use spawn::{
+    MobileSpawned,
+    SpawnSpec,
+    spawn,
+};
+pub use speech::{
+    check_vendor_access,
+    overhear,
+};
 pub use vendor::{
-    RESTOCK_TICKS, STOCK_LAYER, StockLine, buy, buy_keyword, offer_sell_list, open_shop, sell, stock,
+    RESTOCK_TICKS,
+    STOCK_LAYER,
+    StockLine,
+    buy,
+    buy_keyword,
+    offer_sell_list,
+    open_shop,
+    sell,
+    stock,
 };
 
 /// The bank box graphic and gump — ServUO's `BankBox` on `Layer.Bank`. A
@@ -138,25 +186,26 @@ use openshard_items::banked_gold as bank_gold;
 /// the "the bank says" reply a keyword earns.
 pub(crate) fn notify(state: &mut WorldState, connection: ConnectionId, text: &str) {
     let packet = ServerPacket::SpokenMessage(SpokenMessage {
-        serial: None, // the system talking, not the banker
+        serial:  None, // the system talking, not the banker
         graphic: None,
-        mode: TalkMode::Regular,
+        mode:    TalkMode::Regular,
         // The system's hue, not [`GREET_HUE`]: this line carries no serial and
         // names itself "System", so it is the shard talking and not the banker.
         // It read `GREET_HUE` while the two names shared a value, which is the
         // confusion splitting them was for.
-        hue: Hue::SYSTEM,
-        font: GREET_FONT,
-        name: "System".to_owned(),
-        text: text.to_owned(),
+        hue:     Hue::SYSTEM,
+        font:    GREET_FONT,
+        name:    "System".to_owned(),
+        text:    text.to_owned(),
     });
     state.send_packet(connection, &packet);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use openshard_state::Rng;
+
+    use super::*;
 
     #[test]
     fn a_banker_keyword_is_a_word_and_not_a_substring() {

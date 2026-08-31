@@ -53,11 +53,17 @@ use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
 
 use crate::camera::Camera;
-use crate::cutaway::{self, Cutaway};
+use crate::cutaway::{
+    self,
+    Cutaway,
+};
 use crate::facing::Face;
 use crate::geometry::Vec2;
 use crate::items::GroundItem;
-use crate::occlusion::{Edges, Occlusion};
+use crate::occlusion::{
+    Edges,
+    Occlusion,
+};
 
 /// One point light, where it stands in the world.
 ///
@@ -71,22 +77,22 @@ pub struct Light {
     /// Floats because the shader compares them against a fragment's tile and
     /// there is nothing to be gained by converting twice; every value here came
     /// from a `u16` and is exact.
-    pub at: Vec2,
+    pub at:        Vec2,
     /// Its height, in the map's own `z` units.
-    pub z: f32,
+    pub z:         f32,
     /// How far its pool reaches, **in tiles**. Nothing beyond this is touched at
     /// all, which is what keeps the shader's loop cheap and the pool a shape
     /// rather than a global tint.
-    pub radius: f32,
+    pub radius:    f32,
     /// Its colour, linear, each channel in `0..=1`.
-    pub color: [f32; 3],
+    pub color:     [f32; 3],
     /// How brightly it burns at its centre, flicker already folded in. Above
     /// `1.0` is ordinary: a fire blows out the ground it stands on.
     pub intensity: f32,
     /// Which way it throws its light, where it throws it one way at all — see
     /// [`Beam`]. `None` is a fire in the open, which lights every direction
     /// equally, and it is what everything on the map is.
-    pub beam: Option<Beam>,
+    pub beam:      Option<Beam>,
 }
 
 /// A flame that lights one direction and not the others: a hooded lantern, or a
@@ -109,7 +115,7 @@ pub struct Beam {
     /// Where it points, unit length. Built by [`Beam::towards`], which is the
     /// only thing that makes one — a direction of some other length would make
     /// the dot product below mean nothing.
-    pub toward: TileVec,
+    pub toward:   TileVec,
     /// The cosine of its half-angle: the rim of the cone. A spot whose direction
     /// is below this gets nothing at all.
     pub cos_half: f32,
@@ -160,7 +166,7 @@ impl Beam {
         };
         let length = (dx * dx + dy * dy + rise * rise).sqrt();
         Self {
-            toward: TileVec::new(dx / length, dy / length, rise / length),
+            toward:   TileVec::new(dx / length, dy / length, rise / length),
             cos_half: (degrees.to_radians() / 2.0).cos(),
         }
     }
@@ -203,9 +209,9 @@ pub struct Sun {
     /// unit the distance to a flame is in, so that an elevation of 45° really is
     /// one tile up per tile along. Normalised by [`Sun::towards`], which is the
     /// only thing that builds one.
-    pub toward: TileVec,
+    pub toward:    TileVec,
     /// Its colour, linear.
-    pub color: [f32; 3],
+    pub color:     [f32; 3],
     /// How much it adds where it reaches. Zero is "no sun", and the blit skips
     /// the walk entirely for it — which is what keeps a frame that has no sun
     /// exactly as cheap as it was before there was one.
@@ -477,7 +483,7 @@ impl WorldVec {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Ambient {
     /// What a tile with an open column above it gets, in full.
-    pub sky: [f32; 3],
+    pub sky:    [f32; 3],
     /// What every tile gets, roof or no roof.
     pub ground: [f32; 3],
 }
@@ -490,7 +496,7 @@ impl Ambient {
     /// arriving in the one constant that used to mean "no lighting at all" —
     /// see [`Lighting::is_identity`], which is why it now asks about the grid.
     pub const DAY: Self = Self {
-        sky: [1.0, 1.0, 1.0],
+        sky:    [1.0, 1.0, 1.0],
         ground: [0.0, 0.0, 0.0],
     };
 
@@ -558,21 +564,21 @@ pub struct Lighting {
     /// What everything is multiplied by away from any flame — the daylight, or
     /// the lack of it, per tile. [`Ambient::DAY`] over an empty grid is "no
     /// lighting at all".
-    pub ambient: Ambient,
+    pub ambient:      Ambient,
     /// The flames themselves, nearest first and never more than
     /// [`Lighting::MAX`] of them.
-    pub lights: Vec<Light>,
+    pub lights:       Vec<Light>,
     /// What stands between them and the ground — see [`crate::occlusion`].
     ///
     /// Travels with the lights rather than beside them because it is the same
     /// frame's answer built from the same walk: a grid collected for one camera
     /// and used with another's flames would put shadows where the map has no
     /// walls.
-    pub occlusion: Occlusion,
+    pub occlusion:    Occlusion,
     /// The sun, where there is one — see [`Sun`]. `None` is night, or a frame
     /// that has not been given a sky yet, and costs nothing at all: the shader
     /// never walks a ray for it.
-    pub sun: Option<Sun>,
+    pub sun:          Option<Sun>,
     /// Which of the pass's own values to draw instead of the lit frame — see
     /// [`crate::debug::View`], and `docs/lighting.md`'s decision 8 for why the
     /// diagnostics are branches of this pass rather than a second one.
@@ -580,7 +586,7 @@ pub struct Lighting {
     /// Here rather than in [`crate::blit::Frame`] because it is read where the
     /// lights are read, out of the same uniform block, and a second channel into
     /// the same shader is a second thing to keep in step.
-    pub view: crate::debug::View,
+    pub view:         crate::debug::View,
     /// How big every flame in this frame is, in tiles — the radius of the sphere
     /// [`arrival`] casts its [`SHADOW_RAYS`] at.
     ///
@@ -608,11 +614,11 @@ pub struct Lighting {
     /// about by [`sample`] and drawn by `blit.wgsl` casts the same rays at the
     /// same points — which is what keeps every parity oracle comparing two
     /// answers rather than two sample counts.
-    pub shadow_rays: ShadowRays,
+    pub shadow_rays:  ShadowRays,
     /// Whether the player's own character is a ghost — `view::Player::dead`,
     /// `0x2C`. `docs/combat.md`'s D9: one uniform, one branch, and the whole
     /// lit frame desaturates rather than every quad carrying its own hue.
-    pub dead: bool,
+    pub dead:         bool,
 }
 
 impl Lighting {
@@ -626,14 +632,14 @@ impl Lighting {
 
     /// The frame nothing lights: the world image, unchanged.
     pub const NONE: Self = Self {
-        ambient: Ambient::DAY,
-        lights: Vec::new(),
-        occlusion: Occlusion::EMPTY,
-        sun: None,
-        view: crate::debug::View::Lit,
+        ambient:      Ambient::DAY,
+        lights:       Vec::new(),
+        occlusion:    Occlusion::EMPTY,
+        sun:          None,
+        view:         crate::debug::View::Lit,
         flame_radius: FLAME_RADIUS,
-        shadow_rays: ShadowRays::DEFAULT,
-        dead: false,
+        shadow_rays:  ShadowRays::DEFAULT,
+        dead:         false,
     };
 
     /// Whether this would change a single pixel.
@@ -723,7 +729,7 @@ pub const GROUND_AMBIENT: [f32; 3] = [0.013_412, 0.015_325, 0.027_212];
 /// is the constant the change is most visible on: `0.20` of a displayed value is
 /// a dark street, and `0.20` of *radiance* is a bright overcast afternoon.
 pub const NIGHT: Ambient = Ambient {
-    sky: [0.033_105, 0.039_682, 0.078_288],
+    sky:    [0.033_105, 0.039_682, 0.078_288],
     ground: [0.010_023, 0.011_645, 0.017_389],
 };
 
@@ -739,7 +745,7 @@ pub const NIGHT: Ambient = Ambient {
 /// unchanged and the room under the roof is what moved.
 /// Linear, authored as `[0.43, 0.42, 0.44]`.
 pub const SKYLIGHT: Ambient = Ambient {
-    sky: [0.154_872, 0.147_319, 0.162_647],
+    sky:    [0.154_872, 0.147_319, 0.162_647],
     ground: GROUND_AMBIENT,
 };
 
@@ -761,14 +767,14 @@ pub fn midday() -> Sun {
 pub struct Flame {
     /// The pool's reach, in tiles. The world's own unit: what it lights is a
     /// span of ground, and no zoom changes how much ground that is.
-    pub radius: f32,
+    pub radius:    f32,
     /// Its colour, linear.
-    pub color: [f32; 3],
+    pub color:     [f32; 3],
     /// Its brightness at the centre, before the flicker multiplies it.
     pub intensity: f32,
     /// How much the flicker swings that brightness, as a fraction of it. A
     /// candle gutters; a bonfire mostly does not.
-    pub flicker: f32,
+    pub flicker:   f32,
 }
 
 /// A torch, a candle, a lantern: the ordinary flame, and what anything flagged
@@ -776,23 +782,23 @@ pub struct Flame {
 const TORCH: Flame = Flame {
     // Six tiles. The reference isometrics light a good deal more than the tile
     // the fire is on — a pool a tile wide reads as a bug, not as a torch.
-    radius: 6.0,
+    radius:    6.0,
     // Linear, authored as `[1.0, 0.72, 0.36]` at `0.95` — [`GROUND_AMBIENT`].
-    color: [1.0, 0.477_000, 0.106_539],
+    color:     [1.0, 0.477_000, 0.106_539],
     intensity: 0.890_005,
-    flicker: 0.10,
+    flicker:   0.10,
 };
 
 /// A campfire: wider, brighter, steadier.
 const CAMPFIRE: Flame = Flame {
-    radius: 9.0,
+    radius:    9.0,
     // Linear, authored as `[1.0, 0.66, 0.30]` at `1.25`. The intensity is past
     // the range sRGB is defined on, so it carries the curve's exponent alone:
     // `1.25^2.4`. A fire brighter than white is ordinary and is exactly what a
     // tonemap is for.
-    color: [1.0, 0.393_123, 0.073_239],
+    color:     [1.0, 0.393_123, 0.073_239],
     intensity: 1.708_378,
-    flicker: 0.07,
+    flicker:   0.07,
 };
 
 /// The graphics a campfire cycles through.
@@ -1026,10 +1032,14 @@ pub fn collect_with_interior(
         Some(_) => {
             crate::occlusion::collect_with_interior(map, items, bounds, tiledata, cutaway, atlas, interior)
         }
-        None => match bake {
-            Some(bake) => crate::occlusion::bake::collect(bake, map, items, bounds, tiledata, cutaway, atlas),
-            None => crate::occlusion::collect(map, items, bounds, tiledata, cutaway, atlas),
-        },
+        None => {
+            match bake {
+                Some(bake) => {
+                    crate::occlusion::bake::collect(bake, map, items, bounds, tiledata, cutaway, atlas)
+                }
+                None => crate::occlusion::collect(map, items, bounds, tiledata, cutaway, atlas),
+            }
+        }
     };
     for light in &mut lights {
         light.at = mounted_at(light.at, &occlusion);
@@ -1141,15 +1151,14 @@ fn mounted_at(at: Vec2, occlusion: &crate::occlusion::Occlusion) -> Vec2 {
     // Componentwise and not along one normalised direction, so that a flame on a
     // **corner** — two panels, and every building has them — goes clear of both
     // planes rather than half clear of each.
-    let toward = |positive: Edges, negative: Edges| match (
-        cell.edges.contains(positive),
-        cell.edges.contains(negative),
-    ) {
-        (true, false) => MOUNTED_CLEARANCE,
-        (false, true) => -MOUNTED_CLEARANCE,
-        // Neither side, or both: a lid, a whole-tile occluder, or a tile holding
-        // two walls that face away from each other. No direction, no move.
-        _ => 0.0,
+    let toward = |positive: Edges, negative: Edges| {
+        match (cell.edges.contains(positive), cell.edges.contains(negative)) {
+            (true, false) => MOUNTED_CLEARANCE,
+            (false, true) => -MOUNTED_CLEARANCE,
+            // Neither side, or both: a lid, a whole-tile occluder, or a tile holding
+            // two walls that face away from each other. No direction, no move.
+            _ => 0.0,
+        }
     };
     Vec2::new(
         at.x + toward(crate::occlusion::Edges::EAST, crate::occlusion::Edges::WEST),
@@ -1170,14 +1179,14 @@ fn place(at: Point, flame: Flame, time: f32) -> Light {
         // fractional now — the world passes write where in its tile a pixel is —
         // and a flame at `(x, y)` exactly would sit on the tile's north corner
         // and light the tile north of it as brightly as its own.
-        at: Vec2::new(f32::from(at.x) + 0.5, f32::from(at.y) + 0.5),
-        z: f32::from(at.z) + FLAME_LIFT,
-        radius: flame.radius,
-        color: flame.color,
+        at:        Vec2::new(f32::from(at.x) + 0.5, f32::from(at.y) + 0.5),
+        z:         f32::from(at.z) + FLAME_LIFT,
+        radius:    flame.radius,
+        color:     flame.color,
         intensity: flame.intensity * flicker(time, phase_of(at), flame.flicker),
         // Every fire standing in the world burns in every direction. A beam is
         // something a hand does to a flame — see [`carried`].
-        beam: None,
+        beam:      None,
     }
 }
 
@@ -1355,13 +1364,13 @@ pub struct SunTuning {
     /// How steeply it climbs, in tiles up per tile along — [`Sun::rise_per_tile`],
     /// which is the number this exists to be able to state directly. `1.0` is
     /// 45°.
-    pub rise_per_tile: f32,
+    pub rise_per_tile:   f32,
     /// Its colour, linear.
-    pub color: [f32; 3],
+    pub color:           [f32; 3],
     /// How much it adds where it reaches. Zero is "no sun" and the shader never
     /// walks a ray for it, which is what `App::sunlit` writes when the sun is
     /// switched off.
-    pub intensity: f32,
+    pub intensity:       f32,
 }
 
 impl SunTuning {
@@ -1373,9 +1382,9 @@ impl SunTuning {
     /// that test says they are the same sun.
     pub const MIDDAY: Self = Self {
         azimuth_degrees: 0.0,
-        rise_per_tile: 1.0,
-        color: [1.0, 0.933_107, 0.748_414],
-        intensity: 0.263_273,
+        rise_per_tile:   1.0,
+        color:           [1.0, 0.933_107, 0.748_414],
+        intensity:       0.263_273,
     };
 
     /// The direction the walk wants, built from the two numbers a person turns.
@@ -1427,29 +1436,29 @@ pub struct Tuning {
     /// casts, and the one knob a person means by "hardness". [`FLAME_RADIUS`] is
     /// the world's answer; `0.0` is a point source and a razor edge, and larger
     /// than a tile is a bonfire the size of a room.
-    pub flame_radius: f32,
+    pub flame_radius:    f32,
     /// How many rays each fragment casts at each flame — [`ShadowRays`].
-    pub shadow_rays: ShadowRays,
+    pub shadow_rays:     ShadowRays,
     /// What every flame's own [`Flame::intensity`] is multiplied by: how hard the
     /// fire burns.
-    pub brightness: f32,
+    pub brightness:      f32,
     /// And what its [`Flame::radius`] is: how far the pool reaches, in tiles.
     ///
     /// Read *before* the frame's lights are collected, because [`lit_tiles`] is
     /// grown by it — see the struct's own note.
-    pub reach: f32,
+    pub reach:           f32,
     /// What [`Ambient::sky`] is multiplied by: how bright the open sky is over a
     /// tile that can see it.
-    pub sky: f32,
+    pub sky:             f32,
     /// And [`Ambient::ground`]: the floor under the darkness, which is what a
     /// windowless cellar gets. Turning this to nothing is what makes an unlit
     /// room pure black.
-    pub ground: f32,
+    pub ground:          f32,
     /// Where the sun stands and how hard it burns — [`SunTuning`]. Read only by a
     /// frame that has a sun at all; night never asks. Its own colour —
     /// [`SunTuning::color`] — is a literal and not a factor, for the reason
     /// stated there.
-    pub sun: SunTuning,
+    pub sun:             SunTuning,
     /// A tint the player's own light — [`carried`] — is multiplied through,
     /// channel by channel, by [`Tuning::applied_headlight`]. `[1.0, 1.0, 1.0]`
     /// leaves it whatever colour [`carried`] built it as.
@@ -1471,28 +1480,28 @@ pub struct Tuning {
     /// literal, unlike [`SunTuning::color`]: a literal here could not leave
     /// [`TORCH`] and [`CAMPFIRE`] their own colours by default, since they do
     /// not share one.
-    pub lantern_color: [f32; 3],
+    pub lantern_color:   [f32; 3],
     /// A tint [`Ambient::sky`] and [`Ambient::ground`] are each multiplied
     /// through, on top of [`Tuning::sky`] and [`Tuning::ground`]'s own
     /// brightness — see [`Tuning::ambient`]. `[1.0, 1.0, 1.0]` leaves [`NIGHT`]
     /// its blue and [`SKYLIGHT`] the colour it was authored as.
-    pub ambient_color: [f32; 3],
+    pub ambient_color:   [f32; 3],
 }
 
 impl Tuning {
     /// The frame this client draws with nothing turned: every factor `1.0`, the
     /// flame the size the art says, eight rays, and [`midday`] overhead.
     pub const DEFAULT: Self = Self {
-        flame_radius: FLAME_RADIUS,
-        shadow_rays: ShadowRays::DEFAULT,
-        brightness: 1.0,
-        reach: 1.0,
-        sky: 1.0,
-        ground: 1.0,
-        sun: SunTuning::MIDDAY,
+        flame_radius:    FLAME_RADIUS,
+        shadow_rays:     ShadowRays::DEFAULT,
+        brightness:      1.0,
+        reach:           1.0,
+        sky:             1.0,
+        ground:          1.0,
+        sun:             SunTuning::MIDDAY,
         headlight_color: [1.0, 1.0, 1.0],
-        lantern_color: [1.0, 1.0, 1.0],
-        ambient_color: [1.0, 1.0, 1.0],
+        lantern_color:   [1.0, 1.0, 1.0],
+        ambient_color:   [1.0, 1.0, 1.0],
     };
 
     /// The largest any factor may be set to, and the largest a flame may be.
@@ -1521,31 +1530,33 @@ impl Tuning {
     /// for the same reason: a light nobody can see is not worth a crash on
     /// startup.
     pub fn clamped(self) -> Self {
-        let factor = |value: f32, default: f32| match value.is_nan() {
-            true => default,
-            false => value.clamp(0.0, Self::MOST),
+        let factor = |value: f32, default: f32| {
+            match value.is_nan() {
+                true => default,
+                false => value.clamp(0.0, Self::MOST),
+            }
         };
         Self {
-            flame_radius: factor(self.flame_radius, FLAME_RADIUS),
-            shadow_rays: self.shadow_rays,
-            brightness: factor(self.brightness, 1.0),
-            reach: factor(self.reach, 1.0),
-            sky: factor(self.sky, 1.0),
-            ground: factor(self.ground, 1.0),
-            sun: SunTuning {
+            flame_radius:    factor(self.flame_radius, FLAME_RADIUS),
+            shadow_rays:     self.shadow_rays,
+            brightness:      factor(self.brightness, 1.0),
+            reach:           factor(self.reach, 1.0),
+            sky:             factor(self.sky, 1.0),
+            ground:          factor(self.ground, 1.0),
+            sun:             SunTuning {
                 azimuth_degrees: match self.sun.azimuth_degrees.is_nan() {
                     true => SunTuning::MIDDAY.azimuth_degrees,
                     false => self.sun.azimuth_degrees % 360.0,
                 },
-                rise_per_tile: factor(self.sun.rise_per_tile, SunTuning::MIDDAY.rise_per_tile),
-                color: std::array::from_fn(|channel| {
+                rise_per_tile:   factor(self.sun.rise_per_tile, SunTuning::MIDDAY.rise_per_tile),
+                color:           std::array::from_fn(|channel| {
                     factor(self.sun.color[channel], SunTuning::MIDDAY.color[channel])
                 }),
-                intensity: factor(self.sun.intensity, SunTuning::MIDDAY.intensity),
+                intensity:       factor(self.sun.intensity, SunTuning::MIDDAY.intensity),
             },
             headlight_color: std::array::from_fn(|channel| factor(self.headlight_color[channel], 1.0)),
-            lantern_color: std::array::from_fn(|channel| factor(self.lantern_color[channel], 1.0)),
-            ambient_color: std::array::from_fn(|channel| factor(self.ambient_color[channel], 1.0)),
+            lantern_color:   std::array::from_fn(|channel| factor(self.lantern_color[channel], 1.0)),
+            ambient_color:   std::array::from_fn(|channel| factor(self.ambient_color[channel], 1.0)),
         }
     }
 
@@ -1583,7 +1594,9 @@ impl Tuning {
     /// The ambient with this frame's sky and floor brightness and colour in it.
     pub fn ambient(self, ambient: Ambient) -> Ambient {
         Ambient {
-            sky: std::array::from_fn(|channel| ambient.sky[channel] * self.sky * self.ambient_color[channel]),
+            sky:    std::array::from_fn(|channel| {
+                ambient.sky[channel] * self.sky * self.ambient_color[channel]
+            }),
             ground: std::array::from_fn(|channel| {
                 ambient.ground[channel] * self.ground * self.ambient_color[channel]
             }),
@@ -2027,10 +2040,12 @@ fn on_the_lit_surface(
     if along < 0.0 {
         return false;
     }
-    let coordinate = |corner: crate::camera::WorldSpot| match axis {
-        0 => corner.x,
-        1 => corner.y,
-        _ => corner.z,
+    let coordinate = |corner: crate::camera::WorldSpot| {
+        match axis {
+            0 => corner.x,
+            1 => corner.y,
+            _ => corner.z,
+        }
     };
     match outward {
         true => coordinate(candidate.max) == coordinate(own.max),
@@ -2049,7 +2064,7 @@ fn on_the_lit_surface(
 #[derive(Clone, Copy)]
 struct LitEnd {
     surface: Surface,
-    solid: Option<crate::occlusion::SolidId>,
+    solid:   Option<crate::occlusion::SolidId>,
 }
 
 impl LitEnd {
@@ -2063,7 +2078,7 @@ impl LitEnd {
     fn of(spot: Spot) -> Self {
         Self {
             surface: spot.surface,
-            solid: spot.solid,
+            solid:   spot.solid,
         }
     }
 
@@ -2073,7 +2088,7 @@ impl LitEnd {
     fn nowhere() -> Self {
         Self {
             surface: Surface::Flat,
-            solid: None,
+            solid:   None,
         }
     }
 }
@@ -2114,9 +2129,9 @@ impl LitEnd {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Spot {
     /// Tile coordinates, the fraction being where in the tile the point is.
-    pub at: Vec2,
+    pub at:      Vec2,
     /// Its height, in the map's own `z` units.
-    pub z: f32,
+    pub z:       f32,
     /// The tile this is a point of — **not** `at.x.floor()`/`at.y.floor()`.
     /// A point legitimately sits on a tile's own far edge (a stair tread's
     /// outer corner, `at.x` exactly whole) and `floor()` there picks whichever
@@ -2125,7 +2140,7 @@ pub struct Spot {
     /// instead of re-deriving it in the walk is the CPU twin of
     /// `MeshFaceVertex::tile`'s fix to the same class of bug on the GPU side.
     /// `docs/lighting_raymarch.md` step 2.
-    pub tile: (i32, i32),
+    pub tile:    (i32, i32),
     /// What surface of the world this is a point of.
     ///
     /// The polygon and not the tile: which way it looks, and therefore which
@@ -2156,7 +2171,7 @@ pub struct Spot {
     ///
     /// [`Option`] in the sense the style asks for: a mobile is a point of no
     /// occluder, which is a fact about mobiles and not a measurement nobody took.
-    pub solid: Option<crate::occlusion::SolidId>,
+    pub solid:   Option<crate::occlusion::SolidId>,
 }
 
 impl Spot {
@@ -2345,7 +2360,7 @@ fn lit_from(normal: TileVec, toward: TileVec) -> f32 {
 pub struct Stopper {
     /// The tile it stands on — what [`Reach::stopped_by`] was, alone, before
     /// there was anything beside it.
-    pub cell: (i32, i32),
+    pub cell:  (i32, i32),
     /// Which solid of the frame this is, off the reference the walk followed to
     /// reach it — the very name [`exemption`] compares. See
     /// [`crate::occlusion::SolidId`].
@@ -2365,7 +2380,7 @@ pub struct Stopper {
     /// entitled to is the discipline `docs/lighting_height.md` phase 2 states,
     /// and a report that quietly picked the exact one would hide the walk that
     /// read the other.
-    pub span: (f32, f32),
+    pub span:  (f32, f32),
 }
 
 impl std::fmt::Display for Stopper {
@@ -2417,13 +2432,13 @@ impl LightIdx {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Reach {
     /// Which of [`Lighting::lights`] this is, by index.
-    pub light: LightIdx,
+    pub light:      LightIdx,
     /// How far the flame is, in tiles, with `z` divided into tiles — the same
     /// three-dimensional distance the falloff uses.
-    pub distance: f32,
+    pub distance:   f32,
     /// Whether that distance is inside the flame's radius. `false` means the
     /// spot is outside the pool and nothing else was computed.
-    pub within: bool,
+    pub within:     bool,
     /// How much of the flame's own body survived the walk: `1.0` for an open
     /// path, `0.0` for a wall, and between for a partial occluder. Only
     /// meaningful when [`Reach::within`].
@@ -2432,7 +2447,7 @@ pub struct Reach {
     /// what `View::Shadow` draws, and it is the one number that separates "the
     /// walk is wrong" from "the cosine is wrong", which is why phase 5b kept it
     /// beside [`Reach::delivered`] rather than folding the two together.
-    pub through: f32,
+    pub through:    f32,
     /// What the flame actually delivered here, as a share of what it would
     /// deliver to a surface squarely facing it at no distance at all: the mean
     /// over the flame's body of `visibility × max(N · L, 0) × falloff² × beam`.
@@ -2447,7 +2462,7 @@ pub struct Reach {
     /// to be evaluated along. A sum over the body is the honest replacement, and
     /// a report that still printed one cosine would be printing a number the
     /// renderer no longer computes.
-    pub delivered: f32,
+    pub delivered:  f32,
     /// What stopped the ray, where anything did.
     ///
     /// The *first* cell that took the survival to zero and the solid on it that
@@ -2456,7 +2471,7 @@ pub struct Reach {
     /// not about this pixel. See [`Stopper`].
     pub stopped_by: Option<Stopper>,
     /// What this flame added to the multiplier, linear, per channel.
-    pub added: [f32; 3],
+    pub added:      [f32; 3],
 }
 
 /// Everything one point of the world receives, and from what.
@@ -2469,7 +2484,7 @@ pub struct Reach {
 #[derive(Clone, PartialEq, Debug)]
 pub struct Sample {
     /// Where this was asked about.
-    pub spot: Spot,
+    pub spot:       Spot,
     /// What the art at this spot is multiplied by: the ambient plus every
     /// flame's contribution, unclamped. The shader clamps at the end; this does
     /// not, because a value over one is a real answer — it says the spot is
@@ -2478,10 +2493,10 @@ pub struct Sample {
     /// One entry per flame the frame carried, in the order [`Lighting::lights`]
     /// holds them — including the ones that reached nothing, which is exactly
     /// what a person asking "why is it dark here" needs to see.
-    pub reaches: Vec<Reach>,
+    pub reaches:    Vec<Reach>,
     /// How much of the sun reached this spot, and what stopped it — `None` where
     /// the frame had no sun at all, which is a different answer from `0.0`.
-    pub sun: Option<Reach>,
+    pub sun:        Option<Reach>,
 }
 
 impl Sample {
@@ -2551,28 +2566,34 @@ impl std::fmt::Display for Sample {
                 (true, Some(stopper)) => {
                     writeln!(f, ", stopped by {stopper} — {}", stands_to(self.spot, stopper))?
                 }
-                (true, None) => writeln!(
-                    f,
-                    ", visible {:.2}, delivers {:.3}, adds {:.3}",
-                    reach.through,
-                    reach.delivered,
-                    reach.added.iter().sum::<f32>() / 3.0,
-                )?,
+                (true, None) => {
+                    writeln!(
+                        f,
+                        ", visible {:.2}, delivers {:.3}, adds {:.3}",
+                        reach.through,
+                        reach.delivered,
+                        reach.added.iter().sum::<f32>() / 3.0,
+                    )?
+                }
             }
         }
         if let Some(sun) = self.sun {
             match sun.stopped_by {
-                Some(stopper) => writeln!(
-                    f,
-                    "  sun: in shadow of {stopper} — {}",
-                    stands_to(self.spot, stopper)
-                )?,
-                None => writeln!(
-                    f,
-                    "  sun: through {:.2}, adds {:.3}",
-                    sun.through,
-                    sun.added.iter().sum::<f32>() / 3.0,
-                )?,
+                Some(stopper) => {
+                    writeln!(
+                        f,
+                        "  sun: in shadow of {stopper} — {}",
+                        stands_to(self.spot, stopper)
+                    )?
+                }
+                None => {
+                    writeln!(
+                        f,
+                        "  sun: through {:.2}, adds {:.3}",
+                        sun.through,
+                        sun.added.iter().sum::<f32>() / 3.0,
+                    )?
+                }
             }
         }
         Ok(())
@@ -2899,7 +2920,7 @@ pub fn flame_points(spot: Spot, flame: [f32; 3], radius: f32, rays: ShadowRays) 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct FlamePoints {
     points: [[f32; 3]; ShadowRays::MOST as usize],
-    rays: ShadowRays,
+    rays:   ShadowRays,
 }
 
 impl FlamePoints {
@@ -2942,10 +2963,10 @@ struct Arrival {
     /// Everything a flame's colour and intensity are multiplied by, in one
     /// number, because every one of those terms is a function of the *sample
     /// point* and none of them of the flame's centre.
-    delivered: f32,
+    delivered:  f32,
     /// The share of the flame's body this spot can see: the mean of the same
     /// rays' visibility alone, with no cosine, no falloff and no beam in it.
-    visible: f32,
+    visible:    f32,
     /// What took the most from any single ray **that had light to lose**.
     ///
     /// A ray from below the spot's own horizon delivers exactly zero whatever
@@ -3046,8 +3067,8 @@ fn arrival(
         }
     }
     Arrival {
-        delivered: delivered / rays.count() as f32,
-        visible: visible / rays.count() as f32,
+        delivered:  delivered / rays.count() as f32,
+        visible:    visible / rays.count() as f32,
         stopped_by: worst.map(|(_, stopper)| stopper),
     }
 }
@@ -3341,10 +3362,10 @@ fn walk_primitives(
             worst = Some((
                 entered,
                 Stopper {
-                    cell: tile_of(cross),
+                    cell:  tile_of(cross),
                     solid: id,
                     edges: stands.edges,
-                    span: (low, high),
+                    span:  (low, high),
                 },
             ));
         }
@@ -3357,14 +3378,16 @@ fn walk_primitives(
     // product that has already fallen under the cutoff cannot climb back out of
     // it.
     match through <= RAY_CUTOFF {
-        true => (
-            0.0,
-            Some(
-                worst
-                    .expect("a ray that trips the cutoff has a primitive that did it")
-                    .1,
-            ),
-        ),
+        true => {
+            (
+                0.0,
+                Some(
+                    worst
+                        .expect("a ray that trips the cutoff has a primitive that did it")
+                        .1,
+                ),
+            )
+        }
         false => (through, None),
     }
 }
@@ -3518,11 +3541,14 @@ fn flicker(time: f32, phase: f32, depth: f32) -> f32 {
 mod tests {
     use openshard_map::grid::BlockExtent;
     use openshard_map::map::LandCell;
+    use openshard_protocol::items::ItemAmount;
     use openshard_protocol::wire::Hue;
-    use openshard_tiles::{StaticTile, TileFlags};
+    use openshard_tiles::{
+        StaticTile,
+        TileFlags,
+    };
 
     use super::*;
-    use openshard_protocol::items::ItemAmount;
 
     /// A tiledata table where exactly one graphic burns.
     fn lit(graphic: u16) -> TileData {
@@ -3553,12 +3579,12 @@ mod tests {
     #[test]
     fn the_default_tuning_changes_no_number() {
         let torch = Light {
-            at: Vec2::new(100.5, 100.5),
-            z: FLAME_LIFT,
-            radius: TORCH.radius,
-            color: TORCH.color,
+            at:        Vec2::new(100.5, 100.5),
+            z:         FLAME_LIFT,
+            radius:    TORCH.radius,
+            color:     TORCH.color,
             intensity: TORCH.intensity,
-            beam: None,
+            beam:      None,
         };
         assert_eq!(Tuning::DEFAULT.applied(torch), torch);
         assert_eq!(Tuning::DEFAULT.applied_headlight(torch), torch);
@@ -3579,19 +3605,19 @@ mod tests {
             ..Tuning::DEFAULT
         };
         let torch = Light {
-            at: Vec2::new(100.5, 100.5),
-            z: FLAME_LIFT,
-            radius: 6.0,
-            color: [1.0, 1.0, 1.0],
+            at:        Vec2::new(100.5, 100.5),
+            z:         FLAME_LIFT,
+            radius:    6.0,
+            color:     [1.0, 1.0, 1.0],
             intensity: 0.5,
-            beam: None,
+            beam:      None,
         };
         let turned = tuning.applied(torch);
         assert_eq!(turned.radius, 3.0, "half the reach");
         assert_eq!(turned.intensity, 1.0, "twice the brightness");
         assert_eq!(turned.color, torch.color, "and nothing else moved");
         let ambient = tuning.ambient(Ambient {
-            sky: [0.4, 0.4, 0.4],
+            sky:    [0.4, 0.4, 0.4],
             ground: [0.1, 0.1, 0.1],
         });
         assert_eq!(ambient.sky, [0.0; 3], "no sky at all");
@@ -3605,12 +3631,12 @@ mod tests {
     #[test]
     fn the_headlight_lantern_and_ambient_tints_are_independent() {
         let torch = Light {
-            at: Vec2::new(100.5, 100.5),
-            z: FLAME_LIFT,
-            radius: TORCH.radius,
-            color: [1.0, 1.0, 1.0],
+            at:        Vec2::new(100.5, 100.5),
+            z:         FLAME_LIFT,
+            radius:    TORCH.radius,
+            color:     [1.0, 1.0, 1.0],
             intensity: TORCH.intensity,
-            beam: None,
+            beam:      None,
         };
         let tuning = Tuning {
             headlight_color: [0.0, 1.0, 0.0],
@@ -3621,7 +3647,7 @@ mod tests {
         assert_eq!(tuning.applied_headlight(torch).color, [0.0, 1.0, 0.0]);
         assert_eq!(tuning.applied(torch).color, [1.0, 0.0, 0.0]);
         let ambient = tuning.ambient(Ambient {
-            sky: [1.0, 1.0, 1.0],
+            sky:    [1.0, 1.0, 1.0],
             ground: [1.0, 1.0, 1.0],
         });
         assert_eq!(ambient.sky, [0.0, 0.0, 1.0]);
@@ -3689,12 +3715,12 @@ mod tests {
         let walks = std::cell::Cell::new(0usize);
         let spot = Spot::flat(Vec2::new(100.5, 100.5), 0.0, (100, 100));
         let light = Light {
-            at: Vec2::new(101.5, 100.5),
-            z: 10.0,
-            radius: 40.0,
-            color: [1.0; 3],
+            at:        Vec2::new(101.5, 100.5),
+            z:         10.0,
+            radius:    40.0,
+            color:     [1.0; 3],
             intensity: 1.0,
-            beam: None,
+            beam:      None,
         };
         let result = arrival(
             spot,
@@ -3758,21 +3784,21 @@ mod tests {
     #[test]
     fn hostile_numbers_are_clamped_rather_than_drawn() {
         let clamped = Tuning {
-            flame_radius: f32::NAN,
-            shadow_rays: ShadowRays::DEFAULT,
-            brightness: -1.0,
-            reach: 1e9,
-            sky: f32::NAN,
-            ground: 0.5,
-            sun: SunTuning {
+            flame_radius:    f32::NAN,
+            shadow_rays:     ShadowRays::DEFAULT,
+            brightness:      -1.0,
+            reach:           1e9,
+            sky:             f32::NAN,
+            ground:          0.5,
+            sun:             SunTuning {
                 azimuth_degrees: 400.0,
-                rise_per_tile: -2.0,
-                color: [f32::NAN; 3],
-                intensity: 99.0,
+                rise_per_tile:   -2.0,
+                color:           [f32::NAN; 3],
+                intensity:       99.0,
             },
             headlight_color: [-1.0, f32::NAN, 99.0],
-            lantern_color: [-1.0, f32::NAN, 99.0],
-            ambient_color: [-1.0, f32::NAN, 99.0],
+            lantern_color:   [-1.0, f32::NAN, 99.0],
+            ambient_color:   [-1.0, f32::NAN, 99.0],
         }
         .clamped();
         assert_eq!(clamped.flame_radius, FLAME_RADIUS);
@@ -3793,9 +3819,11 @@ mod tests {
     /// come from the item list, which is the half a test can build without a
     /// client install.
     fn bare() -> WorldMap {
-        WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: openshard_tiles::LandTileId(0),
-            z: 0,
+        WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: openshard_tiles::LandTileId(0),
+                z:    0,
+            }
         })
     }
 
@@ -3935,10 +3963,10 @@ mod tests {
             0,
             along,
             crate::facing::Hole {
-                near: 64,
-                far: 191,
+                near:   64,
+                far:    191,
                 bottom: 5,
-                top: 15,
+                top:    15,
             },
         )
     }
@@ -3987,10 +4015,10 @@ mod tests {
         // A window in the first tile of it, from a quarter of the way along to
         // the far end of that tile.
         run.aperture = Some(crate::occlusion::Aperture {
-            near: 105.25,
-            far: 106.0,
+            near:   105.25,
+            far:    106.0,
             bottom: 5,
-            top: 15,
+            top:    15,
         });
 
         assert_eq!(pierced(&run, [105.5, 0.0, 10.0]), 0.0, "the window is open");
@@ -4041,7 +4069,7 @@ mod tests {
     #[test]
     fn a_primitives_span_is_its_own_fraction_and_not_a_rounded_one() {
         let box_at_half = crate::occlusion::Solid {
-            space: crate::solid::Solid {
+            space:    crate::solid::Solid {
                 min: crate::camera::WorldSpot {
                     x: 5.0,
                     y: 5.0,
@@ -4053,12 +4081,12 @@ mod tests {
                     z: 6.5,
                 },
             },
-            opacity: 255,
-            edges: crate::occlusion::Edges::ANY,
+            opacity:  255,
+            edges:    crate::occlusion::Edges::ANY,
             aperture: None,
-            roof: false,
-            owner: crate::occlusion::Owner::new(3, openshard_protocol::wire::Graphic(0)),
-            part: crate::occlusion::Part::ONLY,
+            roof:     false,
+            owner:    crate::occlusion::Owner::new(3, openshard_protocol::wire::Graphic(0)),
+            part:     crate::occlusion::Part::ONLY,
         };
         assert_eq!(
             (box_at_half.low(), box_at_half.high()),
@@ -4283,24 +4311,24 @@ mod tests {
 
         let reach = 1.0_f32;
         let lighting = Lighting {
-            ambient: Ambient {
-                sky: [0.0; 3],
+            ambient:      Ambient {
+                sky:    [0.0; 3],
                 ground: [0.0; 3],
             },
-            lights: vec![Light {
-                at: Vec2::new(100.5, 100.5),
-                z: 0.0,
-                radius: reach,
-                color: [1.0, 1.0, 1.0],
+            lights:       vec![Light {
+                at:        Vec2::new(100.5, 100.5),
+                z:         0.0,
+                radius:    reach,
+                color:     [1.0, 1.0, 1.0],
                 intensity: 1.0,
-                beam: None,
+                beam:      None,
             }],
-            occlusion: Occlusion::EMPTY,
-            sun: None,
-            view: crate::debug::View::Lit,
+            occlusion:    Occlusion::EMPTY,
+            sun:          None,
+            view:         crate::debug::View::Lit,
             flame_radius: FLAME_RADIUS,
-            shadow_rays: ShadowRays::DEFAULT,
-            dead: false,
+            shadow_rays:  ShadowRays::DEFAULT,
+            dead:         false,
         };
         // Along `x` and at the flame's own height, so the distance is the offset
         // and nothing has to be derived. `Spot::at` has no facing, so the cosine
@@ -4405,10 +4433,10 @@ mod tests {
     fn an_unflagged_item_makes_no_light() {
         let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
         let items = [GroundItem {
-            amount: ItemAmount::ONE,
-            at: Point::new(100, 100, 0),
+            amount:  ItemAmount::ONE,
+            at:      Point::new(100, 100, 0),
             graphic: Graphic(0x0FAE),
-            hue: Hue::NONE,
+            hue:     Hue::NONE,
         }];
         let lighting = collect(
             &bare(),
@@ -4672,7 +4700,10 @@ mod tests {
     #[test]
     fn a_treads_top_is_not_shadowed_by_the_tread_it_is_the_top_of() {
         use crate::facing::Prism;
-        use crate::occlusion::{Builder, Shape};
+        use crate::occlusion::{
+            Builder,
+            Shape,
+        };
 
         let stair = StaticTile {
             flags: TileFlags::new(TileFlags::NO_SHOOT | TileFlags::CLIMBABLE),
@@ -4719,12 +4750,12 @@ mod tests {
         // the claim itself: what the test is about is a riser not shadowing the
         // tread it caps *tile-wide*, which is what a real staircase render showed.
         let light = Light {
-            at: Vec2::new(102.5, 100.5),
-            z: top.top() as f32 + FLAME_LIFT,
-            radius: 6.0,
-            color: [1.0, 1.0, 1.0],
+            at:        Vec2::new(102.5, 100.5),
+            z:         top.top() as f32 + FLAME_LIFT,
+            radius:    6.0,
+            color:     [1.0, 1.0, 1.0],
             intensity: 1.0,
-            beam: None,
+            beam:      None,
         };
         let lighting = Lighting {
             ambient: NIGHT,
@@ -4800,7 +4831,10 @@ mod tests {
     #[test]
     fn a_fragment_is_shadowed_by_every_solid_of_its_own_static_but_the_one_it_is_a_point_of() {
         use crate::facing::Prism;
-        use crate::occlusion::{Builder, Shape};
+        use crate::occlusion::{
+            Builder,
+            Shape,
+        };
 
         let stair = StaticTile {
             flags: TileFlags::new(TileFlags::NO_SHOOT | TileFlags::CLIMBABLE),
@@ -4838,8 +4872,8 @@ mod tests {
 
         let walked = |spot: Spot, at: Vec2, z: f32| {
             let lighting = Lighting {
-                ambient: NIGHT,
-                lights: vec![Light {
+                ambient:      NIGHT,
+                lights:       vec![Light {
                     at,
                     z,
                     // Wide enough that nothing here is out of reach: this is a
@@ -4849,12 +4883,12 @@ mod tests {
                     intensity: 1.0,
                     beam: None,
                 }],
-                occlusion: occlusion.clone(),
-                sun: None,
-                view: crate::debug::View::default(),
+                occlusion:    occlusion.clone(),
+                sun:          None,
+                view:         crate::debug::View::default(),
                 flame_radius: FLAME_RADIUS,
-                shadow_rays: ShadowRays::DEFAULT,
-                dead: false,
+                shadow_rays:  ShadowRays::DEFAULT,
+                dead:         false,
             };
             let streaming = sample(spot, &lighting).reaches[0].through;
             let exact = sample_exact(spot, &lighting).reaches[0].through;
@@ -4942,7 +4976,10 @@ mod tests {
     #[test]
     fn a_vertical_ray_is_not_stopped_by_lids_it_is_not_over() {
         use crate::facing::Prism;
-        use crate::occlusion::{Builder, Shape};
+        use crate::occlusion::{
+            Builder,
+            Shape,
+        };
 
         let stair = StaticTile {
             flags: TileFlags::new(TileFlags::NO_SHOOT | TileFlags::CLIMBABLE),
@@ -4976,8 +5013,8 @@ mod tests {
 
         let walked = |spot: Spot, at: Vec2, z: f32| {
             let lighting = Lighting {
-                ambient: NIGHT,
-                lights: vec![Light {
+                ambient:      NIGHT,
+                lights:       vec![Light {
                     at,
                     z,
                     radius: 40.0,
@@ -4985,14 +5022,14 @@ mod tests {
                     intensity: 1.0,
                     beam: None,
                 }],
-                occlusion: occlusion.clone(),
-                sun: None,
-                view: crate::debug::View::default(),
+                occlusion:    occlusion.clone(),
+                sun:          None,
+                view:         crate::debug::View::default(),
                 // A point flame, which is the only thing that sends a ray
                 // straight up — see this test's own doc comment.
                 flame_radius: 0.0,
-                shadow_rays: ShadowRays::DEFAULT,
-                dead: false,
+                shadow_rays:  ShadowRays::DEFAULT,
+                dead:         false,
             };
             // The positive control, and it is the whole reason this test is worth
             // anything: every one of the rays actually walked has to have no
@@ -5062,7 +5099,10 @@ mod tests {
     /// and the leak this is about is what one exact ray does.
     #[test]
     fn a_ray_through_the_point_four_floor_tiles_share_is_stopped_by_them() {
-        use crate::occlusion::{Builder, Shape};
+        use crate::occlusion::{
+            Builder,
+            Shape,
+        };
 
         // `FLOOR` is the whole of what makes a lid — `occlusion::boxes_of` asks
         // `is_background()` and nothing else, deliberately, so that a floor
@@ -5114,12 +5154,12 @@ mod tests {
         let lighting = Lighting {
             ambient: NIGHT,
             lights: vec![Light {
-                at: to,
-                z: below,
-                radius: 40.0,
-                color: [1.0, 1.0, 1.0],
+                at:        to,
+                z:         below,
+                radius:    40.0,
+                color:     [1.0, 1.0, 1.0],
                 intensity: 1.0,
-                beam: None,
+                beam:      None,
             }],
             occlusion,
             sun: None,
@@ -5167,7 +5207,10 @@ mod tests {
     /// bug's own coincidence as if it were the spec.
     #[test]
     fn a_wall_level_with_the_flame_is_not_skipped_by_a_shallow_ray() {
-        use crate::occlusion::{Builder, Shape};
+        use crate::occlusion::{
+            Builder,
+            Shape,
+        };
 
         let wall = StaticTile {
             flags: TileFlags::new(TileFlags::NO_SHOOT),
@@ -5184,12 +5227,12 @@ mod tests {
         let occlusion = occlusion.finish(&Cutaway::OPEN);
 
         let light = Light {
-            at: Vec2::new(98.0, 100.0),
-            z: 10.0,
-            radius: 12.0,
-            color: [1.0, 1.0, 1.0],
+            at:        Vec2::new(98.0, 100.0),
+            z:         10.0,
+            radius:    12.0,
+            color:     [1.0, 1.0, 1.0],
             intensity: 1.0,
-            beam: None,
+            beam:      None,
         };
         let lighting = Lighting {
             ambient: NIGHT,
@@ -5280,7 +5323,10 @@ mod tests {
     #[test]
     fn walk_the_record_does_not_read_every_lid_as_transparent() {
         use crate::facing::Prism;
-        use crate::occlusion::{Builder, Shape};
+        use crate::occlusion::{
+            Builder,
+            Shape,
+        };
 
         let stair = StaticTile {
             flags: TileFlags::new(TileFlags::NO_SHOOT | TileFlags::CLIMBABLE),
@@ -5334,9 +5380,13 @@ mod tests {
     /// as values pinned at `1.0` far more often than the geometry allows.
     #[test]
     fn walk_the_record_stays_in_range_on_the_stair() {
-        use crate::facing::Prism;
-        use crate::occlusion::{Builder, Shape};
         use proptest::prelude::*;
+
+        use crate::facing::Prism;
+        use crate::occlusion::{
+            Builder,
+            Shape,
+        };
 
         let stair = StaticTile {
             flags: TileFlags::new(TileFlags::NO_SHOOT | TileFlags::CLIMBABLE),
@@ -5378,7 +5428,10 @@ mod tests {
     /// agreement for.
     #[test]
     fn walk_the_wire_agrees_with_walk_the_record_on_the_six_point_counter_example() {
-        use crate::occlusion::{Builder, Shape};
+        use crate::occlusion::{
+            Builder,
+            Shape,
+        };
 
         let wall = StaticTile {
             flags: TileFlags::new(TileFlags::NO_SHOOT),
@@ -5413,8 +5466,12 @@ mod tests {
     /// agreement with [`walk_the_record`] everywhere in the domain.
     #[test]
     fn walk_the_wire_agrees_with_walk_the_record_on_a_single_body() {
-        use crate::occlusion::{Builder, Shape};
         use proptest::prelude::*;
+
+        use crate::occlusion::{
+            Builder,
+            Shape,
+        };
 
         let wall = StaticTile {
             flags: TileFlags::new(TileFlags::NO_SHOOT),
@@ -5664,8 +5721,9 @@ mod tests {
     /// for the fixture that names it.
     #[test]
     fn walk_the_wire_agrees_with_walk_the_record_on_a_body_at_a_fractional_z() {
-        use crate::occlusion::Builder;
         use proptest::prelude::*;
+
+        use crate::occlusion::Builder;
 
         let mut occlusion = Builder::new(crate::camera::TileBounds {
             min_x: 90,
@@ -5775,9 +5833,13 @@ mod tests {
     /// comparison needed.
     #[test]
     fn walk_the_wire_agrees_with_walk_the_record_on_a_single_panel() {
-        use crate::facing::Facing;
-        use crate::occlusion::{Builder, Shape};
         use proptest::prelude::*;
+
+        use crate::facing::Facing;
+        use crate::occlusion::{
+            Builder,
+            Shape,
+        };
 
         let wall = StaticTile {
             flags: TileFlags::new(TileFlags::NO_SHOOT),
@@ -5830,9 +5892,13 @@ mod tests {
     /// kept as a permanent regression rather than only run once by hand.
     #[test]
     fn walk_the_wire_agrees_with_walk_the_record_in_a_small_room() {
-        use crate::facing::Facing;
-        use crate::occlusion::{Builder, Shape};
         use proptest::prelude::*;
+
+        use crate::facing::Facing;
+        use crate::occlusion::{
+            Builder,
+            Shape,
+        };
 
         let wall = StaticTile {
             flags: TileFlags::new(TileFlags::NO_SHOOT),
@@ -5957,9 +6023,13 @@ mod tests {
     /// compare against.
     #[test]
     fn walk_the_wire_stays_in_range_on_the_stair() {
-        use crate::facing::Prism;
-        use crate::occlusion::{Builder, Shape};
         use proptest::prelude::*;
+
+        use crate::facing::Prism;
+        use crate::occlusion::{
+            Builder,
+            Shape,
+        };
 
         let stair = StaticTile {
             flags: TileFlags::new(TileFlags::NO_SHOOT | TileFlags::CLIMBABLE),

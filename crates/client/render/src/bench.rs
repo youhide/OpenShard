@@ -54,7 +54,11 @@ use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 
 use crate::camera::WorldPixel;
-use crate::follow::{Follower, Gaze, Rig};
+use crate::follow::{
+    Follower,
+    Gaze,
+    Rig,
+};
 
 /// Two `f64`s of world pixel space: a position, a step, a speed or an
 /// acceleration, depending on what took the difference. Named because half of
@@ -72,13 +76,13 @@ type Pixels = (f64, f64);
 #[derive(Clone, Copy, Debug)]
 pub struct Knot {
     /// When it starts, from the start of the script.
-    pub at: Duration,
+    pub at:    Duration,
     /// How long it takes. Zero is a jump.
     pub takes: Duration,
     /// The tile left behind.
-    pub from: Point,
+    pub from:  Point,
     /// The tile arrived at.
-    pub to: Point,
+    pub to:    Point,
 }
 
 /// A body's whole path, as a function of a virtual instant.
@@ -90,13 +94,13 @@ pub struct Knot {
 pub struct Script {
     /// What this scenario is called, for the table and the file it is written
     /// to.
-    pub name: &'static str,
+    pub name:   &'static str,
     /// How long it lasts. Every cadence covers exactly this span, which is what
     /// makes two frame rates comparable at all.
     pub length: Duration,
-    knots: Vec<Knot>,
+    knots:      Vec<Knot>,
     /// Where the body is now, while the script is being built.
-    at: Point,
+    at:         Point,
 }
 
 impl Script {
@@ -205,9 +209,9 @@ impl Script {
 /// jittery run that finds something is a number and not an anecdote.
 #[derive(Clone, Copy, Debug)]
 pub struct Cadence {
-    step: Duration,
+    step:   Duration,
     spread: Duration,
-    seed: u64,
+    seed:   u64,
 }
 
 impl Cadence {
@@ -248,11 +252,11 @@ impl Cadence {
 #[derive(Clone, Copy, Debug)]
 pub struct Sample {
     /// When, from the start of the script.
-    pub at: Duration,
+    pub at:    Duration,
     /// Where the body was asking to be looked at.
-    pub gaze: Gaze,
+    pub gaze:  Gaze,
     /// The whole pixel the screen was given.
-    pub eye: WorldPixel,
+    pub eye:   WorldPixel,
     /// What the filter had before the quantiser rounded it, still in channels —
     /// see this module's note on why both are kept. [`Gaze::exact`] folds it
     /// into the pair the derivatives are taken on; the `lift` field is what
@@ -264,9 +268,9 @@ pub struct Sample {
 #[derive(Clone, Debug)]
 pub struct Trace {
     /// What was being flown.
-    pub rig: Rig,
+    pub rig:     Rig,
     /// What it was flown over.
-    pub script: &'static str,
+    pub script:  &'static str,
     /// Every frame, in order.
     pub samples: Vec<Sample>,
 }
@@ -325,9 +329,9 @@ pub fn run(rig: Rig, script: &Script, cadence: Cadence) -> Trace {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Reading {
     /// When, from the start of the run.
-    pub at: Duration,
+    pub at:    Duration,
     /// How far the *drawn* eye was from the body — what the player sees.
-    pub lag: f64,
+    pub lag:   f64,
     /// How fast the eye moved, off the unrounded trace. See this module's note
     /// on why not the drawn one.
     pub speed: f64,
@@ -336,7 +340,7 @@ pub struct Reading {
     pub accel: Option<f64>,
     /// The third difference — what "ragged" is, as a number. `None` for the
     /// first two, for the same reason.
-    pub jerk: Option<f64>,
+    pub jerk:  Option<f64>,
 }
 
 /// Every frame's derivatives, in order.
@@ -388,8 +392,8 @@ pub fn readings(samples: &[Sample]) -> Vec<Reading> {
 /// also what lets a test hand it a cadence and get a trace it can assert on.
 #[derive(Clone, Debug)]
 pub struct Scope {
-    span: Duration,
-    at: Duration,
+    span:    Duration,
+    at:      Duration,
     samples: Vec<Sample>,
 }
 
@@ -472,17 +476,17 @@ impl Scope {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Metrics {
     /// How many frames were drawn. Every other number is worthless without it.
-    pub frames: usize,
+    pub frames:       usize,
     /// How far the drawn eye moved in total. The other half of "the data is
     /// real": an eye that never moved is smooth, still and useless.
-    pub travel: f64,
+    pub travel:       f64,
     /// The worst distance from the drawn eye to the body, and the RMS of it.
     ///
     /// The reference camera's is under `sqrt(0.5)`, which is the quantiser and
     /// nothing else. Anything above that is the rig trailing.
-    pub lag_max: f64,
+    pub lag_max:      f64,
     /// Likewise.
-    pub lag_rms: f64,
+    pub lag_rms:      f64,
     /// The worst the *height* alone was behind, in pixels.
     ///
     /// Apart from [`Metrics::lag_max`] because it is a different question with a
@@ -492,9 +496,9 @@ pub struct Metrics {
     pub lift_lag_max: f64,
     /// The furthest the eye got *ahead* of the body along its direction of
     /// travel — overshoot, and negative everywhere means there was none.
-    pub ahead_max: f64,
+    pub ahead_max:    f64,
     /// How fast the eye itself moved, at most.
-    pub speed_max: f64,
+    pub speed_max:    f64,
     /// And how sharply that changed, at most. This is the reversal: an eye that
     /// stops dead and sets off the other way has an unbounded one, and a
     /// filtered eye's is its speed over its time constant.
@@ -506,17 +510,17 @@ pub struct Metrics {
     /// if the frame rate doubles. Where the input is a jump,
     /// [`Metrics::speed_max`] is the number that means something: how fast the
     /// eye actually slid.
-    pub accel_max: f64,
+    pub accel_max:    f64,
     /// The RMS of the third difference. What "ragged" means when it is a number
     /// rather than a feeling.
-    pub jerk_rms: f64,
+    pub jerk_rms:     f64,
     /// How uneven the *drawn* eye's step was, over the frames where the body
     /// was moving: the variance, in pixels, of how far it moved each frame.
     ///
     /// The metric a continuous one cannot give. At a constant body speed an eye
     /// that moves `0, 0, 3, 0, 0, 3` and one that moves `1, 1, 1, 1, 1, 1` have
     /// the same mean velocity, and only the first is a ratchet.
-    pub step_var: f64,
+    pub step_var:     f64,
     /// Frames where the body moved and the drawn eye did not.
     pub still_frames: usize,
 }
@@ -530,16 +534,16 @@ impl Metrics {
     /// be compared with a number from another.
     pub fn of(samples: &[Sample]) -> Self {
         let mut metrics = Self {
-            frames: samples.len(),
-            travel: 0.0,
-            lag_max: 0.0,
-            lag_rms: 0.0,
+            frames:       samples.len(),
+            travel:       0.0,
+            lag_max:      0.0,
+            lag_rms:      0.0,
             lift_lag_max: 0.0,
-            ahead_max: f64::NEG_INFINITY,
-            speed_max: 0.0,
-            accel_max: 0.0,
-            jerk_rms: 0.0,
-            step_var: 0.0,
+            ahead_max:    f64::NEG_INFINITY,
+            speed_max:    0.0,
+            accel_max:    0.0,
+            jerk_rms:     0.0,
+            step_var:     0.0,
             still_frames: 0,
         };
         let mut lag_squares = 0.0;

@@ -103,15 +103,25 @@ pub mod bake;
 pub mod bvh;
 pub mod merge;
 
+use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-
-use crate::facing::{Face, Facing, Hole};
-use openshard_map::map::WorldMap;
-use openshard_tiles::{StaticTile, TileData, TileFlags};
+use openshard_tiles::{
+    StaticTile,
+    TileData,
+    TileFlags,
+};
 
 use crate::camera::TileBounds;
-use crate::cutaway::{self, Cutaway};
+use crate::cutaway::{
+    self,
+    Cutaway,
+};
+use crate::facing::{
+    Face,
+    Facing,
+    Hole,
+};
 use crate::items::GroundItem;
 
 /// A tile that stops light entirely.
@@ -548,14 +558,16 @@ pub fn boxes_of(
         // before `edges` could come out `ANY`, and a footprint is only ever
         // `Some` beside `facing: None` in the first place. `docs/footprints.md`
         // S3.
-        Edges::ANY => each(
-            Part::ONLY,
-            edges,
-            match shape.footprint {
-                Some(footprint) => Solid::footprint_box_of(x, y, bottom, top, footprint),
-                None => Solid::box_of(x, y, bottom, top, edges),
-            },
-        ),
+        Edges::ANY => {
+            each(
+                Part::ONLY,
+                edges,
+                match shape.footprint {
+                    Some(footprint) => Solid::footprint_box_of(x, y, bottom, top, footprint),
+                    None => Solid::box_of(x, y, bottom, top, edges),
+                },
+            )
+        }
         named => {
             // A corner's panels are numbered in the order they are pushed, which
             // is the order this array names the sides in — see [`Part`].
@@ -583,7 +595,7 @@ pub fn boxes_of(
 pub struct Shape {
     /// Which sides of its tile the picture stands on, or `None` for "the art
     /// would not say" — see [`edges_of`].
-    pub facing: Option<Facing>,
+    pub facing:    Option<Facing>,
     /// The hole in it, or `None` for a solid.
     ///
     /// A [`Hole`] and not an [`Aperture`], which is the difference between a
@@ -591,7 +603,7 @@ pub struct Shape {
     /// hundred tiles at a hundred heights, so what the art can say is a rectangle
     /// above the *static's own base*. [`Builder::add`] is where the two meet,
     /// because it is the one place that knows which `z` this instance stands at.
-    pub hole: Option<Hole>,
+    pub hole:      Option<Hole>,
     /// The solid this picture is of, where it is a picture of one.
     ///
     /// A different *kind* of answer from [`Shape::facing`], and the two are not
@@ -605,7 +617,7 @@ pub struct Shape {
     /// Which of the two is believed is not decided here: this is what the picture
     /// says, and [`Builder::add`] is where the client's own `CLIMBABLE` bit picks
     /// between them.
-    pub prism: Option<crate::facing::Prism>,
+    pub prism:     Option<crate::facing::Prism>,
     /// A shape [`prism`](Self::prism) cannot describe, authored rather than
     /// derived — an arch's posts and lintel, a gap nothing here states because
     /// it is simply the absence of a block. `docs/lighting.md`'s decision 41 is
@@ -618,7 +630,7 @@ pub struct Shape {
     /// a person placing boxes by eye against a silhouette — so it survives a
     /// re-derivation exactly the way an authored `prism` does, because nothing
     /// but a person's own `author` call ever sets it.
-    pub blocks: crate::facing::Blocks,
+    pub blocks:    crate::facing::Blocks,
     /// The horizontal box the art's own base edge states, where the picture is
     /// one and nothing else already answered for it.
     ///
@@ -636,10 +648,10 @@ pub struct Shape {
 impl Shape {
     /// Nothing was measured: the whole-tile occluder, with no hole in it.
     pub const UNREAD: Self = Self {
-        facing: None,
-        hole: None,
-        prism: None,
-        blocks: crate::facing::Blocks::EMPTY,
+        facing:    None,
+        hole:      None,
+        prism:     None,
+        blocks:    crate::facing::Blocks::EMPTY,
         footprint: None,
     };
 
@@ -647,10 +659,10 @@ impl Shape {
     /// every wall in the world but the fifty-eight windows step 16 reads.
     pub fn faced(facing: Facing) -> Self {
         Self {
-            facing: Some(facing),
-            hole: None,
-            prism: None,
-            blocks: crate::facing::Blocks::EMPTY,
+            facing:    Some(facing),
+            hole:      None,
+            prism:     None,
+            blocks:    crate::facing::Blocks::EMPTY,
             footprint: None,
         }
     }
@@ -658,10 +670,10 @@ impl Shape {
     /// A graphic the art reads as a solid: a box, or a flight of steps.
     pub fn solid(prism: crate::facing::Prism) -> Self {
         Self {
-            facing: None,
-            hole: None,
-            prism: Some(prism),
-            blocks: crate::facing::Blocks::EMPTY,
+            facing:    None,
+            hole:      None,
+            prism:     Some(prism),
+            blocks:    crate::facing::Blocks::EMPTY,
             footprint: None,
         }
     }
@@ -841,15 +853,15 @@ pub const RUN_STEPS: f32 = 255.0;
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Aperture {
     /// Where the hole starts along the run, in world coordinates.
-    pub near: f32,
+    pub near:   f32,
     /// And where it ends. A `far` at or below `near` is a hole of no width,
     /// which stops nothing from being stopped — the same degenerate case a `z`
     /// span of zero already is.
-    pub far: f32,
+    pub far:    f32,
     /// The lowest `z` the hole reaches.
     pub bottom: i32,
     /// And the highest.
-    pub top: i32,
+    pub top:    i32,
 }
 
 impl Aperture {
@@ -870,10 +882,10 @@ impl Aperture {
     pub fn placed(base: i32, along: i32, hole: Hole) -> Self {
         let run = |step: u8| along as f32 + f32::from(step) / RUN_STEPS;
         Self {
-            near: run(hole.near),
-            far: run(hole.far),
+            near:   run(hole.near),
+            far:    run(hole.far),
             bottom: base + i32::from(hole.bottom),
-            top: base + i32::from(hole.top),
+            top:    base + i32::from(hole.top),
         }
     }
 }
@@ -920,14 +932,14 @@ pub struct Solid {
     /// below the surface it is, a body fills its whole tile. See
     /// [`Solid::box_of`] for each, and the type doc for why nothing nominal is
     /// stored here.
-    pub space: crate::solid::Solid,
+    pub space:    crate::solid::Solid,
     /// How much of a ray crossing it is stopped.
-    pub opacity: u8,
+    pub opacity:  u8,
     /// Which side of the tile it stands on: one of [`Edges::NORTH`],
     /// [`Edges::EAST`], [`Edges::SOUTH`], [`Edges::WEST`] for a panel,
     /// [`Edges::NONE`] for a lid, or [`Edges::ANY`] for a body. Never two named
     /// sides — a corner is two panels, which is what the list is for.
-    pub edges: Edges,
+    pub edges:    Edges,
     /// The hole in it, where the art named one — see [`Aperture`], and step 21.3
     /// of `docs/lighting.md`. Indexed by the solid's own place in
     /// [`Occlusion::solid`], which is what the aperture plane is folded to.
@@ -946,7 +958,7 @@ pub struct Solid {
     /// 33 is that the cut happens when a *frame* is packed rather than when a
     /// surface is built. So the surface has to carry it that far. See
     /// [`Builder::finish`].
-    pub roof: bool,
+    pub roof:     bool,
     /// The thing this is a solid **of** — see [`Owner`].
     ///
     /// Every solid one [`Builder::add`] pushes carries the same one, which is
@@ -957,7 +969,7 @@ pub struct Solid {
     ///
     /// Never uploaded. What crosses the wire is [`OwnerId`], the number
     /// [`Builder::finish`] gives this key within its cell.
-    pub owner: Owner,
+    pub owner:    Owner,
     /// And **which** of that thing's solids this one is — see [`Part`].
     ///
     /// Never uploaded either, and for a different reason than [`Solid::owner`]:
@@ -965,7 +977,7 @@ pub struct Solid {
     /// bytes of a reference), so this is only ever a *join key* on this side —
     /// what lets the pass that draws a flight's third tread find the grid's own
     /// third tread. `docs/lighting_rebuild.md` phase 4.
-    pub part: Part,
+    pub part:     Part,
 }
 
 impl Solid {
@@ -1321,9 +1333,9 @@ impl Solid {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Cell {
     /// The lowest `z` this tile stops anything at.
-    pub bottom: i32,
+    pub bottom:  i32,
     /// The highest.
-    pub top: i32,
+    pub top:     i32,
     /// How much of a ray crossing the span is stopped.
     pub opacity: u8,
     /// Which sides of the tile the things standing here occupy — the union over
@@ -1332,7 +1344,7 @@ pub struct Cell {
     /// Zero is a **lid** and not "nothing": something horizontal, whose whole
     /// occlusion is the `z` span above. [`Edges::ANY`] is the old whole-tile
     /// answer and what an unreadable static gets. See [`Edges::NORTH`].
-    pub edges: Edges,
+    pub edges:   Edges,
 }
 
 /// A tile with nothing at all over it: the whole of the sky.
@@ -1349,7 +1361,7 @@ struct Span {
     /// of it survive the upload — see [`Occlusion::bytes`].
     offset: u32,
     /// How many solids the tile references. One byte, for the same reason.
-    count: u8,
+    count:  u8,
 }
 
 /// **The thing that was added**, as the world names it — one
@@ -1384,7 +1396,7 @@ struct Span {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Owner {
     /// The `z` the static was placed at — its own, not any solid's span.
-    pub z: i8,
+    pub z:       i8,
     /// And its graphic, the *placed* one rather than whichever animation frame
     /// is showing: the two walks read the same field, and an animated static
     /// would otherwise change owner every hundred milliseconds.
@@ -1612,13 +1624,13 @@ pub const NODE_BYTES: usize = 32;
 /// lets a tile's references be contiguous, which is what an `(offset, count)` is.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Occlusion {
-    bounds: TileBounds,
+    bounds:  TileBounds,
     /// Row-major over `bounds`, `x` fastest: the order [`Occlusion::bytes`]
     /// uploads and the shader indexes.
-    index: Vec<Span>,
+    index:   Vec<Span>,
     /// Every reference in the frame, the ones of a tile contiguous. The order is
     /// the index's, which is what [`Occlusion::id_bytes`] uploads.
-    ids: Vec<SolidId>,
+    ids:     Vec<SolidId>,
     /// Which occluder of its own cell each of those references is — one
     /// [`OwnerId`] per entry of `ids`, in the same order, and the fourth channel
     /// [`Occlusion::id_bytes`] uploads.
@@ -1629,10 +1641,10 @@ pub struct Occlusion {
     /// it a different number in each. Nothing does today — the two lists are the
     /// same length and one solid is one cell's — which is exactly why the level
     /// is built now rather than after something depends on it being wrong.
-    owners: Vec<OwnerId>,
+    owners:  Vec<OwnerId>,
     /// Every solid in the frame, in the order [`Occlusion::primitive_bytes`]
     /// uploads and [`SolidId`] names.
-    solids: Vec<Solid>,
+    solids:  Vec<Solid>,
     /// The broad phase over those solids — `docs/occluders.md`'s D3, and what
     /// replaces the grid above as the thing a ray asks "what might I meet".
     ///
@@ -1641,13 +1653,13 @@ pub struct Occlusion {
     /// *tile* — [`Occlusion::at`]'s merged view, [`Occlusion::owner_at`]'s join,
     /// the wireframe, the plan view. What moves to the tree is the **walk**,
     /// whose question was never about tiles at all.
-    bvh: bvh::Bvh,
+    bvh:     bvh::Bvh,
     /// How much of the sky each tile can see, in the same order as the index —
     /// see this module's header and [`Occlusion::sky_at`].
     ///
     /// A byte and not an `Option`: every tile has an answer, and the answer for
     /// a tile with nothing over it is [`SKY_OPEN`] rather than "absent".
-    sky: Vec<u8>,
+    sky:     Vec<u8>,
     /// How many solids did not fit — see [`Occlusion::dropped`].
     dropped: usize,
 }
@@ -1659,18 +1671,18 @@ impl Occlusion {
     /// what [`Lighting::NONE`](crate::light::Lighting::NONE) is built from, and
     /// a daylit frame must not pay for a grid it will not read.
     pub const EMPTY: Self = Self {
-        bounds: TileBounds {
+        bounds:  TileBounds {
             min_x: 0,
             max_x: -1,
             min_y: 0,
             max_y: -1,
         },
-        index: Vec::new(),
-        ids: Vec::new(),
-        owners: Vec::new(),
-        solids: Vec::new(),
-        bvh: bvh::Bvh::EMPTY,
-        sky: Vec::new(),
+        index:   Vec::new(),
+        ids:     Vec::new(),
+        owners:  Vec::new(),
+        solids:  Vec::new(),
+        bvh:     bvh::Bvh::EMPTY,
+        sky:     Vec::new(),
         dropped: 0,
     };
 
@@ -1905,16 +1917,18 @@ impl Occlusion {
         let first = solids.next()?;
         Some(solids.fold(
             Cell {
-                bottom: first.bottom(),
-                top: first.top(),
+                bottom:  first.bottom(),
+                top:     first.top(),
                 opacity: first.opacity,
-                edges: first.edges,
+                edges:   first.edges,
             },
-            |cell, solid| Cell {
-                bottom: cell.bottom.min(solid.bottom()),
-                top: cell.top.max(solid.top()),
-                opacity: cell.opacity.max(solid.opacity),
-                edges: cell.edges | solid.edges,
+            |cell, solid| {
+                Cell {
+                    bottom:  cell.bottom.min(solid.bottom()),
+                    top:     cell.top.max(solid.top()),
+                    opacity: cell.opacity.max(solid.opacity),
+                    edges:   cell.edges | solid.edges,
+                }
             },
         ))
     }
@@ -2180,10 +2194,10 @@ impl Occlusion {
         let mut bytes = Vec::with_capacity(self.solids.len().max(1) * APERTURE_BYTES);
         for solid in &self.solids {
             let hole = solid.aperture.unwrap_or(Aperture {
-                near: 0.0,
-                far: 0.0,
+                near:   0.0,
+                far:    0.0,
                 bottom: 0,
-                top: 0,
+                top:    0,
             });
             for value in [hole.near, hole.far, hole.bottom as f32, hole.top as f32] {
                 bytes.extend_from_slice(&value.to_le_bytes());
@@ -2337,10 +2351,10 @@ pub const MAX_SOLIDS_PER_CELL: usize = 255;
 /// thirteen times the GPU.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Builder {
-    bounds: TileBounds,
+    bounds:  TileBounds,
     /// The first solid of each tile, row-major over `bounds`, or
     /// [`Link::NONE`] for open ground.
-    heads: Vec<Link>,
+    heads:   Vec<Link>,
     /// Every solid added this frame, each with the link to the next one on
     /// its own tile.
     ///
@@ -2348,9 +2362,9 @@ pub struct Builder {
     /// the ownership has moved into [`Occlusion`], where a cell references what
     /// the frame owns, and the builder above it has not been asked to hold a
     /// solid two tiles reference. Decision 38.2's spill is the step that asks.
-    arena: Vec<(Solid, Link)>,
+    arena:   Vec<(Solid, Link)>,
     /// How much of the sky each tile can see, in the same order as `heads`.
-    sky: Vec<u8>,
+    sky:     Vec<u8>,
     /// How many solids were refused because their tile was already full — see
     /// [`MAX_SOLIDS_PER_CELL`] and [`Occlusion::dropped`].
     dropped: usize,
@@ -2451,13 +2465,15 @@ impl Builder {
                     // about a crossing.
                     aperture: match edges {
                         Edges::NONE | Edges::ANY => None,
-                        named => shape.hole.map(|hole| {
-                            let along = match named.contains(Edges::NORTH.union(Edges::SOUTH)) {
-                                true => place.0,
-                                false => place.1,
-                            };
-                            Aperture::placed(bottom, along, hole)
-                        }),
+                        named => {
+                            shape.hole.map(|hole| {
+                                let along = match named.contains(Edges::NORTH.union(Edges::SOUTH)) {
+                                    true => place.0,
+                                    false => place.1,
+                                };
+                                Aperture::placed(bottom, along, hole)
+                            })
+                        }
                     },
                     roof: tile.flags.is_roof(),
                     owner,
@@ -2847,12 +2863,12 @@ fn place(
 /// [`boxes_of`] needs and this is where the art's answer to it lives.
 pub fn shape_of(atlas: Option<crate::atlas::StaticArt<'_>>, graphic: Graphic) -> Shape {
     Shape {
-        facing: atlas
+        facing:    atlas
             .and_then(|atlas| atlas.paged_sprite(graphic))
             .and_then(|sprite| sprite.sprite.facing),
-        hole: atlas.and_then(|atlas| atlas.hole(graphic)),
-        prism: atlas.and_then(|atlas| atlas.prism(graphic)),
-        blocks: crate::facing::Blocks::EMPTY,
+        hole:      atlas.and_then(|atlas| atlas.hole(graphic)),
+        prism:     atlas.and_then(|atlas| atlas.prism(graphic)),
+        blocks:    crate::facing::Blocks::EMPTY,
         footprint: atlas.and_then(|atlas| atlas.footprint(graphic)),
     }
 }
@@ -2895,12 +2911,18 @@ mod tests {
     const NOT_A_DOOR: Graphic = Graphic(0);
 
     use openshard_map::grid::BlockExtent;
-    use openshard_map::map::{LandCell, WorldMap};
-    use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_map::map::{
+        LandCell,
+        WorldMap,
+    };
+    use openshard_protocol::items::ItemAmount;
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
     use openshard_protocol::world::Point;
 
     use super::*;
-    use openshard_protocol::items::ItemAmount;
 
     /// A static tile with the flags and height a test is about.
     fn tile(flags: u64, height: u8) -> StaticTile {
@@ -3072,14 +3094,18 @@ mod tests {
     /// only offered the table would pass with the gate deleted.
     #[test]
     fn a_platform_the_art_fits_a_box_to_stands_as_the_box_and_a_wall_does_not() {
-        use crate::facing::{Face, Facing, Prism};
+        use crate::facing::{
+            Face,
+            Facing,
+            Prism,
+        };
 
         // The reading a tabletop actually gets: a corner of two walls, with a
         // prism measured off the same picture. See `Shape::of`.
         let shape = Shape {
             facing: Some(Facing::Corner {
                 right: Face::East,
-                left: Face::South,
+                left:  Face::South,
             }),
             prism: Some(Prism::box_of(4)),
             ..Shape::UNREAD
@@ -3149,13 +3175,13 @@ mod tests {
     fn a_cell_numbers_each_thing_added_once_however_many_solids_it_became() {
         let wall = tile(TileFlags::NO_SHOOT, 20);
         let corner = Shape {
-            facing: Some(Facing::Corner {
+            facing:    Some(Facing::Corner {
                 right: Face::East,
-                left: Face::South,
+                left:  Face::South,
             }),
-            hole: None,
-            prism: None,
-            blocks: crate::facing::Blocks::EMPTY,
+            hole:      None,
+            prism:     None,
+            blocks:    crate::facing::Blocks::EMPTY,
             footprint: None,
         };
         let (lower, upper) = (Graphic(0x0006), Graphic(0x0007));
@@ -3313,10 +3339,10 @@ mod tests {
         assert_eq!(
             occlusion.at(102, 103),
             Some(Cell {
-                bottom: 5,
-                top: 25,
+                bottom:  5,
+                top:     25,
                 opacity: OPAQUE,
-                edges: Edges::ANY,
+                edges:   Edges::ANY,
             })
         );
         assert_eq!(occlusion.at(103, 103), None, "its neighbour is open ground");
@@ -3332,11 +3358,14 @@ mod tests {
     /// side of it. Before this every corner in the world was `Edges::ANY`.
     #[test]
     fn a_corner_stands_on_the_two_sides_its_art_named() {
-        use crate::facing::{Face, Facing};
+        use crate::facing::{
+            Face,
+            Facing,
+        };
 
         let corner = Facing::Corner {
             right: Face::East,
-            left: Face::South,
+            left:  Face::South,
         };
         assert_eq!(edges_of(Some(corner)), Edges::EAST | Edges::SOUTH);
         // And each of the four pairings, so that a mask built from the right
@@ -3344,7 +3373,7 @@ mod tests {
         assert_eq!(
             edges_of(Some(Facing::Corner {
                 right: Face::North,
-                left: Face::West
+                left:  Face::West,
             })),
             Edges::NORTH | Edges::WEST,
         );
@@ -3453,17 +3482,20 @@ mod tests {
     /// half it belonged to.
     #[test]
     fn only_a_named_panel_carries_a_hole() {
-        use crate::facing::{Face, Facing};
+        use crate::facing::{
+            Face,
+            Facing,
+        };
 
         // Measured off the picture, so it is a height above the static's base
         // and a fraction along its own run — and the static that keeps it stands
         // at `z = 0` on the tile at `x = 100`, which is what the placement below
         // adds.
         let hole = Hole {
-            near: 64,
-            far: 191,
+            near:   64,
+            far:    191,
             bottom: 0,
-            top: 10,
+            top:    10,
         };
         let placed = Aperture::placed(0, 100, hole);
         let wall = tile(TileFlags::NO_SHOOT, 20);
@@ -3476,10 +3508,10 @@ mod tests {
             NOT_A_DOOR,
             &wall,
             Shape {
-                facing: Some(Facing::One(Face::South)),
-                hole: Some(hole),
-                prism: None,
-                blocks: crate::facing::Blocks::EMPTY,
+                facing:    Some(Facing::One(Face::South)),
+                hole:      Some(hole),
+                prism:     None,
+                blocks:    crate::facing::Blocks::EMPTY,
                 footprint: None,
             },
         );
@@ -3491,10 +3523,10 @@ mod tests {
             NOT_A_DOOR,
             &wall,
             Shape {
-                facing: None,
-                hole: Some(hole),
-                prism: None,
-                blocks: crate::facing::Blocks::EMPTY,
+                facing:    None,
+                hole:      Some(hole),
+                prism:     None,
+                blocks:    crate::facing::Blocks::EMPTY,
                 footprint: None,
             },
         );
@@ -3506,10 +3538,10 @@ mod tests {
             NOT_A_DOOR,
             &tile(TileFlags::NO_SHOOT | TileFlags::FLOOR, 0),
             Shape {
-                facing: Some(Facing::One(Face::South)),
-                hole: Some(hole),
-                prism: None,
-                blocks: crate::facing::Blocks::EMPTY,
+                facing:    Some(Facing::One(Face::South)),
+                hole:      Some(hole),
+                prism:     None,
+                blocks:    crate::facing::Blocks::EMPTY,
                 footprint: None,
             },
         );
@@ -3521,13 +3553,13 @@ mod tests {
             NOT_A_DOOR,
             &wall,
             Shape {
-                facing: Some(Facing::Corner {
+                facing:    Some(Facing::Corner {
                     right: Face::East,
-                    left: Face::South,
+                    left:  Face::South,
                 }),
-                hole: Some(hole),
-                prism: None,
-                blocks: crate::facing::Blocks::EMPTY,
+                hole:      Some(hole),
+                prism:     None,
+                blocks:    crate::facing::Blocks::EMPTY,
                 footprint: None,
             },
         );
@@ -3586,7 +3618,10 @@ mod tests {
     /// own whole units, with nothing clamped on the way.
     #[test]
     fn a_hole_is_uploaded_at_its_own_surface_s_index() {
-        use crate::facing::{Face, Facing};
+        use crate::facing::{
+            Face,
+            Facing,
+        };
 
         let wall = tile(TileFlags::NO_SHOOT, 20);
         let mut occlusion = Builder::new(bounds());
@@ -3607,20 +3642,20 @@ mod tests {
             NOT_A_DOOR,
             &wall,
             Shape {
-                facing: Some(Facing::One(Face::East)),
+                facing:    Some(Facing::One(Face::East)),
                 // Measured a `z` above the picture's base and a nine, on a
                 // static standing at five — so the bytes below are the placed
                 // rectangle and not the measured one. A conversion that had
                 // dropped the base would pass every test that stood its walls on
                 // the ground.
-                hole: Some(Hole {
-                    near: 64,
-                    far: 191,
+                hole:      Some(Hole {
+                    near:   64,
+                    far:    191,
                     bottom: 1,
-                    top: 9,
+                    top:    9,
                 }),
-                prism: None,
-                blocks: crate::facing::Blocks::EMPTY,
+                prism:     None,
+                blocks:    crate::facing::Blocks::EMPTY,
                 footprint: None,
             },
         );
@@ -3687,7 +3722,10 @@ mod tests {
     /// the test: `Builder::add` takes an `i8` because the map does.
     #[test]
     fn a_hole_above_the_map_s_own_ceiling_is_not_clamped_on_the_wire() {
-        use crate::facing::{Face, Facing};
+        use crate::facing::{
+            Face,
+            Facing,
+        };
 
         let mut occlusion = Builder::new(bounds());
         occlusion.add(
@@ -3697,15 +3735,15 @@ mod tests {
             NOT_A_DOOR,
             &tile(TileFlags::NO_SHOOT, 20),
             Shape {
-                facing: Some(Facing::One(Face::South)),
-                hole: Some(Hole {
-                    near: 0,
-                    far: 255,
+                facing:    Some(Facing::One(Face::South)),
+                hole:      Some(Hole {
+                    near:   0,
+                    far:    255,
                     bottom: 5,
-                    top: 20,
+                    top:    20,
                 }),
-                prism: None,
-                blocks: crate::facing::Blocks::EMPTY,
+                prism:     None,
+                blocks:    crate::facing::Blocks::EMPTY,
                 footprint: None,
             },
         );
@@ -3752,7 +3790,10 @@ mod tests {
     /// world only.
     #[test]
     fn every_solid_comes_back_off_the_wire_where_it_was_put() {
-        use crate::facing::{Face, Prism};
+        use crate::facing::{
+            Face,
+            Prism,
+        };
 
         let stair = StaticTile {
             flags: TileFlags::new(TileFlags::NO_SHOOT | TileFlags::CLIMBABLE),
@@ -3846,7 +3887,11 @@ mod tests {
     /// `Builder::add`, and `docs/lighting.md`'s backlog.
     #[test]
     fn a_stair_is_one_body_per_tread_and_each_ones_height_comes_off_the_art() {
-        use crate::facing::{Face, Facing, Prism};
+        use crate::facing::{
+            Face,
+            Facing,
+            Prism,
+        };
 
         let stair = tile(TileFlags::NO_SHOOT | TileFlags::CLIMBABLE, 20);
         let read_as = |shape| {
@@ -3920,7 +3965,7 @@ mod tests {
         // way, because `calc_height` halves it before either branch sees it.
         let corner = read_as(Shape::faced(Facing::Corner {
             right: Face::East,
-            left: Face::South,
+            left:  Face::South,
         }));
         assert_eq!(corner.len(), 1, "one whole-tile body, not two panels");
         assert_eq!(corner[0].edges, Edges::ANY, "a body, not a named-edge panel");
@@ -3953,7 +3998,10 @@ mod tests {
     /// shape and the occluding shape are two shapes again.
     #[test]
     fn a_flight_draws_its_own_solids_in_the_grid_s_own_order() {
-        use crate::facing::{Face, Prism};
+        use crate::facing::{
+            Face,
+            Prism,
+        };
 
         let stair = tile(TileFlags::NO_SHOOT | TileFlags::CLIMBABLE, 20);
         for up in [Face::North, Face::East, Face::South, Face::West] {
@@ -4014,7 +4062,7 @@ mod tests {
         use crate::camera::WorldSpot;
 
         let plane = Solid {
-            space: crate::solid::Solid {
+            space:    crate::solid::Solid {
                 min: WorldSpot {
                     x: 100.0 + 1.0 / 3.0,
                     y: 100.0,
@@ -4026,12 +4074,12 @@ mod tests {
                     z: 3.0,
                 },
             },
-            opacity: OPAQUE,
-            edges: opposite(edge_of(crate::facing::Face::West)),
+            opacity:  OPAQUE,
+            edges:    opposite(edge_of(crate::facing::Face::West)),
             aperture: None,
-            roof: false,
-            owner: Owner::new(1, Graphic(0)),
-            part: Part::ONLY,
+            roof:     false,
+            owner:    Owner::new(1, Graphic(0)),
+            part:     Part::ONLY,
         };
         assert_eq!(
             plane.footprint(),
@@ -4085,10 +4133,10 @@ mod tests {
         assert_eq!(
             occlusion.at(105, 105),
             Some(Cell {
-                bottom: 0,
-                top: 60,
+                bottom:  0,
+                top:     60,
                 opacity: OPAQUE,
-                edges: Edges::ANY,
+                edges:   Edges::ANY,
             }),
             "the merged view is what it always was",
         );
@@ -4110,7 +4158,10 @@ mod tests {
     /// is pierced. See `light::walk_cells`.
     #[test]
     fn a_lid_and_a_panel_on_one_tile_are_not_one_surface() {
-        use crate::facing::{Face, Facing};
+        use crate::facing::{
+            Face,
+            Facing,
+        };
 
         let mut occlusion = Builder::new(bounds());
         // A wall on the south side of its tile, twenty `z` tall.
@@ -4149,10 +4200,10 @@ mod tests {
         assert_eq!(
             occlusion.at(104, 104),
             Some(Cell {
-                bottom: 0,
-                top: 20,
+                bottom:  0,
+                top:     20,
                 opacity: OPAQUE,
-                edges: Edges::SOUTH,
+                edges:   Edges::SOUTH,
             }),
         );
     }
@@ -4185,7 +4236,10 @@ mod tests {
     /// already is the picture.
     #[test]
     fn a_panel_lies_in_the_plane_its_face_pixels_lie_on() {
-        use crate::facing::{Face, Facing};
+        use crate::facing::{
+            Face,
+            Facing,
+        };
 
         let (x, y) = (1500, 1600);
         for face in [Face::North, Face::East, Face::South, Face::West] {
@@ -4360,7 +4414,10 @@ mod tests {
     /// hand: how many tiles hold how many surfaces.
     #[test]
     fn the_histogram_counts_tiles_and_not_surfaces() {
-        use crate::facing::{Face, Facing};
+        use crate::facing::{
+            Face,
+            Facing,
+        };
 
         let mut occlusion = Builder::new(bounds());
         occlusion.add(
@@ -4379,7 +4436,7 @@ mod tests {
             &tile(TileFlags::NO_SHOOT, 20),
             Shape::faced(Facing::Corner {
                 right: Face::East,
-                left: Face::South,
+                left:  Face::South,
             }),
         );
         let histogram = occlusion.finish(&Cutaway::OPEN).histogram();
@@ -4526,17 +4583,19 @@ mod tests {
             min_y: 5,
             max_y: 5,
         };
-        let raw = |low: f64, high: f64| crate::solid::Solid {
-            min: crate::camera::WorldSpot {
-                x: 5.0,
-                y: 5.0,
-                z: low,
-            },
-            max: crate::camera::WorldSpot {
-                x: 6.0,
-                y: 6.0,
-                z: high,
-            },
+        let raw = |low: f64, high: f64| {
+            crate::solid::Solid {
+                min: crate::camera::WorldSpot {
+                    x: 5.0,
+                    y: 5.0,
+                    z: low,
+                },
+                max: crate::camera::WorldSpot {
+                    x: 6.0,
+                    y: 6.0,
+                    z: high,
+                },
+            }
         };
         let mut builder = Builder::new(bounds);
         // Four distinct owners, so the four boxes are four occluders of the cell
@@ -4631,11 +4690,13 @@ mod tests {
             let leaf = word(base + 28);
             match node.leaf {
                 None => assert_eq!(leaf & 7, 0, "node {at} is inner and names no primitives"),
-                Some(run) => assert_eq!(
-                    (leaf >> 3, leaf & 7),
-                    (run.first.position(), run.count.as_u32()),
-                    "node {at}'s own run"
-                ),
+                Some(run) => {
+                    assert_eq!(
+                        (leaf >> 3, leaf & 7),
+                        (run.first.position(), run.count.as_u32()),
+                        "node {at}'s own run"
+                    )
+                }
             }
         }
 
@@ -4703,20 +4764,20 @@ mod tests {
                     102,
                     200,
                     Cell {
-                        bottom: 0,
-                        top: 20,
+                        bottom:  0,
+                        top:     20,
                         opacity: OPAQUE,
-                        edges: Edges::ANY,
+                        edges:   Edges::ANY,
                     }
                 ),
                 (
                     100,
                     201,
                     Cell {
-                        bottom: 5,
-                        top: 15,
+                        bottom:  5,
+                        top:     15,
                         opacity: PANE,
-                        edges: Edges::ANY,
+                        edges:   Edges::ANY,
                     }
                 ),
             ],
@@ -4810,9 +4871,11 @@ mod tests {
     /// daylight into every building they enter.
     #[test]
     fn the_cutaway_takes_a_roof_from_the_eye_and_not_from_the_sky() {
-        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: openshard_tiles::LandTileId(0),
-            z: 0,
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: openshard_tiles::LandTileId(0),
+                z:    0,
+            }
         });
         let graphic = Graphic(0x000A);
         let mut tiledata = TileData::empty();
@@ -4821,11 +4884,13 @@ mod tests {
         // nine of the tiles the blur reads.
         let items: Vec<GroundItem> = (2..=6u16)
             .flat_map(|x| {
-                (2..=6u16).map(move |y| GroundItem {
-                    amount: ItemAmount::ONE,
-                    at: Point::new(x, y, 20),
-                    graphic,
-                    hue: Hue::NONE,
+                (2..=6u16).map(move |y| {
+                    GroundItem {
+                        amount: ItemAmount::ONE,
+                        at: Point::new(x, y, 20),
+                        graphic,
+                        hue: Hue::NONE,
+                    }
                 })
             })
             .collect();
@@ -4882,9 +4947,11 @@ mod tests {
     /// picture is worse than the light leaking.
     #[test]
     fn a_hidden_wall_occludes_nothing() {
-        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: openshard_tiles::LandTileId(0),
-            z: 0,
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| {
+            LandCell {
+                tile: openshard_tiles::LandTileId(0),
+                z:    0,
+            }
         });
         let graphic = Graphic(0x0006);
         let mut tiledata = TileData::empty();
@@ -5115,12 +5182,14 @@ mod tests {
         .expect("a screen of statics fits");
         let bounds = crate::light::lit_tiles(&camera, &crate::light::Tuning::DEFAULT);
 
-        let shape = |graphic: Graphic| Shape {
-            facing: atlas.sprite(graphic).and_then(|s| s.facing),
-            hole: atlas.hole(graphic),
-            prism: None,
-            blocks: crate::facing::Blocks::EMPTY,
-            footprint: None,
+        let shape = |graphic: Graphic| {
+            Shape {
+                facing:    atlas.sprite(graphic).and_then(|s| s.facing),
+                hole:      atlas.hole(graphic),
+                prism:     None,
+                blocks:    crate::facing::Blocks::EMPTY,
+                footprint: None,
+            }
         };
         let floor = |x: u16, y: u16| map.land(x, y).map_or(0, |cell| cell.z);
 

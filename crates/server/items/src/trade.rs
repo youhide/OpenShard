@@ -31,8 +31,12 @@
 //! tick over a list that is almost always empty instead, the shape
 //! `tick/regions.rs` and `tick/status.rs` use.
 
+use openshard_state::{
+    Trade,
+    TradeSide,
+};
+
 use super::*;
-use openshard_state::{Trade, TradeSide};
 
 /// How near, in tiles, the two parties must be — to open a trade and to keep
 /// one. ServUO's `InRange(Location, 2)`, which is *tighter* than [`ITEM_REACH`]:
@@ -199,19 +203,19 @@ pub fn offer(state: &mut WorldState, connection: ConnectionId, held: HeldItem, t
         return;
     };
     state.trades.push(Trade {
-        from: TradeSide {
+        from:      TradeSide {
             player,
             connection,
             container: mine.0,
             container_serial: mine.1,
             accepted: false,
         },
-        to: TradeSide {
-            player: target,
-            connection: partner_connection,
-            container: theirs.0,
+        to:        TradeSide {
+            player:           target,
+            connection:       partner_connection,
+            container:        theirs.0,
             container_serial: theirs.1,
-            accepted: false,
+            accepted:         false,
         },
         witnessed: Vec::new(),
     });
@@ -389,8 +393,8 @@ fn hand_over(state: &mut WorldState, items: &[EntityId], receiver: EntityId) {
             let grid = item_count(state, pack);
             let contained = Contained {
                 container: pack,
-                position: GumpPoint::new(0, 0),
-                grid: GridSlot(grid),
+                position:  GumpPoint::new(0, 0),
+                grid:      GridSlot(grid),
             };
             relocate_item(state, item, ItemLocation::contained(contained))
                 .expect("settled trade goods have one receiver-pack parent");

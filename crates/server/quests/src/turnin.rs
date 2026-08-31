@@ -1,14 +1,24 @@
 //! Finishing a quest: is it done, take what it asked for, pay what it promised.
 
 use openshard_entities::EntityId;
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_state::WorldState;
 use openshard_state::components::QuestLog;
-use openshard_state::quest::{ObjectiveKind, QuestKey, RewardKind};
+use openshard_state::quest::{
+    ObjectiveKind,
+    QuestKey,
+    RewardKind,
+};
 
 use crate::events::QuestCompleted;
-use crate::gump::{self, sound};
+use crate::gump::{
+    self,
+    sound,
+};
 use crate::offer;
-use openshard_protocol::wire::{Graphic, Hue};
 
 /// Whether every objective a quest needs has been met.
 ///
@@ -117,14 +127,16 @@ pub fn complete(state: &mut WorldState, player: EntityId, key: &QuestKey) -> boo
     if let Some(reward_container) = reward_container {
         for reward in &quest.rewards {
             rewards_complete &= match reward.kind {
-                RewardKind::Gold(amount) => openshard_items::give(
-                    state,
-                    reward_container,
-                    openshard_items::GOLD_GRAPHIC,
-                    Hue(0),
-                    amount,
-                )
-                .is_complete(),
+                RewardKind::Gold(amount) => {
+                    openshard_items::give(
+                        state,
+                        reward_container,
+                        openshard_items::GOLD_GRAPHIC,
+                        Hue(0),
+                        amount,
+                    )
+                    .is_complete()
+                }
                 RewardKind::Item {
                     graphic,
                     hue,

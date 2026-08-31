@@ -5,16 +5,34 @@
 //! command that pays the full-facet bake once.
 
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufWriter, Read, Write};
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::fs::{
+    self,
+    File,
+    OpenOptions,
+};
+use std::io::{
+    self,
+    BufWriter,
+    Read,
+    Write,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
+use std::time::{
+    SystemTime,
+    UNIX_EPOCH,
+};
 
 use openshard_client_render::interiors::BuildingMap;
 use openshard_map::snapshot::MapRevision;
 use openshard_protocol::world::Facet;
 
-use crate::{LoadError, load};
+use crate::{
+    LoadError,
+    load,
+};
 
 const MAGIC: &[u8; 8] = b"OSINT\0\r\n";
 const FORMAT: u32 = 2;
@@ -25,18 +43,18 @@ const FNV_PRIME: u64 = 0x100000001b3;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InputStamp {
-    name: String,
-    bytes: u64,
+    name:        String,
+    bytes:       u64,
     modified_ns: u128,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Stamp {
-    facet: Facet,
+    facet:            Facet,
     /// The immutable world revision the flood was run over.
-    revision: MapRevision,
+    revision:         MapRevision,
     topology_version: u32,
-    inputs: Vec<InputStamp>,
+    inputs:           Vec<InputStamp>,
 }
 
 #[derive(Debug)]
@@ -46,7 +64,7 @@ pub enum Error {
         path: PathBuf,
     },
     Io {
-        path: PathBuf,
+        path:   PathBuf,
         source: io::Error,
     },
     /// The facet could not be read from the source it was named from — the
@@ -55,19 +73,19 @@ pub enum Error {
         source: openshard_movement::bake::SourceError,
     },
     TileData {
-        path: PathBuf,
+        path:   PathBuf,
         source: openshard_uofiles::tiledata::TileDataError,
     },
     Incompatible {
-        path: PathBuf,
+        path:   PathBuf,
         reason: String,
     },
     Stale {
-        path: PathBuf,
+        path:   PathBuf,
         reason: String,
     },
     Corrupt {
-        path: PathBuf,
+        path:   PathBuf,
         reason: String,
     },
 }
@@ -144,12 +162,14 @@ pub fn stamp_of(
         (format!("art-table: {}", table.display()), table),
     ];
     let inputs_at: Vec<(String, PathBuf)> = match &world.base_set {
-        Some(base_set) => [Some(base_set.clone()), world.log.clone()]
-            .into_iter()
-            .flatten()
-            .map(|path| (openshard_movement::bake::file_name_of(&path), path))
-            .chain(shared)
-            .collect(),
+        Some(base_set) => {
+            [Some(base_set.clone()), world.log.clone()]
+                .into_iter()
+                .flatten()
+                .map(|path| (openshard_movement::bake::file_name_of(&path), path))
+                .chain(shared)
+                .collect()
+        }
         None => {
             let uop_name = format!("map{}LegacyMUL.uop", facet.0);
             let map_name = if client_dir.join(&uop_name).exists() {
@@ -247,7 +267,7 @@ pub fn build(
 pub fn save(path: &Path, graph: &BuildingMap, stamp: &Stamp) -> Result<u64, Error> {
     if stamp.topology_version != TOPOLOGY_VERSION {
         return Err(Error::Incompatible {
-            path: path.into(),
+            path:   path.into(),
             reason: "writer received an old topology stamp".into(),
         });
     }
@@ -471,21 +491,21 @@ fn hash_continue(mut hash: u64, bytes: &[u8]) -> u64 {
 
 fn corrupt(path: &Path, reason: impl Into<String>) -> Error {
     Error::Corrupt {
-        path: path.into(),
+        path:   path.into(),
         reason: reason.into(),
     }
 }
 
 fn incompatible(path: &Path, reason: impl Into<String>) -> Error {
     Error::Incompatible {
-        path: path.into(),
+        path:   path.into(),
         reason: reason.into(),
     }
 }
 
 fn stale(path: &Path, reason: impl Into<String>) -> Error {
     Error::Stale {
-        path: path.into(),
+        path:   path.into(),
         reason: reason.into(),
     }
 }
@@ -516,12 +536,12 @@ mod tests {
     fn a_baked_building_map_round_trips_with_its_stamp() {
         let graph = BuildingMap::from_labels(3, 2, vec![0, 4, 4, 0, 4, 0]).expect("matching labels");
         let stamp = Stamp {
-            facet: Facet(0),
-            revision: MapRevision::INITIAL,
+            facet:            Facet(0),
+            revision:         MapRevision::INITIAL,
             topology_version: TOPOLOGY_VERSION,
-            inputs: vec![InputStamp {
-                name: "map0.mul".into(),
-                bytes: 42,
+            inputs:           vec![InputStamp {
+                name:        "map0.mul".into(),
+                bytes:       42,
                 modified_ns: 99,
             }],
         };

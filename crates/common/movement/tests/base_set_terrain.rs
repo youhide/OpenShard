@@ -27,8 +27,14 @@ use std::path::PathBuf;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::Doors;
 use openshard_movement::spans::SpanIndex;
-use openshard_movement::{Footing, MapTerrain};
-use openshard_protocol::world::{Facet, Point};
+use openshard_movement::{
+    Footing,
+    MapTerrain,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 
 /// The client directory, or `None` to skip.
 fn client_dir() -> Option<PathBuf> {
@@ -47,12 +53,12 @@ const STRIDE: usize = 31;
 /// What every question was asked about, so a green run cannot be an empty one.
 #[derive(Default)]
 struct Counts {
-    tiles: u64,
+    tiles:         u64,
     /// Steps the terrain allowed — a run where everything is refused would
     /// agree perfectly and prove nothing.
-    steps_taken: u64,
+    steps_taken:   u64,
     /// Tiles with something standing on them.
-    statics: u64,
+    statics:       u64,
     /// Looks the terrain blocked, for the same reason as `steps_taken`.
     sight_blocked: u64,
 }

@@ -25,7 +25,11 @@
 //! [`FIXED_LAYERS`] names the layers nothing may be lifted from — ServUO's
 //! `Movable = false` on the same items.
 
-use openshard_protocol::wire::{Graphic, Hue, Layer};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
 use openshard_state::rng::Rng;
 
 /// Layer `0x03`, UO `Layer.Shoes`.
@@ -107,11 +111,11 @@ impl ShoeType {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Appearance {
     /// The human body graphic, [`BODY_MALE`] or [`BODY_FEMALE`].
-    pub body: Graphic,
+    pub body:      Graphic,
     /// The skin hue.
-    pub hue: Hue,
+    pub hue:       Hue,
     /// Whether it came out female — the pack needs it to pick a name list.
-    pub female: bool,
+    pub female:    bool,
     /// Everything worn, `(graphic, layer, hue)`, in the order `spawn` equips it.
     pub equipment: Vec<(Graphic, Layer, Hue)>,
 }
@@ -244,8 +248,9 @@ fn random_facial_hair(rng: &mut Rng) -> Graphic {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashSet;
+
+    use super::*;
 
     #[test]
     fn the_same_seed_dresses_the_same_townsperson() {

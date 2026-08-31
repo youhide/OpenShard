@@ -14,7 +14,7 @@ use std::num::NonZeroU32;
 /// [`crate::Serial`] for the identity that appears on the wire.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EntityId {
-    index: u32,
+    index:      u32,
     generation: NonZeroU32,
 }
 
@@ -64,10 +64,12 @@ impl EntityId {
     #[inline]
     pub const fn from_bits(bits: u64) -> Option<Self> {
         match NonZeroU32::new((bits >> 32) as u32) {
-            Some(generation) => Some(Self {
-                index: bits as u32,
-                generation,
-            }),
+            Some(generation) => {
+                Some(Self {
+                    index: bits as u32,
+                    generation,
+                })
+            }
             None => None,
         }
     }
@@ -91,10 +93,10 @@ pub(crate) struct EntityAllocator {
     /// Current generation of each slot. Parallel to `alive`.
     generations: Vec<NonZeroU32>,
     /// Whether each slot is currently occupied.
-    alive: Vec<bool>,
+    alive:       Vec<bool>,
     /// Slots that can be recycled.
-    free: Vec<EntitySlot>,
-    live_count: usize,
+    free:        Vec<EntitySlot>,
+    live_count:  usize,
 }
 
 /// The first generation handed out for a slot.

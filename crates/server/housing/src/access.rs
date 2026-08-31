@@ -1,10 +1,9 @@
 //! House access-list rules: co-owners, friends, and bans.
 
 use openshard_protocol::serial::Serial;
-use openshard_state::components::House;
-
 /// Where somebody stands with a house.
 pub use openshard_state::Standing;
+use openshard_state::components::House;
 
 /// Maximum number of co-owners.
 pub const MAX_CO_OWNERS: usize = 15;

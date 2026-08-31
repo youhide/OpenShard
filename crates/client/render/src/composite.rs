@@ -13,15 +13,31 @@
 //! asynchronously and a visible block can be drawn without rebuilding its
 //! constituent ground/static quads.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::time::{Duration, Instant};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_map::grid::BlockCoord;
 use openshard_map::map::BLOCK_SIZE;
 
 use crate::blit::WORLD_FORMAT;
-use crate::camera::{Camera, TILE_HEIGHT, TILE_WIDTH, TileBounds, WorldPixel, project};
-use crate::chunk_cache::{LruBudget, WorkQueue};
+use crate::camera::{
+    Camera,
+    TILE_HEIGHT,
+    TILE_WIDTH,
+    TileBounds,
+    WorldPixel,
+    project,
+};
+use crate::chunk_cache::{
+    LruBudget,
+    WorkQueue,
+};
 use crate::geometry::Rect;
 use crate::lod::BlockLod;
 
@@ -46,7 +62,7 @@ pub const COMPOSITE_SOURCE_SIDE: u32 = BLOCK_SIZE * TILE_WIDTH as u32;
 /// later restore rectangle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FlatGroundBlock {
-    block: BlockCoord,
+    block:     BlockCoord,
     elevation: i8,
 }
 
@@ -111,7 +127,7 @@ impl FlatGroundBlock {
 /// than from differently cropped camera frames.
 #[derive(Clone, Copy, Debug)]
 pub struct CompositeProducerJob {
-    key: CompositeKey,
+    key:    CompositeKey,
     camera: Camera,
     ground: FlatGroundBlock,
 }
@@ -170,7 +186,7 @@ impl CompositeProducerJob {
     /// Fixed source attachment dimensions. LOD1 retains this exact grid.
     pub const fn source_size(self) -> CompositeSize {
         CompositeSize {
-            width: COMPOSITE_SOURCE_SIDE,
+            width:  COMPOSITE_SOURCE_SIDE,
             height: COMPOSITE_SOURCE_SIDE,
         }
     }
@@ -190,9 +206,9 @@ impl CompositeProducerJob {
         ));
         let side = COMPOSITE_SOURCE_SIDE as f32;
         Rect {
-            x: top.x as f32 - side / 2.0,
-            y: top.y as f32 - TILE_WIDTH as f32 / 2.0,
-            width: side,
+            x:      top.x as f32 - side / 2.0,
+            y:      top.y as f32 - TILE_WIDTH as f32 / 2.0,
+            width:  side,
             height: side,
         }
     }
@@ -377,9 +393,9 @@ pub struct ImmutableRevision(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CompositeKey {
     /// The map block pictured by the texture.
-    pub block: BlockCoord,
+    pub block:    BlockCoord,
     /// The cache's intentional sampling resolution.
-    pub tier: CompositeTier,
+    pub tier:     CompositeTier,
     /// Immutable source revision used to produce its pixels.
     pub revision: ImmutableRevision,
 }
@@ -400,8 +416,8 @@ pub enum CompositeQuarantineReason {
 /// The compact immutable owner record retained for a quarantined block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CompositeQuarantine {
-    pub block: BlockCoord,
-    pub key: CompositeKey,
+    pub block:  BlockCoord,
+    pub key:    CompositeKey,
     pub ground: Option<FlatGroundBlock>,
     pub reason: CompositeQuarantineReason,
 }
@@ -410,7 +426,7 @@ pub struct CompositeQuarantine {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CompositeSize {
     /// Width in texels.
-    pub width: u32,
+    pub width:  u32,
     /// Height in texels.
     pub height: u32,
 }
@@ -438,7 +454,7 @@ impl CompositeSize {
         // ceil(source / divisor), preserving the right/bottom edge.
         let side = source.div_ceil(divisor);
         Self {
-            width: side,
+            width:  side,
             height: side,
         }
     }
@@ -458,8 +474,8 @@ impl CompositeSize {
 /// failed or partial worker result from becoming a drawable cache entry.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompositePixels {
-    size: CompositeSize,
-    rgba: Vec<u8>,
+    size:     CompositeSize,
+    rgba:     Vec<u8>,
     /// The cache starts colour-only while Work 2 is being built.  A composite
     /// is eligible to replace map geometry only once its producer supplied the
     /// deferred planes below; otherwise using it would leave dynamic sprites
@@ -479,10 +495,10 @@ pub struct CompositePixels {
 /// fragment depth.  This is deliberately source data, not a lossy screenshot.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeferredPixels {
-    ids: Vec<u32>,
-    position: Vec<f32>,
-    normal: Vec<u32>,
-    depth: Vec<f32>,
+    ids:        Vec<u32>,
+    position:   Vec<f32>,
+    normal:     Vec<u32>,
+    depth:      Vec<f32>,
     depth_base: i32,
 }
 
@@ -570,18 +586,18 @@ impl CompositePixels {
 /// A GPU-resident cached composite.
 #[derive(Debug)]
 pub struct CompositeTexture {
-    key: CompositeKey,
+    key:        CompositeKey,
     /// The source contract carried through producer and restore unchanged.
-    ground: FlatGroundBlock,
+    ground:     FlatGroundBlock,
     /// CPU pixels are retained for worker-produced entries.  GPU captures do
     /// not read the image back merely to upload it again, so they have no CPU
     /// copy here.
-    pixels: Option<CompositePixels>,
-    size: CompositeSize,
+    pixels:     Option<CompositePixels>,
+    size:       CompositeSize,
     depth_base: i32,
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    deferred: DeferredTextures,
+    texture:    wgpu::Texture,
+    view:       wgpu::TextureView,
+    deferred:   DeferredTextures,
 }
 
 /// GPU planes for a completed deferred composite.  Keeping the owning textures
@@ -589,14 +605,14 @@ pub struct CompositeTexture {
 /// bind group with dangling sources.
 #[derive(Debug)]
 struct DeferredTextures {
-    _ids: wgpu::Texture,
-    ids_view: wgpu::TextureView,
-    _position: wgpu::Texture,
+    _ids:          wgpu::Texture,
+    ids_view:      wgpu::TextureView,
+    _position:     wgpu::Texture,
     position_view: wgpu::TextureView,
-    _normal: wgpu::Texture,
-    normal_view: wgpu::TextureView,
-    _depth: wgpu::Texture,
-    depth_view: wgpu::TextureView,
+    _normal:       wgpu::Texture,
+    normal_view:   wgpu::TextureView,
+    _depth:        wgpu::Texture,
+    depth_view:    wgpu::TextureView,
 }
 
 impl CompositeTexture {
@@ -607,35 +623,35 @@ impl CompositeTexture {
             .expect("only a completed deferred result can enter the GPU cache");
         let depth_base = planes.depth_base();
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("map block composite"),
-            size: wgpu::Extent3d {
-                width: size.width,
-                height: size.height,
+            label:           Some("map block composite"),
+            size:            wgpu::Extent3d {
+                width:                 size.width,
+                height:                size.height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: WORLD_FORMAT,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
+            sample_count:    1,
+            dimension:       wgpu::TextureDimension::D2,
+            format:          WORLD_FORMAT,
+            usage:           wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats:    &[],
         });
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
-                texture: &texture,
+                texture:   &texture,
                 mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
+                origin:    wgpu::Origin3d::ZERO,
+                aspect:    wgpu::TextureAspect::All,
             },
             pixels.rgba(),
             wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * size.width),
+                offset:         0,
+                bytes_per_row:  Some(4 * size.width),
                 rows_per_image: Some(size.height),
             },
             wgpu::Extent3d {
-                width: size.width,
-                height: size.height,
+                width:                 size.width,
+                height:                size.height,
                 depth_or_array_layers: 1,
             },
         );
@@ -670,20 +686,20 @@ impl CompositeTexture {
             "a captured texture must retain the producer's own ground block"
         );
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("captured map block composite"),
-            size: wgpu::Extent3d {
-                width: size.width,
-                height: size.height,
+            label:           Some("captured map block composite"),
+            size:            wgpu::Extent3d {
+                width:                 size.width,
+                height:                size.height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: WORLD_FORMAT,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
+            sample_count:    1,
+            dimension:       wgpu::TextureDimension::D2,
+            format:          WORLD_FORMAT,
+            usage:           wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
+            view_formats:    &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         Self {
@@ -786,8 +802,8 @@ impl DeferredTextures {
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
                 size: wgpu::Extent3d {
-                    width: size.width,
-                    height: size.height,
+                    width:                 size.width,
+                    height:                size.height,
                     depth_or_array_layers: 1,
                 },
                 mip_level_count: 1,
@@ -812,13 +828,13 @@ impl DeferredTextures {
                 },
                 bytes,
                 wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(size.width * bytes_per_texel),
+                    offset:         0,
+                    bytes_per_row:  Some(size.width * bytes_per_texel),
                     rows_per_image: Some(size.height),
                 },
                 wgpu::Extent3d {
-                    width: size.width,
-                    height: size.height,
+                    width:                 size.width,
+                    height:                size.height,
                     depth_or_array_layers: 1,
                 },
             );
@@ -840,14 +856,14 @@ impl DeferredTextures {
         write(&normal, &words(planes.normal()), 4);
         write(&depth, &floats(planes.depth()), 4);
         Self {
-            ids_view: ids.create_view(&wgpu::TextureViewDescriptor::default()),
-            _ids: ids,
+            ids_view:      ids.create_view(&wgpu::TextureViewDescriptor::default()),
+            _ids:          ids,
             position_view: position.create_view(&wgpu::TextureViewDescriptor::default()),
-            _position: position,
-            normal_view: normal.create_view(&wgpu::TextureViewDescriptor::default()),
-            _normal: normal,
-            depth_view: depth.create_view(&wgpu::TextureViewDescriptor::default()),
-            _depth: depth,
+            _position:     position,
+            normal_view:   normal.create_view(&wgpu::TextureViewDescriptor::default()),
+            _normal:       normal,
+            depth_view:    depth.create_view(&wgpu::TextureViewDescriptor::default()),
+            _depth:        depth,
         }
     }
 
@@ -860,8 +876,8 @@ impl DeferredTextures {
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
                 size: wgpu::Extent3d {
-                    width: size.width,
-                    height: size.height,
+                    width:                 size.width,
+                    height:                size.height,
                     depth_or_array_layers: 1,
                 },
                 mip_level_count: 1,
@@ -894,14 +910,14 @@ impl DeferredTextures {
                 | wgpu::TextureUsages::COPY_SRC,
         );
         Self {
-            ids_view: ids.create_view(&wgpu::TextureViewDescriptor::default()),
-            _ids: ids,
+            ids_view:      ids.create_view(&wgpu::TextureViewDescriptor::default()),
+            _ids:          ids,
             position_view: position.create_view(&wgpu::TextureViewDescriptor::default()),
-            _position: position,
-            normal_view: normal.create_view(&wgpu::TextureViewDescriptor::default()),
-            _normal: normal,
-            depth_view: depth.create_view(&wgpu::TextureViewDescriptor::default()),
-            _depth: depth,
+            _position:     position,
+            normal_view:   normal.create_view(&wgpu::TextureViewDescriptor::default()),
+            _normal:       normal,
+            depth_view:    depth.create_view(&wgpu::TextureViewDescriptor::default()),
+            _depth:        depth,
         }
     }
 }
@@ -917,7 +933,7 @@ pub struct CompositeCacheLimits {
     /// Maximum bytes retained for entries outside the protected viewport
     /// margin.  Visible and near-visible entries are never evicted merely to
     /// satisfy this limit; they are the working set, not the cache tail.
-    pub max_gpu_bytes: u64,
+    pub max_gpu_bytes:          u64,
     /// Number of map blocks kept on every side of the visible rectangle.
     pub viewport_margin_blocks: u32,
 }
@@ -943,7 +959,7 @@ impl CompositeCacheLimits {
 impl Default for CompositeCacheLimits {
     fn default() -> Self {
         Self {
-            max_gpu_bytes: Self::DEFAULT_MAX_GPU_BYTES,
+            max_gpu_bytes:          Self::DEFAULT_MAX_GPU_BYTES,
             viewport_margin_blocks: Self::DEFAULT_VIEWPORT_MARGIN_BLOCKS,
         }
     }
@@ -967,14 +983,14 @@ pub struct CompositeEviction {
 /// A cache of immutable block pictures with a bounded LRU tail.
 #[derive(Debug)]
 pub struct CompositeCache {
-    entries: BTreeMap<CompositeKey, CompositeTexture>,
+    entries:           BTreeMap<CompositeKey, CompositeTexture>,
     /// Blocks the full-frame oracle has proved unsafe to restore. They stay at
     /// LOD0 for the rest of the session: a correct fallback is preferable to
     /// repeatedly rebuilding a known-bad cache image every frame.
-    rejected: BTreeMap<BlockCoord, CompositeQuarantine>,
+    rejected:          BTreeMap<BlockCoord, CompositeQuarantine>,
     latest_quarantine: Option<CompositeQuarantine>,
-    limits: CompositeCacheLimits,
-    budget: LruBudget<CompositeKey>,
+    limits:            CompositeCacheLimits,
+    budget:            LruBudget<CompositeKey>,
 }
 
 impl Default for CompositeCache {
@@ -1265,13 +1281,13 @@ impl CompositeCache {
 /// The immutable attachments captured at the map/dynamic boundary.
 #[derive(Clone, Copy, Debug)]
 pub struct CaptureSource<'a> {
-    pub color: &'a wgpu::Texture,
-    pub ids: &'a wgpu::Texture,
-    pub position: &'a wgpu::Texture,
-    pub normal: &'a wgpu::Texture,
-    pub depth: &'a wgpu::TextureView,
+    pub color:      &'a wgpu::Texture,
+    pub ids:        &'a wgpu::Texture,
+    pub position:   &'a wgpu::Texture,
+    pub normal:     &'a wgpu::Texture,
+    pub depth:      &'a wgpu::TextureView,
     pub depth_base: i32,
-    pub rect: crate::blit::ViewportRect,
+    pub rect:       crate::blit::ViewportRect,
 }
 
 /// Why one composite job is waiting.
@@ -1291,7 +1307,7 @@ pub enum CompositePriority {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CompositeWork {
     /// The immutable image to build or refresh.
-    pub key: CompositeKey,
+    pub key:      CompositeKey,
     /// Why the work was scheduled.
     pub priority: CompositePriority,
 }
@@ -1303,7 +1319,7 @@ pub struct CompositeWork {
 /// define both the producer camera and the later restore transform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PreparedCompositeWork {
-    pub work: CompositeWork,
+    pub work:   CompositeWork,
     pub ground: FlatGroundBlock,
 }
 
@@ -1311,7 +1327,7 @@ pub struct PreparedCompositeWork {
 struct QueueOrder {
     priority: CompositePriority,
     distance: u32,
-    key: CompositeKey,
+    key:      CompositeKey,
 }
 
 /// The bounded map-cell queue shared by streamed map work and composites.
@@ -1322,9 +1338,9 @@ struct QueueOrder {
 /// newly exposed large block never becomes a synchronous camera-frame build.
 #[derive(Debug)]
 pub struct CompositeWorkQueue {
-    queue: WorkQueue<CompositeKey>,
-    orders: BTreeMap<CompositeKey, QueueOrder>,
-    prepared: BTreeMap<CompositeKey, FlatGroundBlock>,
+    queue:            WorkQueue<CompositeKey>,
+    orders:           BTreeMap<CompositeKey, QueueOrder>,
+    prepared:         BTreeMap<CompositeKey, FlatGroundBlock>,
     previous_visible: Option<MapBlockBounds>,
 }
 
@@ -1338,10 +1354,10 @@ impl CompositeWorkQueue {
     /// Construct a queue with explicit pending and per-frame bounds.
     pub fn new(max_pending: usize, builds_per_frame: usize) -> Option<Self> {
         (max_pending != 0 && builds_per_frame != 0).then_some(Self {
-            queue: WorkQueue::new(max_pending, builds_per_frame)
+            queue:            WorkQueue::new(max_pending, builds_per_frame)
                 .expect("the composite wrapper has checked its limits"),
-            orders: BTreeMap::new(),
-            prepared: BTreeMap::new(),
+            orders:           BTreeMap::new(),
+            prepared:         BTreeMap::new(),
             previous_visible: None,
         })
     }
@@ -1409,9 +1425,11 @@ impl CompositeWorkQueue {
         ordered
             .into_iter()
             .take(self.queue.work_per_turn())
-            .map(|order| CompositeWork {
-                key: order.key,
-                priority: order.priority,
+            .map(|order| {
+                CompositeWork {
+                    key:      order.key,
+                    priority: order.priority,
+                }
             })
             .collect()
     }
@@ -1711,7 +1729,7 @@ pub struct CompositeQuad<'a> {
     /// has completed it; requesting or composing work does not happen here.
     pub texture: &'a CompositeTexture,
     /// The image's full screen-space rectangle in virtual target pixels.
-    pub rect: Rect,
+    pub rect:    Rect,
 }
 
 /// Draws each cached map block as one textured quad.
@@ -1755,22 +1773,22 @@ pub struct CompositeRenderer {
 /// encoding is responsible before its representation is changed.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DeferredCpuCosts {
-    pub upload: Duration,
+    pub upload:   Duration,
     pub bindings: Duration,
-    pub pass: Duration,
+    pub pass:     Duration,
 }
 
 /// Buffers held immutable by one deferred call in an encoded frame.
 #[derive(Debug)]
 struct DeferredBatch {
-    viewport: wgpu::Buffer,
+    viewport:  wgpu::Buffer,
     instances: wgpu::Buffer,
-    capacity: u64,
+    capacity:  u64,
     /// Bind groups retain their source textures. Retain only this call's
     /// visible blocks so an evicted composite image is not kept alive here.
     /// The key index keeps frame-to-frame reuse and per-draw lookup logarithmic;
     /// draw order continues to come from the caller's block slice.
-    bindings: BTreeMap<CompositeKey, wgpu::BindGroup>,
+    bindings:  BTreeMap<CompositeKey, wgpu::BindGroup>,
 }
 
 fn write_capture_uniform(
@@ -1800,39 +1818,39 @@ impl CompositeRenderer {
     /// Create the colour-only cached-composite pass.
     pub fn new(device: &wgpu::Device) -> Self {
         let viewport = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("composite viewport"),
-            size: 16,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            label:              Some("composite viewport"),
+            size:               16,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("map block composite"),
+            label:   Some("map block composite"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                    binding:    0,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding:    1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding:    2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
+                    ty:         wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count:      None,
                 },
             ],
         });
@@ -1847,188 +1865,188 @@ impl CompositeRenderer {
             ..Default::default()
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("map block composite"),
+            label:  Some("map block composite"),
             source: wgpu::ShaderSource::Wgsl(
                 include_str!(concat!(env!("OUT_DIR"), "/composite.wgsl")).into(),
             ),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("map block composite"),
+            label:              Some("map block composite"),
             bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
+            immediate_size:     0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("map block composite"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+            label:          Some("map block composite"),
+            layout:         Some(&pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
+                buffers:             &[
                     Some(wgpu::VertexBufferLayout {
                         array_stride: 8,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
+                        step_mode:    wgpu::VertexStepMode::Vertex,
+                        attributes:   &[wgpu::VertexAttribute {
+                            format:          wgpu::VertexFormat::Float32x2,
+                            offset:          0,
                             shader_location: 0,
                         }],
                     }),
                     Some(wgpu::VertexBufferLayout {
                         array_stride: 16,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x4,
-                            offset: 0,
+                        step_mode:    wgpu::VertexStepMode::Instance,
+                        attributes:   &[wgpu::VertexAttribute {
+                            format:          wgpu::VertexFormat::Float32x4,
+                            offset:          0,
                             shader_location: 1,
                         }],
                     }),
                 ],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: WORLD_FORMAT,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                targets:             &[Some(wgpu::ColorTargetState {
+                    format:     WORLD_FORMAT,
+                    blend:      Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+            primitive:      wgpu::PrimitiveState {
+                topology:           wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
+                front_face:         wgpu::FrontFace::Ccw,
+                cull_mode:          None,
+                unclipped_depth:    false,
+                polygon_mode:       wgpu::PolygonMode::Fill,
+                conservative:       false,
             },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            depth_stencil:  None,
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
         let deferred_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("map block deferred composite"),
+            label:   Some("map block deferred composite"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                    binding:    0,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding:    1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding:    2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding:    3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 4,
+                    binding:    4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 5,
+                    binding:    5,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
             ],
         });
         let deferred_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("map block deferred composite"),
+            label:  Some("map block deferred composite"),
             source: wgpu::ShaderSource::Wgsl(
                 include_str!(concat!(env!("OUT_DIR"), "/composite_deferred.wgsl")).into(),
             ),
         });
         let deferred_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("map block deferred composite"),
+            label:              Some("map block deferred composite"),
             bind_group_layouts: &[Some(&deferred_layout)],
-            immediate_size: 0,
+            immediate_size:     0,
         });
         let vertex_buffers = [
             Some(wgpu::VertexBufferLayout {
                 array_stride: 8,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &[wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: 0,
+                step_mode:    wgpu::VertexStepMode::Vertex,
+                attributes:   &[wgpu::VertexAttribute {
+                    format:          wgpu::VertexFormat::Float32x2,
+                    offset:          0,
                     shader_location: 0,
                 }],
             }),
             Some(wgpu::VertexBufferLayout {
                 array_stride: 20,
-                step_mode: wgpu::VertexStepMode::Instance,
-                attributes: &[
+                step_mode:    wgpu::VertexStepMode::Instance,
+                attributes:   &[
                     wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x4,
-                        offset: 0,
+                        format:          wgpu::VertexFormat::Float32x4,
+                        offset:          0,
                         shader_location: 1,
                     },
                     wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32,
-                        offset: 16,
+                        format:          wgpu::VertexFormat::Float32,
+                        offset:          16,
                         shader_location: 2,
                     },
                 ],
             }),
         ];
         let deferred_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("map block deferred composite"),
-            layout: Some(&deferred_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &deferred_shader,
-                entry_point: Some("vs_main"),
+            label:          Some("map block deferred composite"),
+            layout:         Some(&deferred_pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &deferred_shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &vertex_buffers,
+                buffers:             &vertex_buffers,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &deferred_shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &deferred_shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[
+                targets:             &[
                     Some(wgpu::ColorTargetState {
-                        format: WORLD_FORMAT,
-                        blend: None,
+                        format:     WORLD_FORMAT,
+                        blend:      None,
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
                     Some(crate::renderer::IDS_TARGET),
@@ -2036,198 +2054,198 @@ impl CompositeRenderer {
                     Some(crate::renderer::NORMAL_TARGET),
                 ],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+            primitive:      wgpu::PrimitiveState {
+                topology:           wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
+                front_face:         wgpu::FrontFace::Ccw,
+                cull_mode:          None,
+                unclipped_depth:    false,
+                polygon_mode:       wgpu::PolygonMode::Fill,
+                conservative:       false,
             },
-            depth_stencil: Some(crate::renderer::depth_state()),
-            multisample: wgpu::MultisampleState::default(),
+            depth_stencil:  Some(crate::renderer::depth_state()),
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
         let capture_depth_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("map composite depth capture"),
+            label:   Some("map composite depth capture"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                    binding:    0,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding:    1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Depth,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding:    2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
             ],
         });
         let capture_depth_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("map composite depth capture"),
+            label:  Some("map composite depth capture"),
             source: wgpu::ShaderSource::Wgsl(
                 include_str!(concat!(env!("OUT_DIR"), "/composite_capture_depth.wgsl")).into(),
             ),
         });
         let capture_depth_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("map composite depth capture"),
+            label:              Some("map composite depth capture"),
             bind_group_layouts: &[Some(&capture_depth_layout)],
-            immediate_size: 0,
+            immediate_size:     0,
         });
         let capture_depth_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("map composite depth capture"),
-            layout: Some(&capture_depth_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &capture_depth_shader,
-                entry_point: Some("vs_main"),
+            label:          Some("map composite depth capture"),
+            layout:         Some(&capture_depth_pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &capture_depth_shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
+                buffers:             &[Some(wgpu::VertexBufferLayout {
                     array_stride: 8,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x2,
-                        offset: 0,
+                    step_mode:    wgpu::VertexStepMode::Vertex,
+                    attributes:   &[wgpu::VertexAttribute {
+                        format:          wgpu::VertexFormat::Float32x2,
+                        offset:          0,
                         shader_location: 0,
                     }],
                 })],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &capture_depth_shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &capture_depth_shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::R32Float,
-                    blend: None,
+                targets:             &[Some(wgpu::ColorTargetState {
+                    format:     wgpu::TextureFormat::R32Float,
+                    blend:      None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+            primitive:      wgpu::PrimitiveState {
+                topology:           wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
+                front_face:         wgpu::FrontFace::Ccw,
+                cull_mode:          None,
+                unclipped_depth:    false,
+                polygon_mode:       wgpu::PolygonMode::Fill,
+                conservative:       false,
             },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            depth_stencil:  None,
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
         let capture_planes_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("map composite plane capture"),
+            label:   Some("map composite plane capture"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                    binding:    0,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                    ty:         wgpu::BindingType::Buffer {
+                        ty:                 wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size:   None,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding:    1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding:    2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding:    3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 4,
+                    binding:    4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
+                    ty:         wgpu::BindingType::Texture {
+                        sample_type:    wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        multisampled:   false,
                     },
-                    count: None,
+                    count:      None,
                 },
             ],
         });
         let capture_planes_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("map composite plane capture"),
+            label:  Some("map composite plane capture"),
             source: wgpu::ShaderSource::Wgsl(
                 include_str!(concat!(env!("OUT_DIR"), "/composite_capture_planes.wgsl")).into(),
             ),
         });
         let capture_planes_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("map composite plane capture"),
+            label:              Some("map composite plane capture"),
             bind_group_layouts: &[Some(&capture_planes_layout)],
-            immediate_size: 0,
+            immediate_size:     0,
         });
         let capture_planes_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("map composite plane capture"),
-            layout: Some(&capture_planes_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &capture_planes_shader,
-                entry_point: Some("vs_main"),
+            label:          Some("map composite plane capture"),
+            layout:         Some(&capture_planes_pipeline_layout),
+            vertex:         wgpu::VertexState {
+                module:              &capture_planes_shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
+                buffers:             &[Some(wgpu::VertexBufferLayout {
                     array_stride: 8,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x2,
-                        offset: 0,
+                    step_mode:    wgpu::VertexStepMode::Vertex,
+                    attributes:   &[wgpu::VertexAttribute {
+                        format:          wgpu::VertexFormat::Float32x2,
+                        offset:          0,
                         shader_location: 0,
                     }],
                 })],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &capture_planes_shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &capture_planes_shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[
+                targets:             &[
                     Some(wgpu::ColorTargetState {
-                        format: WORLD_FORMAT,
-                        blend: None,
+                        format:     WORLD_FORMAT,
+                        blend:      None,
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
                     Some(crate::renderer::IDS_TARGET),
@@ -2235,30 +2253,30 @@ impl CompositeRenderer {
                     Some(crate::renderer::NORMAL_TARGET),
                 ],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+            primitive:      wgpu::PrimitiveState {
+                topology:           wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
+                front_face:         wgpu::FrontFace::Ccw,
+                cull_mode:          None,
+                unclipped_depth:    false,
+                polygon_mode:       wgpu::PolygonMode::Fill,
+                conservative:       false,
             },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            depth_stencil:  None,
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         });
         let capture_uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("map composite depth capture"),
-            size: 48,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            label:              Some("map composite depth capture"),
+            size:               48,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let quad = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("map block composite unit quad"),
-            size: 4 * 2 * 4,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            label:              Some("map block composite unit quad"),
+            size:               4 * 2 * 4,
+            usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: true,
         });
         let mut bytes = Vec::with_capacity(4 * 2 * 4);
@@ -2296,18 +2314,18 @@ impl CompositeRenderer {
 
     fn instance_buffer(device: &wgpu::Device, capacity: u64) -> wgpu::Buffer {
         device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("map block composite instances"),
-            size: capacity * 16,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            label:              Some("map block composite instances"),
+            size:               capacity * 16,
+            usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         })
     }
 
     fn deferred_instance_buffer(device: &wgpu::Device, capacity: u64) -> wgpu::Buffer {
         device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("map block deferred composite instances"),
-            size: capacity * 20,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            label:              Some("map block deferred composite instances"),
+            size:               capacity * 20,
+            usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         })
     }
@@ -2315,9 +2333,9 @@ impl CompositeRenderer {
     fn deferred_batch(device: &wgpu::Device, capacity: u64) -> DeferredBatch {
         DeferredBatch {
             viewport: device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("map block deferred composite viewport"),
-                size: 16,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                label:              Some("map block deferred composite viewport"),
+                size:               16,
+                usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
             instances: Self::deferred_instance_buffer(device, capacity),
@@ -2394,19 +2412,19 @@ impl CompositeRenderer {
             .iter()
             .map(|block| {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("map block composite"),
-                    layout: &self.layout,
+                    label:   Some("map block composite"),
+                    layout:  &self.layout,
                     entries: &[
                         wgpu::BindGroupEntry {
-                            binding: 0,
+                            binding:  0,
                             resource: self.viewport.as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
-                            binding: 1,
+                            binding:  1,
                             resource: wgpu::BindingResource::TextureView(block.texture.view()),
                         },
                         wgpu::BindGroupEntry {
-                            binding: 2,
+                            binding:  2,
                             resource: wgpu::BindingResource::Sampler(&self.sampler),
                         },
                     ],
@@ -2417,11 +2435,11 @@ impl CompositeRenderer {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("map block composites"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                depth_slice: None,
+                view:           target,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                ops:            wgpu::Operations {
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -2523,31 +2541,31 @@ impl CompositeRenderer {
                     bindings_created += 1;
                     let (ids, position, normal, depth) = block.texture.deferred_views();
                     entry.insert(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("map block deferred composite"),
-                        layout: &self.deferred_layout,
+                        label:   Some("map block deferred composite"),
+                        layout:  &self.deferred_layout,
                         entries: &[
                             wgpu::BindGroupEntry {
-                                binding: 0,
+                                binding:  0,
                                 resource: batch.viewport.as_entire_binding(),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 1,
+                                binding:  1,
                                 resource: wgpu::BindingResource::TextureView(block.texture.view()),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 2,
+                                binding:  2,
                                 resource: wgpu::BindingResource::TextureView(ids),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 3,
+                                binding:  3,
                                 resource: wgpu::BindingResource::TextureView(position),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 4,
+                                binding:  4,
                                 resource: wgpu::BindingResource::TextureView(normal),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 5,
+                                binding:  5,
                                 resource: wgpu::BindingResource::TextureView(depth),
                             },
                         ],
@@ -2561,46 +2579,46 @@ impl CompositeRenderer {
             label: Some("map block deferred composites"),
             color_attachments: &[
                 Some(wgpu::RenderPassColorAttachment {
-                    view: target.view,
-                    depth_slice: None,
+                    view:           target.view,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.ids,
-                    depth_slice: None,
+                    view:           &target.gbuffer.ids,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.position,
-                    depth_slice: None,
+                    view:           &target.gbuffer.position,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: &target.gbuffer.normal,
-                    depth_slice: None,
+                    view:           &target.gbuffer.normal,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 }),
             ],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: target.depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                view:        target.depth,
+                depth_ops:   Some(wgpu::Operations {
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -2652,27 +2670,27 @@ impl CompositeRenderer {
             .create_view(&wgpu::TextureViewDescriptor::default());
         let source_normal = source.normal.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("map composite plane capture"),
-            layout: &self.capture_planes_layout,
+            label:   Some("map composite plane capture"),
+            layout:  &self.capture_planes_layout,
             entries: &[
                 wgpu::BindGroupEntry {
-                    binding: 0,
+                    binding:  0,
                     resource: self.capture_uniform.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 1,
+                    binding:  1,
                     resource: wgpu::BindingResource::TextureView(&color),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding:  2,
                     resource: wgpu::BindingResource::TextureView(&source_ids),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding:  3,
                     resource: wgpu::BindingResource::TextureView(&source_position),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 4,
+                    binding:  4,
                     resource: wgpu::BindingResource::TextureView(&source_normal),
                 },
             ],
@@ -2681,38 +2699,38 @@ impl CompositeRenderer {
             label: Some("map composite plane capture"),
             color_attachments: &[
                 Some(wgpu::RenderPassColorAttachment {
-                    view: captured.view(),
-                    depth_slice: None,
+                    view:           captured.view(),
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: ids,
-                    depth_slice: None,
+                    view:           ids,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(crate::gbuffer::IDS_CLEAR),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(crate::gbuffer::IDS_CLEAR),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: position,
-                    depth_slice: None,
+                    view:           position,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: normal,
-                    depth_slice: None,
+                    view:           normal,
+                    depth_slice:    None,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    ops:            wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
@@ -2751,19 +2769,19 @@ impl CompositeRenderer {
         );
         let source_ids = source.ids.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("map composite depth capture"),
-            layout: &self.capture_depth_layout,
+            label:   Some("map composite depth capture"),
+            layout:  &self.capture_depth_layout,
             entries: &[
                 wgpu::BindGroupEntry {
-                    binding: 0,
+                    binding:  0,
                     resource: self.capture_uniform.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 1,
+                    binding:  1,
                     resource: wgpu::BindingResource::TextureView(source.depth),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding:  2,
                     resource: wgpu::BindingResource::TextureView(&source_ids),
                 },
             ],
@@ -2772,11 +2790,11 @@ impl CompositeRenderer {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("map composite depth capture"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &depth_view,
-                depth_slice: None,
+                view:           &depth_view,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                ops:            wgpu::Operations {
+                    load:  wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -2831,8 +2849,8 @@ mod tests {
         device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
             size: wgpu::Extent3d {
-                width: size,
-                height: size,
+                width:                 size,
+                height:                size,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -2861,9 +2879,9 @@ mod tests {
         let stride = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let bytes = u64::from(stride) * u64::from(texture.height());
         let readback = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("composite test readback"),
-            size: bytes,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            label:              Some("composite test readback"),
+            size:               bytes,
+            usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -2877,14 +2895,14 @@ mod tests {
             wgpu::TexelCopyBufferInfo {
                 buffer: &readback,
                 layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(stride),
+                    offset:         0,
+                    bytes_per_row:  Some(stride),
                     rows_per_image: Some(texture.height()),
                 },
             },
             wgpu::Extent3d {
-                width: texture.width(),
-                height: texture.height(),
+                width:                 texture.width(),
+                height:                texture.height(),
                 depth_or_array_layers: 1,
             },
         );
@@ -2912,7 +2930,7 @@ mod tests {
     /// dynamic renderer: the restored map depth remains a normal depth target.
     fn dynamic_depth_pipeline(device: &wgpu::Device, depth: f32, color: [f32; 4]) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("composite dynamic-depth test"),
+            label:  Some("composite dynamic-depth test"),
             source: wgpu::ShaderSource::Wgsl(
                 format!(
                     "
@@ -2938,44 +2956,44 @@ mod tests {
             ),
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("composite dynamic-depth test"),
+            label:              Some("composite dynamic-depth test"),
             bind_group_layouts: &[],
-            immediate_size: 0,
+            immediate_size:     0,
         });
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("composite dynamic-depth test"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+            label:          Some("composite dynamic-depth test"),
+            layout:         Some(&layout),
+            vertex:         wgpu::VertexState {
+                module:              &shader,
+                entry_point:         Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
+                buffers:             &[],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+            fragment:       Some(wgpu::FragmentState {
+                module:              &shader,
+                entry_point:         Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: crate::blit::WORLD_FORMAT,
-                    blend: None,
+                targets:             &[Some(wgpu::ColorTargetState {
+                    format:     crate::blit::WORLD_FORMAT,
+                    blend:      None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState {
+            primitive:      wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
                 ..Default::default()
             },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: crate::renderer::DEPTH_FORMAT,
+            depth_stencil:  Some(wgpu::DepthStencilState {
+                format:              crate::renderer::DEPTH_FORMAT,
                 depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
+                depth_compare:       Some(wgpu::CompareFunction::Less),
+                stencil:             wgpu::StencilState::default(),
+                bias:                wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample:    wgpu::MultisampleState::default(),
             multiview_mask: None,
-            cache: None,
+            cache:          None,
         })
     }
 
@@ -2988,18 +3006,18 @@ mod tests {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("composite dynamic-depth test"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: world,
-                depth_slice: None,
+                view:           world,
+                depth_slice:    None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                ops:            wgpu::Operations {
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                view:        depth,
+                depth_ops:   Some(wgpu::Operations {
+                    load:  wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -3046,13 +3064,13 @@ mod tests {
                 .unwrap()
         };
         let left_key = CompositeKey {
-            block: BlockCoord { x: 0, y: 0 },
-            tier: CompositeTier::Lod1,
+            block:    BlockCoord { x: 0, y: 0 },
+            tier:     CompositeTier::Lod1,
             revision: ImmutableRevision::default(),
         };
         let right_key = CompositeKey {
-            block: BlockCoord { x: 1, y: 0 },
-            tier: CompositeTier::Lod1,
+            block:    BlockCoord { x: 1, y: 0 },
+            tier:     CompositeTier::Lod1,
             revision: ImmutableRevision::default(),
         };
         let mut cache = CompositeCache::default();
@@ -3073,46 +3091,46 @@ mod tests {
                 label: Some("deferred composite group test clear"),
                 color_attachments: &[
                     Some(wgpu::RenderPassColorAttachment {
-                        view: &restored_view,
-                        depth_slice: None,
+                        view:           &restored_view,
+                        depth_slice:    None,
                         resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        ops:            wgpu::Operations {
+                            load:  wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                             store: wgpu::StoreOp::Store,
                         },
                     }),
                     Some(wgpu::RenderPassColorAttachment {
-                        view: &restored_views.ids,
-                        depth_slice: None,
+                        view:           &restored_views.ids,
+                        depth_slice:    None,
                         resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(crate::gbuffer::IDS_CLEAR),
+                        ops:            wgpu::Operations {
+                            load:  wgpu::LoadOp::Clear(crate::gbuffer::IDS_CLEAR),
                             store: wgpu::StoreOp::Store,
                         },
                     }),
                     Some(wgpu::RenderPassColorAttachment {
-                        view: &restored_views.position,
-                        depth_slice: None,
+                        view:           &restored_views.position,
+                        depth_slice:    None,
                         resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(crate::gbuffer::POSITION_CLEAR),
+                        ops:            wgpu::Operations {
+                            load:  wgpu::LoadOp::Clear(crate::gbuffer::POSITION_CLEAR),
                             store: wgpu::StoreOp::Store,
                         },
                     }),
                     Some(wgpu::RenderPassColorAttachment {
-                        view: &restored_views.normal,
-                        depth_slice: None,
+                        view:           &restored_views.normal,
+                        depth_slice:    None,
                         resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(crate::gbuffer::NORMAL_CLEAR),
+                        ops:            wgpu::Operations {
+                            load:  wgpu::LoadOp::Clear(crate::gbuffer::NORMAL_CLEAR),
                             store: wgpu::StoreOp::Store,
                         },
                     }),
                 ],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &restored_depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
+                    view:        &restored_depth_view,
+                    depth_ops:   Some(wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -3133,10 +3151,10 @@ mod tests {
             0.0,
             &[CompositeQuad {
                 texture: left,
-                rect: Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    width: BLOCK as f32,
+                rect:    Rect {
+                    x:      0.0,
+                    y:      0.0,
+                    width:  BLOCK as f32,
                     height: SIZE as f32,
                 },
             }],
@@ -3150,10 +3168,10 @@ mod tests {
             0.01,
             &[CompositeQuad {
                 texture: right,
-                rect: Rect {
-                    x: BLOCK as f32,
-                    y: 0.0,
-                    width: BLOCK as f32,
+                rect:    Rect {
+                    x:      BLOCK as f32,
+                    y:      0.0,
+                    width:  BLOCK as f32,
                     height: SIZE as f32,
                 },
             }],
@@ -3191,19 +3209,19 @@ mod tests {
             &[
                 CompositeQuad {
                     texture: left,
-                    rect: Rect {
-                        x: 0.0,
-                        y: 0.0,
-                        width: BLOCK as f32,
+                    rect:    Rect {
+                        x:      0.0,
+                        y:      0.0,
+                        width:  BLOCK as f32,
                         height: SIZE as f32,
                     },
                 },
                 CompositeQuad {
                     texture: right,
-                    rect: Rect {
-                        x: BLOCK as f32,
-                        y: 0.0,
-                        width: BLOCK as f32,
+                    rect:    Rect {
+                        x:      BLOCK as f32,
+                        y:      0.0,
+                        width:  BLOCK as f32,
                         height: SIZE as f32,
                     },
                 },
@@ -3235,10 +3253,10 @@ mod tests {
             0,
             &[CompositeQuad {
                 texture: left,
-                rect: Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    width: BLOCK as f32,
+                rect:    Rect {
+                    x:      0.0,
+                    y:      0.0,
+                    width:  BLOCK as f32,
                     height: SIZE as f32,
                 },
             }],
@@ -3331,13 +3349,13 @@ mod tests {
                 },
                 bytes,
                 wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(bytes_per_row),
+                    offset:         0,
+                    bytes_per_row:  Some(bytes_per_row),
                     rows_per_image: Some(SIZE),
                 },
                 wgpu::Extent3d {
-                    width: SIZE,
-                    height: SIZE,
+                    width:                 SIZE,
+                    height:                SIZE,
                     depth_or_array_layers: 1,
                 },
             );
@@ -3355,9 +3373,9 @@ mod tests {
                 label: Some("composite test source depth"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &source_depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0.5),
+                    view:        &source_depth_view,
+                    depth_ops:   Some(wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(0.5),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -3392,16 +3410,16 @@ mod tests {
         let mut cache = CompositeCache::default();
         let mut composite = CompositeRenderer::new(&device);
         let source = CaptureSource {
-            color: &color,
-            ids: &ids,
-            position: &position,
-            normal: &normal,
-            depth: &source_depth_view,
+            color:      &color,
+            ids:        &ids,
+            position:   &position,
+            normal:     &normal,
+            depth:      &source_depth_view,
             depth_base: 0,
-            rect: crate::blit::ViewportRect {
-                x: 0,
-                y: 0,
-                width: SIZE,
+            rect:       crate::blit::ViewportRect {
+                x:      0,
+                y:      0,
+                width:  SIZE,
                 height: SIZE,
             },
         };
@@ -3430,46 +3448,46 @@ mod tests {
                 label: Some("composite test restore clear"),
                 color_attachments: &[
                     Some(wgpu::RenderPassColorAttachment {
-                        view: &restored_view,
-                        depth_slice: None,
+                        view:           &restored_view,
+                        depth_slice:    None,
                         resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        ops:            wgpu::Operations {
+                            load:  wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                             store: wgpu::StoreOp::Store,
                         },
                     }),
                     Some(wgpu::RenderPassColorAttachment {
-                        view: &restored_views.ids,
-                        depth_slice: None,
+                        view:           &restored_views.ids,
+                        depth_slice:    None,
                         resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(crate::gbuffer::IDS_CLEAR),
+                        ops:            wgpu::Operations {
+                            load:  wgpu::LoadOp::Clear(crate::gbuffer::IDS_CLEAR),
                             store: wgpu::StoreOp::Store,
                         },
                     }),
                     Some(wgpu::RenderPassColorAttachment {
-                        view: &restored_views.position,
-                        depth_slice: None,
+                        view:           &restored_views.position,
+                        depth_slice:    None,
                         resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(crate::gbuffer::POSITION_CLEAR),
+                        ops:            wgpu::Operations {
+                            load:  wgpu::LoadOp::Clear(crate::gbuffer::POSITION_CLEAR),
                             store: wgpu::StoreOp::Store,
                         },
                     }),
                     Some(wgpu::RenderPassColorAttachment {
-                        view: &restored_views.normal,
-                        depth_slice: None,
+                        view:           &restored_views.normal,
+                        depth_slice:    None,
                         resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(crate::gbuffer::NORMAL_CLEAR),
+                        ops:            wgpu::Operations {
+                            load:  wgpu::LoadOp::Clear(crate::gbuffer::NORMAL_CLEAR),
                             store: wgpu::StoreOp::Store,
                         },
                     }),
                 ],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &restored_depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
+                    view:        &restored_depth_view,
+                    depth_ops:   Some(wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -3489,9 +3507,9 @@ mod tests {
             &[CompositeQuad {
                 texture,
                 rect: Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    width: SIZE as f32,
+                    x:      0.0,
+                    y:      0.0,
+                    width:  SIZE as f32,
                     height: SIZE as f32,
                 },
             }],
@@ -3552,20 +3570,20 @@ mod tests {
         let overwritten: Vec<_> = (0..SIZE * SIZE).flat_map(|_| [0, 255, 0, 255]).collect();
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
-                texture: &color,
+                texture:   &color,
                 mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
+                origin:    wgpu::Origin3d::ZERO,
+                aspect:    wgpu::TextureAspect::All,
             },
             &overwritten,
             wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * SIZE),
+                offset:         0,
+                bytes_per_row:  Some(4 * SIZE),
                 rows_per_image: Some(SIZE),
             },
             wgpu::Extent3d {
-                width: SIZE,
-                height: SIZE,
+                width:                 SIZE,
+                height:                SIZE,
                 depth_or_array_layers: 1,
             },
         );
@@ -3596,9 +3614,9 @@ mod tests {
                 label: Some("composite test second source depth"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &source_depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0.25),
+                    view:        &source_depth_view,
+                    depth_ops:   Some(wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(0.25),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -3618,16 +3636,16 @@ mod tests {
                     &mut cache,
                     second_key,
                     CaptureSource {
-                        color: &color,
-                        ids: &ids,
-                        position: &position,
-                        normal: &normal,
-                        depth: &source_depth_view,
+                        color:      &color,
+                        ids:        &ids,
+                        position:   &position,
+                        normal:     &normal,
+                        depth:      &source_depth_view,
                         depth_base: 0,
-                        rect: crate::blit::ViewportRect {
-                            x: 0,
-                            y: 0,
-                            width: SIZE,
+                        rect:       crate::blit::ViewportRect {
+                            x:      0,
+                            y:      0,
+                            width:  SIZE,
                             height: SIZE,
                         },
                     },
@@ -3713,13 +3731,13 @@ mod tests {
                 },
                 bytes,
                 wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(bytes_per_texel * SOURCE),
+                    offset:         0,
+                    bytes_per_row:  Some(bytes_per_texel * SOURCE),
                     rows_per_image: Some(SOURCE),
                 },
                 wgpu::Extent3d {
-                    width: SOURCE,
-                    height: SOURCE,
+                    width:                 SOURCE,
+                    height:                SOURCE,
                     depth_or_array_layers: 1,
                 },
             );
@@ -3732,8 +3750,8 @@ mod tests {
         let source_depth = crate::renderer::depth_texture(&device, SOURCE, SOURCE);
         let source_depth_view = source_depth.create_view(&wgpu::TextureViewDescriptor::default());
         let key = CompositeKey {
-            block: BlockCoord { x: 0, y: 0 },
-            tier: CompositeTier::Lod2,
+            block:    BlockCoord { x: 0, y: 0 },
+            tier:     CompositeTier::Lod2,
             revision: ImmutableRevision::default(),
         };
         let bounds = MapBlockBounds {
@@ -3753,9 +3771,9 @@ mod tests {
                 label: Some("sparse composite source depth"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &source_depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0.5),
+                    view:        &source_depth_view,
+                    depth_ops:   Some(wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(0.5),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -3774,16 +3792,16 @@ mod tests {
                 &mut cache,
                 key,
                 CaptureSource {
-                    color: &color,
-                    ids: &ids,
-                    position: &position,
-                    normal: &normal,
-                    depth: &source_depth_view,
+                    color:      &color,
+                    ids:        &ids,
+                    position:   &position,
+                    normal:     &normal,
+                    depth:      &source_depth_view,
                     depth_base: 0,
-                    rect: crate::blit::ViewportRect {
-                        x: 0,
-                        y: 0,
-                        width: SOURCE,
+                    rect:       crate::blit::ViewportRect {
+                        x:      0,
+                        y:      0,
+                        width:  SOURCE,
                         height: SOURCE,
                     },
                 },
@@ -3834,8 +3852,8 @@ mod tests {
     #[test]
     fn producer_job_has_a_fixed_local_camera_and_canonical_source_extent() {
         let key = CompositeKey {
-            block: BlockCoord { x: 12, y: 19 },
-            tier: CompositeTier::Lod2,
+            block:    BlockCoord { x: 12, y: 19 },
+            tier:     CompositeTier::Lod2,
             revision: ImmutableRevision(41),
         };
         let job = CompositeProducerJob::new(key);
@@ -3847,9 +3865,9 @@ mod tests {
         assert_eq!(
             job.source_rect(),
             Rect {
-                x: 0.0,
-                y: 0.0,
-                width: COMPOSITE_SOURCE_SIDE as f32,
+                x:      0.0,
+                y:      0.0,
+                width:  COMPOSITE_SOURCE_SIDE as f32,
                 height: COMPOSITE_SOURCE_SIDE as f32,
             }
         );
@@ -3858,8 +3876,8 @@ mod tests {
     #[test]
     fn elevated_flat_plateau_keeps_its_source_rect_at_the_full_attachment() {
         let key = CompositeKey {
-            block: BlockCoord { x: 12, y: 19 },
-            tier: CompositeTier::Lod1,
+            block:    BlockCoord { x: 12, y: 19 },
+            tier:     CompositeTier::Lod1,
             revision: ImmutableRevision(41),
         };
         let elevated = CompositeProducerJob::for_flat_ground(key, FlatGroundBlock::at(key.block, 20));
@@ -3878,12 +3896,17 @@ mod tests {
 
     #[test]
     fn flat_ground_block_accepts_only_one_common_surface_height() {
-        use openshard_map::map::{LandCell, WorldMap};
+        use openshard_map::map::{
+            LandCell,
+            WorldMap,
+        };
         use openshard_tiles::LandTileId;
 
-        let mut map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
-            tile: LandTileId(7),
-            z: 20,
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| {
+            LandCell {
+                tile: LandTileId(7),
+                z:    20,
+            }
         });
         let block = BlockCoord { x: 0, y: 0 };
         let plateau = FlatGroundBlock::inspect(&map, block).expect("one level 8x8 plateau");
@@ -3898,7 +3921,7 @@ mod tests {
             4,
             LandCell {
                 tile: LandTileId(7),
-                z: 21,
+                z:    21,
             },
         );
         assert_eq!(FlatGroundBlock::inspect(&map, block), None);
@@ -3906,16 +3929,21 @@ mod tests {
 
     #[test]
     fn prepared_work_preserves_the_verified_plateau_for_producer_and_restore() {
-        use openshard_map::map::{LandCell, WorldMap};
+        use openshard_map::map::{
+            LandCell,
+            WorldMap,
+        };
         use openshard_tiles::LandTileId;
 
-        let map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
-            tile: LandTileId(7),
-            z: 20,
+        let map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| {
+            LandCell {
+                tile: LandTileId(7),
+                z:    20,
+            }
         });
         let key = CompositeKey {
-            block: BlockCoord { x: 1, y: 1 },
-            tier: CompositeTier::Lod1,
+            block:    BlockCoord { x: 1, y: 1 },
+            tier:     CompositeTier::Lod1,
             revision: ImmutableRevision(9),
         };
         let plateau = FlatGroundBlock::inspect(&map, key.block).expect("the map supplies one plateau proof");
@@ -3950,8 +3978,8 @@ mod tests {
     #[should_panic(expected = "source proof for its own block")]
     fn prepared_work_rejects_a_source_proof_for_another_block() {
         let key = CompositeKey {
-            block: BlockCoord { x: 0, y: 0 },
-            tier: CompositeTier::Lod1,
+            block:    BlockCoord { x: 0, y: 0 },
+            tier:     CompositeTier::Lod1,
             revision: ImmutableRevision::default(),
         };
         let bounds = MapBlockBounds {
@@ -3968,8 +3996,8 @@ mod tests {
     #[test]
     fn producer_source_and_runtime_rects_share_one_canonical_transform() {
         let key = CompositeKey {
-            block: BlockCoord { x: 12, y: 19 },
-            tier: CompositeTier::Lod1,
+            block:    BlockCoord { x: 12, y: 19 },
+            tier:     CompositeTier::Lod1,
             revision: ImmutableRevision::default(),
         };
         let job = CompositeProducerJob::new(key);
@@ -4303,10 +4331,12 @@ mod tests {
         let limits = CompositeCacheLimits::new(256, 0).unwrap();
         let mut cache = CompositeCache::with_limits(limits);
         let size = CompositeSize::new(2, 2).unwrap();
-        let key = |x| CompositeKey {
-            block: BlockCoord { x, y: 0 },
-            tier: CompositeTier::Lod1,
-            revision: ImmutableRevision(0),
+        let key = |x| {
+            CompositeKey {
+                block:    BlockCoord { x, y: 0 },
+                tier:     CompositeTier::Lod1,
+                revision: ImmutableRevision(0),
+            }
         };
         for x in 0..3 {
             let deferred =
@@ -4343,8 +4373,8 @@ mod tests {
     fn quarantine_retains_the_latest_owner_and_reason() {
         let mut cache = CompositeCache::default();
         let key = CompositeKey {
-            block: BlockCoord { x: 3, y: 7 },
-            tier: CompositeTier::Lod1,
+            block:    BlockCoord { x: 3, y: 7 },
+            tier:     CompositeTier::Lod1,
             revision: ImmutableRevision(12),
         };
         cache.reject_block(key, None, CompositeQuarantineReason::NonFlatGround);
@@ -4378,10 +4408,12 @@ mod tests {
     #[test]
     fn ground_that_moves_lifts_the_quarantine_over_it() {
         let mut cache = CompositeCache::default();
-        let key = |x: u32| CompositeKey {
-            block: BlockCoord { x, y: 7 },
-            tier: CompositeTier::Lod1,
-            revision: ImmutableRevision(12),
+        let key = |x: u32| {
+            CompositeKey {
+                block:    BlockCoord { x, y: 7 },
+                tier:     CompositeTier::Lod1,
+                revision: ImmutableRevision(12),
+            }
         };
         cache.reject_block(key(3), None, CompositeQuarantineReason::NonFlatGround);
         cache.reject_block(

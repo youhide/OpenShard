@@ -18,30 +18,52 @@ use std::num::NonZeroU32;
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_movement::Walker;
+use openshard_protocol::access::AccessLevel;
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::containers::GridSlot;
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
 use openshard_protocol::feedback::{
-    ActionPhase, ActionStage, CombatActionKind, InterruptReason, SwingDuration,
+    ActionPhase,
+    ActionStage,
+    CombatActionKind,
+    InterruptReason,
+    SwingDuration,
 };
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::identity::AccountName;
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
+pub use openshard_protocol::items::CORPSE_GRAPHIC;
 use openshard_protocol::items::CorpseEquipmentItem;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::skill::SkillLock;
-use openshard_protocol::wire::{Graphic, Hue, Layer, SoundId};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+    SoundId,
+};
+pub use openshard_protocol::world::{
+    Aggression,
+    DamageType,
+    PoisonLevel,
+    RangedRange,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+    Sight,
+};
 
 use crate::WorldTick;
 use crate::action_rules::ConditionSet;
 use crate::quest::QuestKey;
 use crate::skill::Skill;
-pub use openshard_protocol::items::CORPSE_GRAPHIC;
-pub use openshard_protocol::world::{Aggression, DamageType, PoisonLevel, RangedRange};
-use openshard_protocol::world::{Facet, Point, Sight};
-use openshard_protocol::{
-    access::AccessLevel,
-    direction::{Direction, Facing},
-};
 
 /// Where a mobile or item is.
 ///
@@ -62,7 +84,7 @@ pub struct Heading(pub Facing);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Body {
     /// The body graphic id.
-    pub id: Graphic,
+    pub id:  Graphic,
     /// Its colour.
     pub hue: Hue,
 }
@@ -85,7 +107,7 @@ pub struct Body {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Drawn {
     /// The tiledata id.
-    pub id: Graphic,
+    pub id:  Graphic,
     /// Its colour, or [`Hue`]`(0)` for none.
     pub hue: Hue,
 }
@@ -127,7 +149,7 @@ pub struct Amount(pub u16);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CorpseBody {
     /// The mobile graphic the corpse represents.
-    pub body: Graphic,
+    pub body:   Graphic,
     /// Which way it fell — the heading it died with.
     pub facing: Direction,
 }
@@ -163,9 +185,9 @@ pub struct Contained {
     /// wrong place. The same type the packet built from this carries
     /// (`containers::ContainedItem::position`), so the two no longer disagree
     /// about what space they are in.
-    pub position: GumpPoint,
+    pub position:  GumpPoint,
     /// Its slot in the enhanced client's grid view.
-    pub grid: GridSlot,
+    pub grid:      GridSlot,
 }
 
 /// Marks an item as *worn* by a mobile, at a layer.
@@ -186,7 +208,7 @@ pub struct Equipped {
     /// (`0x2E` and the `0x78` outfit list), and every rule that reads it — what
     /// a corpse keeps, what armour counts, what may not be lifted — is naming a
     /// slot rather than doing arithmetic. `docs/protocol_newtypes.md` N4.
-    pub layer: Layer,
+    pub layer:  Layer,
 }
 
 /// The one authoritative answer to "where is this item?" while it is settled.
@@ -203,7 +225,7 @@ pub enum SettledItemLocation {
     /// Loose on a facet at a world coordinate.
     Ground {
         /// Which facet owns the spatial entry.
-        facet: Facet,
+        facet:    Facet,
         /// Where the item lies.
         position: Point,
     },
@@ -235,7 +257,7 @@ pub enum ItemLocation {
         /// The cursor that owns the drag transaction.
         connection: ConnectionId,
         /// Where a refused or interrupted drag restores it.
-        origin: SettledItemLocation,
+        origin:     SettledItemLocation,
     },
 }
 
@@ -322,7 +344,7 @@ pub enum ItemAffix {
     /// landed weapon blow, matching the usual major-slayer convention.
     Slayer {
         /// The target's body graphic.
-        body: u16,
+        body:          u16,
         /// Extra damage after the ordinary weapon calculation, in percent.
         bonus_percent: u8,
     },
@@ -337,7 +359,7 @@ pub enum ItemAffix {
     /// On a landed weapon blow, this independently rolls to poison the target.
     HitPoison {
         /// The standard poison level, 0 (lesser) through 4 (lethal).
-        level: u8,
+        level:            u8,
         /// Chance out of 1,000. Values above 1,000 mean certainty.
         chance_per_mille: u16,
     },
@@ -360,25 +382,25 @@ pub struct ItemAffixes(pub Vec<ItemAffix>);
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct QuestState {
     /// Which quest, by the pack's key.
-    pub key: QuestKey,
+    pub key:          QuestKey,
     /// How far each objective has got.
-    pub progress: Vec<u16>,
+    pub progress:     Vec<u16>,
     /// Ticks left on each timed objective; `0` on the untimed ones.
     pub seconds_left: Vec<u32>,
     /// Whether a timer ran out on it. A failed quest stays in the log, in red,
     /// until it is resigned — ServUO shows it rather than removing it, so the
     /// player finds out why it stopped counting.
-    pub failed: bool,
+    pub failed:       bool,
     /// Who gave it, so the turn-in knows where to go back to. `None` once that
     /// mobile is gone.
-    pub giver: Option<Serial>,
+    pub giver:        Option<Serial>,
 }
 
 /// A quest a character has finished, and when they may take it again.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct DoneQuest {
     /// Which quest, by the pack's key.
-    pub key: QuestKey,
+    pub key:        QuestKey,
     /// The tick it may be offered again at. [`u64::MAX`] never.
     pub restart_at: WorldTick,
 }
@@ -389,7 +411,7 @@ pub struct QuestLog {
     /// Quests in progress, newest last. The gump lists them newest first.
     pub active: Vec<QuestState>,
     /// Quests finished, with their cooldowns.
-    pub done: Vec<DoneQuest>,
+    pub done:   Vec<DoneQuest>,
 }
 
 impl QuestLog {
@@ -426,10 +448,10 @@ pub struct Escortable {
     /// quest says", picked when the escort is accepted.
     pub destination: String,
     /// Who is leading it, once someone is.
-    pub escorter: Option<Serial>,
+    pub escorter:    Option<Serial>,
     /// The last tick its escorter was within sight. An escortable left behind
     /// gives up rather than following a ghost across the map.
-    pub last_seen: WorldTick,
+    pub last_seen:   WorldTick,
 }
 
 /// The account a player character belongs to.
@@ -467,17 +489,17 @@ pub struct Decoration;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Door {
     /// The graphic drawn while shut.
-    pub closed: Graphic,
+    pub closed:   Graphic,
     /// The graphic drawn while open.
-    pub open: Graphic,
+    pub open:     Graphic,
     /// How far the door hops east/west when it swings open.
     pub offset_x: i16,
     /// How far it hops north/south.
     pub offset_y: i16,
     /// The other leaf of a generated double door, if this is one.
-    pub link: Option<Serial>,
+    pub link:     Option<Serial>,
     /// Whether the door is currently open.
-    pub is_open: bool,
+    pub is_open:  bool,
     /// The tick it auto-closes on when open; `0` when shut.
     pub close_at: WorldTick,
 }
@@ -515,13 +537,13 @@ pub struct Karma(pub i32);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Lock {
     /// How this lock may be opened.
-    pub kind: LockKind,
+    pub kind:           LockKind,
     /// The Lockpicking a thief needs before the lock will even be tried, in tenths
     /// — ServUO's `LockLevel`. Zero is a lock anybody may attempt.
     pub required_skill: u16,
     /// The skill at which it is no challenge at all, in tenths — ServUO's
     /// `MaxLockLevel`, the top of the band a pick is rolled against.
-    pub max_skill: u16,
+    pub max_skill:      u16,
 }
 
 /// How a lock may be opened.
@@ -622,9 +644,9 @@ pub struct Client {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Stats {
     /// Raw might — the cap on hit points.
-    pub strength: u16,
+    pub strength:     u16,
     /// Quickness — the cap on stamina, and the pace of a swing, to come.
-    pub dexterity: u16,
+    pub dexterity:    u16,
     /// Wits — the cap on mana.
     pub intelligence: u16,
 }
@@ -638,7 +660,7 @@ pub struct Hitpoints {
     /// How much it has now.
     pub current: u16,
     /// The most it can have.
-    pub max: u16,
+    pub max:     u16,
 }
 
 /// Marks a mobile as temporarily a criminal: grey, and freely attackable,
@@ -673,9 +695,9 @@ pub struct Frozen {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Poisoned {
     /// The poison level, 0 (lesser) .. 4 (lethal) — sets the damage per pulse.
-    pub level: PoisonLevel,
+    pub level:       PoisonLevel,
     /// The tick the next pulse of damage lands.
-    pub next_pulse: WorldTick,
+    pub next_pulse:  WorldTick,
     /// Pulses left before the poison wears off.
     pub pulses_left: u8,
 }
@@ -690,7 +712,7 @@ pub struct Poisoned {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PoisonCharges {
     /// The poison level, 0 (lesser) .. 4 (lethal) — the same scale [`Poisoned`] uses.
-    pub level: PoisonLevel,
+    pub level:   PoisonLevel,
     /// Doses left. Zero means spent, and a spent coating is removed rather than
     /// kept at zero, so this is never `0` on a live component.
     pub charges: u16,
@@ -732,18 +754,18 @@ pub struct Tool {
 pub struct Harvesting {
     /// The tool being swung. Re-checked each beat: a pickaxe dropped mid-swing
     /// mines nothing.
-    pub tool: EntityId,
+    pub tool:       EntityId,
     /// The tile being worked.
-    pub at: Point,
+    pub at:         Point,
     /// Which system this is, so the beat needs no second lookup.
-    pub kind: crate::harvest::HarvestKind,
+    pub kind:       crate::harvest::HarvestKind,
     /// The normalized tile id, as [`crate::harvest::tile_key`] matched it — kept so the beat
     /// can confirm the ground has not changed under the swing.
-    pub tile: crate::harvest::HarvestTile,
+    pub tile:       crate::harvest::HarvestTile,
     /// Beats still to come. The last one delivers.
     pub beats_left: u16,
     /// The tick the next beat falls on.
-    pub next_beat: WorldTick,
+    pub next_beat:  WorldTick,
     /// The tick this beat's *sound* falls on, or [`u64::MAX`] once it has played.
     ///
     /// A second clock rather than one, because ServUO gives the swing and the
@@ -763,19 +785,19 @@ pub struct Harvesting {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Crafting {
     /// Which craft system, by its index in the core table.
-    pub system: u8,
+    pub system:     u8,
     /// Which of that system's recipes, by index.
-    pub recipe: u16,
+    pub recipe:     u16,
     /// The tool in hand. Re-checked each beat: tongs dropped mid-craft make
     /// nothing.
-    pub tool: EntityId,
+    pub tool:       EntityId,
     /// Which material off the system's axis — the ore or wood the player chose in
     /// the gump.
-    pub sub_res: u8,
+    pub sub_res:    u8,
     /// Beats still to come. The last one resolves.
     pub beats_left: u8,
     /// The tick the next beat falls on.
-    pub next_beat: WorldTick,
+    pub next_beat:  WorldTick,
 }
 
 /// How well a crafted item came out — ServUO's `IQuality.Quality`.
@@ -826,7 +848,7 @@ pub struct Discorded {
     /// How much worse at everything, as a percentage.
     pub penalty: u16,
     /// The tick the song wears off.
-    pub until: WorldTick,
+    pub until:   WorldTick,
 }
 
 /// What a trap on a container does when it goes off — ServUO's `TrapType`.
@@ -852,7 +874,7 @@ pub enum TrapKind {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Trap {
     /// What it does.
-    pub kind: TrapKind,
+    pub kind:  TrapKind,
     /// How hard it hits when `level` is zero, and the difficulty Remove Trap is
     /// rolled against either way (`power .. power + 10`).
     pub power: u16,
@@ -913,16 +935,16 @@ impl FieldKind {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Field {
     /// What the field does.
-    pub kind: FieldKind,
+    pub kind:       FieldKind,
     /// Who laid it — a Fire Field's damage is credited to the caster, so a field
     /// kill counts.
-    pub caster: Serial,
+    pub caster:     Serial,
     /// The tick the next pulse of harm lands (Fire, Poison); unused for a wall.
     pub next_pulse: WorldTick,
     /// The tick the tile vanishes.
     pub expires_at: WorldTick,
     /// Whether the tile is registered in the obstruction index (Energy, Stone).
-    pub blocks: bool,
+    pub blocks:     bool,
 }
 
 /// The z-span a wall-like field tile occupies in the obstruction index — tall
@@ -1069,9 +1091,9 @@ pub fn is_debuff(kind: StatEffectKind) -> bool {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct StatMod {
     /// Which effect — an [`effect`] kind (Strength..Curse).
-    pub kind: StatEffectKind,
+    pub kind:       StatEffectKind,
     /// The signed magnitude applied to each stat the kind selects.
-    pub offset: i16,
+    pub offset:     i16,
     /// The tick it wears off.
     pub expires_at: WorldTick,
 }
@@ -1101,10 +1123,10 @@ pub struct StatMods {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct BehaviourBuff {
     /// Which behaviour the buff changes.
-    pub kind: BehaviourBuffKind,
+    pub kind:       BehaviourBuffKind,
     /// The magnitude the buff's decision point reads (chance, reflect percent),
     /// or `0` for a bare marker.
-    pub amount: i16,
+    pub amount:     i16,
     /// The tick it wears off.
     pub expires_at: WorldTick,
 }
@@ -1157,12 +1179,12 @@ pub struct Skills {
     values: HashMap<Skill, u16>,
     /// How the window trains each skill — `Up` unless the player set an arrow.
     /// Sparse like the values: an untouched skill trains up.
-    locks: HashMap<Skill, SkillLock>,
+    locks:  HashMap<Skill, SkillLock>,
     /// The ceiling on each skill, in tenths. Sparse like the rest: an untouched
     /// skill caps at [`DEFAULT_SKILL_CAP`]. Per-skill and not one shard-wide
     /// number because the gain chance reads *this* skill's headroom, and because
     /// a reward or a profession raises one skill's ceiling alone.
-    caps: HashMap<Skill, u16>,
+    caps:   HashMap<Skill, u16>,
 }
 
 impl Skills {
@@ -1311,9 +1333,9 @@ pub struct SkillCooldown {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct StatLocks {
     /// Strength's arrow.
-    pub strength: StatLock,
+    pub strength:     StatLock,
     /// Dexterity's arrow.
-    pub dexterity: StatLock,
+    pub dexterity:    StatLock,
     /// Intelligence's arrow.
     pub intelligence: StatLock,
 }
@@ -1326,9 +1348,9 @@ pub struct StatLocks {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct LastStatGain {
     /// The tick strength last rose.
-    pub strength: WorldTick,
+    pub strength:     WorldTick,
     /// The tick dexterity last rose.
-    pub dexterity: WorldTick,
+    pub dexterity:    WorldTick,
     /// The tick intelligence last rose.
     pub intelligence: WorldTick,
 }
@@ -1362,7 +1384,7 @@ pub struct Tamable {
     /// The Animal Taming needed even to try, in tenths — ServUO's `MinTameSkill`.
     pub min_skill: u16,
     /// How much of a tamer's following it takes up, in slots.
-    pub slots: openshard_protocol::world::FollowerSlots,
+    pub slots:     openshard_protocol::world::FollowerSlots,
 }
 
 /// What a tamed creature is doing, and for whom — ServUO's `ControlOrder`.
@@ -1391,11 +1413,11 @@ pub enum PetOrder {
 pub struct Pet {
     /// Whose it is, by wire serial — a serial rather than an entity because the
     /// owner logs out and comes back while the pet stands where it was.
-    pub owner: Serial,
+    pub owner:        Serial,
     /// How many follower slots it fills.
-    pub slots: openshard_protocol::world::FollowerSlots,
+    pub slots:        openshard_protocol::world::FollowerSlots,
     /// What it was last told to do.
-    pub order: PetOrder,
+    pub order:        PetOrder,
     /// Whom that order was about, for Attack.
     pub order_target: Option<Serial>,
 }
@@ -1451,7 +1473,7 @@ pub struct Meditating;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Casting {
     /// The spell being cast, by id.
-    pub spell: SpellId,
+    pub spell:       SpellId,
     /// The tick the cast finishes and resolves.
     pub complete_at: WorldTick,
 }
@@ -1467,11 +1489,11 @@ pub struct Casting {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Brain {
     /// How far, in tiles, it notices a foe. Zero never picks a fight.
-    pub sight: Sight,
+    pub sight:       Sight,
     /// Whether it drifts around when it has nothing to fight.
-    pub wander: bool,
+    pub wander:      bool,
     /// The tick it next gets to act — brains think in beats, not every tick.
-    pub next_think: WorldTick,
+    pub next_think:  WorldTick,
     /// Standing watch until this tick after a chase found no way through —
     /// the give-up both reference emulators use instead of wall-shuffling.
     /// Zero means not guarding.
@@ -1480,10 +1502,10 @@ pub struct Brain {
     /// wall. Humanoids do; animals do not — ServUO's `CanOpenDoors`.
     pub opens_doors: bool,
     /// Whether it starts fights, only answers them, or only runs.
-    pub aggression: Aggression,
+    pub aggression:  Aggression,
     /// Ticks between its beats while hunting; `0` takes the shard's default
     /// (`Gameplay::creature_step_ticks`). Idle, it ambles at twice this.
-    pub beat_ticks: u64,
+    pub beat_ticks:  u64,
 }
 
 /// A Magery spellbook's contents: a bit per spell, bit `n` set when the book
@@ -1540,7 +1562,7 @@ pub const RUNEBOOK_GRAPHIC: Graphic = Graphic(0x22C5);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct RuneMark {
     /// Which facet the destination is on.
-    pub facet: Facet,
+    pub facet:       Facet,
     /// The tile the rune was marked on.
     pub destination: Point,
 }
@@ -1553,7 +1575,7 @@ pub struct RuneMark {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct RunebookEntry {
     /// Which facet the destination is on.
-    pub facet: Facet,
+    pub facet:       Facet,
     /// The tile bound.
     pub destination: Point,
     /// What to call it in the window — the region's name where there is one.
@@ -1569,11 +1591,11 @@ pub struct RunebookEntry {
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct Runebook {
     /// The destinations bound, in the order they were added.
-    pub entries: Vec<RunebookEntry>,
+    pub entries:       Vec<RunebookEntry>,
     /// Charges left, each good for one free Recall from the book itself.
-    pub charges: u8,
+    pub charges:       u8,
     /// The ceiling recharging fills to — set when the book is made.
-    pub max_charges: u8,
+    pub max_charges:   u8,
     /// Which entry the Recall spell takes when aimed at the book rather than at
     /// a row, if any.
     pub default_entry: Option<u8>,
@@ -1581,7 +1603,7 @@ pub struct Runebook {
     ///
     /// Not saved: it is a couple of seconds long, and a restart re-arming it at
     /// zero errs in the generous direction.
-    pub next_use: WorldTick,
+    pub next_use:      WorldTick,
 }
 
 /// How many destinations one runebook holds — ServUO's `Runebook.MaxEntries`.
@@ -1603,11 +1625,11 @@ pub const MOONGATE_GRAPHIC: Graphic = Graphic(0x0F6C);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Moongate {
     /// Which facet the far end is on.
-    pub facet: Facet,
+    pub facet:       Facet,
     /// The tile it leads to.
     pub destination: Point,
     /// The tick it closes, or `None` for one that never does.
-    pub expires_at: Option<WorldTick>,
+    pub expires_at:  Option<WorldTick>,
 }
 
 /// How tall a gate stands, for the reach test on a double-click. ServUO's
@@ -1632,34 +1654,34 @@ pub const CORPSE_GUMP: Graphic = Graphic(0x0009);
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Corpse {
     /// Who this was.
-    pub owner: String,
+    pub owner:       String,
     /// The player whose death made this corpse, when it was a player death.
     ///
     /// Names are the right historical record for Forensics, but resurrection
     /// needs an unambiguous live link. The player's serial remains stable while
     /// they are a ghost (and across a restart), so it lets the shard return only
     /// that player's own worn items and consume only their own body.
-    pub player: Option<Serial>,
+    pub player:      Option<Serial>,
     /// Who struck the killing blow, if anybody did. An unattributed death (a fall
     /// into a fire field with no caster, say) leaves `None`, which Forensics reads
     /// out as ServUO's "no one".
-    pub killer: Option<String>,
+    pub killer:      Option<String>,
     /// The first forensicist to read it, so a second one is told the work is done —
     /// ServUO's `m_Forensicist`, which it sets on the first successful examination.
     pub examined_by: Option<String>,
     /// Everyone who has taken something off it, in the order they did.
-    pub looters: Vec<String>,
+    pub looters:     Vec<String>,
     /// Whether the animal resources from this body have already been taken.
     ///
     /// This belongs to the corpse story instead of its contents: an empty
     /// animal carcass is still a valid corpse, and players may take or put back
     /// its contents without making it harvestable again.
-    pub carved: bool,
+    pub carved:      bool,
     /// Which items were worn by the body, and on which layers, before they
     /// moved into this corpse container.  A container listing carries the item
     /// pictures but not these layers; retaining this pairing is what lets the
     /// client dress the corpse after it opens the loot window.
-    pub equipment: Vec<CorpseEquipmentItem>,
+    pub equipment:   Vec<CorpseEquipmentItem>,
 }
 
 impl Corpse {
@@ -1808,7 +1830,7 @@ pub struct RangedAttack {
     /// How far the attack reaches, in tiles.
     pub range: RangedRange,
     /// The kind of damage the attack deals.
-    pub kind: DamageType,
+    pub kind:  DamageType,
 }
 
 /// Marks a townsperson as a shopkeeper: it answers double-click with a buy
@@ -1835,7 +1857,7 @@ pub struct Riding {
     /// The creature underneath, held out of the world until dismount.
     pub mount: EntityId,
     /// The mount item worn on the mount layer — what the client draws.
-    pub item: EntityId,
+    pub item:  EntityId,
 }
 
 /// The route a body is walking, followed a step per beat.
@@ -1858,9 +1880,9 @@ pub struct Riding {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Route {
     /// The steps, from where it was planned.
-    pub steps: Vec<Direction>,
+    pub steps:      Vec<Direction>,
     /// The next step to take.
-    pub next: usize,
+    pub next:       usize,
     /// Where the body has to be standing for [`Self::next`] to mean anything.
     ///
     /// **A route is a sequence of steps and not a set of places**, so it says
@@ -1872,9 +1894,9 @@ pub struct Route {
     ///
     /// The whole place and not the tile: a landing is a tile *and* a height, and
     /// that is the identity the search itself is over.
-    pub at: Point,
+    pub at:         Point,
     /// Where the route was aimed; a goal that strays invalidates it.
-    pub goal: Point,
+    pub goal:       Point,
     /// When it was planned, for the repath clock.
     pub planned_at: WorldTick,
 }
@@ -1899,7 +1921,7 @@ pub struct Route {
 pub struct RouteRefused {
     /// Where there was no route to. A body whose goal has moved on is asking a
     /// different question and this says nothing about it.
-    pub goal: Point,
+    pub goal:  Point,
     /// The tick the graph is asked about it again.
     pub until: WorldTick,
 }
@@ -1933,7 +1955,7 @@ pub struct GuildMember {
     ///
     /// Defaults to [`Rank::Ronin`](crate::guild::Rank::Ronin), which is also
     /// what a newcomer joins as — see that type.
-    pub rank: crate::guild::Rank,
+    pub rank:  crate::guild::Rank,
 }
 
 /// A mobile that has been asked to join a guild and has not yet answered.
@@ -1965,7 +1987,7 @@ pub struct GuildCandidate {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PartyMember {
     /// Which party, by its leader's serial.
-    pub party: crate::party::PartyId,
+    pub party:    crate::party::PartyId,
     /// Whether the rest of the party may take from this member's corpse.
     ///
     /// Off by default, which is ServUO's `PartyMemberInfo` — a player has to
@@ -2074,7 +2096,7 @@ pub struct Title(pub String);
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Restock {
     /// The tick at or after which the next shop-open refills the shelf.
-    pub at: WorldTick,
+    pub at:    WorldTick,
     /// What the shelf holds when full.
     pub lines: Vec<StockRecord>,
 }
@@ -2087,20 +2109,20 @@ pub struct Restock {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct StockRecord {
     /// The goods' graphic.
-    pub graphic: Graphic,
+    pub graphic:   Graphic,
     /// Their hue.
-    pub hue: Hue,
+    pub hue:       Hue,
     /// The semantic identity of this stock line, when it is registry-backed.
     /// `None` retains an old pack's art-only shelf until its row is migrated.
     pub item_kind: Option<ItemKindId>,
     /// The material selected for [`Self::item_kind`].
-    pub material: Option<MaterialId>,
+    pub material:  Option<MaterialId>,
     /// How many the shelf holds when full.
-    pub amount: Amount,
+    pub amount:    Amount,
     /// What one unit costs.
-    pub price: Price,
+    pub price:     Price,
     /// The label the client shows.
-    pub name: String,
+    pub name:      String,
 }
 
 /// Where a townsperson sleeps, for the optional daily routine.
@@ -2121,11 +2143,11 @@ pub struct NightHome(pub Point);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Npc {
     /// The tile it belongs at — a shop counter, a bank.
-    pub home: Point,
+    pub home:       Point,
     /// How many tiles it may stray from `home`; `0` stands perfectly still.
-    pub wander: u8,
+    pub wander:     u8,
     /// The tick it next gets a beat.
-    pub next_beat: WorldTick,
+    pub next_beat:  WorldTick,
     /// The earliest tick it may greet or bark again, so it welcomes rather than
     /// natters. It sat on [`Banker`] while bankers were the only townsfolk that
     /// spoke; every trade greets now, so it belongs on the base.
@@ -2154,7 +2176,7 @@ enum CombatState {
     AtPeace,
     AtWar,
     Engaged {
-        target: Serial,
+        target:     Serial,
         /// A tick number, like [`Decays`], so combat replays without a clock.
         next_swing: WorldTick,
     },
@@ -2284,7 +2306,7 @@ impl Combat {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct WrestlingOpener {
     /// The mobile the concealed fighter committed to.
-    pub target: Serial,
+    pub target:     Serial,
     /// The last tick at which the opening remains armed.
     pub expires_at: WorldTick,
 }
@@ -2304,9 +2326,9 @@ pub struct WrestlingAmbushCooldown {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct WrestlingCombo {
     /// The opponent the sequence belongs to.
-    pub target: Serial,
+    pub target:     Serial,
     /// Successful hits already landed in this sequence (one or two).
-    pub hits: u8,
+    pub hits:       u8,
     /// The last tick on which the next hit still continues the sequence.
     pub expires_at: WorldTick,
 }
@@ -2318,7 +2340,7 @@ pub struct WrestlingCombo {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct WrestlingStride {
     /// Steps made inside the current short window.
-    pub steps: u8,
+    pub steps:      u8,
     /// The tick at which the stored steps expire.
     pub expires_at: WorldTick,
 }
@@ -2350,9 +2372,9 @@ pub struct Weapon {
     /// Ticks-formula speed base (Sphere's weapon `base`); higher swings faster.
     pub speed: u16,
     /// Minimum damage before resistance.
-    pub min: u16,
+    pub min:   u16,
     /// Maximum damage before resistance.
-    pub max: u16,
+    pub max:   u16,
 }
 
 /// How many steps a mobile has taken — ServUO's `PlayerMobile.StepsTaken`, and
@@ -2403,25 +2425,25 @@ pub struct SwingSpeed {
 pub struct CombatAction {
     /// The opponent this action was committed to. It does not follow a change
     /// of aim: a fighter who picks another target abandons this action.
-    pub target: Serial,
+    pub target:      Serial,
     /// What the impact will do.
-    pub kind: ActionKind,
+    pub kind:        ActionKind,
     /// Which phase of its life it is in.
-    pub phase: Phase,
+    pub phase:       Phase,
     /// When it was committed — the tick the promise was made on.
-    pub started_at: WorldTick,
+    pub started_at:  WorldTick,
     /// A percentage adjustment to the hit roll, accumulated while the action
     /// runs and spent once when it resolves. An ambush from cover puts a bonus
     /// in it at the commit; a condition rule's `Sway` — a shot loosed at a run —
     /// subtracts from it while it runs.
-    pub accuracy: i16,
+    pub accuracy:    i16,
     /// Which conditions have already been charged against this action.
     ///
     /// A rule is a fact about the action ("it ran"), not a tax on every step:
     /// twenty steps during a long draw must not sway an archer twenty times over
     /// nor push the impact out faster than it arrives. See
     /// [`action_rules`](crate::action_rules).
-    pub applied: ConditionSet,
+    pub applied:     ConditionSet,
     /// Whether the gesture was shown when the action was committed.
     ///
     /// A concealed fighter has no wind-up: drawing one would break cover before
@@ -2436,7 +2458,7 @@ pub struct CombatAction {
     /// shares say it should be in against this one and announces only a change.
     /// It never goes backwards — a `Slow` that pushes the impact out lowers the
     /// fraction elapsed, and a fighter who has drawn a bow has not un-drawn it.
-    pub stage: ActionStage,
+    pub stage:       ActionStage,
 }
 
 /// A fighter who wants to act and cannot, and what is in the way.
@@ -2472,18 +2494,18 @@ pub enum ActionKind {
     /// the commit off the weapon the fighter was holding then — a bow swapped
     /// mid-draw does not change what is already on the string.
     Shot {
-        reach: RangedRange,
+        reach:  RangedRange,
         nocked: Graphic,
-        art: Graphic,
+        art:    Graphic,
     },
     /// An innate ranged attack — a [`RangedAttack`] component, a breath weapon.
     /// It carries no ammunition, and that is a difference in kind, not a missing
     /// field. `damage` is what it deals, which is the other thing a breath does
     /// not share with an arrow.
     Breath {
-        reach: RangedRange,
+        reach:  RangedRange,
         damage: DamageType,
-        art: Graphic,
+        art:    Graphic,
     },
 }
 
@@ -2493,8 +2515,8 @@ pub enum Phase {
     /// Preparing to become armed. Sight may open during this interval, but the
     /// watch cannot release until `ready_at`: every new shot pays its draw.
     Arming {
-        watch: Watch,
-        ready_at: WorldTick,
+        watch:      Watch,
+        ready_at:   WorldTick,
         expires_at: WorldTick,
     },
     /// Ready and waiting on the world. `expires_at` is the arm's endurance, not
@@ -2503,7 +2525,10 @@ pub enum Phase {
     /// A bow constructs this with [`Watch::TargetInSight`] when its already
     /// selected target is in range but behind cover. Other watch kinds are the
     /// remaining arming work.
-    Armed { watch: Watch, expires_at: WorldTick },
+    Armed {
+        watch:      Watch,
+        expires_at: WorldTick,
+    },
     /// Released. The impact lands at this tick, and a rule may still push it.
     Releasing { impact: WorldTick },
 }
@@ -2610,15 +2635,21 @@ impl CombatAction {
     #[must_use]
     pub const fn wire_phase(self, now: WorldTick) -> ActionPhase {
         match self.phase {
-            Phase::Arming { ready_at, .. } => ActionPhase::Arming {
-                ready_in: SwingDuration(ticks_to_millis(ready_at.saturating_sub(now))),
-            },
-            Phase::Armed { expires_at, .. } => ActionPhase::Armed {
-                endurance: SwingDuration(ticks_to_millis(expires_at.saturating_sub(now))),
-            },
-            Phase::Releasing { impact } => ActionPhase::Releasing {
-                impact_in: SwingDuration(ticks_to_millis(impact.saturating_sub(now))),
-            },
+            Phase::Arming { ready_at, .. } => {
+                ActionPhase::Arming {
+                    ready_in: SwingDuration(ticks_to_millis(ready_at.saturating_sub(now))),
+                }
+            }
+            Phase::Armed { expires_at, .. } => {
+                ActionPhase::Armed {
+                    endurance: SwingDuration(ticks_to_millis(expires_at.saturating_sub(now))),
+                }
+            }
+            Phase::Releasing { impact } => {
+                ActionPhase::Releasing {
+                    impact_in: SwingDuration(ticks_to_millis(impact.saturating_sub(now))),
+                }
+            }
         }
     }
 }
@@ -2644,13 +2675,13 @@ pub struct Resistance {
     /// Percent of physical damage absorbed, 0–100.
     pub physical: u8,
     /// Percent of fire damage absorbed.
-    pub fire: u8,
+    pub fire:     u8,
     /// Percent of cold damage absorbed.
-    pub cold: u8,
+    pub cold:     u8,
     /// Percent of poison damage absorbed.
-    pub poison: u8,
+    pub poison:   u8,
     /// Percent of energy damage absorbed.
-    pub energy: u8,
+    pub energy:   u8,
 }
 
 impl Resistance {
@@ -2659,10 +2690,10 @@ impl Resistance {
     pub const fn none() -> Self {
         Self {
             physical: 0,
-            fire: 0,
-            cold: 0,
-            poison: 0,
-            energy: 0,
+            fire:     0,
+            cold:     0,
+            poison:   0,
+            energy:   0,
         }
     }
 
@@ -2689,7 +2720,7 @@ pub struct Mana {
     /// What it has now.
     pub current: u16,
     /// The most it can have.
-    pub max: u16,
+    pub max:     u16,
 }
 
 /// A mobile's stamina: the pool the client reads run-eligibility from, and how
@@ -2707,7 +2738,7 @@ pub struct Stamina {
     /// What it has now.
     pub current: u16,
     /// The most it can have — dexterity.
-    pub max: u16,
+    pub max:     u16,
 }
 
 /// A mobile that can walk: its position, facing, sequence and pace.
@@ -2768,7 +2799,7 @@ pub struct InRegion {
     /// zero, so region 3 in Felucca and region 3 in Ilshenar compare equal —
     /// and a traveller crossing between them would look to the diff like
     /// somebody who had not moved: no `RegionChanged`, no music, no guards.
-    pub facet: Facet,
+    pub facet:  Facet,
     /// The region's id on that facet, or `None` out in the wilds.
     pub region: Option<crate::RegionId>,
 }
@@ -2829,11 +2860,11 @@ pub struct Sailing {
     pub direction: openshard_protocol::direction::Direction,
     /// The tick this ship may next take a step on — the cadence gate, in the
     /// same units as [`WorldState::ticks`](crate::WorldState::ticks).
-    pub next: WorldTick,
+    pub next:      WorldTick,
     /// How many ticks apart its steps are. Stored rather than recomputed,
     /// because `next` has already passed by the time a step is taken and the
     /// interval cannot be read back out of it.
-    pub every: u64,
+    pub every:     u64,
 }
 
 /// Beside a [`Position`] and a [`Drawn`] whose graphic is `0x4000 | multi`, so
@@ -2849,21 +2880,21 @@ pub struct Sailing {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct House {
     /// Which multi it is, `0x4000` below the graphic on the wire.
-    pub multi: openshard_protocol::wire::MultiId,
+    pub multi:     openshard_protocol::wire::MultiId,
     /// Who owns it. A house always has an owner; demolition is what happens when
     /// it would not.
-    pub owner: openshard_protocol::serial::Serial,
+    pub owner:     openshard_protocol::serial::Serial,
     /// Everyone trusted with the house short of owning it: they may lock things
     /// down, open every secure, and use the door.
     pub co_owners: std::collections::BTreeSet<openshard_protocol::serial::Serial>,
     /// Everyone who may come in and use the door, and nothing else.
-    pub friends: std::collections::BTreeSet<openshard_protocol::serial::Serial>,
+    pub friends:   std::collections::BTreeSet<openshard_protocol::serial::Serial>,
     /// Everyone turned away at it.
     ///
     /// A separate list rather than a flag on the other two, because a ban is not
     /// the absence of friendship: a stranger is neither, and the difference is
     /// what the door says when it refuses.
-    pub bans: std::collections::BTreeSet<openshard_protocol::serial::Serial>,
+    pub bans:      std::collections::BTreeSet<openshard_protocol::serial::Serial>,
     /// How many ticks the house has stood unrefreshed.
     ///
     /// A tick count and not a wall clock, which is D6. An **accumulator** and not
@@ -2875,7 +2906,7 @@ pub struct House {
     /// in, and every house on the shard would come up freshly refreshed.
     ///
     /// Counted up by the decay sweep, zeroed by a refresh, saved as it stands.
-    pub age: u64,
+    pub age:       u64,
     /// How many items may be locked down here, secures included.
     ///
     /// **Computed at placement and stored**, which is D2's own rule one level
@@ -3057,7 +3088,7 @@ pub struct HouseDesign {
     /// `(serial, revision)` and ask for the whole thing only when what it holds
     /// is stale. Not an optimisation: without it every client walking into an
     /// area re-fetches every design in it, on every approach.
-    pub revision: u32,
+    pub revision:   u32,
 }
 
 /// The sign standing outside a house — the thing you double-click to see who
@@ -3094,7 +3125,7 @@ pub struct HouseSign {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct LockedDown {
     /// Which house, by its item serial.
-    pub house: openshard_protocol::serial::Serial,
+    pub house:  openshard_protocol::serial::Serial,
     /// The least standing that may open it, if this is a secure container.
     /// `None` for a plain lockdown, which is not a container and opens for
     /// nobody.
@@ -3212,7 +3243,7 @@ mod tests {
             registry.insert(
                 entity,
                 Body {
-                    id: openshard_protocol::wire::Graphic(0x0190),
+                    id:  openshard_protocol::wire::Graphic(0x0190),
                     hue: openshard_protocol::wire::Hue(0),
                 },
             );

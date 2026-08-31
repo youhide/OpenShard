@@ -24,31 +24,79 @@
 //! not a move at all. Both are routed by serial in [`WorldView::apply`], so
 //! [`WorldView::mobiles`] holds only *other* mobiles, as its docs promise.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{
+    BTreeMap,
+    HashSet,
+    VecDeque,
+};
 
-use rustc_hash::FxHashMap;
-
+pub use openshard_client_model::{
+    Skill,
+    Status,
+};
 use openshard_protocol::access::AccessLevel;
 use openshard_protocol::chunks::WorldNotice;
-use openshard_protocol::containers::{ContainedItem, GridSlot};
-use openshard_protocol::craft::{CraftCatalogue, CraftWorkbench};
+use openshard_protocol::containers::{
+    ContainedItem,
+    GridSlot,
+};
+use openshard_protocol::craft::{
+    CraftCatalogue,
+    CraftWorkbench,
+};
 use openshard_protocol::direction::Facing;
 use openshard_protocol::feedback::HarvestPreview;
-use openshard_protocol::gump::layout::{Element, parse};
-use openshard_protocol::gump::{GumpId, GumpKey, GumpPoint};
-use openshard_protocol::items::{CorpseEquipmentItem, ItemAmount, WorldItemPayload};
-use openshard_protocol::mobile::{Equipment, Notoriety, PaperdollFlags, StatusFlags, Vitals};
+use openshard_protocol::gump::layout::{
+    Element,
+    parse,
+};
+use openshard_protocol::gump::{
+    GumpId,
+    GumpKey,
+    GumpPoint,
+};
+use openshard_protocol::items::{
+    CorpseEquipmentItem,
+    ItemAmount,
+    WorldItemPayload,
+};
+use openshard_protocol::mobile::{
+    Equipment,
+    Notoriety,
+    PaperdollFlags,
+    StatusFlags,
+    Vitals,
+};
 use openshard_protocol::properties::PropertyEntry;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::speech::{Font, LocalizedMessage, SpokenMessage, TalkMode, UnicodeMessage};
+use openshard_protocol::speech::{
+    Font,
+    LocalizedMessage,
+    SpokenMessage,
+    TalkMode,
+    UnicodeMessage,
+};
 use openshard_protocol::spellbook::SpellbookContent;
 use openshard_protocol::target::TargetCursor;
-use openshard_protocol::vendor::{BuyLine, SellLine};
-use openshard_protocol::wire::{Graphic, Hue, Layer};
-use openshard_protocol::world::{Light, MapSize, PlayerStart, Point, Weather, WeatherChange};
-
-pub use openshard_client_model::{Skill, Status};
+use openshard_protocol::vendor::{
+    BuyLine,
+    SellLine,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
+use openshard_protocol::world::{
+    Light,
+    MapSize,
+    PlayerStart,
+    Point,
+    Weather,
+    WeatherChange,
+};
+use rustc_hash::FxHashMap;
 
 /// How many lines of speech the journal keeps.
 ///
@@ -67,15 +115,15 @@ pub const JOURNAL_LINES: usize = 256;
 /// renderer to remember the previous precipitation packet for itself.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WeatherState {
-    pub weather: Weather,
-    pub intensity: u8,
+    pub weather:     Weather,
+    pub intensity:   u8,
     pub temperature: u8,
 }
 
 impl WeatherState {
     pub const CLEAR: Self = Self {
-        weather: Weather::Clear,
-        intensity: 0,
+        weather:     Weather::Clear,
+        intensity:   0,
         temperature: 0,
     };
 
@@ -98,7 +146,7 @@ impl WeatherState {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct VendorBuy {
     pub container: Serial,
-    pub lines: Vec<BuyLine>,
+    pub lines:     Vec<BuyLine>,
 }
 
 /// A vendor's offer to buy items from this character.
@@ -230,22 +278,22 @@ pub struct Player {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Mobile {
     /// Its body graphic.
-    pub body: Graphic,
+    pub body:      Graphic,
     /// Where it stands.
-    pub position: Point,
+    pub position:  Point,
     /// Which way it faces, and whether it is running.
-    pub facing: Facing,
+    pub facing:    Facing,
     /// Its hue.
-    pub hue: Hue,
+    pub hue:       Hue,
     /// Poisoned, invisible, war mode.
-    pub flags: StatusFlags,
+    pub flags:     StatusFlags,
     /// How to colour its health bar.
     pub notoriety: Notoriety,
     /// The hit-point pair the shard last stated for this mobile.
     ///
     /// Stored as sent: for strangers this is usually a 0-100 percentage, and
     /// no caller has to know that to draw a bar.
-    pub hits: Option<Vitals>,
+    pub hits:      Option<Vitals>,
     /// What it is wearing.
     ///
     /// Only `0x78` carries this; a `0x77` move leaves it as it was; see
@@ -286,32 +334,32 @@ impl Mobile {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Heard {
     /// The speaker, or `None` for the system.
-    pub serial: Option<Serial>,
+    pub serial:  Option<Serial>,
     /// The speaker's body graphic, or `None` for no mobile behind it.
     pub graphic: Option<Graphic>,
     /// How it is said.
-    pub mode: TalkMode,
+    pub mode:    TalkMode,
     /// The colour to draw it in.
-    pub hue: Hue,
+    pub hue:     Hue,
     /// The font to draw it in.
-    pub font: Font,
+    pub font:    Font,
     /// The speaker's name, or empty for the system.
-    pub name: String,
+    pub name:    String,
     /// What was said.
-    pub text: String,
+    pub text:    String,
 }
 
 impl From<&SpokenMessage> for Heard {
     /// `0x1C` — Latin-1 speech.
     fn from(message: &SpokenMessage) -> Self {
         Self {
-            serial: message.serial,
+            serial:  message.serial,
             graphic: message.graphic,
-            mode: message.mode,
-            hue: message.hue,
-            font: message.font,
-            name: message.name.clone(),
-            text: message.text.clone(),
+            mode:    message.mode,
+            hue:     message.hue,
+            font:    message.font,
+            name:    message.name.clone(),
+            text:    message.text.clone(),
         }
     }
 }
@@ -326,13 +374,13 @@ impl From<&UnicodeMessage> for Heard {
     /// notice does nothing.
     fn from(message: &UnicodeMessage) -> Self {
         Self {
-            serial: message.serial,
+            serial:  message.serial,
             graphic: message.graphic,
-            mode: message.mode,
-            hue: message.hue,
-            font: message.font,
-            name: message.name.clone(),
-            text: message.text.clone(),
+            mode:    message.mode,
+            hue:     message.hue,
+            font:    message.font,
+            name:    message.name.clone(),
+            text:    message.text.clone(),
         }
     }
 }
@@ -346,13 +394,13 @@ impl From<&UnicodeMessage> for Heard {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Item {
     /// Its graphic.
-    pub graphic: Graphic,
+    pub graphic:  Graphic,
     /// Stack size, or the dead body's graphic for a corpse marker.
-    pub payload: WorldItemPayload,
+    pub payload:  WorldItemPayload,
     /// Where it lies.
     pub position: Point,
     /// Its hue, or [`Hue::NONE`] for none.
-    pub hue: Hue,
+    pub hue:      Hue,
 }
 
 /// A client's complete record of one item, keyed by its serial in
@@ -364,9 +412,9 @@ pub struct Item {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ItemEntity {
     /// The art all three positions draw.
-    pub graphic: Graphic,
+    pub graphic:  Graphic,
     /// The dye all three positions draw.
-    pub hue: Hue,
+    pub hue:      Hue,
     /// Its one current position, including position-specific data.
     pub position: ItemPosition,
 }
@@ -377,7 +425,7 @@ pub enum ItemPosition {
     /// Loose in the world.
     Ground {
         /// Stack count or corpse metadata sent by `0x1A`.
-        payload: WorldItemPayload,
+        payload:  WorldItemPayload,
         /// Its world coordinate.
         position: Point,
     },
@@ -386,18 +434,18 @@ pub enum ItemPosition {
         /// The container that owns it.
         container: Serial,
         /// Stack count.
-        amount: ItemAmount,
+        amount:    ItemAmount,
         /// Icon position inside the gump.
-        at: GumpPoint,
+        at:        GumpPoint,
         /// Enhanced-client grid cell.
-        grid: GridSlot,
+        grid:      GridSlot,
     },
     /// Worn by a mobile.
     Equipped {
         /// The mobile wearing it.
         mobile: Serial,
         /// Its paperdoll layer.
-        layer: Layer,
+        layer:  Layer,
     },
 }
 
@@ -471,8 +519,8 @@ impl ItemCatalogue {
             for serial in self.place(
                 item.serial,
                 ItemEntity {
-                    graphic: item.graphic,
-                    hue: item.hue,
+                    graphic:  item.graphic,
+                    hue:      item.hue,
                     position: ItemPosition::Equipped {
                         mobile,
                         layer: item.layer,
@@ -507,8 +555,8 @@ impl ItemCatalogue {
             for serial in self.place(
                 item.serial,
                 ItemEntity {
-                    graphic: item.graphic,
-                    hue: item.hue,
+                    graphic:  item.graphic,
+                    hue:      item.hue,
                     position: ItemPosition::Contained {
                         container,
                         amount: item.amount,
@@ -579,10 +627,10 @@ impl ItemCatalogue {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct OpenTarget {
     /// What the shard asked for.
-    pub cursor: TargetCursor,
+    pub cursor:  TargetCursor,
     /// The multi the client draws under the pointer, for a `0x99`. `None` for
     /// an ordinary `0x6C`.
-    pub multi: Option<openshard_protocol::wire::MultiId>,
+    pub multi:   Option<openshard_protocol::wire::MultiId>,
     /// A local-animation hint for this exact cursor. `None` for ordinary targets.
     pub harvest: Option<HarvestPreview>,
 }
@@ -598,28 +646,28 @@ pub struct OpenTarget {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct WorldView {
     /// This client's character.
-    pub player: Player,
+    pub player:              Player,
     /// How dark the shard says this character's world is right now. The value
     /// is the authoritative target of the client's eased day/night curve.
-    pub light: Option<Light>,
+    pub light:               Option<Light>,
     /// The precipitation and temperature the shard last reported.
-    pub weather: WeatherState,
+    pub weather:             WeatherState,
     /// How big the facet is. The client needs it to bound the map it draws.
-    pub map: MapSize,
+    pub map:                 MapSize,
     /// Every other mobile this client has been shown, by serial.
-    pub mobiles: FxHashMap<Serial, Mobile>,
+    pub mobiles:             FxHashMap<Serial, Mobile>,
     /// Every ground item this client has been shown, by serial.
     ///
     /// This is the ground projection of [`item_catalogue`](Self::item_catalogue).
     /// It remains a map because the renderer needs exactly this spatial slice.
-    pub items: FxHashMap<Serial, Item>,
+    pub items:               FxHashMap<Serial, Item>,
     /// Every item entity this client currently knows, whatever its position.
     ///
     /// Packet reduction changes this catalogue first; [`items`](Self::items),
     /// [`contents`](Self::contents) and mobile equipment are then rebuilt from
     /// the resulting entities.  Keeping the source of truth here makes one
     /// serial unable to survive in two of those projections.
-    pub item_catalogue: ItemCatalogue,
+    pub item_catalogue:      ItemCatalogue,
     /// What has been said to this client, oldest first, capped at
     /// [`JOURNAL_LINES`].
     ///
@@ -631,7 +679,7 @@ pub struct WorldView {
     /// the cap. The first thing it holds, and the reason it exists at all, is
     /// the shard saying it is going away (`docs/shutdown.md` S3): a client that
     /// could decode that line and then dropped it was told and did not listen.
-    pub journal: VecDeque<Heard>,
+    pub journal:             VecDeque<Heard>,
     /// The dialogs the server has opened here and this client has not answered,
     /// oldest first.
     ///
@@ -643,14 +691,14 @@ pub struct WorldView {
     ///
     /// Removed by [`gump_closed`](Self::gump_closed) when this client answers,
     /// which is the one thing here the server does not tell us — see its docs.
-    pub gumps: Vec<OpenGump>,
+    pub gumps:               Vec<OpenGump>,
     /// Compact rows for client-owned catalogue tables, keyed by their gump
     /// shell. They travel in an OpenShard packet rather than inside `0xB0`.
-    pub craft_catalogues: FxHashMap<GumpId, CraftCatalogue>,
+    pub craft_catalogues:    FxHashMap<GumpId, CraftCatalogue>,
     /// Typed payload for normal, tool-specific craft windows. It shares the
     /// gump shell and reply channel with the legacy layout, but egui owns its
     /// presentation.
-    pub craft_workbenches: FxHashMap<GumpId, CraftWorkbench>,
+    pub craft_workbenches:   FxHashMap<GumpId, CraftWorkbench>,
     /// The gump art of every container the shard has opened a window for
     /// (`0x24`), by container serial.
     ///
@@ -658,7 +706,7 @@ pub struct WorldView {
     /// and both windows stand. Removed by
     /// [`container_closed`](Self::container_closed) — closing one is a click,
     /// exactly as closing a gump is, and the wire has no packet for it either.
-    pub containers: FxHashMap<Serial, Graphic>,
+    pub containers:          FxHashMap<Serial, Graphic>,
     /// What each container holds, as far as this client has been told
     /// (`0x3C`, then `0x25` per addition), in the order the shard listed it.
     ///
@@ -673,22 +721,22 @@ pub struct WorldView {
     /// A `Vec` and not a map keyed by serial, because painter's order is data
     /// here: a container's icons overlap, and the shard's order is the order the
     /// reference client draws them in.
-    pub contents: FxHashMap<Serial, Vec<ContainedItem>>,
+    pub contents:            FxHashMap<Serial, Vec<ContainedItem>>,
     /// The layers the items in a corpse container occupied on the body that
     /// died. `0x3C` supplies their graphics; `0x89` supplies this relationship.
     /// Keeping the packets separate preserves either arrival order.
-    pub corpse_equipment: FxHashMap<Serial, Vec<CorpseEquipmentItem>>,
+    pub corpse_equipment:    FxHashMap<Serial, Vec<CorpseEquipmentItem>>,
     /// The one target cursor the shard currently has open for this player.
-    pub target: Option<OpenTarget>,
+    pub target:              Option<OpenTarget>,
     /// A harvest hint can arrive immediately before its ordinary target cursor.
     /// It is retained only until that cursor folds it into [`OpenTarget`].
     pending_harvest_preview: Option<HarvestPreview>,
     /// Buy catalogues currently opened by NPC vendors, keyed by vendor serial.
-    pub vendor_buys: FxHashMap<Serial, VendorBuy>,
+    pub vendor_buys:         FxHashMap<Serial, VendorBuy>,
     /// Sell catalogues currently opened by NPC vendors, keyed by vendor serial.
-    pub vendor_sells: FxHashMap<Serial, VendorSell>,
+    pub vendor_sells:        FxHashMap<Serial, VendorSell>,
     /// A `0x74` arrives just before the `0x24` that identifies its vendor.
-    pending_vendor_buys: FxHashMap<Serial, Vec<BuyLine>>,
+    pending_vendor_buys:     FxHashMap<Serial, Vec<BuyLine>>,
     /// The stock crate each vendor most recently wore on shop layer `0x1A`.
     ///
     /// This deliberately does not live only in [`Mobile::equipment`].  A
@@ -696,7 +744,7 @@ pub struct WorldView {
     /// update reaches this client; dropping that identity made the later buy
     /// list impossible to attach to the window even though every shop packet
     /// had arrived.
-    vendor_stock: FxHashMap<Serial, Serial>,
+    vendor_stock:            FxHashMap<Serial, Serial>,
     /// Whose paperdoll the shard has opened a window for (`0x88`), by the
     /// mobile's serial.
     ///
@@ -714,17 +762,17 @@ pub struct WorldView {
     /// title rather than stacking a window. Removed by
     /// [`paperdoll_closed`](Self::paperdoll_closed): closing one is a click,
     /// exactly as it is for a container and a gump.
-    pub paperdolls: FxHashMap<Serial, Paperdoll>,
+    pub paperdolls:          FxHashMap<Serial, Paperdoll>,
     /// The books this client has opened, keyed by book serial.  The spellbook
     /// content packet is the window's source of truth, not the bag it came
     /// from: books can be carried, equipped, or opened from the ground.
-    pub spellbooks: FxHashMap<Serial, Spellbook>,
+    pub spellbooks:          FxHashMap<Serial, Spellbook>,
     /// The party this client is in, and who has asked it into one.
     ///
     /// One value, not a table: a mobile is in at most one party, and the shard
     /// says so with a roster rather than with deltas — every change re-sends the
     /// whole list, so this is replaced rather than edited.
-    pub party: Party,
+    pub party:               Party,
     /// The AoS tooltip this client knows about each object it has been shown.
     ///
     /// Filled by the two halves of the property protocol — a `0xDC` naming a
@@ -732,7 +780,7 @@ pub struct WorldView {
     /// Entries go when the object does, in [`forget`](Self::forget): a tooltip
     /// is about a thing on screen, and a serial the shard has taken away has no
     /// hover to answer.
-    pub tooltips: FxHashMap<Serial, Tooltip>,
+    pub tooltips:            FxHashMap<Serial, Tooltip>,
     /// Which revision the shard last named for each **designed** house.
     ///
     /// [`tooltips`](Self::tooltips)' twin, one question along: a `0xBF 0x1D`
@@ -746,7 +794,7 @@ pub struct WorldView {
     /// `openshard-uofiles` and must not start. So the view holds what the
     /// packets said, and whoever holds the client's files holds what was made of
     /// it — the same split that keeps `WorldView` free of art.
-    pub designs: FxHashMap<Serial, u32>,
+    pub designs:             FxHashMap<Serial, u32>,
     /// What the shard says this character's authority is — the answer to "may I
     /// run a staff command", and the only thing that reads it is the completer
     /// on the speech line (`openshard_commands::StaffCommand::matching`).
@@ -762,7 +810,7 @@ pub struct WorldView {
     ///
     /// It is never a *permission*: nothing here is checked before a line goes
     /// out, and the shard refuses what it refuses regardless of what this says.
-    pub authority: AccessLevel,
+    pub authority:           AccessLevel,
     /// Which world the shard says this connection is standing in — the facet,
     /// its size in blocks, and the revision it is published at.
     ///
@@ -780,13 +828,13 @@ pub struct WorldView {
     ///
     /// It is *not* the same question as [`map`](Self::map), which is the size in
     /// tiles the `0x1B` carried and which every client, ours or stock, is told.
-    pub world: Option<WorldNotice>,
+    pub world:               Option<WorldNotice>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct Party {
     /// Everyone in it, leader first. Empty when this client is in no party.
-    pub members: Vec<Serial>,
+    pub members:    Vec<Serial>,
     /// Who has invited this client and is waiting on an answer.
     ///
     /// Independent of [`members`](Self::members): an invitation arrives while
@@ -823,7 +871,7 @@ pub struct Tooltip {
     /// The revision the shard last named as current for this object (`0xDC`).
     ///
     /// `None` in `full` mode, where the shard never sends one.
-    pub revision: Option<u32>,
+    pub revision:      Option<u32>,
     /// The revision [`entries`](Self::entries) were built at — the hash the
     /// `0xD6` that filled them carried. `None` until one arrives.
     pub held_revision: Option<u32>,
@@ -832,7 +880,7 @@ pub struct Tooltip {
     /// Kept rather than cleared when a newer revision arrives, so a hover during
     /// the round trip draws the tooltip that is one edit out of date instead of
     /// a blank. A blank would read as "this has no name".
-    pub entries: Vec<PropertyEntry>,
+    pub entries:       Vec<PropertyEntry>,
 }
 
 impl Tooltip {
@@ -863,7 +911,7 @@ pub struct Paperdoll {
     /// The title on the paperdoll's name plate: the character name plus any
     /// honorific the shard chose to include.  It is deliberately not called a
     /// mobile name: `0x88` is the sole authority for this display string.
-    pub title: String,
+    pub title:    String,
     /// Whether this client may lift what is worn on this doll. The shard's
     /// answer and not a guess: it is set for your own paperdoll and for a pet's,
     /// and clear for a stranger's.
@@ -886,7 +934,7 @@ pub struct Spellbook {
     /// The book's graphic, retained for a later spell school.
     pub graphic: Graphic,
     /// The one-based spell number represented by bit zero.
-    pub offset: u16,
+    pub offset:  u16,
     /// Bit `n` says this book holds spell `offset + n`.
     pub content: u64,
 }
@@ -895,7 +943,7 @@ impl From<SpellbookContent> for Spellbook {
     fn from(content: SpellbookContent) -> Self {
         Self {
             graphic: content.graphic,
-            offset: content.offset,
+            offset:  content.offset,
             content: content.content,
         }
     }
@@ -911,15 +959,15 @@ impl From<SpellbookContent> for Spellbook {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct OpenGump {
     /// What the reply must echo. Opaque: the server chose it — see [`GumpKey`].
-    pub key: GumpKey,
+    pub key:      GumpKey,
     /// Which dialog, and what the reply is routed by on the way back.
-    pub gump_id: GumpId,
+    pub gump_id:  GumpId,
     /// Where on the screen the server asked for it.
-    pub at: GumpPoint,
+    pub at:       GumpPoint,
     /// What to draw, in the order the window draws it.
     pub elements: Vec<Element>,
     /// The text table the elements index into.
-    pub lines: Vec<String>,
+    pub lines:    Vec<String>,
 }
 
 impl OpenGump {
@@ -1180,16 +1228,16 @@ impl WorldView {
         self.designs.clear();
         self.target = None;
         self.heard(Heard {
-            serial: None,
+            serial:  None,
             graphic: None,
             // A system line has the shape the shard's own private messages
             // have — no speaker, muted grey, ordinary mode — because it is the
             // same kind of line, said by the one participant still in the room.
-            mode: TalkMode::Regular,
-            hue: Hue::SYSTEM,
-            font: Font::DEFAULT,
-            name: String::new(),
-            text: format!("The shard is no longer answering: {reason}."),
+            mode:    TalkMode::Regular,
+            hue:     Hue::SYSTEM,
+            font:    Font::DEFAULT,
+            name:    String::new(),
+            text:    format!("The shard is no longer answering: {reason}."),
         });
     }
 
@@ -1370,11 +1418,11 @@ impl WorldView {
             // menus nobody can dismiss.
             ServerPacket::GumpDisplay(display) => {
                 let fresh = OpenGump {
-                    key: display.serial,
-                    gump_id: display.gump_id,
-                    at: display.at,
+                    key:      display.serial,
+                    gump_id:  display.gump_id,
+                    at:       display.at,
                     elements: parse(&display.layout),
-                    lines: display.lines.clone(),
+                    lines:    display.lines.clone(),
                 };
                 match self.gumps.iter_mut().find(|open| open.gump_id == fresh.gump_id) {
                     Some(open) if *open == fresh => false,
@@ -1552,13 +1600,13 @@ impl WorldView {
                     .replace_outfit(incoming.serial, &incoming.equipment);
                 let relocated = self.apply_catalogue_change(catalogue_change);
                 let fresh = Mobile {
-                    body: incoming.body,
-                    position: incoming.position,
-                    facing: incoming.facing,
-                    hue: incoming.hue,
-                    flags: incoming.flags,
+                    body:      incoming.body,
+                    position:  incoming.position,
+                    facing:    incoming.facing,
+                    hue:       incoming.hue,
+                    flags:     incoming.flags,
                     notoriety: incoming.notoriety,
-                    hits: previous.as_ref().and_then(|mobile| mobile.hits),
+                    hits:      previous.as_ref().and_then(|mobile| mobile.hits),
                     equipment: Vec::new(),
                 };
                 self.mobiles.insert(incoming.serial, fresh);
@@ -1576,11 +1624,11 @@ impl WorldView {
                 let catalogue_change = self.item_catalogue.place(
                     update.item,
                     ItemEntity {
-                        graphic: update.graphic,
-                        hue: update.hue,
+                        graphic:  update.graphic,
+                        hue:      update.hue,
                         position: ItemPosition::Equipped {
                             mobile: update.mobile,
-                            layer: update.layer,
+                            layer:  update.layer,
                         },
                     },
                 );
@@ -1596,10 +1644,10 @@ impl WorldView {
                 let catalogue_change = self.item_catalogue.place(
                     item.serial,
                     ItemEntity {
-                        graphic: item.graphic,
-                        hue: item.hue,
+                        graphic:  item.graphic,
+                        hue:      item.hue,
                         position: ItemPosition::Ground {
-                            payload: item.payload,
+                            payload:  item.payload,
                             position: item.position,
                         },
                     },
@@ -1611,8 +1659,8 @@ impl WorldView {
                 // a plain cursor after a house cursor must stop drawing the
                 // house, and the two live in one value so it cannot be forgotten.
                 let opened = OpenTarget {
-                    cursor: *cursor,
-                    multi: None,
+                    cursor:  *cursor,
+                    multi:   None,
                     harvest: self
                         .pending_harvest_preview
                         .take()
@@ -1624,11 +1672,11 @@ impl WorldView {
             }
             ServerPacket::MultiTarget(request) => {
                 let opened = OpenTarget {
-                    cursor: TargetCursor {
+                    cursor:  TargetCursor {
                         cursor_id: request.cursor_id,
-                        kind: request.kind,
+                        kind:      request.kind,
                     },
-                    multi: Some(request.multi),
+                    multi:   Some(request.multi),
                     harvest: None,
                 };
                 self.pending_harvest_preview = None;
@@ -1694,20 +1742,23 @@ impl WorldView {
             // An empty listing names no container at all — the wire has no field
             // for it — so there is nothing this can be about. See
             // `ContainerContents::container`.
-            ServerPacket::ContainerContents(listing) => match listing.container {
-                None => false,
-                Some(container) => {
-                    let catalogue_change = self.item_catalogue.replace_contents(container, &listing.items);
-                    let catalogue_changed = self.apply_catalogue_change(catalogue_change);
-                    let projection_changed = self.contents.get(&container) != Some(&listing.items);
-                    // A window can have deliberately dropped its projection
-                    // while the catalogue kept the entities. `0x3C` is the
-                    // authoritative drawing order for that window, so rebuild
-                    // it even when none of those entities moved.
-                    self.contents.insert(container, listing.items.clone());
-                    catalogue_changed || projection_changed
+            ServerPacket::ContainerContents(listing) => {
+                match listing.container {
+                    None => false,
+                    Some(container) => {
+                        let catalogue_change =
+                            self.item_catalogue.replace_contents(container, &listing.items);
+                        let catalogue_changed = self.apply_catalogue_change(catalogue_change);
+                        let projection_changed = self.contents.get(&container) != Some(&listing.items);
+                        // A window can have deliberately dropped its projection
+                        // while the catalogue kept the entities. `0x3C` is the
+                        // authoritative drawing order for that window, so rebuild
+                        // it even when none of those entities moved.
+                        self.contents.insert(container, listing.items.clone());
+                        catalogue_changed || projection_changed
+                    }
                 }
-            },
+            }
             ServerPacket::CorpseEquipment(equipment) => {
                 let changed = self.corpse_equipment.get(&equipment.corpse) != Some(&equipment.items);
                 self.corpse_equipment
@@ -1746,13 +1797,13 @@ impl WorldView {
                 let catalogue_change = self.item_catalogue.place(
                     added.item.serial,
                     ItemEntity {
-                        graphic: added.item.graphic,
-                        hue: added.item.hue,
+                        graphic:  added.item.graphic,
+                        hue:      added.item.hue,
                         position: ItemPosition::Contained {
                             container: added.container,
-                            amount: added.item.amount,
-                            at: added.item.at,
-                            grid: added.item.grid,
+                            amount:    added.item.amount,
+                            at:        added.item.at,
+                            grid:      added.item.grid,
                         },
                     },
                 );
@@ -1781,7 +1832,7 @@ impl WorldView {
             // body, which is honest, where nothing at all is not.
             ServerPacket::OpenPaperdoll(paperdoll) => {
                 let fresh = Paperdoll {
-                    title: paperdoll.text.clone(),
+                    title:    paperdoll.text.clone(),
                     can_lift: paperdoll.flags.has(PaperdollFlags::CAN_LIFT),
                 };
                 let mut changed = self.paperdolls.get(&paperdoll.serial) != Some(&fresh);
@@ -1827,14 +1878,16 @@ impl WorldView {
                 self.player.hits = Some(bar.vitals);
                 changed
             }
-            ServerPacket::Health(bar) => match self.mobiles.get_mut(&bar.serial) {
-                Some(mobile) => {
-                    let changed = mobile.hits != Some(bar.vitals);
-                    mobile.hits = Some(bar.vitals);
-                    changed
+            ServerPacket::Health(bar) => {
+                match self.mobiles.get_mut(&bar.serial) {
+                    Some(mobile) => {
+                        let changed = mobile.hits != Some(bar.vitals);
+                        mobile.hits = Some(bar.vitals);
+                        changed
+                    }
+                    None => false,
                 }
-                None => false,
-            },
+            }
             // `0x11` is status-bar data, not a position or an appearance. It
             // belongs on the one player the connection is about, and its hits
             // join `0xA1` in Player::hits so the two pictures have one value.
@@ -1949,17 +2002,17 @@ impl WorldView {
                     false => "[Party tell]",
                 };
                 self.heard(Heard {
-                    serial: Some(message.from),
+                    serial:  Some(message.from),
                     graphic: None,
-                    mode: TalkMode::Regular,
+                    mode:    TalkMode::Regular,
                     // The wire carries no name here, only a serial: a client is
                     // expected to know who its own party is. Left empty rather
                     // than guessed at — whatever draws this has the roster and
                     // the mobiles, and this layer has only the number.
-                    name: channel.to_owned(),
-                    font: Font::DEFAULT,
-                    hue: Hue::NONE,
-                    text: message.text.clone(),
+                    name:    channel.to_owned(),
+                    font:    Font::DEFAULT,
+                    hue:     Hue::NONE,
+                    text:    message.text.clone(),
                 });
                 true
             }
@@ -2019,24 +2072,40 @@ impl WorldView {
 #[cfg(test)]
 mod tests {
     use openshard_protocol::combat::WarMode;
-    use openshard_protocol::containers::{AddToContainer, ContainerContents};
+    use openshard_protocol::containers::{
+        AddToContainer,
+        ContainerContents,
+    };
     use openshard_protocol::direction::Direction;
     use openshard_protocol::items::{
-        CorpseEquipment, CorpseEquipmentItem, ItemAmount, ItemFlags, WorldItem, WorldItemPayload,
+        CorpseEquipment,
+        CorpseEquipmentItem,
+        ItemAmount,
+        ItemFlags,
+        WorldItem,
+        WorldItemPayload,
     };
-    use openshard_protocol::mobile::{MobileIncoming, MobileMove, MobileStatus, Remove};
+    use openshard_protocol::mobile::{
+        MobileIncoming,
+        MobileMove,
+        MobileStatus,
+        Remove,
+    };
     use openshard_protocol::skill::SkillLock;
-    use openshard_protocol::world::{DeathStatus, PlayerUpdate};
+    use openshard_protocol::world::{
+        DeathStatus,
+        PlayerUpdate,
+    };
 
     use super::*;
 
     fn start() -> PlayerStart {
         PlayerStart {
-            serial: Serial::new(0x0000_002A).unwrap(),
-            body: Graphic(0x0190),
+            serial:   Serial::new(0x0000_002A).unwrap(),
+            body:     Graphic(0x0190),
             position: Point::new(1475, 1770, 20),
-            facing: Facing::walking(Direction::South),
-            map: MapSize::BRITANNIA,
+            facing:   Facing::walking(Direction::South),
+            map:      MapSize::BRITANNIA,
         }
     }
 
@@ -2046,10 +2115,10 @@ mod tests {
 
     fn shirt() -> Equipment {
         Equipment {
-            serial: Serial::new(0x4000_0001).unwrap(),
+            serial:  Serial::new(0x4000_0001).unwrap(),
             graphic: Graphic(0x1517),
-            layer: openshard_protocol::wire::Layer(0x05),
-            hue: Hue(0x0021),
+            layer:   openshard_protocol::wire::Layer(0x05),
+            hue:     Hue(0x0021),
         }
     }
 
@@ -2059,14 +2128,20 @@ mod tests {
             name: "Lord British".to_owned(),
             hits: Vitals {
                 current: 98,
-                max: 100,
+                max:     100,
             },
             female: false,
             strength: 100,
             dexterity: 50,
             intelligence: 75,
-            stamina: Vitals { current: 49, max: 50 },
-            mana: Vitals { current: 72, max: 75 },
+            stamina: Vitals {
+                current: 49,
+                max:     50,
+            },
+            mana: Vitals {
+                current: 72,
+                max:     75,
+            },
             gold: 1_234,
             armor: 42,
             weight: 12,
@@ -2081,13 +2156,13 @@ mod tests {
         // What `WorldState::system_message` builds: no speaker, no body behind
         // it. The shutdown notice is exactly this line.
         SpokenMessage {
-            serial: None,
+            serial:  None,
             graphic: None,
-            mode: openshard_protocol::speech::TalkMode::Regular,
-            hue: Hue(0x0035),
-            font: openshard_protocol::speech::Font::DEFAULT,
-            name: "System".to_owned(),
-            text: text.to_owned(),
+            mode:    openshard_protocol::speech::TalkMode::Regular,
+            hue:     Hue(0x0035),
+            font:    openshard_protocol::speech::Font::DEFAULT,
+            name:    "System".to_owned(),
+            text:    text.to_owned(),
         }
     }
 
@@ -2148,14 +2223,14 @@ mod tests {
         let mut view = WorldView::entered(start());
         let unicode = |text: &str| {
             ServerPacket::UnicodeMessage(openshard_protocol::speech::UnicodeMessage {
-                serial: None,
-                graphic: None,
-                mode: openshard_protocol::speech::TalkMode::Regular,
-                hue: Hue(0x0035),
-                font: openshard_protocol::speech::Font::DEFAULT,
+                serial:   None,
+                graphic:  None,
+                mode:     openshard_protocol::speech::TalkMode::Regular,
+                hue:      Hue(0x0035),
+                font:     openshard_protocol::speech::Font::DEFAULT,
                 language: "ENU".to_owned(),
-                name: "System".to_owned(),
-                text: text.to_owned(),
+                name:     "System".to_owned(),
+                text:     text.to_owned(),
             })
         };
 
@@ -2191,11 +2266,11 @@ mod tests {
         let mut view = WorldView::entered(start());
         let menu = |title: &str| {
             ServerPacket::GumpDisplay(openshard_protocol::gump::GumpDisplay {
-                serial: GumpKey::on(start().serial),
+                serial:  GumpKey::on(start().serial),
                 gump_id: GumpId(0x00AD_0001),
-                at: GumpPoint::new(100, 100),
-                layout: "{ resizepic 0 0 5054 300 270 }{ text 105 14 2100 0 }".to_owned(),
-                lines: vec![title.to_owned()],
+                at:      GumpPoint::new(100, 100),
+                layout:  "{ resizepic 0 0 5054 300 270 }{ text 105 14 2100 0 }".to_owned(),
+                lines:   vec![title.to_owned()],
             })
         };
 
@@ -2205,11 +2280,11 @@ mod tests {
         assert_eq!(
             view.gumps[0].elements.first(),
             Some(&Element::Background {
-                x: 0,
-                y: 0,
-                width: 300,
+                x:      0,
+                y:      0,
+                width:  300,
                 height: 270,
-                gump: 5054,
+                gump:   5054,
             }),
             "the layout is read when it arrives, not when it is drawn"
         );
@@ -2234,11 +2309,11 @@ mod tests {
         let mut view = WorldView::entered(start());
         view.apply(&ServerPacket::GumpDisplay(
             openshard_protocol::gump::GumpDisplay {
-                serial: GumpKey::on(start().serial),
+                serial:  GumpKey::on(start().serial),
                 gump_id: GumpId(0x00AD_0001),
-                at: GumpPoint::new(100, 100),
-                layout: "{ resizepic 0 0 5054 300 270 }".to_owned(),
-                lines: Vec::new(),
+                at:      GumpPoint::new(100, 100),
+                layout:  "{ resizepic 0 0 5054 300 270 }".to_owned(),
+                lines:   Vec::new(),
             },
         ));
         assert_eq!(view.gumps.len(), 1);
@@ -2246,14 +2321,14 @@ mod tests {
         assert!(
             view.apply(&ServerPacket::CloseGump(openshard_protocol::gump::CloseGump {
                 gump_id: GumpId(0x00AD_0001),
-                button: openshard_protocol::gump::ButtonId(0),
+                button:  openshard_protocol::gump::ButtonId(0),
             }))
         );
         assert!(view.gumps.is_empty());
         assert!(
             !view.apply(&ServerPacket::CloseGump(openshard_protocol::gump::CloseGump {
                 gump_id: GumpId(0x00AD_0001),
-                button: openshard_protocol::gump::ButtonId(0),
+                button:  openshard_protocol::gump::ButtonId(0),
             })),
             "closing what is already closed is no change"
         );
@@ -2267,12 +2342,12 @@ mod tests {
         // followed by one more entry packet.
         let mut view = WorldView::entered(start());
         view.apply(&ServerPacket::MobileIncoming(MobileIncoming {
-            serial: other(),
-            body: Graphic(0x0190),
-            position: Point::new(1476, 1770, 20),
-            facing: start().facing,
-            hue: Hue::NONE,
-            flags: StatusFlags::NONE,
+            serial:    other(),
+            body:      Graphic(0x0190),
+            position:  Point::new(1476, 1770, 20),
+            facing:    start().facing,
+            hue:       Hue::NONE,
+            flags:     StatusFlags::NONE,
             notoriety: Notoriety::Innocent,
             equipment: Vec::new(),
         }));
@@ -2320,12 +2395,12 @@ mod tests {
     fn a_player_update_moves_the_players_own_body() {
         let mut view = WorldView::entered(start());
         let update = PlayerUpdate {
-            serial: view.player.serial,
-            body: Graphic(0x0191),
-            hue: Hue(0x0021),
-            flags: StatusFlags::NONE,
+            serial:   view.player.serial,
+            body:     Graphic(0x0191),
+            hue:      Hue(0x0021),
+            flags:    StatusFlags::NONE,
             position: Point::new(1480, 1770, 20),
-            facing: Facing::running(Direction::East),
+            facing:   Facing::running(Direction::East),
         };
         assert!(view.apply(&ServerPacket::PlayerUpdate(update)));
         assert_eq!(view.player.body, Graphic(0x0191));
@@ -2342,12 +2417,12 @@ mod tests {
     fn a_player_update_turns_the_players_own_body_in_place() {
         let mut view = WorldView::entered(start());
         let update = PlayerUpdate {
-            serial: view.player.serial,
-            body: view.player.body,
-            hue: view.player.hue,
-            flags: StatusFlags::NONE,
+            serial:   view.player.serial,
+            body:     view.player.body,
+            hue:      view.player.hue,
+            flags:    StatusFlags::NONE,
             position: view.player.position,
-            facing: Facing::walking(Direction::East),
+            facing:   Facing::walking(Direction::East),
         };
 
         assert!(view.apply(&ServerPacket::PlayerUpdate(update)));
@@ -2385,14 +2460,14 @@ mod tests {
         // second body at the player's own serial, drawn twice.
         let mut view = WorldView::entered(start());
         let mine = MobileIncoming {
-            serial: view.player.serial,
-            body: Graphic(0x0190),
+            serial:    view.player.serial,
+            body:      Graphic(0x0190),
             // Deliberately different: an appearance snapshot must never
             // relocate the predicted/authoritative player movement anchor.
-            position: Point::new(2000, 2000, 0),
-            facing: Facing::running(Direction::South),
-            hue: Hue(0x83EA),
-            flags: StatusFlags::NONE,
+            position:  Point::new(2000, 2000, 0),
+            facing:    Facing::running(Direction::South),
+            hue:       Hue(0x83EA),
+            flags:     StatusFlags::NONE,
             notoriety: Notoriety::Innocent,
             equipment: vec![shirt()],
         };
@@ -2410,12 +2485,12 @@ mod tests {
         // And a 0x20 afterwards must not undress us: it carries a body and a
         // position, and no paperdoll at all.
         view.apply(&ServerPacket::PlayerUpdate(PlayerUpdate {
-            serial: view.player.serial,
-            body: Graphic(0x0190),
-            hue: Hue(0x83EA),
-            flags: StatusFlags::NONE,
+            serial:   view.player.serial,
+            body:     Graphic(0x0190),
+            hue:      Hue(0x83EA),
+            flags:    StatusFlags::NONE,
             position: Point::new(1476, 1770, 20),
-            facing: Facing::walking(Direction::North),
+            facing:   Facing::walking(Direction::North),
         }));
         assert_eq!(view.player.equipment, vec![shirt()]);
     }
@@ -2426,12 +2501,12 @@ mod tests {
         // the client is predicting for. Acting on one would fight `Walk`.
         let mut view = WorldView::entered(start());
         assert!(!view.apply(&ServerPacket::MobileMove(MobileMove {
-            serial: view.player.serial,
-            body: Graphic(0x0190),
-            position: Point::new(1000, 1000, 0),
-            facing: Facing::walking(Direction::North),
-            hue: Hue::NONE,
-            flags: StatusFlags::NONE,
+            serial:    view.player.serial,
+            body:      Graphic(0x0190),
+            position:  Point::new(1000, 1000, 0),
+            facing:    Facing::walking(Direction::North),
+            hue:       Hue::NONE,
+            flags:     StatusFlags::NONE,
             notoriety: Notoriety::Innocent,
         })));
         assert_eq!(view.player.position, start().position);
@@ -2442,12 +2517,12 @@ mod tests {
     fn a_mobile_incoming_is_recorded_with_its_equipment() {
         let mut view = WorldView::entered(start());
         let incoming = MobileIncoming {
-            serial: other(),
-            body: Graphic(0x0190),
-            position: Point::new(1476, 1770, 20),
-            facing: Facing::walking(Direction::South),
-            hue: Hue(0x83EA),
-            flags: StatusFlags::NONE,
+            serial:    other(),
+            body:      Graphic(0x0190),
+            position:  Point::new(1476, 1770, 20),
+            facing:    Facing::walking(Direction::South),
+            hue:       Hue(0x83EA),
+            flags:     StatusFlags::NONE,
             notoriety: Notoriety::Innocent,
             equipment: vec![shirt()],
         };
@@ -2467,23 +2542,23 @@ mod tests {
         // so a mobile already on screen must not be stripped naked by one.
         let mut view = WorldView::entered(start());
         view.apply(&ServerPacket::MobileIncoming(MobileIncoming {
-            serial: other(),
-            body: Graphic(0x0190),
-            position: Point::new(1476, 1770, 20),
-            facing: Facing::walking(Direction::South),
-            hue: Hue(0x83EA),
-            flags: StatusFlags::NONE,
+            serial:    other(),
+            body:      Graphic(0x0190),
+            position:  Point::new(1476, 1770, 20),
+            facing:    Facing::walking(Direction::South),
+            hue:       Hue(0x83EA),
+            flags:     StatusFlags::NONE,
             notoriety: Notoriety::Innocent,
             equipment: vec![shirt()],
         }));
 
         assert!(view.apply(&ServerPacket::MobileMove(MobileMove {
-            serial: other(),
-            body: Graphic(0x0190),
-            position: Point::new(1477, 1770, 20),
-            facing: Facing::walking(Direction::South),
-            hue: Hue(0x83EA),
-            flags: StatusFlags::NONE,
+            serial:    other(),
+            body:      Graphic(0x0190),
+            position:  Point::new(1477, 1770, 20),
+            facing:    Facing::walking(Direction::South),
+            hue:       Hue(0x83EA),
+            flags:     StatusFlags::NONE,
             notoriety: Notoriety::Innocent,
         })));
 
@@ -2496,13 +2571,13 @@ mod tests {
     fn a_world_item_is_recorded_by_serial() {
         let mut view = WorldView::entered(start());
         let item = WorldItem {
-            serial: Serial::new(0x4000_00AB).unwrap(),
-            graphic: Graphic(0x0EED),
-            payload: WorldItemPayload::Stack(ItemAmount(500)),
+            serial:   Serial::new(0x4000_00AB).unwrap(),
+            graphic:  Graphic(0x0EED),
+            payload:  WorldItemPayload::Stack(ItemAmount(500)),
             position: Point::new(1000, 2000, 5),
-            hue: Hue(0x0021),
-            light: None,
-            flags: ItemFlags::NONE,
+            hue:      Hue(0x0021),
+            light:    None,
+            flags:    ItemFlags::NONE,
         };
         assert!(view.apply(&ServerPacket::WorldItem(item)));
         assert_eq!(
@@ -2515,17 +2590,17 @@ mod tests {
     fn a_ground_destination_retires_the_lifters_stale_container_source() {
         let mut view = WorldView::entered(start());
         view.apply(&ServerPacket::AddToContainer(AddToContainer {
-            item: candle(),
+            item:      candle(),
             container: chest(),
         }));
         assert!(view.apply(&ServerPacket::WorldItem(WorldItem {
-            serial: candle().serial,
-            graphic: candle().graphic,
-            payload: WorldItemPayload::Stack(candle().amount),
+            serial:   candle().serial,
+            graphic:  candle().graphic,
+            payload:  WorldItemPayload::Stack(candle().amount),
             position: Point::new(1000, 2000, 5),
-            hue: candle().hue,
-            light: None,
-            flags: ItemFlags::NONE,
+            hue:      candle().hue,
+            light:    None,
+            flags:    ItemFlags::NONE,
         })));
         assert!(view.contents.get(&chest()).is_none_or(Vec::is_empty));
         assert!(view.items.contains_key(&candle().serial));
@@ -2539,22 +2614,22 @@ mod tests {
         let robe = shirt();
         view.apply(&ServerPacket::EquipUpdate(
             openshard_protocol::items::EquipUpdate {
-                item: robe.serial,
+                item:    robe.serial,
                 graphic: robe.graphic,
-                layer: robe.layer,
-                mobile: view.player.serial,
-                hue: robe.hue,
+                layer:   robe.layer,
+                mobile:  view.player.serial,
+                hue:     robe.hue,
             },
         ));
 
         assert!(view.apply(&ServerPacket::WorldItem(WorldItem {
-            serial: robe.serial,
-            graphic: robe.graphic,
-            payload: WorldItemPayload::Stack(ItemAmount::ONE),
+            serial:   robe.serial,
+            graphic:  robe.graphic,
+            payload:  WorldItemPayload::Stack(ItemAmount::ONE),
             position: Point::new(1000, 2000, 5),
-            hue: robe.hue,
-            light: None,
-            flags: ItemFlags::NONE,
+            hue:      robe.hue,
+            light:    None,
+            flags:    ItemFlags::NONE,
         })));
         assert!(view.player.equipment.is_empty(), "the robe left the paperdoll");
         assert!(
@@ -2564,10 +2639,10 @@ mod tests {
         assert_eq!(
             view.item_catalogue.get(robe.serial),
             Some(&ItemEntity {
-                graphic: robe.graphic,
-                hue: robe.hue,
+                graphic:  robe.graphic,
+                hue:      robe.hue,
                 position: ItemPosition::Ground {
-                    payload: WorldItemPayload::Stack(ItemAmount::ONE),
+                    payload:  WorldItemPayload::Stack(ItemAmount::ONE),
                     position: Point::new(1000, 2000, 5),
                 },
             }),
@@ -2582,19 +2657,19 @@ mod tests {
         let mut view = WorldView::entered(start());
         let shirt = shirt();
         let replacement = Equipment {
-            serial: Serial::new(0x4000_0002).unwrap(),
+            serial:  Serial::new(0x4000_0002).unwrap(),
             graphic: Graphic(0x1515),
-            layer: shirt.layer,
-            hue: Hue(0x0022),
+            layer:   shirt.layer,
+            hue:     Hue(0x0022),
         };
         for item in [shirt, replacement] {
             assert!(view.apply(&ServerPacket::EquipUpdate(
                 openshard_protocol::items::EquipUpdate {
-                    item: item.serial,
+                    item:    item.serial,
                     graphic: item.graphic,
-                    layer: item.layer,
-                    mobile: view.player.serial,
-                    hue: item.hue,
+                    layer:   item.layer,
+                    mobile:  view.player.serial,
+                    hue:     item.hue,
                 },
             )));
         }
@@ -2613,13 +2688,13 @@ mod tests {
         // item being picked up; neither does Remove — it just tries both maps.
         let mut view = WorldView::entered(start());
         let item = WorldItem {
-            serial: Serial::new(0x4000_00AB).unwrap(),
-            graphic: Graphic(0x0EED),
-            payload: WorldItemPayload::Stack(ItemAmount(1)),
+            serial:   Serial::new(0x4000_00AB).unwrap(),
+            graphic:  Graphic(0x0EED),
+            payload:  WorldItemPayload::Stack(ItemAmount(1)),
             position: Point::new(1000, 2000, 5),
-            hue: Hue::NONE,
-            light: None,
-            flags: ItemFlags::NONE,
+            hue:      Hue::NONE,
+            light:    None,
+            flags:    ItemFlags::NONE,
         };
         view.apply(&ServerPacket::WorldItem(item));
 
@@ -2643,18 +2718,18 @@ mod tests {
     fn a_remove_takes_a_worn_item_off_whoever_is_wearing_it() {
         let mut view = WorldView::entered(start());
         view.apply(&ServerPacket::MobileIncoming(MobileIncoming {
-            serial: other(),
-            body: Graphic(0x0190),
-            position: Point::new(1476, 1770, 20),
-            facing: Facing::walking(Direction::South),
-            hue: Hue::NONE,
-            flags: StatusFlags::NONE,
+            serial:    other(),
+            body:      Graphic(0x0190),
+            position:  Point::new(1476, 1770, 20),
+            facing:    Facing::walking(Direction::South),
+            hue:       Hue::NONE,
+            flags:     StatusFlags::NONE,
             notoriety: Notoriety::Innocent,
             equipment: vec![shirt()],
         }));
 
         assert!(view.apply(&ServerPacket::Remove(Remove {
-            serial: shirt().serial
+            serial: shirt().serial,
         })));
         assert!(
             view.mobiles
@@ -2666,7 +2741,7 @@ mod tests {
         );
         assert!(
             !view.apply(&ServerPacket::Remove(Remove {
-                serial: shirt().serial
+                serial: shirt().serial,
             })),
             "forgetting something already gone changes nothing"
         );
@@ -2682,26 +2757,26 @@ mod tests {
     #[test]
     fn a_saddle_is_taken_off_by_the_remove_that_ends_the_ride() {
         let saddle = Equipment {
-            serial: Serial::new(0x4000_00C8).unwrap(),
+            serial:  Serial::new(0x4000_00C8).unwrap(),
             graphic: Graphic(0x3E9F),
-            layer: openshard_protocol::wire::Layer::MOUNT,
-            hue: Hue::NONE,
+            layer:   openshard_protocol::wire::Layer::MOUNT,
+            hue:     Hue::NONE,
         };
         let mut view = WorldView::entered(start());
 
         assert!(view.apply(&ServerPacket::EquipUpdate(
             openshard_protocol::items::EquipUpdate {
-                item: saddle.serial,
+                item:    saddle.serial,
                 graphic: saddle.graphic,
-                layer: saddle.layer,
-                mobile: view.player.serial,
-                hue: saddle.hue,
+                layer:   saddle.layer,
+                mobile:  view.player.serial,
+                hue:     saddle.hue,
             }
         )));
         assert_eq!(view.player.equipment, vec![saddle], "in the saddle");
 
         assert!(view.apply(&ServerPacket::Remove(Remove {
-            serial: saddle.serial
+            serial: saddle.serial,
         })));
         assert!(view.player.equipment.is_empty(), "and back on foot");
     }
@@ -2731,12 +2806,12 @@ mod tests {
     fn a_paperdoll_is_a_window_over_equipment_the_mobile_already_has() {
         let mut view = WorldView::entered(start());
         view.apply(&ServerPacket::MobileIncoming(MobileIncoming {
-            serial: other(),
-            body: Graphic(0x0190),
-            position: Point::new(1476, 1770, 20),
-            facing: Facing::walking(Direction::South),
-            hue: Hue(0x83EA),
-            flags: StatusFlags::NONE,
+            serial:    other(),
+            body:      Graphic(0x0190),
+            position:  Point::new(1476, 1770, 20),
+            facing:    Facing::walking(Direction::South),
+            hue:       Hue(0x83EA),
+            flags:     StatusFlags::NONE,
             notoriety: Notoriety::Innocent,
             equipment: vec![shirt()],
         }));
@@ -2766,7 +2841,7 @@ mod tests {
             view.spellbooks.get(&book),
             Some(&Spellbook {
                 graphic: Graphic(0x0EFA),
-                offset: 1,
+                offset:  1,
                 content: 1 | (1 << 17),
             })
         );
@@ -2786,8 +2861,8 @@ mod tests {
         assert!(view.apply(&ServerPacket::OpenPaperdoll(
             openshard_protocol::mobile::OpenPaperdoll {
                 serial: view.player.serial,
-                text: "Lord British".to_owned(),
-                flags: PaperdollFlags::WARMODE.with(PaperdollFlags::CAN_LIFT),
+                text:   "Lord British".to_owned(),
+                flags:  PaperdollFlags::WARMODE.with(PaperdollFlags::CAN_LIFT),
             }
         )));
         assert!(view.player.war, "our own `0x88` states the stance we are in");
@@ -2819,15 +2894,15 @@ mod tests {
         assert!(view.player.war);
 
         let relocated = PlayerUpdate {
-            serial: view.player.serial,
-            body: view.player.body,
-            hue: view.player.hue,
+            serial:   view.player.serial,
+            body:     view.player.body,
+            hue:      view.player.hue,
             // A `.gm` at peace, as the shard's `stance_of` would state it — and
             // the war bit deliberately clear, which is the disagreement this
             // test is about.
-            flags: StatusFlags::IGNORE_MOBILES,
+            flags:    StatusFlags::IGNORE_MOBILES,
             position: Point::new(1480, 1770, 20),
-            facing: view.player.facing,
+            facing:   view.player.facing,
         };
         assert!(view.apply(&ServerPacket::PlayerUpdate(relocated)));
         assert!(
@@ -2866,14 +2941,14 @@ mod tests {
 
         assert!(view.apply(&ServerPacket::AttackTarget(
             openshard_protocol::combat::AttackTarget {
-                target: Some(other())
+                target: Some(other()),
             }
         )));
         assert_eq!(view.player.attacking, Some(other()));
         assert!(
             !view.apply(&ServerPacket::AttackTarget(
                 openshard_protocol::combat::AttackTarget {
-                    target: Some(other())
+                    target: Some(other()),
                 }
             )),
             "the same aim twice settles"
@@ -2893,7 +2968,7 @@ mod tests {
             corpse,
             items: vec![CorpseEquipmentItem {
                 layer: openshard_protocol::wire::Layer::TORSO,
-                item: shirt,
+                item:  shirt,
             }],
         };
 
@@ -2914,7 +2989,7 @@ mod tests {
             corpse,
             items: vec![CorpseEquipmentItem {
                 layer: openshard_protocol::wire::Layer::TORSO,
-                item: shirt,
+                item:  shirt,
             }],
         }));
 
@@ -2926,12 +3001,12 @@ mod tests {
     fn health_bars_land_on_the_mobile_they_name() {
         let mut view = WorldView::entered(start());
         view.apply(&ServerPacket::MobileIncoming(MobileIncoming {
-            serial: other(),
-            body: Graphic(0x00D6),
-            position: Point::new(1476, 1770, 20),
-            facing: Facing::walking(Direction::South),
-            hue: Hue::NONE,
-            flags: StatusFlags::NONE,
+            serial:    other(),
+            body:      Graphic(0x00D6),
+            position:  Point::new(1476, 1770, 20),
+            facing:    Facing::walking(Direction::South),
+            hue:       Hue::NONE,
+            flags:     StatusFlags::NONE,
             notoriety: Notoriety::Neutral,
             equipment: Vec::new(),
         }));
@@ -2943,7 +3018,7 @@ mod tests {
             view.player.hits,
             Some(Vitals {
                 current: 45,
-                max: 120
+                max:     120,
             })
         );
 
@@ -2954,7 +3029,7 @@ mod tests {
             view.mobiles.get(&other()).and_then(|mobile| mobile.hits),
             Some(Vitals {
                 current: 25,
-                max: 100
+                max:     100,
             })
         );
         assert!(
@@ -2977,7 +3052,13 @@ mod tests {
             .as_ref()
             .expect("the status belongs to the player");
         assert_eq!(held.name, "Lord British");
-        assert_eq!(held.stamina, Vitals { current: 49, max: 50 });
+        assert_eq!(
+            held.stamina,
+            Vitals {
+                current: 49,
+                max:     50,
+            }
+        );
         assert_eq!(held.max_weight, 450);
         assert_eq!(
             view.player.hits,
@@ -3009,8 +3090,8 @@ mod tests {
         view.apply(&ServerPacket::OpenPaperdoll(
             openshard_protocol::mobile::OpenPaperdoll {
                 serial: other(),
-                text: "a guard".to_owned(),
-                flags: PaperdollFlags::WARMODE,
+                text:   "a guard".to_owned(),
+                flags:  PaperdollFlags::WARMODE,
             },
         ));
         assert!(!view.player.war);
@@ -3023,12 +3104,12 @@ mod tests {
     fn closing_a_paperdoll_leaves_the_mobile_dressed() {
         let mut view = WorldView::entered(start());
         view.apply(&ServerPacket::MobileIncoming(MobileIncoming {
-            serial: other(),
-            body: Graphic(0x0190),
-            position: Point::new(1476, 1770, 20),
-            facing: Facing::walking(Direction::South),
-            hue: Hue(0x83EA),
-            flags: StatusFlags::NONE,
+            serial:    other(),
+            body:      Graphic(0x0190),
+            position:  Point::new(1476, 1770, 20),
+            facing:    Facing::walking(Direction::South),
+            hue:       Hue(0x83EA),
+            flags:     StatusFlags::NONE,
             notoriety: Notoriety::Innocent,
             equipment: vec![shirt()],
         }));
@@ -3069,12 +3150,12 @@ mod tests {
 
     fn candle() -> ContainedItem {
         ContainedItem {
-            serial: Serial::new(0x4000_0101).unwrap(),
+            serial:  Serial::new(0x4000_0101).unwrap(),
             graphic: Graphic(0x0A28),
-            amount: ItemAmount(1),
-            at: GumpPoint::new(44, 65),
-            grid: openshard_protocol::containers::GridSlot(0),
-            hue: Hue::NONE,
+            amount:  ItemAmount(1),
+            at:      GumpPoint::new(44, 65),
+            grid:    openshard_protocol::containers::GridSlot(0),
+            hue:     Hue::NONE,
         }
     }
 
@@ -3095,7 +3176,7 @@ mod tests {
         assert!(view.apply(&opened(chest())));
         assert!(view.apply(&ServerPacket::ContainerContents(ContainerContents {
             container: Some(chest()),
-            items: vec![candle()],
+            items:     vec![candle()],
         })));
 
         assert_eq!(view.containers.get(&chest()), Some(&Graphic(0x003C)));
@@ -3116,7 +3197,7 @@ mod tests {
         view.apply(&opened(chest()));
         assert!(!view.apply(&ServerPacket::ContainerContents(ContainerContents {
             container: None,
-            items: Vec::new(),
+            items:     Vec::new(),
         })));
         assert!(view.containers.contains_key(&chest()));
     }
@@ -3130,7 +3211,7 @@ mod tests {
         view.apply(&opened(chest()));
         view.apply(&ServerPacket::ContainerContents(ContainerContents {
             container: Some(chest()),
-            items: vec![candle()],
+            items:     vec![candle()],
         }));
         view.apply(&opened(chest()));
         assert!(!view.contents.contains_key(&chest()));
@@ -3143,7 +3224,7 @@ mod tests {
         let mut view = WorldView::entered(start());
         view.apply(&opened(chest()));
         assert!(view.apply(&ServerPacket::AddToContainer(AddToContainer {
-            item: candle(),
+            item:      candle(),
             container: chest(),
         })));
         let grown = ContainedItem {
@@ -3151,13 +3232,13 @@ mod tests {
             ..candle()
         };
         assert!(view.apply(&ServerPacket::AddToContainer(AddToContainer {
-            item: grown,
+            item:      grown,
             container: chest(),
         })));
         assert_eq!(view.contents.get(&chest()).unwrap(), &[grown]);
         assert!(
             !view.apply(&ServerPacket::AddToContainer(AddToContainer {
-                item: grown,
+                item:      grown,
                 container: chest(),
             })),
             "the same record twice settles"
@@ -3168,17 +3249,17 @@ mod tests {
     fn a_container_destination_retires_the_lifters_stale_ground_source() {
         let mut view = WorldView::entered(start());
         let item = WorldItem {
-            serial: candle().serial,
-            graphic: candle().graphic,
-            payload: WorldItemPayload::Stack(candle().amount),
+            serial:   candle().serial,
+            graphic:  candle().graphic,
+            payload:  WorldItemPayload::Stack(candle().amount),
             position: Point::new(1000, 2000, 5),
-            hue: candle().hue,
-            light: None,
-            flags: ItemFlags::NONE,
+            hue:      candle().hue,
+            light:    None,
+            flags:    ItemFlags::NONE,
         };
         view.apply(&ServerPacket::WorldItem(item));
         assert!(view.apply(&ServerPacket::AddToContainer(AddToContainer {
-            item: candle(),
+            item:      candle(),
             container: chest(),
         })));
         assert!(!view.items.contains_key(&item.serial));
@@ -3191,13 +3272,13 @@ mod tests {
         view.player.equipment.push(shirt());
 
         assert!(view.apply(&ServerPacket::AddToContainer(AddToContainer {
-            item: ContainedItem {
-                serial: shirt().serial,
+            item:      ContainedItem {
+                serial:  shirt().serial,
                 graphic: shirt().graphic,
-                amount: ItemAmount(1),
-                at: GumpPoint::new(20, 30),
-                grid: Default::default(),
-                hue: shirt().hue,
+                amount:  ItemAmount(1),
+                at:      GumpPoint::new(20, 30),
+                grid:    Default::default(),
+                hue:     shirt().hue,
             },
             container: chest(),
         })));
@@ -3212,11 +3293,11 @@ mod tests {
 
         assert!(view.apply(&ServerPacket::EquipUpdate(
             openshard_protocol::items::EquipUpdate {
-                item: candle().serial,
+                item:    candle().serial,
                 graphic: candle().graphic,
-                layer: openshard_protocol::wire::Layer(1),
-                mobile: view.player.serial,
-                hue: candle().hue,
+                layer:   openshard_protocol::wire::Layer(1),
+                mobile:  view.player.serial,
+                hue:     candle().hue,
             },
         )));
         assert!(view.contents.get(&chest()).unwrap().is_empty());
@@ -3232,10 +3313,10 @@ mod tests {
         view.apply(&opened(chest()));
         view.apply(&ServerPacket::ContainerContents(ContainerContents {
             container: Some(chest()),
-            items: vec![candle()],
+            items:     vec![candle()],
         }));
         assert!(view.apply(&ServerPacket::Remove(Remove {
-            serial: candle().serial
+            serial: candle().serial,
         })));
         assert!(view.contents.get(&chest()).unwrap().is_empty());
     }
@@ -3249,7 +3330,7 @@ mod tests {
         view.apply(&opened(chest()));
         view.apply(&ServerPacket::ContainerContents(ContainerContents {
             container: Some(chest()),
-            items: vec![candle()],
+            items:     vec![candle()],
         }));
         assert!(view.apply(&ServerPacket::Remove(Remove { serial: chest() })));
         assert!(!view.containers.contains_key(&chest()));
@@ -3265,7 +3346,7 @@ mod tests {
         let mut view = WorldView::entered(start());
         assert!(view.apply(&ServerPacket::ContainerContents(ContainerContents {
             container: Some(chest()),
-            items: vec![candle()],
+            items:     vec![candle()],
         })));
         assert!(view.contents.contains_key(&chest()));
         assert!(!view.containers.contains_key(&chest()));
@@ -3283,23 +3364,23 @@ mod tests {
         let mut view = WorldView::entered(start());
         let vendor = other();
         view.apply(&ServerPacket::MobileIncoming(MobileIncoming {
-            serial: vendor,
-            body: Graphic(0x0190),
-            position: Point::new(1476, 1770, 20),
-            facing: Facing::walking(Direction::South),
-            hue: Hue::NONE,
-            flags: StatusFlags::NONE,
+            serial:    vendor,
+            body:      Graphic(0x0190),
+            position:  Point::new(1476, 1770, 20),
+            facing:    Facing::walking(Direction::South),
+            hue:       Hue::NONE,
+            flags:     StatusFlags::NONE,
             notoriety: Notoriety::Innocent,
             equipment: Vec::new(),
         }));
         view.apply(&ServerPacket::ContainerContents(ContainerContents {
             container: Some(chest()),
-            items: vec![candle()],
+            items:     vec![candle()],
         }));
         view.apply(&ServerPacket::OpenContainer(
             openshard_protocol::containers::OpenContainer {
                 container: chest(),
-                gump: Graphic(0x003C),
+                gump:      Graphic(0x003C),
             },
         ));
         view.apply(&paperdoll_of(view.player.serial));
@@ -3341,30 +3422,30 @@ mod tests {
         // the body record is still in flight.
         assert!(view.apply(&ServerPacket::EquipUpdate(
             openshard_protocol::items::EquipUpdate {
-                item: stock,
+                item:    stock,
                 graphic: Graphic(0x0E3F),
-                layer: openshard_protocol::wire::Layer(0x1A),
-                mobile: vendor,
-                hue: Hue::NONE,
+                layer:   openshard_protocol::wire::Layer(0x1A),
+                mobile:  vendor,
+                hue:     Hue::NONE,
             },
         )));
         assert!(view.apply(&ServerPacket::ContainerContents(ContainerContents {
             container: Some(stock),
-            items: vec![item],
+            items:     vec![item],
         })));
         assert!(
             view.apply(&ServerPacket::BuyList(openshard_protocol::vendor::BuyList {
                 container: stock,
-                lines: vec![BuyLine {
+                lines:     vec![BuyLine {
                     price: 5,
-                    name: "candle".to_owned(),
+                    name:  "candle".to_owned(),
                 }],
             }))
         );
         assert!(view.apply(&ServerPacket::OpenContainer(
             openshard_protocol::containers::OpenContainer {
                 container: vendor,
-                gump: Graphic(0x0030),
+                gump:      Graphic(0x0030),
             },
         )));
         assert_eq!(
@@ -3383,7 +3464,7 @@ mod tests {
         view.apply(&opened(chest()));
         view.apply(&ServerPacket::ContainerContents(ContainerContents {
             container: Some(chest()),
-            items: vec![candle()],
+            items:     vec![candle()],
         }));
         assert!(view.container_closed(chest()));
         assert!(!view.containers.contains_key(&chest()));
@@ -3490,12 +3571,12 @@ mod tests {
             entries: vec![entry(0, 755)],
         }));
         view.apply(&ServerPacket::PlayerUpdate(PlayerUpdate {
-            serial: view.player.serial,
-            body: view.player.body,
-            hue: Hue::NONE,
-            flags: StatusFlags::NONE,
+            serial:   view.player.serial,
+            body:     view.player.body,
+            hue:      Hue::NONE,
+            flags:    StatusFlags::NONE,
             position: Point::new(1476, 1770, 20),
-            facing: view.player.facing,
+            facing:   view.player.facing,
         }));
         assert_eq!(view.player.skills.len(), 1, "the step kept the table");
     }
@@ -3509,7 +3590,7 @@ mod tests {
             serial,
             hash,
             entries: vec![openshard_protocol::properties::PropertyEntry {
-                cliloc: openshard_protocol::wire::ClilocId(1_050_045),
+                cliloc:    openshard_protocol::wire::ClilocId(1_050_045),
                 arguments: format!(" \t{name}\t "),
             }],
         })
@@ -3631,8 +3712,8 @@ mod tests {
         assert!(view.apply(&ServerPacket::PartyTextMessage(
             openshard_protocol::party::PartyTextMessage {
                 to_all: true,
-                from: other(),
-                text: "regroup".to_owned(),
+                from:   other(),
+                text:   "regroup".to_owned(),
             }
         )));
         let line = view.journal.back().expect("a line");
@@ -3643,8 +3724,8 @@ mod tests {
         view.apply(&ServerPacket::PartyTextMessage(
             openshard_protocol::party::PartyTextMessage {
                 to_all: false,
-                from: other(),
-                text: "you first".to_owned(),
+                from:   other(),
+                text:   "you first".to_owned(),
             },
         ));
         assert_eq!(view.journal.back().expect("a line").name, "[Party tell]");
@@ -3659,15 +3740,22 @@ mod tests {
     /// different colour.
     #[test]
     fn a_house_cursor_carries_its_house_and_a_plain_one_takes_it_away() {
-        use openshard_protocol::target::{MultiOffset, MultiTargetRequest, TargetKind};
-        use openshard_protocol::wire::{CursorId, MultiId};
+        use openshard_protocol::target::{
+            MultiOffset,
+            MultiTargetRequest,
+            TargetKind,
+        };
+        use openshard_protocol::wire::{
+            CursorId,
+            MultiId,
+        };
 
         let mut view = WorldView::entered(start());
         view.apply(&ServerPacket::MultiTarget(MultiTargetRequest {
             cursor_id: CursorId(7),
-            kind: TargetKind::Location,
-            multi: MultiId(0x64),
-            offset: MultiOffset::default(),
+            kind:      TargetKind::Location,
+            multi:     MultiId(0x64),
+            offset:    MultiOffset::default(),
         }));
         let open = view.target.expect("a cursor is up");
         assert_eq!(open.cursor.cursor_id, CursorId(7));
@@ -3676,7 +3764,7 @@ mod tests {
 
         view.apply(&ServerPacket::TargetCursor(TargetCursor {
             cursor_id: CursorId(8),
-            kind: TargetKind::Object,
+            kind:      TargetKind::Object,
         }));
         let open = view.target.expect("the new cursor is up");
         assert_eq!(open.cursor.cursor_id, CursorId(8));
@@ -3688,23 +3776,30 @@ mod tests {
 
     #[test]
     fn a_harvest_preview_is_attached_before_its_cursor_is_drawn() {
-        use openshard_protocol::feedback::{AnimationFrameCount, HarvestPreview, SwingDuration};
-        use openshard_protocol::target::{TargetCursor, TargetKind};
+        use openshard_protocol::feedback::{
+            AnimationFrameCount,
+            HarvestPreview,
+            SwingDuration,
+        };
+        use openshard_protocol::target::{
+            TargetCursor,
+            TargetKind,
+        };
         use openshard_protocol::wire::CursorId;
 
         let mut view = WorldView::entered(start());
         let preview = HarvestPreview {
-            cursor_id: CursorId(7),
-            serial: view.player.serial,
-            action: 13,
+            cursor_id:   CursorId(7),
+            serial:      view.player.serial,
+            action:      13,
             frame_count: AnimationFrameCount(6),
-            duration: SwingDuration(4_800),
-            cycles: 3,
+            duration:    SwingDuration(4_800),
+            cycles:      3,
         };
         assert!(view.apply(&ServerPacket::HarvestPreview(preview)));
         assert!(view.apply(&ServerPacket::TargetCursor(TargetCursor {
             cursor_id: CursorId(7),
-            kind: TargetKind::Location,
+            kind:      TargetKind::Location,
         })));
         assert_eq!(view.target.expect("target cursor").harvest, Some(preview));
     }
@@ -3716,26 +3811,29 @@ mod tests {
     /// of what the wire told us.
     #[test]
     fn a_design_revision_is_remembered_by_serial() {
-        use openshard_protocol::design::{DesignRevision, Revision};
+        use openshard_protocol::design::{
+            DesignRevision,
+            Revision,
+        };
         use openshard_protocol::serial::RawSerial;
 
         let mut view = WorldView::entered(start());
         let house = Serial::new(0x4000_0001).unwrap();
 
         assert!(view.apply(&ServerPacket::DesignRevision(DesignRevision {
-            serial: RawSerial(house.raw()),
+            serial:   RawSerial(house.raw()),
             revision: Revision(4),
         })));
         assert_eq!(view.designs.get(&house), Some(&4));
 
         // The same revision again is not a change, so nothing redraws for it.
         assert!(!view.apply(&ServerPacket::DesignRevision(DesignRevision {
-            serial: RawSerial(house.raw()),
+            serial:   RawSerial(house.raw()),
             revision: Revision(4),
         })));
         // A newer one is.
         assert!(view.apply(&ServerPacket::DesignRevision(DesignRevision {
-            serial: RawSerial(house.raw()),
+            serial:   RawSerial(house.raw()),
             revision: Revision(5),
         })));
         assert_eq!(view.designs.get(&house), Some(&5));
@@ -3746,13 +3844,16 @@ mod tests {
     /// the same failure a stale tooltip would be, one layer over.
     #[test]
     fn a_removed_house_forgets_its_design_revision() {
-        use openshard_protocol::design::{DesignRevision, Revision};
+        use openshard_protocol::design::{
+            DesignRevision,
+            Revision,
+        };
         use openshard_protocol::serial::RawSerial;
 
         let mut view = WorldView::entered(start());
         let house = Serial::new(0x4000_0001).unwrap();
         view.apply(&ServerPacket::DesignRevision(DesignRevision {
-            serial: RawSerial(house.raw()),
+            serial:   RawSerial(house.raw()),
             revision: Revision(4),
         }));
 
@@ -3765,7 +3866,10 @@ mod tests {
 
     #[test]
     fn environment_packets_keep_one_current_world_state() {
-        use openshard_protocol::world::{LightLevel, WeatherChange};
+        use openshard_protocol::world::{
+            LightLevel,
+            WeatherChange,
+        };
 
         let mut view = WorldView::entered(start());
         assert_eq!(view.light, None);
@@ -3776,8 +3880,8 @@ mod tests {
         assert!(!view.apply(&ServerPacket::LightLevel(LightLevel { level: Light(12) })));
 
         assert!(view.apply(&ServerPacket::WeatherChange(WeatherChange {
-            weather: Weather::Rain,
-            intensity: 96,
+            weather:     Weather::Rain,
+            intensity:   96,
             temperature: 9,
         })));
         assert_eq!(view.weather.weather, Weather::Rain);
@@ -3785,8 +3889,8 @@ mod tests {
         assert_eq!(view.weather.temperature, 9);
 
         assert!(view.apply(&ServerPacket::WeatherChange(WeatherChange {
-            weather: Weather::Temperature,
-            intensity: 0,
+            weather:     Weather::Temperature,
+            intensity:   0,
             temperature: 2,
         })));
         assert_eq!(view.weather.weather, Weather::Rain);

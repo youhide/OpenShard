@@ -2,16 +2,32 @@
 
 use std::time::Instant;
 
-use openshard_protocol::direction::{Direction, Facing};
-use openshard_protocol::world::{Point, TurnRequest, WalkRequest};
-
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Body, Cover, Doors};
+use openshard_map::overlay::{
+    Body,
+    Cover,
+    Doors,
+};
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
+use openshard_protocol::world::{
+    Point,
+    TurnRequest,
+    WalkRequest,
+};
 
 use crate::footing::Footing;
-use crate::pace::{Pace, WalkPace};
+use crate::pace::{
+    Pace,
+    WalkPace,
+};
 use crate::sequence::WalkSequence;
-use crate::terrain::{MAX_STEP_UP, PLAYER_HEIGHT};
+use crate::terrain::{
+    MAX_STEP_UP,
+    PLAYER_HEIGHT,
+};
 
 /// What a walk request did.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -32,7 +48,7 @@ pub enum Walk {
         /// Where it is now.
         position: Point,
         /// Which way it is facing.
-        facing: Facing,
+        facing:   Facing,
     },
     /// The step is refused. The client snaps back and resets its sequence.
     Refused(Refusal),
@@ -156,11 +172,11 @@ pub struct Walker {
     /// Where it is.
     pub position: Point,
     /// Which way it faces.
-    pub facing: Facing,
+    pub facing:   Facing,
     /// Its walk sequence.
     pub sequence: WalkSequence,
     /// How fast it is allowed to move.
-    pub pace: WalkPace,
+    pub pace:     WalkPace,
 }
 
 impl Walker {
@@ -243,7 +259,7 @@ impl Walker {
         self.facing = request.facing;
         Walk::Moved {
             position: self.position,
-            facing: self.facing,
+            facing:   self.facing,
         }
     }
 
@@ -337,7 +353,7 @@ pub struct Heading {
     /// The sector: which of the eight ways this heading is nearest to.
     pub direction: Direction,
     /// Where inside that sector it actually points.
-    pub lean: Lean,
+    pub lean:      Lean,
 }
 
 impl Heading {
@@ -477,7 +493,7 @@ pub fn predict_step(footing: &Footing<'_>, from: Point, tile: Tile) -> i32 {
 struct Stance {
     /// The feet — ServUO's `startZ`, and what the body's height is measured
     /// from.
-    z: i32,
+    z:       i32,
     /// The top of what the *map* says is underfoot: `start_surface`'s second
     /// element, or the feet where there is no map.
     ///
@@ -488,7 +504,7 @@ struct Stance {
     map_top: i32,
     /// The same, with the live world's crests folded in — the reach
     /// [`climbed`] measures from.
-    top: i32,
+    top:     i32,
 }
 
 impl Stance {
@@ -526,12 +542,14 @@ fn landing(footing: &Footing<'_>, stance: Stance, to: Point) -> Option<Point> {
     let ground = match footing.map {
         // `land_at` and not `can_step`: the start half is `stance`'s, computed
         // once for every landing out of this tile rather than per call.
-        Some(map) => match map.land_at(to, stance.z, stance.map_top) {
-            Some(landed) => Some(i32::from(landed.z)),
-            // The map says there is nothing to stand on, which over open water
-            // is true right up until a ship is moored there.
-            None => aboard(footing, stance, to),
-        },
+        Some(map) => {
+            match map.land_at(to, stance.z, stance.map_top) {
+                Some(landed) => Some(i32::from(landed.z)),
+                // The map says there is nothing to stand on, which over open water
+                // is true right up until a ship is moored there.
+                None => aboard(footing, stance, to),
+            }
+        }
         // No map at all: no floor and no walls, so the ground allows everything
         // and only what the live world put there can refuse.
         None => Some(i32::from(to.z)),
@@ -905,11 +923,17 @@ pub fn steps_out_of(footing: &Footing<'_>, from: Point) -> [Option<Point>; 8] {
 
 #[cfg(test)]
 mod tests {
-    use openshard_protocol::world::{RawFastwalkKey, RawStepSequence};
+    use openshard_map::overlay::{
+        Cover,
+        Overlay,
+    };
+    use openshard_protocol::world::{
+        RawFastwalkKey,
+        RawStepSequence,
+    };
 
     use super::*;
     use crate::footing::Bodies;
-    use openshard_map::overlay::{Cover, Overlay};
 
     /// Where [`direction_toward`] flattens: far more east than south still
     /// reads as a diagonal, because only the signs of `dx`/`dy` are looked at.
@@ -992,8 +1016,8 @@ mod tests {
 
     fn request(direction: Direction, sequence: u8) -> WalkRequest {
         WalkRequest {
-            facing: Facing::walking(direction),
-            sequence: RawStepSequence(sequence),
+            facing:       Facing::walking(direction),
+            sequence:     RawStepSequence(sequence),
             fastwalk_key: RawFastwalkKey(0),
         }
     }
@@ -1047,7 +1071,7 @@ mod tests {
             outcome,
             Walk::Moved {
                 position: Point::new(100, 99, 0),
-                facing: Facing::walking(Direction::North),
+                facing:   Facing::walking(Direction::North),
             }
         );
         assert_eq!(walker.position, Point::new(100, 99, 0));
@@ -1069,7 +1093,7 @@ mod tests {
         assert_eq!(
             outcome,
             Walk::Turned {
-                facing: Facing::walking(Direction::East)
+                facing: Facing::walking(Direction::East),
             }
         );
         assert_eq!(walker.position, Point::new(100, 100, 0), "did not move");
@@ -1085,7 +1109,7 @@ mod tests {
             outcome,
             Walk::Moved {
                 position: Point::new(101, 100, 0),
-                facing: Facing::walking(Direction::East),
+                facing:   Facing::walking(Direction::East),
             }
         );
     }
@@ -1111,8 +1135,8 @@ mod tests {
         let mut walker = walker();
         let outcome = walker.request(
             WalkRequest {
-                facing: Facing::running(Direction::North),
-                sequence: RawStepSequence(0),
+                facing:       Facing::running(Direction::North),
+                sequence:     RawStepSequence(0),
                 fastwalk_key: RawFastwalkKey(0),
             },
             &Footing::new(None, &open_world(), Doors::AsTheyStand),
@@ -1140,7 +1164,7 @@ mod tests {
                 outcome,
                 Walk::Moved {
                     position: expected,
-                    facing: Facing::walking(direction),
+                    facing:   Facing::walking(direction),
                 },
                 "{direction}"
             );
@@ -1213,7 +1237,7 @@ mod tests {
             outcome,
             Walk::Moved {
                 position: Point::new(100, 99, 2),
-                facing: Facing::walking(Direction::North),
+                facing:   Facing::walking(Direction::North),
             }
         );
         assert_eq!(walker.position.z, 2, "the walker believes the terrain");
@@ -1586,7 +1610,7 @@ mod tests {
                     assert_eq!(
                         intent,
                         Intent::Turned {
-                            facing: Facing::walking(to)
+                            facing: Facing::walking(to),
                         },
                         "{from} to {to} is a turn"
                     );
@@ -1619,7 +1643,7 @@ mod tests {
                 Facing::walking(Direction::West)
             ),
             Intent::Turned {
-                facing: Facing::walking(Direction::West)
+                facing: Facing::walking(Direction::West),
             }
         );
         assert_eq!(

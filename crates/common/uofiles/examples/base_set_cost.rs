@@ -20,9 +20,17 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use openshard_map::chunk::{self, Chunk};
+use openshard_map::chunk::{
+    self,
+    Chunk,
+};
 use openshard_map::codec;
-use openshard_protocol::chunks::{DeflateLevel, InflatedLength, deflate, inflate};
+use openshard_protocol::chunks::{
+    DeflateLevel,
+    InflatedLength,
+    deflate,
+    inflate,
+};
 use openshard_protocol::world::Facet;
 
 /// The fastest of `runs` runs, in milliseconds.

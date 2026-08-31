@@ -29,13 +29,13 @@ use std::str::FromStr;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct ClientVersion {
     /// Major version. `7` for all modern clients.
-    pub major: u8,
+    pub major:    u8,
     /// Minor version.
-    pub minor: u8,
+    pub minor:    u8,
     /// Revision.
     pub revision: u8,
     /// Patch. In old-style versions this is the trailing letter, `a` = 1.
-    pub patch: u8,
+    pub patch:    u8,
 }
 
 impl ClientVersion {
@@ -148,7 +148,8 @@ impl fmt::Display for ParseVersionError {
     }
 }
 
-impl std::error::Error for ParseVersionError {}
+impl std::error::Error for ParseVersionError {
+}
 
 impl FromStr for ClientVersion {
     type Err = ParseVersionError;

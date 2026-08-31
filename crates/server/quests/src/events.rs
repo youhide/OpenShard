@@ -33,14 +33,14 @@ pub struct ObjectiveProgress {
     /// How much credit the player has now.
     pub current: ObjectiveCount,
     /// How much credit completes this objective.
-    pub goal: ObjectiveCount,
+    pub goal:    ObjectiveCount,
 }
 
 impl ObjectiveProgress {
     pub const fn new(current: u16, goal: u16) -> Self {
         Self {
             current: ObjectiveCount::new(current),
-            goal: ObjectiveCount::new(goal),
+            goal:    ObjectiveCount::new(goal),
         }
     }
 
@@ -55,7 +55,7 @@ pub struct QuestAccepted {
     /// Who took it.
     pub player: Serial,
     /// Which quest, by its key.
-    pub key: QuestKey,
+    pub key:    QuestKey,
 }
 
 /// A player turned an offered quest down. Nothing was started.
@@ -64,7 +64,7 @@ pub struct QuestRefused {
     /// Who refused.
     pub player: Serial,
     /// Which quest, by its key.
-    pub key: QuestKey,
+    pub key:    QuestKey,
 }
 
 /// A player gave up on a quest they had taken.
@@ -73,20 +73,20 @@ pub struct QuestResigned {
     /// Who resigned.
     pub player: Serial,
     /// Which quest, by its key.
-    pub key: QuestKey,
+    pub key:    QuestKey,
 }
 
 /// An objective moved — a kill counted, an item found, a leg of a journey walked.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct QuestObjectiveUpdated {
     /// Whose quest.
-    pub player: Serial,
+    pub player:    Serial,
     /// Which quest, by its key.
-    pub key: QuestKey,
+    pub key:       QuestKey,
     /// Which objective, by its index in the definition.
     pub objective: ObjectiveIndex,
     /// Its current and required amounts.
-    pub progress: ObjectiveProgress,
+    pub progress:  ObjectiveProgress,
 }
 
 /// A timed quest ran out of time.
@@ -95,7 +95,7 @@ pub struct QuestFailed {
     /// Whose quest.
     pub player: Serial,
     /// Which quest, by its key.
-    pub key: QuestKey,
+    pub key:    QuestKey,
 }
 
 /// A quest was turned in and paid.
@@ -109,14 +109,17 @@ pub struct QuestCompleted {
     /// Who finished it.
     pub player: Serial,
     /// Which quest, by its key.
-    pub key: QuestKey,
+    pub key:    QuestKey,
     /// Who it was turned in to, if the giver is still around.
-    pub giver: Option<Serial>,
+    pub giver:  Option<Serial>,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ObjectiveCount, ObjectiveProgress};
+    use super::{
+        ObjectiveCount,
+        ObjectiveProgress,
+    };
 
     #[test]
     fn completion_includes_progress_past_the_goal() {

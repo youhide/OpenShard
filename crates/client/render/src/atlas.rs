@@ -16,20 +16,49 @@
 //! screen is a fraction of that, and the browser is the reason the difference
 //! matters rather than an optimisation nobody asked for.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
 use std::fmt;
 
 use openshard_protocol::feedback::AnimationFrameCount;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Graphic;
-use openshard_tiles::{LandTileId, TileData};
-use openshard_uofiles::anim::{Anim, AnimError, AnimFrame, AnimationFrameIndex};
-use openshard_uofiles::art::{Art, ArtError, LAND_TILE_SIZE, land_row};
-use openshard_uofiles::color::{Color16, Rgb8};
-use openshard_uofiles::font::{AsciiFonts, FONT_COUNT};
+use openshard_tiles::{
+    LandTileId,
+    TileData,
+};
+use openshard_uofiles::anim::{
+    Anim,
+    AnimError,
+    AnimFrame,
+    AnimationFrameIndex,
+};
+use openshard_uofiles::art::{
+    Art,
+    ArtError,
+    LAND_TILE_SIZE,
+    land_row,
+};
+use openshard_uofiles::color::{
+    Color16,
+    Rgb8,
+};
+use openshard_uofiles::font::{
+    AsciiFonts,
+    FONT_COUNT,
+};
 use openshard_uofiles::image::Image;
-use openshard_uofiles::texmaps::{TexMapError, TexMaps};
-use openshard_uofiles::ttf_font::{TtfFont, TtfGlyph, TtfLineMetrics};
+use openshard_uofiles::texmaps::{
+    TexMapError,
+    TexMaps,
+};
+use openshard_uofiles::ttf_font::{
+    TtfFont,
+    TtfGlyph,
+    TtfLineMetrics,
+};
 
 /// The atlas texture's side, in pixels.
 ///
@@ -71,7 +100,7 @@ pub enum AtlasError {
     /// build an atlas per region, or to evict. Failing loudly is the point.
     Full {
         /// How many were asked for.
-        wanted: usize,
+        wanted:   usize,
         /// How many would have fitted, at best.
         capacity: usize,
     },
@@ -85,7 +114,7 @@ pub enum AtlasError {
         /// Pages needed to hold the requested pictures.
         wanted: usize,
         /// Pages this atlas family is allowed to retain.
-        limit: usize,
+        limit:  usize,
     },
     /// A sprite is bigger than the whole atlas, so no packing could hold it.
     ///
@@ -97,9 +126,9 @@ pub enum AtlasError {
         /// Which graphic.
         graphic: Graphic,
         /// How wide it claims to be.
-        width: u16,
+        width:   u16,
         /// How tall.
-        height: u16,
+        height:  u16,
     },
     /// A rasterized TrueType glyph is bigger than the whole atlas.
     ///
@@ -109,9 +138,9 @@ pub enum AtlasError {
     /// implausible size rather than that a real character is this shape.
     OversizedGlyph {
         /// The character.
-        char: char,
+        char:   char,
         /// How wide it rasterized to.
-        width: u16,
+        width:  u16,
         /// How tall.
         height: u16,
     },
@@ -136,14 +165,18 @@ impl fmt::Display for AtlasError {
                 graphic,
                 width,
                 height,
-            } => write!(
-                f,
-                "{graphic:?} is {width}x{height}, which does not fit an atlas {ATLAS_SIDE} on a side",
-            ),
-            Self::OversizedGlyph { char, width, height } => write!(
-                f,
-                "{char:?} rasterized to {width}x{height}, which does not fit an atlas {ATLAS_SIDE} on a side",
-            ),
+            } => {
+                write!(
+                    f,
+                    "{graphic:?} is {width}x{height}, which does not fit an atlas {ATLAS_SIDE} on a side",
+                )
+            }
+            Self::OversizedGlyph { char, width, height } => {
+                write!(
+                    f,
+                    "{char:?} rasterized to {width}x{height}, which does not fit an atlas {ATLAS_SIDE} on a side",
+                )
+            }
             Self::Art(source) => write!(f, "reading land art: {source}"),
             Self::Anim(source) => write!(f, "reading an animation: {source}"),
             Self::TexMaps(source) => write!(f, "reading a land texture: {source}"),
@@ -248,9 +281,9 @@ impl Dirty {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Region {
     /// Left edge, 0..1.
-    pub u: f32,
+    pub u:  f32,
     /// Top edge, 0..1.
-    pub v: f32,
+    pub v:  f32,
     /// Width, 0..1.
     pub du: f32,
     /// Height, 0..1.
@@ -278,7 +311,7 @@ pub struct LandAtlas {
     regions: Box<[Option<Region>]>,
     /// How many slots are spoken for — the next free one, and the count
     /// `regions` cannot give without a scan.
-    packed: u32,
+    packed:  u32,
     /// Every graphic ever offered to this atlas, whether or not it packed.
     ///
     /// Not the same set as `slots`, and the difference is the point: three
@@ -286,10 +319,10 @@ pub struct LandAtlas {
     /// absent would otherwise be looked up in a 155MB container on every frame
     /// it is on screen — and would answer "not packed" for ever, which is a
     /// question that never stops being asked.
-    asked: BTreeSet<LandTileId>,
+    asked:   BTreeSet<LandTileId>,
     /// `ATLAS_SIDE * ATLAS_SIDE` RGBA8 pixels, row-major.
-    pixels: Vec<u8>,
-    dirty: Dirty,
+    pixels:  Vec<u8>,
+    dirty:   Dirty,
 }
 
 impl fmt::Debug for LandAtlas {
@@ -329,10 +362,10 @@ impl LandAtlas {
         let side = ATLAS_SIDE as usize;
         Self {
             regions: vec![None; LAND_TILE_SLOTS].into_boxed_slice(),
-            packed: 0,
-            asked: BTreeSet::new(),
-            pixels: vec![0u8; side * side * 4],
-            dirty: Dirty::default(),
+            packed:  0,
+            asked:   BTreeSet::new(),
+            pixels:  vec![0u8; side * side * 4],
+            dirty:   Dirty::default(),
         }
     }
 
@@ -427,7 +460,7 @@ impl LandAtlas {
         let images: BTreeMap<LandTileId, Image> = images.into_iter().collect();
         if self.packed as usize + images.len() > CAPACITY {
             return Err(AtlasError::Full {
-                wanted: self.packed as usize + images.len(),
+                wanted:   self.packed as usize + images.len(),
                 capacity: CAPACITY,
             });
         }
@@ -531,8 +564,8 @@ fn region_of_slot(slot: u32) -> Region {
     let side = ATLAS_SIDE as f32;
     let tile = LAND_TILE_SIZE as f32;
     Region {
-        u: x as f32 / side,
-        v: y as f32 / side,
+        u:  x as f32 / side,
+        v:  y as f32 / side,
         du: tile / side,
         dv: tile / side,
     }
@@ -566,19 +599,19 @@ pub struct TexmapAtlas {
     regions: Box<[Option<Region>]>,
     /// How many of `regions` are filled — the count a scan would otherwise
     /// have to find.
-    packed: u32,
+    packed:  u32,
     /// Every land graphic ever offered, whether or not it had a texture.
     ///
     /// The ordinary case is that it did not — the client ships 4,116 textures
     /// for 16,384 slots — so without this every flat tile on screen would send
     /// `tiledata` and `texmaps.mul` the same question on every frame, for ever.
-    asked: BTreeSet<LandTileId>,
+    asked:   BTreeSet<LandTileId>,
     /// Which cells are spoken for, kept between growths: an atlas that forgot
     /// this would hand the next texture a cell it had already filled.
-    grid: CellGrid,
+    grid:    CellGrid,
     /// `ATLAS_SIDE * ATLAS_SIDE` RGBA8 pixels, row-major.
-    pixels: Vec<u8>,
-    dirty: Dirty,
+    pixels:  Vec<u8>,
+    dirty:   Dirty,
 }
 
 impl fmt::Debug for TexmapAtlas {
@@ -620,11 +653,11 @@ impl TexmapAtlas {
         let side = ATLAS_SIDE as usize;
         Self {
             regions: vec![None; LAND_TILE_SLOTS].into_boxed_slice(),
-            packed: 0,
-            asked: BTreeSet::new(),
-            grid: CellGrid::new(),
-            pixels: vec![0u8; side * side * 4],
-            dirty: Dirty::default(),
+            packed:  0,
+            asked:   BTreeSet::new(),
+            grid:    CellGrid::new(),
+            pixels:  vec![0u8; side * side * 4],
+            dirty:   Dirty::default(),
         }
     }
 
@@ -760,8 +793,8 @@ impl TexmapAtlas {
             let atlas = ATLAS_SIDE as f32;
             let half = 0.5 / atlas;
             self.regions[tile.0 as usize] = Some(Region {
-                u: origin_x as f32 / atlas + half,
-                v: origin_y as f32 / atlas + half,
+                u:  origin_x as f32 / atlas + half,
+                v:  origin_y as f32 / atlas + half,
                 du: f32::from(image.width()) / atlas - 2.0 * half,
                 dv: f32::from(image.height()) / atlas - 2.0 * half,
             });
@@ -818,7 +851,7 @@ pub struct Sprite {
     /// Where to sample it.
     pub region: Region,
     /// Its width in pixels.
-    pub width: u16,
+    pub width:  u16,
     /// Its height in pixels.
     pub height: u16,
     /// Which edges of its tile this picture stands on, if the art says.
@@ -857,7 +890,7 @@ pub struct StaticAtlasPage(pub u8);
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct PagedSprite {
     /// Texture page to bind before sampling `sprite.region`.
-    pub page: StaticAtlasPage,
+    pub page:   StaticAtlasPage,
     /// The page-local sprite placement and geometry facts.
     pub sprite: Sprite,
 }
@@ -892,10 +925,14 @@ impl StaticArt<'_> {
     /// The page-local sprite to draw for `graphic`.
     pub fn paged_sprite(self, graphic: Graphic) -> Option<PagedSprite> {
         match self {
-            Self::Single(atlas) => atlas.sprite(graphic).map(|sprite| PagedSprite {
-                page: StaticAtlasPage(0),
-                sprite,
-            }),
+            Self::Single(atlas) => {
+                atlas.sprite(graphic).map(|sprite| {
+                    PagedSprite {
+                        page: StaticAtlasPage(0),
+                        sprite,
+                    }
+                })
+            }
             Self::Pages(atlas) => atlas.sprite(graphic),
         }
     }
@@ -985,7 +1022,7 @@ pub const MAX_STATIC_ATLAS_PAGES: usize = 8;
 /// the land graphic [`LandAtlas`] is keyed by, and the two overlap numerically —
 /// which is exactly why they are separate atlases rather than one with a prefix.
 pub struct StaticAtlas {
-    sprites: BTreeMap<Graphic, Packed>,
+    sprites:    BTreeMap<Graphic, Packed>,
     /// The largest packed sprite in each direction. Picking uses this as a
     /// conservative screen-space margin, so it need not walk every visible
     /// static just to find one under the cursor.
@@ -1003,7 +1040,7 @@ pub struct StaticAtlas {
     /// Fifty-eight entries on a 2D install and nearly all of them windows — see
     /// [`aperture_of`](crate::facing::aperture_of), which is what fills it, and
     /// [`StaticAtlas::state_hole`] for a scene that states one instead.
-    holes: BTreeMap<Graphic, crate::facing::Hole>,
+    holes:      BTreeMap<Graphic, crate::facing::Hole>,
     /// The solid each graphic that is one is a picture of — see
     /// [`Prism`](crate::facing::Prism).
     ///
@@ -1012,7 +1049,7 @@ pub struct StaticAtlas {
     /// walks the map, and nothing that places a quad has any use for it. A stair
     /// is a rarity in an install — 576 climbable statics of 39,189 pictures — so a
     /// map is the right shape for it and a field on every sprite is not.
-    prisms: BTreeMap<Graphic, crate::facing::Prism>,
+    prisms:     BTreeMap<Graphic, crate::facing::Prism>,
     /// The horizontal box each graphic's own base edge states, where the
     /// picture is one and nothing else already answered for it — see
     /// [`Footprint`](crate::facing::Footprint) and `docs/footprints.md`'s S3.
@@ -1035,7 +1072,7 @@ pub struct StaticAtlas {
     /// and is rebuilt from scratch when it fills up, and a lifetime on
     /// [`StaticAtlas`] would travel into every renderer that holds one. It is a
     /// few thousand rows.
-    table: Option<crate::arttable::ArtTable>,
+    table:      Option<crate::arttable::ArtTable>,
     /// Every graphic ever offered, whether or not the client ships art for it.
     ///
     /// The one that most needed writing down: "does the atlas hold everything
@@ -1043,16 +1080,16 @@ pub struct StaticAtlas {
     /// art, because a graphic that cannot be packed is never packed — so one
     /// such tile repacked every atlas on every frame. Asking each graphic once
     /// is what makes the question terminate.
-    asked: BTreeSet<Graphic>,
+    asked:      BTreeSet<Graphic>,
     /// How many times the answers [`StaticAtlas::sprite`], [`StaticAtlas::hole`]
     /// and [`StaticAtlas::prism`] give have changed — see
     /// [`StaticAtlas::revision`].
-    revision: u64,
+    revision:   u64,
     /// Where the next sprite goes, kept between growths.
-    shelf: Shelf,
+    shelf:      Shelf,
     /// `ATLAS_SIDE * ATLAS_SIDE` RGBA8 pixels, row-major.
-    pixels: Vec<u8>,
-    dirty: Dirty,
+    pixels:     Vec<u8>,
+    dirty:      Dirty,
 }
 
 impl fmt::Debug for StaticAtlas {
@@ -1102,17 +1139,17 @@ impl StaticAtlas {
     fn empty() -> Self {
         let side = ATLAS_SIDE as usize;
         Self {
-            sprites: BTreeMap::new(),
+            sprites:    BTreeMap::new(),
             max_sprite: (0, 0),
-            holes: BTreeMap::new(),
-            prisms: BTreeMap::new(),
+            holes:      BTreeMap::new(),
+            prisms:     BTreeMap::new(),
             footprints: BTreeMap::new(),
-            table: None,
-            asked: BTreeSet::new(),
-            revision: 0,
-            shelf: Shelf::default(),
-            pixels: vec![0u8; side * side * 4],
-            dirty: Dirty::default(),
+            table:      None,
+            asked:      BTreeSet::new(),
+            revision:   0,
+            shelf:      Shelf::default(),
+            pixels:     vec![0u8; side * side * 4],
+            dirty:      Dirty::default(),
         }
     }
 
@@ -1523,7 +1560,7 @@ pub struct DirtyStaticAtlasPage {
 /// [`PagedSprite`] as a bounded page-batch binding. [`StaticAtlas`] remains a
 /// one-page baseline for tests and embeddings that do not need paging.
 pub struct StaticAtlasPages {
-    pages: Vec<StaticAtlas>,
+    pages:      Vec<StaticAtlas>,
     /// Which page holds each graphic, indexed by the graphic.
     ///
     /// Dense for the same reason [`LandAtlas::regions`] is, and it earns it
@@ -1531,15 +1568,15 @@ pub struct StaticAtlasPages {
     /// it is drawn — [`Self::sprite`], [`Self::prism`], [`Self::footprint`] and
     /// [`Self::opaque_at`] each resolve the page for themselves — and a
     /// far-zoom frame draws seven thousand of them.
-    page_of: Box<[Option<StaticAtlasPage>]>,
+    page_of:    Box<[Option<StaticAtlasPage>]>,
     /// How many of `page_of` are filled.
-    packed: u32,
+    packed:     u32,
     /// Requests belong to the family rather than to one page: absent art must
     /// not be re-read after a later page is allocated.
-    asked: BTreeSet<Graphic>,
-    table: Option<crate::arttable::ArtTable>,
+    asked:      BTreeSet<Graphic>,
+    table:      Option<crate::arttable::ArtTable>,
     page_limit: usize,
-    revision: u64,
+    revision:   u64,
 }
 
 impl fmt::Debug for StaticAtlasPages {
@@ -1615,7 +1652,7 @@ impl StaticAtlasPages {
         if page_limit == 0 || page_limit > usize::from(u8::MAX) + 1 {
             return Err(AtlasError::PageLimit {
                 wanted: 1,
-                limit: page_limit,
+                limit:  page_limit,
             });
         }
         let mut first = StaticAtlas::empty();
@@ -1682,7 +1719,7 @@ impl StaticAtlasPages {
                 if self.pages.len() == self.page_limit {
                     return Err(AtlasError::PageLimit {
                         wanted: self.pages.len() + 1,
-                        limit: self.page_limit,
+                        limit:  self.page_limit,
                     });
                 }
                 let mut page = StaticAtlas::empty();
@@ -1745,9 +1782,11 @@ impl StaticAtlasPages {
             .iter_mut()
             .enumerate()
             .filter_map(|(index, atlas)| {
-                atlas.take_dirty().map(|rows| DirtyStaticAtlasPage {
-                    page: StaticAtlasPage(index as u8),
-                    rows,
+                atlas.take_dirty().map(|rows| {
+                    DirtyStaticAtlasPage {
+                        page: StaticAtlasPage(index as u8),
+                        rows,
+                    }
                 })
             })
             .collect()
@@ -1828,7 +1867,7 @@ pub struct FrameKey {
     /// The animation this picture belongs to.
     pub animation: AnimationKey,
     /// Which frame of that animation.
-    pub frame: AnimationFrameIndex,
+    pub frame:     AnimationFrameIndex,
 }
 
 impl FrameKey {
@@ -1842,7 +1881,7 @@ impl FrameKey {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct PackedFrame {
     /// Where to sample it, and how big it is.
-    pub sprite: Sprite,
+    pub sprite:   Sprite,
     /// The frame's own centre offsets, carried through unchanged.
     ///
     /// They are not the middle of the picture and they are not the atlas's
@@ -1859,7 +1898,7 @@ pub struct PackedFrame {
     /// question that already has one. [`AnimAtlas::opaque_at`] reads the texel
     /// picking is decided by, and a one-pixel miss there is a creature that
     /// cannot be pointed at along its own edge.
-    origin: (u32, u32),
+    origin:       (u32, u32),
 }
 
 /// Which pixels a mobile placement samples.
@@ -1885,23 +1924,23 @@ pub enum AnimFrameSource {
 /// rebuilt on completely different triggers — the camera moving against a
 /// creature turning — and a draw call binds one texture either way.
 pub struct AnimAtlas {
-    frames: BTreeMap<FrameKey, PackedFrame>,
+    frames:            BTreeMap<FrameKey, PackedFrame>,
     /// Two pictures that make an unknown body visible without pretending it
     /// is another body from the client's files.
     fallback_standing: PackedFrame,
-    fallback_corpse: PackedFrame,
+    fallback_corpse:   PackedFrame,
     /// Every body-group-direction ever offered, animated or not.
     ///
     /// Keyed by the triple and not by [`FrameKey`], because a triple is what a
     /// caller asks for and what the file answers in one read. Most of the index
     /// is empty, so without this a creature whose group the client ships no
     /// animation for would seek `anim.mul` once a frame for ever.
-    asked: BTreeSet<AnimationKey>,
+    asked:             BTreeSet<AnimationKey>,
     /// Where the next frame goes, kept between growths.
-    shelf: Shelf,
+    shelf:             Shelf,
     /// `ATLAS_SIDE * ATLAS_SIDE` RGBA8 pixels, row-major.
-    pixels: Vec<u8>,
-    dirty: Dirty,
+    pixels:            Vec<u8>,
+    dirty:             Dirty,
 }
 
 impl fmt::Debug for AnimAtlas {
@@ -1946,15 +1985,15 @@ impl AnimAtlas {
     fn empty() -> Self {
         let side = ATLAS_SIDE as usize;
         let mut atlas = Self {
-            frames: BTreeMap::new(),
+            frames:            BTreeMap::new(),
             // Filled just below. A zero-sized sprite is never sampled: these
             // placeholders let the value be built before its shelf exists.
             fallback_standing: empty_packed_frame(),
-            fallback_corpse: empty_packed_frame(),
-            asked: BTreeSet::new(),
-            shelf: Shelf::default(),
-            pixels: vec![0u8; side * side * 4],
-            dirty: Dirty::default(),
+            fallback_corpse:   empty_packed_frame(),
+            asked:             BTreeSet::new(),
+            shelf:             Shelf::default(),
+            pixels:            vec![0u8; side * side * 4],
+            dirty:             Dirty::default(),
         };
         atlas.fallback_standing = atlas.pack_fallback(fallback_standing());
         atlas.fallback_corpse = atlas.pack_fallback(fallback_corpse());
@@ -1975,7 +2014,7 @@ impl AnimAtlas {
             .expect("the two tiny built-in mobile silhouettes fit in an empty atlas");
         copy_sprite(&mut self.pixels, image, origin_x, origin_y);
         PackedFrame {
-            sprite: Sprite {
+            sprite:   Sprite {
                 region: region_at(origin_x, origin_y, width, height),
                 width,
                 height,
@@ -1983,7 +2022,7 @@ impl AnimAtlas {
             },
             center_x: frame.center_x,
             center_y: frame.center_y,
-            origin: (origin_x, origin_y),
+            origin:   (origin_x, origin_y),
         }
     }
 
@@ -2098,7 +2137,7 @@ impl AnimAtlas {
             self.frames.insert(
                 key,
                 PackedFrame {
-                    sprite: Sprite {
+                    sprite:   Sprite {
                         region: region_at(origin_x, origin_y, width, height),
                         width,
                         height,
@@ -2108,7 +2147,7 @@ impl AnimAtlas {
                     },
                     center_x: frame.center_x,
                     center_y: frame.center_y,
-                    origin: (origin_x, origin_y),
+                    origin:   (origin_x, origin_y),
                 },
             );
         }
@@ -2147,13 +2186,17 @@ impl AnimAtlas {
     pub fn frame_or_fallback(&self, key: FrameKey, corpse: bool) -> (PackedFrame, AnimFrameSource) {
         match self.frame(key) {
             Some(frame) => (frame, AnimFrameSource::Frame(key)),
-            None => match corpse {
-                false => (
-                    self.fallback_standing,
-                    AnimFrameSource::Fallback { corpse: false },
-                ),
-                true => (self.fallback_corpse, AnimFrameSource::Fallback { corpse: true }),
-            },
+            None => {
+                match corpse {
+                    false => {
+                        (
+                            self.fallback_standing,
+                            AnimFrameSource::Fallback { corpse: false },
+                        )
+                    }
+                    true => (self.fallback_corpse, AnimFrameSource::Fallback { corpse: true }),
+                }
+            }
         }
     }
 
@@ -2215,20 +2258,20 @@ impl AnimAtlas {
 /// built-in frames. It never reaches a renderer.
 const fn empty_packed_frame() -> PackedFrame {
     PackedFrame {
-        sprite: Sprite {
+        sprite:   Sprite {
             region: Region {
-                u: 0.0,
-                v: 0.0,
+                u:  0.0,
+                v:  0.0,
                 du: 0.0,
                 dv: 0.0,
             },
-            width: 0,
+            width:  0,
             height: 0,
             facing: None,
         },
         center_x: 0,
         center_y: 0,
-        origin: (0, 0),
+        origin:   (0, 0),
     }
 }
 
@@ -2311,13 +2354,13 @@ pub struct GlyphKey {
 /// rectangles require. Fully transparent glyphs retain their width as advance
 /// but allocate no texture rectangle.
 pub struct FontAtlas {
-    sprites: BTreeMap<GlyphKey, Sprite>,
+    sprites:     BTreeMap<GlyphKey, Sprite>,
     /// Visible (not cell) height of each glyph.  `fonts.mul` cells include
     /// transparent top and bottom padding, so UI line spacing must not use a
     /// sprite rectangle as though every row were ink.
     ink_heights: BTreeMap<GlyphKey, u16>,
     /// `ATLAS_SIDE * ATLAS_SIDE` RGBA8 pixels, row-major.
-    pixels: Vec<u8>,
+    pixels:      Vec<u8>,
 }
 
 impl fmt::Debug for FontAtlas {
@@ -2534,12 +2577,12 @@ pub struct TtfSprite {
     /// to a zero-sized [`Sprite`] with nothing copied into the texture, the
     /// way [`SpriteQuad`](crate::sprite::SpriteQuad) already treats a zero
     /// width or height as nothing to draw.
-    pub sprite: Sprite,
+    pub sprite:            Sprite,
     /// How far below the glyph's own top edge the baseline sits, in pixels.
     /// See [`openshard_uofiles::ttf_font::TtfGlyph::baseline_from_top`].
     pub baseline_from_top: i32,
     /// How far to move the pen afterwards, in pixels.
-    pub advance: u16,
+    pub advance:           u16,
 }
 
 /// A TrueType face's glyphs, packed into one texture and grown on demand.
@@ -2579,11 +2622,11 @@ pub struct TtfAtlas {
     /// Same purpose as the other atlases' `asked` sets: a character with no
     /// glyph — impossible for a TrueType face, which always has `.notdef` —
     /// would otherwise be rasterized once per frame forever.
-    asked: BTreeSet<(char, TextSize)>,
-    shelf: Shelf,
+    asked:   BTreeSet<(char, TextSize)>,
+    shelf:   Shelf,
     /// `ATLAS_SIDE * ATLAS_SIDE` RGBA8 pixels, row-major.
-    pixels: Vec<u8>,
-    dirty: Dirty,
+    pixels:  Vec<u8>,
+    dirty:   Dirty,
 }
 
 impl fmt::Debug for TtfAtlas {
@@ -2604,10 +2647,10 @@ impl TtfAtlas {
         Self {
             sprites: BTreeMap::new(),
             metrics: BTreeMap::new(),
-            asked: BTreeSet::new(),
-            shelf: Shelf::default(),
-            pixels: vec![0u8; side * side * 4],
-            dirty: Dirty::default(),
+            asked:   BTreeSet::new(),
+            shelf:   Shelf::default(),
+            pixels:  vec![0u8; side * side * 4],
+            dirty:   Dirty::default(),
         }
     }
 
@@ -2756,19 +2799,19 @@ impl TtfAtlas {
                 self.sprites.insert(
                     key,
                     TtfSprite {
-                        sprite: Sprite {
+                        sprite:            Sprite {
                             region: Region {
-                                u: 0.0,
-                                v: 0.0,
+                                u:  0.0,
+                                v:  0.0,
                                 du: 0.0,
                                 dv: 0.0,
                             },
-                            width: 0,
+                            width:  0,
                             height: 0,
                             facing: None,
                         },
                         baseline_from_top: glyph.baseline_from_top,
-                        advance: glyph.advance,
+                        advance:           glyph.advance,
                     },
                 );
                 continue;
@@ -2791,7 +2834,7 @@ impl TtfAtlas {
             self.sprites.insert(
                 key,
                 TtfSprite {
-                    sprite: Sprite {
+                    sprite:            Sprite {
                         region: region_at(origin_x, origin_y, width, height),
                         width,
                         height,
@@ -2799,7 +2842,7 @@ impl TtfAtlas {
                         facing: None,
                     },
                     baseline_from_top: glyph.baseline_from_top,
-                    advance: glyph.advance,
+                    advance:           glyph.advance,
                 },
             );
         }
@@ -2871,8 +2914,8 @@ fn copy_sprite(pixels: &mut [u8], image: &Image, origin_x: u32, origin_y: u32) {
 fn region_at(origin_x: u32, origin_y: u32, width: u16, height: u16) -> Region {
     let atlas = ATLAS_SIDE as f32;
     Region {
-        u: origin_x as f32 / atlas,
-        v: origin_y as f32 / atlas,
+        u:  origin_x as f32 / atlas,
+        v:  origin_y as f32 / atlas,
         du: f32::from(width) / atlas,
         dv: f32::from(height) / atlas,
     }
@@ -2888,9 +2931,9 @@ fn region_at(origin_x: u32, origin_y: u32, width: u16, height: u16) -> Region {
 #[derive(Clone, Default)]
 struct Shelf {
     /// Where the current row starts, from the top of the atlas.
-    top: u32,
+    top:    u32,
     /// How far along the current row is filled.
-    used: u32,
+    used:   u32,
     /// How tall the current row is, which the next one starts below.
     height: u32,
 }
@@ -3182,8 +3225,14 @@ mod tests {
     /// detector is wrong about its wall.
     #[test]
     fn a_packed_sprite_takes_its_surface_from_the_table() {
-        use crate::arttable::{ArtTable, Stamp};
-        use crate::facing::{Face, Facing};
+        use crate::arttable::{
+            ArtTable,
+            Stamp,
+        };
+        use crate::facing::{
+            Face,
+            Facing,
+        };
 
         let wall = crate::facing::silhouette(Face::East, 80);
         assert_eq!(
@@ -3193,8 +3242,8 @@ mod tests {
         );
 
         let mut table = ArtTable::measured(Stamp {
-            art: "artLegacyMUL.uop".to_string(),
-            bytes: 1,
+            art:      "artLegacyMUL.uop".to_string(),
+            bytes:    1,
             detector: crate::facing::DETECTOR,
         });
         table.author(
@@ -3207,10 +3256,10 @@ mod tests {
         table.author(
             Graphic(3),
             crate::occlusion::Shape {
-                facing: Some(Facing::One(Face::East)),
-                hole: Some(WINDOW),
-                prism: None,
-                blocks: crate::facing::Blocks::EMPTY,
+                facing:    Some(Facing::One(Face::East)),
+                hole:      Some(WINDOW),
+                prism:     None,
+                blocks:    crate::facing::Blocks::EMPTY,
                 footprint: None,
             },
         );
@@ -3223,10 +3272,10 @@ mod tests {
         table.author(
             Graphic(4),
             crate::occlusion::Shape {
-                facing: None,
-                hole: None,
-                prism: None,
-                blocks: crate::facing::Blocks::EMPTY,
+                facing:    None,
+                hole:      None,
+                prism:     None,
+                blocks:    crate::facing::Blocks::EMPTY,
                 footprint: Some(footprint),
             },
         );
@@ -3268,10 +3317,10 @@ mod tests {
     /// `0x003C`'s hole, which is what the detector reads off the client's own
     /// window — see the sweep in `openshard-client-artscan`.
     const WINDOW: crate::facing::Hole = crate::facing::Hole {
-        near: 93,
-        far: 185,
+        near:   93,
+        far:    185,
         bottom: 10,
-        top: 15,
+        top:    15,
     };
 
     /// And with no table at all, the picture is measured as it always was —
@@ -3283,7 +3332,10 @@ mod tests {
     /// windows exist only on machines somebody ran a tool on.
     #[test]
     fn a_packed_sprite_with_no_table_is_measured_as_it_is_packed() {
-        use crate::facing::{Face, Facing};
+        use crate::facing::{
+            Face,
+            Facing,
+        };
 
         let atlas = StaticAtlas::pack([
             (Graphic(1), crate::facing::silhouette(Face::East, 80)),

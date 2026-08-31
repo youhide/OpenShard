@@ -31,10 +31,17 @@ use openshard_config::CombatEra;
 use openshard_entities::EntityId;
 use openshard_protocol::skill::SkillLock;
 use openshard_state::WorldState;
-use openshard_state::components::{Client, Skills, Stats};
+use openshard_state::components::{
+    Client,
+    Skills,
+    Stats,
+};
 use openshard_state::skill::Skill;
 
-use crate::{SkillChanged, SkillValue};
+use crate::{
+    SkillChanged,
+    SkillValue,
+};
 
 /// The lower and upper difficulty edges for a skill check, in tenths.
 ///
@@ -336,7 +343,10 @@ fn reduce_a_down_skill(
 
 #[cfg(test)]
 mod tests {
-    use super::{SkillBand, chance_in_band};
+    use super::{
+        SkillBand,
+        chance_in_band,
+    };
 
     #[test]
     fn chance_in_band_accepts_the_full_i32_span() {

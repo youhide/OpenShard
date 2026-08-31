@@ -31,12 +31,19 @@
 //! ports, and no timing that depends on a kernel.
 
 use std::io;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{
+    Ipv4Addr,
+    SocketAddr,
+    SocketAddrV4,
+};
 use std::time::Instant;
 
 use openshard_client_net::transport::Dial;
 use openshard_config::Config;
-use openshard_gateway::{Gate, Shutdown};
+use openshard_gateway::{
+    Gate,
+    Shutdown,
+};
 use tokio::io::DuplexStream;
 
 use crate::Running;
@@ -150,7 +157,7 @@ pub fn spawn(
     (
         dial,
         Running {
-            stop: shutdown,
+            stop:   shutdown,
             thread: Some(thread),
         },
     )

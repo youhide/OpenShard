@@ -66,12 +66,18 @@
 //! with its stem" is one rule that covers all three without this module having
 //! to know what a bake is.
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::time::SystemTime;
 
 use openshard_map::snapshot::MapSnapshot;
 use openshard_protocol::chunks::WorldNotice;
-use openshard_protocol::world::{Facet, WorldId};
+use openshard_protocol::world::{
+    Facet,
+    WorldId,
+};
 
 /// The extension a kept world takes: it is a base set, so it is a base set's.
 const EXTENSION: &str = "osbase";
@@ -120,7 +126,7 @@ pub enum CacheError {
     /// The file is there and is not one world of ours.
     Unreadable {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: openshard_basemap::BaseError,
     },
@@ -131,36 +137,40 @@ pub enum CacheError {
     /// differently.
     NotThisWorld {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// What the shard says its facet and size are.
         wanted: WorldNotice,
         /// What the file says it is.
-        found: Facet,
+        found:  Facet,
     },
 }
 
 impl std::fmt::Display for CacheError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unnamed { facet } => write!(
-                f,
-                "the shard does not name its world for facet {}, so there is nothing to keep it \
+            Self::Unnamed { facet } => {
+                write!(
+                    f,
+                    "the shard does not name its world for facet {}, so there is nothing to keep it \
                  under",
-                facet.0
-            ),
+                    facet.0
+                )
+            }
             Self::Missing { path } => write!(f, "no world kept at {}", path.display()),
             Self::Unreadable { path, source } => {
                 write!(f, "the world kept at {}: {source}", path.display())
             }
-            Self::NotThisWorld { path, wanted, found } => write!(
-                f,
-                "{} holds facet {} and the shard is describing facet {} of {}x{} blocks",
-                path.display(),
-                found.0,
-                wanted.facet.0,
-                wanted.blocks.wide,
-                wanted.blocks.down
-            ),
+            Self::NotThisWorld { path, wanted, found } => {
+                write!(
+                    f,
+                    "{} holds facet {} and the shard is describing facet {} of {}x{} blocks",
+                    path.display(),
+                    found.0,
+                    wanted.facet.0,
+                    wanted.blocks.wide,
+                    wanted.blocks.down
+                )
+            }
         }
     }
 }
@@ -317,7 +327,7 @@ pub fn path_for(dir: &Path, notice: WorldNotice) -> Result<PathBuf, CacheError> 
 #[derive(Debug)]
 pub struct CachedWorld {
     snapshot: MapSnapshot,
-    path: PathBuf,
+    path:     PathBuf,
 }
 
 impl CachedWorld {
@@ -372,9 +382,11 @@ pub fn read(dir: &Path, notice: WorldNotice) -> Result<CachedWorld, CacheError> 
     // arriving at different revisions of one file. A client writes no patches,
     // so in practice there is no log — but if somebody drops one there, the
     // world is what the log makes it, exactly as it is for the shard.
-    let loaded = openshard_basemap::load(&path).map_err(|source| CacheError::Unreadable {
-        path: path.clone(),
-        source,
+    let loaded = openshard_basemap::load(&path).map_err(|source| {
+        CacheError::Unreadable {
+            path: path.clone(),
+            source,
+        }
     })?;
     let held = loaded.snapshot;
     let extent = held.map().extent();
@@ -419,7 +431,7 @@ fn used(path: &Path) {
 #[derive(Debug)]
 pub struct Kept {
     /// Where this world is now kept.
-    pub path: PathBuf,
+    pub path:  PathBuf,
     /// The worlds let go of to make room, each named by its base set.
     ///
     /// Empty on nearly every write: it takes a *new* world of a facet this
@@ -455,9 +467,11 @@ pub fn write(dir: &Path, notice: WorldNotice, world: &MapSnapshot) -> Result<Kep
     // that changed identity by being cached is a world every later comparison
     // is about the wrong thing.
     openshard_basemap::write(&writing, world, openshard_basemap::Identity::Keep(identity)).map_err(
-        |source| CacheError::Unreadable {
-            path: writing.clone(),
-            source,
+        |source| {
+            CacheError::Unreadable {
+                path: writing.clone(),
+                source,
+            }
         },
     )?;
     std::fs::rename(&writing, &path).map_err(|source| {
@@ -466,7 +480,7 @@ pub fn write(dir: &Path, notice: WorldNotice, world: &MapSnapshot) -> Result<Kep
         // failed cleanup after a failed write is a second thing to report about
         // one event.
         CacheError::Unreadable {
-            path: path.clone(),
+            path:   path.clone(),
             source: openshard_basemap::BaseError::Write {
                 path: path.clone(),
                 source,
@@ -480,9 +494,15 @@ pub fn write(dir: &Path, notice: WorldNotice, world: &MapSnapshot) -> Result<Kep
 #[cfg(test)]
 mod tests {
     use openshard_map::grid::BlockExtent;
-    use openshard_map::map::{LandCell, WorldMap};
+    use openshard_map::map::{
+        LandCell,
+        WorldMap,
+    };
     use openshard_map::snapshot::MapRevision;
-    use openshard_protocol::chunks::{FacetBlocks, WorldRevision};
+    use openshard_protocol::chunks::{
+        FacetBlocks,
+        WorldRevision,
+    };
     use openshard_tiles::LandTileId;
 
     use super::*;
@@ -537,9 +557,11 @@ mod tests {
                 wide: BLOCKS,
                 down: BLOCKS,
             },
-            |x, y| LandCell {
-                tile: LandTileId(x.wrapping_mul(7).wrapping_add(y)),
-                z: (x as i32 - y as i32) as i8,
+            |x, y| {
+                LandCell {
+                    tile: LandTileId(x.wrapping_mul(7).wrapping_add(y)),
+                    z:    (x as i32 - y as i32) as i8,
+                }
             },
         );
         MapSnapshot::restored(FACET, revision, map)
@@ -794,9 +816,11 @@ mod tests {
                 wide: BLOCKS + 8,
                 down: BLOCKS,
             },
-            |_, _| LandCell {
-                tile: LandTileId(3),
-                z: 0,
+            |_, _| {
+                LandCell {
+                    tile: LandTileId(3),
+                    z:    0,
+                }
             },
         );
         openshard_basemap::write(

@@ -5,19 +5,32 @@
 //! packet to the local scroll position and turns a chosen row into a cast.
 
 use openshard_client_net::action::Outgoing;
-use openshard_client_render::gump::{GumpArt, GumpPixel};
-use openshard_client_render::spellbook::{self, Hit};
+use openshard_client_render::gump::{
+    GumpArt,
+    GumpPixel,
+};
+use openshard_client_render::spellbook::{
+    self,
+    Hit,
+};
 use openshard_protocol::serial::Serial;
 
-use crate::panes::{Button, Effect, Input, PaneCtx, PaneFrame, Response};
+use crate::panes::{
+    Button,
+    Effect,
+    Input,
+    PaneCtx,
+    PaneFrame,
+    Response,
+};
 use crate::windows::Drawn;
 
 /// One opened book and the state no packet carries.
 #[derive(Debug)]
 pub struct SpellbookPane {
-    book: Serial,
+    book:   Serial,
     scroll: i32,
-    held: Option<Hit>,
+    held:   Option<Hit>,
 }
 
 impl SpellbookPane {
@@ -62,10 +75,12 @@ impl SpellbookPane {
             return Response::changed();
         }
         match held {
-            Hit::Cast(spell) => Response::changed().with(Effect::Net(Outgoing::CastSpell {
-                spellbook: self.book,
-                spell,
-            })),
+            Hit::Cast(spell) => {
+                Response::changed().with(Effect::Net(Outgoing::CastSpell {
+                    spellbook: self.book,
+                    spell,
+                }))
+            }
         }
     }
 

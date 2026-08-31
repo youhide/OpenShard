@@ -5,21 +5,45 @@
 //! is the seam between what winit reports and the method that already knows
 //! what to do with it.
 
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_client_render::camera::RealPixel;
 use openshard_client_render::gump::GumpPixel;
 use openshard_movement::Bodies;
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow};
-use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::event::{
+    ElementState,
+    WindowEvent,
+};
+use winit::event_loop::{
+    ActiveEventLoop,
+    ControlFlow,
+};
+use winit::keyboard::{
+    KeyCode,
+    PhysicalKey,
+};
 use winit::window::WindowId;
 
 use crate::app::App;
 use crate::picking::SelectedIdentity;
-use crate::world::{footing, guide};
-use crate::{DOUBLE_CLICK, PAGE_PIXELS, desk, keyboard, keys, panes, shell, steer};
+use crate::world::{
+    footing,
+    guide,
+};
+use crate::{
+    DOUBLE_CLICK,
+    PAGE_PIXELS,
+    desk,
+    keyboard,
+    keys,
+    panes,
+    shell,
+    steer,
+};
 
 /// How far `App::last_advance` may lag behind the redraw cadence before
 /// `about_to_wait` stops trusting `App::watched` and ticks the state clock
@@ -44,9 +68,9 @@ impl App {
             // the reason the single terrain always was — they borrow the map
             // and the crowd, and the walk borrows `steer` mutably beside them.
             let ground = steer::Readings {
-                live: footing(&self.resources, self.walking_doors())
+                live:   footing(&self.resources, self.walking_doors())
                     .among(Bodies::standing(&self.world.bodies)),
-                guide: guide(&self.resources),
+                guide:  guide(&self.resources),
                 coarse: self.resources.coarse.as_ref(),
             };
             let motion = self.world.motion.planning_state();
@@ -365,9 +389,9 @@ impl ApplicationHandler<()> for App {
                                     // `Detour` for a way past whatever is ahead
                                     // — and somebody standing there is one of
                                     // the things it has to get past.
-                                    live: footing(&self.resources, self.walking_doors())
+                                    live:   footing(&self.resources, self.walking_doors())
                                         .among(Bodies::standing(&self.world.bodies)),
-                                    guide: guide(&self.resources),
+                                    guide:  guide(&self.resources),
                                     coarse: self.resources.coarse.as_ref(),
                                 },
                             )
@@ -828,10 +852,14 @@ impl ApplicationHandler<()> for App {
                         (Some(who), _, _) => Some(SelectedIdentity::Mobile(who)),
                         (None, Some(item), _) => Some(SelectedIdentity::Item(item)),
                         (None, None, Some(picked)) => Some(SelectedIdentity::Static(picked)),
-                        (None, None, None) => self.pick_tile(camera).map(|tile| SelectedIdentity::Tile {
-                            x: tile.at.x,
-                            y: tile.at.y,
-                        }),
+                        (None, None, None) => {
+                            self.pick_tile(camera).map(|tile| {
+                                SelectedIdentity::Tile {
+                                    x: tile.at.x,
+                                    y: tile.at.y,
+                                }
+                            })
+                        }
                     };
                     if self.map_editor.active() {
                         self.apply_map_editor_click(camera);
@@ -998,10 +1026,12 @@ impl ApplicationHandler<()> for App {
         // exactly the case where the UI wants no frame of its own, so it falls
         // back to the animation clock.
         let deadline = match self.shell.as_ref().map(shell::Shell::repaint_after) {
-            Some(after) => match now.checked_add(after) {
-                Some(ui) => self.next_tick.min(ui),
-                None => self.next_tick,
-            },
+            Some(after) => {
+                match now.checked_add(after) {
+                    Some(ui) => self.next_tick.min(ui),
+                    None => self.next_tick,
+                }
+            }
             None => self.next_tick,
         };
         let deadline = match self.steer.deadline() {
@@ -1045,10 +1075,10 @@ impl ApplicationHandler<()> for App {
             let position = screen.window.outer_position().ok();
             let previous = self.desk.window;
             self.desk.window = Some(desk::Frame {
-                x: position.map_or_else(|| previous.map_or(0, |frame| frame.x), |at| at.x),
-                y: position.map_or_else(|| previous.map_or(0, |frame| frame.y), |at| at.y),
-                width: size.width.max(1),
-                height: size.height.max(1),
+                x:         position.map_or_else(|| previous.map_or(0, |frame| frame.x), |at| at.x),
+                y:         position.map_or_else(|| previous.map_or(0, |frame| frame.y), |at| at.y),
+                width:     size.width.max(1),
+                height:    size.height.max(1),
                 maximized: screen.window.is_maximized(),
             });
         }

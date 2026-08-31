@@ -9,10 +9,16 @@
 //! tenths, chances in per-mille, every duration a tick count. A craft has to
 //! replay.
 
-use openshard_protocol::wire::{ClilocId, SoundId};
+use openshard_protocol::wire::{
+    ClilocId,
+    SoundId,
+};
 use openshard_state::Skill;
 
-use crate::recipe::{Recipe, SubResAxis};
+use crate::recipe::{
+    Recipe,
+    SubResAxis,
+};
 
 /// A cliloc number, or a literal string where ServUO has no number for it.
 ///
@@ -59,11 +65,11 @@ pub struct Needs {
     /// An anvil to beat it on.
     pub anvil: bool,
     /// Any fire at all, which is a looser test than a forge.
-    pub heat: bool,
+    pub heat:  bool,
     /// An oven, for baking.
-    pub oven: bool,
+    pub oven:  bool,
     /// A flour mill.
-    pub mill: bool,
+    pub mill:  bool,
     /// Water.
     pub water: bool,
 }
@@ -75,9 +81,9 @@ impl Needs {
         Self {
             forge: false,
             anvil: false,
-            heat: false,
-            oven: false,
-            mill: false,
+            heat:  false,
+            oven:  false,
+            mill:  false,
             water: false,
         }
     }
@@ -104,9 +110,9 @@ impl Needs {
         Self {
             forge: self.forge || other.forge,
             anvil: self.anvil || other.anvil,
-            heat: self.heat || other.heat,
-            oven: self.oven || other.oven,
-            mill: self.mill || other.mill,
+            heat:  self.heat || other.heat,
+            oven:  self.oven || other.oven,
+            mill:  self.mill || other.mill,
             water: self.water || other.water,
         }
     }
@@ -120,30 +126,30 @@ impl Needs {
 #[derive(Clone, Copy, Debug)]
 pub struct CraftSystemDef {
     /// The skill rolled and trained — `MainSkill`.
-    pub skill: Skill,
+    pub skill:         Skill,
     /// The title over the gump.
-    pub title: Text,
+    pub title:         Text,
     /// The chance of success at the bottom of a recipe's band, in per-mille.
     /// ServUO's `GetChanceAtMin`: zero for a smith (a recipe you have only just
     /// qualified for always fails at first), five hundred for a tailor or
     /// fletcher.
     pub chance_at_min: u32,
     /// How the exceptional chance falls out of the success chance.
-    pub eca: Eca,
+    pub eca:           Eca,
     /// Ticks between the beats of one craft — ServUO's `Delay`, 1.25s for all but
     /// one system.
-    pub delay_ticks: u64,
+    pub delay_ticks:   u64,
     /// The fewest beats a craft takes, and the most; the count is rolled between
     /// them. Both are 1 nearly everywhere, which is what makes a craft feel
     /// instant and a failed one still take a moment.
-    pub min_beats: u8,
+    pub min_beats:     u8,
     /// The other end of the roll.
-    pub max_beats: u8,
+    pub max_beats:     u8,
     /// What the tool makes on each beat — `PlayCraftEffect`. The hammer on the
     /// anvil is `0x2A`.
-    pub craft_sound: SoundId,
+    pub craft_sound:   SoundId,
     /// What has to be standing nearby for *any* of this system's recipes.
-    pub needs: Needs,
+    pub needs:         Needs,
     /// The cliloc said when [`needs`](Self::needs) is not met — "You must be near
     /// an anvil and a forge to smith items."
     ///
@@ -153,13 +159,13 @@ pub struct CraftSystemDef {
     /// so "absent" and "message zero" would be the same bits.
     pub needs_message: Option<ClilocId>,
     /// The gump's left-hand column, indexed by [`Recipe::group`].
-    pub groups: &'static [Text],
+    pub groups:        &'static [Text],
     /// Everything it can make.
-    pub recipes: &'static [Recipe],
+    pub recipes:       &'static [Recipe],
     /// The material axis, where it has one: the nine metals, the seven woods, the
     /// leather grades. A system without one (Alchemy, Tinkering) has `None` and
     /// its gump draws no material row.
-    pub sub_res: Option<SubResAxis>,
+    pub sub_res:       Option<SubResAxis>,
 }
 
 /// Which of the systems in [`crate::defs`], by index.

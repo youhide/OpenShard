@@ -22,13 +22,24 @@
 
 use openshard_client_net::action::Outgoing;
 use openshard_client_net::view::WorldView;
-use openshard_client_render::gump::{GumpArt, GumpPixel};
+use openshard_client_render::gump::{
+    GumpArt,
+    GumpPixel,
+};
 use openshard_client_render::skills;
 use openshard_protocol::skill::SkillLock;
 use openshard_protocol::wire::RawSkillId;
 use openshard_uofiles::skills::SkillId;
 
-use crate::panes::{Button, Effect, Input, PaneCtx, PaneFiles, PaneFrame, Response};
+use crate::panes::{
+    Button,
+    Effect,
+    Input,
+    PaneCtx,
+    PaneFiles,
+    PaneFrame,
+    Response,
+};
 use crate::windows::Drawn;
 
 /// This character's skill sheet, open.
@@ -209,7 +220,7 @@ impl SkillsPane {
                 self.tree.set_lock(id, next);
                 Response::changed().with(Effect::Net(Outgoing::SkillLock {
                     skill: RawSkillId(id.0),
-                    lock: next,
+                    lock:  next,
                 }))
             }
             skills::Hit::Use(id) => {
@@ -265,11 +276,13 @@ impl SkillsPane {
             files.skill_groups,
             &self.tree,
             |id| {
-                frame.view.player.skills.get(&id.0).map(|line| skills::Standing {
-                    skill: *line,
-                    // The player's own click, held over the shard's line — see
-                    // `Tree::lock_of`.
-                    lock: self.tree.lock_of(id, line.lock),
+                frame.view.player.skills.get(&id.0).map(|line| {
+                    skills::Standing {
+                        skill: *line,
+                        // The player's own click, held over the shard's line — see
+                        // `Tree::lock_of`.
+                        lock:  self.tree.lock_of(id, line.lock),
+                    }
                 })
             },
             |text, font| openshard_client_render::text::gump_width(text, font, files.font_atlas),
@@ -334,9 +347,8 @@ mod tests {
     use openshard_client_render::gump::GumpPixel;
     use openshard_protocol::serial::Serial;
 
-    use crate::panes::fixture;
-
     use super::*;
+    use crate::panes::fixture;
 
     /// **Step 8 on the second window kind: the notch through
     /// [`AnyPane::handle`](crate::panes::AnyPane::handle).**

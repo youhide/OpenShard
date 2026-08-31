@@ -35,11 +35,27 @@
 use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::{Hue, MultiId};
-use openshard_protocol::world::{Facet, Point};
+use openshard_protocol::wire::{
+    Hue,
+    MultiId,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 use openshard_state::boat::Plank;
-use openshard_state::components::{Boat, Drawn, Movement, Position, Sailing};
-use openshard_state::{ItemLocation, WorldState, establish_item_location};
+use openshard_state::components::{
+    Boat,
+    Drawn,
+    Movement,
+    Position,
+    Sailing,
+};
+use openshard_state::{
+    ItemLocation,
+    WorldState,
+    establish_item_location,
+};
 
 /// Why a boat could not be launched.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -172,7 +188,7 @@ pub fn place(
     state.registry.insert(
         entity,
         Drawn {
-            id: multi.graphic(),
+            id:  multi.graphic(),
             hue: Hue(0),
         },
     );

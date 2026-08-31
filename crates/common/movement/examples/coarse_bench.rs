@@ -23,17 +23,33 @@
 //! is walked and the first standable tiles on it are taken.
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use clap::Parser;
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Doors, Overlay};
+use openshard_map::overlay::{
+    Doors,
+    Overlay,
+};
 use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::reach::Reach;
 use openshard_movement::{
-    Footing, MapTerrain, NavigationGraph, Weight, bake, find_long_path, find_path, search_path,
+    Footing,
+    MapTerrain,
+    NavigationGraph,
+    Weight,
+    bake,
+    find_long_path,
+    find_path,
+    search_path,
 };
-use openshard_protocol::world::{Facet, Point};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 
 /// Chebyshev distances the sampler aims at, in tiles.
 ///
@@ -47,20 +63,20 @@ const PER_BAND: usize = 8;
 #[derive(Debug, Parser)]
 struct Cli {
     #[arg(short, long, env = "OPENSHARD_CLIENT", value_name = "DIR")]
-    client: PathBuf,
+    client:    PathBuf,
     #[arg(long, default_value_t = 0)]
-    facet: u8,
+    facet:     u8,
     #[arg(long, default_value_t = 1363)]
-    x: u16,
+    x:         u16,
     #[arg(long, default_value_t = 1600)]
-    y: u16,
+    y:         u16,
     /// Node budget for both the flat search and the corridor's exact hops.
     #[arg(long, default_value_t = 600)]
-    budget: usize,
+    budget:    usize,
     /// Times to repeat each query, keeping the fastest — see `map_path_probe`
     /// for why a shared workstation makes the minimum the honest reading.
     #[arg(long, default_value_t = 3, value_name = "N")]
-    repeat: usize,
+    repeat:    usize,
     /// Also run the old open-world comparison this example used to be.
     #[arg(long, default_value_t = false)]
     synthetic: bool,

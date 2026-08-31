@@ -7,7 +7,10 @@
 use openshard_client_render::blit::ViewportRect;
 use openshard_client_render::camera::TileBounds;
 use openshard_client_render::composite::{
-    CaptureSource, CompositeProducerJob, CompositeWorkQueue, PreparedCompositeWork,
+    CaptureSource,
+    CompositeProducerJob,
+    CompositeWorkQueue,
+    PreparedCompositeWork,
 };
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::ground;
@@ -72,11 +75,11 @@ pub(super) fn produce(
         .create_view(&wgpu::TextureViewDescriptor::default());
     let gbuffer = window.composite_producer.gbuffer.views();
     let target = Target {
-        view: &world,
-        depth: &depth,
-        gbuffer: &gbuffer,
-        width: job.source_size().width,
-        height: job.source_size().height,
+        view:       &world,
+        depth:      &depth,
+        gbuffer:    &gbuffer,
+        width:      job.source_size().width,
+        height:     job.source_size().height,
         projection: camera.projection(),
     };
     window
@@ -84,16 +87,16 @@ pub(super) fn produce(
         .render(&window.device, &window.queue, &mut encoder, target, &ground);
     let (eye_x, eye_y) = camera.eye_tile();
     let source = CaptureSource {
-        color: &window.composite_producer.world,
-        ids: window.composite_producer.gbuffer.ids(),
-        position: window.composite_producer.gbuffer.position(),
-        normal: window.composite_producer.gbuffer.normal(),
-        depth: &depth,
+        color:      &window.composite_producer.world,
+        ids:        window.composite_producer.gbuffer.ids(),
+        position:   window.composite_producer.gbuffer.position(),
+        normal:     window.composite_producer.gbuffer.normal(),
+        depth:      &depth,
         depth_base: openshard_client_render::depth::base_for(eye_x, eye_y),
-        rect: ViewportRect {
-            x: 0,
-            y: 0,
-            width: job.source_size().width,
+        rect:       ViewportRect {
+            x:      0,
+            y:      0,
+            width:  job.source_size().width,
             height: job.source_size().height,
         },
     };

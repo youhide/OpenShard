@@ -28,9 +28,9 @@ use crate::components::ActionKind;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ActionSpeeds {
     /// A blow's pace, as a percentage of the derived interval.
-    pub swing: u16,
+    pub swing:  u16,
     /// A shot's.
-    pub shot: u16,
+    pub shot:   u16,
     /// An innate ranged attack's.
     pub breath: u16,
 }
@@ -48,8 +48,8 @@ impl ActionSpeeds {
     #[must_use]
     pub const fn shipped() -> Self {
         Self {
-            swing: 100,
-            shot: 64,
+            swing:  100,
+            shot:   64,
             breath: 100,
         }
     }
@@ -58,8 +58,8 @@ impl ActionSpeeds {
     #[must_use]
     pub const fn from_config(speeds: &ActionSpeedsConfig) -> Self {
         Self {
-            swing: speeds.swing,
-            shot: speeds.shot,
+            swing:  speeds.swing,
+            shot:   speeds.shot,
             breath: speeds.breath,
         }
     }
@@ -90,11 +90,12 @@ impl ActionSpeeds {
 
 #[cfg(test)]
 mod tests {
-    use super::ActionSpeeds;
-    use crate::components::ActionKind;
     use openshard_config::ActionSpeedsConfig;
     use openshard_protocol::wire::Graphic;
     use openshard_protocol::world::RangedRange;
+
+    use super::ActionSpeeds;
+    use crate::components::ActionKind;
 
     const REACH: RangedRange = match RangedRange::new(10) {
         Some(reach) => reach,
@@ -103,9 +104,9 @@ mod tests {
 
     fn shot() -> ActionKind {
         ActionKind::Shot {
-            reach: REACH,
+            reach:  REACH,
             nocked: Graphic(0x0F3F),
-            art: Graphic(0x0F42),
+            art:    Graphic(0x0F42),
         }
     }
 
@@ -141,8 +142,8 @@ mod tests {
     #[test]
     fn a_scaled_interval_never_reaches_zero() {
         let speeds = ActionSpeeds {
-            swing: 100,
-            shot: 1,
+            swing:  100,
+            shot:   1,
             breath: 100,
         };
         assert_eq!(speeds.scale(shot(), 1), 1);

@@ -12,13 +12,34 @@
 //! - above it, anything, with the wild ones rolled against 100.0.
 
 use openshard_entities::EntityId;
-use openshard_protocol::gump::{ButtonId, GumpButton, GumpDisplay, GumpId, GumpKey, GumpLayout, GumpPoint};
+use openshard_protocol::gump::{
+    ButtonId,
+    GumpButton,
+    GumpDisplay,
+    GumpId,
+    GumpKey,
+    GumpLayout,
+    GumpPoint,
+};
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::wire::ClilocId;
 use openshard_state::components::{
-    Body, BodyType, Client, Ghost, Hitpoints, Mana, Pet, Resistance, Skills, Stamina, Stats,
+    Body,
+    BodyType,
+    Client,
+    Ghost,
+    Hitpoints,
+    Mana,
+    Pet,
+    Resistance,
+    Skills,
+    Stamina,
+    Stats,
 };
-use openshard_state::{Skill, WorldState};
+use openshard_state::{
+    Skill,
+    WorldState,
+};
 
 use crate::check::roll_skill_band;
 
@@ -254,11 +275,11 @@ fn show_window(state: &mut WorldState, looker: EntityId, target: EntityId) {
         // Keyed on the dialog's own id rather than on a mobile: the window is
         // read-only and answers nothing, so the key only has to be a number the
         // client can hang the window on — which is exactly what a `GumpKey` is.
-        serial: GumpKey(ANIMAL_LORE_GUMP.0),
+        serial:  GumpKey(ANIMAL_LORE_GUMP.0),
         gump_id: ANIMAL_LORE_GUMP,
-        at: GumpPoint::new(250, 50),
-        layout: layout.to_owned(),
-        lines: lines.to_vec(),
+        at:      GumpPoint::new(250, 50),
+        layout:  layout.to_owned(),
+        lines:   lines.to_vec(),
     });
     state.send_packet(connection, &packet);
 }

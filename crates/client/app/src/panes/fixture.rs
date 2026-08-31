@@ -19,11 +19,22 @@
 
 use openshard_client_net::view::WorldView;
 use openshard_client_render::atlas::FontAtlas;
-use openshard_client_render::gump::{GumpArt, GumpAtlas, GumpPixel};
-use openshard_protocol::direction::{Direction, Facing};
+use openshard_client_render::gump::{
+    GumpArt,
+    GumpAtlas,
+    GumpPixel,
+};
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Graphic;
-use openshard_protocol::world::{MapSize, PlayerStart, Point};
+use openshard_protocol::world::{
+    MapSize,
+    PlayerStart,
+    Point,
+};
 use openshard_tiles::TileData;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::color::Color16;
@@ -32,7 +43,12 @@ use openshard_uofiles::image::Image;
 use openshard_uofiles::skillgrp::SkillGroups;
 use openshard_uofiles::skills::Skills;
 
-use crate::panes::{Modifiers, PaneCtx, PaneFiles, PaneFrame};
+use crate::panes::{
+    Modifiers,
+    PaneCtx,
+    PaneFiles,
+    PaneFrame,
+};
 use crate::windows::Drawn;
 
 /// A solid rectangle of opaque pixels, the shape of one gump picture.
@@ -55,12 +71,12 @@ pub(crate) fn block(width: u16, height: u16) -> Image {
 /// somewhere — a test keeps one of these alive for as long as the
 /// [`PaneCtx`] it lends to.
 pub(crate) struct Install {
-    gump_atlas: GumpAtlas,
-    font_atlas: FontAtlas,
-    art: Art,
-    tiledata: TileData,
-    equip_conv: EquipConv,
-    skill_names: Skills,
+    gump_atlas:   GumpAtlas,
+    font_atlas:   FontAtlas,
+    art:          Art,
+    tiledata:     TileData,
+    equip_conv:   EquipConv,
+    skill_names:  Skills,
     skill_groups: SkillGroups,
 }
 
@@ -79,15 +95,15 @@ impl Install {
             .into_iter()
             .map(|(art, (width, height))| (art, block(width, height)));
         Self {
-            gump_atlas: GumpAtlas::pack(packed).expect("a handful of blocks fit in one atlas"),
+            gump_atlas:   GumpAtlas::pack(packed).expect("a handful of blocks fit in one atlas"),
             // No glyphs: a test that measures text is a test about text, and it
             // reads a real `fonts.mul`. Every width here is zero, honestly so —
             // this file ships nothing rather than guessing at a face.
-            font_atlas: FontAtlas::pack([]).expect("an atlas of no glyphs"),
-            art: Art::empty(),
-            tiledata: TileData::empty(),
-            equip_conv: EquipConv::default(),
-            skill_names: Skills::default(),
+            font_atlas:   FontAtlas::pack([]).expect("an atlas of no glyphs"),
+            art:          Art::empty(),
+            tiledata:     TileData::empty(),
+            equip_conv:   EquipConv::default(),
+            skill_names:  Skills::default(),
             skill_groups: SkillGroups::default(),
         }
     }
@@ -95,17 +111,17 @@ impl Install {
     /// The nine borrows a pane reads.
     pub(crate) fn files(&self) -> PaneFiles<'_> {
         PaneFiles {
-            gump_atlas: &self.gump_atlas,
-            font_atlas: &self.font_atlas,
-            art: &self.art,
-            tiledata: &self.tiledata,
+            gump_atlas:   &self.gump_atlas,
+            font_atlas:   &self.font_atlas,
+            art:          &self.art,
+            tiledata:     &self.tiledata,
             // The two an install may legitimately not ship, and this one does
             // not. Both readers already treat `None` as "nothing to draw"
             // rather than as an error.
-            gumps: None,
-            cliloc: None,
-            equip_conv: &self.equip_conv,
-            skill_names: &self.skill_names,
+            gumps:        None,
+            cliloc:       None,
+            equip_conv:   &self.equip_conv,
+            skill_names:  &self.skill_names,
             skill_groups: &self.skill_groups,
         }
     }
@@ -156,10 +172,10 @@ impl Install {
 /// and no packet after it.
 pub(crate) fn world(player: Serial) -> WorldView {
     WorldView::entered(PlayerStart {
-        serial: player,
-        body: Graphic(400),
+        serial:   player,
+        body:     Graphic(400),
         position: Point::new(1000, 1000, 0),
-        facing: Facing::walking(Direction::South),
-        map: MapSize::BRITANNIA,
+        facing:   Facing::walking(Direction::South),
+        map:      MapSize::BRITANNIA,
     })
 }

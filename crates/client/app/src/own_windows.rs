@@ -31,17 +31,29 @@ use std::time::Instant;
 use openshard_client_net::view::WorldView;
 use openshard_client_render::gump as gump_art;
 use openshard_protocol::containers::ContainedItem;
-use openshard_protocol::gump::GumpId;
-use openshard_protocol::gump::GumpPoint;
+use openshard_protocol::gump::{
+    GumpId,
+    GumpPoint,
+};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::TalkMode;
-use openshard_protocol::wire::{Graphic, MultiId};
+use openshard_protocol::wire::{
+    Graphic,
+    MultiId,
+};
 use openshard_protocol::world::Point;
 
 use crate::app::App;
-use crate::hand;
-use crate::windows::{self, Drawn, WindowSubject};
-use crate::{chat, link};
+use crate::windows::{
+    self,
+    Drawn,
+    WindowSubject,
+};
+use crate::{
+    chat,
+    hand,
+    link,
+};
 
 mod sync;
 
@@ -264,7 +276,7 @@ impl App {
             return false;
         }
         self.windows.world_press = Some(hand::ItemPress {
-            item: ContainedItem {
+            item:   ContainedItem {
                 serial,
                 graphic: item.graphic,
                 amount,
@@ -277,7 +289,7 @@ impl App {
             origin: hand::DragOrigin::Ground,
             // The completed frame preserved the actual art texel under the
             // pointer, already in the cursor preview's gump pixels.
-            grab: hovered.grab,
+            grab:   hovered.grab,
         });
         true
     }
@@ -937,10 +949,11 @@ mod tests {
 
 #[cfg(test)]
 mod stack_tests {
-    use super::*;
     use openshard_protocol::containers::GridSlot;
     use openshard_protocol::items::ItemAmount;
     use openshard_protocol::wire::Hue;
+
+    use super::*;
 
     fn pile(serial: u32, graphic: Graphic, amount: u16) -> ContainedItem {
         ContainedItem {

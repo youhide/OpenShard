@@ -18,29 +18,61 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_client_render::animation::FRAME_DELAY;
-use openshard_client_render::bench::{Scope, Script};
-use openshard_client_render::camera::{Camera, TileBounds};
+use openshard_client_render::bench::{
+    Scope,
+    Script,
+};
+use openshard_client_render::camera::{
+    Camera,
+    TileBounds,
+};
 use openshard_client_render::composite::CompositeWorkQueue;
 use openshard_client_render::control::Control;
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::lod::BlockLodSelector;
 use openshard_client_render::mobiles;
-use openshard_client_render::radar::{RadarCache, RadarLodSelector, RadarWorkQueue};
+use openshard_client_render::radar::{
+    RadarCache,
+    RadarLodSelector,
+    RadarWorkQueue,
+};
 use openshard_protocol::direction::Facing;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Layer;
-use openshard_protocol::world::{Point, RangedRange};
+use openshard_protocol::world::{
+    Point,
+    RangedRange,
+};
 
 use crate::chat::Chat;
-use crate::diagnostics::{OccluderSurface, Route, TerrainOverlay};
+use crate::diagnostics::{
+    OccluderSurface,
+    Route,
+    TerrainOverlay,
+};
 use crate::net_command::project_motion;
 use crate::window::Screen;
 use crate::{
-    GLIDE_INTERVAL, Scenario, desk, frames, graphics, input, picking, replay, resources, shell, steer,
-    tooltips, windows, world,
+    GLIDE_INTERVAL,
+    Scenario,
+    desk,
+    frames,
+    graphics,
+    input,
+    picking,
+    replay,
+    resources,
+    shell,
+    steer,
+    tooltips,
+    windows,
+    world,
 };
 
 /// The cadence of the non-rendering state clock.
@@ -96,13 +128,13 @@ pub(crate) struct LodSweep {
 /// idle scene was actually rebuilt from newly arrived authoritative state.
 #[derive(Debug, Default)]
 pub(crate) struct ServerUpdateAudit {
-    worlds: u64,
-    mutations: BTreeMap<&'static str, u64>,
-    movements: BTreeMap<&'static str, u64>,
-    animations: u64,
+    worlds:         u64,
+    mutations:      BTreeMap<&'static str, u64>,
+    movements:      BTreeMap<&'static str, u64>,
+    animations:     u64,
     new_animations: u64,
-    swing_timings: u64,
-    dropped: u64,
+    swing_timings:  u64,
+    dropped:        u64,
 }
 
 /// How work done off the frame loop gets back into it.
@@ -117,7 +149,7 @@ pub(crate) struct ServerUpdateAudit {
 #[derive(Clone)]
 pub(crate) struct Post {
     updates: crate::link::Updates,
-    proxy: winit::event_loop::EventLoopProxy<()>,
+    proxy:   winit::event_loop::EventLoopProxy<()>,
 }
 
 impl Post {
@@ -143,45 +175,45 @@ impl Post {
 pub(crate) struct App {
     /// How this side's own workers report back — see [`Post`]. The shard thread
     /// has its own copy of the same pair, made in `run`.
-    pub(crate) post: Post,
+    pub(crate) post:                Post,
     /// What this client has by way of a coarse graph, for the HUD to say.
     ///
     /// Beside `Resources::coarse` and not inside it, because they answer
     /// different questions: the graph is what a route reads, and this is what a
     /// *person* is told — including "there is one being built", which is not a
     /// state a search has any use for.
-    pub(crate) navigation: crate::diagnostics::Navigation,
+    pub(crate) navigation:          crate::diagnostics::Navigation,
     /// The optional output mixer. It hears packet feedback but never owns game
     /// state, which stays in `world`.
-    pub(crate) audio: crate::audio::Audio,
+    pub(crate) audio:               crate::audio::Audio,
     /// The client's own asset files, read once and held for the run — see
     /// [`resources::Resources`].
-    pub(crate) resources: resources::Resources,
+    pub(crate) resources:           resources::Resources,
     /// The debug-view and lighting switches a person has set on this run —
     /// see [`graphics::GraphicsSettings`].
-    pub(crate) graphics: graphics::GraphicsSettings,
+    pub(crate) graphics:            graphics::GraphicsSettings,
     /// What the shard, or its absence, has said the world looks like — see
     /// [`world::WorldState`].
-    pub(crate) world: world::WorldState,
+    pub(crate) world:               world::WorldState,
     /// The shard thread's staged delivery into this event-loop-owned model.
     /// Every packet and numbered movement event is drained in wire/app order.
-    pub(crate) updates: crate::link::Updates,
+    pub(crate) updates:             crate::link::Updates,
     /// One opt-in pause after entering the world, used only by a diagnostic
     /// harness to make mailbox backpressure observable.
-    pub(crate) stall_on_update: Option<Duration>,
+    pub(crate) stall_on_update:     Option<Duration>,
     /// The camera, who is allowed to move it, and what a drag has not yet spent.
     ///
     /// All of it arithmetic, and all of it in `client/render` where it can be
     /// reached by a test: this crate owns a window, a GPU and a `WorldMap`, and none
     /// of the three has anything to say about a wheel notch.
-    pub(crate) control: Control,
+    pub(crate) control:             Control,
     /// Whether the device's refusal to hold a zoom's image has been said out
     /// loud. A silently truncated target draws a smaller world into a larger
     /// rect, which looks exactly like a bug in the projection — so it is
     /// reported, and once.
     pub(crate) zoom_limit_reported: bool,
     /// The dev HUD, once there is a window to put it on.
-    pub(crate) shell: Option<shell::Shell>,
+    pub(crate) shell:               Option<shell::Shell>,
     /// What the HUD looked like when the client last closed: which tab, where
     /// the dev window and the operating system's window sat, and at what scale.
     ///
@@ -189,7 +221,7 @@ pub(crate) struct App {
     /// window; written back in [`App::exiting`]. Held here rather than in the
     /// shell because half of it — the frame — is the *platform's* window, which
     /// the HUD does not own and cannot ask about.
-    pub(crate) desk: desk::Desk,
+    pub(crate) desk:                desk::Desk,
     /// Where the player is asking to walk — the arrows, and the tile the mouse
     /// last sent the body to.
     ///
@@ -197,75 +229,75 @@ pub(crate) struct App {
     /// auto-repeat is not a walking speed, a shard refuses a flood of steps as a
     /// speedhack, and a mouse held over the ground reports a move a pixel. One
     /// clock paces all of them. See `steer.rs`.
-    pub(crate) steer: steer::Steering,
+    pub(crate) steer:               steer::Steering,
     /// Persisted movement preferences, applied at the point a step is sent.
-    pub(crate) auto_open_doors: bool,
+    pub(crate) auto_open_doors:     bool,
     /// The shut leaves already asked to open — the landing's and, on a diagonal,
     /// its flanks' (`world::doors_a_step_needs`). A server update clears one when
     /// it swings, while keeping a locked door from receiving a use packet each
     /// walking beat.
-    pub(crate) auto_opened_doors: Vec<Serial>,
+    pub(crate) auto_opened_doors:   Vec<Serial>,
     /// The most recent object explicitly used by the player.
     ///
     /// Automatic doors intentionally do not replace it: `UseLastItem` is for
     /// repeating a player's action, not for reopening the leaf they walked
     /// through.
-    pub(crate) last_used_item: Option<Serial>,
+    pub(crate) last_used_item:      Option<Serial>,
     /// The last route assembled for the development HUD.
     ///
     /// A path search is considerably more expensive than drawing its line,
     /// especially when zooming out.  The cache is keyed by the two inputs that
     /// change as the body walks, and is cleared whenever a fresh world view
     /// changes the terrain it was planned over.
-    pub(crate) route_cache: Option<RouteCache>,
+    pub(crate) route_cache:         Option<RouteCache>,
     /// The last sight line drawn, while its two ends stand — see [`SightCache`].
-    pub(crate) sight_cache: Option<SightCache>,
+    pub(crate) sight_cache:         Option<SightCache>,
     /// The terrain wash for an unchanged world and camera.
-    pub(crate) terrain_cache: Option<TerrainCache>,
+    pub(crate) terrain_cache:       Option<TerrainCache>,
     /// The HUD's separate occlusion grid for an unchanged world/camera view.
-    pub(crate) occluder_cache: Option<OccluderCache>,
+    pub(crate) occluder_cache:      Option<OccluderCache>,
     /// Ready minimap terrain lives with world content, never with a minimap
     /// window. Closing that window must not discard its CPU products.
-    pub(crate) radar_cache: RadarCache,
+    pub(crate) radar_cache:         RadarCache,
     /// Bounded, coalescing requests for the minimap's terrain chunks — the
     /// radar's counterpart to [`Self::composite_work`]. Kept beside
     /// [`Self::radar_cache`] and not on [`Screen`] for the same reason: it
     /// survives a closed minimap window, and production only ever removes a
     /// key once [`RadarCache::publish`] has a complete chunk for it.
-    pub(crate) radar_queue: RadarWorkQueue,
+    pub(crate) radar_queue:         RadarWorkQueue,
     /// Independent hysteresis state: two open windows may sit on opposite
     /// sides of an LOD boundary without changing one another's selection.
-    pub(crate) minimap_radar_lod: RadarLodSelector,
+    pub(crate) minimap_radar_lod:   RadarLodSelector,
     pub(crate) world_map_radar_lod: RadarLodSelector,
     /// What the last frame's radar demand and production came to, for the
     /// development HUD. Carried across the frame boundary rather than read
     /// live because the HUD is assembled before any of it happens — see
     /// [`crate::diagnostics::RadarFrame`].
-    pub(crate) radar_frame: crate::diagnostics::RadarFrame,
+    pub(crate) radar_frame:         crate::diagnostics::RadarFrame,
     /// Bounded requests for immutable map-block composites.  It is updated
     /// from the camera snapshot; a future idle producer takes jobs from it,
     /// never from the camera frame itself.
-    pub(crate) composite_work: CompositeWorkQueue,
+    pub(crate) composite_work:      CompositeWorkQueue,
     /// The persistent hysteresis state for the map-block representation.
-    pub(crate) composite_lod: BlockLodSelector,
+    pub(crate) composite_lod:       BlockLodSelector,
     /// What the window system and the mouse have last said — see
     /// [`input::Input`].
-    pub(crate) input: input::Input,
+    pub(crate) input:               input::Input,
     /// When the clock next advances a frame.
-    pub(crate) next_tick: Instant,
+    pub(crate) next_tick:           Instant,
     /// When it last did.
     ///
     /// Presentation clocks are moved by *measured* time and not by the interval
     /// that was waited for: `WaitUntil` is a floor and the compositor overshoots
     /// it, so a clock fed the nominal step would run slow by however much it did
     /// — which a stepping animation hides and a glide does not.
-    pub(crate) last_advance: Instant,
+    pub(crate) last_advance:        Instant,
     /// When the viewport and camera last caught up with the world.
     ///
     /// Unlike [`last_advance`](Self::last_advance), this clock deliberately
     /// stands still while the window is hidden. The next visible view is then
     /// advanced over the same whole span as the world it is about to show.
-    pub(crate) last_view_advance: Instant,
+    pub(crate) last_view_advance:   Instant,
     /// When the last frame was *drawn*, for the frame panel's interval.
     ///
     /// Not [`App::last_advance`], which is the clock the world is advanced on
@@ -273,8 +305,8 @@ pub(crate) struct App {
     /// against that, a frame that followed a packet by a millisecond would be
     /// reported as a thousand a second, and the one number the panel exists to
     /// show — the gap between two pictures — would be the one it does not.
-    pub(crate) last_frame: Instant,
-    pub(crate) window: Option<Screen>,
+    pub(crate) last_frame:          Instant,
+    pub(crate) window:              Option<Screen>,
     /// What the last frame's HUD asked for, waiting to be applied at the top of
     /// the next one.
     ///
@@ -290,46 +322,46 @@ pub(crate) struct App {
     /// The delay is a frame on a button press, which is the same latency every
     /// keyboard and mouse event here already has: they arrive between frames and
     /// land on the next one.
-    pub(crate) pending: shell::Request,
+    pub(crate) pending:             shell::Request,
     /// The privileged map-editor mode.
     ///
     /// Application state rather than egui state: the panel only asks for a
     /// transition, while future tools and drafts need one authoritative local
     /// answer even when the panel is closed.
-    pub(crate) map_editor: crate::editor_mode::MapEditor,
+    pub(crate) map_editor:          crate::editor_mode::MapEditor,
     /// What is under the cursor, and what the last click named — see
     /// [`picking::Picking`].
-    pub(crate) picking: picking::Picking,
+    pub(crate) picking:             picking::Picking,
     /// The player's own windows, and what the mouse is doing to them — see
     /// [`windows::Windows`].
-    pub(crate) windows: windows::Windows,
+    pub(crate) windows:             windows::Windows,
     /// Which tooltips have already been asked for — see [`tooltips::Tooltips`].
     ///
     /// The lists themselves are not here: they arrive in packets and live in the
     /// [`WorldView`](openshard_client_net::view::WorldView) with everything else
     /// the shard said. This is only the outstanding questions, which is the one
     /// part of the exchange the wire has no packet for.
-    pub(crate) tooltips: tooltips::Tooltips,
+    pub(crate) tooltips:            tooltips::Tooltips,
     /// The speech line — see [`Chat`].
-    pub(crate) chat: Chat,
+    pub(crate) chat:                Chat,
     /// The last few seconds of the eye, for the scope in the HUD.
     ///
     /// Recorded every frame the camera is advanced, from the same three values
     /// the offline bench records, so the panel's numbers and the table's are one
     /// arithmetic. See [`Scope`].
-    pub(crate) scope: Scope,
+    pub(crate) scope:               Scope,
     /// The last few seconds of the event loop, for the frame panel.
     ///
     /// Recorded every frame that is actually drawn, locked or not: this is a
     /// number about the loop and not about the camera. See [`frames::Frames`]
     /// for why it is not the scope.
-    pub(crate) frames: frames::Frames,
+    pub(crate) frames:              frames::Frames,
     /// How many full atlas repacks this session has paid for — the eviction
     /// `AtlasError::Full` triggers, named in `docs/camera.md`: "costly and
     /// rare" was a claim nothing counted, and each one's cost otherwise reads
     /// as an ordinary heavy frame. See [`Frame::repacked`](frames::Frame) for
     /// which frame paid it.
-    pub(crate) repacks: u64,
+    pub(crate) repacks:             u64,
     /// The flamegraph socket, held open for as long as the client runs.
     ///
     /// Never read after it is built — dropping it is what closes the port, so
@@ -337,34 +369,34 @@ pub(crate) struct App {
     /// for one; see [`profile::serve`], and [`profile`]'s docs for why the
     /// flamegraph is a separate viewer rather than a tab in this window.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) _puffin: Option<puffin_http::Server>,
+    pub(crate) _puffin:             Option<puffin_http::Server>,
     /// The bench's scenarios, built once.
     ///
     /// Held rather than rebuilt per frame because the HUD lists their names, and
     /// a scenario is a `Vec` of knots: building nine of them to print nine
     /// strings would be a small allocation storm on every frame that draws.
-    pub(crate) scripts: Vec<Script>,
+    pub(crate) scripts:             Vec<Script>,
     /// The one being walked in the window, while it is.
-    pub(crate) replay: Option<replay::Replay>,
+    pub(crate) replay:              Option<replay::Replay>,
     /// A requested presentation diagnostic, armed once the real GPU has told
     /// the control how large a world texture it can allocate.
-    pub(crate) scenario: Option<Scenario>,
+    pub(crate) scenario:            Option<Scenario>,
     /// The active state of [`Scenario::LodSweep`], if that diagnostic was
     /// requested at startup.
-    pub(crate) lod_sweep: Option<LodSweep>,
+    pub(crate) lod_sweep:           Option<LodSweep>,
     /// Diagnostic comparison of network, prediction, crowd and render positions.
-    pub(crate) movement_trace: Option<crate::movement_trace::MovementTrace>,
+    pub(crate) movement_trace:      Option<crate::movement_trace::MovementTrace>,
     /// The latest walk request round-trip, for the always-visible status strip.
-    pub(crate) ping: crate::ping::Ping,
+    pub(crate) ping:                crate::ping::Ping,
 }
 
 /// A route snapshot and the world positions that make it valid.
 pub(crate) struct RouteCache {
-    pub(crate) from: Point,
+    pub(crate) from:  Point,
     /// The place the route was planned to, height and all: two floors of one
     /// column are two destinations, and a cache keyed by the tile would hand a
     /// route to the street back for an order to the storey over it.
-    pub(crate) goal: Point,
+    pub(crate) goal:  Point,
     pub(crate) route: Option<Arc<Route>>,
 }
 
@@ -375,8 +407,8 @@ pub(crate) struct RouteCache {
 /// and the endpoints do not. Keyed on the pair and cleared wherever the route
 /// cache is, since both are readings of the same ground.
 pub(crate) struct SightCache {
-    pub(crate) from: Point,
-    pub(crate) to: Point,
+    pub(crate) from:  Point,
+    pub(crate) to:    Point,
     /// The reach the held line was built with. Part of the key and not merely a
     /// field: turning the knob changes where the picture stops being a shot,
     /// which is a different picture of the same two points.
@@ -387,18 +419,18 @@ pub(crate) struct SightCache {
 /// A terrain wash is independent of time; rebuilding it while the camera is
 /// still only repeats per-tile walkability queries.
 pub(crate) struct TerrainCache {
-    pub(crate) bounds: TileBounds,
-    pub(crate) from: Point,
+    pub(crate) bounds:  TileBounds,
+    pub(crate) from:    Point,
     pub(crate) overlay: Arc<TerrainOverlay>,
 }
 
 /// The wireframe grid is only a different rendering of the same static
 /// occlusion data while its bounds, cutaway and atlas geometry stay unchanged.
 pub(crate) struct OccluderCache {
-    pub(crate) bounds: TileBounds,
-    pub(crate) cutaway: Cutaway,
+    pub(crate) bounds:         TileBounds,
+    pub(crate) cutaway:        Cutaway,
     pub(crate) atlas_revision: Option<u64>,
-    pub(crate) surfaces: Arc<[OccluderSurface]>,
+    pub(crate) surfaces:       Arc<[OccluderSurface]>,
 }
 
 impl App {
@@ -547,11 +579,13 @@ impl App {
         let path = root.join(format!("combat-{stamp}.log"));
         let text = self.world.presentation.combat_log.to_text(None);
         match std::fs::write(&path, text) {
-            Ok(()) => tracing::info!(
-                into = %path.display(),
-                entries = self.world.presentation.combat_log.len(),
-                "wrote the combat log"
-            ),
+            Ok(()) => {
+                tracing::info!(
+                    into = %path.display(),
+                    entries = self.world.presentation.combat_log.len(),
+                    "wrote the combat log"
+                )
+            }
             Err(error) => tracing::warn!(into = %path.display(), %error, "cannot write the combat log"),
         }
     }

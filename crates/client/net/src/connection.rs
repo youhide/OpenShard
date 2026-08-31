@@ -6,9 +6,20 @@
 //! compression — the game connection's stream is Huffman-coded, and the client
 //! is the end that has to undo it.
 
-use openshard_protocol::huffman::{self, HuffmanError};
-use openshard_protocol::packet::{Frame, FrameError, MAX_SERVER_PACKET_SIZE};
-use openshard_protocol::server_packet::{ServerDecodeError, ServerPacket, frame_server_packet};
+use openshard_protocol::huffman::{
+    self,
+    HuffmanError,
+};
+use openshard_protocol::packet::{
+    Frame,
+    FrameError,
+    MAX_SERVER_PACKET_SIZE,
+};
+use openshard_protocol::server_packet::{
+    ServerDecodeError,
+    ServerPacket,
+    frame_server_packet,
+};
 use openshard_protocol::version::ClientVersion;
 
 /// A packet id this crate has no decoder for.
@@ -42,7 +53,7 @@ pub enum Event {
     /// one id from here to [`Event::Packet`].
     Undecoded {
         /// The packet id.
-        id: PacketId,
+        id:   PacketId,
         /// The whole packet, id byte included, already decompressed.
         body: Vec<u8>,
     },
@@ -104,7 +115,8 @@ impl std::fmt::Display for ConnectionError {
     }
 }
 
-impl std::error::Error for ConnectionError {}
+impl std::error::Error for ConnectionError {
+}
 
 /// The bound on the inbox, for the same reason the gateway has one: it turns a
 /// framing bug into a dropped connection instead of a growing buffer.
@@ -209,10 +221,10 @@ pub enum Stream {
 /// ```
 #[derive(Debug)]
 pub struct Connection {
-    stream: Stream,
+    stream:  Stream,
     version: ClientVersion,
     /// Bytes received and not yet turned into a packet.
-    inbox: FrontBuffer,
+    inbox:   FrontBuffer,
     /// Decompressed bytes waiting to be framed.
     ///
     /// Empty on a [`Stream::Plain`] connection, where the inbox already is the
@@ -327,9 +339,17 @@ impl Connection {
 #[cfg(test)]
 mod tests {
     use openshard_protocol::feedback::PlaySound;
-    use openshard_protocol::login::{DenyReason, LoginDenied};
+    use openshard_protocol::login::{
+        DenyReason,
+        LoginDenied,
+    };
     use openshard_protocol::wire::SoundId;
-    use openshard_protocol::world::{LoginComplete, Point, Season, SeasonChange};
+    use openshard_protocol::world::{
+        LoginComplete,
+        Point,
+        Season,
+        SeasonChange,
+    };
 
     use super::*;
 
@@ -438,7 +458,7 @@ mod tests {
     fn repeated_harvest_sounds_are_not_coalesced_by_the_wire_reader() {
         let sound = ServerPacket::PlaySound(PlaySound {
             sound: SoundId(0x013E),
-            at: Point::new(100, 100, 0),
+            at:    Point::new(100, 100, 0),
         });
         let mut bytes = sound.encode(version());
         bytes.extend(sound.encode(version()));
@@ -492,7 +512,7 @@ mod tests {
         // The point of `Undecoded`: an id nobody has written a decoder for must
         // not cost the packets behind it.
         let season = ServerPacket::SeasonChange(SeasonChange {
-            season: Season::Fall,
+            season:     Season::Fall,
             play_sound: false,
         });
         let mut bytes = season.encode(version());
@@ -504,7 +524,7 @@ mod tests {
         assert_eq!(
             connection.poll().unwrap(),
             Some(Event::Undecoded {
-                id: PacketId(0xBC),
+                id:   PacketId(0xBC),
                 body: season.encode(version()),
             })
         );
@@ -565,7 +585,7 @@ mod tests {
                     serial,
                     hash,
                     entries: vec![openshard_protocol::properties::PropertyEntry {
-                        cliloc: openshard_protocol::wire::ClilocId(1_020_000),
+                        cliloc:    openshard_protocol::wire::ClilocId(1_020_000),
                         arguments: String::new(),
                     }],
                 }

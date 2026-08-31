@@ -44,9 +44,9 @@ impl Vec2 {
 /// and [`ViewPixel`](crate::camera::ViewPixel) do not share one either.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
+    pub x:      f32,
+    pub y:      f32,
+    pub width:  f32,
     pub height: f32,
 }
 

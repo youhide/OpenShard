@@ -69,8 +69,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use clap::Parser;
-use clap::ValueEnum;
+use clap::{
+    Parser,
+    ValueEnum,
+};
 use tracing_subscriber::EnvFilter;
 
 /// A fresh trace from the last playground run. `target/` keeps the diagnostic
@@ -242,10 +244,12 @@ fn main() -> ExitCode {
             // The shard still reads it — it has to, since what the window
             // fetches is the shard's own facet. What changed is only which end
             // opens the file.
-            true => eprintln!(
-                "the shard reads facet 0 from {}, and the window asks the shard for it",
-                base_set.display()
-            ),
+            true => {
+                eprintln!(
+                    "the shard reads facet 0 from {}, and the window asks the shard for it",
+                    base_set.display()
+                )
+            }
             false => eprintln!("both ends read facet 0 from {}", base_set.display()),
         }
     }
@@ -300,13 +304,15 @@ fn main() -> ExitCode {
         Some((dial, plan)),
         cli.ttf_font,
         openshard_client_app::Opening {
-            at: None,
-            solids: false,
+            at:              None,
+            solids:          false,
             stall_on_update: cli.stall_app_ms.map(Duration::from_millis),
-            scenario: cli.scenario.map(|scenario| match scenario {
-                Scenario::CraftCatalogue => openshard_client_app::Scenario::CraftCatalogue,
-                Scenario::ZoomSoak => openshard_client_app::Scenario::ZoomSoak,
-                Scenario::LodSweep => openshard_client_app::Scenario::LodSweep,
+            scenario:        cli.scenario.map(|scenario| {
+                match scenario {
+                    Scenario::CraftCatalogue => openshard_client_app::Scenario::CraftCatalogue,
+                    Scenario::ZoomSoak => openshard_client_app::Scenario::ZoomSoak,
+                    Scenario::LodSweep => openshard_client_app::Scenario::LodSweep,
+                }
             }),
         },
     );

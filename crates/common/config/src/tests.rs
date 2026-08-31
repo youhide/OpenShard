@@ -347,7 +347,7 @@ fn the_commented_combat_tables_in_the_shipped_file_are_the_shipped_tables() {
     }
     #[derive(serde::Deserialize)]
     struct JustTheGameplay {
-        action_speed: crate::ActionSpeedsConfig,
+        action_speed:  crate::ActionSpeedsConfig,
         action_stages: crate::ActionStagesConfig,
     }
     let parsed: JustTheTables = toml::from_str(&uncommented).expect("the commented rows must parse");
@@ -850,8 +850,8 @@ fn an_absurd_slow_is_refused_at_load() {
     assert!(matches!(
         config.validate(),
         Err(ConfigError::SlowPercentTooHigh {
-            kind: "swing",
-            percent: 10000
+            kind:    "swing",
+            percent: 10000,
         })
     ));
 }

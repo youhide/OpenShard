@@ -8,14 +8,31 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
-use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::io::{
+    BufReader,
+    BufWriter,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
+use std::process::{
+    Command,
+    ExitCode,
+};
 
 use clap::Parser;
 use openshard_protocol::speech::Font;
-use openshard_uofiles::color::{Color16, Rgb8};
-use openshard_uofiles::font::{AsciiFonts, CHARS_PER_FONT, FONT_COUNT, GLYPH_BASE};
+use openshard_uofiles::color::{
+    Color16,
+    Rgb8,
+};
+use openshard_uofiles::font::{
+    AsciiFonts,
+    CHARS_PER_FONT,
+    FONT_COUNT,
+    GLYPH_BASE,
+};
 use openshard_uofiles::image::Image;
 
 const PREVIEW_MARGIN: u32 = 4;
@@ -29,38 +46,38 @@ const COMPARISON_GAP: u32 = 16;
 struct Cli {
     /// Ultima Online Classic install directory containing fonts.mul.
     #[arg(short, long, env = "OPENSHARD_CLIENT", value_name = "DIR")]
-    client: PathBuf,
+    client:          PathBuf,
     /// Real-ESRGAN NCNN Vulkan executable.
     #[arg(long, value_name = "FILE")]
-    upscaler: PathBuf,
+    upscaler:        PathBuf,
     /// Directory containing the NCNN .param and .bin model files.
     /// Defaults to `models` beside the executable.
     #[arg(long, value_name = "DIR")]
-    models: Option<PathBuf>,
+    models:          Option<PathBuf>,
     /// Output directory. Intermediates are intentionally retained here.
     #[arg(long, default_value = "font-upscale-artifacts", value_name = "DIR")]
-    out: PathBuf,
+    out:             PathBuf,
     /// NCNN model name.
     #[arg(long, default_value = "realesrgan-x4plus-anime")]
-    model: String,
+    model:           String,
     /// Model scale. The portable runner accepts 2, 3, or 4.
     #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u8).range(2..=4))]
-    scale: u8,
+    scale:           u8,
     /// Alpha values below this become transparent in the binary-alpha MUL.
     #[arg(long, default_value_t = 128)]
     alpha_threshold: u8,
     /// Extra alpha thresholds to repack and place in a 2-column contact sheet.
     #[arg(long, value_delimiter = ',', default_value = "64,96,128,160")]
-    compare_alpha: Vec<u8>,
+    compare_alpha:   Vec<u8>,
     /// Transparent context around each glyph before inference, in source pixels.
     #[arg(long, default_value_t = 8)]
-    padding: u16,
+    padding:         u16,
     /// Reuse already-produced glyph PNGs; useful when only changing alpha threshold.
     #[arg(long)]
-    skip_inference: bool,
+    skip_inference:  bool,
     /// Text rendered once in each of the ten faces for the before/after previews.
     #[arg(long, default_value = "OpenShard: The quick brown fox 0123456789 !?")]
-    sample: String,
+    sample:          String,
 }
 
 fn main() -> ExitCode {
@@ -386,9 +403,9 @@ fn rgb_to_opaque_color16(red: u8, green: u8, blue: u8) -> Color16 {
 }
 
 struct RgbaImage {
-    width: u32,
+    width:  u32,
     height: u32,
-    rgba: Vec<u8>,
+    rgba:   Vec<u8>,
 }
 
 fn read_png(path: &Path) -> Result<RgbaImage, Box<dyn std::error::Error>> {
@@ -403,12 +420,14 @@ fn read_png(path: &Path) -> Result<RgbaImage, Box<dyn std::error::Error>> {
     let source = &bytes[..info.buffer_size()];
     let rgba = match info.color_type {
         png::ColorType::Rgba => source.to_vec(),
-        png::ColorType::Rgb => source
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .flat_map(|rgb| [rgb[0], rgb[1], rgb[2], 255])
-            .collect(),
+        png::ColorType::Rgb => {
+            source
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .flat_map(|rgb| [rgb[0], rgb[1], rgb[2], 255])
+                .collect()
+        }
         other => return Err(format!("{} decoded as unsupported {other:?}", path.display()).into()),
     };
     Ok(RgbaImage {

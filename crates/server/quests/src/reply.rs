@@ -7,14 +7,33 @@
 
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
-use openshard_protocol::gump::{ButtonId, GumpAnswer, GumpId, GumpResponse, RawGumpId};
+use openshard_protocol::gump::{
+    ButtonId,
+    GumpAnswer,
+    GumpId,
+    GumpResponse,
+    RawGumpId,
+};
 use openshard_state::components::QuestLog;
-use openshard_state::{QuestGumpContext, QuestSection, WorldState};
+use openshard_state::{
+    QuestGumpContext,
+    QuestSection,
+    WorldState,
+};
 
 use crate::gump::{
-    self, QUEST_GUMP, QUEST_RESIGN_GUMP, RESIGN_OK, RESIGN_SWITCH_YES, RESIGN_SWITCHES, button,
+    self,
+    QUEST_GUMP,
+    QUEST_RESIGN_GUMP,
+    RESIGN_OK,
+    RESIGN_SWITCH_YES,
+    RESIGN_SWITCHES,
+    button,
 };
-use crate::{offer, turnin};
+use crate::{
+    offer,
+    turnin,
+};
 
 /// The two windows the quest system draws, and the only ids it answers for.
 const QUEST_GUMPS: [GumpId; 2] = [QUEST_GUMP, QUEST_RESIGN_GUMP];
@@ -66,11 +85,11 @@ fn quest_reply(state: &mut WorldState, player: EntityId, context: &QuestGumpCont
                 state,
                 player,
                 QuestGumpContext {
-                    quest: None,
-                    section: QuestSection::Main,
-                    offer: false,
+                    quest:     None,
+                    section:   QuestSection::Main,
+                    offer:     false,
                     completed: false,
-                    giver: None,
+                    giver:     None,
                 },
             );
         }

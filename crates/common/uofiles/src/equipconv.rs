@@ -33,10 +33,15 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use openshard_protocol::wire::{Graphic, Hue};
-
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_tiles::AnimId;
 
 /// What one `(body, item graphic)` pair resolves to.
@@ -58,10 +63,10 @@ pub struct EquipConvEntry {
     /// Telling those apart is
     /// `openshard_client_render::paperdoll::gump_of`'s job, because it is the
     /// same function that applies the offset — see its port of `GetAnimID`.
-    pub gump: Graphic,
+    pub gump:    Graphic,
     /// Applied only where the item's own wire hue is [`Hue::NONE`] — the same
     /// rule a static's tiledata-driven hue follows.
-    pub color: Hue,
+    pub color:   Hue,
 }
 
 /// The whole table, keyed by the pair a lookup always has both halves of.
@@ -77,7 +82,7 @@ pub enum EquipConvError {
     /// The file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
@@ -103,9 +108,11 @@ impl EquipConv {
     /// Read `Equipconv.def`.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, EquipConvError> {
         let path = path.as_ref();
-        let text = std::fs::read_to_string(path).map_err(|source| EquipConvError::Read {
-            path: path.to_owned(),
-            source,
+        let text = std::fs::read_to_string(path).map_err(|source| {
+            EquipConvError::Read {
+                path: path.to_owned(),
+                source,
+            }
         })?;
         Ok(Self::parse(&text))
     }
@@ -160,8 +167,8 @@ impl EquipConv {
                 (body, graphic),
                 EquipConvEntry {
                     graphic: AnimId(new_graphic),
-                    gump: Graphic(gump),
-                    color: Hue(color),
+                    gump:    Graphic(gump),
+                    color:   Hue(color),
                 },
             );
         }

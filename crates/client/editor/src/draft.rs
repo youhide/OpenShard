@@ -8,28 +8,46 @@
 //! eventual patch is derived afresh from those originals to the preview and
 //! therefore contains no undone work or changes that returned to base.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{
+    BTreeMap,
+    BTreeSet,
+};
 use std::fmt;
 
 use openshard_map::chunk::ChunkCoord;
-use openshard_map::map::{LandCell, StaticItem, WorldMap};
-use openshard_map::patch::{Patch, PatchAuthor, PatchError, PatchOp, PatchTime, StaticId};
+use openshard_map::map::{
+    LandCell,
+    StaticItem,
+    WorldMap,
+};
+use openshard_map::patch::{
+    Patch,
+    PatchAuthor,
+    PatchError,
+    PatchOp,
+    PatchTime,
+    StaticId,
+};
 use openshard_map::snapshot::MapRevision;
 use openshard_protocol::world::Facet;
 
-use crate::tools::{Gesture, GestureView, TilePoint};
+use crate::tools::{
+    Gesture,
+    GestureView,
+    TilePoint,
+};
 
 /// A draft's pinned parent no longer names the world a caller is holding.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DraftConflict {
     /// Facet selected when editing began.
-    pub expected_facet: Facet,
+    pub expected_facet:    Facet,
     /// Revision selected when editing began.
     pub expected_revision: MapRevision,
     /// Facet held now.
-    pub actual_facet: Facet,
+    pub actual_facet:      Facet,
     /// Revision held now.
-    pub actual_revision: MapRevision,
+    pub actual_revision:   MapRevision,
 }
 
 impl fmt::Display for DraftConflict {
@@ -45,7 +63,8 @@ impl fmt::Display for DraftConflict {
     }
 }
 
-impl std::error::Error for DraftConflict {}
+impl std::error::Error for DraftConflict {
+}
 
 /// Why a completed gesture could not become a draft history command.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -56,7 +75,7 @@ pub enum DraftError {
     /// address.
     TooManyStatics {
         /// Tile whose static sequence is full.
-        at: TilePoint,
+        at:       TilePoint,
         /// Number already standing there.
         standing: usize,
     },
@@ -66,11 +85,13 @@ impl fmt::Display for DraftError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Patch(source) => write!(f, "gesture does not apply to the draft preview: {source}"),
-            Self::TooManyStatics { at, standing } => write!(
-                f,
-                "tile ({}, {}) already has {standing} statics and cannot address another one",
-                at.x, at.y
-            ),
+            Self::TooManyStatics { at, standing } => {
+                write!(
+                    f,
+                    "tile ({}, {}) already has {standing} statics and cannot address another one",
+                    at.x, at.y
+                )
+            }
         }
     }
 }
@@ -92,28 +113,28 @@ impl From<PatchError> for DraftError {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct TileState {
-    at: TilePoint,
-    land: LandCell,
+    at:      TilePoint,
+    land:    LandCell,
     statics: Vec<StaticItem>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct Command {
     before: Vec<TileState>,
-    after: Vec<TileState>,
+    after:  Vec<TileState>,
 }
 
 /// UI-independent unpublished changes over one facet revision.
 #[derive(Debug)]
 pub struct Draft {
-    facet: Facet,
-    revision: MapRevision,
-    originals: BTreeMap<TilePoint, TileState>,
-    land: BTreeMap<TilePoint, LandCell>,
-    statics: BTreeMap<TilePoint, Vec<StaticItem>>,
-    history: Vec<Command>,
-    applied: usize,
-    dirty_tiles: BTreeSet<TilePoint>,
+    facet:        Facet,
+    revision:     MapRevision,
+    originals:    BTreeMap<TilePoint, TileState>,
+    land:         BTreeMap<TilePoint, LandCell>,
+    statics:      BTreeMap<TilePoint, Vec<StaticItem>>,
+    history:      Vec<Command>,
+    applied:      usize,
+    dirty_tiles:  BTreeSet<TilePoint>,
     dirty_chunks: BTreeSet<ChunkCoord>,
 }
 
@@ -153,10 +174,10 @@ impl Draft {
             None
         } else {
             Some(DraftConflict {
-                expected_facet: self.facet,
+                expected_facet:    self.facet,
                 expected_revision: self.revision,
-                actual_facet: facet,
-                actual_revision: revision,
+                actual_facet:      facet,
+                actual_revision:   revision,
             })
         }
     }
@@ -229,12 +250,14 @@ impl Draft {
         }
 
         for state in &before {
-            self.originals.entry(state.at).or_insert_with(|| TileState {
-                at: state.at,
-                land: base
-                    .land(state.at.x, state.at.y)
-                    .expect("a touched tile is on the base map"),
-                statics: base.statics_at(state.at.x, state.at.y).copied().collect(),
+            self.originals.entry(state.at).or_insert_with(|| {
+                TileState {
+                    at:      state.at,
+                    land:    base
+                        .land(state.at.x, state.at.y)
+                        .expect("a touched tile is on the base map"),
+                    statics: base.statics_at(state.at.x, state.at.y).copied().collect(),
+                }
             });
         }
         self.history.truncate(self.applied);
@@ -360,8 +383,8 @@ impl Draft {
                 .expect("a dirty tile is on the preview");
             if base_land != preview_land {
                 ops.push(PatchOp::SetLand {
-                    x: at.x,
-                    y: at.y,
+                    x:   at.x,
+                    y:   at.y,
                     was: base_land,
                     now: preview_land,
                 });
@@ -382,7 +405,7 @@ impl Draft {
                     which: StaticId(
                         u16::try_from(index).expect("a draft accepts addressable static ordinals"),
                     ),
-                    was: base_statics[index],
+                    was:   base_statics[index],
                 });
             }
             ops.extend(
@@ -507,7 +530,7 @@ impl Draft {
 #[derive(Debug)]
 struct DraftView<'a> {
     draft: &'a Draft,
-    base: &'a WorldMap,
+    base:  &'a WorldMap,
 }
 
 impl GestureView for DraftView<'_> {
@@ -536,19 +559,31 @@ impl GestureView for DraftView<'_> {
 mod tests {
     use openshard_map::grid::BlockExtent;
     use openshard_map::snapshot::MapSnapshot;
-    use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_protocol::wire::{
+        Graphic,
+        Hue,
+    };
     use openshard_tiles::LandTileId;
 
     use super::*;
-    use crate::tools::{Brush, HeightStrength, StaticHeight, StaticPlacement, TargetHeight, Tool};
+    use crate::tools::{
+        Brush,
+        HeightStrength,
+        StaticHeight,
+        StaticPlacement,
+        TargetHeight,
+        Tool,
+    };
 
     const FACET: Facet = Facet(2);
     const AT: TilePoint = TilePoint::new(3, 4);
 
     fn flat() -> WorldMap {
-        WorldMap::from_blocks(BlockExtent { wide: 16, down: 8 }, |_, _| LandCell {
-            tile: LandTileId(3),
-            z: 10,
+        WorldMap::from_blocks(BlockExtent { wide: 16, down: 8 }, |_, _| {
+            LandCell {
+                tile: LandTileId(3),
+                z:    10,
+            }
         })
     }
 
@@ -596,7 +631,8 @@ mod tests {
 
     #[test]
     fn draft_is_owned_and_keeps_touched_originals_after_the_caller_map_moves() {
-        fn assert_static<T: 'static>() {}
+        fn assert_static<T: 'static>() {
+        }
         assert_static::<Draft>();
 
         let mut base = flat();
@@ -607,7 +643,7 @@ mod tests {
             AT.y,
             LandCell {
                 tile: LandTileId(99),
-                z: 50,
+                z:    50,
             },
         );
 
@@ -634,7 +670,7 @@ mod tests {
             draft.land(&base, AT.x, AT.y).unwrap(),
             LandCell {
                 tile: LandTileId(3),
-                z: 11
+                z:    11,
             }
         );
         assert!(draft.undo());
@@ -646,7 +682,7 @@ mod tests {
             draft.land(&base, AT.x, AT.y).unwrap(),
             LandCell {
                 tile: LandTileId(90),
-                z: 11
+                z:    11,
             }
         );
         assert!(!draft.redo());
@@ -727,9 +763,9 @@ mod tests {
         base.place_static(old);
         let mut draft = Draft::new(FACET, MapRevision::INITIAL);
         let placement = StaticPlacement {
-            tile: Graphic(2),
+            tile:   Graphic(2),
             height: StaticHeight::OnGround,
-            hue: Hue(7),
+            hue:    Hue(7),
         };
         apply(&mut draft, &base, Tool::PlaceStatic(placement), AT);
         apply(&mut draft, &base, Tool::RemoveStatic(StaticId(1)), AT);
@@ -758,9 +794,9 @@ mod tests {
         let mut draft = Draft::new(FACET, MapRevision::INITIAL);
         apply(&mut draft, &base, Tool::RemoveStatic(StaticId(0)), AT);
         let placement = StaticPlacement {
-            tile: Graphic(3),
+            tile:   Graphic(3),
             height: StaticHeight::OnGround,
-            hue: Hue::NONE,
+            hue:    Hue::NONE,
         };
         apply(&mut draft, &base, Tool::PlaceStatic(placement), AT);
 
@@ -778,12 +814,12 @@ mod tests {
             .apply_gesture(
                 &base,
                 vec![PatchOp::SetLand {
-                    x: u16::MAX,
-                    y: u16::MAX,
+                    x:   u16::MAX,
+                    y:   u16::MAX,
                     was: LandCell::default(),
                     now: LandCell {
                         tile: LandTileId(1),
-                        z: 1,
+                        z:    1,
                     },
                 }],
             )
@@ -804,9 +840,9 @@ mod tests {
             &mut draft,
             &base,
             Tool::PlaceStatic(StaticPlacement {
-                tile: Graphic(55),
+                tile:   Graphic(55),
                 height: StaticHeight::OnGround,
-                hue: Hue::NONE,
+                hue:    Hue::NONE,
             }),
             AT,
         );

@@ -27,29 +27,70 @@
 use std::path::Path;
 use std::time::Duration;
 
-use openshard_client_net::chunks::{Fetch, Fetched};
+use openshard_client_net::chunks::{
+    Fetch,
+    Fetched,
+};
 use openshard_client_net::connection::Event;
-use openshard_client_net::transport::{Socket, enter_world};
-use openshard_map::map::{LandCell, StaticItem};
+use openshard_client_net::transport::{
+    Socket,
+    enter_world,
+};
+use openshard_e2e_shard::{
+    plan,
+    spawn,
+    version,
+};
+use openshard_map::map::{
+    LandCell,
+    StaticItem,
+};
 use openshard_map::overlay::Doors;
-use openshard_map::snapshot::{MapRevision, MapSnapshot};
+use openshard_map::snapshot::{
+    MapRevision,
+    MapSnapshot,
+};
 use openshard_movement::spans::SpanIndex;
-use openshard_movement::{Footing, MapTerrain, NavigationGraph};
-use openshard_protocol::chunks::{Changes, ChunkAt, WorldRevision};
+use openshard_movement::{
+    Footing,
+    MapTerrain,
+    NavigationGraph,
+};
+use openshard_protocol::chunks::{
+    Changes,
+    ChunkAt,
+    WorldRevision,
+};
 use openshard_protocol::mapedit::{
-    EditLandTile, EditTile, EditX, EditY, EditZ, MapEditOp, MapEditOutcome, MapEditRefusal, MapEditReply,
+    EditLandTile,
+    EditTile,
+    EditX,
+    EditY,
+    EditZ,
+    MapEditOp,
+    MapEditOutcome,
+    MapEditRefusal,
+    MapEditReply,
     MapEditRequest,
 };
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_tiles::LandTileId;
 use tokio::net::TcpStream;
 
-use openshard_e2e_shard::{plan, spawn, version};
-
 mod common;
 
-use common::{FACET, START, config_over, install, scratch, world_of_ours};
+use common::{
+    FACET,
+    START,
+    config_over,
+    install,
+    scratch,
+    world_of_ours,
+};
 
 /// 32 blocks square — 256x256 tiles and sixteen wire chunks.
 const BLOCKS: u32 = 32;
@@ -155,7 +196,7 @@ fn assert_edited(snapshot: &MapSnapshot, placed: StaticItem) {
         snapshot.map().land(START.0, START.1),
         Some(LandCell {
             tile: LandTileId(3),
-            z: 7,
+            z:    7,
         }),
         "the land operation is visible in fetched ground"
     );
@@ -195,31 +236,31 @@ async fn a_gm_batch_is_published_fetchable_conflict_checked_and_replayed_after_r
 
     let placed = StaticItem {
         tile: Graphic(0x4001),
-        x: START.0,
-        y: START.1,
-        z: 9,
-        hue: Hue(17),
+        x:    START.0,
+        y:    START.1,
+        z:    9,
+        hue:  Hue(17),
     };
     let request = MapEditRequest {
-        facet: FACET,
+        facet:  FACET,
         parent: before.revision,
-        ops: vec![
+        ops:    vec![
             MapEditOp::SetLand {
-                at: EditTile {
+                at:   EditTile {
                     x: EditX(START.0),
                     y: EditY(START.1),
                 },
                 tile: EditLandTile::from_wire(3).expect("a land tile"),
-                z: EditZ(7),
+                z:    EditZ(7),
             },
             MapEditOp::AddStatic {
-                at: EditTile {
+                at:      EditTile {
                     x: EditX(START.0),
                     y: EditY(START.1),
                 },
                 graphic: placed.tile,
-                z: EditZ(placed.z),
-                hue: placed.hue,
+                z:       EditZ(placed.z),
+                hue:     placed.hue,
             },
         ],
     };
@@ -239,9 +280,11 @@ async fn a_gm_batch_is_published_fetchable_conflict_checked_and_replayed_after_r
     .await;
     let replies: Vec<MapEditReply> = heard
         .iter()
-        .filter_map(|packet| match packet {
-            ServerPacket::MapEditReply(reply) => Some(*reply),
-            _ => None,
+        .filter_map(|packet| {
+            match packet {
+                ServerPacket::MapEditReply(reply) => Some(*reply),
+                _ => None,
+            }
         })
         .collect();
     assert_eq!(replies.len(), 1, "one request has exactly one typed reply");
@@ -251,9 +294,11 @@ async fn a_gm_batch_is_published_fetchable_conflict_checked_and_replayed_after_r
 
     let publishes: Vec<_> = heard
         .iter()
-        .filter_map(|packet| match packet {
-            ServerPacket::PublishNotice(notice) => Some(notice),
-            _ => None,
+        .filter_map(|packet| {
+            match packet {
+                ServerPacket::PublishNotice(notice) => Some(notice),
+                _ => None,
+            }
         })
         .collect();
     assert_eq!(publishes.len(), 1, "one accepted batch publishes once");
@@ -292,9 +337,11 @@ async fn a_gm_batch_is_published_fetchable_conflict_checked_and_replayed_after_r
     .await;
     let refusal = refused
         .iter()
-        .find_map(|packet| match packet {
-            ServerPacket::MapEditReply(reply) => Some(*reply),
-            _ => None,
+        .find_map(|packet| {
+            match packet {
+                ServerPacket::MapEditReply(reply) => Some(*reply),
+                _ => None,
+            }
         })
         .expect("the stale draft receives a typed reply");
     assert_eq!(refusal.revision, WorldRevision(2));

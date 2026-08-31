@@ -92,11 +92,13 @@ pub const fn flags_of(rank: Rank) -> RankFlags {
     match rank {
         Rank::Ronin => RankFlags::NONE,
         Rank::Member => RankFlags::MEMBER,
-        Rank::Emissary => RankFlags::MEMBER
-            .with(RankFlags::REMOVE_PLAYERS)
-            .with(RankFlags::CAN_INVITE)
-            .with(RankFlags::CAN_SET_GUILD_TITLE)
-            .with(RankFlags::CAN_PROMOTE_DEMOTE),
+        Rank::Emissary => {
+            RankFlags::MEMBER
+                .with(RankFlags::REMOVE_PLAYERS)
+                .with(RankFlags::CAN_INVITE)
+                .with(RankFlags::CAN_SET_GUILD_TITLE)
+                .with(RankFlags::CAN_PROMOTE_DEMOTE)
+        }
         Rank::Warlord => RankFlags::MEMBER.with(RankFlags::CONTROL_WAR_STATUS),
         Rank::Leader => RankFlags::ALL,
     }

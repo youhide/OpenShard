@@ -181,19 +181,43 @@
 //! comes due.
 
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_map::overlay::Doors;
 #[cfg(test)]
 use openshard_movement::find_path;
 use openshard_movement::{
-    Around, COARSE_MIN_DISTANCE, Detour, Footing, Heading, Lean, Leeway, LongExit, NavigationGraph,
-    SearchExit, Step, Weight, destination_place, find_path_toward, search_long_path, search_path,
+    Around,
+    COARSE_MIN_DISTANCE,
+    Detour,
+    Footing,
+    Heading,
+    Lean,
+    Leeway,
+    LongExit,
+    NavigationGraph,
+    SearchExit,
+    Step,
+    Weight,
+    destination_place,
+    find_path_toward,
+    search_long_path,
+    search_path,
     step_allowed,
 };
 #[cfg(test)]
-use openshard_movement::{MOUNTED_RUN_HOLD, RUN_HOLD, WALK_HOLD};
-use openshard_protocol::direction::{Direction, Facing};
+use openshard_movement::{
+    MOUNTED_RUN_HOLD,
+    RUN_HOLD,
+    WALK_HOLD,
+};
+use openshard_protocol::direction::{
+    Direction,
+    Facing,
+};
 use openshard_protocol::world::Point;
 
 use crate::keys::Held;
@@ -376,11 +400,11 @@ pub struct Readings<'a> {
     /// stand, this is what a step is allowed by; read with them open, it is
     /// what a route may be *planned* through — never what decides a step, since
     /// walking on that word is a step the shard refuses.
-    pub live: Footing<'a>,
+    pub live:   Footing<'a>,
     /// The bare static map the coarse graph was built from. Unlike the live
     /// reading it never contains a door, crate or mobile, so those can reject a
     /// proposed corridor without rewriting its topology.
-    pub guide: Footing<'a>,
+    pub guide:  Footing<'a>,
     /// The map-only connectivity cache, absent in mapless/test callers.
     pub coarse: Option<&'a NavigationGraph>,
 }
@@ -483,14 +507,16 @@ impl Readings<'_> {
             // found no portal, refinement that could not walk any corridor it
             // was offered, effort spent — and none of those is a claim about
             // the world.
-            None => Err(match exit {
-                LongExit::NoCorridor => Refusal::Nowhere,
-                LongExit::Route
-                | LongExit::OffGraph
-                | LongExit::NoJoin
-                | LongExit::PortalsExhausted
-                | LongExit::Spent => Refusal::TooFar,
-            }),
+            None => {
+                Err(match exit {
+                    LongExit::NoCorridor => Refusal::Nowhere,
+                    LongExit::Route
+                    | LongExit::OffGraph
+                    | LongExit::NoJoin
+                    | LongExit::PortalsExhausted
+                    | LongExit::Spent => Refusal::TooFar,
+                })
+            }
         }
     }
 }
@@ -503,8 +529,8 @@ impl Readings<'_> {
 impl<'a> Readings<'a> {
     pub const fn plain(footing: Footing<'a>) -> Self {
         Self {
-            live: footing,
-            guide: footing,
+            live:   footing,
+            guide:  footing,
             coarse: None,
         }
     }
@@ -518,15 +544,15 @@ impl<'a> Readings<'a> {
 pub struct Plan {
     /// The part of the way the world as it stands allows. What the walk takes,
     /// and what a picture of the route draws as passable.
-    pub open: Vec<Direction>,
+    pub open:                 Vec<Direction>,
     /// What is left of the way past the first thing standing in it — empty for
     /// a route that reaches the destination, which is the ordinary answer.
     ///
     /// Never walked: the first of these steps is one this end has already proven
     /// the shard would refuse. It is a *reason*, and the thing to draw so a
     /// player can see where the way stopped and why.
-    pub barred: Vec<Direction>,
-    pub(crate) open_points: Vec<Point>,
+    pub barred:               Vec<Direction>,
+    pub(crate) open_points:   Vec<Point>,
     pub(crate) barred_points: Vec<Point>,
     /// Why the destination itself is not on the end of this route, when it is
     /// not — see [`Refusal`].
@@ -536,18 +562,18 @@ pub struct Plan {
     /// between the two is invisible in the steps themselves — both are a list of
     /// directions ending somewhere. Carrying it here is what lets the line be
     /// drawn as what it is and the player be told why.
-    pub refusal: Option<Refusal>,
+    pub refusal:              Option<Refusal>,
 }
 
 #[derive(Clone, Debug)]
 struct CachedPlan {
-    from: Point,
-    goal: Point,
-    plan: Option<Plan>,
+    from:           Point,
+    goal:           Point,
+    plan:           Option<Plan>,
     /// A preview has already performed this frame's query.  The next walk may
     /// consume it once, but successful plans are never retained across live
     /// terrain changes.
-    preview: bool,
+    preview:        bool,
     /// A failed coarse search is expensive and cannot become more successful
     /// without a terrain update. Keep it from being retried every frame until
     /// the app explicitly invalidates the cache.
@@ -575,9 +601,9 @@ pub struct Steering {
     /// `can_step` incremented a cell — an instrument that existed only because
     /// the seam was a trait. See `docs/map/terrain_seam.md`'s node E.
     #[cfg(test)]
-    plans: std::cell::Cell<u32>,
+    plans:       std::cell::Cell<u32>,
     /// The arrows, and shift.
-    keys: Held,
+    keys:        Held,
     /// What a held right button (with no modifier) is asking for, recomputed
     /// from the body to the cursor on every move — see [`Steering::steer`].
     /// `None` when the mouse is not steering, which is not the same as
@@ -589,7 +615,7 @@ pub struct Steering {
     /// than one of eight sectors, since which side of the sector it is on is
     /// what decides a tie between two ways round an obstacle (see
     /// [`Detour::step`]).
-    mouse: Option<Ask>,
+    mouse:       Option<Ask>,
     /// The place a Ctrl-held right button last asked for — a destination, not
     /// a heading; see [`Steering::go_to`].
     ///
@@ -608,7 +634,7 @@ pub struct Steering {
     /// surface: [`destination_place`] is what turns it into somewhere to stand,
     /// and both the search and the arrival test ask it rather than keeping a
     /// resolved copy that the ground could move out from under.
-    goal: Option<Point>,
+    goal:        Option<Point>,
     /// The route planned to [`Steering::goal`], most-recent-plan first.
     ///
     /// Consumed one direction per step; emptied on a refusal and on every
@@ -621,7 +647,7 @@ pub struct Steering {
     /// the way, or as close to the destination as the ground ever gets. Then
     /// nothing is sent at all and the destination's patience is what ends the
     /// order; see [`Steering::take`].
-    route: VecDeque<Direction>,
+    route:       VecDeque<Direction>,
     /// The last complete plan is shared by movement and the route preview.
     /// Both consumers ask the same question for the same world snapshot; do
     /// not make the expensive real/doors-open searches twice.
@@ -633,14 +659,14 @@ pub struct Steering {
     /// route is replanned every few steps and dropped whenever the ground
     /// changes, and the answer to "why is my body walking at that wall" has to
     /// stay on screen for as long as the order does.
-    refused: Option<(Point, Refusal)>,
+    refused:     Option<(Point, Refusal)>,
     /// Whether [`Steering::refused`] has been said to the player yet.
     ///
     /// **A refusal is announced once per destination**, and this is the whole
     /// of that rule. A plan is remade on a cadence — every few steps, and again
     /// whenever the live layer moves — so a client that spoke on every plan
     /// would fill the journal with one sentence while the body stood still.
-    said: bool,
+    said:        bool,
     /// The earliest the next step may leave: the deadline of the step in flight.
     ///
     /// The rate floor, and the queue rule's whole mechanism. Armed by every step
@@ -652,11 +678,11 @@ pub struct Steering {
     /// It is not a "the walk is running" flag, which is what it used to be:
     /// whether anything is being asked for is [`Steering::asking_for_anything`],
     /// and that is what decides whether the event loop is woken for it.
-    due: Option<Instant>,
+    due:         Option<Instant>,
     /// Where the body stood when the last step was sent, for [`STUCK_STEPS`].
-    was: Option<Point>,
+    was:         Option<Point>,
     /// How many steps in a row have left it there.
-    stalled: u8,
+    stalled:     u8,
     /// Whether [`Steering::due`] is the deadline of a walk still under way,
     /// rather than one that has since stopped.
     ///
@@ -667,7 +693,7 @@ pub struct Steering {
     /// is not a cadence at all — the player pressed again some time later, and
     /// measuring from it would make the step after that one due a fraction of a
     /// hold away, which cuts the glide short and jumps the body.
-    walking: bool,
+    walking:     bool,
     /// The direction of the last step sent, once one has been.
     ///
     /// Which way the body is *going* to face, which is a step ahead of the way
@@ -675,7 +701,7 @@ pub struct Steering {
     /// thread, and a second step decided from it would turn twice. Absent until
     /// this has asked for anything, and then the caller's facing is the only
     /// answer there is.
-    asked: Option<Direction>,
+    asked:       Option<Direction>,
     /// Whether the free turn a direction change buys has been spent since the
     /// clock last actually armed.
     ///
@@ -698,7 +724,7 @@ pub struct Steering {
     /// still free, and every one after it — until a real, clock-arming step
     /// or turn-then-step pair actually leaves — is paced exactly like an
     /// ordinary step instead.
-    turned: bool,
+    turned:      bool,
     /// Getting past whatever is directly in the way of a held direction.
     ///
     /// The rule itself is `common/movement`'s [`Detour`], not this module's:
@@ -708,14 +734,14 @@ pub struct Steering {
     /// is when to ask it — only for a held direction, never for a planned
     /// route, which answers for its own obstacles by replanning — and what to
     /// do with [`Step::Stuck`], which needs the facing this module tracks.
-    detour: Detour,
+    detour:      Detour,
     /// How far a body may be turned off the way it was pointed to keep it
     /// moving — see [`Leeway`], and [`Steering::set_leeway`] for where this
     /// comes from.
-    leeway: Leeway,
+    leeway:      Leeway,
     /// What a turn costs the step it precedes — see [`Turning`], and
     /// [`Steering::set_turning`].
-    turning: Turning,
+    turning:     Turning,
     /// Whether [`Steering::due`] is the end of a crossing, rather than of a turn.
     ///
     /// What [`LOOKAHEAD`] is allowed against, and only that. Being early is worth
@@ -724,7 +750,7 @@ pub struct Steering {
     /// the earliness. A turn covers no ground and is drawn by nothing, so a turn
     /// let out a frame early would only be a turn that costs a frame less —
     /// [`TURN_HOLD`] is 80ms and a frame of it is a fifth.
-    crossing: bool,
+    crossing:    bool,
     /// Whether the body is in a saddle, for [`Steering::interval`] alone.
     ///
     /// The one fact about the *shard's* answer that this module has to know: a
@@ -733,7 +759,7 @@ pub struct Steering {
     /// above it is not a preference — it is a fact off the wire, restated on
     /// every fold of the world view by [`Steering::set_mounted`], the same way
     /// [`crate::world::PlayerMotion::accept_local`] is told it per step.
-    mounted: bool,
+    mounted:     bool,
 }
 
 impl Steering {
@@ -1268,54 +1294,58 @@ impl Steering {
                 // the terrain, so only that case gets the flanking check.
                 let step = match self.goal {
                     Some(_) => step,
-                    None => match self.detour(
-                        &ground.live,
-                        from,
-                        Heading {
-                            direction: step.direction,
-                            lean,
-                        },
-                    ) {
-                        Step::Ahead(direction) | Step::Aside(direction) => Facing { direction, ..step },
-                        // Nowhere legal to go: the direction is blocked and so
-                        // is every flank of it — a body wedged into the inside
-                        // corner of a building, pushed at the corner itself.
-                        //
-                        // A step there is one this end has already proven the
-                        // shard will refuse, and sending it anyway is not a
-                        // no-op: the shard answers `0x21`, which puts the body
-                        // back where it was and, on the way, resets the walk
-                        // sequence this end is counting — a rollback a hold, for
-                        // as long as the player leans on the key. So it is not
-                        // sent. What is *not* suppressed is the turn: the body
-                        // may not be facing the corner yet, and a mobile asked
-                        // for a direction it is not facing turns and moves
-                        // nowhere, which the shard accepts (`Walk::Turned`) and
-                        // which is the feedback a player pressing into a wall
-                        // expects to see. Only once the body already faces it is
-                        // there nothing left to ask for.
-                        Step::Stuck => match step.direction == self.asked.unwrap_or(facing) {
-                            // Charged as if a step had left, and it is the
-                            // clock that makes this a refusal rather than a
-                            // spin: nothing here clears the asking, so the wait
-                            // loop would wake on a deadline already passed and
-                            // re-ask immediately, over and over, until the
-                            // player let go. Armed, the retry comes at the pace
-                            // a walk would have had — which is also what picks
-                            // the walk straight back up the moment whatever was
-                            // in the way (a door, another body) is gone.
-                            true => {
-                                self.charge(Some(step), now, facing);
-                                // Charged like a step but *no step left*, so
-                                // there is no crossing for the retry to be early
-                                // against: a body pressed into a corner would
-                                // otherwise re-ask a frame sooner every hold.
-                                self.crossing = false;
-                                return None;
+                    None => {
+                        match self.detour(
+                            &ground.live,
+                            from,
+                            Heading {
+                                direction: step.direction,
+                                lean,
+                            },
+                        ) {
+                            Step::Ahead(direction) | Step::Aside(direction) => Facing { direction, ..step },
+                            // Nowhere legal to go: the direction is blocked and so
+                            // is every flank of it — a body wedged into the inside
+                            // corner of a building, pushed at the corner itself.
+                            //
+                            // A step there is one this end has already proven the
+                            // shard will refuse, and sending it anyway is not a
+                            // no-op: the shard answers `0x21`, which puts the body
+                            // back where it was and, on the way, resets the walk
+                            // sequence this end is counting — a rollback a hold, for
+                            // as long as the player leans on the key. So it is not
+                            // sent. What is *not* suppressed is the turn: the body
+                            // may not be facing the corner yet, and a mobile asked
+                            // for a direction it is not facing turns and moves
+                            // nowhere, which the shard accepts (`Walk::Turned`) and
+                            // which is the feedback a player pressing into a wall
+                            // expects to see. Only once the body already faces it is
+                            // there nothing left to ask for.
+                            Step::Stuck => {
+                                match step.direction == self.asked.unwrap_or(facing) {
+                                    // Charged as if a step had left, and it is the
+                                    // clock that makes this a refusal rather than a
+                                    // spin: nothing here clears the asking, so the wait
+                                    // loop would wake on a deadline already passed and
+                                    // re-ask immediately, over and over, until the
+                                    // player let go. Armed, the retry comes at the pace
+                                    // a walk would have had — which is also what picks
+                                    // the walk straight back up the moment whatever was
+                                    // in the way (a door, another body) is gone.
+                                    true => {
+                                        self.charge(Some(step), now, facing);
+                                        // Charged like a step but *no step left*, so
+                                        // there is no crossing for the retry to be early
+                                        // against: a body pressed into a corner would
+                                        // otherwise re-ask a frame sooner every hold.
+                                        self.crossing = false;
+                                        return None;
+                                    }
+                                    false => step,
+                                }
                             }
-                            false => step,
-                        },
-                    },
+                        }
+                    }
                 };
                 self.charge(Some(step), now, facing);
                 Some(step)
@@ -1476,9 +1506,11 @@ impl Steering {
         if let Some(facing) = self.keys.asking() {
             return Some((facing, Lean::Centred));
         }
-        let pace = |direction| match self.keys.running() {
-            true => Facing::running(direction),
-            false => Facing::walking(direction),
+        let pace = |direction| {
+            match self.keys.running() {
+                true => Facing::running(direction),
+                false => Facing::walking(direction),
+            }
         };
         if let Some(ask) = self.mouse {
             // A turn's pace is nobody's business — it covers no ground — so
@@ -1785,11 +1817,19 @@ fn debug_detour(from: Point, around: &Around, step: Step) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use openshard_map::grid::Tile;
-    use openshard_map::overlay::{Cover, Overlay};
-    use openshard_movement::{Bodies, step_from};
     use std::sync::LazyLock;
+
+    use openshard_map::grid::Tile;
+    use openshard_map::overlay::{
+        Cover,
+        Overlay,
+    };
+    use openshard_movement::{
+        Bodies,
+        step_from,
+    };
+
+    use super::*;
 
     /// Open ground: no map, so no floor and no walls, and nothing placed on it.
     /// The only thing that can refuse a step here is an overlay a test builds.
@@ -2623,8 +2663,8 @@ mod tests {
         );
         let plan = plan(
             Readings {
-                live: open_ground(),
-                guide: open_ground(),
+                live:   open_ground(),
+                guide:  open_ground(),
                 coarse: Some(&router),
             },
             from,
@@ -2645,8 +2685,8 @@ mod tests {
         let goal = Point::new(702, 1, 0);
         let plan = plan(
             Readings {
-                live: shut,
-                guide: open,
+                live:   shut,
+                guide:  open,
                 coarse: Some(&router),
             },
             from,
@@ -2691,8 +2731,8 @@ mod tests {
         );
         let plan = plan(
             Readings {
-                live: shut,
-                guide: open,
+                live:   shut,
+                guide:  open,
                 coarse: None,
             },
             here(),
@@ -2740,8 +2780,8 @@ mod tests {
         }
         let plan = plan(
             Readings {
-                live: over(&walls),
-                guide: over(&walls),
+                live:   over(&walls),
+                guide:  over(&walls),
                 coarse: None,
             },
             here(),
@@ -2788,8 +2828,8 @@ mod tests {
         let mut door = long_door(DOORWAY.x, u16::MAX);
         let plan = plan(
             Readings {
-                live: over(&door),
-                guide: open_ground(),
+                live:   over(&door),
+                guide:  open_ground(),
                 coarse: None,
             },
             here(),
@@ -2816,8 +2856,8 @@ mod tests {
         let wall = blocking(Tile::new(101, 100));
         let plan = plan(
             Readings {
-                live: over(&wall),
-                guide: open_ground(),
+                live:   over(&wall),
+                guide:  open_ground(),
                 coarse: None,
             },
             here(),
@@ -2850,8 +2890,8 @@ mod tests {
         let shut = over(&doorwall);
         let open = shut.reading(Doors::AllOpen);
         let ground = Readings {
-            live: shut,
-            guide: open,
+            live:   shut,
+            guide:  open,
             coarse: None,
         };
 
@@ -2924,8 +2964,8 @@ mod tests {
                 start,
                 Direction::East,
                 Readings {
-                    live: shut,
-                    guide: open,
+                    live:   shut,
+                    guide:  open,
                     coarse: None,
                 },
             )
@@ -2935,8 +2975,8 @@ mod tests {
             Point::new(101, 100, 0),
             Direction::East,
             Readings {
-                live: shut,
-                guide: open,
+                live:   shut,
+                guide:  open,
                 coarse: None,
             },
         );
@@ -2946,8 +2986,8 @@ mod tests {
                 waiting,
                 Direction::East,
                 Readings {
-                    live: shut,
-                    guide: open,
+                    live:   shut,
+                    guide:  open,
                     coarse: None,
                 }
             ),

@@ -54,13 +54,28 @@ use std::path::PathBuf;
 use openshard_client_render::atlas::StaticAtlas;
 use openshard_client_render::camera::TileBounds;
 use openshard_client_render::cutaway::Cutaway;
-use openshard_client_render::facing::{Block, Blocks, Footprint, Span, blocks_silhouette};
-use openshard_client_render::impostor::{self, Volume};
+use openshard_client_render::facing::{
+    Block,
+    Blocks,
+    Footprint,
+    Span,
+    blocks_silhouette,
+};
+use openshard_client_render::impostor::{
+    self,
+    Volume,
+};
 use openshard_client_render::light::WorldVec;
-use openshard_client_render::occlusion::{self, Shape};
+use openshard_client_render::occlusion::{
+    self,
+    Shape,
+};
 use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
-use openshard_tiles::{StaticTile, TileData};
+use openshard_tiles::{
+    StaticTile,
+    TileData,
+};
 use openshard_uofiles::art::Art;
 use openshard_uofiles::image::Image;
 
@@ -141,10 +156,12 @@ fn grid(
                 );
                 let shape = match footprints {
                     true => shape,
-                    false => Shape {
-                        footprint: None,
-                        ..shape
-                    },
+                    false => {
+                        Shape {
+                            footprint: None,
+                            ..shape
+                        }
+                    }
                 };
                 builder.add(
                     x as u16,
@@ -248,7 +265,7 @@ fn overhang(image: &Image, at: (i32, i32), z: i8, volumes: &[Volume]) -> (u32, u
 #[derive(Clone, Copy)]
 struct Shading {
     /// The face [`impostor::meets`] names — the shipped answer.
-    met: usize,
+    met:       usize,
     /// And the face [`impostor::presented_face`] would give it, which is the
     /// candidate this tool exists to price.
     presented: usize,
@@ -256,7 +273,7 @@ struct Shading {
     /// hit is shaded by the surface it is genuinely on under either rule, and it
     /// is in this walk because the *seam* below is a question about the join
     /// between the two populations.
-    missed: bool,
+    missed:    bool,
 }
 
 /// **How serrated the overhang is** — the number the fringe decision turns on.
@@ -303,19 +320,19 @@ struct Shading {
 #[derive(Default)]
 struct Comb {
     /// Neighbouring drawn pixels that both missed.
-    misses: u64,
+    misses:       u64,
     /// …of which the two rules' answers differ, under the exit rule.
-    comb_exit: u64,
+    comb_exit:    u64,
     /// …and under the presented-face rule.
-    comb_now: u64,
+    comb_now:     u64,
     /// Neighbouring drawn pixels of which exactly one missed.
-    edges: u64,
+    edges:        u64,
     /// …disagreeing, under the exit rule.
-    seam_exit: u64,
+    seam_exit:    u64,
     /// …and under the presented-face rule.
-    seam_now: u64,
+    seam_now:     u64,
     /// **The control**: neighbouring drawn pixels that both *hit*.
-    bodies: u64,
+    bodies:       u64,
     /// …of which the two disagree, which neither rule can touch — both pixels
     /// are on a surface they genuinely met. This is what a face disagreement
     /// between two neighbours costs when it is *honest*: the rate at which one
@@ -331,7 +348,7 @@ struct Comb {
     /// sprite's overhang is mostly *above* its box, so the art next to it is
     /// where the view ray grazes over the box's **top** — which is a lid face
     /// even on a wall panel whose every other pixel is a side one.
-    seam_hits: [u64; 3],
+    seam_hits:    [u64; 3],
 }
 
 impl Comb {
@@ -409,24 +426,24 @@ struct Steps {
     /// Under half a fragment out: the sample-grid case in full, since half a
     /// step is the furthest a fragment's centre can sit from an edge that
     /// genuinely passes through that fragment.
-    half: u64,
+    half:            u64,
     /// Under one.
-    one: u64,
+    one:             u64,
     /// Under two.
-    two: u64,
+    two:             u64,
     /// Under eight.
-    eight: u64,
+    eight:           u64,
     /// And the rest — art that overhangs by an object's worth.
-    beyond: u64,
+    beyond:          u64,
     /// The largest miss seen, in steps.
-    worst: f32,
+    worst:           f32,
     /// **What face a miss is shaded as** — `x`, `y`, `z`, counted separately.
     ///
     /// A clamp names whichever exit came first, so a pixel falling sideways off
     /// a lid would be handed a wall's cosine. That is what this row prices: the
     /// *position* a clamp gives is off by at most the overhang, while the *face*
     /// it gives is a different surface.
-    faces: [u64; 3],
+    faces:           [u64; 3],
     /// **The same three under the rule that was refused** —
     /// `impostor::presented_face`, one face for a whole box's overhang. Kept
     /// beside the shipped column because the pair is the whole measurement: a
@@ -441,10 +458,10 @@ struct Steps {
     /// pixel is flat. A fragment that falls off the end of a wall panel and is
     /// handed that panel's side has been handed something defensible; a floor
     /// pixel handed a side has not, and only this column can tell them apart.
-    lid_faces: [u64; 3],
+    lid_faces:       [u64; 3],
     /// And how much of the overhang is **serrated** — [`Comb`], which is the
     /// only column here that can see the defect a person reported.
-    comb: Comb,
+    comb:            Comb,
 }
 
 /// One step of the fragment grid, in tiles: what a change of one virtual pixel
@@ -563,16 +580,16 @@ fn controls(at: (i32, i32)) -> Vec<(u8, u32, u32, u32, Steps)> {
                 .expect("a whole tile with a height");
             let image = blocks_silhouette(&Blocks::new(&[block]).expect("one block"));
             let own = Volume {
-                lo: WorldVec::new(at.0 as f32, at.1 as f32, 0.0),
-                hi: WorldVec::new(at.0 as f32 + 1.0, at.1 as f32 + 1.0, f32::from(top)),
+                lo:    WorldVec::new(at.0 as f32, at.1 as f32, 0.0),
+                hi:    WorldVec::new(at.0 as f32 + 1.0, at.1 as f32 + 1.0, f32::from(top)),
                 solid: None,
                 // A whole tile with a height is a body, and this walk reads
                 // geometry rather than facings — nothing here asks the mask.
                 edges: occlusion::Edges::ANY,
             };
             let elsewhere = Volume {
-                lo: WorldVec::new(own.lo.x + 100.0, own.lo.y + 100.0, own.lo.z),
-                hi: WorldVec::new(own.hi.x + 100.0, own.hi.y + 100.0, own.hi.z),
+                lo:    WorldVec::new(own.lo.x + 100.0, own.lo.y + 100.0, own.lo.z),
+                hi:    WorldVec::new(own.hi.x + 100.0, own.hi.y + 100.0, own.hi.z),
                 solid: None,
                 edges: own.edges,
             };
@@ -587,30 +604,30 @@ fn controls(at: (i32, i32)) -> Vec<(u8, u32, u32, u32, Steps)> {
 #[derive(Default)]
 struct Tally {
     /// How many times it stands in the window.
-    placements: u32,
+    placements:    u32,
     /// Its drawn pixels, once per placement.
-    drawn: u64,
+    drawn:         u64,
     /// Of those, the ones discarded against the whole-tile box.
-    missed_wide: u64,
+    missed_wide:   u64,
     /// And against the box we give it today.
-    missed_now: u64,
+    missed_now:    u64,
     /// Those same misses, sorted by how far out they are in *fragments* — see
     /// [`Steps`], and it is the number the hit tolerance has to be chosen from.
-    steps: Steps,
+    steps:         Steps,
     /// Whether today's box is a measured footprint — the class S4 is about.
-    footprint: Option<Footprint>,
+    footprint:     Option<Footprint>,
     /// Placements of it the occlusion grid holds a primitive for, which is where
     /// a narrower box would also mean a narrower *shadow*.
-    in_the_grid: u32,
+    in_the_grid:   u32,
     /// The picture's own size in pixels, and how many `z` units tall the box it
     /// is met against is. Two numbers rather than a share, because the first
     /// question a large discard raises is whether the art is simply taller than
     /// the height `tiledata` states for it — `docs/footprints.md`'s D1 measures
     /// the footprint and leaves the height alone, so a picture overhanging its
     /// own *lid* is that carried item showing up in pixels.
-    art: (u16, u16),
+    art:           (u16, u16),
     /// How tall its box is, in `z` units, from `occlusion::calc_height`.
-    height: i32,
+    height:        i32,
     /// Whether the client's own `ROOF` bit is on it — the class a player
     /// standing indoors is not shown at all, and the class the only recorded
     /// measurement of this discard was taken **without**
@@ -618,7 +635,7 @@ struct Tally {
     /// cut"). A roof is a sloped slab given a whole-tile box three `z` units
     /// tall under art seventy-six pixels high, so it overhangs enormously and
     /// for a reason that belongs to that document's phase 6i rather than here.
-    roof: bool,
+    roof:          bool,
     /// **Drawn pixels whose own screen column no box of this picture can ever
     /// reach**, and the share of them.
     ///
@@ -630,11 +647,11 @@ struct Tally {
     /// *leg* has its whole top outside, which is the table at Britain's
     /// `(1499, 1664)` — `0x0B80` measures 5/8 by 5/8 while its two neighbours in
     /// the same table stand as whole tiles.
-    outside_band: u64,
+    outside_band:  u64,
     /// Which kind of claim its box is — `geometry_census.rs`'s own vocabulary,
     /// because a share of discarded pixels that does not say *whose* pixels is
     /// a number nobody can act on.
-    claim: &'static str,
+    claim:         &'static str,
     /// **A picture the client calls a `PLATFORM` that stands as the box its art
     /// fits** — a table, a counter, a display case.
     ///

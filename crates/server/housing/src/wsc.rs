@@ -33,13 +33,13 @@ pub struct WorldItem {
     /// The static art id.
     pub graphic: u16,
     /// Its absolute position in the source world.
-    pub at: Origin,
+    pub at:      Origin,
 }
 
 /// A malformed or unsupported `.wsc` record.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Error {
-    line: usize,
+    line:    usize,
     message: String,
 }
 
@@ -58,15 +58,16 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for Error {
+}
 
 #[derive(Default)]
 struct ItemFields {
     started: usize,
     graphic: Option<u16>,
-    x: Option<i32>,
-    y: Option<i32>,
-    z: Option<i32>,
+    x:       Option<i32>,
+    y:       Option<i32>,
+    z:       Option<i32>,
 }
 
 impl ItemFields {
@@ -104,25 +105,25 @@ fn number(text: &str, line: usize) -> Result<i32, Error> {
 fn component(graphic: u16, dx: i32, dy: i32, dz: i32, line: usize) -> Result<Component, Error> {
     Ok(Component {
         graphic: Graphic(graphic),
-        dx: i16::from(i8::try_from(dx).map_err(|_| {
+        dx:      i16::from(i8::try_from(dx).map_err(|_| {
             Error::new(
                 line,
                 format!("item {graphic:#06x} is too far east/west of the origin"),
             )
         })?),
-        dy: i16::from(i8::try_from(dy).map_err(|_| {
+        dy:      i16::from(i8::try_from(dy).map_err(|_| {
             Error::new(
                 line,
                 format!("item {graphic:#06x} is too far north/south of the origin"),
             )
         })?),
-        dz: i16::from(i8::try_from(dz).map_err(|_| {
+        dz:      i16::from(i8::try_from(dz).map_err(|_| {
             Error::new(
                 line,
                 format!("item {graphic:#06x} is too far above/below the origin"),
             )
         })?),
-        flags: 1,
+        flags:   1,
     })
 }
 
@@ -345,19 +346,19 @@ Z 20
             vec![
                 WorldItem {
                     graphic: 0x05A2,
-                    at: Origin {
+                    at:      Origin {
                         x: 5458,
                         y: 1179,
-                        z: 20
-                    }
+                        z: 20,
+                    },
                 },
                 WorldItem {
                     graphic: 1442,
-                    at: Origin {
+                    at:      Origin {
                         x: 5457,
                         y: 1179,
-                        z: 20
-                    }
+                        z: 20,
+                    },
                 },
             ]
         );
@@ -380,16 +381,16 @@ Z 20
                 Origin {
                     x: 5455,
                     y: 1178,
-                    z: 0
+                    z: 0,
                 }
             )
             .expect("one component"),
             vec![Component {
                 graphic: Graphic(1442),
-                dx: 3,
-                dy: 1,
-                dz: 20,
-                flags: 1
+                dx:      3,
+                dy:      1,
+                dz:      20,
+                flags:   1,
             }]
         );
     }
@@ -423,17 +424,17 @@ Z 20
             vec![
                 Component {
                     graphic: Graphic(3025),
-                    dx: 11,
-                    dy: -7,
-                    dz: 3,
-                    flags: 1
+                    dx:      11,
+                    dy:      -7,
+                    dz:      3,
+                    flags:   1,
                 },
                 Component {
                     graphic: Graphic(2973),
-                    dx: 11,
-                    dy: -7,
-                    dz: 3,
-                    flags: 1
+                    dx:      11,
+                    dy:      -7,
+                    dz:      3,
+                    flags:   1,
                 },
             ]
         );
@@ -447,17 +448,17 @@ Z 20
             vec![
                 Component {
                     graphic: Graphic(0x06A5),
-                    dx: 4,
-                    dy: 7,
-                    dz: 7,
-                    flags: 1
+                    dx:      4,
+                    dy:      7,
+                    dz:      7,
+                    flags:   1,
                 },
                 Component {
                     graphic: Graphic(0x0BD2),
-                    dx: 6,
-                    dy: 8,
-                    dz: 5,
-                    flags: 1
+                    dx:      6,
+                    dy:      8,
+                    dz:      5,
+                    flags:   1,
                 },
             ]
         );
@@ -470,10 +471,10 @@ Z 20
             sphere_component_design(source).expect("one component at ground level"),
             vec![Component {
                 graphic: Graphic(0x049c),
-                dx: -4,
-                dy: -4,
-                dz: 0,
-                flags: 1
+                dx:      -4,
+                dy:      -4,
+                dz:      0,
+                flags:   1,
             }]
         );
     }

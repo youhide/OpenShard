@@ -19,25 +19,46 @@
 //! nothing else.
 
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::time::Duration;
 
 use openshard_client_net::connection::Event;
 use openshard_client_net::talk;
 use openshard_client_net::transport::Socket;
-use openshard_config::{Config, FacetKey, RawAccessLevel};
+use openshard_config::{
+    Config,
+    FacetKey,
+    RawAccessLevel,
+};
+use openshard_e2e_shard::{
+    ACCOUNT,
+    stock_config,
+};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, StaticItem, WorldMap};
-use openshard_map::overlay::{Doors, Overlay};
+use openshard_map::map::{
+    LandCell,
+    StaticItem,
+    WorldMap,
+};
+use openshard_map::overlay::{
+    Doors,
+    Overlay,
+};
 use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::spans::SpanIndex;
-use openshard_movement::{Footing, MapTerrain, NavigationGraph, bake};
+use openshard_movement::{
+    Footing,
+    MapTerrain,
+    NavigationGraph,
+    bake,
+};
 use openshard_protocol::speech::TalkMode;
 use openshard_protocol::world::Facet;
 use openshard_tiles::LandTileId;
 use tokio::net::TcpStream;
-
-use openshard_e2e_shard::{ACCOUNT, stock_config};
 
 /// The facet every one of these fixtures is.
 pub const FACET: Facet = Facet(0);
@@ -52,7 +73,7 @@ pub const START: (u16, u16) = (128, 128);
 /// with the test reading it.
 pub const GROUND: LandCell = LandCell {
     tile: LandTileId(3),
-    z: 0,
+    z:    0,
 };
 
 /// The install, from the environment.

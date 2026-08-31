@@ -114,12 +114,7 @@ pub fn carried(state: &WorldState, mobile: EntityId) -> Vec<(Graphic, u16)> {
 }
 
 /// Add one item and, if it is a container, everything inside it.
-fn gather(
-    state: &WorldState,
-    item: EntityId,
-    out: &mut Vec<(Graphic, u16)>,
-    visited: &mut Vec<Serial>,
-) {
+fn gather(state: &WorldState, item: EntityId, out: &mut Vec<(Graphic, u16)>, visited: &mut Vec<Serial>) {
     let Some(serial) = state.registry.serial_of(item) else {
         return;
     };

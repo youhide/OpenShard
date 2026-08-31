@@ -11,27 +11,51 @@
 //! reads ServUO's own `SB*.cs`), and the skills that use them would refuse every
 //! one.
 
-use openshard_state::WorldState;
-use openshard_state::components::{
-    Container, Decays, Instrument, ItemKind, Name, POISON_POTION_GRAPHIC, PoisonCharges, RUNEBOOK_GRAPHIC,
-    Runebook, SPELLBOOK_GRAPHIC, Spellbook, Tool,
+use openshard_entities::{
+    EntityId,
+    Registry,
 };
-use openshard_state::craft::{craft_tool, craft_tool_for_kind};
-use openshard_state::harvest::{tool_data, tool_data_for_kind};
-use openshard_state::instrument::{
-    INSTRUMENT_MAX_USES, INSTRUMENT_MIN_USES, instrument_data, instrument_data_for_kind,
-};
-use openshard_state::item_definition::{has_tag, item_definition};
-
-use openshard_entities::{EntityId, Registry};
 use openshard_protocol::item_kind::ItemTag;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::PoisonLevel;
+use openshard_state::WorldState;
+use openshard_state::components::{
+    Container,
+    Decays,
+    Instrument,
+    ItemKind,
+    Name,
+    POISON_POTION_GRAPHIC,
+    PoisonCharges,
+    RUNEBOOK_GRAPHIC,
+    Runebook,
+    SPELLBOOK_GRAPHIC,
+    Spellbook,
+    Tool,
+};
+use openshard_state::craft::{
+    craft_tool,
+    craft_tool_for_kind,
+};
+use openshard_state::harvest::{
+    tool_data,
+    tool_data_for_kind,
+};
+use openshard_state::instrument::{
+    INSTRUMENT_MAX_USES,
+    INSTRUMENT_MIN_USES,
+    instrument_data,
+    instrument_data_for_kind,
+};
+use openshard_state::item_definition::{
+    has_tag,
+    item_definition,
+};
 
 /// An inclusive fresh-use range in the form the world's generator consumes.
 #[derive(Clone, Copy, Debug)]
 struct UsesRange {
-    min: u16,
+    min:   u16,
     width: std::num::NonZeroU32,
 }
 

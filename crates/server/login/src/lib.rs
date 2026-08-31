@@ -74,6 +74,21 @@ pub mod auth;
 pub mod password;
 mod session;
 
-pub use accounts::{Credential, CredentialCheck, DevAccount, DevAccounts, PasswordVerdict};
-pub use auth::{AuthKeys, PendingLogin};
-pub use session::{LoginServer, LoginSession, Outcome, Response, single_shard};
+pub use accounts::{
+    Credential,
+    CredentialCheck,
+    DevAccount,
+    DevAccounts,
+    PasswordVerdict,
+};
+pub use auth::{
+    AuthKeys,
+    PendingLogin,
+};
+pub use session::{
+    LoginServer,
+    LoginSession,
+    Outcome,
+    Response,
+    single_shard,
+};

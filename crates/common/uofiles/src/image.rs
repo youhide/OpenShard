@@ -18,9 +18,9 @@ use crate::color::Color16;
 /// margins belong to a screen coordinate system.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InkBounds {
-    pub x: u16,
-    pub y: u16,
-    pub width: u16,
+    pub x:      u16,
+    pub y:      u16,
+    pub width:  u16,
     pub height: u16,
 }
 
@@ -36,7 +36,7 @@ pub struct InkBounds {
 /// shape has to be recovered from outside the pixels.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Image {
-    width: u16,
+    width:  u16,
     height: u16,
     pixels: Vec<Color16>,
 }
@@ -121,9 +121,9 @@ impl Image {
             return None;
         }
         Some(InkBounds {
-            x: left,
-            y: top,
-            width: right - left + 1,
+            x:      left,
+            y:      top,
+            width:  right - left + 1,
             height: bottom - top + 1,
         })
     }
@@ -192,9 +192,9 @@ mod tests {
         assert_eq!(
             image.ink_bounds(),
             Some(InkBounds {
-                x: 1,
-                y: 1,
-                width: 2,
+                x:      1,
+                y:      1,
+                width:  2,
                 height: 2,
             })
         );

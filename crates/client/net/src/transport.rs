@@ -21,12 +21,28 @@ use std::net::SocketAddrV4;
 
 use openshard_protocol::login::DenyReason;
 use openshard_protocol::version::ClientVersion;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{
+    AsyncRead,
+    AsyncReadExt,
+    AsyncWrite,
+    AsyncWriteExt,
+};
 use tokio::net::TcpStream;
 use tracing::debug;
 
-use crate::connection::{Connection, ConnectionError, Event, Stream};
-use crate::session::{Login, LoginError, Plan, Stage, Step};
+use crate::connection::{
+    Connection,
+    ConnectionError,
+    Event,
+    Stream,
+};
+use crate::session::{
+    Login,
+    LoginError,
+    Plan,
+    Stage,
+    Step,
+};
 use crate::view::WorldView;
 
 /// How big a read is. A packet is at most 18,000 bytes and usually a few dozen;
@@ -86,7 +102,8 @@ impl std::fmt::Display for TransportError {
     }
 }
 
-impl std::error::Error for TransportError {}
+impl std::error::Error for TransportError {
+}
 
 /// How a client opens its connections to a shard.
 ///
@@ -141,14 +158,14 @@ impl Dial for Tcp {
 /// One connection, with the parser that reads it.
 #[derive(Debug)]
 pub struct Socket<S> {
-    stream: S,
+    stream:     S,
     connection: Connection,
     /// Events already parsed out of the last read, oldest first.
     ///
     /// A single read routinely carries several packets. Holding them here is
     /// what lets [`Socket::next_event`] be called one packet at a time without
     /// losing the rest.
-    pending: std::collections::VecDeque<Event>,
+    pending:    std::collections::VecDeque<Event>,
 }
 
 impl Socket<TcpStream> {
@@ -288,11 +305,13 @@ pub async fn enter_world_with<D: Dial>(
 /// `None` means the event moved nothing.
 fn step(login: &mut Login, event: Event) -> Result<Option<Step>, TransportError> {
     match event {
-        Event::Packet(packet) => match login.on_packet(&packet)? {
-            Step::Refused(reason) => Err(TransportError::Refused(reason)),
-            Step::Idle => Ok(None),
-            step => Ok(Some(step)),
-        },
+        Event::Packet(packet) => {
+            match login.on_packet(&packet)? {
+                Step::Refused(reason) => Err(TransportError::Refused(reason)),
+                Step::Idle => Ok(None),
+                step => Ok(Some(step)),
+            }
+        }
         Event::Undecoded { id, .. } => {
             // The features mask, the light level, the music: packets a shard
             // sends around the login that this crate has no decoder for. They

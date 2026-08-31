@@ -1,11 +1,25 @@
 //! Asking somebody along, answering, leaving, and the loot flag.
 
 use openshard_entities::EntityId;
-use openshard_protocol::party::{CAPACITY, PartyInvitation};
+use openshard_protocol::party::{
+    CAPACITY,
+    PartyInvitation,
+};
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_state::{PartyCandidate, PartyId, PartyMember, WorldState};
+use openshard_state::{
+    PartyCandidate,
+    PartyId,
+    PartyMember,
+    WorldState,
+};
 
-use crate::{Refusal, announce, may_lead, tell_removal, tell_roster};
+use crate::{
+    Refusal,
+    announce,
+    may_lead,
+    tell_removal,
+    tell_roster,
+};
 
 /// Ask `candidate` into the party `inviter` leads, opening one if they lead
 /// none.

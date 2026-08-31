@@ -40,14 +40,14 @@ pub mod pathtrace;
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Drawn {
     /// [`openshard_client_render::place::Kind`]'s own two bits.
-    pub kind: u32,
+    pub kind:   u32,
     /// The stance, which for a mesh face is the
     /// [`Stance::MeshFace`](openshard_client_render::place::Stance::MeshFace)
     /// routing sentinel rather than the face's real one.
     pub stance: u32,
     /// The instance row this fragment's picture came from — a `MeshFaceRow` for
     /// a mesh face, a ground quad for land.
-    pub id: u32,
+    pub id:     u32,
     /// And **where in the world the fragment itself is**, which is not the world
     /// point that projected onto it: the pixel's own fragment sits at the
     /// pixel's centre. That is the point the shader lit, so it is the point an
@@ -58,7 +58,7 @@ pub struct Drawn {
     /// fraction in hundred-and-twenty-sevenths and a height in sixteenths, which
     /// every caller then added to a tile it looked up — three fields, one of
     /// them quantised twice on the way. `docs/lighting_rebuild.md` phase 2.
-    pub at: (f64, f64, f64),
+    pub at:     (f64, f64, f64),
 }
 
 /// The G-buffer read back, one [`Drawn`] a pixel, row-major.
@@ -99,10 +99,10 @@ pub fn read_gbuffer(
                 // shares no arithmetic with what it measures. A *format* is a
                 // wire and reading it through the engine's own accessor is what
                 // keeps this module honest about the difference.
-                kind: word & 3,
+                kind:   word & 3,
                 stance: openshard_client_render::gbuffer::ids_stance(word),
-                id: openshard_client_render::gbuffer::ids_id(word),
-                at: (axis(0), axis(1), axis(2)),
+                id:     openshard_client_render::gbuffer::ids_id(word),
+                at:     (axis(0), axis(1), axis(2)),
             }
         })
         .collect()
@@ -213,9 +213,9 @@ fn read_plane(
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let padded = row.div_ceil(align) * align;
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("g-buffer readback"),
-        size: u64::from(padded) * u64::from(height),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("g-buffer readback"),
+        size:               u64::from(padded) * u64::from(height),
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -229,8 +229,8 @@ fn read_plane(
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(padded),
+                offset:         0,
+                bytes_per_row:  Some(padded),
                 rows_per_image: Some(height),
             },
         },
@@ -416,24 +416,24 @@ pub fn read_surface(
     height: u32,
 ) -> Vec<u8> {
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("readback"),
-        size: u64::from(width) * u64::from(height) * 4,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        label:              Some("readback"),
+        size:               u64::from(width) * u64::from(height) * 4,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: surface,
+            texture:   surface,
             mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    wgpu::TextureAspect::All,
         },
         wgpu::TexelCopyBufferInfo {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
+                offset:         0,
+                bytes_per_row:  Some(width * 4),
                 rows_per_image: Some(height),
             },
         },

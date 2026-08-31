@@ -36,7 +36,10 @@
 //! microseconds is zero ticks behind and says nothing; a shard running at a
 //! quarter of its rate is thirty ticks behind every second and says so at once.
 
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_world::TICK_INTERVAL;
 
@@ -48,18 +51,18 @@ use openshard_world::TICK_INTERVAL;
 /// the tick.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct TickWork {
-    commands: u32,
-    kinds: [&'static str; 4],
-    kind_count: u8,
+    commands:      u32,
+    kinds:         [&'static str; 4],
+    kind_count:    u8,
     omitted_kinds: u32,
 }
 
 impl TickWork {
     pub(crate) fn from_kinds(kinds: impl IntoIterator<Item = &'static str>) -> Self {
         let mut work = Self {
-            commands: 0,
-            kinds: [""; 4],
-            kind_count: 0,
+            commands:      0,
+            kinds:         [""; 4],
+            kind_count:    0,
             omitted_kinds: 0,
         };
         for kind in kinds {
@@ -113,16 +116,16 @@ const WINDOW: u32 = openshard_state::TICKS_PER_SECOND as u32;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct Window {
     /// How long the window's [`WINDOW`] intervals actually took.
-    pub(crate) elapsed: Duration,
+    pub(crate) elapsed:    Duration,
     /// How much of that was spent inside the tick itself.
     ///
     /// **This is the field that says whose fault it is.** Near the whole window
     /// means the tick body is too slow and the shard is the problem; a small
     /// share means the tick was ready on time and was not run — the runtime, the
     /// other threads in this process, or the machine.
-    pub(crate) busy: Duration,
+    pub(crate) busy:       Duration,
     /// The longest single tick in the window, which is what an average hides.
-    pub(crate) worst: Duration,
+    pub(crate) worst:      Duration,
     /// Which queued commands that longest tick applied.
     pub(crate) worst_work: TickWork,
 }
@@ -181,17 +184,17 @@ impl Window {
 #[derive(Clone, Copy, Debug)]
 struct Open {
     began: Instant,
-    body: Duration,
-    work: TickWork,
+    body:  Duration,
+    work:  TickWork,
 }
 
 /// What has accumulated since the last verdict.
 #[derive(Clone, Copy, Debug)]
 struct Partial {
-    intervals: u32,
-    elapsed: Duration,
-    busy: Duration,
-    worst: Duration,
+    intervals:  u32,
+    elapsed:    Duration,
+    busy:       Duration,
+    worst:      Duration,
     worst_work: TickWork,
 }
 
@@ -199,14 +202,14 @@ impl Partial {
     /// Nothing measured yet.
     const fn empty() -> Self {
         Self {
-            intervals: 0,
-            elapsed: Duration::ZERO,
-            busy: Duration::ZERO,
-            worst: Duration::ZERO,
+            intervals:  0,
+            elapsed:    Duration::ZERO,
+            busy:       Duration::ZERO,
+            worst:      Duration::ZERO,
             worst_work: TickWork {
-                commands: 0,
-                kinds: [""; 4],
-                kind_count: 0,
+                commands:      0,
+                kinds:         [""; 4],
+                kind_count:    0,
                 omitted_kinds: 0,
             },
         }
@@ -243,19 +246,19 @@ pub(crate) struct Pace {
     ///
     /// Absence here is the domain's — there genuinely is no open interval before
     /// a tick has run — and not a value waiting to be filled in.
-    open: Option<Open>,
+    open:    Option<Open>,
     partial: Partial,
     /// What the last window said, so that a standing state can be announced on
     /// its edges rather than restated every second. `None` until the first
     /// window closes, which is why the first verdict is always spoken.
-    said: Option<bool>,
+    said:    Option<bool>,
     /// How many windows in a row have been behind. Reset by any window that is
     /// not, because what the limit is about is a shard that *stays* wrong: a
     /// hiccup a second apart, forever, is a different complaint and killing a
     /// shard for it would be the wrong answer to it.
-    streak: u32,
+    streak:  u32,
     /// The operator's patience, from `[watchdog] tick_behind_windows`.
-    limit: BehindWindows,
+    limit:   BehindWindows,
 }
 
 impl Pace {
@@ -290,9 +293,9 @@ impl Pace {
             return None;
         }
         let window = Window {
-            elapsed: self.partial.elapsed,
-            busy: self.partial.busy,
-            worst: self.partial.worst,
+            elapsed:    self.partial.elapsed,
+            busy:       self.partial.busy,
+            worst:      self.partial.worst,
             worst_work: self.partial.worst_work,
         };
         self.partial = Partial::empty();
@@ -349,7 +352,7 @@ pub(crate) enum Verdict {
     /// happens next, not something this repeats until.
     GivingUp {
         /// The window that reached the limit, for the numbers in the line.
-        window: Window,
+        window:  Window,
         /// How many in a row it took, which is the operator's own setting read
         /// back to them.
         windows: u32,
@@ -358,9 +361,21 @@ pub(crate) enum Verdict {
 
 #[cfg(test)]
 mod tests {
-    use super::{BehindWindows, Pace, TickWork, Verdict, WINDOW, Window};
+    use std::time::{
+        Duration,
+        Instant,
+    };
+
     use openshard_world::TICK_INTERVAL;
-    use std::time::{Duration, Instant};
+
+    use super::{
+        BehindWindows,
+        Pace,
+        TickWork,
+        Verdict,
+        WINDOW,
+        Window,
+    };
 
     /// The patience of an operator who wants to be told and not stopped. Every
     /// test about the *edges* uses it, so that none of them can pass by

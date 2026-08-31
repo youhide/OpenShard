@@ -23,10 +23,23 @@
 
 use std::path::PathBuf;
 
-use openshard_map::map::{LandCell, StaticItem, WorldMap};
-use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
+use openshard_map::map::{
+    LandCell,
+    StaticItem,
+    WorldMap,
+};
+use openshard_map::patch::{
+    Patch,
+    PatchAuthor,
+    PatchOp,
+    PatchTime,
+};
 use openshard_movement::ground::Ground;
-use openshard_movement::spans::{Span, SpanIndex, Spans};
+use openshard_movement::spans::{
+    Span,
+    SpanIndex,
+    Spans,
+};
 use openshard_protocol::world::Facet;
 use openshard_tiles::TileData;
 
@@ -80,7 +93,7 @@ fn raise(ground: &mut Ground, tiles: &TileData, x: u16, y: u16) {
         y,
         LandCell {
             tile: was.tile,
-            z: was.z.saturating_add(40),
+            z:    was.z.saturating_add(40),
         },
     )
     .expect("a tile on this facet");

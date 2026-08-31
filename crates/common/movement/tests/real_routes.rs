@@ -25,15 +25,32 @@
 use std::path::PathBuf;
 
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Doors, Overlay};
+use openshard_map::overlay::{
+    Doors,
+    Overlay,
+};
 use openshard_map::snapshot::MapSnapshot;
-use openshard_movement::bake::{FacetWorld, WorldSource};
+use openshard_movement::bake::{
+    FacetWorld,
+    WorldSource,
+};
 use openshard_movement::spans::SpanIndex;
 use openshard_movement::{
-    COARSE_MIN_DISTANCE, Footing, MapTerrain, NavigationGraph, Weight, destination_place, find_long_path,
-    find_path, search_path, step_allowed,
+    COARSE_MIN_DISTANCE,
+    Footing,
+    MapTerrain,
+    NavigationGraph,
+    Weight,
+    destination_place,
+    find_long_path,
+    find_path,
+    search_path,
+    step_allowed,
 };
-use openshard_protocol::world::{Facet, Point};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 
 /// The upper storey a person was standing on when a click did nothing:
 /// `(1340, 1676)` at z 52, over land at 30.
@@ -59,14 +76,14 @@ fn client_dir() -> Option<PathBuf> {
 /// What an install owns, so a test can hold it and hand out views of it.
 struct Install {
     snapshot: MapSnapshot,
-    tiles: openshard_tiles::TileData,
-    spans: SpanIndex,
+    tiles:    openshard_tiles::TileData,
+    spans:    SpanIndex,
     /// The baked coarse graph, when one is beside the install and current.
     ///
     /// `None` is a real state and not a failure — a client with no bake plans
     /// long routes with nothing but the bounded search, and says so on stderr —
     /// so the survey reports which of the two it measured rather than skipping.
-    coarse: Option<NavigationGraph>,
+    coarse:   Option<NavigationGraph>,
 }
 
 impl Install {
@@ -170,13 +187,15 @@ fn picture(terrain: &MapTerrain<'_>, centre: Point, radius: u16) {
             row.push(match (x, y) {
                 _ if (x, y) == (centre.x, centre.y) => '@',
                 _ if (x, y) == (ALONG.x, ALONG.y) => 'B',
-                _ => match highest {
-                    None => '#',
-                    Some(z) if z >= 45 => 'X',
-                    Some(z) if z >= 35 => '+',
-                    Some(z) if z >= 25 => '.',
-                    Some(_) => ',',
-                },
+                _ => {
+                    match highest {
+                        None => '#',
+                        Some(z) if z >= 45 => 'X',
+                        Some(z) if z >= 35 => '+',
+                        Some(z) if z >= 25 => '.',
+                        Some(_) => ',',
+                    }
+                }
             });
         }
         println!("  {row}");

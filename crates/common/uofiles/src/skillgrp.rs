@@ -22,7 +22,10 @@
 //! open or shut. Both are the window's, in `openshard_client_render::skills`.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use crate::skills::SkillId;
 
@@ -39,7 +42,7 @@ pub struct GroupId(pub u8);
 #[derive(Clone, Debug, Default)]
 pub struct SkillGroups {
     /// Every heading, `MISC` first and then the file's own, in its order.
-    names: Vec<String>,
+    names:    Vec<String>,
     /// One group per skill, by [`SkillId`] — indexed, not keyed, because the
     /// file's trailing table is exactly as long as the skill list and in the
     /// same order.
@@ -62,7 +65,7 @@ pub enum SkillGroupsError {
     /// The file could not be read.
     Read {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// Why.
         source: std::io::Error,
     },
@@ -73,9 +76,9 @@ pub enum SkillGroupsError {
     /// bytes.
     Truncated {
         /// Which file.
-        path: PathBuf,
+        path:   PathBuf,
         /// How long it was.
-        size: usize,
+        size:   usize,
         /// How long its own header says it must be, at least.
         wanted: usize,
     },
@@ -85,11 +88,13 @@ impl fmt::Display for SkillGroupsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
-            Self::Truncated { path, size, wanted } => write!(
-                f,
-                "{} is {size} bytes, and its own header needs at least {wanted}",
-                path.display()
-            ),
+            Self::Truncated { path, size, wanted } => {
+                write!(
+                    f,
+                    "{} is {size} bytes, and its own header needs at least {wanted}",
+                    path.display()
+                )
+            }
         }
     }
 }
@@ -120,9 +125,11 @@ impl SkillGroups {
     /// Open a named file, for tests.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, SkillGroupsError> {
         let path = path.as_ref();
-        let bytes = std::fs::read(path).map_err(|source| SkillGroupsError::Read {
-            path: path.to_owned(),
-            source,
+        let bytes = std::fs::read(path).map_err(|source| {
+            SkillGroupsError::Read {
+                path: path.to_owned(),
+                source,
+            }
         })?;
         Self::parse(&bytes).ok_or_else(|| {
             // What the header asked for, so the message can say how far short the
@@ -187,21 +194,25 @@ impl SkillGroups {
             let at = start + nth * width;
             let record = bytes.get(at..at + width)?;
             names.push(match unicode {
-                true => record
-                    .as_chunks::<2>()
-                    .0
-                    .iter()
-                    .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-                    .take_while(|unit| *unit != 0)
-                    .map(|unit| char::from_u32(u32::from(unit)).unwrap_or('?'))
-                    .collect(),
+                true => {
+                    record
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                        .take_while(|unit| *unit != 0)
+                        .map(|unit| char::from_u32(u32::from(unit)).unwrap_or('?'))
+                        .collect()
+                }
                 // Latin-1, the same single-byte reading `skills.mul`'s own names
                 // get — see `crate::skills::Skill::name`.
-                false => record
-                    .iter()
-                    .take_while(|byte| **byte != 0)
-                    .map(|byte| char::from(*byte))
-                    .collect(),
+                false => {
+                    record
+                        .iter()
+                        .take_while(|byte| **byte != 0)
+                        .map(|byte| char::from(*byte))
+                        .collect()
+                }
             });
         }
         let of_skill = bytes[table_at..]
@@ -209,9 +220,11 @@ impl SkillGroups {
             .0
             .iter()
             .map(|four| i32::from_le_bytes([four[0], four[1], four[2], four[3]]))
-            .map(|group| match usize::try_from(group) {
-                Ok(group) if group < names.len() => GroupId(group as u8),
-                _ => Self::MISC,
+            .map(|group| {
+                match usize::try_from(group) {
+                    Ok(group) if group < names.len() => GroupId(group as u8),
+                    _ => Self::MISC,
+                }
             })
             .collect();
         Some(Self { names, of_skill })

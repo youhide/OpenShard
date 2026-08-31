@@ -26,17 +26,45 @@
 use std::path::PathBuf;
 
 use openshard_client_render::animate::StaticAnimations;
-use openshard_client_render::atlas::{LandAtlas, StaticAtlas, TexmapAtlas};
-use openshard_client_render::blit::{self, Blit, ViewportRect};
-use openshard_client_render::camera::{Camera, RealPixel, Zoom};
+use openshard_client_render::atlas::{
+    LandAtlas,
+    StaticAtlas,
+    TexmapAtlas,
+};
+use openshard_client_render::blit::{
+    self,
+    Blit,
+    ViewportRect,
+};
+use openshard_client_render::camera::{
+    Camera,
+    RealPixel,
+    Zoom,
+};
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::debug::View;
-use openshard_client_render::frame::{self, Impostor};
+use openshard_client_render::frame::{
+    self,
+    Impostor,
+};
 use openshard_client_render::geometry::Vec2;
-use openshard_client_render::light::{self, Tuning};
-use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, SpriteRenderer, Target};
+use openshard_client_render::light::{
+    self,
+    Tuning,
+};
+use openshard_client_render::renderer::{
+    self,
+    GroundRenderer,
+    MeshFaceRenderer,
+    SpriteRenderer,
+    Target,
+};
 use openshard_client_render::statics::StaticGeometry;
-use openshard_client_render::{dump, ground, statics};
+use openshard_client_render::{
+    dump,
+    ground,
+    statics,
+};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 use openshard_uofiles::animdata::AnimData;
@@ -97,18 +125,18 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 /// together — a G-buffer from one frame over another frame's world image is a
 /// picture of nothing.
 struct Drawn {
-    world: wgpu::Texture,
-    gbuffer: openshard_client_render::gbuffer::Gbuffer,
-    lighting: light::Lighting,
-    ground: GroundRenderer,
-    statics: SpriteRenderer,
-    mesh: MeshFaceRenderer,
+    world:             wgpu::Texture,
+    gbuffer:           openshard_client_render::gbuffer::Gbuffer,
+    lighting:          light::Lighting,
+    ground:            GroundRenderer,
+    statics:           SpriteRenderer,
+    mesh:              MeshFaceRenderer,
     /// How many static pictures the assembly collected — what `draw` above let
     /// through, kept because a count is the only thing about the *drawing* that
     /// the four fields above have already turned into GPU buffers.
     statics_collected: usize,
     /// And how many quads of land, on the same terms.
-    land_collected: usize,
+    land_collected:    usize,
 }
 
 /// Assemble a frame the way `App::draw` assembles one, draw its three world
@@ -317,9 +345,9 @@ fn a_readback_measures_a_row_in_the_textures_own_texels() {
         return;
     };
     let rect = ViewportRect {
-        x: 0,
-        y: 0,
-        width: 301,
+        x:      0,
+        y:      0,
+        width:  301,
         height: 97,
     };
     for (format, texel) in [
@@ -330,8 +358,8 @@ fn a_readback_measures_a_row_in_the_textures_own_texels() {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("a texture of some format"),
             size: wgpu::Extent3d {
-                width: rect.width,
-                height: rect.height,
+                width:                 rect.width,
+                height:                rect.height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -364,9 +392,9 @@ fn a_frame_dumps_one_picture_per_view_at_the_size_asked_for() {
     let dummy_mobiles = blit::dummy_instances(&device);
 
     let rect = ViewportRect {
-        x: 0,
-        y: 0,
-        width: VIEWPORT.0,
+        x:      0,
+        y:      0,
+        width:  VIEWPORT.0,
         height: VIEWPORT.1,
     };
     let planes = dump::planes(
@@ -447,9 +475,9 @@ fn a_readback_off_the_corner_is_the_same_pixels_shifted() {
     let dummy_mobiles = blit::dummy_instances(&device);
 
     let whole = ViewportRect {
-        x: 0,
-        y: 0,
-        width: VIEWPORT.0,
+        x:      0,
+        y:      0,
+        width:  VIEWPORT.0,
         height: VIEWPORT.1,
     };
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -458,16 +486,16 @@ fn a_readback_off_the_corner_is_the_same_pixels_shifted() {
         &queue,
         &mut encoder,
         blit::Frame {
-            target: &into_view,
-            world: &world_view,
-            gbuffer: &gbuffer_views,
-            face_instances: drawn.statics.instances_buffer(),
-            item_instances: drawn.statics.instances_buffer(),
+            target:           &into_view,
+            world:            &world_view,
+            gbuffer:          &gbuffer_views,
+            face_instances:   drawn.statics.instances_buffer(),
+            item_instances:   drawn.statics.instances_buffer(),
             mobile_instances: &dummy_mobiles,
-            mesh_instances: drawn.mesh.rows_buffer(),
+            mesh_instances:   drawn.mesh.rows_buffer(),
             ground_instances: drawn.ground.instances_buffer(),
-            zoom: openshard_client_render::camera::Zoom::ONE,
-            rect: whole,
+            zoom:             openshard_client_render::camera::Zoom::ONE,
+            rect:             whole,
         },
         &drawn.lighting,
     );
@@ -478,9 +506,9 @@ fn a_readback_off_the_corner_is_the_same_pixels_shifted() {
     // hand-rolled readbacks never had to handle because they always read from
     // `(0, 0)`.
     let corner = ViewportRect {
-        x: 37,
-        y: 11,
-        width: 301,
+        x:      37,
+        y:      11,
+        width:  301,
         height: 97,
     };
     let all = dump::read_rect(&device, &queue, &into, whole);
@@ -528,25 +556,27 @@ fn a_docked_panels_offset_places_the_same_picture_it_shows_at_the_corner() {
     let mut blit = Blit::new(&device, format);
     let dummy_mobiles = blit::dummy_instances(&device);
 
-    let frame = |rect: ViewportRect| blit::Frame {
-        target: &world_view, // overwritten per call below
-        world: &world_view,
-        gbuffer: &gbuffer_views,
-        face_instances: drawn.statics.instances_buffer(),
-        item_instances: drawn.statics.instances_buffer(),
-        mobile_instances: &dummy_mobiles,
-        mesh_instances: drawn.mesh.rows_buffer(),
-        ground_instances: drawn.ground.instances_buffer(),
-        zoom: openshard_client_render::camera::Zoom::ONE,
-        rect,
+    let frame = |rect: ViewportRect| {
+        blit::Frame {
+            target: &world_view, // overwritten per call below
+            world: &world_view,
+            gbuffer: &gbuffer_views,
+            face_instances: drawn.statics.instances_buffer(),
+            item_instances: drawn.statics.instances_buffer(),
+            mobile_instances: &dummy_mobiles,
+            mesh_instances: drawn.mesh.rows_buffer(),
+            ground_instances: drawn.ground.instances_buffer(),
+            zoom: openshard_client_render::camera::Zoom::ONE,
+            rect,
+        }
     };
 
     let direct = dump_target(&device, format);
     let direct_view = direct.create_view(&wgpu::TextureViewDescriptor::default());
     let whole = ViewportRect {
-        x: 0,
-        y: 0,
-        width: VIEWPORT.0,
+        x:      0,
+        y:      0,
+        width:  VIEWPORT.0,
         height: VIEWPORT.1,
     };
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -569,9 +599,9 @@ fn a_docked_panels_offset_places_the_same_picture_it_shows_at_the_corner() {
     let window = dump_target_sized(&device, format, VIEWPORT.0 + 50, VIEWPORT.1 + 50);
     let window_view = window.create_view(&wgpu::TextureViewDescriptor::default());
     let corner = ViewportRect {
-        x: 37,
-        y: 11,
-        width: VIEWPORT.0,
+        x:      37,
+        y:      11,
+        width:  VIEWPORT.0,
         height: VIEWPORT.1,
     };
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -624,9 +654,9 @@ fn each_normal_layer_holds_its_own_category_and_nothing_else() {
     let mut blit = Blit::new(&device, format);
     let dummy_mobiles = blit::dummy_instances(&device);
     let rect = ViewportRect {
-        x: 0,
-        y: 0,
-        width: VIEWPORT.0,
+        x:      0,
+        y:      0,
+        width:  VIEWPORT.0,
         height: VIEWPORT.1,
     };
 
@@ -709,24 +739,24 @@ fn each_normal_layer_holds_its_own_category_and_nothing_else() {
     queue.submit([encoder.finish()]);
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
-            texture: &painted,
+            texture:   &painted,
             mip_level: 0,
-            origin: wgpu::Origin3d {
+            origin:    wgpu::Origin3d {
                 x: background as u32 % rect.width,
                 y: background as u32 / rect.width,
                 z: 0,
             },
-            aspect: wgpu::TextureAspect::All,
+            aspect:    wgpu::TextureAspect::All,
         },
         &[255, 255, 255, 255],
         wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(4),
+            offset:         0,
+            bytes_per_row:  Some(4),
             rows_per_image: Some(1),
         },
         wgpu::Extent3d {
-            width: 1,
-            height: 1,
+            width:                 1,
+            height:                1,
             depth_or_array_layers: 1,
         },
     );
@@ -751,12 +781,14 @@ fn each_normal_layer_holds_its_own_category_and_nothing_else() {
     // unknown colour is a failure and not a fifth bucket: it would mean the kind
     // view draws something this test does not know the rule for, and every
     // assertion below would then be silently skipping those pixels.
-    let named = |pixel: &[u8]| match pixel {
-        _ if is(pixel, NOTHING) => Some(0),
-        _ if is(pixel, LAND) => Some(1),
-        _ if is(pixel, STATIC) => Some(2),
-        _ if is(pixel, MOBILE) => Some(3),
-        _ => None,
+    let named = |pixel: &[u8]| {
+        match pixel {
+            _ if is(pixel, NOTHING) => Some(0),
+            _ if is(pixel, LAND) => Some(1),
+            _ if is(pixel, STATIC) => Some(2),
+            _ if is(pixel, MOBILE) => Some(3),
+            _ => None,
+        }
     };
 
     let mut counted = [0u32; 4];
@@ -798,10 +830,12 @@ fn each_normal_layer_holds_its_own_category_and_nothing_else() {
                      surface: geometry {in_geometry}, sprites {in_sprites}",
                 );
             }
-            _ => panic!(
-                "({x}, {y}) is a kind colour nothing draws: {:?}",
-                &kinds[at..at + 3],
-            ),
+            _ => {
+                panic!(
+                    "({x}, {y}) is a kind colour nothing draws: {:?}",
+                    &kinds[at..at + 3],
+                )
+            }
         }
     }
 
@@ -897,9 +931,9 @@ fn the_two_silhouette_layers_are_two_lines_and_a_frame_agrees_about_both() {
     let mut blit = Blit::new(&device, format);
     let dummy_mobiles = blit::dummy_instances(&device);
     let rect = ViewportRect {
-        x: 0,
-        y: 0,
-        width: VIEWPORT.0,
+        x:      0,
+        y:      0,
+        width:  VIEWPORT.0,
         height: VIEWPORT.1,
     };
 

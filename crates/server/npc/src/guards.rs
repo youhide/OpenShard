@@ -19,24 +19,48 @@
 //! whole of its purpose — ServUO says the same thing by clearing the guard's own
 //! `Criminal` and `Kills` on every beat of its timer.
 
+use openshard_combat as combat;
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
-use openshard_protocol::feedback::{EffectKind, GraphicalEffect, PlaySound};
+use openshard_protocol::feedback::{
+    EffectKind,
+    GraphicalEffect,
+    PlaySound,
+};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::wire::{Graphic, Hue, Layer, SoundId};
-use openshard_protocol::world::{Facet, Point, Sight};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+    SoundId,
+};
+use openshard_protocol::world::{
+    Facet,
+    Point,
+    Sight,
+};
 use openshard_state::WorldState;
 use openshard_state::components::{
-    Aggression, Client, CriminalUntil, DamageType, Ghost, Guard, Hitpoints, Murders, Position, Staff,
+    Aggression,
+    Client,
+    CriminalUntil,
+    DamageType,
+    Ghost,
+    Guard,
+    Hitpoints,
+    Murders,
+    Position,
+    Staff,
 };
-
-use openshard_combat as combat;
 
 use crate::dress::ShoeType;
 use crate::names::personal_name;
 use crate::notify;
-use crate::spawn::{SpawnSpec, spawn};
+use crate::spawn::{
+    SpawnSpec,
+    spawn,
+};
 
 /// How far a call for guards reaches for someone to answer it — ServUO's 14.
 const CALL_RANGE: u32 = 14;
@@ -239,16 +263,16 @@ fn make_guard(state: &mut WorldState, target: EntityId) {
 /// or out of it — with no feedback reads as a client glitch.
 fn flash(state: &mut WorldState, guard: EntityId, at: Point) {
     let packet = GraphicalEffect {
-        kind: EffectKind::FixedXyz,
-        from: None,
-        to: None,
-        art: ARRIVAL_GRAPHIC,
-        from_point: at,
-        to_point: at,
-        speed: 9,
-        duration: 20,
+        kind:            EffectKind::FixedXyz,
+        from:            None,
+        to:              None,
+        art:             ARRIVAL_GRAPHIC,
+        from_point:      at,
+        to_point:        at,
+        speed:           9,
+        duration:        20,
         fixed_direction: true,
-        explode: false,
+        explode:         false,
     };
     state.broadcast_packet(guard, &ServerPacket::Effect(packet));
     state.broadcast_packet(

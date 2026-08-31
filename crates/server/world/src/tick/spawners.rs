@@ -186,43 +186,43 @@ impl World {
             .iter()
             .map(|s| {
                 openshard_persistence::SpawnerRecord {
-                id: s.id,
-                facet: s.area.facet.0,
-                x: s.area.x,
-                y: s.area.y,
-                width: s.area.width,
-                height: s.area.height,
-                max_count: s.max_count,
-                respawn_secs: s.respawn_delay / TICKS_PER_SECOND,
-                remaining_secs: s.next_spawn.saturating_sub(now) / TICKS_PER_SECOND,
-                creatures: s
-                    .creatures
-                    .iter()
+                    id:             s.id,
+                    facet:          s.area.facet.0,
+                    x:              s.area.x,
+                    y:              s.area.y,
+                    width:          s.area.width,
+                    height:         s.area.height,
+                    max_count:      s.max_count,
+                    respawn_secs:   s.respawn_delay / TICKS_PER_SECOND,
+                    remaining_secs: s.next_spawn.saturating_sub(now) / TICKS_PER_SECOND,
+                    creatures:      s
+                        .creatures
+                        .iter()
                         .map(|c| {
                             openshard_persistence::CreatureData {
-                        body: c.body.0,
-                        hue: c.hue.0,
-                        hits: c.hits,
-                        notoriety: c.notoriety,
-                        damage: c.damage,
-                        resistance: c.resistance,
-                        fame: c.fame,
-                        karma: c.karma,
-                        swing: c.swing,
-                        sight: c.sight,
-                        aggression: c.aggression,
-                        beat: c.beat,
-                        ranged: c.ranged,
-                        ranged_kind: c.ranged_kind,
-                        wander: c.wander,
-                        skills: c
-                            .skills
-                            .iter()
-                            .map(|(skill, value)| (skill.id(), *value))
-                            .collect(),
+                                body:        c.body.0,
+                                hue:         c.hue.0,
+                                hits:        c.hits,
+                                notoriety:   c.notoriety,
+                                damage:      c.damage,
+                                resistance:  c.resistance,
+                                fame:        c.fame,
+                                karma:       c.karma,
+                                swing:       c.swing,
+                                sight:       c.sight,
+                                aggression:  c.aggression,
+                                beat:        c.beat,
+                                ranged:      c.ranged,
+                                ranged_kind: c.ranged_kind,
+                                wander:      c.wander,
+                                skills:      c
+                                    .skills
+                                    .iter()
+                                    .map(|(skill, value)| (skill.id(), *value))
+                                    .collect(),
                             }
-                    })
-                    .collect(),
+                        })
+                        .collect(),
                 }
             })
             .collect()
@@ -236,39 +236,39 @@ impl World {
         let now = self.state.ticks;
         for record in records {
             let area = crate::spawner::SpawnArea {
-                x: record.x,
-                y: record.y,
-                width: record.width,
+                x:      record.x,
+                y:      record.y,
+                width:  record.width,
                 height: record.height,
-                facet: Facet(record.facet),
+                facet:  Facet(record.facet),
             };
             let creatures = record
                 .creatures
                 .into_iter()
                 .map(|c| {
                     crate::spawner::CreatureTemplate {
-                    body: Graphic(c.body),
-                    hue: Hue(c.hue),
-                    hits: c.hits,
-                    notoriety: c.notoriety,
-                    damage: c.damage,
-                    resistance: c.resistance,
-                    fame: c.fame,
-                    karma: c.karma,
-                    swing: c.swing,
-                    sight: c.sight,
-                    aggression: c.aggression,
-                    beat: c.beat,
-                    ranged: c.ranged,
-                    ranged_kind: c.ranged_kind,
-                    wander: c.wander,
-                    skills: c
-                        .skills
-                        .into_iter()
-                        .filter_map(|(id, value)| {
-                            openshard_state::Skill::from_id(id).map(|skill| (skill, value))
-                        })
-                        .collect(),
+                        body:        Graphic(c.body),
+                        hue:         Hue(c.hue),
+                        hits:        c.hits,
+                        notoriety:   c.notoriety,
+                        damage:      c.damage,
+                        resistance:  c.resistance,
+                        fame:        c.fame,
+                        karma:       c.karma,
+                        swing:       c.swing,
+                        sight:       c.sight,
+                        aggression:  c.aggression,
+                        beat:        c.beat,
+                        ranged:      c.ranged,
+                        ranged_kind: c.ranged_kind,
+                        wander:      c.wander,
+                        skills:      c
+                            .skills
+                            .into_iter()
+                            .filter_map(|(id, value)| {
+                                openshard_state::Skill::from_id(id).map(|skill| (skill, value))
+                            })
+                            .collect(),
                     }
                 })
                 .collect();

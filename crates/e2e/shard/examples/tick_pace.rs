@@ -34,10 +34,16 @@
 //! `cargo run -p openshard-playground` builds and the whole question is about
 //! that build. Pass `--release` to ask the other question.
 
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use openshard_config::Config;
-use openshard_e2e_shard::{in_process, stock_config};
+use openshard_e2e_shard::{
+    in_process,
+    stock_config,
+};
 
 /// How long to watch. `pace` closes a window every second's worth of ticks and
 /// speaks only on an edge, so this has to be long enough for several windows —
@@ -107,11 +113,13 @@ fn disposable_copy_of(path: &str) -> Config {
             std::fs::copy(named, &copy).expect("the world's database can be copied");
             println!("measuring a copy of {}", config.persistence.database);
         }
-        false => println!(
-            "note: {} is not a file on disk, so this is an EMPTY world — the numbers below are a \
+        false => {
+            println!(
+                "note: {} is not a file on disk, so this is an EMPTY world — the numbers below are a \
              floor and not this operator's load",
-            config.persistence.database
-        ),
+                config.persistence.database
+            )
+        }
     }
     config.persistence.database = copy.to_string_lossy().into_owned();
     config
