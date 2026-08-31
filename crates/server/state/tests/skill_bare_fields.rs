@@ -21,6 +21,11 @@ use std::path::{
 /// fix that changed it.
 const ALLOWLIST: &[(&str, usize, &str)] = &[
     (
+        "crates/common/protocol/src/craft.rs",
+        1,
+        "CraftSkillRequirement is generated client/server wire data in the lower protocol crate; the state-owned Skill type cannot cross that dependency boundary, and the shared catalogue build validates every id",
+    ),
+    (
         "crates/server/world/src/tick/command.rs",
         3,
         "the Command queue: CastSpell/SetSkill/UseSkill cross it unchecked (N3's \"the queue is a delivery, not a checkpoint\"); the function that first reads it (cast_spell, set_skill, set_skill_cap, use_skill) promotes with Skill::from_id",

@@ -45,6 +45,7 @@ use proptest::prelude::*;
 use super::tests::{
     START,
     enter,
+    enter_as,
     packets_for,
     world,
 };
@@ -535,6 +536,112 @@ proptest! {
         }
         prop_assert!(openshard_state::audit_item_graph(&world.state).is_empty());
     }
+}
+
+/// Release-only fixed-window planner/commit and simultaneous-open benchmark.
+/// Its fixture deliberately uses the maximum 125 one-unit piles so preparation
+/// measures fragmentation rather than the one-pile happy path.
+#[test]
+#[ignore = "release-mode item transaction microbenchmark"]
+fn release_bench_withdrawal_and_simultaneous_catalogue_opens() {
+    use std::hint::black_box;
+
+    let now = Instant::now();
+    let line = openshard_crafting::consume::MaterialLine {
+        key:      openshard_protocol::craft::craft_key_for(
+            Some((ItemKindId(1), Some(MaterialId(1)))),
+            INGOT,
+            Hue::NONE,
+        )
+        .unwrap(),
+        graphic:  INGOT,
+        hue:      Some(Hue::NONE),
+        amount:   openshard_crafting::consume::MAX_CRAFT_WITHDRAWALS as u16,
+        message:  openshard_crafting::Text::Str("not enough ingots"),
+        semantic: Some((ItemKindId(1), Some(MaterialId(1)))),
+    };
+    let materials = openshard_crafting::Materials {
+        lines:      vec![line],
+        max_amount: 1,
+        res_hue:    Hue::NONE,
+    };
+    const PREPARES: u32 = 20_000;
+
+    let mut dense = world();
+    let dense_connection = enter(&mut dense, now);
+    give(
+        &mut dense,
+        dense_connection,
+        INGOT,
+        Hue::NONE,
+        openshard_crafting::consume::MAX_CRAFT_WITHDRAWALS as u16,
+    );
+    let dense_player = dense.state.players[&dense_connection];
+    let began = Instant::now();
+    for _ in 0..PREPARES {
+        black_box(
+            openshard_crafting::consume::prepare_withdrawal(
+                &dense.state,
+                dense_player,
+                &materials,
+                openshard_crafting::Share::All,
+            )
+            .unwrap(),
+        );
+    }
+    let dense_prepare = began.elapsed();
+
+    let mut measured = world();
+    let connection = enter(&mut measured, now);
+    for _ in 0..openshard_crafting::consume::MAX_CRAFT_WITHDRAWALS {
+        give(&mut measured, connection, INGOT, Hue::NONE, 1);
+    }
+    let player = measured.state.players[&connection];
+    let began = Instant::now();
+    for _ in 0..PREPARES {
+        black_box(
+            openshard_crafting::consume::prepare_withdrawal(
+                &measured.state,
+                player,
+                &materials,
+                openshard_crafting::Share::All,
+            )
+            .unwrap(),
+        );
+    }
+    let prepare = began.elapsed();
+    let plan = openshard_crafting::consume::prepare_withdrawal(
+        &measured.state,
+        player,
+        &materials,
+        openshard_crafting::Share::All,
+    )
+    .unwrap();
+    let began = Instant::now();
+    plan.commit(&mut measured.state);
+    let commit = began.elapsed();
+
+    let mut clients = world();
+    let mut connections = Vec::new();
+    for raw in 1..=MAX_CATALOGUE_OPENS_PER_TICK as u64 {
+        let connection = ConnectionId::from_raw(raw);
+        enter_as(&mut clients, connection, now);
+        connections.push(connection);
+    }
+    for connection in connections {
+        clients.queue(Command::OpenCraftCatalogue { connection });
+    }
+    let began = Instant::now();
+    clients.tick(now);
+    let opens = began.elapsed();
+    eprintln!(
+        "craft transaction release: dense one-pile prepare = {:.1} us/op; fragmented 125-pile prepare = {:.1} us/op; one 125-pile commit = {:.1} us; 32 simultaneous catalogue opens = {:.1} us total",
+        dense_prepare.as_secs_f64() * 1_000_000.0 / f64::from(PREPARES),
+        prepare.as_secs_f64() * 1_000_000.0 / f64::from(PREPARES),
+        commit.as_secs_f64() * 1_000_000.0,
+        opens.as_secs_f64() * 1_000_000.0,
+    );
+    assert_eq!(clients.queued(), 0);
 }
 
 #[test]

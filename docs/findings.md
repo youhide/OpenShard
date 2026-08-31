@@ -669,3 +669,13 @@ passed against a `map0.mul` that was 90MB of zeroes — all-zero terrain is
 perfectly smooth however you index it. `terrain::tests::the_map_is_not_degenerate`
 exists to stop that. Any test that measures a property of real data can pass
 vacuously on absent data.
+
+**A bounded transaction can still multiply bounded maintenance.** Crafting from
+125 one-unit piles was individually safe, yet every `consume` notification
+rebuilt the same 125-item root. Release commit time was 10,568.5 microseconds:
+the linear withdrawal loop had composed with a linear projection into quadratic
+work. A prepared root batch now suppresses intermediate publications and emits
+one final revision; the same fixture takes 68.6 microseconds, about 154 times
+less. The invariant test matters as much as the timing: while the batch is open
+readers see the old complete revision, then one complete new revision, never a
+partial stock view.

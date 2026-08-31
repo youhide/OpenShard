@@ -838,6 +838,7 @@ impl World {
         let mut deferred = Vec::new();
         let mut command_work = 0usize;
         let mut catalogue_opens = 0usize;
+        let mut catalogue_coalesced = 0usize;
         for (index, command) in commands.into_iter().enumerate() {
             if command_work == MAX_COMMAND_WORK_PER_TICK {
                 deferred.push(command);
@@ -845,6 +846,7 @@ impl World {
             }
             if let Command::OpenCraftCatalogue { connection } = &command {
                 if last_catalogue_open.get(connection) != Some(&index) {
+                    catalogue_coalesced += 1;
                     continue;
                 }
                 if catalogue_opens == MAX_CATALOGUE_OPENS_PER_TICK {
@@ -855,6 +857,16 @@ impl World {
             }
             command_work += 1;
             self.apply(command, now);
+        }
+        if !deferred.is_empty() || catalogue_coalesced != 0 {
+            tracing::debug!(
+                metric = "item_transaction.command_budget",
+                command_work,
+                catalogue_opens,
+                catalogue_coalesced,
+                deferred = deferred.len(),
+                "bounded command lanes deferred or coalesced work"
+            );
         }
         deferred.append(&mut self.inbox);
         self.inbox = deferred;

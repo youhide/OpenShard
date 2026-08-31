@@ -120,6 +120,8 @@ impl WithdrawalPlan {
     /// therefore a broken caller invariant, not a gameplay refusal halfway
     /// through payment.
     pub fn commit(self, state: &mut WorldState) {
+        let began = std::time::Instant::now();
+        let withdrawals = self.rows.len();
         assert_eq!(
             state
                 .craft_stock_amounts(self.source)
@@ -127,6 +129,7 @@ impl WithdrawalPlan {
             Ok(self.source_revision),
             "a prepared craft source keeps its projection revision until commit"
         );
+        let batch = state.begin_craft_stock_batch(self.source);
         for row in self.rows {
             assert_eq!(
                 state.registry.entity_of(row.serial),
@@ -155,6 +158,12 @@ impl WithdrawalPlan {
                 "a validated craft withdrawal must consume its reserved pile"
             );
         }
+        state.finish_craft_stock_batch(batch);
+        tracing::trace!(
+            metric = "item_transaction.withdrawal_commit",
+            withdrawals,
+            elapsed_ns = began.elapsed().as_nanos(),
+        );
     }
 
     #[must_use]
@@ -399,7 +408,14 @@ pub fn prepare_withdrawal(
     materials: &Materials,
     share: Share,
 ) -> Result<WithdrawalPlan, Refusal> {
+    let began = std::time::Instant::now();
     if materials.lines.len() > MAX_CRAFT_RESOURCE_LINES || materials.max_amount > MAX_CRAFT_BATCH {
+        tracing::trace!(
+            metric = "item_transaction.withdrawal_prepare",
+            refused = true,
+            reason = "declared_bound",
+            elapsed_ns = began.elapsed().as_nanos(),
+        );
         return Err(Refusal::TooComplex);
     }
     let Some(owner) = state.registry.serial_of(crafter) else {
@@ -456,6 +472,12 @@ pub fn prepare_withdrawal(
                     .expect("combined reservations cannot exceed the expected pile amount");
             } else {
                 if rows.len() == MAX_CRAFT_WITHDRAWALS {
+                    tracing::trace!(
+                        metric = "item_transaction.withdrawal_prepare",
+                        refused = true,
+                        reason = "fragmentation",
+                        elapsed_ns = began.elapsed().as_nanos(),
+                    );
                     return Err(Refusal::TooComplex);
                 }
                 row_by_serial.insert(serial, rows.len());
@@ -475,6 +497,13 @@ pub fn prepare_withdrawal(
     }
 
     rows.sort_by_key(|row| (row.source, row.serial));
+    tracing::trace!(
+        metric = "item_transaction.withdrawal_prepare",
+        candidates = candidates.len(),
+        withdrawals = rows.len(),
+        refused = false,
+        elapsed_ns = began.elapsed().as_nanos(),
+    );
     Ok(WithdrawalPlan {
         source,
         source_revision,

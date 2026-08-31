@@ -62,15 +62,19 @@ pub enum CraftStockError {
 
 #[derive(Debug)]
 pub(crate) struct CraftStockIndex {
-    next_revision: u64,
-    roots:         HashMap<Serial, RootProjection>,
+    next_revision:   u64,
+    roots:           HashMap<Serial, RootProjection>,
+    suspended:       Option<Serial>,
+    suspended_dirty: bool,
 }
 
 impl CraftStockIndex {
     pub(crate) fn new() -> Self {
         Self {
-            next_revision: 1,
-            roots:         HashMap::new(),
+            next_revision:   1,
+            roots:           HashMap::new(),
+            suspended:       None,
+            suspended_dirty: false,
         }
     }
 
@@ -84,6 +88,13 @@ impl CraftStockIndex {
             }
         }
     }
+}
+
+/// Proof that one root's projection updates are being folded into one rebuild.
+/// Only an already-prepared atomic mutation should hold this token.
+#[derive(Debug)]
+pub struct CraftStockBatch {
+    root: Serial,
 }
 
 impl WorldState {
@@ -109,10 +120,52 @@ impl WorldState {
     /// the realtime ceiling and records an unavailable projection rather than
     /// allowing a later request to rediscover an adversarial subtree.
     pub fn refresh_craft_stock_root(&mut self, root: Serial) {
+        if self.craft_stock.suspended == Some(root) {
+            self.craft_stock.suspended_dirty = true;
+            return;
+        }
+        let began = std::time::Instant::now();
         let revision = self.craft_stock.next_revision;
         self.craft_stock.next_revision = self.craft_stock.next_revision.wrapping_add(1).max(1);
         let projection = build_root(self, root, revision);
+        let (items, refused) = match &projection {
+            Some(RootProjection::Ready { item_count, .. }) => (*item_count, false),
+            Some(RootProjection::TooComplex { .. }) => (MAX_CRAFT_SOURCE_ITEMS + 1, true),
+            None => (0, false),
+        };
+        tracing::trace!(
+            metric = "item_transaction.craft_stock_projection",
+            root = %root,
+            items,
+            refused,
+            elapsed_ns = began.elapsed().as_nanos(),
+        );
         self.craft_stock.replace(root, projection);
+    }
+
+    /// Fold notifications for one prepared atomic root mutation into a single
+    /// final projection revision.
+    #[must_use]
+    pub fn begin_craft_stock_batch(&mut self, root: Serial) -> CraftStockBatch {
+        assert!(
+            self.craft_stock.suspended.replace(root).is_none(),
+            "craft stock batches do not nest"
+        );
+        self.craft_stock.suspended_dirty = false;
+        CraftStockBatch { root }
+    }
+
+    /// Publish the one current projection after a prepared batch committed.
+    pub fn finish_craft_stock_batch(&mut self, batch: CraftStockBatch) {
+        assert_eq!(
+            self.craft_stock.suspended.take(),
+            Some(batch.root),
+            "the craft stock batch finishes the root it began"
+        );
+        let dirty = std::mem::replace(&mut self.craft_stock.suspended_dirty, false);
+        if dirty {
+            self.refresh_craft_stock_root(batch.root);
+        }
     }
 
     /// Refresh the root which currently contains `item`, if it has one.
@@ -434,6 +487,76 @@ mod tests {
             state.craft_stock_piles(root, &[ingot_key()]),
             Err(CraftStockError::TooComplex)
         );
+    }
+
+    #[test]
+    fn a_prepared_batch_publishes_one_final_root_revision() {
+        let mut state = world();
+        let (_, root) = root_item(&mut state, 1);
+        pile(&mut state, root, 1, true);
+        let before = state.craft_stock_revision(root).unwrap();
+
+        let batch = state.begin_craft_stock_batch(root);
+        state.refresh_craft_stock_root(root);
+        state.refresh_craft_stock_root(root);
+        assert_eq!(state.craft_stock_revision(root), Some(before));
+        state.finish_craft_stock_batch(batch);
+
+        assert_eq!(state.craft_stock_revision(root), Some(before + 1));
+    }
+
+    /// Explicit release-only microbenchmark used to select the realtime root
+    /// ceiling. Run with `cargo test --release -p openshard-state
+    /// release_bench_craft_stock -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "release-mode item transaction microbenchmark"]
+    fn release_bench_craft_stock_projection_and_snapshot_are_local() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let mut state = world();
+        let (_, root) = root_item(&mut state, 1);
+        for _ in 0..MAX_CRAFT_SOURCE_ITEMS {
+            pile(&mut state, root, 1, true);
+        }
+
+        const PROJECTIONS: u32 = 10_000;
+        let began = Instant::now();
+        for _ in 0..PROJECTIONS {
+            state.refresh_craft_stock_root(black_box(root));
+        }
+        let local_projection = began.elapsed();
+
+        for _ in 0..50_000 {
+            let unrelated = state.registry.spawn();
+            state.registry.insert(
+                unrelated,
+                Drawn {
+                    id:  Graphic(0x0EED),
+                    hue: Hue::NONE,
+                },
+            );
+        }
+
+        let began = Instant::now();
+        for _ in 0..PROJECTIONS {
+            state.refresh_craft_stock_root(black_box(root));
+        }
+        let large_world_projection = began.elapsed();
+
+        const SNAPSHOTS: u32 = 100_000;
+        let began = Instant::now();
+        for _ in 0..SNAPSHOTS {
+            black_box(state.craft_stock_amounts(black_box(root)).unwrap());
+        }
+        let snapshot = began.elapsed();
+        eprintln!(
+            "craft_stock release: 125-item projection with 0 unrelated items = {:.1} us/op; with 50,000 unrelated items = {:.1} us/op; dense snapshot = {:.1} ns/op",
+            local_projection.as_secs_f64() * 1_000_000.0 / f64::from(PROJECTIONS),
+            large_world_projection.as_secs_f64() * 1_000_000.0 / f64::from(PROJECTIONS),
+            snapshot.as_secs_f64() * 1_000_000_000.0 / f64::from(SNAPSHOTS),
+        );
+        assert_eq!(state.craft_stock_item_count(root), Ok(MAX_CRAFT_SOURCE_ITEMS));
     }
 
     proptest! {

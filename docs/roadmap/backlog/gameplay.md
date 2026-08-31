@@ -64,6 +64,15 @@ started.
   Resmelt, recipe scrolls, make-number/make-max and the last-ten list, and the
   two material chains (hides → leather, cotton → cloth) that are addon
   interactions in ServUO rather than crafts.
+- ~~**Atomic item transactions and inventory search.**~~ **Landed.** Canonical
+  ownership now maintains exact container membership; split, merge, give,
+  withdrawal, and successful craft output use validated prepare/commit doors.
+  Recursive backpack stock and catalogue work have measured hard tick bounds,
+  and Ctrl+I provides permission-filtered, paginated house inventory search.
+  Direct crafting from house boxes was deliberately rejected as a separate
+  access-policy feature, not left half-built behind the search index. The
+  contracts and release evidence are in
+  [`item_transactions_plan.md`](../../item_transactions_plan.md).
 - ~~**Travel.**~~ Landed; see **Travel** in §6 `magic`. Still open from that
   entry: Sacred Journey, the moon-phase gates, red/young restrictions, ship-mark
   runes, and a tooltip that refreshes when a property changes — which travel gave

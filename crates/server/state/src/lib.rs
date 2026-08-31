@@ -185,6 +185,7 @@ pub use components::{
     stat_shift,
 };
 pub use craft_stock::{
+    CraftStockBatch,
     CraftStockError,
     CraftStockPile,
 };

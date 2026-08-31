@@ -33,6 +33,7 @@ openshard-protocol.workspace = true
 openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
 serde.workspace = true
+tracing.workspace = true
 
 # `build.rs` only: the body-type, mount and skill tables are `data/*.json` and
 # become `const`s before the crate compiles. Nothing here is linked into the shard.

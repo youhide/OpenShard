@@ -254,7 +254,8 @@ impl HouseInventoryIndex {
         }
     }
 
-    fn advance(&mut self, state: &WorldState, mut budget: usize) {
+    fn advance(&mut self, state: &WorldState, mut budget: usize) -> usize {
+        let available = budget;
         while budget > 0 {
             let Some(house) = self.pending.pop_front() else {
                 break;
@@ -290,6 +291,7 @@ impl HouseInventoryIndex {
                 self.pending.push_back(house);
             }
         }
+        available - budget
     }
 
     fn page(
@@ -613,8 +615,15 @@ impl WorldState {
 
     /// Spend at most `budget` work units rebuilding invalidated projections.
     pub fn advance_house_inventory_rebuilds(&mut self, budget: usize) {
+        let began = std::time::Instant::now();
         let mut index = std::mem::replace(&mut self.house_inventory, HouseInventoryIndex::new());
-        index.advance(self, budget);
+        let spent = index.advance(self, budget);
+        tracing::trace!(
+            metric = "item_transaction.house_inventory_projection",
+            budget,
+            spent,
+            elapsed_ns = began.elapsed().as_nanos(),
+        );
         self.house_inventory = index;
     }
 

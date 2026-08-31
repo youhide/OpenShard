@@ -484,3 +484,20 @@ typed material-bearing input of that same family.
 `ItemUsed` now exposes optional `item_kind` and `material` beside its legacy
 graphic, so scripts can migrate rules without reverse-engineering client
 presentation. The fields remain `None` for still-unmapped legacy items.
+
+The item-transaction layer now consumes the generated recipe/identity graph as
+a shared client/server artifact. Each exact semantic or audited legacy selector
+has a dense `CraftKey`; recursive backpack stock maintains totals and ordered
+pile candidates under that key on mutation. Catalogue context carries those
+totals and the shared catalogue revision, while the client derives readiness
+for all 492 rows locally. A craft request still names one stable recipe and the
+server prepares its withdrawal from current canonical `ItemLocation`, amount,
+kind, and material facts before any output or input is committed.
+
+Restore rejects zero or over-`MAX_STACK` saved amounts before allocating an
+entity. Live amount changes go through the stack mutation door, and item
+ownership projects into exact `ContainedItems`; neither the semantic identity
+bridge nor a stale index can authorize consumption. House inventory search uses
+the same generated identity catalogue for bounded exact selectors, but its
+permissioned results are read-only and direct house-storage crafting remains a
+separate, declined policy.

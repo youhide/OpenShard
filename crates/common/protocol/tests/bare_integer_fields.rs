@@ -176,6 +176,187 @@ const ALLOWLIST: &[(&str, &str, &str)] = &[
         "range",
         "CraftWeaponProperties: optional tile count for a ranged weapon, zero remains the wire sentinel for melee",
     ),
+    (
+        "craft.rs",
+        "skill",
+        "CraftSkillRequirement: openshard_state::Skill lives above protocol; the generated catalogue validates the id",
+    ),
+    (
+        "craft.rs",
+        "minimum",
+        "CraftSkillRequirement: a displayed skill quantity in tenths of a percent",
+    ),
+    (
+        "craft.rs",
+        "needs",
+        "CraftCatalogueDefinitionRow: generated facility-presence bitmask; the facility domain lives in crafting above protocol",
+    ),
+    (
+        "craft.rs",
+        "request_id",
+        "CraftCatalogue: connection-local correlation token chosen by the client and compared opaquely",
+    ),
+    (
+        "craft.rs",
+        "catalogue_revision",
+        "CraftCatalogue: generated content hash compared opaquely by both ends",
+    ),
+    (
+        "craft.rs",
+        "craft_projection_revision",
+        "CraftCatalogue: server-computed stock generation used only as an opaque cache diagnostic",
+    ),
+    (
+        "craft.rs",
+        "backpack_revision",
+        "CraftCatalogue: same opaque stock-generation argument",
+    ),
+    (
+        "craft.rs",
+        "facilities",
+        "CraftCatalogue: facility-presence bitmask whose domain lives in crafting above protocol",
+    ),
+    (
+        "craft.rs",
+        "skills",
+        "CraftCatalogue: pairs of state-owned skill ids and displayed tenths-of-a-percent quantities",
+    ),
+    (
+        "craft.rs",
+        "amounts",
+        "CraftCatalogue: dense CraftKey-indexed stock quantities, not identities",
+    ),
+    (
+        "craft.rs",
+        "amount",
+        "CraftWorkbenchComponent: a displayed result/input stack quantity",
+    ),
+    (
+        "craft.rs",
+        "carried",
+        "CraftWorkbenchComponent: optional displayed inventory quantity",
+    ),
+    (
+        "craft.rs",
+        "button",
+        "CraftWorkbenchGroup: the normal gump reply id at this private presentation seam",
+    ),
+    (
+        "craft.rs",
+        "button",
+        "CraftWorkbenchMaterial: the normal gump reply id at this private presentation seam",
+    ),
+    (
+        "craft.rs",
+        "carried",
+        "CraftWorkbenchMaterial: displayed inventory quantity",
+    ),
+    (
+        "craft.rs",
+        "make_button",
+        "CraftWorkbenchRecipe: optional gump reply id at this private presentation seam",
+    ),
+    (
+        "craft.rs",
+        "details_button",
+        "CraftWorkbenchRecipe: optional gump reply id at this private presentation seam",
+    ),
+    (
+        "craft.rs",
+        "skills",
+        "CraftWorkbenchRecipe: displayed skill thresholds in tenths of a percent",
+    ),
+    (
+        "craft.rs",
+        "Details.success_per_mille",
+        "CraftWorkbenchPage: displayed probability quantity in per-mille units",
+    ),
+    (
+        "craft.rs",
+        "Details.exceptional_per_mille",
+        "CraftWorkbenchPage: optional displayed probability quantity in per-mille units",
+    ),
+    (
+        "craft.rs",
+        "tool_uses",
+        "CraftWorkbench: displayed remaining-use quantity",
+    ),
+    (
+        "craft.rs",
+        "required_facilities",
+        "CraftWorkbench: facility-presence bitmask whose domain lives in crafting above protocol",
+    ),
+    (
+        "craft.rs",
+        "present_facilities",
+        "CraftWorkbench: same generated facility-presence bitmask",
+    ),
+    (
+        "craft.rs",
+        "materials_button",
+        "CraftWorkbench: optional gump reply id at this private presentation seam",
+    ),
+    (
+        "craft.rs",
+        "refresh_button",
+        "CraftWorkbench: gump reply id at this private presentation seam",
+    ),
+    (
+        "craft.rs",
+        "cancel_button",
+        "CraftWorkbench: gump reply id at this private presentation seam",
+    ),
+    // -- bounded read-only house inventory ---------------------------------
+    (
+        "house_inventory.rs",
+        "aggregate_total",
+        "HouseInventoryRow: permission-filtered item quantity across roots",
+    ),
+    (
+        "house_inventory.rs",
+        "root_total",
+        "HouseInventoryRow: item quantity in one root",
+    ),
+    (
+        "house_inventory.rs",
+        "pile_count",
+        "HouseInventoryRow: diagnostic count of piles in one root",
+    ),
+    (
+        "house_inventory.rs",
+        "Search.expected_epoch",
+        "HouseInventoryRequest: optional projection generation compared opaquely for pagination continuity",
+    ),
+    (
+        "house_inventory.rs",
+        "Search.limit",
+        "HouseInventoryRequest: page-size quantity validated against MAX_HOUSE_INVENTORY_PAGE while decoding",
+    ),
+    (
+        "house_inventory.rs",
+        "Resolve.epoch",
+        "HouseInventoryRequest: projection generation compared opaquely before canonical revalidation",
+    ),
+    (
+        "house_inventory.rs",
+        "Page.epoch",
+        "HouseInventoryReply: server projection generation echoed for the next bounded request",
+    ),
+    (
+        "house_inventory.rs",
+        "Resolved.epoch",
+        "HouseInventoryReply: same server projection generation",
+    ),
+    (
+        "house_inventory.rs",
+        "Refused.current_epoch",
+        "HouseInventoryReply: same generation returned to replace a stale client token",
+    ),
+    (
+        "item_kind.rs",
+        "SameAsInput.0",
+        "MaterialRule: build-validated index into one recipe's bounded resource lines",
+    ),
     // -- login's own quantities, and a type that is not a packet struct -----
     // N6 amendments 7/8
     // `percent_full` was on this list and is not any more: 100 is a ceiling

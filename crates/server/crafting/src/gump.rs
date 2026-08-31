@@ -460,6 +460,7 @@ fn catalogue() -> GumpLayout {
 /// There are deliberately no coordinates here: the client's `ScrollTable`
 /// virtualizes rows, clips them and keeps the scroll position locally.
 fn catalogue_data(state: &mut WorldState, player: EntityId) -> CraftCatalogue {
+    let began = std::time::Instant::now();
     let facilities = environment::around(state, player);
     let backpack = state
         .registry
@@ -478,7 +479,7 @@ fn catalogue_data(state: &mut WorldState, player: EntityId) -> CraftCatalogue {
             connection.craft_catalogue_request
         })
         .unwrap_or_default();
-    CraftCatalogue {
+    let catalogue = CraftCatalogue {
         gump_id: CRAFT_GUMP,
         request_id,
         catalogue_revision: openshard_protocol::craft::CRAFT_CATALOGUE_REVISION,
@@ -495,7 +496,14 @@ fn catalogue_data(state: &mut WorldState, player: EntityId) -> CraftCatalogue {
             .collect(),
         amounts,
         rows: Vec::new(),
-    }
+    };
+    tracing::trace!(
+        metric = "item_transaction.catalogue_context",
+        keys = catalogue.amounts.len(),
+        skills = catalogue.skills.len(),
+        elapsed_ns = began.elapsed().as_nanos(),
+    );
+    catalogue
 }
 
 /// The normal, tool-specific craft gump as data rather than a 0xB0 layout.

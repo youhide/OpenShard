@@ -273,6 +273,37 @@ for that churn and still iterate a dense array.
 If profiling later says otherwise, `Registry`'s public API does not leak the
 storage, so it can be replaced.
 
+### Item ownership and atomic mutations
+
+`ItemLocation` is the canonical ownership edge. `Position`, `Contained`,
+`Equipped`, cursor state, and `ContainedItems` are synchronous projections of
+that edge; readers revalidate indexed candidates against it. Container lookup
+therefore costs the named container's candidate count, never an iteration over
+the world, and restore rebuilds the index through the ordinary establish door
+instead of persisting derived membership.
+
+Compound quantity/ownership changes use domain-specific prepare/commit values.
+Prepare validates capacity, identity, amount, source revision, and every needed
+allocation without publishing gameplay state. Commit has no ordinary failure
+branch. Crafting combines a deterministic `WithdrawalPlan` with a prepared
+output placement, so an allocation or capacity refusal spends neither inputs
+nor tool state and emits no durable craft event.
+
+Recursive backpack craft stock is paid for on canonical mutation and bounded
+at 125 descendants. Dense `CraftKey` totals answer catalogue context directly;
+ordered piles are revalidated only for the selected authoritative recipe.
+Multiple pile changes in one prepared withdrawal suppress intermediate stock
+rebuilds and publish one final root revision. House inventory uses a separate
+permissioned, epoch-invalidated projection rebuilt under a fixed tick budget;
+its Ctrl+I search is read-only. Crafting from house boxes is deliberately not a
+side effect of search and remains disabled under the settled `SearchOnly`
+policy.
+
+The tick admits at most 256 command work units and 32 coalesced catalogue opens.
+Unadmitted work remains FIFO for a later tick; a gameplay mutation is never
+paused halfway. The complete contract, limits, release measurements, and
+property model live in [`item_transactions_plan.md`](item_transactions_plan.md).
+
 ## Events
 
 Systems do not call each other. Combat does not call the guild system to update

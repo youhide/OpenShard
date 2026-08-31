@@ -2158,6 +2158,10 @@ mod tests {
                     }],
                 },
             }),
+            ServerPacket::HouseInventory(HouseInventoryReply::Refused {
+                reason:        crate::house_inventory::HouseInventoryRefusal::Unavailable,
+                current_epoch: 7,
+            }),
             ServerPacket::GumpDisplay(crate::gump::GumpDisplay {
                 serial:  crate::gump::GumpKey::STANDALONE,
                 gump_id: crate::gump::GumpId(0x0051_0001),

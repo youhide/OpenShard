@@ -426,13 +426,20 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         return;
     };
     let stacks = recipe.use_all_res || recipe.amount > 1 || made > 1;
-    let placement = match identity {
+    let output_began = std::time::Instant::now();
+    let placement_result = match identity {
         Some((kind, material)) => {
             openshard_items::prepare_kind_placement(state, crafter, pack, kind, material, made, stacks)
         }
         None => openshard_items::prepare_placement(state, crafter, pack, recipe.graphic, hue, made, stacks),
     };
-    let placement = match placement {
+    tracing::trace!(
+        metric = "item_transaction.output_prepare",
+        amount = made,
+        refused = placement_result.is_err(),
+        elapsed_ns = output_began.elapsed().as_nanos(),
+    );
+    let placement = match placement_result {
         Ok(placement) => placement,
         Err(openshard_items::PreparePlacementError::Full(full)) => {
             state.system_message(crafter, full.message());
@@ -459,6 +466,7 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         amount: made,
     };
 
+    let commit_began = std::time::Instant::now();
     state.rng = prepared_rng;
     prepared.withdrawal.commit(state);
     if recipe.use_all_res {
@@ -501,6 +509,11 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         system: SystemId::new(work.system),
     });
     wear_tool(state, crafter, work.tool);
+    tracing::trace!(
+        metric = "item_transaction.craft_commit",
+        amount = prepared.amount,
+        elapsed_ns = commit_began.elapsed().as_nanos(),
+    );
 }
 
 /// Resolve the semantic output before ingredients are spent.

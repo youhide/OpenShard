@@ -166,7 +166,7 @@ and the two are kept in step by hand.
 | `mobile::Vitals::{current, max}` | components of one bar — [N2 amendment 2](#amendments-forced-by-n2-mobilers) |
 | `mobile::MobileStatus::{strength, dexterity, intelligence, gold, armor, weight, max_weight, stat_cap, followers, followers_max}` | the status bar's quantities — [N2 amendment 3](#amendments-forced-by-n2-mobilers) |
 | `vendor::BuyLine::price`, `vendor::SellLine::price` | gold: the `MobileStatus::gold` argument — [N5 amendment 1](#amendments-forced-by-n5-vendorrs) |
-| `login::ShardEntry::{percent_full, timezone}` | quantities, by the `MobileStatus` argument — [N6 amendment 8](#amendments-forced-by-n6-loginrs-seedrs-versionrs) |
+| `login::ShardEntry::timezone` | a quantity, by the `MobileStatus` argument — [N6 amendment 8](#amendments-forced-by-n6-loginrs-seedrs-versionrs) |
 | `version::ClientVersion::{major, minor, revision, patch}` | components of one version, and not a packet struct — [N6 amendment 7](#amendments-forced-by-n6-loginrs-seedrs-versionrs) |
 | `feedback::Animation::{action, repeat_count, delay}` | a body-specific animation index whose domain (`openshard_state::Action`) lives above `protocol`, plus quantities — [N7 amendment 1](#amendments-forced-by-n7-feedbackrs-skillrs-combatrs-propertiesrs-spellbookrs-encodedrs-castingrs) |
 | `feedback::NewAnimation::{animation_type, action, delay}` | same, the `0xE2` numbering — [N7 amendment 1](#amendments-forced-by-n7-feedbackrs-skillrs-combatrs-propertiesrs-spellbookrs-encodedrs-castingrs) |
@@ -185,6 +185,16 @@ and the two are kept in step by hand.
 | `wire::InvalidCharacterSlot::slot` | same |
 | `design::DesignTile::{dx, dy, dz}` | a signed tile displacement from a house's origin — `target::MultiOffset`'s geometry, at `i8` because the wire's stair buffer gives each offset one byte |
 | `design::DesignBounds::{x_min, y_min}` | the corner the grid planes are indexed from, in that same displacement space: subtracted from one and added back to the other |
+| `craft::{CraftCatalogueComponent, CraftWorkbenchComponent}::amount`, workbench/component `carried`, `CraftCatalogue::amounts`, `CraftWorkbench::tool_uses` | displayed or indexed item/use quantities; their gameplay caps live above `protocol` |
+| craft catalogue/workbench `button`, `make_button`, `details_button`, `materials_button`, `refresh_button`, `cancel_button` | private presentation-seam gump reply ids, matching the existing `CraftCatalogueRow::button` exception |
+| `craft::CraftSkillRequirement::{skill, minimum}`, catalogue/workbench `skills` | state-owned skill ids plus displayed thresholds in tenths of a percent |
+| craft `needs`, `facilities`, `required_facilities`, `present_facilities` | generated facility-presence bitmasks whose domain lives in `crafting` above `protocol` |
+| `craft::CraftCatalogue::{request_id, catalogue_revision, craft_projection_revision, backpack_revision}` | connection correlation, generated content hash, and stock generations compared opaquely rather than interpreted as gameplay identity |
+| `craft::CraftWorkbenchPage::Details::{success_per_mille, exceptional_per_mille}` | displayed probability quantities in their named per-mille unit |
+| `house_inventory::HouseInventoryRow::{aggregate_total, root_total, pile_count}` | permission-filtered item quantities and a diagnostic pile count |
+| house-inventory request/reply `epoch`, `expected_epoch`, `current_epoch` fields | one server projection generation compared opaquely for pagination/result continuity; result use still canonically revalidates |
+| `house_inventory::HouseInventoryRequest::Search::limit` | page-size quantity validated against `MAX_HOUSE_INVENTORY_PAGE` at decode |
+| `item_kind::MaterialRule::SameAsInput.0` | build-validated index into one recipe's bounded resource lines |
 
 `containers::ContainedItem::{x, y}` came *off* this list in N5: they are one
 `GumpPoint` now, as [N4 amendment 6](#amendments-forced-by-n4-containersrs)

@@ -6,19 +6,16 @@ boundary, and for replacing whole-world container scans with an exact index.
 Update this document in the same change that settles a decision or completes a
 stage.
 
-**Status:** A1–A5 and A2's access-boundary follow-up are built. Item ownership,
-quantity changes, bounded recursive backpack stock, withdrawal, and successful
-craft output now share prepare/commit doors and unchanged-state refusals. A4's
-dense generated `CraftKey` projection gives selected-recipe checks ordered,
-revisioned candidates without a request-time container walk. A6a's exact house
-coverage, permissioned inventory backend, and client-owned Ctrl+I search window
-are built. A6b is deliberately closed as
-`SearchOnly`. A7's shared 492-recipe artifact, revision handshake, compact
-context packet, client-side readiness, O(1) recipe lookup, and coalesced bounded
-open lane are built. A8 now caps command and catalogue-open work, removes the
-temporary whole-pack catalogue snapshot, and rejects corrupt restored stack
-amounts before allocation. Release measurements, observability, the property
-soak, and documentation cleanup remain open.
+**Status: complete (2026-08-31).** A0–A5, A6a, A7, A8, and A2's access-boundary
+follow-up are built and verified. Item ownership, quantity changes, bounded
+recursive backpack stock, withdrawal, and successful craft output share
+prepare/commit doors and unchanged-state refusals. House inventory search is
+permissioned, paginated, and client-owned. Catalogue availability uses the
+shared 492-recipe artifact and a compact bounded context lane. A6b is
+deliberately closed as `SearchOnly`; its unchecked list is the acceptance
+contract for a future separately approved `OptInCraftStorage`, not unfinished
+runtime behavior. Release measurements, structured observability, the
+10,000-sequence soak, and documentation are complete.
 
 ## Outcome
 
@@ -638,10 +635,10 @@ presentation.
       `Equipped`, `Amount`, and raw `Registry::despawn` for item entities.
 - [x] Add normalized test snapshots for ownership, quantities, identity,
       cursors, and domain events.
-- [ ] Add release-mode microbenchmarks for source-tile projection, a 125-item
+- [x] Add release-mode microbenchmarks for source-tile projection, a 125-item
       root move/access change, fixed-window withdrawal preparation/commit,
       snapshot capture, and simultaneous catalogue opens.
-- [ ] Select and document `MAX_CRAFT_SOURCE_ITEMS`,
+- [x] Select and document `MAX_CRAFT_SOURCE_ITEMS`,
       `MAX_CRAFT_RESOURCE_LINES`, `MAX_CRAFT_WITHDRAWALS`, service-channel
       capacity, and per-tick work budgets from those measurements.
 
@@ -667,6 +664,48 @@ flipped its former loss expectation: ingredients, output, tool, skill, ownership
 identity, cursor state, and `ItemCrafted` events now remain unchanged when output
 allocation fails. A companion full-backpack regression pins the capacity
 failure to the same normalized snapshot.
+
+#### A0 measurement record (2026-08-31)
+
+The explicit ignored benchmarks were run in release mode on an AMD Ryzen 9
+7900X (12 cores/24 threads, x86-64). The stock fixture was one backpack root
+with 125 one-unit items. Rebuilding that root took 96.3 microseconds per
+operation with no unrelated entities and 95.5 microseconds with 50,000
+unrelated registry entities; reading its dense stock snapshot took 27.5
+nanoseconds. The equal timings are the important result: the mutation cost is
+local to the bounded root rather than the world.
+
+The transaction fixture compared one 125-unit pile with 125 one-unit piles.
+Withdrawal preparation took 0.2 microseconds per operation for the dense pile
+and 14.3 microseconds at maximum fragmentation. Committing all 125 withdrawals
+took 68.6 microseconds. Before intermediate stock notifications were folded
+into one final projection rebuild, that same commit took 10,568.5 microseconds;
+the batching door made it about 154 times faster. A tick serving 32 distinct
+simultaneous catalogue opens took 105.1 microseconds total (about 3.3
+microseconds per open), including compact context construction and command-lane
+handling.
+
+A6b was declined as `SearchOnly`, so there is no shipped source-tile/access
+projection to benchmark. Its planned benchmark is therefore not silently
+claimed: the shipped non-spatial backpack-root projection is measured instead,
+and source-tile/access-change measurement remains an acceptance condition if
+`OptInCraftStorage` is separately approved.
+
+Those measurements settle the shipped hard limits:
+
+- `MAX_CRAFT_SOURCE_ITEMS = 125`, aligned with the ordinary backpack item cap;
+- `MAX_CRAFT_RESOURCE_LINES = 4`, enforced by the data build and equal to the
+  maximum in the 492 shipped recipes;
+- `MAX_CRAFT_WITHDRAWALS = 125`, so even maximum fragmentation remains bounded;
+- `MAX_CATALOGUE_OPENS_PER_TICK = 32` after per-connection coalescing and
+  `MAX_COMMAND_WORK_PER_TICK = 256`, with untouched FIFO work deferred whole;
+- `HOUSE_INVENTORY_REBUILD_BUDGET = 256` projection units per tick; and
+- house search accepts at most 32 exact selectors and returns at most 50 rows
+  per page.
+
+Catalogue capture is synchronous fixed indexed work, so there is no worker
+service channel or queue capacity to tune. The 32-open lane is its explicit
+capacity and its deferred/coalesced counts are observable.
 
 ### A1 — make split allocation-first
 
@@ -967,25 +1006,45 @@ catalogue-reply regression remains green.
       reserve the realtime simulation budget and bound service work separately.
 - [x] Never suspend inside a gameplay mutation: defer the whole command before
       prepare when its predicted cost does not fit the remaining budget.
-- [ ] Add counters/timers for index projection, snapshot/service queue latency,
+- [x] Add counters/timers for index projection, snapshot/service queue latency,
       withdrawal planning, output preparation, commit, deferrals, and
       over-budget refusals.
-- [ ] Benchmark index updates and craft requests against unrelated world size,
+- [x] Benchmark index updates and craft requests against unrelated world size,
       local source density, fragmentation, and simultaneous clients; assert the
       request path stays inside its declared work bounds.
-- [ ] Run the 10,000-sequence property soak and commit all regression seeds.
+- [x] Run the 10,000-sequence property soak and commit all regression seeds.
 - [x] Remove the temporary catalogue `MaterialStock` backpack snapshot once
       server readiness is gone.
 - [x] Validate restored stack amounts before entity allocation in
       `crates/server/world/src/tick/persist.rs`; zero or above-`MAX_STACK` saved
       piles are corrupt external records and must be refused, never clamped or
       allowed to reach the in-memory quantity door.
-- [ ] Update `docs/item_kind.md`, architecture notes, and gameplay backlog with
+- [x] Update `docs/item_kind.md`, architecture notes, and gameplay backlog with
       the settled ownership/index/transaction contracts.
+
+Structured tracing records `craft_stock_projection`,
+`house_inventory_projection`, `withdrawal_prepare`, `withdrawal_commit`,
+`output_prepare`, `craft_commit`, and `catalogue_context` elapsed time and work
+shape. `command_budget` records admitted command/catalogue work, coalesced
+opens, and deferred commands; bounded preparation/projection refusals include
+their reason. Because the catalogue lane is synchronous, `catalogue_context`
+is the service latency and there is no hidden worker-queue wait to measure.
+
+The release measurements and commands are recorded in A0. The mutation-model
+soak ran 10,000 sequences of up to 512 actions with
+`OPENSHARD_ITEM_TRANSACTION_CASES=10000` and
+`OPENSHARD_ITEM_TRANSACTION_ACTIONS=512`; it passed, so proptest produced no
+regression seed to commit.
 
 Done when every individual operation and every tick admits only measured bounded
 work, the property soak is clean, and no retired full-world or recursive request
 scan remains on the craft path.
+
+**Final verification (2026-08-31):** `cargo fmt --all -- --check`, workspace
+clippy with `-D warnings`, and `cargo test --workspace --quiet` passed. Both
+ignored release microbenchmarks passed with the A0 numbers above. The final
+release mutation soak passed 10,000 sequences of up to 512 actions in 1.45
+seconds and generated no regression seed.
 
 ## Required verification per stage
 

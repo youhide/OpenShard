@@ -837,6 +837,20 @@ mod tests {
         children
     }
 
+    fn mutation_property_cases() -> u32 {
+        std::env::var("OPENSHARD_ITEM_TRANSACTION_CASES")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(256)
+    }
+
+    fn mutation_property_actions() -> usize {
+        std::env::var("OPENSHARD_ITEM_TRANSACTION_ACTIONS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(128)
+    }
+
     #[test]
     fn one_item_cannot_be_established_in_two_places() {
         let mut state = world();
@@ -1166,9 +1180,14 @@ mod tests {
     }
 
     proptest! {
+        #![proptest_config(ProptestConfig::with_cases(mutation_property_cases()))]
+
         #[test]
         fn indexed_membership_matches_a_slow_scan_after_mutation_sequences(
-            actions in prop::collection::vec((0_u8..8, 0_u8..4), 1..=128),
+            actions in prop::collection::vec(
+                (0_u8..8, 0_u8..4),
+                1..=mutation_property_actions(),
+            ),
         ) {
             let mut state = world();
             let at = Point::new(10, 10, 0);
