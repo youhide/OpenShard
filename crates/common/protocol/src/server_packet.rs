@@ -2100,6 +2100,7 @@ mod tests {
                 amounts: vec![0; crate::craft::CRAFT_KEY_COUNT],
                 rows: vec![crate::craft::CraftCatalogueRow {
                     button:           8,
+                    admin_button:     9,
                     result:           crate::wire::Graphic(0x13EB),
                     result_hue:       crate::wire::Hue::NONE,
                     result_item_kind: Some(crate::item_kind::ItemKindId(4)),
@@ -2140,6 +2141,7 @@ mod tests {
                     recipes: vec![crate::craft::CraftWorkbenchRecipe {
                         make_button:       Some(2),
                         details_button:    Some(3),
+                        admin_button:      Some(4),
                         result:            crate::craft::CraftWorkbenchComponent {
                             item_kind: Some(crate::item_kind::ItemKindId(4)),
                             graphic:   crate::wire::Graphic(0x13EB),

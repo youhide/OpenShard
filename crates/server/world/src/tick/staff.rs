@@ -284,46 +284,69 @@ impl World {
             crate::admin::ButtonAction::OpenItemCreator => {
                 crate::admin::open_item_creator(&mut self.state, actor);
             }
-            crate::admin::ButtonAction::CreateItem => {
+            crate::admin::ButtonAction::CreateItem | crate::admin::ButtonAction::CreateItemKind => {
                 match crate::admin::item_request(&response) {
                     Ok(item) => {
                         let Some(serial) = self.state.registry.serial_of(actor) else {
                             return;
                         };
-                        let created = if let Some((kind, material)) = kind_from_drawn(Drawn {
-                            id:  item.graphic,
-                            hue: item.hue,
-                        }) {
-                            // F1's free-form art fields stay useful for client assets
-                            // that have not entered the registry. A known projection,
-                            // however, is created from its durable identity rather
-                            // than through a legacy art/hue compatibility path.
-                            items::give_kind_to_backpack(
-                                &mut self.state,
-                                serial,
+                        let (created, description) = match item {
+                            crate::admin::ItemRequest::Kind {
                                 kind,
                                 material,
-                                item.amount,
-                                item.stackable,
-                            )
-                        } else {
-                            items::give_to_backpack(
-                                &mut self.state,
-                                serial,
-                                item.graphic,
-                                item.hue,
-                                item.amount,
-                                item.stackable,
-                            )
+                                amount,
+                                stackable,
+                            } => {
+                                (
+                                    items::give_kind_to_backpack(
+                                        &mut self.state,
+                                        serial,
+                                        kind,
+                                        material,
+                                        amount,
+                                        stackable,
+                                    ),
+                                    format!("kind {}", kind.0),
+                                )
+                            }
+                            crate::admin::ItemRequest::LegacyArt {
+                                graphic,
+                                hue,
+                                amount,
+                                stackable,
+                            } => {
+                                let created = if let Some((kind, material)) =
+                                    kind_from_drawn(Drawn { id: graphic, hue })
+                                {
+                                    // A known projection is created from its durable
+                                    // identity even when it came through the legacy
+                                    // debug form.
+                                    items::give_kind_to_backpack(
+                                        &mut self.state,
+                                        serial,
+                                        kind,
+                                        material,
+                                        amount,
+                                        stackable,
+                                    )
+                                } else {
+                                    items::give_to_backpack(
+                                        &mut self.state,
+                                        serial,
+                                        graphic,
+                                        hue,
+                                        amount,
+                                        stackable,
+                                    )
+                                };
+                                (created, format!("{:#06x}", graphic.0))
+                            }
                         };
                         if created {
                             gm::notify(
                                 &mut self.state,
                                 actor,
-                                &format!(
-                                    "Created {} of {:#06x} in your backpack.",
-                                    item.amount, item.graphic.0
-                                ),
+                                &format!("Created {description} in your backpack."),
                             );
                         } else {
                             gm::notify(&mut self.state, actor, "Your backpack cannot hold that item.");

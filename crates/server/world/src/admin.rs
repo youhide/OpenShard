@@ -22,8 +22,11 @@ use openshard_protocol::gump::admin::{
     CREATURE_KIND_FIELD,
     ITEM_AMOUNT_FIELD,
     ITEM_CREATE,
+    ITEM_CREATE_KIND,
     ITEM_GRAPHIC_FIELD,
     ITEM_HUE_FIELD,
+    ITEM_KIND_FIELD,
+    ITEM_MATERIAL_FIELD,
     ITEM_STACKABLE,
 };
 use openshard_protocol::gump::{
@@ -37,6 +40,10 @@ use openshard_protocol::gump::{
     GumpLayout,
     GumpPoint,
     GumpResponse,
+};
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
 };
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::server_packet::ServerPacket;
@@ -303,6 +310,8 @@ pub enum ButtonAction {
     OpenItemCreator,
     /// Submit the generic item form.
     CreateItem,
+    /// Submit a registered gameplay identity from the F1 catalogue.
+    CreateItemKind,
     /// Begin target placement for a server-owned animal preset.
     PlaceCreature,
 }
@@ -402,13 +411,23 @@ const CREATURES: [CreaturePreset; 10] = [
     },
 ];
 
-/// The data the item form makes into an item.
+/// The data one of the two item forms makes into an item.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct ItemRequest {
-    pub graphic:   Graphic,
-    pub hue:       Hue,
-    pub amount:    u16,
-    pub stackable: bool,
+pub enum ItemRequest {
+    /// Explicitly unregistered client art for decoration and asset debugging.
+    LegacyArt {
+        graphic:   Graphic,
+        hue:       Hue,
+        amount:    u16,
+        stackable: bool,
+    },
+    /// Durable gameplay identity from the shared definition catalogue.
+    Kind {
+        kind:      ItemKindId,
+        material:  Option<MaterialId>,
+        amount:    u16,
+        stackable: bool,
+    },
 }
 
 pub fn button_action(
@@ -437,6 +456,8 @@ pub fn button_action(
         }
     } else if gump == ADMIN_ITEM_GUMP && button == ITEM_CREATE {
         ButtonAction::CreateItem
+    } else if gump == ADMIN_ITEM_GUMP && button == ITEM_CREATE_KIND {
+        ButtonAction::CreateItemKind
     } else if gump == ADMIN_CREATURE_GUMP && button == CREATURE_CREATE {
         ButtonAction::PlaceCreature
     } else {
@@ -525,14 +546,6 @@ pub fn place_creature(state: &mut WorldState, actor: EntityId, kind: u16, positi
 /// Validate an item form submission.  Field ids are checked by looking each up
 /// explicitly; a forged or duplicate unknown field carries no meaning.
 pub fn item_request(response: &GumpResponse) -> Result<ItemRequest, &'static str> {
-    let graphic = field(response, ITEM_GRAPHIC_FIELD)
-        .and_then(|value| parse_u16(value.trim()))
-        .map(Graphic)
-        .ok_or("Graphic must be a decimal or 0x hexadecimal number.")?;
-    let hue = field(response, ITEM_HUE_FIELD)
-        .and_then(|value| parse_u16(value.trim()))
-        .map(Hue)
-        .ok_or("Hue must be a decimal or 0x hexadecimal number.")?;
     let amount = field(response, ITEM_AMOUNT_FIELD)
         .and_then(|value| parse_u16(value.trim()))
         .filter(|amount| *amount > 0)
@@ -541,7 +554,35 @@ pub fn item_request(response: &GumpResponse) -> Result<ItemRequest, &'static str
         .switches
         .iter()
         .any(|switch| switch.0 == ITEM_STACKABLE.0);
-    Ok(ItemRequest {
+    if response.button.interpret() == GumpAnswer::Pressed(ITEM_CREATE_KIND) {
+        let kind = field(response, ITEM_KIND_FIELD)
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .and_then(ItemKindId::new)
+            .ok_or("Item kind must name a registered positive definition id.")?;
+        let material = field(response, ITEM_MATERIAL_FIELD)
+            .and_then(|value| parse_u16(value.trim()))
+            .ok_or("Material must be zero or a positive definition id.")?;
+        let material = if material == 0 {
+            None
+        } else {
+            MaterialId::new(material)
+        };
+        return Ok(ItemRequest::Kind {
+            kind,
+            material,
+            amount,
+            stackable,
+        });
+    }
+    let graphic = field(response, ITEM_GRAPHIC_FIELD)
+        .and_then(|value| parse_u16(value.trim()))
+        .map(Graphic)
+        .ok_or("Graphic must be a decimal or 0x hexadecimal number.")?;
+    let hue = field(response, ITEM_HUE_FIELD)
+        .and_then(|value| parse_u16(value.trim()))
+        .map(Hue)
+        .ok_or("Hue must be a decimal or 0x hexadecimal number.")?;
+    Ok(ItemRequest::LegacyArt {
         graphic,
         hue,
         amount,
@@ -661,11 +702,36 @@ mod tests {
 
         assert_eq!(
             item_request(&response),
-            Ok(ItemRequest {
+            Ok(ItemRequest::LegacyArt {
                 graphic:   openshard_protocol::wire::Graphic(0x0eed),
                 hue:       openshard_protocol::wire::Hue(0x0481),
                 amount:    25,
                 stackable: true,
+            })
+        );
+    }
+
+    #[test]
+    fn item_form_accepts_a_semantic_identity_without_client_art() {
+        let response = openshard_protocol::gump::GumpResponse {
+            serial:       openshard_protocol::gump::RawGumpKey(0),
+            gump_id:      openshard_protocol::gump::RawGumpId(ADMIN_ITEM_GUMP.0),
+            button:       openshard_protocol::gump::RawButtonId(ITEM_CREATE_KIND.0),
+            switches:     Vec::new(),
+            text_entries: vec![
+                (ITEM_KIND_FIELD, "9".to_owned()),
+                (ITEM_MATERIAL_FIELD, "1".to_owned()),
+                (ITEM_AMOUNT_FIELD, "1".to_owned()),
+            ],
+        };
+
+        assert_eq!(
+            item_request(&response),
+            Ok(ItemRequest::Kind {
+                kind:      ItemKindId(9),
+                material:  Some(MaterialId(1)),
+                amount:    1,
+                stackable: false,
             })
         );
     }

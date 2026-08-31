@@ -159,6 +159,9 @@ pub struct CraftWeaponProperties {
 pub struct CraftCatalogueRow {
     /// The normal craft-gump reply id for opening this recipe's details.
     pub button:           u32,
+    /// Staff-only reply id which creates the recipe result immediately. The
+    /// client hides it from ordinary players and the shard rechecks authority.
+    pub admin_button:     u32,
     pub result:           Graphic,
     pub result_hue:       Hue,
     /// Durable output type for a migrated recipe row.
@@ -301,6 +304,9 @@ pub struct CraftWorkbenchMaterial {
 pub struct CraftWorkbenchRecipe {
     pub make_button:       Option<u32>,
     pub details_button:    Option<u32>,
+    /// Present only when the server says this viewer may use the immediate
+    /// administrator construction path.
+    pub admin_button:      Option<u32>,
     pub result:            CraftWorkbenchComponent,
     pub skills:            Vec<(CraftText, u16)>,
     pub components:        Vec<CraftWorkbenchComponent>,
@@ -460,6 +466,13 @@ fn write_recipe(out: &mut PacketWriter, recipe: &CraftWorkbenchRecipe) {
         }
         None => out.u8(0),
     }
+    match recipe.admin_button {
+        Some(button) => {
+            out.u8(1);
+            out.u32(button);
+        }
+        None => out.u8(0),
+    }
     write_component(out, &recipe.result);
     out.u8(u8::try_from(recipe.skills.len()).expect("craft recipe has at most 255 skills"));
     for (name, minimum) in &recipe.skills {
@@ -495,6 +508,16 @@ fn read_recipe(reader: &mut PacketReader<'_>) -> Result<CraftWorkbenchRecipe, De
             });
         }
     };
+    let admin_button = match reader.u8()? {
+        0 => None,
+        1 => Some(reader.u32()?),
+        value => {
+            return Err(DecodeError::UnknownValue {
+                field: "craft admin-button presence",
+                value: u32::from(value),
+            });
+        }
+    };
     let result = read_component(reader)?;
     let skills = (0..reader.u8()?)
         .map(|_| Ok((read_craft_text(reader)?, reader.u16()?)))
@@ -505,6 +528,7 @@ fn read_recipe(reader: &mut PacketReader<'_>) -> Result<CraftWorkbenchRecipe, De
     Ok(CraftWorkbenchRecipe {
         make_button,
         details_button,
+        admin_button,
         result,
         skills,
         components,
@@ -845,6 +869,7 @@ mod tests {
             amounts: vec![0; CRAFT_KEY_COUNT],
             rows: vec![CraftCatalogueRow {
                 button:           8,
+                admin_button:     9,
                 result:           Graphic(0x13EB),
                 result_hue:       Hue::NONE,
                 result_item_kind: Some(ItemKindId(4)),
@@ -922,6 +947,7 @@ mod tests {
                 recipe:                CraftWorkbenchRecipe {
                     make_button:       Some(1),
                     details_button:    None,
+                    admin_button:      Some(2),
                     result:            CraftWorkbenchComponent {
                         item_kind: Some(ItemKindId(4)),
                         graphic:   Graphic(0x13EB),

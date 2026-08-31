@@ -195,6 +195,7 @@ fn main() {
         writeln!(out, "        CraftCatalogueDefinitionRow {{").unwrap();
         writeln!(out, "            row: CraftCatalogueRow {{").unwrap();
         writeln!(out, "                button: {},", 3 + index as u32 * 7).unwrap();
+        writeln!(out, "                admin_button: {},", 4 + index as u32 * 7).unwrap();
         writeln!(out, "                result: Graphic({graphic}),").unwrap();
         writeln!(out, "                result_hue: Hue({hue}),").unwrap();
         writeln!(

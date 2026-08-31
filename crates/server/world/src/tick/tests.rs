@@ -12510,6 +12510,39 @@ fn admin_item_response(
     }
 }
 
+fn admin_item_kind_response(
+    connection: ConnectionId,
+    kind: openshard_protocol::item_kind::ItemKindId,
+    material: Option<openshard_protocol::item_kind::MaterialId>,
+    amount: u16,
+) -> Command {
+    Command::GumpResponse {
+        connection,
+        response: openshard_protocol::gump::GumpResponse {
+            serial:       openshard_protocol::gump::RawGumpKey(0),
+            gump_id:      openshard_protocol::gump::RawGumpId(crate::admin::ADMIN_ITEM_GUMP.0),
+            button:       openshard_protocol::gump::RawButtonId(
+                openshard_protocol::gump::admin::ITEM_CREATE_KIND.0,
+            ),
+            switches:     Vec::new(),
+            text_entries: vec![
+                (
+                    openshard_protocol::gump::admin::ITEM_KIND_FIELD,
+                    kind.0.to_string(),
+                ),
+                (
+                    openshard_protocol::gump::admin::ITEM_MATERIAL_FIELD,
+                    material.map_or(0, |material| material.0).to_string(),
+                ),
+                (
+                    openshard_protocol::gump::admin::ITEM_AMOUNT_FIELD,
+                    amount.to_string(),
+                ),
+            ],
+        },
+    }
+}
+
 fn admin_creature_response(connection: ConnectionId, kind: u16) -> Command {
     Command::GumpResponse {
         connection,
@@ -12719,6 +12752,36 @@ fn an_admin_created_backpack_is_a_container() {
         world.registry().get::<Contained>(item).unwrap().container,
         created_serial,
         "the created backpack accepts a dropped item"
+    );
+}
+
+#[test]
+fn the_f1_gameplay_catalogue_creates_by_kind_with_real_components() {
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::components::ItemKind;
+
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let actor = world.state.players[&gm];
+    let actor_serial = world.registry().serial_of(actor).unwrap();
+    let pack = items::backpack_of(&world.state, actor_serial).unwrap();
+
+    world.queue(admin_item_kind_response(gm, ItemKindId(7), None, 1));
+    world.tick(now);
+
+    let created = world
+        .registry()
+        .query::<Contained>()
+        .find_map(|(item, held)| {
+            (held.container == pack
+                && world.registry().get::<ItemKind>(item) == Some(&ItemKind(ItemKindId(7))))
+            .then_some(item)
+        })
+        .expect("the semantic F1 request placed a backpack kind");
+    assert!(
+        world.registry().has::<Container>(created),
+        "the kind constructor creates a usable container, not backpack art"
     );
 }
 

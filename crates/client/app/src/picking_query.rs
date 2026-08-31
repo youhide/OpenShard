@@ -1047,35 +1047,73 @@ impl App {
         if let Some(item) = request.create_item {
             if authority.allows(openshard_commands::StaffCommand::AUTHORITY) {
                 if let Some(link) = self.world.shard.link() {
+                    let (button, switches, text_entries) = match item {
+                        crate::shell::AdminItemRequest::Kind {
+                            kind,
+                            material,
+                            amount,
+                            stackable,
+                        } => {
+                            (
+                                openshard_protocol::gump::admin::ITEM_CREATE_KIND,
+                                stackable
+                                    .then_some(openshard_protocol::gump::RawSwitchId(
+                                        openshard_protocol::gump::admin::ITEM_STACKABLE.0,
+                                    ))
+                                    .into_iter()
+                                    .collect(),
+                                vec![
+                                    (
+                                        openshard_protocol::gump::admin::ITEM_KIND_FIELD,
+                                        kind.0.to_string(),
+                                    ),
+                                    (
+                                        openshard_protocol::gump::admin::ITEM_MATERIAL_FIELD,
+                                        material.map_or(0, |material| material.0).to_string(),
+                                    ),
+                                    (
+                                        openshard_protocol::gump::admin::ITEM_AMOUNT_FIELD,
+                                        amount.to_string(),
+                                    ),
+                                ],
+                            )
+                        }
+                        crate::shell::AdminItemRequest::LegacyArt {
+                            graphic,
+                            hue,
+                            amount,
+                            stackable,
+                        } => {
+                            (
+                                openshard_protocol::gump::admin::ITEM_CREATE,
+                                stackable
+                                    .then_some(openshard_protocol::gump::RawSwitchId(
+                                        openshard_protocol::gump::admin::ITEM_STACKABLE.0,
+                                    ))
+                                    .into_iter()
+                                    .collect(),
+                                vec![
+                                    (
+                                        openshard_protocol::gump::admin::ITEM_GRAPHIC_FIELD,
+                                        format!("{graphic:#06x}"),
+                                    ),
+                                    (openshard_protocol::gump::admin::ITEM_HUE_FIELD, hue.to_string()),
+                                    (
+                                        openshard_protocol::gump::admin::ITEM_AMOUNT_FIELD,
+                                        amount.to_string(),
+                                    ),
+                                ],
+                            )
+                        }
+                    };
                     link.act(Outgoing::AnswerGump(GumpReply {
-                        key:          openshard_protocol::gump::RawGumpKey(0),
-                        gump_id:      openshard_protocol::gump::RawGumpId(
+                        key: openshard_protocol::gump::RawGumpKey(0),
+                        gump_id: openshard_protocol::gump::RawGumpId(
                             openshard_protocol::gump::id::ADMIN_ITEM.0,
                         ),
-                        button:       openshard_protocol::gump::RawButtonId(
-                            openshard_protocol::gump::admin::ITEM_CREATE.0,
-                        ),
-                        switches:     item
-                            .stackable
-                            .then_some(openshard_protocol::gump::RawSwitchId(
-                                openshard_protocol::gump::admin::ITEM_STACKABLE.0,
-                            ))
-                            .into_iter()
-                            .collect(),
-                        text_entries: vec![
-                            (
-                                openshard_protocol::gump::admin::ITEM_GRAPHIC_FIELD,
-                                format!("{:#06x}", item.graphic),
-                            ),
-                            (
-                                openshard_protocol::gump::admin::ITEM_HUE_FIELD,
-                                item.hue.to_string(),
-                            ),
-                            (
-                                openshard_protocol::gump::admin::ITEM_AMOUNT_FIELD,
-                                item.amount.to_string(),
-                            ),
-                        ],
+                        button: openshard_protocol::gump::RawButtonId(button.0),
+                        switches,
+                        text_entries,
                     }));
                 }
             }

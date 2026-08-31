@@ -148,6 +148,11 @@ const ALLOWLIST: &[(&str, &str, &str)] = &[
     ),
     (
         "craft.rs",
+        "admin_button",
+        "CraftCatalogueRow: the staff gump reply id at the same private wire seam as button",
+    ),
+    (
+        "craft.rs",
         "skill_min",
         "CraftCatalogueRow: displayed primary-skill threshold in the game's tenths-of-a-percent unit",
     ),
@@ -260,6 +265,11 @@ const ALLOWLIST: &[(&str, &str, &str)] = &[
         "craft.rs",
         "details_button",
         "CraftWorkbenchRecipe: optional gump reply id at this private presentation seam",
+    ),
+    (
+        "craft.rs",
+        "admin_button",
+        "CraftWorkbenchRecipe: optional staff gump reply id at this private presentation seam",
     ),
     (
         "craft.rs",

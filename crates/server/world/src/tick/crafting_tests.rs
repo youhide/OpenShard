@@ -46,6 +46,7 @@ use super::tests::{
     START,
     enter,
     enter_as,
+    enter_gm,
     packets_for,
     world,
 };
@@ -1865,5 +1866,114 @@ fn the_private_catalogue_opens_without_a_tool_and_selects_a_recipe() {
     assert!(
         !world.state.registry.has::<Crafting>(player),
         "a browse-only context cannot start a craft"
+    );
+}
+
+#[test]
+fn a_game_master_can_create_a_recipe_result_immediately() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter_gm(&mut world, now);
+    let player = world.state.players[&connection];
+
+    world.queue(Command::OpenCraftCatalogue { connection });
+    world.tick(now + TICK_INTERVAL);
+    let catalogue = packets_for(&mut world, connection)
+        .into_iter()
+        .find_map(|packet| {
+            match ServerPacket::decode(&packet, ClientVersion::TOL) {
+                Ok(Some(ServerPacket::CraftCatalogue(catalogue))) => Some(catalogue),
+                _ => None,
+            }
+        })
+        .expect("the game master receives the craft catalogue");
+    let button = catalogue
+        .rows
+        .iter()
+        .find(|row| row.result_item_kind == Some(ItemKindId(4)))
+        .map(|row| row.admin_button)
+        .expect("the registered longsword recipe has an administrator action");
+    let serial = world.state.registry.serial_of(player).unwrap();
+    let pack = items::backpack_of(&world.state, serial).expect("the game master has a backpack");
+
+    world.queue(Command::GumpResponse {
+        connection,
+        response: openshard_protocol::gump::GumpResponse {
+            serial:       openshard_protocol::gump::RawGumpKey(serial.raw()),
+            gump_id:      openshard_protocol::gump::RawGumpId(openshard_crafting::CRAFT_GUMP.0),
+            button:       openshard_protocol::gump::RawButtonId(button),
+            switches:     Vec::new(),
+            text_entries: Vec::new(),
+        },
+    });
+    world.tick(now + TICK_INTERVAL * 2);
+
+    assert!(
+        world.state.registry.query::<Contained>().any(|(item, held)| {
+            held.container == pack
+                && world.state.registry.get::<ItemKind>(item) == Some(&ItemKind(ItemKindId(4)))
+                && world.state.registry.get::<Material>(item) == Some(&Material(MaterialId(1)))
+        }),
+        "the button creates the typed default-material recipe output in the backpack"
+    );
+    assert!(
+        !world.state.registry.has::<Crafting>(player),
+        "administrator construction has no delayed craft in flight"
+    );
+}
+
+#[test]
+fn an_ordinary_player_cannot_forge_the_immediate_recipe_button() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+
+    world.queue(Command::OpenCraftCatalogue { connection });
+    world.tick(now + TICK_INTERVAL);
+    let catalogue = packets_for(&mut world, connection)
+        .into_iter()
+        .find_map(|packet| {
+            match ServerPacket::decode(&packet, ClientVersion::TOL) {
+                Ok(Some(ServerPacket::CraftCatalogue(catalogue))) => Some(catalogue),
+                _ => None,
+            }
+        })
+        .expect("the player receives the read-only catalogue");
+    let button = catalogue
+        .rows
+        .iter()
+        .find(|row| row.result_item_kind == Some(ItemKindId(4)))
+        .map(|row| row.admin_button)
+        .expect("the shared row has a stable reply id");
+    let before = world
+        .state
+        .registry
+        .query::<ItemKind>()
+        .filter(|(_, kind)| **kind == ItemKind(ItemKindId(4)))
+        .count();
+    let serial = world.state.registry.serial_of(player).unwrap();
+
+    world.queue(Command::GumpResponse {
+        connection,
+        response: openshard_protocol::gump::GumpResponse {
+            serial:       openshard_protocol::gump::RawGumpKey(serial.raw()),
+            gump_id:      openshard_protocol::gump::RawGumpId(openshard_crafting::CRAFT_GUMP.0),
+            button:       openshard_protocol::gump::RawButtonId(button),
+            switches:     Vec::new(),
+            text_entries: Vec::new(),
+        },
+    });
+    world.tick(now + TICK_INTERVAL * 2);
+
+    let after = world
+        .state
+        .registry
+        .query::<ItemKind>()
+        .filter(|(_, kind)| **kind == ItemKind(ItemKindId(4)))
+        .count();
+    assert_eq!(
+        after, before,
+        "authority is checked on the shard, not trusted from the hidden button"
     );
 }

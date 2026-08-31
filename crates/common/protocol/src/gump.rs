@@ -122,10 +122,16 @@ pub mod admin {
     };
 
     pub const ITEM_CREATE: ButtonId = ButtonId(1);
+    /// Create a registered gameplay item by its durable identity. Unlike
+    /// [`ITEM_CREATE`], this request contains no client-chosen art projection.
+    pub const ITEM_CREATE_KIND: ButtonId = ButtonId(2);
     pub const ITEM_GRAPHIC_FIELD: u16 = 1;
     pub const ITEM_HUE_FIELD: u16 = 2;
     pub const ITEM_AMOUNT_FIELD: u16 = 3;
     pub const ITEM_STACKABLE: SwitchId = SwitchId(1);
+    pub const ITEM_KIND_FIELD: u16 = 4;
+    /// Zero means that the kind has no material axis.
+    pub const ITEM_MATERIAL_FIELD: u16 = 5;
 
     /// Submit one of the server-owned animal presets for placement.
     pub const CREATURE_CREATE: ButtonId = ButtonId(1);

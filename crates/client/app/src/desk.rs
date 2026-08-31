@@ -1171,10 +1171,11 @@ impl Default for CombatRecorder {
     }
 }
 
-/// The query and creation settings of F1's installed-client item-art browser.
+/// The query and creation settings of F1's registered gameplay-item browser.
 ///
-/// It is deliberately just navigation state: art stays in the client resource
-/// archive and is decoded only for the page currently on screen.
+/// It is deliberately just navigation state: semantic definitions come from
+/// the shared catalogue, while art stays in the client resource archive and is
+/// decoded only for the page currently on screen.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AdminCatalogue {
@@ -1183,20 +1184,20 @@ pub struct AdminCatalogue {
     /// Kept as text so an incomplete edit does not get rewritten while typing.
     /// It is validated only when an item from the browser is created.
     pub amount:    String,
-    /// Whether the selected graphic is put in the backpack as one mergeable
+    /// Whether the selected identity is put in the backpack as one mergeable
     /// pile, rather than as an ordinary discrete item.
     pub stackable: bool,
 }
 
-/// Gameplay family used to narrow the administrator's complete item browser.
+/// Gameplay family used to narrow the administrator's registered item browser.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum AdminItemCategory {
-    /// Every static graphic in the installed client.
+    /// Every registered gameplay item.
     #[default]
     All,
-    /// Items in the shard's classic weapon table.
+    /// Items carrying the semantic weapon tag.
     Weapons,
-    /// Items in the shard's classic armour table.
+    /// Items carrying the semantic armour tag.
     Armor,
 }
 

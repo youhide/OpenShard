@@ -64,6 +64,12 @@ started.
   Resmelt, recipe scrolls, make-number/make-max and the last-ten list, and the
   two material chains (hides → leather, cotton → cloth) that are addon
   interactions in ServUO rather than crafts.
+- **House catalogue material-family umbrella rows.** The generated house item
+  catalogue currently emits a material-less semantic identity as well as every
+  concrete material for metal, wood and leather families. That material-less
+  identity is not constructible; F1 filters it out. House search should model
+  "any material" as a selector distinct from an exact item identity, or stop
+  emitting the invalid exact row.
 - ~~**Atomic item transactions and inventory search.**~~ **Landed.** Canonical
   ownership now maintains exact container membership; split, merge, give,
   withdrawal, and successful craft output use validated prepare/commit doors.

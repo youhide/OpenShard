@@ -112,14 +112,14 @@ kind; a particular valorite, exceptional, player-made longsword is an instance.
 
 ### Staff/F1 construction
 
-F1 remains able to request arbitrary client art for decoration and debugging,
-but it is not a second item-construction path: it sends the administrator form
-and the server uses the common item factory.  Registry-known art receives its
-`ItemKind` and all required components.  Thus `0x0EFA` creates an empty
-`Spellbook`, `0x22C5` a charged `Runebook`, `0x0E75` a `Container`, and tools,
-instruments and potions receive their usual fresh state.  An unknown graphic is
-an explicit legacy/debug item, rather than a falsely typed object; adding a
-playable thing means adding its definition and factory facts first.
+F1's primary catalogue is semantic: it submits an `ItemKindId` and optional
+`MaterialId`, and the server uses the common item factory. The rows are concrete
+registry definitions and material variants, so a created spellbook, runebook,
+container, tool, instrument or potion receives all of its usual gameplay state.
+Arbitrary `(graphic, hue)` construction remains available only in an explicitly
+labelled legacy/debug section. An unknown graphic creates a legacy item rather
+than a falsely typed object; adding a playable thing means adding its definition
+and factory facts first.
 
 ## Boundaries and invariants
 
@@ -398,10 +398,17 @@ immune to a future presentation alias changing its behaviour.
 Every registered craft-tool role is also checked to resolve to a craft system by
 its kind, before a client can attempt to open a workbench.
 
-The F1 form remains art-addressable so staff can inspect arbitrary installed
-client assets. When its submitted `(graphic, hue)` is a registry projection it
-constructs by `ItemKindId + MaterialId` directly; only unmapped art takes the
-explicit legacy/debug path.
+The F1 catalogue is addressable by `ItemKindId + MaterialId`, not by client art,
+and displays only constructible semantic identities. Staff can still inspect or
+spawn arbitrary installed client assets through the separately labelled legacy
+debug form; registry projections submitted there are upgraded to semantic
+construction, while only unmapped art takes the legacy path.
+
+Craft catalogue and workbench rows expose a separate immediate-create action to
+staff. The server rechecks authority and constructs the recipe output directly
+through the same item factory. This debug action deliberately consumes no tool
+or resources, performs no skill roll or crafting timer, and emits no normal
+`ItemCrafted` event.
 
 The generic world `SpawnItem` command and compatibility `GiveItem` reward path
 follow the same rule, which keeps staff commands and scripted world setup from

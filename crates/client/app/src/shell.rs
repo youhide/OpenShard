@@ -277,12 +277,23 @@ pub enum ScriptRequest {
 }
 
 /// One validated submission from the F1 administrator item panel.
+///
+/// The ordinary catalogue names durable gameplay identity. Raw client art is
+/// retained only in the explicitly labelled legacy/debug form.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct AdminItemRequest {
-    pub graphic:   u16,
-    pub hue:       u16,
-    pub amount:    u16,
-    pub stackable: bool,
+pub enum AdminItemRequest {
+    Kind {
+        kind:      openshard_protocol::item_kind::ItemKindId,
+        material:  Option<openshard_protocol::item_kind::MaterialId>,
+        amount:    u16,
+        stackable: bool,
+    },
+    LegacyArt {
+        graphic:   u16,
+        hue:       u16,
+        amount:    u16,
+        stackable: bool,
+    },
 }
 
 /// The two egui compositions recorded into one GPU command buffer.
@@ -409,7 +420,7 @@ impl Shell {
             // animation clock is what wakes the loop.
             repaint_after: std::time::Duration::MAX,
             desk,
-            item_catalogue: ItemArtCatalogue::default(),
+            item_catalogue: ItemArtCatalogue::new(),
             crafting: CraftWindowPanel::default(),
             house_inventory: HouseInventoryPanel::new(),
         }
@@ -875,7 +886,7 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
                 camera,
                 world,
                 art,
-                tiledata,
+                tiledata: _,
                 hue_ramp,
                 cliloc,
                 skill_names,
@@ -1106,7 +1117,6 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
                             &mut desk.admin_skill,
                             &mut desk.admin_catalogue,
                             art,
-                            tiledata,
                             hue_ramp,
                             skill_names,
                             world,
@@ -1132,7 +1142,16 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
         });
     }
 
-    craft_window(&context, world, art, hue_ramp, cliloc, crafting, &mut request);
+    craft_window(CraftWindowFrame {
+        context: &context,
+        world,
+        art,
+        hue_ramp,
+        cliloc,
+        staff,
+        panel: crafting,
+        request: &mut request,
+    });
     house_inventory_window(&context, world, house_inventory, &mut request);
 
     request
@@ -1606,18 +1625,32 @@ impl CraftTableLayout {
     }
 }
 
+/// The client resources and mutable panel state used by one craft window.
+struct CraftWindowFrame<'a> {
+    context:  &'a egui::Context,
+    world:    &'a WorldState,
+    art:      &'a openshard_uofiles::art::Art,
+    hue_ramp: &'a openshard_client_render::hue::HueRamp,
+    cliloc:   Option<&'a Cliloc>,
+    staff:    bool,
+    panel:    &'a mut CraftWindowPanel,
+    request:  &'a mut Request,
+}
+
 /// Render exactly one craft window. The two typed packets describe different
 /// pages of the same server gump; they must never own separate egui state or
 /// compete to write the frame's reply.
-fn craft_window(
-    context: &egui::Context,
-    world: &WorldState,
-    art: &openshard_uofiles::art::Art,
-    hue_ramp: &openshard_client_render::hue::HueRamp,
-    cliloc: Option<&Cliloc>,
-    panel: &mut CraftWindowPanel,
-    request: &mut Request,
-) {
+fn craft_window(frame: CraftWindowFrame<'_>) {
+    let CraftWindowFrame {
+        context,
+        world,
+        art,
+        hue_ramp,
+        cliloc,
+        staff,
+        panel,
+        request,
+    } = frame;
     let Some(view) = world.authoritative.view.as_ref() else {
         panel.close();
         return;
@@ -1643,7 +1676,9 @@ fn craft_window(
     });
     if let Some((catalogue, gump)) = catalogue {
         panel.awaiting_page = false;
-        craft_catalogue_window(context, catalogue, gump, art, hue_ramp, cliloc, panel, request);
+        craft_catalogue_window(
+            context, catalogue, gump, art, hue_ramp, cliloc, staff, panel, request,
+        );
     } else {
         panel.page_missing();
     }
@@ -1657,6 +1692,7 @@ fn craft_catalogue_window(
     art: &openshard_uofiles::art::Art,
     hue_ramp: &openshard_client_render::hue::HueRamp,
     cliloc: Option<&Cliloc>,
+    staff: bool,
     panel: &mut CraftWindowPanel,
     request: &mut Request,
 ) {
@@ -1791,10 +1827,11 @@ fn craft_catalogue_window(
                 let row_output =
                     row_scroll.show_rows(ui, CraftTableLayout::ROW_HEIGHT, matching.len(), |ui, rows| {
                         for entry in &matching[rows] {
-                            let clicked = craft_table_row(ui, entry, art, hue_ramp, panel, layout);
-                            if clicked {
+                            if let Some(button) =
+                                craft_table_row(ui, entry, art, hue_ramp, staff, panel, layout)
+                            {
                                 panel.awaiting_page = true;
-                                reply = Some(craft_reply(gump, entry.row.button));
+                                reply = Some(craft_reply(gump, button));
                             }
                         }
                     });
@@ -2037,6 +2074,12 @@ fn craft_workbench_recipe_row(
                 *reply = Some(craft_reply(gump, button));
             }
         }
+        if let Some(button) = recipe.admin_button {
+            if ui.button("Create (admin)").clicked() {
+                panel.awaiting_page = true;
+                *reply = Some(craft_reply(gump, button));
+            }
+        }
         if let Some(button) = recipe.details_button {
             if ui.button("Details").clicked() {
                 open_details = true;
@@ -2119,6 +2162,12 @@ fn craft_workbench_detail(
     ui.separator();
     if let Some(button) = recipe.make_button {
         if ui.button("Make now").clicked() {
+            panel.awaiting_page = true;
+            *reply = Some(craft_reply(gump, button));
+        }
+    }
+    if let Some(button) = recipe.admin_button {
+        if ui.button("Create immediately (admin)").clicked() {
             panel.awaiting_page = true;
             *reply = Some(craft_reply(gump, button));
         }
@@ -2285,11 +2334,13 @@ fn craft_table_row(
     entry: &CraftCatalogueEntry<'_>,
     art: &openshard_uofiles::art::Art,
     hue_ramp: &openshard_client_render::hue::HueRamp,
+    staff: bool,
     panel: &mut CraftWindowPanel,
     layout: CraftTableLayout,
-) -> bool {
+) -> Option<u32> {
     let row = entry.row;
     let mut clicked = false;
+    let mut admin_clicked = false;
     let response = ui.allocate_ui_with_layout(
         egui::vec2(layout.width(), CraftTableLayout::ROW_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center).with_main_justify(false),
@@ -2359,7 +2410,7 @@ fn craft_table_row(
             }
             let status_cell = ui.allocate_ui_with_layout(
                 egui::vec2(CraftTableLayout::STATUS, CraftTableLayout::ROW_HEIGHT),
-                egui::Layout::left_to_right(egui::Align::Center),
+                egui::Layout::top_down(egui::Align::Center),
                 |ui| {
                     let (status, color, fill) = if row.ready {
                         (
@@ -2377,17 +2428,30 @@ fn craft_table_row(
                     ui.painter()
                         .rect_filled(ui.max_rect(), 0.0, fill.gamma_multiply(0.35));
                     ui.add_sized(
-                        [108.0, 28.0],
+                        [108.0, if staff { 24.0 } else { 28.0 }],
                         egui::Button::new(egui::RichText::new(status).color(color).strong())
                             .fill(fill)
                             .sense(egui::Sense::hover()),
                     );
+                    if staff
+                        && ui
+                            .add_sized([108.0, 24.0], egui::Button::new("Create (admin)"))
+                            .clicked()
+                    {
+                        admin_clicked = true;
+                    }
                 },
             );
             craft_table_column_separator(ui, &status_cell.response);
         },
     );
-    clicked || response.response.interact(egui::Sense::click()).clicked()
+    if admin_clicked {
+        Some(row.admin_button)
+    } else if clicked || response.response.interact(egui::Sense::click()).clicked() {
+        Some(row.button)
+    } else {
+        None
+    }
 }
 
 fn craft_icon(
@@ -2701,8 +2765,9 @@ fn combat_recorder_panel(
         });
 }
 
-/// The compact F1 workflow for making arbitrary test items.  The shard remains
-/// the authority: this only avoids manually opening and filling a classic gump.
+/// The compact F1 workflow for making registered gameplay items, with an
+/// explicitly labelled legacy-art escape hatch. The shard remains the
+/// authority: this only avoids manually opening and filling a classic gump.
 #[allow(clippy::too_many_arguments)]
 fn admin_items_panel(
     ui: &mut egui::Ui,
@@ -2710,43 +2775,20 @@ fn admin_items_panel(
     skill: &mut crate::desk::AdminSkill,
     catalogue: &mut crate::desk::AdminCatalogue,
     art: &openshard_uofiles::art::Art,
-    tiledata: &openshard_tiles::TileData,
     hue_ramp: &openshard_client_render::hue::HueRamp,
     skill_names: &openshard_uofiles::skills::Skills,
     world: &WorldState,
-    item_catalogue: &mut ItemArtCatalogue,
+    item_browser: &mut ItemArtCatalogue,
     request: &mut Request,
 ) {
     ui.heading("Administrator catalogue");
     admin_skills_panel(ui, skill, skill_names, world, request);
     ui.separator();
-    let selected_hue = admin_hue_panel(ui, item, art, hue_ramp, item_catalogue);
-    ui.separator();
-    ui.add_enabled_ui(selected_hue.is_some(), |ui| {
-        ui.label("Quick access: click an item to put it in your backpack.");
-        catalogue_grid(ui, ITEMS, |entry| {
-            request.create_item = Some(AdminItemRequest {
-                graphic:   entry.graphic,
-                hue:       selected_hue.expect("enabled only with a valid hue"),
-                amount:    entry.amount,
-                stackable: entry.stackable,
-            });
-        });
-    });
-    ui.add_space(10.0);
-    ui.heading("All item art");
-    ui.label("Actual sprites from the installed client. Click a sprite to create it in the selected hue.");
-    ui.add_enabled_ui(selected_hue.is_some(), |ui| {
-        item_art_catalogue(
-            ui,
-            catalogue,
-            art,
-            tiledata,
-            item_catalogue,
-            selected_hue.expect("enabled only with a valid hue"),
-            request,
-        );
-    });
+    ui.heading("Gameplay items");
+    ui.label(
+        "Registered items, not arbitrary art. Weapons, armour, tools, books and containers are created with their gameplay behaviour.",
+    );
+    item_catalogue(ui, catalogue, art, hue_ramp, item_browser, request);
     ui.add_space(10.0);
     ui.heading("Animals");
     ui.label("Click an animal, then choose its place on the map.");
@@ -2767,8 +2809,13 @@ fn admin_items_panel(
         }
     });
     ui.add_space(10.0);
-    ui.collapsing("Custom item", |ui| {
-        ui.label("Graphic and amount accept decimal or 0x hexadecimal values. Hue is set above.");
+    ui.collapsing("Legacy client art (debug only)", |ui| {
+        ui.label(
+            "This creates an unregistered legacy item when the art does not map to a gameplay definition. Use it to inspect client assets, not to make playable items.",
+        );
+        let selected_hue = admin_hue_panel(ui, item, art, hue_ramp, item_browser);
+        ui.separator();
+        ui.label("Graphic and amount accept decimal or 0x hexadecimal values.");
         egui::Grid::new("admin item fields")
             .num_columns(2)
             .spacing([12.0, 8.0])
@@ -2790,12 +2837,12 @@ fn admin_items_panel(
         ui.add_space(8.0);
         match parsed {
             Ok(created) => {
-                if ui.button("Create in backpack").clicked() {
+                if ui.button("Create legacy art in backpack").clicked() {
                     request.create_item = Some(created);
                 }
             }
             Err(problem) => {
-                ui.add_enabled(false, egui::Button::new("Create in backpack"));
+                ui.add_enabled(false, egui::Button::new("Create legacy art in backpack"));
                 ui.colored_label(ui.visuals().warn_fg_color, problem);
             }
         }
@@ -2904,14 +2951,6 @@ fn parse_admin_skill(skill: &crate::desk::AdminSkill) -> Result<String, &'static
     Ok(format!("{}skill {name} {value}", openshard_commands::PREFIX))
 }
 
-struct ItemCatalogueEntry {
-    icon:      &'static str,
-    name:      &'static str,
-    graphic:   u16,
-    amount:    u16,
-    stackable: bool,
-}
-
 struct AnimalCatalogueEntry {
     icon: &'static str,
     name: &'static str,
@@ -2923,15 +2962,6 @@ trait CatalogueEntry {
     fn name(&self) -> &'static str;
 }
 
-impl CatalogueEntry for ItemCatalogueEntry {
-    fn icon(&self) -> &'static str {
-        self.icon
-    }
-    fn name(&self) -> &'static str {
-        self.name
-    }
-}
-
 impl CatalogueEntry for AnimalCatalogueEntry {
     fn icon(&self) -> &'static str {
         self.icon
@@ -2940,58 +2970,6 @@ impl CatalogueEntry for AnimalCatalogueEntry {
         self.name
     }
 }
-
-const ITEMS: &[ItemCatalogueEntry] = &[
-    ItemCatalogueEntry {
-        icon:      "💰",
-        name:      "Gold",
-        graphic:   0x0eed,
-        amount:    100,
-        stackable: true,
-    },
-    ItemCatalogueEntry {
-        icon:      "🩹",
-        name:      "Bandages",
-        graphic:   0x0e21,
-        amount:    10,
-        stackable: true,
-    },
-    ItemCatalogueEntry {
-        icon:      "🍎",
-        name:      "Apples",
-        graphic:   0x09d0,
-        amount:    5,
-        stackable: true,
-    },
-    ItemCatalogueEntry {
-        icon:      "🔥",
-        name:      "Torch",
-        graphic:   0x0f6b,
-        amount:    1,
-        stackable: false,
-    },
-    ItemCatalogueEntry {
-        icon:      "🎒",
-        name:      "Backpack",
-        graphic:   0x0e75,
-        amount:    1,
-        stackable: false,
-    },
-    ItemCatalogueEntry {
-        icon:      "🗝",
-        name:      "Lockpick",
-        graphic:   0x14fb,
-        amount:    5,
-        stackable: true,
-    },
-    ItemCatalogueEntry {
-        icon:      "🔪",
-        name:      "Dagger",
-        graphic:   0x0f52,
-        amount:    1,
-        stackable: false,
-    },
-];
 
 const ANIMALS: &[AnimalCatalogueEntry] = &[
     AnimalCatalogueEntry {
@@ -3206,27 +3184,35 @@ fn preview_pixel(
     egui::Color32::from_rgb(rgb.red, rgb.green, rgb.blue)
 }
 
-/// Lazily decoded thumbnails and the filtered list behind the F1 item browser.
-/// The list contains only ids; art is still decoded only for rows egui makes
-/// visible in the scroll area.
-#[derive(Default)]
+/// Lazily decoded thumbnails and the filtered definitions behind the F1 item
+/// browser. Art is decoded only for rows egui makes visible in the scroll area.
 struct ItemArtCatalogue {
-    textures:  BTreeMap<u16, Option<egui::TextureHandle>>,
+    textures:  BTreeMap<(u16, u16), Option<egui::TextureHandle>>,
     /// One recoloured robe, renewed only when the staff member picks another
     /// hue. This is a deliberately small preview cache, unlike the browser's
     /// thumbnails which follow the visible art rows.
     dyed_robe: Option<(u16, egui::TextureHandle)>,
-    matching:  Vec<u16>,
+    matching:  Vec<&'static openshard_protocol::house_inventory::HouseCatalogueEntry>,
     key:       Option<(String, crate::desk::AdminItemCategory)>,
 }
 
-fn item_art_catalogue(
+impl ItemArtCatalogue {
+    fn new() -> Self {
+        Self {
+            textures:  BTreeMap::new(),
+            dyed_robe: None,
+            matching:  Vec::new(),
+            key:       None,
+        }
+    }
+}
+
+fn item_catalogue(
     ui: &mut egui::Ui,
     catalogue: &mut crate::desk::AdminCatalogue,
     art: &openshard_uofiles::art::Art,
-    tiledata: &openshard_tiles::TileData,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
     browser: &mut ItemArtCatalogue,
-    hue: u16,
     request: &mut Request,
 ) {
     ui.horizontal(|ui| {
@@ -3249,7 +3235,7 @@ fn item_art_catalogue(
     });
     ui.add(
         egui::TextEdit::singleline(&mut catalogue.query)
-            .hint_text("Name or graphic ID, e.g. dagger or 0x0f52"),
+            .hint_text("Name, kind, or graphic ID, e.g. dagger or 0x0f52"),
     );
     ui.horizontal(|ui| {
         ui.label("Amount");
@@ -3270,25 +3256,32 @@ fn item_art_catalogue(
 
     let key = (catalogue.query.trim().to_ascii_lowercase(), catalogue.category);
     if browser.key.as_ref() != Some(&key) {
-        browser.matching = matching_item_ids(tiledata, &key.0, key.1);
+        browser.matching = matching_item_entries(&key.0, key.1);
         browser.key = Some(key);
         browser.textures.clear();
     }
-    ui.small(format!("{} matching graphics", browser.matching.len()));
+    ui.small(format!("{} registered item variants", browser.matching.len()));
 
     if browser.textures.len() > 192 {
         browser.textures.clear();
     }
     egui::ScrollArea::vertical()
-        .id_salt("admin-item-art-catalogue")
+        .id_salt("admin-gameplay-item-catalogue")
         .max_height(280.0)
         .show_rows(ui, 38.0, browser.matching.len(), |ui, rows| {
-            // `show_rows` only asks for visible ranges. Copy those ids out so
-            // thumbnail caching can mutate independently of the full match set.
+            // `show_rows` only asks for visible ranges. Copy those references
+            // out so thumbnail caching can mutate independently of the match set.
             let visible = browser.matching[rows].to_vec();
-            for id in visible {
+            for entry in visible {
                 ui.horizontal(|ui| {
-                    let texture = item_art_texture(ui.ctx(), art, &mut browser.textures, id);
+                    let texture = item_catalogue_texture(
+                        ui.ctx(),
+                        art,
+                        hue_ramp,
+                        &mut browser.textures,
+                        entry.graphic,
+                        entry.hue,
+                    );
                     let clicked = match texture {
                         Some(texture) => {
                             ui.add(
@@ -3300,12 +3293,20 @@ fn item_art_catalogue(
                         }
                         None => ui.add_sized([36.0, 28.0], egui::Button::new("—")).clicked(),
                     };
-                    let name = tiledata.item_name(id).unwrap_or("Unnamed static");
-                    if ui.selectable_label(false, format!("{id:#06x}  {name}")).clicked() || clicked {
+                    let (kind, material) = semantic_catalogue_identity(entry)
+                        .expect("the F1 list contains only valid semantic entries");
+                    if ui
+                        .selectable_label(
+                            false,
+                            format!("{}  ·  kind {}  ·  {:#06x}", entry.name, kind.0, entry.graphic.0),
+                        )
+                        .clicked()
+                        || clicked
+                    {
                         if let Some(amount) = amount {
-                            request.create_item = Some(AdminItemRequest {
-                                graphic: id,
-                                hue,
+                            request.create_item = Some(AdminItemRequest::Kind {
+                                kind,
+                                material,
                                 amount,
                                 stackable: catalogue.stackable,
                             });
@@ -3316,62 +3317,86 @@ fn item_art_catalogue(
         });
 }
 
-fn matching_item_ids(
-    tiledata: &openshard_tiles::TileData,
+fn matching_item_entries(
     query: &str,
     category: crate::desk::AdminItemCategory,
-) -> Vec<u16> {
+) -> Vec<&'static openshard_protocol::house_inventory::HouseCatalogueEntry> {
     let id_query = parse_u16(query);
-    (u16::MIN..=u16::MAX)
-        .filter(|&id| {
+    let kind_query = query.strip_prefix("kind:").unwrap_or(query).parse::<u32>().ok();
+    openshard_protocol::house_inventory::HOUSE_ITEM_CATALOGUE
+        .iter()
+        .filter(|entry| semantic_catalogue_identity(entry).is_some())
+        .filter(|entry| {
             match category {
                 crate::desk::AdminItemCategory::All => true,
-                crate::desk::AdminItemCategory::Weapons => {
-                    openshard_protocol::items::is_classic_weapon(Graphic(id))
-                }
-                crate::desk::AdminItemCategory::Armor => {
-                    openshard_protocol::items::is_classic_armor(Graphic(id))
-                }
+                crate::desk::AdminItemCategory::Weapons => entry.tags.contains(&"weapon"),
+                crate::desk::AdminItemCategory::Armor => entry.tags.contains(&"armor"),
             }
         })
-        .filter(|&id| {
+        .filter(|entry| {
+            let (kind, _) =
+                semantic_catalogue_identity(entry).expect("invalid semantic entries were removed above");
             query.is_empty()
-                || id_query == Some(id)
-                || tiledata
-                    .item_name(id)
-                    .is_some_and(|name| name.to_ascii_lowercase().contains(query))
+                || id_query == Some(entry.graphic.0)
+                || kind_query == Some(kind.0)
+                || entry.name.to_ascii_lowercase().contains(query)
         })
         .collect()
 }
 
-fn item_art_texture<'a>(
+/// Keep only exact identities which the shared registry can project to art.
+/// This also removes the house-search catalogue's material-less umbrella
+/// selectors for material families: those mean "any material" to search, but
+/// do not name constructible items.
+fn semantic_catalogue_identity(
+    entry: &openshard_protocol::house_inventory::HouseCatalogueEntry,
+) -> Option<(
+    openshard_protocol::item_kind::ItemKindId,
+    Option<openshard_protocol::item_kind::MaterialId>,
+)> {
+    let openshard_protocol::house_inventory::HouseItemIdentity::Semantic { kind, material } = entry.identity
+    else {
+        return None;
+    };
+    let is_material_umbrella = material.is_none()
+        && openshard_protocol::house_inventory::HOUSE_ITEM_CATALOGUE
+            .iter()
+            .any(|candidate| {
+                matches!(
+                    candidate.identity,
+                    openshard_protocol::house_inventory::HouseItemIdentity::Semantic {
+                        kind: candidate_kind,
+                        material: Some(_),
+                    } if candidate_kind == kind
+                )
+            });
+    (!is_material_umbrella).then_some((kind, material))
+}
+
+fn item_catalogue_texture<'a>(
     context: &egui::Context,
     art: &openshard_uofiles::art::Art,
-    textures: &'a mut BTreeMap<u16, Option<egui::TextureHandle>>,
-    id: u16,
+    hue_ramp: &openshard_client_render::hue::HueRamp,
+    textures: &'a mut BTreeMap<(u16, u16), Option<egui::TextureHandle>>,
+    graphic: Graphic,
+    hue: Hue,
 ) -> Option<&'a egui::TextureHandle> {
-    textures.entry(id).or_insert_with(|| {
-        let image = art.static_art(Graphic(id)).ok().flatten()?;
+    let key = (graphic.0, hue.0);
+    textures.entry(key).or_insert_with(|| {
+        let image = art.static_art(graphic).ok().flatten()?;
         let size = [usize::from(image.width()), usize::from(image.height())];
         let pixels = image
             .pixels()
             .iter()
-            .map(|pixel| {
-                if pixel.is_transparent() {
-                    egui::Color32::TRANSPARENT
-                } else {
-                    let color = pixel.rgb8();
-                    egui::Color32::from_rgb(color.red, color.green, color.blue)
-                }
-            })
+            .map(|pixel| preview_pixel(*pixel, hue_ramp, hue.0))
             .collect();
         Some(context.load_texture(
-            format!("admin-item-art-{id:#06x}"),
+            format!("admin-item-kind-{:#06x}-{:#06x}", graphic.0, hue.0),
             egui::ColorImage::new(size, pixels),
             egui::TextureOptions::NEAREST,
         ))
     });
-    textures.get(&id).and_then(Option::as_ref)
+    textures.get(&key).and_then(Option::as_ref)
 }
 
 fn parse_admin_item(item: &crate::desk::AdminItem) -> Result<AdminItemRequest, &'static str> {
@@ -3380,7 +3405,7 @@ fn parse_admin_item(item: &crate::desk::AdminItem) -> Result<AdminItemRequest, &
     let amount = parse_u16(&item.amount)
         .filter(|amount| *amount > 0)
         .ok_or("Amount must be a whole number from 1 to 65535.")?;
-    Ok(AdminItemRequest {
+    Ok(AdminItemRequest::LegacyArt {
         graphic,
         hue,
         amount,
@@ -7108,7 +7133,7 @@ mod tests {
         };
         assert_eq!(
             parse_admin_item(&valid),
-            Ok(AdminItemRequest {
+            Ok(AdminItemRequest::LegacyArt {
                 graphic:   0x0eed,
                 hue:       0x0481,
                 amount:    25,
@@ -7123,6 +7148,24 @@ mod tests {
         assert_eq!(
             parse_admin_item(&empty),
             Err("Amount must be a whole number from 1 to 65535.")
+        );
+    }
+
+    #[test]
+    fn the_admin_catalogue_contains_constructible_semantic_items_only() {
+        let matches = matching_item_entries("dagger", crate::desk::AdminItemCategory::Weapons);
+        assert!(matches.iter().any(|entry| {
+            semantic_catalogue_identity(entry)
+                == Some((
+                    openshard_protocol::item_kind::ItemKindId(68),
+                    Some(openshard_protocol::item_kind::MaterialId(1)),
+                ))
+        }));
+        assert!(
+            matches
+                .iter()
+                .all(|entry| semantic_catalogue_identity(entry).is_some()),
+            "the F1 list never offers the material-less umbrella selectors used only by house search"
         );
     }
 
@@ -7151,6 +7194,7 @@ mod tests {
     fn craft_filter_combines_text_and_ready_state() {
         let row = openshard_protocol::craft::CraftCatalogueRow {
             button:           8,
+            admin_button:     9,
             result:           Graphic(0x13EB),
             result_hue:       Hue::NONE,
             result_item_kind: None,

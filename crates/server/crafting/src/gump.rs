@@ -43,7 +43,12 @@ use openshard_protocol::gump::{
     GumpResponse,
     RawGumpId,
 };
-use openshard_protocol::item_kind::ItemSelector;
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    ItemSelector,
+    MaterialId,
+    MaterialRule,
+};
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::wire::{
     ClilocId,
@@ -65,7 +70,10 @@ use openshard_state::{
 
 use crate::chance::chance;
 use crate::defs::system;
-use crate::recipe::Recipe;
+use crate::recipe::{
+    OutputMaterial,
+    Recipe,
+};
 use crate::system::{
     CraftSystemDef,
     SystemId,
@@ -163,6 +171,10 @@ mod kind {
     pub const MAKE: ButtonKind = ButtonKind(1);
     /// Show the item's detail page.
     pub const DETAILS: ButtonKind = ButtonKind(2);
+    /// Create the recipe result immediately. This is an OpenShard staff
+    /// extension in a ServUO button-kind slot this window otherwise does not
+    /// serve; the handler rechecks account authority before every mutation.
+    pub const ADMIN_CREATE: ButtonKind = ButtonKind(3);
     /// A material off the axis.
     pub const RESOURCE: ButtonKind = ButtonKind(5);
     /// Everything else, told apart by its index.
@@ -195,6 +207,8 @@ mod detail {
     pub const BACK: ButtonId = ButtonId::CLOSE_BOX;
     /// Make it.
     pub const MAKE: ButtonId = ButtonId(1);
+    /// Create the result without a tool, materials, delay, or skill roll.
+    pub const ADMIN_CREATE: ButtonId = ButtonId(2);
 }
 
 /// Whether a gump id is this window's.
@@ -416,6 +430,7 @@ fn main(
                 def,
                 context.group,
                 state.registry.has::<Tool>(context.tool),
+                state.staff_authority(player),
             )
         }
     }
@@ -711,6 +726,11 @@ fn workbench_recipe(
                 .map(|index| button_id(kind::MAKE, index).0)
         }),
         details_button: index.map(|index| button_id(kind::DETAILS, index).0),
+        admin_button: state.staff_authority(player).then(|| {
+            index.map_or(detail::ADMIN_CREATE.0, |index| {
+                button_id(kind::ADMIN_CREATE, index).0
+            })
+        }),
         result: CraftWorkbenchComponent {
             item_kind: recipe.kind,
             graphic:   recipe.graphic,
@@ -968,7 +988,7 @@ fn groups(layout: &mut GumpLayout, def: &CraftSystemDef, selected: u16) {
 /// The index a button carries is the row's place **within the group**, which is
 /// what ServUO's `CreateItemList` sends and what [`recipe_in_group`] turns back
 /// into a recipe.
-fn items(layout: &mut GumpLayout, def: &CraftSystemDef, group: u16, can_make: bool) {
+fn items(layout: &mut GumpLayout, def: &CraftSystemDef, group: u16, can_make: bool, can_admin_create: bool) {
     let rows: Vec<(usize, &Recipe)> = def
         .recipes
         .iter()
@@ -1005,6 +1025,17 @@ fn items(layout: &mut GumpLayout, def: &CraftSystemDef, group: u16, can_make: bo
             );
         } else {
             layout.label(230, y + 3, LABEL_HUE, "VIEW");
+        }
+        if can_admin_create {
+            layout.button(
+                590,
+                y,
+                4005,
+                4007,
+                GumpButton::Reply,
+                0,
+                button_id(kind::ADMIN_CREATE, index),
+            );
         }
         // A cell rather than a naked `tilepic`: a recipe's art may be a tiny
         // ingot or a wide piece of furniture, and neither should shove the
@@ -1098,6 +1129,10 @@ fn details(
         layout.html_localized_colored(525, 455, 120, 18, ClilocId(1_044_151), LABEL, false, false); // MAKE NOW
     } else {
         layout.label(470, 455, LABEL_HUE, "VIEW MODE — TOOL REQUIRED");
+    }
+    if state.staff_authority(player) {
+        layout.button(315, 452, 4005, 4007, GumpButton::Reply, 0, detail::ADMIN_CREATE);
+        layout.label(350, 455, LABEL_HUE, "CREATE (ADMIN)");
     }
     layout.button(20, 452, 4014, 4016, GumpButton::Reply, 0, detail::BACK);
     layout.html_localized_colored(55, 455, 120, 18, ClilocId(1_044_150), LABEL, false, false); // BACK
@@ -1248,14 +1283,18 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
             return true;
         };
         let (kind, index) = decode_button(pressed);
+        let Some((system_id, recipe)) = catalogue_recipe(index) else {
+            return true;
+        };
         if kind == kind::DETAILS {
-            let Some((system, recipe)) = catalogue_recipe(index) else {
-                return true;
-            };
             let mut next = context;
-            next.system = system.raw();
+            next.system = system_id.raw();
             next.page = CraftGumpPage::Details(recipe);
             open(state, player, next);
+        } else if kind == kind::ADMIN_CREATE && state.staff_authority(player) {
+            let Some(def) = system(system_id) else { return true };
+            admin_create(state, player, def, recipe, context.sub_res);
+            open(state, player, context);
         }
         return true;
     }
@@ -1284,6 +1323,13 @@ fn handle_details(
 ) {
     match answer {
         GumpAnswer::Pressed(detail::MAKE) => make(state, player, context, recipe),
+        GumpAnswer::Pressed(detail::ADMIN_CREATE) if state.staff_authority(player) => {
+            let Some(def) = system(SystemId::new(context.system)) else {
+                return;
+            };
+            admin_create(state, player, def, recipe, context.sub_res);
+            open(state, player, context);
+        }
         // `detail::BACK` *is* the close box (see the constant), so this arm is
         // both, exactly as ServUO's `OnResponse` reads it.
         GumpAnswer::Closed => {
@@ -1328,6 +1374,14 @@ fn handle_list_button(
         kind::MAKE => {
             if let Some(recipe) = recipe_in_group(def, context.group, index) {
                 make(state, player, context, recipe);
+            }
+        }
+        kind::ADMIN_CREATE => {
+            if state.staff_authority(player) {
+                if let Some(recipe) = recipe_in_group(def, context.group, index) {
+                    admin_create(state, player, def, recipe, context.sub_res);
+                    open(state, player, context);
+                }
             }
         }
         kind::DETAILS => {
@@ -1384,6 +1438,119 @@ fn recipe_in_group(def: &CraftSystemDef, group: u16, index: ButtonIndex) -> Opti
         .filter(|(_, recipe)| recipe.group == group)
         .nth(usize::try_from(index.0).ok()?)
         .and_then(|(at, _)| u16::try_from(at).ok())
+}
+
+/// The output identity an administrator can decree without material payment.
+///
+/// A material inherited by the recipe still comes from the selected workbench
+/// axis. It is never recovered from the result hue, so this bypass remains on
+/// the same semantic graph as an ordinary successful craft.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum AdminOutput {
+    Kind {
+        kind:     ItemKindId,
+        material: Option<MaterialId>,
+    },
+    LegacyArt {
+        graphic: Graphic,
+        hue:     Hue,
+    },
+}
+
+fn admin_output(def: &CraftSystemDef, recipe: &Recipe, sub_res: u8) -> Result<AdminOutput, ()> {
+    let Some(kind) = recipe.kind else {
+        if recipe.output_material != OutputMaterial::Legacy {
+            return Err(());
+        }
+        let hue = if recipe.hue != Hue::NONE {
+            recipe.hue
+        } else if recipe.retain_color {
+            def.sub_res
+                .and_then(|axis| {
+                    axis.entries
+                        .get(usize::from(sub_res))
+                        .or_else(|| axis.entries.first())
+                })
+                .map_or(Hue::NONE, |entry| entry.hue)
+        } else {
+            Hue::NONE
+        };
+        return Ok(AdminOutput::LegacyArt {
+            graphic: recipe.graphic,
+            hue,
+        });
+    };
+    let material = match recipe.output_material {
+        OutputMaterial::Legacy => return Err(()),
+        OutputMaterial::None => None,
+        OutputMaterial::Fixed(material) => Some(material),
+        OutputMaterial::InheritInput(input) => {
+            let resource = recipe.resources.get(usize::from(input)).ok_or(())?;
+            let material = if resource.from_axis {
+                def.sub_res
+                    .and_then(|axis| {
+                        axis.entries
+                            .get(usize::from(sub_res))
+                            .or_else(|| axis.entries.first())
+                    })
+                    .map(|entry| entry.material)
+            } else {
+                match resource.selector {
+                    Some(ItemSelector::KindWithMaterial {
+                        material: MaterialRule::Exact(material),
+                        ..
+                    }) => Some(material),
+                    _ => None,
+                }
+            };
+            Some(material.ok_or(())?)
+        }
+    };
+    openshard_state::presentation_of(kind, material).ok_or(())?;
+    Ok(AdminOutput::Kind { kind, material })
+}
+
+/// Put one base recipe result in the administrator's backpack immediately.
+/// No tool use, material withdrawal, training, quality roll or `ItemCrafted`
+/// event occurs: this is item construction exposed beside crafting, not a
+/// successful craft disguised as one.
+fn admin_create(
+    state: &mut WorldState,
+    player: EntityId,
+    def: &CraftSystemDef,
+    recipe_index: u16,
+    sub_res: u8,
+) {
+    if !state.staff_authority(player) {
+        return;
+    }
+    let Some(recipe) = def.recipes.get(usize::from(recipe_index)) else {
+        return;
+    };
+    let Ok(output) = admin_output(def, recipe, sub_res) else {
+        state.system_message(player, "This recipe is not configured correctly.");
+        return;
+    };
+    let Some(owner) = state.registry.serial_of(player) else {
+        return;
+    };
+    let stackable = recipe.use_all_res || recipe.amount > 1;
+    let created = match output {
+        AdminOutput::Kind { kind, material } => {
+            openshard_items::give_kind_to_backpack(state, owner, kind, material, recipe.amount, stackable)
+        }
+        AdminOutput::LegacyArt { graphic, hue } => {
+            openshard_items::give_to_backpack(state, owner, graphic, hue, recipe.amount, stackable)
+        }
+    };
+    state.system_message(
+        player,
+        if created {
+            "Administrator recipe result created in your backpack."
+        } else {
+            "Your backpack cannot hold that item."
+        },
+    );
 }
 
 /// Start the craft the player asked for, and put the window back up.
