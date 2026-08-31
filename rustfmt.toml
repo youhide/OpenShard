@@ -1,19 +1,15 @@
-# Formatting is not a matter of taste here — `cargo fmt --all` is expected to be
-# silent, so every setting below has to work on the toolchain CI runs.
-
+# shared-rustfmt-policy: 2026-08-31
 max_width = 110
 style_edition = "2024"
 
-# The rest of the house style needs nightly rustfmt, and `rust-toolchain.toml`
-# pins stable: stable warns once per unstable key and then ignores it, which
-# would make `cargo fmt` noisy for everyone. Left here as the intended shape, to
-# be uncommented the day the pin moves.
-#
-# imports_granularity = "Module"     # one `use` per module, not one per crate
-# imports_layout = "Vertical"        # one name per line, so a diff touches one line
-# group_imports = "StdExternalCrate" # std, then crates, then this crate
-# struct_field_align_threshold = 16
-# force_multiline_blocks = true
-# empty_item_single_line = false
-# blank_lines_lower_bound = 0
-# wrap_comments = false              # it mangles commented-out code
+imports_granularity = "Module"
+imports_layout = "Vertical"
+group_imports = "StdExternalCrate"
+
+struct_field_align_threshold = 16
+force_multiline_blocks = true
+empty_item_single_line = false
+blank_lines_lower_bound = 0
+
+# Formatting commented-out code can silently change examples and recovery notes.
+wrap_comments = false

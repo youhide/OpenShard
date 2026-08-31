@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "rust-code-mcp": {
+      "command": "${RUST_CODE_MCP_BIN:-rust-code-mcp}",
+      "env": {
+        "RMC_EMBEDDING_PROFILE": "${RMC_EMBEDDING_PROFILE:-local-gpu-bge}",
+        "RMC_EP_CENSUS": "${RMC_EP_CENSUS:-1}"
+      },
+      "timeout": 7200000
+    }
+  }
+}

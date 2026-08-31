@@ -48,11 +48,9 @@ __pycache__/
 !.vscode/extensions.json
 
 # Local agent tooling: one operator's machine notes (where their reference
-# checkouts and client install live) and an MCP server config pointing at an
-# absolute binary path. Neither is anyone else's. `CLAUDE.md` itself is shared
-# project knowledge and is versioned.
+# checkouts and client install live). Shared policy and the portable MCP config
+# are versioned.
 CLAUDE.local.md
-.mcp.json
 # A plugin's own session state — an iteration counter and a session id, written
 # into the project directory by the tool rather than by anyone working on it.
 .claude/*.local.*

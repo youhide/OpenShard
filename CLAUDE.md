@@ -1,54 +1,91 @@
-# OpenShard
+<!-- shared-repository-policy: 2026-08-31 -->
 
-A modern Ultima Online server engine, compatible with the original 2D client and
-ClassicUO. **Not a SphereServer clone** — the engine SphereServer would likely be
-if it were designed today: compatible with the UO *protocol*, and with nothing
-else about Sphere. Gameplay content lives in a second repository, the
-**OpenShard Community Pack**.
+# Repository policy
 
-## Docs — read before you touch code
+Это общий, переносимый между репозиториями набор правил. До начала работы полностью
+прочитать `CLAUDE.project.md` и `CLAUDE.local.md`, если они существуют.
+Проектные и локальные дополнения уточняют эту политику и имеют приоритет при
+конфликте.
 
-| | |
-|---|---|
-| [`docs/style.md`](docs/style.md) | How code here reads. Read it before writing Rust in this repo. |
-| [`docs/architecture.md`](docs/architecture.md) | The shape: layers, dependency rules, the crate map. |
-| [`docs/findings.md`](docs/findings.md) | What the client actually does. Every entry cost a day — don't re-derive them. |
-| [`docs/roadmap/README.md`](docs/roadmap/README.md) | The order, and what is built. Current status lives here, not in this file. |
-| [`docs/client.md`](docs/client.md) | Our own client, milestone by milestone. |
-| [`docs/client_versions.md`](docs/client_versions.md) | Which clients exist and which are played. |
-| [`docs/development.md`](docs/development.md) | The environment: commands, toolchain, `target/`, MSRV. |
-| [`docs/lighting_state.md`](docs/lighting_state.md) | 🚩 **Where the lighting engine stands, in one page** — readiness by subsystem, what is left ranked, the defects a person can see, the normative spec for the pixel spaces, and which of the eleven lighting documents are still live. Read it before opening any of them. |
-| [`docs/lighting_pitfalls.md`](docs/lighting_pitfalls.md) | 🚩 **How a lit frame lies, and the order to ask it things in.** A bright line on a dark surface is not evidence of light. The four-rung ladder (`Kind` → the albedo control → `Flames` → `Normal`), the amplifier that makes a facing error read as a drawn artefact, and each pitfall with the wrong verdict it cost. Read it before diagnosing anything a person reported by looking. |
-| [`docs/lighting_rebuild.md`](docs/lighting_rebuild.md) | The model itself, phases 0–8, and the backlog every defect is filed in. The lighting we are building instead — deferred shading, art as albedo, shadows by primitive identity. It is the single entry point for eight consolidated plans: what is still live in each, which phase retires or inherits it, and what carries over untouched. |
-| **Consolidated into it** — [`lighting.md`](docs/lighting.md), [`lighting_world.md`](docs/lighting_world.md), [`lighting_raymarch.md`](docs/lighting_raymarch.md), [`lighting_geometry.md`](docs/lighting_geometry.md), [`lighting_height.md`](docs/lighting_height.md), [`lighting_reference.md`](docs/lighting_reference.md), [`gbuffer.md`](docs/gbuffer.md), [`world_coordinates.md`](docs/world_coordinates.md) | The record of how each was built and why. Read one when you need its reasoning — not to find out what is left to do. |
-| [`docs/occluders.md`](docs/occluders.md) | The occlusion geometry, being rebuilt: one shape per surface, absolute world coordinates, a BVH, and no tile in the answer. `lighting_rebuild.md`'s phase 6e in full — its decisions are **made**, so read it before proposing another. |
-| [`docs/parity.md`](docs/parity.md) | 🚩 **One frame, however it was asked for.** A frame is assembled by hand in seven places, so parity between the client and every diagnostic tool is a coincidence rather than a property — read it before adding a caller or trusting a tool's picture. |
-| [`docs/footprints.md`](docs/footprints.md) | A static's box is the box the art drew. The other half of `occluders.md`, which put it out of scope by name: that plan changes how many primitives a surface is, this one changes what one primitive's *shape* is — the 31.6% of the world currently given a whole tile because "the art would not say". |
-| [`docs/pixels.md`](docs/pixels.md) | Six grids meet in this renderer and no document listed them. Not a glossary — a statement of **which pairs share a divisor**, because a sample landing exactly on a discontinuity is what `parity.md`'s window-parity defect was made of. |
-| [`docs/silhouettes.md`](docs/silhouettes.md) | The zigzags. A magnified frame draws its outlines at two resolutions — a box's edge per fragment, the art's alpha per texel — and they meet along one line. First attribute them with a debug view, then decide. |
-| [`docs/housing.md`](docs/housing.md) | 🚩 **A house, and the ground it stands on.** The picture is free — every client already owns every house — so what the shard owes is the walls that stop you, the door that knows you, and the decay that takes it away. **H1–H5 built.** H6 is the sixth phase of a five-phase plan, and it is half a correction: three things this document published as decided were never built, and they are one thing — housing and regions never met. |
-| [`docs/customisation.md`](docs/customisation.md) | **A house whose shape nobody shipped.** Housing's D7, reverted in full. The picture stops being free for exactly one kind of house, and the load-bearing decision is where a per-house component list lives — because `Terrain::multi_components` cannot hold one, for five reasons, and the fifth is why minting a multi id is not an escape hatch. |
-| [`docs/map/`](docs/map/) | 🚩 **The map, and everyone who reads it.** The pathfinding graph, the building flood, the minimap cache — five systems that each bake something off terrain and each key that bake to a file's mtime. [`map_rebuild.md`](docs/map/map_rebuild.md) is the entry point for the whole area: **the map is three layers** — ground, statics, and the live layer over them — and nine plans ordered into three eras, R (the map you hold) → P (the map you search) → S (the map you change). [`layers.md`](docs/map/layers.md) is the one-page routing table over those three: **must a bake see it?** is the whole rule, every answer taken so far is a row, and the two rules that read as a contradiction — *"never an overlay"* against *"a house is a layer"* — are reconciled there. Read it before quoting either at a question about the other. [`realtime_map.md`](docs/map/realtime_map.md) is the plan being executed and [`handoffs/`](docs/map/handoffs/) is where the work stands; [`README.md`](docs/map/README.md) is the index; [`new_map_representation/`](docs/map/new_map_representation/) is era S, half built: an imported base with committed patches and one revisioned snapshot every reader holds. |
-| [`docs/boats.md`](docs/boats.md) | **A house that moves.** Every hard decision follows from *moves*, not from *boat*. No parent transform — refused on the engine's own evidence, since mounting deletes the mount rather than carrying it. The hull stays out of `Obstructions`, which only ever subtracts and cannot say "there is somewhere to stand here". |
-| [`docs/combat.md`](docs/combat.md) | 🚩 **The fight, and what it leaves behind.** War mode, the blow, the bar, the death and the corpse — one plan in six phases, because they are one loop. The server already runs all of it; every gap is at the client's end, and the table at the top is which packet each one is. |
-| [`docs/archery.md`](docs/archery.md) | **A bow that shoots.** Three unrelated gaps closed at once: a player wielding a bow now fights at range off the weapon table itself, not a spawner-only `RangedAttack`; arrows and bolts are real, consumed items; and `0x70` — encoded since P3 but never decoded — now flies on screen as the one sprite in this renderer that is not tile-snapped. |
-| [`docs/combat_actions.md`](docs/combat_actions.md) | 🚩 **A blow that takes time.** The server owns a deadline, not an action — which is why a bow stands still for ten seconds and a spoiled swing has no way to say so. `CombatAction` as a committed, interruptible process on **three separated axes** — *kind* (what the impact does), *watch* (what releases it: nothing, a target stepping out of cover, a rider passing through), *rules* (what the world does to it in between) — where every action releases on a clock and the watch only decides when that clock starts, with the round taken at the nock, interruption and fatigue as a declared condition/effect table rather than flags, and two new packets, because the *end* of an action never crossed the wire at all. Seven phases; **Ф1–Ф4 built** — the object, the three passes, both packets, the bow that now draws for the whole interval instead of teleporting an arrow (`volleys` is gone: one schedule, three impacts), the condition/effect table itself, in operator settings, charged **once per action** so a rule is a fact about the draw rather than a toll per step, and the picture over every fighter's head: a bar for what is being prepared and a glyph and a word for how the last one ended, because *"it landed"*, *"it missed"* and *"the wall got in the way"* used to be the same picture — nothing at all. **Ф4.1** is what playing it found: the commit pass refused in *silence* — a target round a corner produced no packet, no word and no picture for as long as the corner was there, which reads as a shard that has stopped — so a refusal is now a standing state with a name on the wire, and a drawn bow says which part of the draw it is in, off shares the operator owns rather than a percentage the client invents. **Ф4.2** is the same report a second time, about the words rather than the seam: a fighter with nothing aimed at was filtered out of the commit pass *before* it could refuse, so winning a fight left a blank screen, and `clear_target` said *"target gone"* whoever called it — including the two places a creature gives up, where the quarry is standing in plain sight. Nothing a fighter can be standing in is unnamed now, and no name is claimed for a fact that is not so. **Ф4.5** is where the question stops being about the shard: it says everything correctly — a bow fight run tick by tick announces 2500ms, waits 2500ms and drifts by nothing — and the *picture* was posing, `staged_swing_frame` holding one frame for 2020ms of every 2500ms draw and flicking the whole shot through in 400. So the art is spread over the shard's own interval; `Aim` leaves the share table because aiming is *holding* and a released action holds nothing (it is Ф7's armed stage now, and nothing else); a spoiled action costs a whole fresh interval instead of inheriting the dead one's leftover; `gameplay.action_speed` is the third table keyed by kind; a standing fighter turns to its mark while a shot already inside an accepted `step_hold` keeps the stride's facing; the kiting brain is fixed at the neighbouring seam — **turn-as-step is a client-walk rule and was being charged to a decreed step**; `.dummy` puts down a scarecrow so a report is reproducible at all; and the client records every combat edge with the gap in front of it, plus a mark (`k`) that stamps what was on screen at the instant somebody said it stopped. The fatigue, the polearm and the joust are what is left, and each is cheap only because the axes were separated first. |
-| [`docs/sight.md`](docs/sight.md) | **The ray a shot is allowed by, drawn.** `sight_clear` answered `true`/`false` and named no tile, no art and no height, so a refusal was a boolean and a hunch. `sight::trace` is now that same walk with its work written down — and `sight_clear` is a *reading* of it, one loop and one eye height, because a diagnostic drawn from a second walk looks exactly like one drawn from the right one. **All four phases built:** the trace, the client's own reading of it over the same map, the overlay drawn at the ray's own height with the blocking body as a box, and `.sight` for the shard's verdict beside it. Read its closing list before touching the rule — a door is opaque at every height, `EYE = 9` is everybody's eye, and nothing in the live layer but a door is in the way at all. |
-| [`docs/map/interiors.md`](docs/map/interiors.md) | **A building, and what it lets you see.** Three asks, one seam — the storey as a person's choice rather than `UpdateMaxDrawZ`'s, a **sealed room as a black area**, and walls cut to the knee. The second needs an index of rooms, and the first is what makes it necessary: with the roof on, a sealed room is already invisible. R0 is a refactor with no feature in it, and every phase after it names which precondition it spends. |
-| **Living plans** — [`camera.md`](docs/camera.md), [`connection_state.md`](docs/connection_state.md), [`shutdown.md`](docs/shutdown.md), [`outline.md`](docs/outline.md), [`protocol_newtypes.md`](docs/protocol_newtypes.md), [`protocol_rewrite.md`](docs/protocol_rewrite.md), [`facet_newtype.md`](docs/facet_newtype.md), [`client_window_state.md`](docs/client_window_state.md), [`window_components.md`](docs/window_components.md) | Multi-session refactors, each with a backlog of what's left undone — that backlog is where the next session starts. |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | What lands and how: branch, PR, review, merge commit, commit messages. |
+## Язык
 
-## Working on this
+- Общаться с пользователем и писать рабочие документы по-русски.
+- Комментарии в коде допустимы по-русски или по-английски — выбирать язык,
+  который делает контракт понятнее в конкретном модуле.
+- Публичный README и пользовательскую документацию писать на языке проекта.
 
-```sh
-cargo test --workspace          # includes doctests
-cargo clippy --workspace --all-targets
-cargo fmt --all
-```
+## Порядок работы
 
-All three are expected to be silent — that's what CI runs on every PR.
+- Перед правками прочитать документацию, активный план и инструкции,
+  относящиеся к затрагиваемой директории.
+- Рабочее дерево может содержать параллельные изменения. Не откатывать, не
+  форматировать и не включать в коммит чужие файлы.
+- Не использовать `git checkout`, `git restore`, `git reset`, `git clean`
+  или `git stash` для уборки дерева.
+- Не переключать ветки и не создавать worktree без явного запроса.
+- Править файлы напрямую через предназначенный для этого инструмент; не
+  генерировать точечные правки одноразовыми скриптами.
+- Попутные проблемы, не входящие в задачу, записывать в подходящий plan,
+  issue или проектный документ с причиной и ссылкой на место в коде.
+- После законченного юнита работы коммитить только свои пути. Не использовать
+  `git add -A`, `git commit -a` и `git commit --amend`.
 
-## Non-goals
+## Rust: типы и контракты
 
-Reimplementing SphereScript. Parsing `.scp` at runtime. Source compatibility with
-Sphere. Legacy save formats. Mimicking Sphere's internals.
+- Вводить newtype сразу для индексов, идентификаторов, физических величин и
+  других несовместимых доменов. Единица измерения является частью типа.
+- Не реализовывать `Deref` для newtype. Внутреннее значение раскрывать на
+  границах сериализации, аппаратуры и численного ядра.
+- Если значение обязано существовать по уже проверенному инварианту,
+  использовать `unwrap()` или `expect()` с понятным сообщением.
+- На внешних границах — I/O, сеть, БД, пользовательский ввод — возвращать
+  осмысленный `Result` и сохранять контекст ошибки.
+- Не использовать `Option`, нули и пустые строки как временные заглушки.
+  Отсутствие допустимо только как часть доменной модели.
+- Не скрывать происхождение типов через `pub use`: импортировать их из модуля,
+  где они определены.
+- Перед созданием нового алгоритма или структуры искать существующую реализацию
+  и расширять её вместо копирования вариации.
+- В `mod.rs` держать объявления модулей; предметный код размещать в именованных
+  файлах.
+- Комментариями объяснять инварианты, предусловия, формулы и причины
+  неочевидных решений, а не пересказывать синтаксис.
+
+## Rust: тулчейн и форматирование
+
+- Репозиторий использует nightly, выбранный корневым `rust-toolchain.toml`.
+  В обычных командах не писать `+nightly`: выбор делает файл тулчейна.
+- Единый стиль задаёт корневой `rustfmt.toml`.
+- Форматировать только изменённые Rust-файлы. В общем грязном дереве не запускать
+  форматирование всего workspace или пакета.
+- Не передавать `rustfmt` корни модулей (`lib.rs`, `main.rs`, `mod.rs`),
+  если это может затронуть нетронутые дочерние файлы.
+- После изменений запускать проверки затронутых пакетов. Полный workspace
+  проверять при изменении общих интерфейсов, тулчейна или по правилам проекта.
+
+## MCP и поиск кода
+
+- В репозитории с Rust для семантического поиска кода использовать
+  `rust-code-mcp` из корневого `.mcp.json`: определения, ссылки, зависимости
+  и похожий код проверять им до текстового поиска.
+- MCP работает с несколькими репозиториями через общий демон, поэтому во все
+  вызовы передавать абсолютный путь текущего проекта.
+- Проверять состояние только scoped-вызовом `health_check` с этим путём. Если
+  индекс ещё не создан или устарел, запустить инкрементальный `index_codebase`
+  и повторить запрос.
+- Если после scoped-проверки и восстановления MCP остаётся недоступен или
+  degraded, сразу сообщить об этом и только затем использовать `rg` как явный
+  fallback.
+- Для точного поиска по документации, строкам, конфигам и логам использовать
+  `rg`; поиск файлов начинать с `rg --files`.
+
+## Проверка результата
+
+- Проверка обязана называть охват: какие пакеты, цели и сценарии реально
+  выполнены. Нулевой результат без счётчика не является доказательством.
+- Предпочитать узкие воспроизводимые тесты, которые падают при удалении
+  проверяемого поведения.
+- Не объявлять задачу завершённой, пока остаётся безопасная конкретная проверка
+  или правка в заявленном скоупе.
+- Не коммитить секреты, локальные абсолютные пути, дампы, кеши модели и
+  генерируемые артефакты.
