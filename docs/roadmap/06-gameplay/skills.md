@@ -142,6 +142,12 @@
       must stay invisible to the listener or contacting the netherworld would make
       the dead walk visibly among the living. It does not persist, being seconds long,
       like a cast in flight.
+    - **Casting does not currently break Meditation.** `WorldState::break_cover`
+      names casting among ServUO's revealing/disruptive actions, but
+      `World::begin_cast`/`resolve_cast` do not call it. A trance therefore survives
+      a spell cast even though walking, speaking, taking or making a blow, lifting
+      an item and crafting already end it. Route casting through the same seam and
+      pin the interruption with a world-level regression test.
     - [x] **Poisoning and Taste Identification**, the two ends of one fact. A
       `PoisonCharges { level, charges }` on an *item* is both a bottled dose and a
       coating on a blade — ServUO tells them apart by what the item is, and so does

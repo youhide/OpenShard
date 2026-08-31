@@ -3,11 +3,11 @@
     open: true,
     panel: Some((
         x: 0.0,
-        y: 25.78125,
-        width: 678.21875,
-        height: 141.6875,
+        y: 25.28125,
+        width: 118.5,
+        height: 34.6875,
     )),
-    zoom: 1.9,
+    zoom: 1.7,
     window_scale: 1.7,
     window: Some((
         x: 0,

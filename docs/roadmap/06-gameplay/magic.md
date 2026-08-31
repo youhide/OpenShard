@@ -12,6 +12,13 @@
     `SpellCast` and gives it its effect, `MobileDied`'s decoupling a third time.
     `Command::Heal` mends toward the maximum; `op_cast_spell`/`op_heal`/typed
     `op_damage` are the script's hands.
+  - **Live mana redraw.** The client draws the local player's mana as the blue
+    line below the overhead health bar (`client/app/src/shell.rs`), but the line
+    reads the last full `0x11` status reply. Casting and `magic::regen_mana` mutate
+    `Mana` without sending a mana/status update, while `refresh_statuses` only
+    diffs inventory-derived fields. The displayed pool can therefore stay stale
+    until another status reply; the mana mutation path needs one authoritative
+    live wire update and a regression test covering both spending and regen.
   - [x] **Typed damage and resistances** (the piece combat deferred). `damage`
     now takes a `DamageType` — physical, fire, cold, poison, energy — and cuts it
     by the target's `Resistance` *for that type*, in the one place all damage
