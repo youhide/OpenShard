@@ -6,7 +6,7 @@ boundary, and for replacing whole-world container scans with an exact index.
 Update this document in the same change that settles a decision or completes a
 stage.
 
-**Status:** A1 is built. Partial ground/container lifts validate the cursor
+**Status:** A1 and A3 are built. Partial ground/container lifts validate the cursor
 transition and allocate an unlocated remainder before changing the original
 pile; serial exhaustion is now an unchanged-state refusal. A2's direct-child
 index, audited membership, and policy-free deterministic recursive walk are
@@ -15,8 +15,10 @@ indexed-vs-slow state-machine property runs 256 sequences of up to 128 actions.
 The older `items::contents_index` whole-world snapshot is retired: status,
 quest, capacity, weight, backpack, secure-trade, and catalogue-stock reads now
 start at exact indexed container roots. Access-policy stops wait for A6's types;
-A2 is not yet complete. A0's remaining craft/measurement work and A3 onward
-remain open.
+A2 is not yet complete. Quantity changes now pass through one stack door that
+enforces the physical-pile bound, normalises singletons, and publishes viewer
+updates; six 256-case properties cover split, merge, fill/take, give, remove,
+and consume. A0's remaining craft/measurement work and A4 onward remain open.
 
 ## Outcome
 
@@ -652,7 +654,8 @@ The 2026-08-31 mutation inventory found:
   confined to `state::item_location`; restore uses
   `establish_item_location`, so A2's index rebuilds from canonical edges;
 - bare `Amount` writes remain in item constructors plus `items::{drag, stack,
-  containers}` and `skills::handlers::poison`; A3 owns their mutation doors;
+  containers}` and `skills::handlers::poison`; A3 now routes their live
+  mutations through `items::stack`, leaving only construction/restore writes;
 - the initial raw-despawn survey found located items in boats, housing decay,
   and world decor/fields/gates/spawners/death; A2 now routes those through
   `despawn_item`. The raw calls left are mobile destruction or rollback of an
@@ -670,8 +673,9 @@ The 2026-08-31 mutation inventory found:
 - [x] Cover typed/legacy identity and both ground/container origins.
 
 **Built.** Serial exhaustion cannot change total quantity or ownership, and
-named regressions cover both origins plus typed and legacy identities. The
-broader generated conservation suite remains A3's work.
+named regressions cover both origins plus typed and legacy identities. A3's
+generated conservation suite now ranges partial lifts across every valid pile
+size and split point.
 
 ### A2 — add the exact container membership index
 
@@ -697,17 +701,32 @@ oracle after arbitrary mutation sequences, recursive traversal, and save/restore
 
 ### A3 — centralize quantity mutation
 
-- [ ] Route production `Amount` changes through named stack operations rather
+- [x] Route production `Amount` changes through named stack operations rather
       than bare registry writes.
-- [ ] Make zero, singleton normalization, cap enforcement, redraw, and index
+- [x] Make zero, singleton normalization, cap enforcement, redraw, and index
       notifications explicit responsibilities of those operations.
-- [ ] Preserve deliberately partial `GiveOutcome`, but require callers either
+- [x] Preserve deliberately partial `GiveOutcome`, but require callers either
       handle it or use a new all-or-nothing prepared give.
-- [ ] Add conservation/model properties for split, merge, give, remove, and
+- [x] Add conservation/model properties for split, merge, give, remove, and
       consume.
 
 Done when a search for direct production `Amount` writes yields only constructors
 and the named quantity module, with each exception documented.
+
+**Built.** `items::stack` owns positive/capped writes, singleton
+normalisation, fixed-cap filling, bounded taking, and location-derived ground or
+container redraw. Prepared split commit has one narrower unpublished door so it
+cannot re-add the lifted serial to the old gump before the cursor relocation.
+The intentionally partial `GiveOutcome` remains `must_use`, and every production
+caller reads completion or the exact amount delivered. Six properties run 256
+cases each over the boundaries at one, `MAX_STACK`, and refused values through
+`u16::MAX`; named allocation-exhaustion regressions remain beside them.
+
+The remaining direct production `Amount` writes are constructors: persistence
+restore in `crates/server/world/src/tick/persist.rs` and test fixtures. Restore
+currently trusts a saved stack amount above `MAX_STACK`; validating and refusing
+that external record before entity allocation is recorded in A8 rather than
+turning the in-memory mutation door into a panic on I/O.
 
 ### A4 — introduce recursive `WithdrawalPlan`
 
@@ -850,6 +869,10 @@ cannot block the realtime loop.
 - [ ] Run the 10,000-sequence property soak and commit all regression seeds.
 - [ ] Remove the temporary catalogue `MaterialStock` backpack snapshot once
       server readiness is gone.
+- [ ] Validate restored stack amounts before entity allocation in
+      `crates/server/world/src/tick/persist.rs`; zero or above-`MAX_STACK` saved
+      piles are corrupt external records and must be refused, never clamped or
+      allowed to reach the in-memory quantity door.
 - [ ] Update `docs/item_kind.md`, architecture notes, and gameplay backlog with
       the settled ownership/index/transaction contracts.
 

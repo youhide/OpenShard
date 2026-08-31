@@ -1,7 +1,14 @@
-use super::*;
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_protocol::world::PoisonLevel;
+
+use super::*;
 
 /// An item appeared in the world.
 ///
@@ -11,15 +18,15 @@ use openshard_protocol::world::PoisonLevel;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ItemSpawned {
     /// The entity.
-    pub entity: EntityId,
+    pub entity:    EntityId,
     /// Its wire identity.
-    pub serial: Serial,
+    pub serial:    Serial,
     /// Semantic kind, present for migrated definitions.
     pub item_kind: Option<ItemKindId>,
     /// Semantic material grade, when this item has one.
-    pub material: Option<MaterialId>,
+    pub material:  Option<MaterialId>,
     /// Where it lies.
-    pub position: Point,
+    pub position:  Point,
 }
 
 /// Override a weapon item's speed and damage — the pack's magic sword, its stats
@@ -77,6 +84,10 @@ pub fn spawn_item(
     position: Point,
     facet: Facet,
 ) -> Option<EntityId> {
+    if !is_valid_stack_amount(amount) {
+        warn!(amount, "an item needs a positive representable amount");
+        return None;
+    }
     let facet = if state.facets.contains_key(&facet) {
         facet
     } else {
@@ -99,9 +110,7 @@ pub fn spawn_item(
     establish_item_location(state, entity, ItemLocation::ground(facet, position))
         .expect("a newly spawned ground item has one valid location");
     // Only a real stack carries an amount; a single item stays a bare graphic.
-    if amount > 1 {
-        state.registry.insert(entity, Amount(amount));
-    }
+    initialize_stack_amount(state, entity, amount);
     // Coins and ammunition are stackable even as a single item.  Callers
     // commonly spawn one item at a time (notably the staff `.add` command),
     // and making their stackability depend on the requested amount leaves
@@ -261,7 +270,10 @@ pub fn place_on_ground(state: &mut WorldState, item: EntityId, position: Point, 
 mod tests {
     use std::collections::BTreeMap;
 
-    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
 
     use super::*;
 
@@ -283,7 +295,7 @@ mod tests {
         state.registry.insert(
             item,
             Drawn {
-                id: Graphic(0x0EFA), // spellbook art, deliberately not a sword
+                id:  Graphic(0x0EFA), // spellbook art, deliberately not a sword
                 hue: Hue::NONE,
             },
         );
@@ -302,6 +314,46 @@ mod tests {
         assert_eq!(
             state.registry.get::<Material>(item),
             Some(&Material(MaterialId(9)))
+        );
+    }
+
+    #[test]
+    fn invalid_spawn_amounts_refuse_before_allocating_an_item() {
+        let mut state = world();
+        let at = Point::new(10, 10, 0);
+
+        assert_eq!(
+            spawn_item(&mut state, GOLD_GRAPHIC, Hue::NONE, 0, true, at, Facet(0)),
+            None,
+        );
+        assert_eq!(
+            spawn_item(
+                &mut state,
+                GOLD_GRAPHIC,
+                Hue::NONE,
+                MAX_STACK + 1,
+                true,
+                at,
+                Facet(0),
+            ),
+            None,
+        );
+        assert_eq!(
+            spawn_item(
+                &mut state,
+                GOLD_GRAPHIC,
+                Hue::NONE,
+                u16::MAX,
+                true,
+                at,
+                Facet(0),
+            ),
+            None,
+        );
+        assert_eq!(
+            state.registry.query::<Drawn>().count(),
+            0,
+            "a refused amount must not consume an entity or item serial"
         );
     }
 }

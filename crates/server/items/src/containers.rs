@@ -1,7 +1,14 @@
-use super::*;
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_state::item_definition::item_definition;
+
+use super::*;
 
 /// Handle a double-click. See `Command::DoubleClick`.
 ///
@@ -106,9 +113,9 @@ pub(crate) fn open_spellbook(
     state.send_packet(
         connection,
         &ServerPacket::SpellbookContent(SpellbookContent {
-            serial: book_serial,
+            serial:  book_serial,
             graphic: SPELLBOOK_GRAPHIC,
-            offset: 1,
+            offset:  1,
             content: mask,
         }),
     );
@@ -189,7 +196,7 @@ pub(crate) fn open_container(
         connection,
         &ServerPacket::ContainerContents(ContainerContents {
             container: Some(container_serial),
-            items: contents.clone(),
+            items:     contents.clone(),
         }),
     );
     // A corpse's contents have the item pictures, but a `0x3C` deliberately
@@ -201,7 +208,7 @@ pub(crate) fn open_container(
             connection,
             &ServerPacket::CorpseEquipment(CorpseEquipment {
                 corpse: container_serial,
-                items: story.equipment.clone(),
+                items:  story.equipment.clone(),
             }),
         );
     }
@@ -327,7 +334,7 @@ pub fn count_in_container(state: &WorldState, container: Serial, graphic: Graphi
                 .get::<Drawn>(*entity)
                 .is_some_and(|g| g.id == graphic)
         })
-        .map(|(entity, _)| u32::from(state.registry.get::<Amount>(entity).map_or(1, |a| a.0)))
+        .map(|(entity, _)| u32::from(amount_of(state, entity)))
         .sum()
 }
 
@@ -351,7 +358,7 @@ pub fn take_from_container(state: &mut WorldState, container: Serial, graphic: G
                 .get::<Drawn>(*entity)
                 .is_some_and(|g| g.id == graphic)
         })
-        .map(|(entity, _)| (entity, state.registry.get::<Amount>(entity).map_or(1, |a| a.0)))
+        .map(|(entity, _)| (entity, amount_of(state, entity)))
         .collect();
     let total: u32 = matches.iter().map(|(_, amount)| u32::from(*amount)).sum();
     if total < count {
@@ -362,25 +369,21 @@ pub fn take_from_container(state: &mut WorldState, container: Serial, graphic: G
     // purchase runs to six figures of gold, spread over as many piles as it takes.
     let mut remaining = count;
     for (entity, amount) in matches {
-        let amount = u32::from(amount);
         if remaining == 0 {
             break;
         }
-        if amount <= remaining {
+        let requested = u16::try_from(remaining.min(u32::from(amount)))
+            .expect("one selected pile is bounded by its u16 amount");
+        let taken = take_stack_amount(state, entity, requested);
+        remaining -= u32::from(taken.taken);
+        if taken.left == 0 {
             // The whole item goes: a contained item is on no sector grid and no
             // screen, so despawning it is all it takes.
-            remaining -= amount;
             let serial = state.registry.serial_of(entity);
             despawn_item(state, entity);
             if let Some(serial) = serial {
                 tell_watchers_removed(state, container, serial);
             }
-        } else {
-            // The remainder fits a stack by construction: it is what is left of an
-            // `Amount` after taking less than all of it.
-            set_stack_amount(state, entity, (amount - remaining) as u16);
-            remaining = 0;
-            tell_watchers_updated(state, container, entity);
         }
     }
     true
@@ -398,6 +401,10 @@ pub fn place_one(
     hue: Hue,
     amount: u16,
 ) -> Option<EntityId> {
+    if !is_valid_stack_amount(amount) {
+        warn!(amount, "a discrete item needs a positive representable amount");
+        return None;
+    }
     let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
         warn!("out of item serials; nothing placed");
         return None;
@@ -412,9 +419,7 @@ pub fn place_one(
     };
     establish_item_location(state, entity, ItemLocation::contained(contained))
         .expect("a newly placed item has one valid container parent");
-    if amount > 1 {
-        state.registry.insert(entity, Amount(amount));
-    }
+    initialize_stack_amount(state, entity, amount);
     // A lute gets its tunes and a bottle its poison here, because a graphic alone
     // cannot say how many are left in either.
     crate::apply_core_defaults(state, entity, graphic);
@@ -434,6 +439,13 @@ pub fn place_one_kind(
     material: Option<MaterialId>,
     amount: u16,
 ) -> Option<EntityId> {
+    if !is_valid_stack_amount(amount) {
+        warn!(
+            amount,
+            "a typed discrete item needs a positive representable amount"
+        );
+        return None;
+    }
     let drawn = presentation_of(kind, material)?;
     let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
         warn!("out of item serials; nothing placed");
@@ -448,9 +460,7 @@ pub fn place_one_kind(
     };
     establish_item_location(state, entity, ItemLocation::contained(contained))
         .expect("a newly placed typed item has one valid container parent");
-    if amount > 1 {
-        state.registry.insert(entity, Amount(amount));
-    }
+    initialize_stack_amount(state, entity, amount);
     crate::apply_core_defaults(state, entity, drawn.id);
     tell_watchers_updated(state, container, entity);
     Some(entity)
@@ -467,9 +477,9 @@ pub struct GiveOutcome {
     /// What the caller asked to put in the container.
     pub requested: u32,
     /// What was actually put in the container.
-    pub given: u32,
+    pub given:     u32,
     /// The last existing or newly-created pile touched, if any.
-    pub last: Option<EntityId>,
+    pub last:      Option<EntityId>,
 }
 
 impl GiveOutcome {
@@ -489,8 +499,8 @@ impl GiveOutcome {
 #[derive(Clone, Copy)]
 struct GiveProgress {
     requested: u32,
-    left: u32,
-    last: Option<EntityId>,
+    left:      u32,
+    last:      Option<EntityId>,
 }
 
 impl GiveProgress {
@@ -505,8 +515,8 @@ impl GiveProgress {
     const fn outcome(self) -> GiveOutcome {
         GiveOutcome {
             requested: self.requested,
-            given: self.requested - self.left,
-            last: self.last,
+            given:     self.requested - self.left,
+            last:      self.last,
         }
     }
 }
@@ -697,15 +707,11 @@ fn fill_existing_piles(
         if progress.left == 0 {
             break;
         }
-        let room = u32::from(MAX_STACK.saturating_sub(amount_of(state, pile)));
-        let moved = progress.left.min(room);
+        let moved = u32::from(fill_stack(state, pile, progress.left));
         if moved > 0 {
-            let total = amount_of(state, pile) + moved as u16;
-            state.registry.insert(pile, Amount(total));
             if intrinsically_stackable(graphic) {
                 state.registry.insert(pile, Stackable);
             }
-            tell_watchers_updated(state, container, pile);
             progress.last = Some(pile);
             progress.left -= moved;
         }
@@ -744,7 +750,7 @@ fn spawn_remaining_piles(
         };
         establish_item_location(state, entity, ItemLocation::contained(contained))
             .expect("a newly given stack has one valid container parent");
-        state.registry.insert(entity, Amount(take));
+        initialize_stack_amount(state, entity, take);
         state.registry.insert(entity, Stackable);
         tell_watchers_updated(state, container, entity);
         progress.left -= u32::from(take);
@@ -783,14 +789,8 @@ fn fill_existing_kind_piles(
         if progress.left == 0 {
             break;
         }
-        let moved = progress
-            .left
-            .min(u32::from(MAX_STACK.saturating_sub(amount_of(state, pile))));
+        let moved = u32::from(fill_stack(state, pile, progress.left));
         if moved > 0 {
-            state
-                .registry
-                .insert(pile, Amount(amount_of(state, pile) + moved as u16));
-            tell_watchers_updated(state, container, pile);
             progress.last = Some(pile);
             progress.left -= moved;
         }
@@ -832,7 +832,7 @@ fn spawn_remaining_kind_piles(
             }),
         )
         .expect("a newly given typed stack has one valid container parent");
-        state.registry.insert(entity, Amount(take));
+        initialize_stack_amount(state, entity, take);
         state.registry.insert(entity, Stackable);
         tell_watchers_updated(state, container, entity);
         progress.left -= u32::from(take);
@@ -846,21 +846,17 @@ fn spawn_remaining_kind_piles(
 /// actually taken; a stack that reaches zero is despawned and forgotten by
 /// everyone watching the container.
 pub fn remove_from_stack(state: &mut WorldState, container: Serial, item: EntityId, amount: u16) -> u16 {
-    let have = amount_of(state, item);
-    let take = have.min(amount);
-    if take == 0 {
+    let taken = take_stack_amount(state, item, amount);
+    if taken.taken == 0 {
         return 0;
     }
-    if take == have {
+    if taken.left == 0 {
         if let Some(serial) = state.registry.serial_of(item) {
             tell_watchers_removed(state, container, serial);
         }
         despawn_item(state, item);
-    } else {
-        state.registry.insert(item, Amount(have - take));
-        tell_watchers_updated(state, container, item);
     }
-    take
+    taken.taken
 }
 
 /// Tell every client with `container` open that `item` has left it — a `0x1D`,
@@ -942,7 +938,7 @@ pub fn contained_record(state: &WorldState, entity: EntityId) -> Option<Containe
         return None;
     };
     let Drawn { id, hue } = *state.registry.get::<Drawn>(entity)?;
-    let amount = state.registry.get::<Amount>(entity).map_or(1, |a| a.0);
+    let amount = amount_of(state, entity);
     Some(ContainedItem {
         serial,
         graphic: id,
@@ -957,7 +953,11 @@ pub fn contained_record(state: &WorldState, entity: EntityId) -> Option<Containe
 mod tests {
     use std::collections::BTreeMap;
 
-    use openshard_protocol::serial::{ITEM_MAX, ITEM_MIN};
+    use openshard_protocol::serial::{
+        ITEM_MAX,
+        ITEM_MIN,
+    };
+    use proptest::prelude::*;
 
     use super::*;
 
@@ -970,6 +970,15 @@ mod tests {
             openshard_map::grid::Tile::new(0, 0),
             1,
         )
+    }
+
+    fn empty_container(state: &mut WorldState) -> Serial {
+        let (entity, serial) = state
+            .registry
+            .spawn_with_serial(SerialKind::Item)
+            .expect("a container serial");
+        state.registry.insert(entity, Container { gump: Graphic(1) });
+        serial
     }
 
     #[test]
@@ -1011,7 +1020,10 @@ mod tests {
 
     #[test]
     fn typed_give_does_not_merge_into_an_affixed_equivalent_pile() {
-        use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+        use openshard_protocol::item_kind::{
+            ItemKindId,
+            MaterialId,
+        };
 
         let mut state = world();
         let container_entity = state.registry.spawn();
@@ -1031,7 +1043,7 @@ mod tests {
         state.registry.insert(
             existing,
             Drawn {
-                id: Graphic(0x1BF2),
+                id:  Graphic(0x1BF2),
                 hue: Hue(0x08AB),
             },
         );
@@ -1057,5 +1069,66 @@ mod tests {
         assert_ne!(new_pile, existing);
         assert_eq!(amount_of(&state, existing), 3, "the affixed item was not changed");
         assert_eq!(amount_of(&state, new_pile), 2);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        #[test]
+        fn give_and_atomic_take_match_a_container_total_model(
+            requested in 0u32..=u32::from(MAX_STACK) * 2,
+            wanted in 0u32..=u32::from(MAX_STACK) * 2,
+        ) {
+            let mut state = world();
+            let container = empty_container(&mut state);
+
+            let outcome = give(&mut state, container, GOLD_GRAPHIC, Hue(0), requested);
+            prop_assert!(outcome.is_complete());
+            prop_assert_eq!(count_in_container(&state, container, GOLD_GRAPHIC), requested);
+
+            let taken = take_from_container(&mut state, container, GOLD_GRAPHIC, wanted);
+            let expected_success = wanted <= requested;
+            let expected_left = if expected_success { requested - wanted } else { requested };
+            prop_assert_eq!(taken, expected_success);
+            prop_assert_eq!(count_in_container(&state, container, GOLD_GRAPHIC), expected_left);
+        }
+
+        #[test]
+        fn remove_from_one_stack_matches_saturating_subtraction(
+            initial in 1u16..=MAX_STACK,
+            requested in 0u16..=MAX_STACK,
+        ) {
+            let mut state = world();
+            let container = empty_container(&mut state);
+            let outcome = give(&mut state, container, GOLD_GRAPHIC, Hue(0), u32::from(initial));
+            let item = outcome.last.expect("a positive payout has a pile");
+
+            let removed = remove_from_stack(&mut state, container, item, requested);
+            let expected_removed = initial.min(requested);
+            prop_assert_eq!(removed, expected_removed);
+            prop_assert_eq!(
+                count_in_container(&state, container, GOLD_GRAPHIC),
+                u32::from(initial - expected_removed),
+            );
+        }
+
+        #[test]
+        fn consume_preserves_the_unconsumed_quantity(
+            initial in 1u16..=MAX_STACK,
+            requested in 0u16..=MAX_STACK,
+        ) {
+            let mut state = world();
+            let container = empty_container(&mut state);
+            let outcome = give(&mut state, container, GOLD_GRAPHIC, Hue(0), u32::from(initial));
+            let item = outcome.last.expect("a positive payout has a pile");
+            let serial = state.registry.serial_of(item).expect("a payout has a serial");
+
+            prop_assert!(consume(&mut state, serial, requested));
+            let removed = if requested == 0 { initial } else { initial.min(requested) };
+            prop_assert_eq!(
+                count_in_container(&state, container, GOLD_GRAPHIC),
+                u32::from(initial - removed),
+            );
+        }
     }
 }

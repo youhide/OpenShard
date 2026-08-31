@@ -1,6 +1,15 @@
+use openshard_state::components::{
+    CraftedBy,
+    ItemAffixes,
+    PoisonCharges,
+    Quality,
+};
+use openshard_state::weapon::{
+    ARROW,
+    BOLT,
+};
+
 use super::*;
-use openshard_state::components::{CraftedBy, ItemAffixes, PoisonCharges, Quality};
-use openshard_state::weapon::{ARROW, BOLT};
 
 /// ServUO's three coin clinks, chosen by the pile that was set down.
 const GOLD_DROP_SOUNDS: [SoundId; 3] = [SoundId(0x02E4), SoundId(0x02E5), SoundId(0x02E6)];
@@ -102,7 +111,6 @@ pub fn merge_onto(state: &mut WorldState, connection: ConnectionId, held: HeldIt
             return;
         }
         let left = merge_amounts(state, held.entity, target);
-        redraw_ground_item(state, target);
         if left > 0 {
             // The target filled up. What did not fit goes back where it came
             // from rather than onto the floor under the pile — the drop is
@@ -131,7 +139,6 @@ pub fn merge_onto(state: &mut WorldState, connection: ConnectionId, held: HeldIt
             return;
         }
         let left = merge_amounts(state, held.entity, target);
-        tell_watchers_updated(state, container, target);
         if left > 0 {
             debug!(left, "stack filled in a container; the remainder bounced");
             bounce(state, connection, held, DragCancelReason::Other);
@@ -184,11 +191,11 @@ fn merge_amounts(state: &mut WorldState, held: EntityId, target: EntityId) -> u1
         state.registry.insert(held, Stackable);
     }
     let held_amount = amount_of(state, held);
-    let room = MAX_STACK.saturating_sub(amount_of(state, target));
-    let moved = held_amount.min(room);
-    set_stack_amount(state, target, amount_of(state, target) + moved);
+    let moved = fill_stack(state, target, u32::from(held_amount));
     let left = held_amount - moved;
-    set_stack_amount(state, held, left);
+    if left > 0 && left != held_amount {
+        set_stack_amount(state, held, left);
+    }
     left
 }
 
@@ -197,9 +204,95 @@ pub fn amount_of(state: &WorldState, item: EntityId) -> u16 {
     state.registry.get::<Amount>(item).map_or(1, |a| a.0)
 }
 
-/// Set a stack's size, keeping the "a single carries no `Amount`" rule that
-/// `spawn_item` and the `0x1A` encoder both rely on.
+/// Whether `amount` can be represented by one live pile.
+///
+/// Zero is absence, not a singleton, and a larger quantity has to be split
+/// over several entities before any of them is published.
+#[must_use]
+pub const fn is_valid_stack_amount(amount: u16) -> bool {
+    amount > 0 && amount <= MAX_STACK
+}
+
+/// Set a live stack's size and publish the change to its current viewers.
+///
+/// Whole-pile removal is deliberately not encoded as `amount == 0`: deleting
+/// an entity also owns its cursor, container and sector cleanup, so the caller
+/// must take that explicit path through [`despawn_item`].
+///
+/// # Panics
+///
+/// Panics when `amount` is zero or exceeds [`MAX_STACK`]. Both are programmer
+/// errors after the operation has selected one physical pile.
 pub fn set_stack_amount(state: &mut WorldState, item: EntityId, amount: u16) {
+    write_stack_amount(state, item, amount);
+    match item_location(state, item) {
+        Some(ItemLocation::Settled(SettledItemLocation::Ground { .. })) => {
+            redraw_ground_item(state, item);
+        }
+        Some(ItemLocation::Settled(SettledItemLocation::Contained(contained))) => {
+            tell_watchers_updated(state, contained.container, item);
+        }
+        Some(ItemLocation::Settled(SettledItemLocation::Equipped(_)))
+        | Some(ItemLocation::Held { .. })
+        | None => {}
+    }
+}
+
+/// Install the quantity of an entity that has not been published yet.
+///
+/// Constructors and prepared transactions use this door while presentation is
+/// still incomplete. Once an item is live, [`set_stack_amount`] owns both the
+/// component write and its viewer update.
+pub(crate) fn initialize_stack_amount(state: &mut WorldState, item: EntityId, amount: u16) {
+    write_stack_amount(state, item, amount);
+}
+
+/// Commit the original half of a prepared split without publishing an
+/// intermediate amount at the old location.
+///
+/// The lift commits the cursor relocation immediately after this write. A
+/// container update here would re-add the just-lifted serial to the lifter's
+/// open gump before the relocation removes it.
+pub(crate) fn commit_prepared_split_amount(state: &mut WorldState, item: EntityId, amount: u16) {
+    write_stack_amount(state, item, amount);
+}
+
+/// Fill one existing pile and return how much of `offered` entered it.
+pub(crate) fn fill_stack(state: &mut WorldState, item: EntityId, offered: u32) -> u16 {
+    let room = MAX_STACK.saturating_sub(amount_of(state, item));
+    let moved = offered.min(u32::from(room)) as u16;
+    if moved > 0 {
+        set_stack_amount(state, item, amount_of(state, item) + moved);
+    }
+    moved
+}
+
+/// The quantity result of taking from one pile.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct StackTake {
+    pub taken: u16,
+    pub left:  u16,
+}
+
+/// Take at most `requested` from one pile without deleting an emptied entity.
+///
+/// A positive remainder is committed and published here. `left == 0` tells
+/// the owning operation to despawn through its location-aware cleanup door.
+pub(crate) fn take_stack_amount(state: &mut WorldState, item: EntityId, requested: u16) -> StackTake {
+    let have = amount_of(state, item);
+    let taken = have.min(requested);
+    let left = have - taken;
+    if taken > 0 && left > 0 {
+        set_stack_amount(state, item, left);
+    }
+    StackTake { taken, left }
+}
+
+fn write_stack_amount(state: &mut WorldState, item: EntityId, amount: u16) {
+    assert!(
+        is_valid_stack_amount(amount),
+        "one live pile must contain 1..={MAX_STACK} items, got {amount}"
+    );
     if amount > 1 {
         state.registry.insert(item, Amount(amount));
     } else {
@@ -224,7 +317,11 @@ pub fn redraw_ground_item(state: &mut WorldState, item: EntityId) {
 mod tests {
     use std::collections::BTreeMap;
 
-    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
+    use proptest::prelude::*;
 
     use super::*;
 
@@ -237,6 +334,13 @@ mod tests {
             openshard_map::grid::Tile::new(0, 0),
             1,
         )
+    }
+
+    fn pile(state: &mut WorldState, amount: u16) -> EntityId {
+        let item = state.registry.spawn();
+        state.registry.insert(item, Stackable);
+        initialize_stack_amount(state, item, amount);
+        item
     }
 
     #[test]
@@ -257,7 +361,7 @@ mod tests {
             state.registry.insert(
                 item,
                 Drawn {
-                    id: Graphic(0x1BF2),
+                    id:  Graphic(0x1BF2),
                     hue: Hue(0x08AB),
                 },
             );
@@ -281,5 +385,70 @@ mod tests {
         state.registry.remove::<Quality>(first);
         state.registry.insert(first, ItemAffixes::default());
         assert!(!can_stack(&state, first, second));
+    }
+
+    #[test]
+    #[should_panic(expected = "one live pile must contain")]
+    fn zero_cannot_be_normalized_into_a_live_singleton() {
+        let mut state = world();
+        let item = state.registry.spawn();
+        set_stack_amount(&mut state, item, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "one live pile must contain")]
+    fn one_pile_cannot_cross_the_stack_cap() {
+        let mut state = world();
+        let item = state.registry.spawn();
+        set_stack_amount(&mut state, item, MAX_STACK + 1);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        #[test]
+        fn merge_conserves_quantity_at_every_stack_boundary(
+            held_amount in 1u16..=MAX_STACK,
+            target_amount in 1u16..=MAX_STACK,
+        ) {
+            let mut state = world();
+            let held = pile(&mut state, held_amount);
+            let target = pile(&mut state, target_amount);
+
+            let left = merge_amounts(&mut state, held, target);
+            let expected_moved = held_amount.min(MAX_STACK - target_amount);
+
+            prop_assert_eq!(amount_of(&state, target), target_amount + expected_moved);
+            prop_assert_eq!(left, held_amount - expected_moved);
+            if left > 0 {
+                prop_assert_eq!(amount_of(&state, held), left);
+            }
+            prop_assert_eq!(
+                u32::from(amount_of(&state, target)) + u32::from(left),
+                u32::from(target_amount) + u32::from(held_amount),
+            );
+        }
+
+        #[test]
+        fn fill_and_take_match_a_small_quantity_model(
+            initial in 1u16..=MAX_STACK,
+            offered in 0u32..=u32::from(MAX_STACK) * 2,
+            requested in 0u16..=MAX_STACK,
+        ) {
+            let mut state = world();
+            let item = pile(&mut state, initial);
+
+            let moved = fill_stack(&mut state, item, offered);
+            let after_fill = initial + moved;
+            prop_assert_eq!(moved, offered.min(u32::from(MAX_STACK - initial)) as u16);
+            prop_assert_eq!(amount_of(&state, item), after_fill);
+
+            let taken = take_stack_amount(&mut state, item, requested);
+            prop_assert_eq!(taken.taken, after_fill.min(requested));
+            prop_assert_eq!(u32::from(taken.taken) + u32::from(taken.left), u32::from(after_fill));
+            if taken.left > 0 {
+                prop_assert_eq!(amount_of(&state, item), taken.left);
+            }
+        }
     }
 }

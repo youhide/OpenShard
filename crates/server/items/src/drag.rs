@@ -1,9 +1,14 @@
-use super::*;
+use std::fmt;
+
 use openshard_entities::SpawnError;
 use openshard_state::{
-    LocationError, PreparedItemRelocation, commit_item_relocation, prepare_item_relocation,
+    LocationError,
+    PreparedItemRelocation,
+    commit_item_relocation,
+    prepare_item_relocation,
 };
-use std::fmt;
+
+use super::*;
 
 /// How near, in tiles, a mobile must be to reach an item on the ground or set one
 /// down. Sphere reaches two; a third forgives the diagonal the cursor is shown
@@ -31,8 +36,8 @@ pub const SECURE_FULL_MESSAGE: &str = "This house cannot hold any more.";
 /// An item whose identity and current parent have passed a lift's basic gates.
 #[derive(Clone, Copy)]
 struct LiftableItem {
-    entity: EntityId,
-    serial: Serial,
+    entity:   EntityId,
+    serial:   Serial,
     location: ItemLocation,
 }
 
@@ -40,7 +45,7 @@ struct LiftableItem {
 /// commit without allocation or another gameplay refusal.
 struct PreparedLift {
     relocation: PreparedItemRelocation,
-    split: Option<PreparedSplit>,
+    split:      Option<PreparedSplit>,
 }
 
 /// The quantity half of a partial lift.
@@ -48,11 +53,11 @@ struct PreparedLift {
 /// `leftover` already owns its serial and identity, but deliberately has no
 /// location and has emitted no event or packet until [`commit_split`].
 struct PreparedSplit {
-    original: EntityId,
-    leftover: EntityId,
-    taken: u16,
+    original:  EntityId,
+    leftover:  EntityId,
+    taken:     u16,
     remainder: u16,
-    origin: SettledItemLocation,
+    origin:    SettledItemLocation,
 }
 
 #[derive(Debug)]
@@ -113,7 +118,7 @@ fn prepare_lift(
         state.registry.insert(leftover, drawn);
         crate::spawn::copy_identity(state, item.entity, leftover);
         state.registry.insert(leftover, Stackable);
-        set_stack_amount(state, leftover, total - amount);
+        initialize_stack_amount(state, leftover, total - amount);
         Some(PreparedSplit {
             original: item.entity,
             leftover,
@@ -133,8 +138,8 @@ fn commit_split(state: &mut WorldState, split: PreparedSplit) {
     // Normalise legacy gold/arrows/bolts while they participate, so persistence
     // retains the fact that both resulting singleton piles remain stackable.
     state.registry.insert(split.original, Stackable);
-    set_stack_amount(state, split.original, split.taken);
-    set_stack_amount(state, split.leftover, split.remainder);
+    commit_prepared_split_amount(state, split.original, split.taken);
+    debug_assert_eq!(amount_of(state, split.leftover), split.remainder);
     establish_item_location(state, split.leftover, ItemLocation::Settled(split.origin))
         .expect("a prepared split remainder keeps the original's valid parent");
     match split.origin {
@@ -524,8 +529,8 @@ pub fn drop_into_container(
     let grid = item_count(state, container_serial);
     let contained = Contained {
         container: container_serial,
-        position: at,
-        grid: GridSlot(grid),
+        position:  at,
+        grid:      GridSlot(grid),
     };
     let graphic = held_graphic(state, held.entity);
     relocate_item(state, held.entity, ItemLocation::contained(contained))
@@ -636,7 +641,7 @@ fn recharge_runebook(
     // rather than vanishing: clamping here would eat the difference, which is
     // the shape of every quiet item-loss bug.
     let room = u32::from(owned.max_charges - owned.charges);
-    let held_amount = u32::from(state.registry.get::<Amount>(held.entity).map_or(1, |a| a.0));
+    let held_amount = u32::from(amount_of(state, held.entity));
     let taken = room.min(held_amount);
     owned.charges += taken as u8;
     state.registry.insert(book, owned);
@@ -645,7 +650,7 @@ fn recharge_runebook(
     } else {
         // Put the remainder back where it came from, still a pile.
         let left = u16::try_from(held_amount - taken).unwrap_or(u16::MAX);
-        state.registry.insert(held.entity, Amount(left));
+        set_stack_amount(state, held.entity, left);
         bounce(state, connection, held, DragCancelReason::Other);
         return;
     }
@@ -732,9 +737,9 @@ fn drop_scroll_on_book(state: &mut WorldState, connection: ConnectionId, held: H
     state.send_packet(
         connection,
         &ServerPacket::SpellbookContent(SpellbookContent {
-            serial: book_serial,
+            serial:  book_serial,
             graphic: SPELLBOOK_GRAPHIC,
-            offset: 1,
+            offset:  1,
             content: mask.0,
         }),
     );
@@ -813,11 +818,18 @@ mod tests {
 
     use openshard_protocol::access::AccessLevel;
     use openshard_protocol::identity::AccountName;
-    use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-    use openshard_protocol::serial::{ITEM_MAX, RawSerial};
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
+    use openshard_protocol::serial::{
+        ITEM_MAX,
+        RawSerial,
+    };
     use openshard_protocol::version::ClientVersion;
     use openshard_state::FacetState;
     use openshard_state::connection::Connection;
+    use proptest::prelude::*;
 
     use super::*;
 
@@ -855,7 +867,7 @@ mod tests {
         state.registry.insert(
             player,
             Body {
-                id: Graphic(0x0190),
+                id:  Graphic(0x0190),
                 hue: Hue(0),
             },
         );
@@ -890,6 +902,13 @@ mod tests {
             .reserve_serial(Serial::new(ITEM_MAX).expect("the final item serial"));
     }
 
+    prop_compose! {
+        fn split_case()(total in 2u16..=MAX_STACK)
+            (taken in 1u16..total, total in Just(total)) -> (u16, u16) {
+            (total, taken)
+        }
+    }
+
     #[test]
     #[should_panic(expected = "an item on a cursor must have art")]
     fn a_held_entity_without_art_is_not_silently_treated_as_graphic_zero() {
@@ -906,7 +925,7 @@ mod tests {
         let (item, serial) = stack(
             &mut state,
             Drawn {
-                id: Graphic(0x1BF2),
+                id:  Graphic(0x1BF2),
                 hue: Hue(0x08AB),
             },
             10,
@@ -939,7 +958,7 @@ mod tests {
         let (container, container_serial) = stack(
             &mut state,
             Drawn {
-                id: Graphic(0x0E75),
+                id:  Graphic(0x0E75),
                 hue: Hue(0),
             },
             1,
@@ -954,15 +973,15 @@ mod tests {
         let (item, serial) = stack(
             &mut state,
             Drawn {
-                id: GOLD_GRAPHIC,
+                id:  GOLD_GRAPHIC,
                 hue: Hue(0),
             },
             10,
         );
         let contained = Contained {
             container: container_serial,
-            position: GumpPoint::new(30, 40),
-            grid: GridSlot(2),
+            position:  GumpPoint::new(30, 40),
+            grid:      GridSlot(2),
         };
         establish_item_location(&mut state, item, ItemLocation::contained(contained)).unwrap();
         exhaust_item_serials(&mut state);
@@ -988,7 +1007,7 @@ mod tests {
         let (item, serial) = stack(
             &mut state,
             Drawn {
-                id: Graphic(0x1BF2),
+                id:  Graphic(0x1BF2),
                 hue: Hue(0x08AB),
             },
             10,
@@ -1028,7 +1047,7 @@ mod tests {
         let (container, container_serial) = stack(
             &mut state,
             Drawn {
-                id: Graphic(0x0E75),
+                id:  Graphic(0x0E75),
                 hue: Hue(0),
             },
             1,
@@ -1041,14 +1060,14 @@ mod tests {
         );
         establish_item_location(&mut state, container, ItemLocation::ground(Facet(0), at)).unwrap();
         let drawn = Drawn {
-            id: Graphic(0x2222),
+            id:  Graphic(0x2222),
             hue: Hue(0x0444),
         };
         let (item, serial) = stack(&mut state, drawn, 10);
         let contained = Contained {
             container: container_serial,
-            position: GumpPoint::new(30, 40),
-            grid: GridSlot(2),
+            position:  GumpPoint::new(30, 40),
+            grid:      GridSlot(2),
         };
         establish_item_location(&mut state, item, ItemLocation::contained(contained)).unwrap();
 
@@ -1064,5 +1083,44 @@ mod tests {
         assert!(!state.registry.has::<ItemKind>(remainder));
         assert!(!state.registry.has::<Material>(remainder));
         assert!(openshard_state::audit_item_graph(&state).is_empty());
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        #[test]
+        fn partial_ground_lifts_conserve_quantity((total, taken) in split_case()) {
+            let mut state = world();
+            let at = Point::new(10, 10, 0);
+            let (connection, _) = connected_player(&mut state, at);
+            let (item, serial) = stack(
+                &mut state,
+                Drawn {
+                    id: GOLD_GRAPHIC,
+                    hue: Hue(0),
+                },
+                total,
+            );
+            establish_item_location(&mut state, item, ItemLocation::ground(Facet(0), at)).unwrap();
+            state.place_item(Facet(0), item, at);
+
+            pick_up(&mut state, connection, RawSerial(serial.raw()), taken);
+
+            let (remainder, _) = state
+                .registry
+                .query::<ItemLocation>()
+                .find(|(candidate, location)| {
+                    *candidate != item && **location == ItemLocation::ground(Facet(0), at)
+                })
+                .expect("a partial lift leaves one remainder");
+            prop_assert_eq!(amount_of(&state, item), taken);
+            prop_assert_eq!(amount_of(&state, remainder), total - taken);
+            prop_assert_eq!(
+                u32::from(amount_of(&state, item)) + u32::from(amount_of(&state, remainder)),
+                u32::from(total),
+            );
+            prop_assert_eq!(state.held_of(connection).map(|held| held.entity), Some(item));
+            prop_assert!(openshard_state::audit_item_graph(&state).is_empty());
+        }
     }
 }

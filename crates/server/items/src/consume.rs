@@ -34,7 +34,6 @@ pub fn consume(state: &mut WorldState, serial: Serial, amount: u16) -> bool {
             Some(ItemLocation::Settled(SettledItemLocation::Ground { .. }))
         ) {
             set_stack_amount(state, entity, have - amount);
-            redraw_ground_item(state, entity);
             return true;
         }
         // Worn or on a cursor — those never stack; fall through to whole removal.

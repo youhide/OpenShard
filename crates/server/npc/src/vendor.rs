@@ -11,22 +11,63 @@ use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_items as items;
 use openshard_map::overlay::Doors;
-use openshard_protocol::containers::{ContainedItem, ContainerContents, GridSlot, encode_open_container};
+use openshard_protocol::containers::{
+    ContainedItem,
+    ContainerContents,
+    GridSlot,
+    encode_open_container,
+};
 use openshard_protocol::gump::GumpPoint;
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-use openshard_protocol::serial::{RawSerial, Serial, SerialKind};
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
+use openshard_protocol::serial::{
+    RawSerial,
+    Serial,
+    SerialKind,
+};
 use openshard_protocol::server_packet::ServerPacket;
-use openshard_protocol::vendor::{BuyLine, BuyList, Purchase, Sale, SellLine, SellList};
+use openshard_protocol::vendor::{
+    BuyLine,
+    BuyList,
+    Purchase,
+    Sale,
+    SellLine,
+    SellList,
+};
 use openshard_protocol::version::ClientVersion;
-use openshard_protocol::wire::{Graphic, Hue, Layer};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
 use openshard_state::components::{
-    Amount, Contained, Drawn, ItemKind, Material, Name, Position, Price, Restock, StockRecord, Vendor,
+    Amount,
+    Contained,
+    Drawn,
+    ItemKind,
+    Material,
+    Name,
+    Position,
+    Price,
+    Restock,
+    StockRecord,
+    Vendor,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{
-    ItemLocation, TooltipMode, WorldState, establish_item_location, kind_from_drawn, presentation_of,
+    ItemLocation,
+    TooltipMode,
+    WorldState,
+    establish_item_location,
+    kind_from_drawn,
+    presentation_of,
 };
-use tracing::debug;
+use tracing::{
+    debug,
+    warn,
+};
 
 use crate::GOLD_GRAPHIC;
 
@@ -56,20 +97,20 @@ const TRADE_RANGE: u32 = 4;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct StockLine {
     /// The goods' graphic.
-    pub graphic: Graphic,
+    pub graphic:   Graphic,
     /// Their hue.
-    pub hue: Hue,
+    pub hue:       Hue,
     /// Explicit semantic type for a new stock script. Omit only for a legacy
     /// line; audited `(graphic, hue)` then upgrades it on stock.
     pub item_kind: Option<ItemKindId>,
     /// Material for `item_kind`, where that kind declares a material family.
-    pub material: Option<MaterialId>,
+    pub material:  Option<MaterialId>,
     /// How many the vendor holds.
-    pub amount: Amount,
+    pub amount:    Amount,
     /// What one unit costs.
-    pub price: Price,
+    pub price:     Price,
     /// The label the client shows.
-    pub name: String,
+    pub name:      String,
 }
 
 /// The stock container a vendor wears, if it is a vendor at all.
@@ -122,7 +163,7 @@ pub fn stock(state: &mut WorldState, vendor_serial: Serial, lines: Vec<StockLine
     // What "full" means for this shelf, and when it may be filled again. Cumulative,
     // like the stocking itself.
     let mut record = state.registry.get::<Restock>(vendor).cloned().unwrap_or(Restock {
-        at: state.ticks + RESTOCK_TICKS,
+        at:    state.ticks + RESTOCK_TICKS,
         lines: Vec::new(),
     });
     for line in lines {
@@ -131,13 +172,13 @@ pub fn stock(state: &mut WorldState, vendor_serial: Serial, lines: Vec<StockLine
             continue;
         };
         record.lines.push(StockRecord {
-            graphic: line.graphic,
-            hue: line.hue,
+            graphic:   line.graphic,
+            hue:       line.hue,
             item_kind: line.item_kind,
-            material: line.material,
-            amount: line.amount,
-            price: line.price,
-            name: line.name.clone(),
+            material:  line.material,
+            amount:    line.amount,
+            price:     line.price,
+            name:      line.name.clone(),
         });
         place_stock_line(state, stock_serial, &line);
     }
@@ -157,7 +198,7 @@ fn semantic_stock_line(mut line: StockLine) -> Option<StockLine> {
         }
         None => {
             if let Some((kind, material)) = kind_from_drawn(Drawn {
-                id: line.graphic,
+                id:  line.graphic,
                 hue: line.hue,
             }) {
                 line.item_kind = Some(kind);
@@ -172,13 +213,17 @@ fn semantic_stock_line(mut line: StockLine) -> Option<StockLine> {
 /// Shared by the first stocking and the restock, so a refilled line is the same
 /// object a fresh one is.
 fn place_stock_line(state: &mut WorldState, stock_serial: Serial, line: &StockLine) {
+    if !items::is_valid_stack_amount(line.amount.0) {
+        warn!(amount = line.amount.0, "vendor stock line has an invalid amount");
+        return;
+    }
     let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
         return;
     };
     state.registry.insert(
         entity,
         Drawn {
-            id: line.graphic,
+            id:  line.graphic,
             hue: line.hue,
         },
     );
@@ -187,12 +232,12 @@ fn place_stock_line(state: &mut WorldState, stock_serial: Serial, line: &StockLi
     }
     let contained = Contained {
         container: stock_serial,
-        position: GumpPoint::new(50, 50),
-        grid: GridSlot(0),
+        position:  GumpPoint::new(50, 50),
+        grid:      GridSlot(0),
     };
     establish_item_location(state, entity, ItemLocation::contained(contained))
         .expect("fresh vendor stock has one valid shelf");
-    state.registry.insert(entity, line.amount);
+    items::set_stack_amount(state, entity, line.amount.0);
     state.registry.insert(entity, line.price);
     state.registry.insert(entity, Name(line.name.clone()));
     // And whatever the graphic implies: a lute's tunes, a bottle's poison. After
@@ -217,45 +262,59 @@ fn restock_if_due(state: &mut WorldState, vendor: EntityId, stock_serial: Serial
         return;
     }
     for line in &record.lines {
+        if !items::is_valid_stack_amount(line.amount.0) {
+            warn!(
+                amount = line.amount.0,
+                "saved vendor stock line has an invalid amount"
+            );
+            continue;
+        }
         let existing = openshard_state::contained_items(state, stock_serial)
-            .filter(|(item, _)| match line.item_kind {
-                Some(kind) => {
-                    state.registry.get::<ItemKind>(*item) == Some(&ItemKind(kind))
-                        && state.registry.get::<Material>(*item).map(|material| material.0) == line.material
+            .filter(|(item, _)| {
+                match line.item_kind {
+                    Some(kind) => {
+                        state.registry.get::<ItemKind>(*item) == Some(&ItemKind(kind))
+                            && state.registry.get::<Material>(*item).map(|material| material.0)
+                                == line.material
+                    }
+                    None => {
+                        state
+                            .registry
+                            .get::<Drawn>(*item)
+                            .is_some_and(|g| g.id == line.graphic && g.hue == line.hue)
+                    }
                 }
-                None => state
-                    .registry
-                    .get::<Drawn>(*item)
-                    .is_some_and(|g| g.id == line.graphic && g.hue == line.hue),
             })
             .map(|(item, _)| item)
             .next();
         match existing {
             Some(item) => {
-                let have = state.registry.get::<Amount>(item).copied().unwrap_or(Amount(0));
-                if have.0 < line.amount.0 {
-                    state.registry.insert(item, line.amount);
+                let have = items::amount_of(state, item);
+                if have < line.amount.0 {
+                    items::set_stack_amount(state, item, line.amount.0);
                 }
             }
-            None => place_stock_line(
-                state,
-                stock_serial,
-                &StockLine {
-                    graphic: line.graphic,
-                    hue: line.hue,
-                    item_kind: line.item_kind,
-                    material: line.material,
-                    amount: line.amount,
-                    price: line.price,
-                    name: line.name.clone(),
-                },
-            ),
+            None => {
+                place_stock_line(
+                    state,
+                    stock_serial,
+                    &StockLine {
+                        graphic:   line.graphic,
+                        hue:       line.hue,
+                        item_kind: line.item_kind,
+                        material:  line.material,
+                        amount:    line.amount,
+                        price:     line.price,
+                        name:      line.name.clone(),
+                    },
+                )
+            }
         }
     }
     state.registry.insert(
         vendor,
         Restock {
-            at: state.ticks + RESTOCK_TICKS,
+            at:    state.ticks + RESTOCK_TICKS,
             lines: record.lines,
         },
     );
@@ -335,14 +394,14 @@ fn send_buy_window(
         connection,
         &ServerPacket::ContainerContents(ContainerContents {
             container: Some(stock_serial),
-            items: contents.to_vec(),
+            items:     contents.to_vec(),
         }),
     );
     state.send_packet(
         connection,
         &ServerPacket::BuyList(BuyList {
             container: stock_serial,
-            lines: lines.to_vec(),
+            lines:     lines.to_vec(),
         }),
     );
     state.send(
@@ -417,12 +476,12 @@ pub fn open_shop(state: &mut WorldState, connection: ConnectionId, serial: Seria
 }
 
 struct BasketLine {
-    item: EntityId,
-    amount: u16,
-    graphic: Graphic,
-    hue: Hue,
+    item:      EntityId,
+    amount:    u16,
+    graphic:   Graphic,
+    hue:       Hue,
     item_kind: Option<ItemKindId>,
-    material: Option<MaterialId>,
+    material:  Option<MaterialId>,
 }
 
 struct Basket {
@@ -450,7 +509,7 @@ fn price_basket(state: &WorldState, stock_serial: Serial, list: &[Purchase]) -> 
         if held_in != Some(stock_serial) {
             continue;
         }
-        let have = state.registry.get::<Amount>(item).map_or(0, |amount| amount.0);
+        let have = items::amount_of(state, item);
         let amount = have.min(purchase.amount.0);
         if amount == 0 {
             continue;
@@ -473,7 +532,7 @@ fn price_basket(state: &WorldState, stock_serial: Serial, list: &[Purchase]) -> 
 }
 
 struct Payment {
-    purse: Serial,
+    purse:     Serial,
     from_bank: bool,
 }
 
@@ -515,8 +574,10 @@ fn commit_purchase(
     for line in &basket.lines {
         items::remove_from_stack(state, stock_serial, line.item, line.amount);
         complete &= match line.item_kind {
-            Some(kind) => items::give_kind(state, backpack, kind, line.material, u32::from(line.amount))
-                .is_some_and(|outcome| outcome.is_complete()),
+            Some(kind) => {
+                items::give_kind(state, backpack, kind, line.material, u32::from(line.amount))
+                    .is_some_and(|outcome| outcome.is_complete())
+            }
             None => {
                 items::give(state, backpack, line.graphic, line.hue, u32::from(line.amount)).is_complete()
             }
@@ -603,7 +664,7 @@ pub fn offer_sell_list(state: &mut WorldState, connection: ConnectionId, actor: 
             let &Drawn { id, hue } = state.registry.get::<Drawn>(entity)?;
             let price = sell_price(stock_price_for(state, entity, &catalogue)?);
             let serial = state.registry.serial_of(entity)?;
-            let amount = state.registry.get::<Amount>(entity).map_or(1, |a| a.0);
+            let amount = items::amount_of(state, entity);
             let name = state
                 .registry
                 .get::<Name>(entity)
@@ -706,10 +767,10 @@ fn sell_price(buy: u32) -> u16 {
 /// for still-unmigrated stock; typed rows compare their semantic components.
 #[derive(Clone, Copy)]
 struct StockPrice {
-    graphic: Graphic,
+    graphic:   Graphic,
     item_kind: Option<ItemKindId>,
-    material: Option<MaterialId>,
-    price: u32,
+    material:  Option<MaterialId>,
+    price:     u32,
 }
 
 /// Every stock identity and unit price the vendor's crate holds.

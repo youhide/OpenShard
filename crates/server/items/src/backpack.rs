@@ -8,10 +8,17 @@
 //! constant, two is a coincidence, and three is how the reward path and the
 //! turn-in path start disagreeing about what a backpack is.
 
-use super::*;
-use openshard_protocol::item_kind::{ItemKindId, MaterialId};
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+};
 use openshard_state::item_definition::item_definition;
+
+use super::*;
 
 /// The paperdoll layer a backpack is worn on. ServUO's `Layer.Backpack`.
 pub const BACKPACK_LAYER: Layer = Layer(0x15);
@@ -56,6 +63,9 @@ pub fn give_to_backpack(
     amount: u16,
     stackable: bool,
 ) -> bool {
+    if amount == 0 {
+        return true;
+    }
     let Some(backpack) = backpack_of(state, mobile) else {
         return false;
     };
@@ -85,6 +95,9 @@ pub fn give_kind_to_backpack(
     amount: u16,
     stackable: bool,
 ) -> bool {
+    if amount == 0 {
+        return true;
+    }
     let Some(drawn) = presentation_of(kind, material) else {
         return false;
     };
@@ -108,6 +121,9 @@ pub fn give_kind_to_backpack(
         give_kind(state, backpack, kind, material, u32::from(amount))
             .is_some_and(|outcome| outcome.is_complete())
     } else {
+        if !is_valid_stack_amount(amount) {
+            return false;
+        }
         // Non-stacking typed items use the shared constructor so the semantic
         // component is present even where the legacy placement API is not.
         let Ok((entity, _)) = state.registry.spawn_with_serial(SerialKind::Item) else {
@@ -118,14 +134,12 @@ pub fn give_kind_to_backpack(
         crate::spawn::install_identity(state, entity, kind, material);
         let contained = Contained {
             container: backpack,
-            position: GumpPoint::new(60, 60),
-            grid: GridSlot(crate::item_count(state, backpack)),
+            position:  GumpPoint::new(60, 60),
+            grid:      GridSlot(crate::item_count(state, backpack)),
         };
         establish_item_location(state, entity, ItemLocation::contained(contained))
             .expect("a typed backpack item has one valid container parent");
-        if amount > 1 {
-            state.registry.insert(entity, Amount(amount));
-        }
+        initialize_stack_amount(state, entity, amount);
         crate::apply_core_defaults(state, entity, drawn.id);
         tell_watchers_updated(state, backpack, entity);
         true
@@ -175,8 +189,8 @@ fn give_container_kind_to_backpack(
         state.registry.insert(entity, Container { gump });
         let contained = Contained {
             container: backpack,
-            position: GumpPoint::new(60, 60),
-            grid: GridSlot(crate::item_count(state, backpack)),
+            position:  GumpPoint::new(60, 60),
+            grid:      GridSlot(crate::item_count(state, backpack)),
         };
         establish_item_location(state, entity, ItemLocation::contained(contained))
             .expect("a newly created semantic container has one valid parent");
@@ -230,8 +244,8 @@ pub fn give_containers_to_backpack(
         state.registry.insert(entity, Container { gump });
         let contained = Contained {
             container: backpack,
-            position: GumpPoint::new(60, 60),
-            grid: GridSlot(crate::item_count(state, backpack)),
+            position:  GumpPoint::new(60, 60),
+            grid:      GridSlot(crate::item_count(state, backpack)),
         };
         establish_item_location(state, entity, ItemLocation::contained(contained))
             .expect("a newly created container has one valid parent");

@@ -12,13 +12,30 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::{ClilocId, CursorId, Hue, SoundId};
+use openshard_protocol::wire::{
+    ClilocId,
+    CursorId,
+    Hue,
+    SoundId,
+};
 use openshard_protocol::world::PoisonLevel;
 use openshard_state::components::{
-    Amount, Drawn, EMPTY_BOTTLE_GRAPHIC, ItemKind, POISON_POTION_GRAPHIC, PoisonCharges,
+    Drawn,
+    EMPTY_BOTTLE_GRAPHIC,
+    ItemKind,
+    POISON_POTION_GRAPHIC,
+    PoisonCharges,
 };
-use openshard_state::weapon::{WeaponKind, weapon_data, weapon_data_for_kind};
-use openshard_state::{Skill, TargetPurpose, WorldState};
+use openshard_state::weapon::{
+    WeaponKind,
+    weapon_data,
+    weapon_data_for_kind,
+};
+use openshard_state::{
+    Skill,
+    TargetPurpose,
+    WorldState,
+};
 
 use crate::check::roll_skill_band;
 
@@ -160,7 +177,7 @@ pub struct PoisonedSelf {
     /// Their wire identity.
     pub serial: Serial,
     /// The strength of the poison they were handling.
-    pub level: PoisonLevel,
+    pub level:  PoisonLevel,
 }
 
 /// Taste Identification: whether a thing has poison on it.
@@ -209,10 +226,12 @@ fn can_be_poisoned(state: &WorldState, target: EntityId) -> bool {
 fn weapon_kind_of(state: &WorldState, item: EntityId) -> Option<WeaponKind> {
     match state.registry.get::<ItemKind>(item) {
         Some(kind) => weapon_data_for_kind(kind.0),
-        None => state
-            .registry
-            .get::<Drawn>(item)
-            .and_then(|graphic| weapon_data(graphic.id)),
+        None => {
+            state
+                .registry
+                .get::<Drawn>(item)
+                .and_then(|graphic| weapon_data(graphic.id))
+        }
     }
     .map(|weapon| weapon.kind)
 }
@@ -221,12 +240,12 @@ fn weapon_kind_of(state: &WorldState, item: EntityId) -> Option<WeaponKind> {
 ///
 /// A stack of potions loses one from the stack; a single bottle becomes an empty one
 /// in place, which is ServUO's `Consume` plus the `Bottle` it hands back, done
-/// without needing to reach into the backpack. The client redraws it the next time
-/// the container is opened — the same limitation every live container update has.
+/// without needing to reach into the backpack. The shared amount door redraws
+/// an open container or a visible ground pile immediately.
 fn spend_potion(state: &mut WorldState, potion: EntityId) {
-    let amount = state.registry.get::<Amount>(potion).map_or(1, |a| a.0);
+    let amount = openshard_items::amount_of(state, potion);
     if amount > 1 {
-        state.registry.insert(potion, Amount(amount - 1));
+        openshard_items::set_stack_amount(state, potion, amount - 1);
         return;
     }
     // The last one: the bottle stays where it was (in the pack, or on the ground)
@@ -235,7 +254,7 @@ fn spend_potion(state: &mut WorldState, potion: EntityId) {
     state.registry.insert(
         potion,
         Drawn {
-            id: EMPTY_BOTTLE_GRAPHIC,
+            id:  EMPTY_BOTTLE_GRAPHIC,
             hue: Hue(0),
         },
     );
