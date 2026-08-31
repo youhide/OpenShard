@@ -781,6 +781,95 @@ mod tests {
         }
     }
 
+    #[test]
+    fn an_explicit_nested_lockdown_stops_inherited_root_inventory_access() {
+        let mut state = world();
+        let inside = Point::new(10, 10, 0);
+        let (_, house) = house(&mut state, inside);
+        let root_art = Drawn {
+            id:  Graphic(0x0E3C),
+            hue: Hue::NONE,
+        };
+        let nested_art = Drawn {
+            id:  Graphic(0x0E76),
+            hue: Hue::NONE,
+        };
+        let wanted = HouseItemIdentity::Legacy {
+            graphic: Graphic(0x0EED),
+            hue:     Hue::NONE,
+        };
+        let (root, root_serial) = item(&mut state, root_art, ItemLocation::ground(Facet(0), inside), true);
+        state.set_item_lockdown(
+            root,
+            Some(LockedDown {
+                house,
+                secure: Some(Standing::Friend),
+            }),
+        );
+        let (nested, nested_serial) = item(
+            &mut state,
+            nested_art,
+            ItemLocation::contained(Contained {
+                container: root_serial,
+                position:  GumpPoint::new(0, 0),
+                grid:      GridSlot(0),
+            }),
+            true,
+        );
+        let (_, pile_serial) = item(
+            &mut state,
+            Drawn {
+                id:  Graphic(0x0EED),
+                hue: Hue::NONE,
+            },
+            ItemLocation::contained(Contained {
+                container: nested_serial,
+                position:  GumpPoint::new(1, 1),
+                grid:      GridSlot(0),
+            }),
+            false,
+        );
+
+        for _ in 0..16 {
+            state.advance_house_inventory_rebuilds(1);
+        }
+        let inherited = state
+            .house_inventory_page(
+                house,
+                Standing::Friend,
+                None,
+                &[wanted],
+                None,
+                MAX_HOUSE_INVENTORY_PAGE,
+            )
+            .expect("the small projection is available");
+        assert_eq!(inherited.rows.len(), 1);
+        assert_eq!(inherited.rows[0].first_pile, pile_serial);
+        assert_eq!(inherited.rows[0].pile_count, 1);
+
+        state.set_item_lockdown(
+            nested,
+            Some(LockedDown {
+                house,
+                secure: Some(Standing::CoOwner),
+            }),
+        );
+        for _ in 0..16 {
+            state.advance_house_inventory_rebuilds(1);
+        }
+        let stopped = state
+            .house_inventory_page(
+                house,
+                Standing::Owner,
+                None,
+                &[wanted],
+                None,
+                MAX_HOUSE_INVENTORY_PAGE,
+            )
+            .expect("the rebuilt projection is available");
+        assert!(stopped.rows.is_empty());
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(256))]
 

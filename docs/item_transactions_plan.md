@@ -709,7 +709,7 @@ size and split point.
 - [x] Retire the legacy `items::contents_index` whole-world snapshot;
       container-specific reads use `ContainedItems`, while tick-wide player
       passes remain explicit budgeted A8 operations.
-- [ ] Add inherited root access and explicit descendant deny stops when the A6
+- [x] Add inherited root access and explicit descendant deny stops when the A6
       house-storage policy types make those meanings concrete.
 
 Done when no container read scans the world and the index agrees with the slow
@@ -856,7 +856,7 @@ the client catalogue/search UI and its wire request/response, not server search.
 
 ### A6b — optional direct crafting from opted-in house storage
 
-- [ ] Keep the default mode `SearchOnly`; make `OptInCraftStorage` a separate
+- [x] Keep the default mode `SearchOnly`; make `OptInCraftStorage` a separate
       feature/config decision with documented UX and performance evidence.
 - [ ] Define `CraftSourcePolicy`: backpack everywhere; spatial storage only
       inside the player's current house and only from same-house roots carrying
@@ -894,6 +894,23 @@ explicitly opted-in recursive house storage without traversing it on request,
 index cost is independent of unrelated world items, and no ineligible branch
 can contribute an item. If the decision remains `SearchOnly`, this stage is
 closed as deliberately not implemented rather than blocking house search.
+
+**Closed as `SearchOnly`.** House inventory search is useful without granting a
+new mutation authority. Direct house crafting would add a second access-policy
+surface, fixed-cell stock projections, facility scoping, rebuild semantics, and
+fragmentation UX before the product has evidence that players want automatic
+consumption from explicitly marked boxes. The shipped/default policy therefore
+remains backpack-only crafting; no `CraftStorage` component, source/reachable
+grid, or ineligible-box refusal exists to imply otherwise. The unchecked items
+above are the rejected `OptInCraftStorage` design, retained as the acceptance
+checklist for a future separately approved feature rather than partially built
+runtime behavior.
+
+A6a's root standing is inherited by ordinary descendants. A nested
+`LockedDown` item is an explicit policy boundary: projection and result
+resolution both stop before it, even for an owner. A named regression now pins
+both the inherited-access case and that deny stop, closing A2 without inventing
+the declined craft-storage policy type.
 
 ### A7 — make catalogue availability client-owned
 
