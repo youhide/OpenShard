@@ -538,6 +538,27 @@ behind.
 
 **H4 is complete.**
 
+#### Indexed read-only inventory search
+
+The item-transaction work adds a derived search projection without changing
+H4's storage authority. Each house is indexed by minimum `Standing` and exact
+semantic identity (or an exact graphic/hue legacy identity), with recursive
+totals and serial-ordered root/pile references. A secure contributes under its
+declared access threshold; a plain lockdown contributes for co-owners. Loose
+objects and roots outside the current coverage do not contribute. An equipped
+or held root cannot qualify, which structurally excludes bank, vendor, and trade
+storage; trade-window and corpse branches are rejected explicitly.
+
+The projection is never authority. Location, amount, identity, lockdown and
+house-shape mutation doors invalidate the house epoch, search becomes
+temporarily unavailable, and the world tick rebuilds at most 256 root/item work
+units before publishing a complete new epoch. Opening or highlighting a result
+rechecks the actor's current indexed house and standing, the root's current
+ground coverage and lockdown, every canonical containment edge to the pile, its
+identity, and the epoch. The server-side selector/page API is built; the
+OpenShard client's catalogue-backed search window and wire exchange remain the
+presentation half tracked in `docs/item_transactions_plan.md` A6a.
+
 ---
 
 ### H5 — decay, and the crate

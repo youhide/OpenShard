@@ -158,6 +158,7 @@ use crate::connection::Connection;
 use crate::dialogue::Dialogue;
 use crate::facet_rules::FacetRules;
 use crate::harvest::Banks;
+use crate::house_inventory::HouseInventoryIndex;
 use crate::obstruct::Obstructions;
 use crate::quest::{
     QuestDefs,
@@ -1234,15 +1235,17 @@ pub struct WornIndex {
 
 pub struct WorldState {
     /// Everything in the world.
-    pub registry:        Registry,
+    pub registry: Registry,
     /// What happened, for anyone to read: the client, persistence, scripts.
-    pub bus:             EventBus,
+    pub bus: EventBus,
     /// The loaded facets, each with its own ground and interest grid, keyed by
     /// facet number. There is always at least the default one.
-    pub facets:          BTreeMap<Facet, FacetState>,
+    pub facets: BTreeMap<Facet, FacetState>,
     /// The facet a new character spawns on, and the one anything asking for a
     /// facet it does not have falls back to.
-    pub default_facet:   Facet,
+    pub default_facet: Facet,
+    /// Read-only house storage projection, rebuilt from canonical item facts.
+    pub(crate) house_inventory: HouseInventoryIndex,
     /// What the client's `tiledata.mul` says about a graphic: whether it blocks,
     /// how tall it is, what it weighs, which hand it is held in, what it is
     /// called.
@@ -1276,7 +1279,7 @@ pub struct WorldState {
     /// longer has. It was a public field, and a direct `state.tiles = table` was
     /// the one remaining way to hold a bake that describes neither world in
     /// hand: [`Ground`] closed the other, where the ground moved under the bake.
-    tiles:               openshard_tiles::TileData,
+    tiles: openshard_tiles::TileData,
     /// Every multi the client knows: what a house or a ship is made of.
     ///
     /// Beside [`tiles`](Self::tiles) and for the same reason — a multi's
@@ -1286,7 +1289,7 @@ pub struct WorldState {
     ///
     /// Owned outright, like [`tiles`](Self::tiles) beside it: one holder each,
     /// and nothing on the shard to share either with.
-    pub multis:          openshard_uofiles::multi::Multis,
+    pub multis: openshard_uofiles::multi::Multis,
     /// Imported house designs the operator has made available to staff.
     ///
     /// Unlike [`multis`](Self::multis), these shapes are original content rather
@@ -1294,7 +1297,7 @@ pub struct WorldState {
     /// authoritative and can be sent to every client as a `HouseDesign`.
     pub house_templates: BTreeMap<String, Vec<openshard_uofiles::multi::Component>>,
     /// Which entity a connection is driving.
-    pub players:         HashMap<ConnectionId, EntityId>,
+    pub players: HashMap<ConnectionId, EntityId>,
     /// Every connection the world is holding, playing a character or not.
     ///
     /// Wider than [`players`](Self::players) on purpose: a connection exists from
@@ -1308,24 +1311,24 @@ pub struct WorldState {
     /// own numbers. Those were maps of their own, cleared by name on the way out;
     /// the row is what makes forgetting one impossible. Let go of through
     /// [`forget_connection`](Self::forget_connection), never `connections.remove`.
-    pub connections:     HashMap<ConnectionId, Connection>,
+    pub connections: HashMap<ConnectionId, Connection>,
     /// What each player's client currently has on screen.
     ///
     /// The server has to remember, because the client never says. There is no
     /// "what can you see" packet — only "draw this" and "forget that" — so the
     /// only way to send a mobile exactly once is to know what was sent before.
-    pub seen:            HashMap<EntityId, HashSet<EntityId>>,
+    pub seen: HashMap<EntityId, HashSet<EntityId>>,
     /// Where new characters appear. The height comes from the map.
-    pub start:           Tile,
+    pub start: Tile,
     /// The generator behind every roll — a swing landing, a skill gaining. Part
     /// of the state so replay is exact; advanced only inside the tick.
-    pub rng:             Rng,
+    pub rng: Rng,
     /// How many ticks have run.
-    pub ticks:           crate::WorldTick,
+    pub ticks: crate::WorldTick,
     /// Who is wearing what, rebuilt from the `Equipped` column when it changes.
     /// A cache with no contents of its own — read it through
     /// [`equipment_of`](WorldState::equipment_of), never directly.
-    pub worn:            WornIndex,
+    pub worn: WornIndex,
     /// The world's hour, 0–23, refreshed once per tick from the tick counter.
     ///
     /// Derived, not stored — `world/tick/ambient.rs` computes it and drops it
@@ -1334,9 +1337,9 @@ pub struct WorldState {
     /// system now asks what time it is (a townsperson's routine, a shop's opening
     /// hours, its greeting), and threading an `hour` argument through each of them
     /// is a signature to keep in step for a value that has exactly one source.
-    pub hour:            u64,
+    pub hour: u64,
     /// Packets the last tick produced.
-    pub outbox:          Vec<Outbound>,
+    pub outbox: Vec<Outbound>,
     /// Which connections have each container open, so a change to its contents —
     /// an item consumed as a reagent, one decaying inside — can be pushed to the
     /// clients looking at it. A connection's opens are cleared on logout.
@@ -1346,25 +1349,25 @@ pub struct WorldState {
     /// A `Vec` and not a map because there is almost never one: it is scanned
     /// whole once a tick to find a trade whose parties have walked apart, which
     /// is cheaper than the region diff it copies, and a player is in at most one.
-    pub trades:          Vec<Trade>,
+    pub trades: Vec<Trade>,
     /// Every quest this shard knows. Replaced
     /// wholesale on a pack reload, and never persisted — the pack is the truth
     /// about what a quest *is*, every boot; only a player's progress is saved.
-    pub quests:          QuestDefs,
+    pub quests: QuestDefs,
     /// What every trade says. Replaced wholesale
     /// on a reload and never persisted, for the same reason as
     /// [`quests`](Self::quests): the pack is the truth about content.
-    pub dialogue:        Dialogue,
+    pub dialogue: Dialogue,
     /// Every guild on the shard, and how they regard each other.
     ///
     /// Here rather than only in `openshard-guilds` because the `0x78` has a
     /// notoriety byte and that byte depends on who is looking — see
     /// [`notoriety_toward`](Self::notoriety_toward).
-    pub guilds:          crate::guild::Guilds,
+    pub guilds: crate::guild::Guilds,
     /// Every named alliance. See [`Alliance`](crate::guild::Alliance).
-    pub alliances:       crate::guild::Alliances,
+    pub alliances: crate::guild::Alliances,
     /// Every party. Runtime-only — see [`crate::party`].
-    pub parties:         crate::party::Parties,
+    pub parties: crate::party::Parties,
     // The targeting cursor and the four gump contexts used to be maps here, keyed
     // by the *player's entity*. They are fields on the connection's row now —
     // `connection::Connection` — reached through `row_of`/`row_of_mut`. They are
@@ -1372,11 +1375,11 @@ pub struct WorldState {
     // already unreachable without a `Client`, and keying them by the entity meant
     // nothing swept them when the client went. Four of the five leaked outright.
     /// The tunable rules — swing era, speech ranges, timers — the systems read.
-    pub gameplay:        Gameplay,
+    pub gameplay: Gameplay,
     /// Set by a staff `.save` to ask the tick for an immediate snapshot. The world
     /// clears it once taken — a request, not the save itself, because taking the
     /// snapshot is the `World`'s to do, not a system's.
-    pub save_requested:  bool,
+    pub save_requested: bool,
 }
 
 /// Which page of the quest dialog a player is looking at.
@@ -1738,6 +1741,7 @@ impl WorldState {
             bus: EventBus::new(),
             facets,
             default_facet,
+            house_inventory: HouseInventoryIndex::new(),
             tiles,
             multis,
             house_templates: BTreeMap::new(),

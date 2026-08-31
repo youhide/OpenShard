@@ -30,6 +30,7 @@
 
 pub mod decay;
 pub mod design;
+pub mod inventory;
 pub mod sign;
 pub mod storage;
 pub mod template;
@@ -809,9 +810,15 @@ pub fn house_at(state: &WorldState, at: Point, facet: Facet) -> Option<EntityId>
 /// tightened — so restoring one is the registry half by hand and this.
 pub fn block(state: &mut WorldState, entity: EntityId, facet: Facet, footprint: &[Footprint]) {
     let covered = covered_by_house(state, entity);
-    let facet_state = state.facet_state_mut(facet);
-    block_footprint(facet_state, entity, footprint);
-    facet_state.cover_house(entity, &covered);
+    let serial = state.registry.serial_of(entity);
+    {
+        let facet_state = state.facet_state_mut(facet);
+        block_footprint(facet_state, entity, footprint);
+        facet_state.cover_house(entity, &covered);
+    }
+    if let Some(serial) = serial {
+        state.invalidate_house_inventory(serial);
+    }
 }
 
 /// Take a house's walls back out of the obstruction index.
@@ -820,11 +827,17 @@ pub fn block(state: &mut WorldState, entity: EntityId, facet: Facet, footprint: 
 /// happen *before* it goes, because the footprint is derived from where it stood.
 pub fn unblock(state: &mut WorldState, entity: EntityId, facet: Facet, footprint: &[Footprint]) {
     let covered = covered_by_house(state, entity);
-    let facet_state = state.facet_state_mut(facet);
-    for spot in footprint {
-        facet_state.unblock(spot.tile.x, spot.tile.y, entity);
+    let serial = state.registry.serial_of(entity);
+    {
+        let facet_state = state.facet_state_mut(facet);
+        for spot in footprint {
+            facet_state.unblock(spot.tile.x, spot.tile.y, entity);
+        }
+        facet_state.uncover_house(entity, &covered);
     }
-    facet_state.uncover_house(entity, &covered);
+    if let Some(serial) = serial {
+        state.invalidate_house_inventory(serial);
+    }
 }
 
 /// Every indexed tile of a live house, derived from its canonical shape.

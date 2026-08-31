@@ -1833,6 +1833,291 @@ fn the_storage_ceiling_counts_what_is_in_the_secures() {
     );
 }
 
+/// House search sees only recursive descendants of same-house lockdown roots,
+/// partitions them by secure standing, and returns no mutation authority.
+#[test]
+fn house_inventory_search_is_recursive_permissioned_and_revalidated() {
+    use openshard_protocol::containers::GridSlot;
+    use openshard_protocol::gump::GumpPoint;
+    use openshard_state::components::{
+        Amount,
+        Contained,
+    };
+    use openshard_state::{
+        HouseInventoryError,
+        HouseItemIdentity,
+    };
+
+    use crate::inventory::{
+        SearchRefusal,
+        resolve,
+        search,
+    };
+    use crate::storage::{
+        lock_down,
+        release,
+    };
+
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
+    state.registry.insert(actor, Position(at));
+    state.registry.insert(actor, Facet(0));
+
+    let chest = an_item(&mut state, at, true);
+    lock_down(&mut state, actor, house, chest, Some(Standing::Friend)).unwrap();
+    let chest_serial = state.registry.serial_of(chest).unwrap();
+    let bag = an_item(&mut state, at, true);
+    state.registry.insert(
+        bag,
+        Drawn {
+            id:  Graphic(0x0E76),
+            hue: Hue::NONE,
+        },
+    );
+    openshard_state::relocate_item(
+        &mut state,
+        bag,
+        openshard_state::ItemLocation::contained(Contained {
+            container: chest_serial,
+            position:  GumpPoint::new(1, 1),
+            grid:      GridSlot(0),
+        }),
+    )
+    .unwrap();
+    let bag_serial = state.registry.serial_of(bag).unwrap();
+    let pile = an_item(&mut state, at, false);
+    let gold = Drawn {
+        id:  Graphic(0x0EED),
+        hue: Hue::NONE,
+    };
+    state.registry.insert(pile, gold);
+    state.registry.insert(pile, Amount(7));
+    openshard_state::relocate_item(
+        &mut state,
+        pile,
+        openshard_state::ItemLocation::contained(Contained {
+            container: bag_serial,
+            position:  GumpPoint::new(2, 2),
+            grid:      GridSlot(0),
+        }),
+    )
+    .unwrap();
+
+    let identity = HouseItemIdentity::Legacy {
+        graphic: gold.id,
+        hue:     gold.hue,
+    };
+    assert!(matches!(
+        search(&state, actor, None, &[identity], None, 10),
+        Err(SearchRefusal::Index(HouseInventoryError::Unavailable { .. }))
+    ));
+    state.advance_house_inventory_rebuilds(256);
+    let page = search(&state, actor, None, &[identity], None, 10).expect("the owner may search");
+    assert_eq!(page.rows.len(), 1);
+    assert_eq!(page.rows[0].aggregate_total, 7);
+    assert_eq!(page.rows[0].root, chest_serial);
+    assert_eq!(page.rows[0].first_pile, state.registry.serial_of(pile).unwrap());
+    assert_eq!(
+        resolve(
+            &state,
+            actor,
+            page.epoch,
+            identity,
+            chest_serial,
+            page.rows[0].first_pile,
+        ),
+        Some(pile)
+    );
+
+    let stranger_serial = an_owner(&mut state);
+    let stranger = state.registry.entity_of(stranger_serial).unwrap();
+    state.registry.insert(stranger, Position(at));
+    state.registry.insert(stranger, Facet(0));
+    assert!(
+        search(&state, stranger, None, &[identity], None, 10)
+            .expect("an empty permitted search is still available")
+            .rows
+            .is_empty()
+    );
+    state
+        .registry
+        .get_mut::<House>(house)
+        .unwrap()
+        .friends
+        .insert(stranger_serial);
+    assert_eq!(
+        search(&state, stranger, None, &[identity], None, 10)
+            .unwrap()
+            .rows[0]
+            .root_total,
+        7
+    );
+    state
+        .registry
+        .get_mut::<House>(house)
+        .unwrap()
+        .bans
+        .insert(stranger_serial);
+    assert_eq!(
+        search(&state, stranger, None, &[identity], None, 10),
+        Err(SearchRefusal::Banned)
+    );
+
+    release(&mut state, actor, house, chest).unwrap();
+    assert_eq!(
+        resolve(
+            &state,
+            actor,
+            page.epoch,
+            identity,
+            chest_serial,
+            page.rows[0].first_pile,
+        ),
+        None,
+        "a released root remained usable through its old result"
+    );
+    state.advance_house_inventory_rebuilds(256);
+    assert!(
+        search(&state, actor, None, &[identity], None, 10)
+            .unwrap()
+            .rows
+            .is_empty()
+    );
+}
+
+/// A canonical containment change invalidates the old epoch immediately. The
+/// rebuild may span ticks; neither search nor result resolution trusts its
+/// partial rows.
+#[test]
+fn house_inventory_epoch_hides_partial_rebuilds_and_stale_results() {
+    use openshard_protocol::containers::GridSlot;
+    use openshard_protocol::gump::GumpPoint;
+    use openshard_state::HouseInventoryError;
+    use openshard_state::components::Contained;
+
+    use crate::inventory::{
+        resolve,
+        search,
+    };
+    use crate::storage::lock_down;
+
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).unwrap();
+    state.registry.insert(actor, Position(at));
+    state.registry.insert(actor, Facet(0));
+    let chest = an_item(&mut state, at, true);
+    lock_down(&mut state, actor, house, chest, Some(Standing::CoOwner)).unwrap();
+    let chest_serial = state.registry.serial_of(chest).unwrap();
+    let identity = openshard_state::house_item_identity(&state, chest).unwrap();
+    state.advance_house_inventory_rebuilds(256);
+    let first = search(&state, actor, None, &[identity], None, 10).unwrap();
+
+    let child = an_item(&mut state, at, false);
+    openshard_state::relocate_item(
+        &mut state,
+        child,
+        openshard_state::ItemLocation::contained(Contained {
+            container: chest_serial,
+            position:  GumpPoint::new(0, 0),
+            grid:      GridSlot(0),
+        }),
+    )
+    .unwrap();
+    assert!(matches!(
+        search(&state, actor, Some(first.epoch), &[identity], None, 10),
+        Err(crate::inventory::SearchRefusal::Index(
+            HouseInventoryError::StaleEpoch { .. }
+        ))
+    ));
+    assert_eq!(
+        resolve(
+            &state,
+            actor,
+            first.epoch,
+            identity,
+            chest_serial,
+            first.rows[0].first_pile,
+        ),
+        None
+    );
+
+    state.advance_house_inventory_rebuilds(1);
+    assert!(matches!(
+        search(&state, actor, None, &[identity], None, 10),
+        Err(crate::inventory::SearchRefusal::Index(
+            HouseInventoryError::Unavailable { .. }
+        ))
+    ));
+    for _ in 0..8 {
+        state.advance_house_inventory_rebuilds(1);
+    }
+    let rebuilt = search(&state, actor, None, &[identity], None, 10).unwrap();
+    assert_eq!(rebuilt.rows[0].root_total, 2);
+
+    let house_serial = state.registry.serial_of(house).unwrap();
+    design::redesign(&mut state, actor, house, a_lean_to()).unwrap();
+    assert!(matches!(
+        state.house_inventory_page(
+            house_serial,
+            Standing::Owner,
+            Some(rebuilt.epoch),
+            &[identity],
+            None,
+            10,
+        ),
+        Err(HouseInventoryError::StaleEpoch { .. })
+    ));
+    state.advance_house_inventory_rebuilds(256);
+    assert!(
+        state
+            .house_inventory_page(house_serial, Standing::Owner, None, &[identity], None, 10,)
+            .unwrap()
+            .rows
+            .is_empty(),
+        "a root outside the replacement footprint survived the epoch rebuild"
+    );
+}
+
+/// Pagination is over ordered roots, not over every pile, and a root belonging
+/// to an adjacent house never enters the current house's aggregate.
+#[test]
+fn house_inventory_pages_roots_without_crossing_into_an_adjacent_house() {
+    use crate::inventory::search;
+    use crate::storage::lock_down;
+
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let first_at = Point::new(8, 8, 0);
+    let first_house = place(&mut state, actor, first_at, Facet(0), COTTAGE, owner).unwrap();
+    state.registry.insert(actor, Position(first_at));
+    state.registry.insert(actor, Facet(0));
+    let first_root = an_item(&mut state, first_at, false);
+    let second_root = an_item(&mut state, first_at, false);
+    lock_down(&mut state, actor, first_house, first_root, None).unwrap();
+    lock_down(&mut state, actor, first_house, second_root, None).unwrap();
+
+    let (other_actor, other_owner) = an_actor(&mut state);
+    let other_at = Point::new(22, 22, 0);
+    let other_house = place(&mut state, other_actor, other_at, Facet(0), COTTAGE, other_owner).unwrap();
+    let foreign = an_item(&mut state, other_at, false);
+    lock_down(&mut state, other_actor, other_house, foreign, None).unwrap();
+
+    state.advance_house_inventory_rebuilds(1024);
+    let identity = openshard_state::house_item_identity(&state, first_root).unwrap();
+    let page = search(&state, actor, None, &[identity], None, 1).unwrap();
+    assert_eq!(page.rows.len(), 1);
+    assert_eq!(page.rows[0].aggregate_total, 2);
+    let next = page.next.expect("a second root remains");
+    let tail = search(&state, actor, Some(page.epoch), &[identity], Some(next), 1).unwrap();
+    assert_eq!(tail.rows.len(), 1);
+    assert_ne!(page.rows[0].root, tail.rows[0].root);
+    assert!(tail.next.is_none());
+}
+
 /// The six stages are the reference's thresholds, and the boundaries are where
 /// it puts them.
 ///

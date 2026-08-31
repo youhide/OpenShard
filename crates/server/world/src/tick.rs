@@ -983,6 +983,8 @@ impl World {
         self.reap();
         items::decay(&mut self.state);
         self.collapse_houses();
+        self.state
+            .advance_house_inventory_rebuilds(openshard_state::HOUSE_INVENTORY_REBUILD_BUDGET);
         self.sail_boats();
         items::close_doors(&mut self.state);
         // End any trade whose two parties have walked apart, died or logged out,

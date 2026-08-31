@@ -47,6 +47,7 @@ pub mod dialogue;
 pub mod facet_rules;
 pub mod guild;
 pub mod harvest;
+pub mod house_inventory;
 pub mod instrument;
 pub mod item_definition;
 pub mod item_location;
@@ -196,6 +197,17 @@ pub use guild::{
     Guilds,
     Rank,
     Removal,
+};
+pub use house_inventory::{
+    HOUSE_INVENTORY_REBUILD_BUDGET,
+    HouseInventoryCursor,
+    HouseInventoryError,
+    HouseInventoryPage,
+    HouseInventoryResult,
+    HouseItemIdentity,
+    MAX_HOUSE_INVENTORY_PAGE,
+    MAX_HOUSE_INVENTORY_SELECTORS,
+    house_item_identity,
 };
 pub use item_definition::{
     ItemDefinition,

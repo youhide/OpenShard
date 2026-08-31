@@ -176,6 +176,7 @@ pub fn install_identity(
             state.registry.remove::<Material>(entity);
         }
     }
+    state.invalidate_house_inventory_for_item(entity);
 }
 
 /// Upgrade an audited legacy presentation pair when the registry names it.

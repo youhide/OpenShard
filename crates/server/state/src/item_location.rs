@@ -266,6 +266,7 @@ pub fn establish_item_location(
     validate_destination(state, item, location)?;
     state.registry.insert(item, location);
     apply_projection(state, item, None, location);
+    state.invalidate_house_inventory_for_item(item);
     Ok(())
 }
 
@@ -328,6 +329,7 @@ pub fn commit_item_relocation(state: &mut WorldState, prepared: PreparedItemRelo
         Some(prepared.previous),
         "a prepared item relocation commits against the edge it validated"
     );
+    state.invalidate_house_inventory_for_item(prepared.item);
     state.registry.insert(prepared.item, prepared.destination);
     apply_projection(
         state,
@@ -335,6 +337,7 @@ pub fn commit_item_relocation(state: &mut WorldState, prepared: PreparedItemRelo
         Some(prepared.previous),
         prepared.destination,
     );
+    state.invalidate_house_inventory_for_item(prepared.item);
     prepared.previous
 }
 
@@ -343,6 +346,8 @@ pub fn commit_item_relocation(state: &mut WorldState, prepared: PreparedItemRelo
 /// Container subtree policy, spatial indexing, and removal packets belong to
 /// the caller; this function owns the canonical edge and its cursor projection.
 pub fn despawn_item(state: &mut WorldState, item: EntityId) -> bool {
+    state.invalidate_house_inventory_for_item(item);
+    state.set_item_lockdown(item, None);
     match item_location(state, item) {
         Some(ItemLocation::Settled(SettledItemLocation::Contained(contained))) => {
             uncontain(state, contained.container, item);

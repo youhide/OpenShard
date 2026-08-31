@@ -25,7 +25,9 @@ commit, while failure-craft material loss uses the same atomic withdrawal
 door. A0's remaining measurement work, the indexed A4 candidate source, and the
 remaining A6 work remain open. A6a's first piece is built: exact per-facet house
 coverage replaces the whole-house `house_at` scan and follows placement,
-restore, redesign, and demolition.
+restore, redesign, and demolition. A6a's recursive permissioned inventory
+projection, epochs, bounded exact-selector pages, and result revalidation are
+also built; the client-side catalogue/search window is the remaining A6a UI.
 
 ## Outcome
 
@@ -736,6 +738,11 @@ caller reads completion or the exact amount delivered. Six properties run 256
 cases each over the boundaries at one, `MAX_STACK`, and refused values through
 `u16::MAX`; named allocation-exhaustion regressions remain beside them.
 
+The full world suite exposed one stale assertion in the shipped healing-potion
+test: it equated an absent sparse `Amount` component with deletion after A3 made
+singletons canonical component absence. The regression now asks `amount_of == 1`
+and separately asserts that the entity remains live.
+
 The remaining direct production `Amount` writes are constructors: persistence
 restore in `crates/server/world/src/tick/persist.rs` and test fixtures. Restore
 currently trusts a saved stack amount above `MAX_STACK`; validating and refusing
@@ -798,20 +805,20 @@ atomic withdrawal before committing it.
 - [x] Add exact per-`FacetState` house coverage and replace the current
       whole-house `house_at` scan with indexed lookup plus canonical
       revalidation.
-- [ ] Define eligible house inventory roots: same-house `LockedDown` storage,
+- [x] Define eligible house inventory roots: same-house `LockedDown` storage,
       filtered by standing; exclude loose, foreign-house, outside, trade,
       vendor, bank, and corpse roots.
-- [ ] Add `HouseInventoryIndex` by house/access/identity with recursive totals
+- [x] Add `HouseInventoryIndex` by house/access/identity with recursive totals
       and ordered root/pile refs, maintained by canonical location/amount doors.
 - [ ] Add bounded selector search and paginated aggregate/root results; resolve
       ordinary text/category matching on the client from its static item
       catalogue.
-- [ ] Revalidate house, standing, root, and item before opening/highlighting a
+- [x] Revalidate house, standing, root, and item before opening/highlighting a
       search result. Search results grant no mutation authority.
-- [ ] Give each house inventory projection an epoch. Footprint/design/removal
+- [x] Give each house inventory projection an epoch. Footprint/design/removal
       invalidates it in O(1), makes search temporarily unavailable, and
       schedules a budgeted rebuild; stale epochs never leak foreign contents.
-- [ ] Add search/index properties against slow recursive oracles, including
+- [x] Add search/index properties against slow recursive oracles, including
       nested storage, permissions, pagination, adjacent houses, footprint
       transitions, and stale/rebuilding epochs.
 
@@ -825,8 +832,27 @@ placement, restore, redesign, and demolition. `house_at` reads only the queried
 tile and revalidates entity lifetime, serial, facet, position, and current
 classic/custom shape before returning it; a stale derived row therefore grants
 nothing. Overlap retains multiple candidates for the staff-placement exception,
-and removal only removes the matching house. Inventory eligibility, projection,
-epochs, and search remain the rest of A6a.
+and removal only removes the matching house.
+
+**Inventory backend built.** A sparse house/access/semantic-or-legacy identity
+projection holds aggregate totals plus serial-ordered root and pile references.
+Only same-house ground `LockedDown` roots enter it; secure access becomes the
+row threshold, plain lockdowns require co-owner standing, and loose, foreign,
+outside, held/equipped (therefore vendor/bank/trade), trade-window, and corpse
+branches are excluded. Canonical location, amount, identity, lockdown, house
+shape, and removal doors invalidate the affected house. An epoch mismatch makes
+both search and old result resolution unavailable immediately; the tick rebuilds
+at most 256 root/item work units and publishes only a complete current epoch.
+
+The server accepts at most 32 exact catalogue identities and returns at most 50
+serial-ordered root rows per cursor page without scanning unrelated identities.
+Opening/highlighting revalidates the actor's current house and standing, the
+root's lockdown and ground coverage, the complete containment path, item
+identity, and epoch. A 256-case slow-oracle property varies nested/loose/foreign/
+outside/trade/corpse roots, legacy and semantic identities, amounts, and access;
+named tests cover pagination, adjacent houses, release, partial rebuilds, and
+design-footprint transitions. The unchecked selector bullet is now specifically
+the client catalogue/search UI and its wire request/response, not server search.
 
 ### A6b — optional direct crafting from opted-in house storage
 

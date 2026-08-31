@@ -386,7 +386,7 @@ fn pack_into_a_crate(
         .collect::<Vec<_>>();
 
     for (slot, &item) in pinned.iter().chain(loose.iter()).enumerate() {
-        state.registry.remove::<LockedDown>(item);
+        state.set_item_lockdown(item, None);
         // Off the ground and off every screen that had it: it is inside a
         // container now, and a client told about both would draw it twice. Not
         // despawned — this is the half of `take_off_the_ground` that keeps the

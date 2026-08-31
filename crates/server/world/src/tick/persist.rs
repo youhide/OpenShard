@@ -761,9 +761,9 @@ impl World {
             );
         }
         if let Some(pinned) = record.locked_down {
-            self.state.registry.insert(
+            self.state.set_item_lockdown(
                 entity,
-                openshard_state::components::LockedDown {
+                Some(openshard_state::components::LockedDown {
                     house:  pinned.house,
                     // A code this engine did not write reads as a plain lockdown
                     // rather than as a secure open to anybody: the item stays
@@ -773,7 +773,7 @@ impl World {
                     secure: pinned
                         .secure
                         .and_then(openshard_state::components::Standing::from_code),
-                },
+                }),
             );
         }
     }

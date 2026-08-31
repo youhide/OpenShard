@@ -145,11 +145,17 @@ mod tests {
             "the drinker was not mended"
         );
         // Potions stack, so one bottle goes and the rest of the pile stays. This is
-        // the whole reason `consume` takes an amount.
+        // the whole reason `consume` takes an amount. A live singleton omits the
+        // sparse `Amount` component, so ask the quantity door rather than treating
+        // component absence as deletion.
         assert_eq!(
-            world.state.registry.get::<Amount>(potion).map(|amount| amount.0),
-            Some(1),
+            openshard_items::amount_of(&world.state, potion),
+            1,
             "the whole lot was drunk at once"
+        );
+        assert!(
+            world.state.registry.contains(potion),
+            "the last bottle was deleted"
         );
     }
 

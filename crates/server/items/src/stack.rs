@@ -298,6 +298,7 @@ fn write_stack_amount(state: &mut WorldState, item: EntityId, amount: u16) {
     } else {
         state.registry.remove::<Amount>(item);
     }
+    state.invalidate_house_inventory_for_item(item);
 }
 
 /// Re-send a ground item to everyone already watching it — for when its

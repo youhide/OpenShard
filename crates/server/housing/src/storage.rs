@@ -250,12 +250,12 @@ pub fn lock_down(
             }
         }
     }
-    state.registry.insert(
+    state.set_item_lockdown(
         item,
-        LockedDown {
+        Some(LockedDown {
             house: serial,
             secure,
-        },
+        }),
     );
     // Off the decay clock. The sweep skips a lockdown anyway, but leaving the
     // component behind would restart the rot the moment it is released — with
@@ -279,7 +279,7 @@ pub fn release(
     {
         return Err(StorageRefusal::NoChange);
     }
-    state.registry.remove::<LockedDown>(item);
+    state.set_item_lockdown(item, None);
     Ok(())
 }
 
