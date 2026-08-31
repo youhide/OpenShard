@@ -570,11 +570,11 @@ thresholds are written out rather than divided, because they are **not evenly
 spaced**: the first band is half a percent of the period and the last is five.
 
 **The sign refreshes it, and the walk does not.** ServUO refreshes on its own
-house menu post-AoS and on the owner walking in before that; the walk is not
-copied because `house_at` is a scan over every house on the shard — fine when
-somebody presses a button, not fine ten times a second per player. The sign is
-where the reference itself moved to, and the sign already draws the condition
-line, so the player who checks is the player who refreshes.
+house menu post-AoS and on the owner walking in before that. This engine keeps
+the sign rule even though `house_at` is now an exact per-facet coverage lookup:
+walking through a house should not be a hidden ownership mutation, while the
+sign already draws the condition line and makes the refresh explicit to the
+player who checks it.
 
 **A period of zero turns decay off**, and turns the *counting* off with it: a
 shard that never wants a plot to free up does not want a counter climbing toward

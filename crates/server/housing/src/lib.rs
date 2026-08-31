@@ -407,7 +407,7 @@ fn place_with_design(
     // On the sector grid like any item, so a client entering the area is told
     // about it by the ordinary interest sweep rather than by a path of its own.
     state.place_item(facet, entity, at);
-    block_footprint(state.facet_state_mut(facet), entity, &footprint);
+    block(state, entity, facet, &footprint);
     install_doors(state, entity, facet, at, multi);
     let sign = hang_sign_for_design(state, entity, facet, at, multi);
     // `place_item` only files an entity for later interest sweeps. A house
@@ -770,25 +770,35 @@ pub fn tiles_of(state: &WorldState, at: Point, multi: MultiId, design: Option<&[
 
 /// The house standing over `at`, if any.
 ///
-/// A scan over the houses rather than an index: there are a handful on a shard,
-/// and this is asked when somebody presses a button, never on a step. That is
-/// also the reason the eager-obstruction argument does not apply — the answer is
-/// wanted a few times a minute, not ten times a second per player.
+/// The facet index narrows this to houses that draw on the tile. Each candidate
+/// is then revalidated against the registry's canonical lifetime, facet,
+/// position and current shape, so a stale derived row can never confer house
+/// access or ownership.
 #[must_use]
 pub fn house_at(state: &WorldState, at: Point, facet: Facet) -> Option<EntityId> {
+    let tile = Tile::new(at.x, at.y);
     state
-        .registry
-        .query::<House>()
-        .filter(|(entity, _)| state.facet_of(*entity) == facet)
-        .find(|(entity, house)| {
-            state
-                .registry
-                .get::<Position>(*entity)
-                .is_some_and(|&Position(origin)| {
-                    tiles_of(state, origin, house.multi, None).contains(&Tile::new(at.x, at.y))
-                })
+        .facet_state_if_loaded(facet)?
+        .houses_covering(tile)
+        .iter()
+        .copied()
+        .find(|&entity| {
+            let (Some(house), Some(&Position(origin)), Some(_)) = (
+                state.registry.get::<House>(entity),
+                state.registry.get::<Position>(entity),
+                state.registry.serial_of(entity),
+            ) else {
+                return false;
+            };
+            state.facet_of(entity) == facet
+                && tiles_of(
+                    state,
+                    origin,
+                    house.multi,
+                    design::shape_of_house(state, entity).as_deref(),
+                )
+                .contains(&tile)
         })
-        .map(|(entity, _)| entity)
 }
 
 /// Put a house's walls into the obstruction index.
@@ -798,7 +808,10 @@ pub fn house_at(state: &WorldState, at: Point, facet: Facet) -> Option<EntityId>
 /// and a house legal when it was built stays built even if the rules have since
 /// tightened — so restoring one is the registry half by hand and this.
 pub fn block(state: &mut WorldState, entity: EntityId, facet: Facet, footprint: &[Footprint]) {
-    block_footprint(state.facet_state_mut(facet), entity, footprint);
+    let covered = covered_by_house(state, entity);
+    let facet_state = state.facet_state_mut(facet);
+    block_footprint(facet_state, entity, footprint);
+    facet_state.cover_house(entity, &covered);
 }
 
 /// Take a house's walls back out of the obstruction index.
@@ -806,10 +819,28 @@ pub fn block(state: &mut WorldState, entity: EntityId, facet: Facet, footprint: 
 /// The entity itself is the caller's to despawn: this is the half that has to
 /// happen *before* it goes, because the footprint is derived from where it stood.
 pub fn unblock(state: &mut WorldState, entity: EntityId, facet: Facet, footprint: &[Footprint]) {
+    let covered = covered_by_house(state, entity);
     let facet_state = state.facet_state_mut(facet);
     for spot in footprint {
         facet_state.unblock(spot.tile.x, spot.tile.y, entity);
     }
+    facet_state.uncover_house(entity, &covered);
+}
+
+/// Every indexed tile of a live house, derived from its canonical shape.
+fn covered_by_house(state: &WorldState, entity: EntityId) -> Vec<Tile> {
+    let (Some(house), Some(&Position(at))) = (
+        state.registry.get::<House>(entity),
+        state.registry.get::<Position>(entity),
+    ) else {
+        return Vec::new();
+    };
+    tiles_of(
+        state,
+        at,
+        house.multi,
+        design::shape_of_house(state, entity).as_deref(),
+    )
 }
 
 /// Where a house standing at `at` would block, and how tall at each tile.

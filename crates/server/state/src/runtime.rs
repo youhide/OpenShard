@@ -624,12 +624,12 @@ pub struct FacetState {
     /// held, without anything noticing. See [`Ground`], and
     /// [`WorldState::footing`](WorldState::footing), which is the one
     /// composition over it.
-    ground:       Ground,
+    ground:         Ground,
     /// Static long-distance connectivity, built with the terrain at facet load.
     /// It deliberately has no live doors or placed items in it; a caller still
     /// refines every hop through [`WorldState::live_terrain`] or its
     /// doors-open sibling.
-    pub coarse:   Option<NavigationGraph>,
+    pub coarse:     Option<NavigationGraph>,
     /// How wide this facet's map is, in tiles.
     ///
     /// Kept here rather than asked of the terrain because the client has to be
@@ -644,9 +644,9 @@ pub struct FacetState {
     /// are sized from this pair, so a facet whose width is assigned after
     /// construction has two indexes that disagree with it and no way to notice.
     /// Read through [`width()`](Self::width).
-    width:        u32,
+    width:          u32,
     /// How tall this facet's map is, in tiles. See [`width`](Self::width).
-    height:       u32,
+    height:         u32,
     /// Who is near what, on this facet.
     ///
     /// **Private, and written only through
@@ -664,14 +664,14 @@ pub struct FacetState {
     /// caller's to declare — see [`Occupant`] for why it is never derived — but
     /// it is declared by *which* of the two calls is made, so there is no third
     /// spelling to get wrong.
-    sectors:      Sectors,
+    sectors:        Sectors,
     /// Where this facet's world lives on disk, when it is a world of ours.
     ///
     /// Private, and read only through [`home`](Self::home): it is a fact about
     /// where the facet came from, set once at construction, and a facet that
     /// could be told a *second* home is a facet whose edits could be written
     /// into somebody else's world.
-    home:         Option<WorldHome>,
+    home:           Option<WorldHome>,
     /// What the live world has put in the way: closed doors, placed decoration.
     ///
     /// **Private, and mutated only through this facet.** Every write here has to
@@ -679,7 +679,21 @@ pub struct FacetState {
     /// and a public field is a way to forget — which is the failure mode
     /// `docs/map/terrain_seam.md` is entirely about. See
     /// [`FacetState::block`].
-    obstructions: Obstructions,
+    obstructions:   Obstructions,
+    /// Which houses draw on each tile of this facet.
+    ///
+    /// This is coverage, not collision: floors and doorway gaps belong here as
+    /// surely as walls do. Housing owns the shape rule and maintains the rows
+    /// through the same placement, redesign and demolition doors that maintain
+    /// [`obstructions`](Self::obstructions). A tile may name more than one
+    /// entity because staff placement is allowed to overlap existing houses;
+    /// ordinary placement policy prevents that case.
+    ///
+    /// Private so a caller cannot update only half of a house. Read through
+    /// [`houses_covering`](Self::houses_covering), which deliberately returns
+    /// candidates: the housing crate revalidates them against the registry's
+    /// canonical components before answering a gameplay question.
+    house_coverage: HashMap<Tile, Vec<EntityId>>,
     /// The ships moored on this facet, and the decks they put over the water.
     ///
     /// Beside the obstruction index rather than in it, because the two move on
@@ -687,7 +701,7 @@ pub struct FacetState {
     /// used to be beside each other *for* — being asked separately by every step
     /// — is over; they project into one overlay now. Private for the same reason
     /// as [`obstructions`](Self::obstructions).
-    boats:        crate::boat::Boats,
+    boats:          crate::boat::Boats,
     /// The named areas of this facet — towns, dungeons, guarded zones.
     ///
     /// **Public on purpose**, alone among the indexes here, and the distinction
@@ -701,14 +715,14 @@ pub struct FacetState {
     /// write here of the kind that makes [`obstructions`](Self::obstructions)
     /// forgettable. Hiding it behind an accessor pair would rename the leak
     /// rather than close one.
-    pub regions:  Regions,
+    pub regions:    Regions,
     /// What each block of this facet's ground still has left to give: the
     /// mining, lumberjacking and fishing stock, per [`crate::harvest`] bank.
     ///
     /// Beside the sector grid and the obstruction index because it is the same
     /// kind of thing — a fact about *this ground*, keyed by coordinates, that no
     /// entity owns. Not persisted; see [`Banks`].
-    pub banks:    Banks,
+    pub banks:      Banks,
     /// What this facet allows: the ruleset, as against the ground.
     ///
     /// The odd field out here, and deliberately so — every other one is a place
@@ -719,7 +733,7 @@ pub struct FacetState {
     ///
     /// See [`FacetRules`], and in particular why its default is derived from a
     /// facet number this crate otherwise treats as opaque.
-    rules:        FacetRules,
+    rules:          FacetRules,
 }
 
 impl FacetState {
@@ -763,6 +777,7 @@ impl FacetState {
             height,
             sectors: Sectors::new(width, height),
             obstructions: Obstructions::default(),
+            house_coverage: HashMap::new(),
             boats: crate::boat::Boats::default(),
             regions: Regions::new(width, height),
             banks: Banks::default(),
@@ -816,6 +831,53 @@ impl FacetState {
     #[must_use]
     pub const fn obstructions(&self) -> &Obstructions {
         &self.obstructions
+    }
+
+    /// Houses whose indexed drawing covers `tile`.
+    ///
+    /// These are candidates rather than authorities. Entity lifetime, facet,
+    /// position and current design remain registry facts and must be checked by
+    /// the housing rule that consumes this slice.
+    #[must_use]
+    pub fn houses_covering(&self, tile: Tile) -> &[EntityId] {
+        self.house_coverage.get(&tile).map_or(&[], Vec::as_slice)
+    }
+
+    /// Add every drawn tile of one house to this facet's coverage index.
+    ///
+    /// Duplicate tiles in a malformed shape and repeat registration are both
+    /// idempotent. Overlapping houses retain both candidates; the ordinary
+    /// placement policy keeps that exceptional, while staff tools remain able
+    /// to express it without silently hiding the older house.
+    pub fn cover_house(&mut self, entity: EntityId, tiles: &[Tile]) {
+        for &tile in tiles {
+            match self.house_coverage.entry(tile) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    if !entry.get().contains(&entity) {
+                        entry.get_mut().push(entity);
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(vec![entity]);
+                }
+            }
+        }
+    }
+
+    /// Remove one house from every supplied coverage tile.
+    ///
+    /// Matching the entity matters when staff have deliberately overlapped two
+    /// houses: taking either one down must leave the other discoverable.
+    pub fn uncover_house(&mut self, entity: EntityId, tiles: &[Tile]) {
+        for tile in tiles {
+            let empty = self.house_coverage.get_mut(tile).is_some_and(|entities| {
+                entities.retain(|&candidate| candidate != entity);
+                entities.is_empty()
+            });
+            if empty {
+                self.house_coverage.remove(tile);
+            }
+        }
     }
 
     /// The ships moored here.

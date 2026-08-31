@@ -22,8 +22,10 @@ and consume. A4 now has a deterministic bounded backpack `WithdrawalPlan` that
 deduplicates overlapping selectors, and A5 is built: successful crafting
 allocates and capacity-checks every output before an infallible payment/output
 commit, while failure-craft material loss uses the same atomic withdrawal
-door. A0's remaining measurement work, the indexed A4 candidate source, and A6
-onward remain open.
+door. A0's remaining measurement work, the indexed A4 candidate source, and the
+remaining A6 work remain open. A6a's first piece is built: exact per-facet house
+coverage replaces the whole-house `house_at` scan and follows placement,
+restore, redesign, and demolition.
 
 ## Outcome
 
@@ -793,7 +795,7 @@ atomic withdrawal before committing it.
 
 ### A6a — index and search house inventory without consuming it
 
-- [ ] Add exact per-`FacetState` house coverage and replace the current
+- [x] Add exact per-`FacetState` house coverage and replace the current
       whole-house `house_at` scan with indexed lookup plus canonical
       revalidation.
 - [ ] Define eligible house inventory roots: same-house `LockedDown` storage,
@@ -815,6 +817,16 @@ atomic withdrawal before committing it.
 
 Done when a player can quickly find eligible items in their current house and
 the feature has no path that consumes, moves, or exposes another house's items.
+
+**Coverage built.** Each facet now owns a private sparse map from every drawn
+house tile—including floors and doorway gaps—to the covering entity candidates.
+The same `block`/`unblock` doors maintain obstruction and coverage during
+placement, restore, redesign, and demolition. `house_at` reads only the queried
+tile and revalidates entity lifetime, serial, facet, position, and current
+classic/custom shape before returning it; a stale derived row therefore grants
+nothing. Overlap retains multiple candidates for the staff-placement exception,
+and removal only removes the matching house. Inventory eligibility, projection,
+epochs, and search remain the rest of A6a.
 
 ### A6b — optional direct crafting from opted-in house storage
 

@@ -719,10 +719,23 @@ fn unblocking_gives_the_ground_back() {
     let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
     let footprint = footprint_of(&state, at, MultiId(COTTAGE), None).expect("the same footprint");
 
+    assert_eq!(house_at(&state, at, Facet(0)), Some(house));
+    assert_eq!(
+        house_at(&state, Point::new(9, 9, 20), Facet(0)),
+        Some(house),
+        "coverage is an x/y question, not a storey question"
+    );
+    assert_eq!(house_at(&state, Point::new(8, 8, 0), Facet(0)), None);
+
     unblock(&mut state, house, Facet(0), &footprint);
     assert!(
         !state.facet_state(Facet(0)).obstructions().holds_anything(9, 9),
         "a wall outlived the house"
+    );
+    assert_eq!(
+        house_at(&state, at, Facet(0)),
+        None,
+        "unblocking left the house in the coverage index"
     );
 
     // The walls are gone and the spot is *still* refused, which is the half worth
@@ -2089,8 +2102,14 @@ fn an_empty_house_leaves_no_crate() {
     let (actor, owner) = an_actor(&mut state);
     let at = Point::new(10, 10, 0);
     let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
+    assert_eq!(house_at(&state, at, Facet(0)), Some(house));
 
     assert_eq!(crate::decay::demolish(&mut state, house), Ok(None));
+    assert_eq!(
+        house_at(&state, at, Facet(0)),
+        None,
+        "demolition left a discoverable indexed house"
+    );
     assert!(
         state
             .registry
@@ -2394,6 +2413,17 @@ fn a_redesigned_house_takes_its_old_walls_out_and_puts_its_new_ones_in() {
 
     design::redesign(&mut state, actor, house, a_lean_to()).expect("the owner may redesign");
 
+    assert_eq!(
+        house_at(&state, Point::new(9, 9, 0), Facet(0)),
+        None,
+        "the old design remained in the coverage index"
+    );
+    assert_eq!(
+        house_at(&state, Point::new(13, 14, 0), Facet(0)),
+        Some(house),
+        "a non-blocking floor was omitted from house coverage"
+    );
+
     let obstructions = &state.facet_state(Facet(0)).obstructions();
     assert!(
         !obstructions.holds_anything(9, 9),
@@ -2407,6 +2437,32 @@ fn a_redesigned_house_takes_its_old_walls_out_and_puts_its_new_ones_in() {
     assert!(
         obstructions.holds_anything(13, 14),
         "and it is still *there*: the new design's floor is somewhere to stand"
+    );
+}
+
+/// The sparse row is a derived shortcut, never permission authority. A damaged
+/// caller that changes the canonical design without using `redesign` may leave
+/// an old candidate behind, but that candidate must not answer as a house.
+#[test]
+fn stale_house_coverage_is_revalidated_against_the_current_design() {
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
+    assert_eq!(house_at(&state, at, Facet(0)), Some(house));
+
+    state.registry.insert(
+        house,
+        HouseDesign {
+            components: a_lean_to(),
+            revision:   2,
+        },
+    );
+
+    assert_eq!(
+        house_at(&state, at, Facet(0)),
+        None,
+        "a stale derived row overruled the canonical design"
     );
 }
 

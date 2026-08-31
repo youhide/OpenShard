@@ -902,6 +902,11 @@ fn a_house_survives_a_restart_with_its_walls() {
         obstructions.blocker_at_z(at.x, at.y, 0).is_none(),
         "the floor was folded in on the way back, sealing the house shut"
     );
+    assert_eq!(
+        openshard_housing::house_at(&restored.state, at, Facet(0)),
+        Some(back),
+        "the restored house was omitted from facet coverage"
+    );
 }
 
 /// Who may come in survives the restart too.
@@ -1146,6 +1151,11 @@ fn a_designed_house_restores_its_own_walls_with_no_client_files() {
     assert_eq!(design.components.len(), 1);
     assert_eq!(design.components[0].graphic, Graphic(0x0006));
     assert_eq!(design.components[0].dx, 1);
+    assert_eq!(
+        openshard_housing::house_at(&world.state, Point::new(at.0 + 1, at.1, 0), Facet(0),),
+        Some(entity),
+        "the restored custom design was omitted from facet coverage"
+    );
 }
 
 /// Imported designs own their fixtures as well as their walls.  The component
