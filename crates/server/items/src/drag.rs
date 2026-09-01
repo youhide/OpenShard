@@ -505,22 +505,6 @@ pub fn drop_into_container(
         bounce(state, connection, held, DragCancelReason::OutOfRange);
         return;
     }
-    // Letting go on empty gump space is still a stack drop.  The client names
-    // the container rather than the pile beneath the cursor, so this door has
-    // to find a pile that can take the whole held stack before it asks whether
-    // the container has a spare item slot.  Otherwise gold dropped back into a
-    // full backpack grows a second pile even though no new slot is needed.
-    let held_amount = amount_of(state, held.entity);
-    let merge_target = contained_items(state, container_serial)
-        .map(|(item, _)| item)
-        .find(|&item| {
-            can_stack(state, held.entity, item)
-                && u32::from(amount_of(state, item)) + u32::from(held_amount) <= u32::from(MAX_STACK)
-        });
-    if let Some(target) = merge_target {
-        merge_onto(state, connection, held, target);
-        return;
-    }
     // And it must have room. ServUO's `CheckHold`, asked here rather than in
     // `drop_onto_serial` because both arms of that one land in this function —
     // the gate belongs where the item actually goes in. The item bounces back to
@@ -1098,78 +1082,6 @@ mod tests {
         assert_eq!(state.registry.get::<Drawn>(remainder), Some(&drawn));
         assert!(!state.registry.has::<ItemKind>(remainder));
         assert!(!state.registry.has::<Material>(remainder));
-        assert!(openshard_state::audit_item_graph(&state).is_empty());
-    }
-
-    #[test]
-    fn dropping_a_stack_into_a_container_merges_a_fitting_existing_pile() {
-        let mut state = world();
-        let at = Point::new(10, 10, 0);
-        let (connection, _) = connected_player(&mut state, at);
-        let (container, container_serial) = stack(
-            &mut state,
-            Drawn {
-                id:  BACKPACK_GRAPHIC,
-                hue: Hue::NONE,
-            },
-            1,
-        );
-        state
-            .registry
-            .insert(container, Container { gump: BACKPACK_GUMP });
-        establish_item_location(&mut state, container, ItemLocation::ground(Facet(0), at)).unwrap();
-
-        let (target, _) = stack(
-            &mut state,
-            Drawn {
-                id:  GOLD_GRAPHIC,
-                hue: Hue::NONE,
-            },
-            1_838,
-        );
-        establish_item_location(
-            &mut state,
-            target,
-            ItemLocation::contained(Contained {
-                container: container_serial,
-                position:  GumpPoint::new(30, 40),
-                grid:      GridSlot(0),
-            }),
-        )
-        .unwrap();
-
-        let (held, held_serial) = stack(
-            &mut state,
-            Drawn {
-                id:  GOLD_GRAPHIC,
-                hue: Hue::NONE,
-            },
-            60,
-        );
-        establish_item_location(
-            &mut state,
-            held,
-            ItemLocation::contained(Contained {
-                container: container_serial,
-                position:  GumpPoint::new(80, 90),
-                grid:      GridSlot(1),
-            }),
-        )
-        .unwrap();
-
-        pick_up(&mut state, connection, RawSerial(held_serial.raw()), 60);
-        let held = state.held_of(connection).expect("the coins are on the cursor");
-        drop_into_container(
-            &mut state,
-            connection,
-            held,
-            GumpPoint::new(120, 130),
-            container_serial,
-        );
-
-        assert_eq!(amount_of(&state, target), 1_898);
-        assert!(!state.registry.contains(held.entity), "the absorbed pile is gone");
-        assert_eq!(contained_items(&state, container_serial).count(), 1);
         assert!(openshard_state::audit_item_graph(&state).is_empty());
     }
 

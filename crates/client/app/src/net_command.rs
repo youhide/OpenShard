@@ -1074,10 +1074,13 @@ impl App {
                 // keeping the local transaction would block every new drag.
                 ServerPacket::Remove(removed) => removed.serial == held,
                 ServerPacket::AddToContainer(added) => {
-                    matches!(
-                        hand.pending_drop(),
-                        Some(crate::hand::PendingDrop::Container { .. })
-                    ) && added.item.serial == held
+                    match hand.pending_drop() {
+                        Some(crate::hand::PendingDrop::Container { .. }) => added.item.serial == held,
+                        // A successful merge redraws the surviving target; the
+                        // source was held and is consumed without a Remove.
+                        Some(crate::hand::PendingDrop::Item { target }) => added.item.serial == target,
+                        _ => false,
+                    }
                 }
                 ServerPacket::WorldItem(item) => {
                     matches!(hand.pending_drop(), Some(crate::hand::PendingDrop::Ground(_)))

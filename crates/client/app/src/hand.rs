@@ -182,13 +182,18 @@ pub enum DragOrigin {
 ///
 /// It is also *what a pane asks for* — see
 /// [`Effect::Drop`](crate::panes::Effect::Drop) — because the three places an
-/// item can be put down are three packets and nothing else: a window says
+/// item can be put down are named here and nothing else: a window says
 /// where, and [`PendingDrop::packet`] is the only translation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PendingDrop {
     Container {
         container: Serial,
         at:        GumpPoint,
+    },
+    /// Onto an item shown in a container. The shard decides whether that means
+    /// stacking, putting an item into a nested container, or rejecting it.
+    Item {
+        target: Serial,
     },
     Ground(Point),
     Equipment {
@@ -200,14 +205,21 @@ pub enum PendingDrop {
 impl PendingDrop {
     /// The packet that puts `item` here.
     ///
-    /// One place, so that a fourth kind of destination is a compile error here
+    /// One place, so that a new kind of destination is a compile error here
     /// rather than a `match` somebody forgot in the router. Equipping is a
-    /// `0x13` and the other two are `0x08` with different coordinates — the
-    /// wire's own distinction, not this client's.
+    /// `0x13`; the other destinations are `0x08`, whose target serial tells
+    /// the shard whether it names an item or the ground.
     pub fn packet(self, item: Serial) -> openshard_client_net::action::Outgoing {
         use openshard_client_net::action::Outgoing;
         match self {
             Self::Container { container, at } => Outgoing::DropInto { item, container, at },
+            Self::Item { target } => {
+                Outgoing::DropInto {
+                    item,
+                    container: target,
+                    at: GumpPoint::new(0, 0),
+                }
+            }
             Self::Ground(at) => Outgoing::DropOnGround { item, at },
             Self::Equipment { mobile, layer } => {
                 Outgoing::Equip {
@@ -389,6 +401,11 @@ mod tests {
             }
             .packet(item),
             Outgoing::DropInto { container, .. } if container == bag
+        ));
+        assert!(matches!(
+            PendingDrop::Item { target: bag }.packet(item),
+            Outgoing::DropInto { container, at, .. }
+                if container == bag && at == GumpPoint::new(0, 0)
         ));
         assert!(matches!(
             PendingDrop::Ground(Point::new(1, 2, 3)).packet(item),

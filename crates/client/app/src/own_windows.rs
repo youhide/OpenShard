@@ -102,6 +102,7 @@ pub(crate) fn drop_target_position(view: &WorldView, destination: hand::PendingD
     match destination {
         hand::PendingDrop::Ground(at) => Some(at),
         hand::PendingDrop::Container { container, .. } => target_position(view, container, 16),
+        hand::PendingDrop::Item { target } => target_position(view, target, 16),
         hand::PendingDrop::Equipment { mobile, .. } => target_position(view, mobile, 1),
     }
 }
@@ -979,6 +980,22 @@ mod stack_tests {
                 source: items[2].serial,
                 target: items[0].serial,
                 amount: 5_000,
+            })
+        );
+    }
+
+    #[test]
+    fn stacking_plans_the_two_gold_piles_in_the_backpack() {
+        let items = [
+            pile(0x4000_0001, GOLD_GRAPHIC, 1_838),
+            pile(0x4000_0002, GOLD_GRAPHIC, 60),
+        ];
+        assert_eq!(
+            next_stack_step(&items),
+            Some(StackStep {
+                source: items[1].serial,
+                target: items[0].serial,
+                amount: 60,
             })
         );
     }

@@ -651,11 +651,21 @@ impl ContainerPane {
     /// waiting for.
     fn release(&mut self, ctx: &PaneCtx<'_>) -> Response {
         if let (Some(hand), true) = (ctx.frame.hand, ctx.under_pointer) {
-            // The gesture targets the *bag*, never an icon drawn in it: a
-            // floor item released over a nested pack would otherwise enter
-            // that pack, with its coordinates measured in the wrong window.
-            // Merging two stacks is a destination gesture of its own and is
-            // not this one.
+            // An icon is an item destination. This is what lets the shard
+            // merge two piles (and preserves the ordinary nested-container
+            // gesture); empty gump space still targets this bag itself.
+            if let Some(target) = match ctx.drawn {
+                Some(Drawn::Container(window)) => {
+                    window.item_at(ctx.frame.cursor, ctx.frame.files.gump_atlas)
+                }
+                _ => None,
+            } {
+                if target.serial != hand.drag().item.serial {
+                    return Response::changed().with(Effect::Drop(PendingDrop::Item {
+                        target: target.serial,
+                    }));
+                }
+            }
             let grab = hand.drag().grab;
             // `ctx.frame.cursor` is already this window's own local pixels —
             // see `PaneFrame::cursor`'s doc — so only the grab offset inside
@@ -1330,6 +1340,55 @@ mod tests {
             [Effect::Drop(PendingDrop::Container { container, at })]
                 if *container == bag && *at == GumpPoint::new(176, 139)
         ));
+    }
+
+    /// Dropping one icon onto another names the icon, rather than the bag that
+    /// contains it. The shard can then apply its normal stack rule.
+    #[test]
+    fn a_drop_on_an_icon_targets_that_icon() {
+        use crate::hand::ItemDrag;
+
+        const BAG: Graphic = Graphic(0x003C);
+        const CANDLE: Graphic = Graphic(0x0A28);
+        let files = fixture::Install::shipping([
+            (GumpArt::Gump(BAG), (200, 200)),
+            (GumpArt::Item(CANDLE), (10, 20)),
+        ]);
+        let bag = serial(0x4000_0100);
+        let target = ContainedItem {
+            at: GumpPoint::new(20, 20),
+            ..item(0x4000_0002, CANDLE, 1)
+        };
+        let held = item(0x4000_0001, CANDLE, 1);
+        let mut view = bare_view();
+        view.containers.insert(bag, BAG);
+        view.contents.insert(bag, vec![target]);
+        let window = Window {
+            pictures: container::window_highlighted(BAG, &[target], GumpPixel::new(0, 0), None),
+            contents: vec![target],
+            lines:    Vec::new(),
+        };
+        assert_eq!(
+            window.item_at(GumpPixel::new(25, 25), files.files().gump_atlas),
+            Some(target)
+        );
+        let drawn = Drawn::Container(window);
+        let mut ctx = files.ctx(&view, Some(&drawn), GumpPixel::new(25, 25), true);
+        ctx.frame.hand = Some(Hand::Held(ItemDrag {
+            item:   held,
+            origin: DragOrigin::Container(bag),
+            grab:   GumpPixel::new(5, 5),
+        }));
+
+        let mut pane = ContainerPane::new(bag);
+        let answer = pane.handle(Input::Release(Button::Left), &ctx);
+        assert!(
+            matches!(
+                answer.out.as_slice(),
+                [Effect::Drop(PendingDrop::Item { target: dropped })] if *dropped == target.serial
+            ),
+            "{answer:?}"
+        );
     }
 
     /// `recall_contents` reuses exactly what was left for it — the case
