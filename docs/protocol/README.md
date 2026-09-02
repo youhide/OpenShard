@@ -131,7 +131,16 @@ off. Revisit only if a client that cannot be configured without it has to be
 supported — the argument is in
 [`research_login_encryption.md`](research_login_encryption.md).
 
-**8. `ButtonId::CLOSE_BOX` and `ButtonId::UNUSED` are one value with two
+**8. Four packets are still free `encode_*` functions for no stated reason.**
+Seven live outside `ServerPacket` — `containers::encode_open_container`,
+`encode_add_to_container` and `login::encode_supported_features` because their
+length depends on the connection's feature set and `EncodePacket::LENGTH` is a
+`const`, which is an argument. `trade`'s three and
+`world::encode_server_change` are fixed-length and have none: they were simply
+never moved, and until they are, "every packet the server can send is a variant"
+is true with an asterisk nobody writes down.
+
+**9. `ButtonId::CLOSE_BOX` and `ButtonId::UNUSED` are one value with two
 meanings.** A third meaning is the trigger to make the type an enum with a
 `Reply(u32)` arm. Re-checked across the workspace and the condition has not
 fired; both constants now name the collision and the trigger.
