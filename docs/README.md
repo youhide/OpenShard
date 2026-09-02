@@ -35,6 +35,13 @@ There is no permanent handoff document. A live worktree and its next step
 belong to the topic README; the facts a handoff established belong to
 `evidence/`.
 
+**A status is a line of text, never a glyph in a heading.** A heading is an
+address: every link written to it breaks the moment a ✅ is appended, silently,
+because the anchor grows a trailing dash and nothing checks it until a link
+audit runs. Sixty of the sixty-one broken links the `world` migration found were
+exactly that. Say "built" in the body — a record does anyway — and leave the
+heading alone.
+
 ## Domains
 
 A domain is roughly a group of crates, so "where does this go" has an objective

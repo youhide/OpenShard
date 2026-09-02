@@ -164,6 +164,20 @@ are written and unread outside the development HUD; markers on the minimap are
 the player and nothing else, and which of party, waypoint and corpse belongs
 there is a decision rather than a drawing.
 
+**15. The publish window.** A revision is visible before the rebake over its
+touched chunks finishes, and today's rule is that a stale artefact refuses itself
+— so routing in those chunks degrades to flat A\* until the rebake lands. The
+alternative is to rebuild the touched regions *inside* the publish and pay the
+latency. It is a real choice and it should be taken with a measurement of a
+single-region rebuild rather than by preference. What made it urgent is gone: a
+restart inside the window used to refuse to boot, and boot replays the log's
+missed chunks now.
+
+**16. Two whole-facet CPU paths with no caller but their own tests.**
+`RadarCache`'s `bake` and `mark` are the whole-map image path, worth keeping only
+if something is going to want a whole-map image; the minimap's close affordance
+is a provisional `M` and says so in `event_loop.rs`.
+
 Two questions this domain deliberately keeps open, and neither is waiting on
 work: **land height per tile or per corner** (closed the day we mean to change
 the geometry, and not before) and **which validation blocks a publish**
