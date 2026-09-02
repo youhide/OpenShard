@@ -13,7 +13,7 @@ have to re-read six files to find out.
 |---|---|---|
 | Recipe tables (data) | `crafting/data/<trade>.json` | one file per trade, generated **once** from ServUO's `Def*.cs` by `tools/gen-craft-tables`, then edited as data |
 | Trade headers (data) | `crafting/data/craft_systems.json` | skill, chance floor, exceptional curve, sound, workshop needs. **Array order is `SystemId`** — append, never reorder: the index rides in the `Crafting` component |
-| Codegen + validation | `crafting/build.rs` | JSON → `const` tables in `OUT_DIR`; refuses a bad row at `cargo check` (group index, leading skill, selector shape, item-kind references, ≤4 resource lines) |
+| Codegen + validation | `crafting/build.rs` | JSON → `const` tables in `OUT_DIR`; refuses a bad row at `cargo check` (group index, leading skill, selector shape, item-kind references, ≤4 resource lines, an addon row typed as its own deed kind) |
 | Types | `crafting/src/system.rs`, `recipe.rs` | `CraftSystemDef`, `Recipe`, `CraftRes`, `SubResAxis`, `Needs`, `Eca`, `Text` |
 | Execution | `crafting/src/craft.rs` | `begin` → `advance_crafts` → `complete` |
 | Odds | `crafting/src/chance.rs` | per-mille; band gate vs roll |
@@ -43,8 +43,9 @@ A **recipe** is: output (`graphic` + `hue`, or a typed `kind` +
 interpolate over; the rest are gates that also train), `resources` (≤4 lines),
 and flags: `use_all_res` (batch: make as many as the pack affords), `hue`,
 `retain_color`, `min_skill_offset`, `markable`, `never_/always_exceptional`,
-per-recipe `needs`, and — new — `addon: Option<AddonKind>` for the deeds that
-install a house addon.
+per-recipe `needs`, `min_chance` (this row's own odds floor, overriding the
+system's — see #6), and `addon: Option<AddonKind>` for the deeds that install a
+house addon.
 
 The **material axis** is a hue swap, not a type swap: nine ingot hues against
 one ingot graphic, seven woods, the leather grades. Exactly one resource line of
@@ -125,25 +126,32 @@ before `complete`), but a restart mid-craft ends the craft silently.
 - Cooking is the seventh `SystemRow`: skill `Cooking`, floor 0, sliding ECA,
   no sound (ServUO's `PlayCraftEffect` is empty too), no system-level needs;
   recipes carry their own `mill` / `heat` / `oven`. Tools: skillet, rolling
-  pin, flour sifter (`state::craft`). 40 rows shipped of DefCooking's 88.
-- **Oven deeds.** Two carpentry rows (0x14F0, the generic scroll) carry
-  `addon: stone_oven_east|south`. `complete` stamps the crafted item with
-  `AddonDeed { addon }` **and** `Name("stone oven east deed")`. The name is the
-  durable form: restore (`persist.rs`) and the double-click dispatch
-  (`skills_wire.rs`) both re-derive `AddonDeed::from_saved_name`.
+  pin, flour sifter (`state::craft`). 41 rows against DefCooking's 88: 40
+  generated, plus the hand-written `Dough` row of #1 below.
+- **Oven deeds.** Four carpentry rows share the generic scroll art `0x14F0` and
+  carry `addon: stone_oven_east|south` / `elven_oven_east|south`. A deed's
+  identity is the row's own `kind` (110–113, the `shared_art` definitions in
+  `state/data/items.json`), so it rides the ordinary typed-item path through
+  creation, save and restore. `complete` additionally stamps
+  `AddonDeed { addon }` — a cache of `AddonKind::from_deed_kind` — and a `Name`,
+  which is cosmetic only. Restore (`persist.rs`) and the double-click dispatch
+  (`skills_wire.rs`) both re-derive the addon from `ItemKind`; see #2 for why
+  the display string is no longer the durable form.
 - Double-click → `offer_addon_placement` raises a location cursor
   (`TargetPurpose::PlaceAddon`); the answer → `place_addon_from_deed`: deed
-  still carried by the actor, tile inside a house (`house_at`), every component
-  tile inside the *same* house, storage allowance has room, then spawn each
-  component as a ground item and `housing::storage::lock_down` it; roll back on
-  any failure; consume the deed. The stone ovens' geometry is read from the
-  generated `decoration::ADDON_COMPONENTS` (see #5); only the two elven facings
-  are inline in `houses.rs` (`0x2DDB` east, `0x2DDC` south), since no elven oven
-  is pre-placed and `deco_addons.json` therefore has no row for either.
+  still carried by the actor, tile inside a house (`house_at`), storage
+  allowance has room, then every component's absolute tile resolved and checked
+  — inside the *same* house and free (`addon_tile_is_free`, see #3) — before
+  anything is spawned, then spawn each component as a ground item and
+  `housing::storage::lock_down` it; roll back on any failure; consume the deed.
+  The stone ovens' geometry is read from the generated
+  `decoration::ADDON_COMPONENTS` (see #5); only the two elven facings are inline
+  in `houses.rs` (`0x2DDB` east, `0x2DDC` south), since no elven oven is
+  pre-placed and `deco_addons.json` therefore has no row for either.
 - Placed components are ordinary locked-down items whose graphics fall in
   `environment::is_oven`/`is_heat`, so a cook standing by one passes the
-  workshop scan. They also carry `AddonPart`, which is what makes the two
-  tiles of an oven one thing to release — see point 3 of the review below.
+  workshop scan. They also carry `AddonPart`, which is what makes a stone
+  oven's two tiles one thing to release — see point 3 of the review below.
 
 ## 6. Review: problems found
 
@@ -163,11 +171,12 @@ upstream values with a comment rather than a quiet edit.
 
 2. ~~**An addon deed's identity is an English display string.**~~ **Fixed.**
    Every deed is now a registered, typed item: `state/data/items.json` ids
-   110–112 (`stone oven east/south deed`, `elven oven deed`), all three sharing
-   the generic scroll art `0x14F0` under a new `shared_art` flag on
-   `ItemDefinition` (`item_definition.rs`) — a graphic the registry
-   deliberately will not reverse-resolve through `kind_from_drawn`, since
-   several kinds legitimately share it. `AddonKind::deed_kind` /
+   110–112 (`stone oven east/south deed`, `elven oven deed`) — 113 joined them
+   when #4 split the elven facing in two — all sharing the generic scroll art
+   `0x14F0` under a new `shared_art` flag on `ItemDefinition`
+   (`item_definition.rs`) — a graphic the registry deliberately will not
+   reverse-resolve through `kind_from_drawn`, since several kinds legitimately
+   share it. `AddonKind::deed_kind` /
    `from_deed_kind` (`state/components.rs`) hold the id mapping;
    `AddonDeed::from_item_kind` replaces `from_saved_name`. The two carpentry
    rows are now typed recipes (`"kind": 110/111, "output_material": "none"`),
@@ -253,8 +262,10 @@ upstream values with a comment rather than a quiet edit.
    `an_elven_oven_deed_places_the_single_component_its_facing_names` places both
    facings and pins that each draws its own graphic, and
    `an_addon_recipe_outputs_its_own_addon_s_deed` pins that every addon recipe's
-   `kind` is that addon's own `deed_kind` — the two halves are hand-written data
-   in different files and nothing else made them agree.
+   `kind` is that addon's own `deed_kind`. The two halves are hand-written data
+   in different files, and the agreement is asserted on both sides of codegen:
+   `build.rs` refuses the mismatched row at `cargo check`, and the test asks the
+   same question of the generated tables.
 
 5. ~~**The oven component layout is written twice.**~~ **Fixed.** World's
    `build.rs` now also emits `decoration::ADDON_COMPONENTS` (public, keyed by
@@ -299,9 +310,9 @@ upstream values with a comment rather than a quiet edit.
 10. ~~**The Cooking slice pushed the catalogue packet over its size
     assertion.**~~ **Fixed.** The row table was never what grew the packet —
     rows are materialized on the client from `CRAFT_RECIPE_LOCATIONS`. The
-    stock context was: `amounts` is one `u32` per craft key, and Cooking's
-    forty rows brought `CRAFT_KEY_COUNT` to 125, so the stock alone was 502
-    bytes of a 512-byte budget. The wire decision went to the encoding, not the
+    stock context was: `amounts` is one `u32` per craft key, and Cooking's rows
+    brought `CRAFT_KEY_COUNT` to 125, so the stock alone was 502 bytes of a
+    512-byte budget. The wire decision went to the encoding, not the
     budget: stock now travels **sparsely**, as `(u16 key, u32 amount)` for the
     non-zero keys only, and the decoder rebuilds the full-width table so every
     reader still indexes it by `CraftKey` with no lookup. A backpack holds a
