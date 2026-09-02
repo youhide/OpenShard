@@ -2,12 +2,13 @@
 
 [Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
 
-- [x] `crafting` — **making things, and the 485 recipes to make.** The pillar the
+- [x] `crafting` — **making things, and the 532 recipes to make.** The pillar the
   harvest slice existed for: mining paid a player in ore and nothing in the
   engine consumed a raw material. A port of ServUO's `Scripts/Services/Craft/` as
   a system in the usual shape — `fn(&mut WorldState)` over `state`, its own
-  `ItemCrafted`, no peer calls — with five trades wired: **Blacksmithy**,
-  **Tailoring**, **Carpentry**, **Tinkering** and **Alchemy**.
+  `ItemCrafted`, no peer calls — with seven trades wired: **Blacksmithy**,
+  **Tailoring**, **Carpentry**, **Tinkering**, **Alchemy**, **Fletching** and
+  **Cooking**.
   - **The recipes are core data**, like `magic::spells` and `state::weapon`: a
     bare shard has to be able to forge. `tools/gen-craft-tables` reads ServUO's
     own `Def*.cs` once, its output is committed under `crafting/src/defs/`, and
@@ -72,7 +73,7 @@
     seam the bandage, the lockpick and the pickaxe come through. There is no
     craft packet at all. The tool table is `state::craft`, in `state` for the
     reason `state::weapon` is — two crates read it: `items` to give a fresh
-    sewing kit its uses, `crafting` to know which of the five windows to open.
+    sewing kit its uses, `crafting` to know which of the seven windows to open.
     The vendors already stocked all of it (26 tongs, 28 sewing kits, 15 saws, 41
     scribe's pens) and every one was an inert prop, exactly as the bandages,
     lutes and pickaxes were before their slices.
@@ -87,12 +88,24 @@
     outlives the session. Without the two columns every masterpiece on the shard
     quietly becomes ordinary at the next boot — the `Murders` bug, over property
     somebody spent an hour earning.
+  - **Cooking is a complete first gameplay pass.** A skillet, rolling pin, or
+    flour sifter opens its own menu; the 40 selected ServUO recipes keep their
+    individual mill, fire, and oven requirements. Both stone-oven deeds are
+    Carpenter recipes (85 boards, 125 iron ingots, Carpentry 68.4 and Tinkering
+    50.0): double-click one and target a tile wholly inside a house to place its
+    two locked-down sections. Both one-tile elven oven facings are Carpenter
+    recipes too (80 boards, Carpentry 85.0, never exceptional) and follow the
+    same house rules, including when one entered through content rather than
+    crafting. Releasing any component of an installed addon — or the collapse of
+    the house it stands in — takes the whole addon down and refunds its deed.
+    Every addon deed's type survives a restart. Food is an ordinary crafted item
+    in this pass; hunger and eating effects remain a separate gameplay decision.
   - Deferred, each its own system hanging off crafting: **Repair**, **Enhance**,
     **AlterItem**, **Resmelt** (item back to ingots; *ore* smelting is in),
     **recipe scrolls**, **make-number / make-max** and the **last-ten list**
     (per-player UI state ServUO serializes, so it wants a decision about saving
-    UI). The six remaining tables — Cooking, Inscription, Bowcraft,
-    Glassblowing, Masonry, Cartography — are data the generator can emit when
+    UI). The four remaining tables — Inscription, Glassblowing, Masonry and
+    Cartography — are data the generator can emit when
     they are wanted; Inscription waits on the writable book it is already tied
     to. And two material chains stay unbuilt rather than implied: **hides →
     leather** (scissors on a hide) and **cotton → thread → cloth** (a spinning
