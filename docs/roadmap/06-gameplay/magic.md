@@ -165,6 +165,17 @@
       which want the `0xC7` particle packet this engine does not send), and a
       mantra in the caster's own speech hue — the client's chosen hue passes
       through `chat::say` and is never stored, so there is nothing to read back.
+  - **An `Item`-targeted spell has no trustworthy aimed point.** `handle_target`
+    passes the client's `location` through, and for an object the client fills it
+    with the *item's* coordinates — which for something in a pack are the slot
+    inside the container, not a place in the world. Nothing reads it today
+    (`SpellTarget::Item` is the travel family, and all three voice themselves at
+    the caster), and the art slice kept it that way rather than sounding Mark at a
+    rune's container slot. But `spell_feedback` still falls back to
+    `target_location` when the mark has no `Position`
+    (`world/src/tick/spells.rs`), so the first `Item` spell that wants a picture
+    on the thing it aims at will draw it in the sea. The fix is to resolve an
+    object target to *the holder's* position rather than trusting the wire.
   - [x] **The non-stat magical buffs — Protection, Reactive Armor, Night Sight,
     Magic Reflection.** The family that modifies a *behaviour*, not a number, moved
     from `Scripted` into the core. All four ride one `BehaviourBuffs` component (the
