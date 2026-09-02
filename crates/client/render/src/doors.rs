@@ -2,7 +2,7 @@
 //!
 //! # Why this cannot be read out of the client
 //!
-//! An open door must not occlude: decision 3 of `docs/lighting.md` makes an
+//! An open door must not occlude: decision 3 of `docs/archive/render/lighting.md` makes an
 //! occluder a whole tile, so a door left in the grid lays a tile of wall across
 //! its own doorway — a band of shadow with nothing visible casting it, and the
 //! more obvious for the leaf beside it being brightly lit. Decision 11 said the

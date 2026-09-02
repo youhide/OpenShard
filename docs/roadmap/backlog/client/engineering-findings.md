@@ -58,7 +58,7 @@
   of the expansion out. So a change to the flank rule leaves the example
   measuring the *old* rule and passing: no test fails, and the plan's next number
   is quietly about something else. Same class as
-  [`parity.md`](../../../parity.md)'s frame assembled by hand in seven places, one layer
+  [`parity.md`](../../../render/design_frame_assembly.md)'s frame assembled by hand in seven places, one layer
   down. What would close it is `steps_out_of` growing a seam the example can
   substitute into, so there is one flank rule and the harness borrows it.
 - **A bench's default is a claim about the machine it was written on.**
@@ -152,5 +152,5 @@
   file is the record of how often it is reachable. Two things follow: the suite is
   not green on a random seed, and a session that runs `cargo test --workspace`
   leaves a dirty working tree it did not write. Whoever owns
-  [`lighting_pitfalls.md`](../../../lighting_pitfalls.md)'s exact-walk ladder
+  [`lighting_pitfalls.md`](../../../render/evidence/pitfalls.md)'s exact-walk ladder
   should read the saved cases before they are trimmed.

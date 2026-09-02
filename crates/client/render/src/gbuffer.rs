@@ -3,7 +3,7 @@
 //! One thing per pixel is not enough and never was. A frame's lighting asks
 //! where a fragment is, which way its surface looks, what colour it is and what
 //! object it belongs to — four different questions, and
-//! `docs/lighting_rebuild.md` phase 2 is the decision to answer each of them
+//! `docs/render/design_model.md` phase 2 is the decision to answer each of them
 //! with *data* rather than with something reconstructed downstream from a
 //! packed byte.
 //!
@@ -126,7 +126,7 @@ const ATTACHMENTS: [wgpu::TextureFormat; 4] = [
 /// **This is what is left of the `place` attachment**, which was four `u16`
 /// channels holding all of the above plus a height in whole units and
 /// sixteenths and seven bits of tile-local `x` and `y`.
-/// `docs/lighting_rebuild.md` phase 2 moved the height and the fraction into
+/// `docs/render/design_model.md` phase 2 moved the height and the fraction into
 /// [`POSITION_FORMAT`] and the facing they stood in for into
 /// [`NORMAL_FORMAT`]; what was left fitted in six bits and an id, so eight
 /// bytes a fragment became four. See [`required_limits`] for what that bought.
@@ -193,7 +193,7 @@ pub const IDS_DYNAMIC_ITEM: u32 = 0x0040_0000;
 /// that position instead of indexing a transient instance buffer.
 pub const IDS_COMPOSITE_MAP: u32 = 0x0080_0000;
 
-/// **The two edges a magnified frame draws** — `docs/silhouettes.md`, and
+/// **The two edges a magnified frame draws** — `docs/render/design_silhouettes.md`, and
 /// `place_format.wesl`'s `IDS_EDGE_ART` / `IDS_EDGE_BOX`, which is where the
 /// argument for the layout lives.
 ///
@@ -272,7 +272,7 @@ pub fn ids_edges(word: u32) -> u32 {
 /// channel, and a height read out of the third as eight whole units and four
 /// sixteenths. Every one of those three is exact in the pass that computed it
 /// and quantised on the way here, and every constant on the height track — see
-/// `docs/lighting_rebuild.md`'s three roots — exists to compensate for the fact
+/// `docs/render/design_model.md`'s three roots — exists to compensate for the fact
 /// that a fragment's own position was not exactly known.
 ///
 /// Full `f32` and not a smaller float because the thing stored is a map
@@ -282,7 +282,7 @@ pub fn ids_edges(word: u32) -> u32 {
 /// draws.
 ///
 /// `z` is in **`z` units**, the map's own, exactly as
-/// [`crate::place::unpacked_height`] returned it. `docs/lighting_rebuild.md`'s
+/// [`crate::place::unpacked_height`] returned it. `docs/render/design_model.md`'s
 /// "one metric" — `z` divided into tiles once, where the map is read — is the
 /// next step and not this one: the occlusion grid, every solid's span and the
 /// whole shadow walk are stated in `z` units, and a G-buffer that alone counted
@@ -360,7 +360,7 @@ pub fn unpack_solid(channel: f32) -> u32 {
 /// carried in a bit of its own — [`NORMAL_FACING`] — rather than inferred from
 /// the id word beside it, so that the plane still means something read alone.
 ///
-/// **Not `Rg16Snorm`, octahedral, which is what `docs/lighting_rebuild.md`'s
+/// **Not `Rg16Snorm`, octahedral, which is what `docs/render/design_model.md`'s
 /// own table said.** Every 16-bit norm format is behind
 /// `wgpu::Features::TEXTURE_FORMAT_16BIT_NORM`, which is native-only and not in
 /// WebGPU's core set — the ceiling this crate draws under (see the crate docs).
@@ -649,7 +649,7 @@ impl Fragment {
     /// The one word of [`NORMAL_FORMAT`]'s texel. See [`pack_normal`].
     ///
     /// Derived from the stance rather than carried as a fifth field, and **the
-    /// real pass stopped doing that at `docs/lighting_rebuild.md` phase 6c**:
+    /// real pass stopped doing that at `docs/render/design_model.md` phase 6c**:
     /// `statics.wesl` writes the face of the box a fragment's own view ray met
     /// now, not a table read off the stance. This is a *fixture's* producer —
     /// `plan.rs`'s diagnostic pictures and the scenes in `tests/`, which have no
@@ -662,7 +662,7 @@ impl Fragment {
     /// `ground.wesl` writes the bilinear patch's own normal per fragment.
     /// That is not this method being wrong: a fixture states a surface by its
     /// stance and a stance cannot hold a hillside's direction, which is
-    /// `docs/lighting_rebuild.md`'s own backlog entry about the CPU's four
+    /// `docs/render/design_model.md`'s own backlog entry about the CPU's four
     /// fixed normals, seen from the fixture side. What a fixture gets is level
     /// land's answer with the facing bit clear rather than `(0, 0, 1)`, so a
     /// parity scene lights it from every side — which is what it did before
@@ -756,7 +756,7 @@ mod tests {
     /// The case worth the test is the **top** one: an id is shifted six bits
     /// left, so a row number near the ceiling is exactly where a field would
     /// start losing its high end silently — a wrong picture rather than a
-    /// fault. Since `docs/silhouettes.md`'s two edge bits took the top of the
+    /// fault. Since `docs/render/design_silhouettes.md`'s two edge bits took the top of the
     /// word, that ceiling has a neighbour above it, and the case worth the test
     /// is that the two do not reach into each other.
     #[test]

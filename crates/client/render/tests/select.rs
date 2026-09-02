@@ -60,7 +60,7 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 }
 
 /// A land texel: `id` is an id into [`ground_rows`], not a tile — since
-/// `docs/gbuffer.md` step 7, the ground half of what step 6 did for a static.
+/// `docs/archive/render/gbuffer.md` step 7, the ground half of what step 6 did for a static.
 fn land_texel(id: u32) -> u32 {
     gbuffer::pack_ids(id, Stance::Flat, Kind::Land)
 }
@@ -108,7 +108,7 @@ const SELECTED_ID: u32 = 0;
 
 /// [`scene`]'s land rows: [`SELECTED`] and [`NEIGHBOUR`], one each — unlike
 /// the statics, the two land bands are two different tiles and need two
-/// different ids. `docs/gbuffer.md` step 7, the ground half of [`face_rows`].
+/// different ids. `docs/archive/render/gbuffer.md` step 7, the ground half of [`face_rows`].
 fn ground_rows() -> Vec<u8> {
     let mut bytes = Vec::new();
     for tile in [SELECTED, NEIGHBOUR] {

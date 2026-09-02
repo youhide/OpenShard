@@ -9,7 +9,7 @@
 // attachment (see `crate::place`) and is lit as that tile is lit. The screen
 // folds height into `y` and a wall's sprite stands above the tile it occludes
 // from, so nothing decided from a screen position can tell the lit face of a
-// wall from the shadow behind it. `docs/lighting.md` is the argument.
+// wall from the shadow behind it. `docs/archive/render/lighting.md` is the argument.
 
 import package::place_format::{
     KIND_NOTHING, KIND_LAND, KIND_STATIC,
@@ -27,7 +27,7 @@ import package::normal_format::unpack_normal;
 import package::solid_format::{SOLID_NOBODY, unpack_solid};
 
 // The world's one metric, declared where the view ray needs it and imported
-// here rather than restated — `docs/lighting_rebuild.md`'s *One metric*.
+// here rather than restated — `docs/render/design_model.md`'s *One metric*.
 import package::impostor::Z_PER_TILE;
 
 import package::tonemap::shade;
@@ -55,7 +55,7 @@ fn vs_main(@builtin(vertex_index) index: u32) -> VertexOut {
 // What drew each pixel of `world`: the kind, the stance and an id into one of
 // the four instance buffers below — `crate::gbuffer::IDS_FORMAT`, one `u32`,
 // and `place_format.wesl` is the layout. An id and not a literal tile since
-// `docs/gbuffer.md` steps 3 and 7 moved it there for every kind. Never sampled
+// `docs/archive/render/gbuffer.md` steps 3 and 7 moved it there for every kind. Never sampled
 // — an integer texture has no filtering, and two ids averaged name a third row
 // nothing was drawn from.
 @group(0) @binding(3) var ids_of: texture_2d<u32>;
@@ -76,24 +76,24 @@ fn vs_main(@builtin(vertex_index) index: u32) -> VertexOut {
 // something the pass that drew it knows — `statics.wesl` resolves a corner's
 // two faces per fragment, and the mesh pass has a measured normal per face —
 // and the lighting was recovering a rounded copy of it from four bits at the
-// far end of a `u16`. `docs/lighting_rebuild.md` phase 2, the same move the
+// far end of a `u16`. `docs/render/design_model.md` phase 2, the same move the
 // position plane is.
 @group(0) @binding(14) var normal_of: texture_2d<u32>;
 // Where each tile's references are, one texel a tile over the rectangle in
 // `lighting.grid`: (offset & 255, offset >> 8, offset >> 16, count). The index
-// of `docs/lighting.md`'s decision 30 — a count of zero is open ground, and
+// of `docs/archive/render/lighting.md`'s decision 30 — a count of zero is open ground, and
 // nothing else says a tile stands nothing. What the offset points at is the id
 // list at binding 8, which is step 23.1. See `crate::occlusion`.
 @group(0) @binding(4) var occluders: texture_2d<u32>;
 // What each of those tiles *is*, over the same rectangle: (sky, unused, unused,
 // unused). Only the sky channel is written today. See `crate::occlusion`, and
-// `docs/lighting_world.md` for why this is a second plane rather than four more
+// `docs/archive/render/lighting_world.md` for why this is a second plane rather than four more
 // channels of the cell above.
 @group(0) @binding(5) var field: texture_2d<u32>;
 // And the primitives themselves — one struct each, indexed by a `SolidId`
 // outright. `crate::occlusion::Occlusion::primitive_bytes`.
 //
-// **A storage buffer and not three textures**, `docs/occluders.md`'s D8. What
+// **A storage buffer and not three textures**, `docs/render/design_occluders.md`'s D8. What
 // stood here was `solids` (opacity and flags), `footprints` (a fraction of a
 // tile, a byte an axis) and `solid_z` (sixteen bits an end), three planes
 // indexed by one number and each a different encoding of one box — because
@@ -120,7 +120,7 @@ struct Primitive {
 // hole is what almost nothing has: the `HOLED` bit is what makes this read at
 // all, so an ordinary wall pays one bit test and no fetch.
 //
-// **Absolute world coordinates and nothing quantised**, `docs/occluders.md`'s
+// **Absolute world coordinates and nothing quantised**, `docs/render/design_occluders.md`'s
 // S6. It was an `Rgba8Uint` texel — `(near, far, z_bottom + 128, z_top + 128)`,
 // the run pair in two-hundred-and-fifty-fifths of a tile and the two heights
 // clamped into a signed byte — which made this the last plane indexed by a
@@ -144,7 +144,7 @@ struct Aperture {
 @group(0) @binding(8) var solid_ids: texture_2d<u32>;
 
 // The broad phase: `crate::occlusion::bvh::Bvh` as two buffers —
-// `docs/occluders.md`'s S5, and the same tree both CPU walks read.
+// `docs/render/design_occluders.md`'s S5, and the same tree both CPU walks read.
 //
 // **A hierarchy over the primitives and no longer the grid of tiles.** What the
 // grid could not do is hold a primitive wider than the cell it was registered on
@@ -216,7 +216,7 @@ struct Lighting {
     // fourth selects a short lighting path: zero is the full path, one is an
     // identity and two is flat ambient only. The first component is zero for the lit
     // frame and every other value is a diagnostic drawn from the values this
-    // pass lit it with — see `docs/lighting.md`, decision 8. The numbers are
+    // pass lit it with — see `docs/archive/render/lighting.md`, decision 8. The numbers are
     // pinned in a test on the Rust side.
     view: vec4<u32>,
     // Which way the sun is — `x` and `y` in tiles, `z` in tiles as well — and in
@@ -265,7 +265,7 @@ fn with_composite_opacity(color: vec4<f32>) -> vec4<f32> {
 // buffer, bound a second time as storage rather than uploaded twice. Only
 // `place` is read here today; the rest exists so the struct's size matches
 // `SpriteQuad::STRIDE` and a future reader (decision 3's real per-face
-// normal, step 4) has the rest already in reach. `docs/gbuffer.md` step 3.
+// normal, step 4) has the rest already in reach. `docs/archive/render/gbuffer.md` step 3.
 // `twin` (step 4) is what `statics.wgsl` reads to give a corner's two faces
 // two different ids — it is never read here, `face_instances[id]` is already
 // addressed by whichever of the two ids a fragment's `place` carries, but it
@@ -274,7 +274,7 @@ fn with_composite_opacity(color: vec4<f32>) -> vec4<f32> {
 // every row past the first at the wrong offset.
 // `owner` *is* read here, unlike `twin`: which occluder of its own tile the
 // static drawn on a pixel is. **It is a key and no longer the comparison** —
-// `docs/lighting_rebuild.md` phase 4 compares a `SolidId`, and a sprite instance
+// `docs/render/design_model.md` phase 4 compares a `SolidId`, and a sprite instance
 // covers a corner's two panels, so `own_solid` narrows this owner by the
 // fragment's own stance to name one of them. `crate::sprite::SpriteQuad`.
 struct FaceInstance {
@@ -290,13 +290,13 @@ struct FaceInstance {
 @group(0) @binding(9) var<storage, read> face_instances: array<FaceInstance>;
 @group(0) @binding(10) var<storage, read> mobile_instances: array<FaceInstance>;
 
-// `docs/gbuffer.md` step 4c's mesh-face pass's own row: the tile a face's
+// `docs/archive/render/gbuffer.md` step 4c's mesh-face pass's own row: the tile a face's
 // static stands on, which way that face really faces, and **which solid of the
 // grid it is the drawn form of** — a mesh face has no picture, so it shares no
 // field with `FaceInstance` and lives in its own buffer instead.
 // `crate::mesh_face::MeshFaceRow`, laid out identically.
 //
-// `solid` was an owner until `docs/lighting_rebuild.md` phase 4. A mesh face is
+// `solid` was an owner until `docs/render/design_model.md` phase 4. A mesh face is
 // one primitive by construction, so it can name it outright, which is what lets
 // a flight's treads stop shadowing each other without a height being read
 // anywhere — see `own_solid` for the sprite side, which cannot.
@@ -310,7 +310,7 @@ struct MeshFaceInstance {
 
 // The ground pass's own `GroundQuad`, laid out exactly as `ground.rs`'s
 // `GroundQuad::write` puts it on the GPU — this is that same buffer, bound a
-// second time as storage. `docs/gbuffer.md` step 7, the ground half of what
+// second time as storage. `docs/archive/render/gbuffer.md` step 7, the ground half of what
 // step 3 did for a static's tile.
 //
 // Scalars rather than the `vec4`s `GroundQuad`'s own doc groups them into,
@@ -355,7 +355,7 @@ struct GroundInstance {
 
 // **`OWNER_NONE` stood here**, and it went with `own_solid` — the last thing in
 // this pass that compared an *owner* at all. What a fragment is a point of is a
-// `SolidId` (`docs/lighting_rebuild.md` phase 4) and it arrives now in the
+// `SolidId` (`docs/render/design_model.md` phase 4) and it arrives now in the
 // position plane's fourth channel, written by the pass that met the box:
 // `solid_format.wesl` carries the whole argument, and `SOLID_NOBODY` is
 // imported from it rather than spelled a second time here.
@@ -368,7 +368,7 @@ struct GroundInstance {
 // this pass is two things. Which instance buffer an id addresses, since a mesh
 // face's row lives in its own (`STANCE_MESH_FACE`); and `own_side`, the shadow
 // walk's own-run test, which asks which *edge of its tile* a fragment's surface
-// stands on rather than which way it looks. `docs/lighting_rebuild.md` phase 4
+// stands on rather than which way it looks. `docs/render/design_model.md` phase 4
 // retires the second. `STANCE_FLAT` is no longer imported at all, and that is
 // the measure of what the normal plane took away: the one flat value this pass
 // used to read was for a facing.
@@ -377,7 +377,7 @@ struct GroundInstance {
 // `max(N · L, 0)`, and nothing else.
 //
 // Textbook Lambert, with no wrap, no band and no width knob — `light::lit_from`'s
-// own doc is the argument, and `docs/lighting_rebuild.md` is the decision.
+// own doc is the argument, and `docs/render/design_model.md` is the decision.
 //
 // **The one thing a fraction cannot say.** A wall's two faces are one tile and
 // one plane — the same tile, the same fraction, the same height — so without a
@@ -387,7 +387,7 @@ struct GroundInstance {
 //
 // `toward` is the fragment-to-flame offset in tiles and **it is normalised
 // here**: fed unnormalised, the same expression answered about a distance along
-// the normal rather than about an angle. `docs/lighting_rebuild.md` phase 3.
+// the normal rather than about an angle. `docs/render/design_model.md` phase 3.
 //
 // `light::lit_from`, and the two are one formula.
 fn lit_from(normal: vec3<f32>, toward: vec3<f32>) -> f32 {
@@ -401,7 +401,7 @@ fn lit_from(normal: vec3<f32>, toward: vec3<f32>) -> f32 {
 }
 
 // **`MAX_WALK_STEPS` stood here and went with the grid** —
-// `docs/occluders.md`'s S5, which deleted `light::MAX_WALK_STEPS` at the same
+// `docs/render/design_occluders.md`'s S5, which deleted `light::MAX_WALK_STEPS` at the same
 // time. It was how many cells of the grid one ray could look at, and it had to
 // exist because a cell count is the *ray's* own length: widen a radius and the
 // walk gets longer, so a loop over data would have become unbounded.
@@ -411,7 +411,7 @@ fn lit_from(normal: vec3<f32>, toward: vec3<f32>) -> f32 {
 // forward, so each node is visited at most once. See `walk`'s own loop.
 
 // **`FLAME_SPREAD`, `SOFT_CROSSING_MIN`, `SOFT_CROSSING_MAX` and `FLAME_DEPTH`
-// stood here** and went at `docs/lighting_rebuild.md` phase 5, with
+// stood here** and went at `docs/render/design_model.md` phase 5, with
 // `light.rs`'s own four. They were the analytic penumbra: the flame's size in
 // tiles, times `t / (1 - t)` for how far along the ray the occluder stands,
 // bounded at both ends, converted into `z` by a flame's height. One ray
@@ -485,7 +485,7 @@ const HOLED: u32 = 64u;
 
 // **`RUN_STEPS` stood here** — 255, how many parts of a tile one step of a
 // hole's run coordinate was worth — and went with the quantisation at
-// `docs/occluders.md`'s S6. Both sides read the same byte and divided it by this
+// `docs/render/design_occluders.md`'s S6. Both sides read the same byte and divided it by this
 // number, which is what made them agree exactly; they read the same `f32` now,
 // which is the same guarantee with nothing to divide. The constant still exists
 // as `occlusion::RUN_STEPS`, where the *art* measures a hole off a picture —
@@ -494,7 +494,7 @@ const HOLED: u32 = 64u;
 // How far past an exact tangent `ray_vs_solid`'s own `entered > leaves`
 // rejection still counts as a hit — a cross-implementation tolerance, and
 // it lives only on this side. `light::ray_vs_solid`'s own doc comment has
-// the story: `docs/lighting_raymarch.md`'s point 4 cutover found a ray
+// the story: `docs/archive/render/lighting_raymarch.md`'s point 4 cutover found a ray
 // grazing a box's corner where this shader's own `f32` division rounds to
 // `entered > leaves` (a miss) on inputs `light::sample` — with the exact,
 // untolerant formula — rounds to `entered <= leaves` (a hit) for. Widening
@@ -519,7 +519,7 @@ const HOLED: u32 = 64u;
 // nothing more: two `f32` implementations of one formula, one rounding apart.
 const RAY_TANGENT_TOLERANCE: f32 = 1.0e-6;
 
-// **`pierces` stood here** and went at `docs/lighting_rebuild.md` phase 5, with
+// **`pierces` stood here** and went at `docs/render/design_model.md` phase 5, with
 // `light::pierces`. It was a panel's own span softened over a band `tall` `z`
 // units wide, centred on the top edge and hanging below the bottom one — the one
 // asymmetry it had, and not a cosmetic one: a wall is based at the height of the
@@ -533,7 +533,7 @@ const RAY_TANGENT_TOLERANCE: f32 = 1.0e-6;
 // it was handed, at that crossing's own midpoint. So what it added was the band,
 // and the band is eight rays now.
 
-// **`crosses` lived here, and `docs/parity.md`'s P4 step 1 deleted it** — with
+// **`crosses` lived here, and `docs/render/design_frame_assembly.md`'s P4 step 1 deleted it** — with
 // `light::crosses`, its twin, which is the only way a formula in two languages
 // goes away at all.
 //
@@ -555,7 +555,7 @@ const RAY_TANGENT_TOLERANCE: f32 = 1.0e-6;
 // crosses a volume. A plane's worth of special pleading in two shading languages
 // is what giving a floor real bounds bought.
 
-// **`STAND_OFF` and `ON_TOP` lived here**, and `docs/lighting_rebuild.md` phase 4
+// **`STAND_OFF` and `ON_TOP` lived here**, and `docs/render/design_model.md` phase 4
 // deleted them: **the bias is zero.** They were two steps of the seven-bit
 // fraction the retired `place` attachment carried and well under the one `z` unit
 // it quantised a height to — numbers off a byte layout, standing in for a ray
@@ -564,7 +564,7 @@ const RAY_TANGENT_TOLERANCE: f32 = 1.0e-6;
 // removed the second thing they bought. `light.rs`'s own note where the pair
 // stood has the whole argument.
 
-// **`drawn_on` lived here**, and `docs/lighting_rebuild.md` phase 4 retired it
+// **`drawn_on` lived here**, and `docs/render/design_model.md` phase 4 retired it
 // along with its twin — see `light.rs`'s own note where the Rust one stood. It
 // asked whether a lid was a plane the fragment was drawn at the height of, which
 // is how one static's several lids were told apart when identity was per static.
@@ -587,7 +587,7 @@ const RAY_TANGENT_TOLERANCE: f32 = 1.0e-6;
 // have a hole: a lid and a body have no run to measure one along.
 //
 // It was `run_v` and returned `along - floor(along)`, the fraction of whichever
-// tile the crossing landed in — `docs/occluders.md`'s S6, and the last `floor`
+// tile the crossing landed in — `docs/render/design_occluders.md`'s S6, and the last `floor`
 // in this file. `light::along_the_run`.
 fn along_the_run(edges: u32, px: f32, py: f32) -> f32 {
     return select(py, px, (edges & (EDGE_NORTH | EDGE_SOUTH)) != 0u);
@@ -610,7 +610,7 @@ fn hole(cut: vec4<f32>, along: f32, z: f32) -> f32 {
 // How much of a surface stands in the way at the point a ray goes through its
 // plane: all of it, less the hole in it.
 //
-// The whole of `docs/lighting.md`'s step 21.3, and the reason it is this small is
+// The whole of `docs/archive/render/lighting.md`'s step 21.3, and the reason it is this small is
 // decision 30.7 — a panel was already *pierced at a point* rather than travelled
 // through, so the point was already being computed and a window is what that
 // point is asked about. `id` is the solid's own place in the list, which is
@@ -689,14 +689,14 @@ fn lit_plane(stance: u32) -> vec2<f32> {
 // `on_the_lit_surface` is the other half of this and lives below `solid_at`,
 // which it reads.
 
-// **`starting_cell` stood here, and `docs/occluders.md`'s S4 deleted it** — with
+// **`starting_cell` stood here, and `docs/render/design_occluders.md`'s S4 deleted it** — with
 // the `tile` parameter of `walk`, `arrival` and `sunlight`, which carried the
 // place attachment's own tile down three functions for this one reader. A walk
 // seeds itself from `floor(start.xy)` now, in the one line that needs it.
 // `light.rs`'s grave note above `light::dda_walk` has the census that licensed
 // the cut and the argument for why the tie it used to break has one answer.
 
-// **`same_run` stood here, and `docs/occluders.md`'s S4 deleted it**, together
+// **`same_run` stood here, and `docs/render/design_occluders.md`'s S4 deleted it**, together
 // with the `on_surface` height gate that was inside it and had no other reader.
 // `light::same_run`'s own grave note has the argument in full: it was
 // `on_the_lit_surface` said as arithmetic over cells, and what kept it alive was
@@ -740,7 +740,7 @@ fn id_at(reference: u32) -> vec2<u32> {
 // One primitive of the list: its own two corners, its flags and its opacity.
 //
 // An array index and no folding at all, where this used to be a `textureLoad`
-// into a row `LIST_ROW` wide — the whole of what `docs/occluders.md`'s D8 buys
+// into a row `LIST_ROW` wide — the whole of what `docs/render/design_occluders.md`'s D8 buys
 // on the read side. **The box is here and nowhere else**: there is no second
 // plane to fetch for a height and none for a footprint, so a solid's geometry
 // arrives in one read and cannot be half-read.
@@ -748,7 +748,7 @@ fn solid_at(id: u32) -> Primitive {
     return primitives[id];
 }
 
-// **`aperture_at` stood here**, and `docs/occluders.md`'s S6 deleted it with the
+// **`aperture_at` stood here**, and `docs/render/design_occluders.md`'s S6 deleted it with the
 // folding it was for: the holes were an `Rgba8Uint` plane `LIST_ROW` wide, so a
 // `SolidId` had to be taken apart into a row and a column and the four numbers
 // put back together from channels. They are a storage buffer now, indexed by the
@@ -766,9 +766,9 @@ fn solid_at(id: u32) -> Primitive {
 // the loop returned whichever member the cell's list held first: every pixel of
 // a flight claimed to be a point of its bottom step.
 //
-// That cost nothing while `docs/gbuffer.md` step 4c's mesh pass drew over every
+// That cost nothing while `docs/archive/render/gbuffer.md` step 4c's mesh pass drew over every
 // climbable static, because its row named one primitive outright and this
-// function was never asked. `docs/lighting_rebuild.md` phase 6d took the pass
+// function was never asked. `docs/render/design_model.md` phase 6d took the pass
 // off real statics and the ambiguity came out from under it as triangular
 // wedges of self-shadow down every staircase in the world.
 //
@@ -777,7 +777,7 @@ fn solid_at(id: u32) -> Primitive {
 // the ray actually met. And the scan was a loop over a cell's whole reference
 // list, once a fragment, which is gone from the pass entirely.
 
-// **`docs/occluders.md`'s D2**: whether a candidate box is part of the very
+// **`docs/render/design_occluders.md`'s D2**: whether a candidate box is part of the very
 // surface the lit fragment is a point of, and so must not shadow it.
 //
 // `light::on_the_lit_surface` states the theorem at length and this is its twin,
@@ -918,12 +918,12 @@ fn sky_at(x: i32, y: i32) -> f32 {
 // **A box is no longer built here at all.** `box_of` stood in this place and
 // reconstructed one from `(cell, bottom, top, footprint)` — a tile plus a
 // fraction of it across and sixteen bits an end up — because that is all the
-// wire carried. `docs/occluders.md`'s D1 took the reconstruction away with the
+// wire carried. `docs/render/design_occluders.md`'s D1 took the reconstruction away with the
 // quantisation: `solid_at(id).lo`/`.hi` are the primitive's own corners in
 // absolute world coordinates, so what used to be a function is now two fields.
 //
 // **`over_footprint` stood here and went with the no-horizontal-run shortcut in
-// `walk`** — `docs/occluders.md`'s S4, and `light.rs`'s own grave note where the
+// `walk`** — `docs/render/design_occluders.md`'s S4, and `light.rs`'s own grave note where the
 // Rust twin was states the measurement. It was `ray_vs_solid`'s parallel-axis
 // branch on the two horizontal axes alone, spelled again because that shortcut
 // could not call `ray_vs_solid` outright while a vertical ray's height answer
@@ -950,7 +950,7 @@ struct RayBox {
 
 // A flame is a point source, and a point source's shadow is exact — no
 // widened corner test, no taper: an intersection here already means the
-// segment genuinely passed through the box. See `docs/lighting_raymarch.md`'s
+// segment genuinely passed through the box. See `docs/archive/render/lighting_raymarch.md`'s
 // "hard shadows" decision; `light::ray_vs_solid` is the whole test now, for
 // every edge kind, and this is its mirror.
 fn ray_vs_solid(ray_from: vec3<f32>, ray_to: vec3<f32>, lo: vec3<f32>, hi: vec3<f32>) -> RayBox {
@@ -1008,7 +1008,7 @@ fn ray_vs_solid(ray_from: vec3<f32>, ray_to: vec3<f32>, lo: vec3<f32>, hi: vec3<
 // interval and the per-surface rule its shape asks for, `light::walk_primitives`'
 // own closure restated as a function, since WGSL has none.
 //
-// **A primitive and no longer a cell** — `docs/occluders.md`'s S5. What stood
+// **A primitive and no longer a cell** — `docs/render/design_occluders.md`'s S5. What stood
 // here was `cell_stopped`, which looped over a tile's own references and took the
 // **largest** of what its surfaces stopped: two panels of one tile are the two
 // faces of one corner, and a ray crossing both was said to have gone through one
@@ -1025,7 +1025,7 @@ fn ray_vs_solid(ray_from: vec3<f32>, ray_to: vec3<f32>, lo: vec3<f32>, hi: vec3<
 // grazing a corner still met what stood on it; a tree has no tie to break, a node
 // being hit or missed by the same slab test a primitive is. Measured before it
 // was removed: deleting the probe outright changed no pixel of any test in this
-// crate — `docs/occluders.md`'s backlog, which is where that silence is recorded
+// crate — `docs/render/design_occluders.md`'s backlog, which is where that silence is recorded
 // as a gap rather than as a licence.
 fn primitive_stopped(
     id: u32,
@@ -1046,14 +1046,14 @@ fn primitive_stopped(
     let low = stands.lo.z;
     let high = stands.hi.z;
     // And the exact interval this ray crosses the primitive's own box in —
-    // `light::ray_vs_solid`. The box is read, not rebuilt: `docs/occluders.md`'s
+    // `light::ray_vs_solid`. The box is read, not rebuilt: `docs/render/design_occluders.md`'s
     // D1.
     let hit = ray_vs_solid(start, finish, stands.lo, stands.hi);
     if !hit.hit {
         return 0.0;
     }
     // **A surface does not shadow itself, and that is one comparison of two
-    // names** — `docs/lighting_rebuild.md` phase 4, `light.rs`'s own inline
+    // names** — `docs/render/design_model.md` phase 4, `light.rs`'s own inline
     // copy of it in `walk_primitives`. Everything that used to stand in for it
     // here is gone: the owner, the `own_cell` gate an owner needed to be
     // meaningful, the `match` on `edges` that asked each shape the one
@@ -1065,7 +1065,7 @@ fn primitive_stopped(
         return 0.0;
     }
     // **And a surface does not shadow itself when it is cut into more than one
-    // primitive** — `docs/occluders.md`'s D2. The rule above answers for the
+    // primitive** — `docs/render/design_occluders.md`'s D2. The rule above answers for the
     // fragment's own box and could never answer for the box abutting it, which is
     // a different primitive of the same wall, floor or landing. `same_run` stood
     // in for it and only for a *panel* on the same row or column; a **body** got
@@ -1100,12 +1100,12 @@ fn primitive_stopped(
         // segment genuinely passed through the box over
         // `hit.entered..hit.leaves`: occlusion is the primitive's own opacity
         // outright. `light::walk_primitives`'s own mirror; see
-        // `docs/lighting_raymarch.md`'s "hard shadows" decision for why the
+        // `docs/archive/render/lighting_raymarch.md`'s "hard shadows" decision for why the
         // length-and-pierce grading this used to do (and the widened-corner
         // graze feeding it) are both gone.
         //
         // **A lid took `crosses(lit.z, lit.z + delta.z, low, high)` here**, and
-        // `docs/parity.md`'s P4 step 1 is what retired it: a lid was a plane in
+        // `docs/render/design_frame_assembly.md`'s P4 step 1 is what retired it: a lid was a plane in
         // `z`, so a hit said only that the ray touched it, and at a corner of the
         // footprint it said so at one `t` where both ends of the `z` interval
         // were one number — a floor leaking one bright point per corner of the
@@ -1120,7 +1120,7 @@ fn primitive_stopped(
     // *surface*, and what a surface does to a ray is decided where
     // the ray pierces it: one sample, at the exact crossing's own
     // midpoint. There was an `edges & ~same_run` gate here, and
-    // `docs/occluders.md`'s S4 is where it went — the run it excused is
+    // `docs/render/design_occluders.md`'s S4 is where it went — the run it excused is
     // `on_the_lit_surface`'s plane, tested above with the other
     // exemptions.
     return opacity * pierced(stands, id, start + delta * middle);
@@ -1129,7 +1129,7 @@ fn primitive_stopped(
 // **`ahead` is gone from this signature and from `sunlight`'s.** It was the lit
 // end's own outward normal, and the only thing it was ever spent on was
 // `STAND_OFF`; with the bias at zero there is nothing here that asks which way a
-// surface looks. `docs/lighting_rebuild.md` phase 4.
+// surface looks. `docs/render/design_model.md` phase 4.
 fn walk(
     start: vec3<f32>,
     finish: vec3<f32>,
@@ -1140,13 +1140,13 @@ fn walk(
     mine: u32,
 ) -> f32 {
     // **Both ends stand exactly where they are, and the bias is zero** —
-    // `docs/lighting_rebuild.md` phase 4. A pair of nudges off the retired
+    // `docs/render/design_model.md` phase 4. A pair of nudges off the retired
     // attachment's byte layout stood here; identity is what keeps a ray from
     // being stopped by the surface it left, and it does not need the ray moved.
     let delta = finish - start;
 
     // **A stackless traversal of the tree, and the DDA over the tile grid is
-    // gone** — `docs/occluders.md`'s S5, `light::candidates`' own mirror. What
+    // gone** — `docs/render/design_occluders.md`'s S5, `light::candidates`' own mirror. What
     // stood here stepped from cell to cell along the nearer of its two axis
     // boundaries, probed the neighbour it did not step into, and asked each cell
     // for the largest of what its surfaces stopped. Three of this file's own
@@ -1256,7 +1256,7 @@ const BEAM_SPILL: f32 = 0.25;
 // in tiles and `z` in tiles as well, pointing *from* the flame *to* the spot.
 //
 // `light::Beam::lights`, arithmetic for arithmetic, and the parity test of
-// `docs/lighting.md`'s decision 9 is what holds the two together. The smoothstep
+// `docs/archive/render/lighting.md`'s decision 9 is what holds the two together. The smoothstep
 // is written out rather than called for the same reason: two texts that mean to
 // be one polynomial should be one polynomial.
 fn cone(beam: vec4<f32>, offset: vec3<f32>) -> f32 {
@@ -1289,7 +1289,7 @@ struct Arrival {
 // the fragment sees: `SHADOW_RAYS` rays at the flame's sphere, with **every term
 // of the sum taken at the sample point**.
 //
-// **This is the whole of the soft shadow** — `docs/lighting_rebuild.md` phase 5 —
+// **This is the whole of the soft shadow** — `docs/render/design_model.md` phase 5 —
 // **and the whole of the shading of a flame besides**, which is its phase 5b. A
 // shadow's edge is a gradient because a fragment in it can see part of the flame
 // and not the rest, which is what a penumbra *is*; nothing here softens
@@ -1518,7 +1518,7 @@ fn debug_color(
         // picture rather than as a wireframe of the boxes, because the failure
         // this field actually has is a tile that is *wrongly open* — an eave that
         // did not cover the floor under it — and a box is drawn for what stands,
-        // not for what does not. `docs/lighting_world.md`'s backlog says so.
+        // not for what does not. `docs/archive/render/lighting_world.md`'s backlog says so.
         return vec3<f32>(share, share, 0.15 + share * 0.85);
     }
     if view == VIEW_SUN {
@@ -1598,7 +1598,7 @@ fn debug_color(
     }
     if view == VIEW_SILHOUETTE_ART || view == VIEW_SILHOUETTE_BOX {
         // **The two edges a magnified frame draws, each in its own picture** —
-        // `docs/silhouettes.md`, and the pair is one instrument rather than two
+        // `docs/render/design_silhouettes.md`, and the pair is one instrument rather than two
         // views that happen to sit next to each other.
         //
         // The art's alpha steps once a *texel*, which is `Projection::scale` real
@@ -1742,7 +1742,7 @@ fn debug_color(
         // (`KIND_NOTHING`, above, returns `color` before this view is ever
         // asked), and that has cost a wrong diagnosis twice: a shadowed pixel
         // beside empty background read as an orphaned shape, and a face's own
-        // outline read as fewer sides than it has. `docs/lighting_raymarch.md`
+        // outline read as fewer sides than it has. `docs/archive/render/lighting_raymarch.md`
         // step 1. `0.004` is `light.rs`'s own `RAY_CUTOFF`.
         if nearest_through <= 0.004 {
             return vec3<f32>(0.2, 0.0, 0.0);
@@ -1822,7 +1822,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     }
 
     // Which *tile* this pixel's picture came from is still an id into a
-    // per-kind instance buffer — `docs/gbuffer.md` step 3 for a static or a
+    // per-kind instance buffer — `docs/archive/render/gbuffer.md` step 3 for a static or a
     // mobile, step 7 for the ground — because the tile is what the shadow walk
     // starts its cell stepping from, and a whole number a pass knew exactly is
     // not something to recover by flooring anything.
@@ -1841,14 +1841,14 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // fraction taken out of the place attachment's fourth channel in
     // hundred-and-twenty-sevenths, and a height taken out of its third as eight
     // whole units plus four bits of sixteenths. Every one of the three was exact
-    // in the pass that computed it; `docs/lighting_rebuild.md` phase 2 is the
+    // in the pass that computed it; `docs/render/design_model.md` phase 2 is the
     // decision to carry the number instead of the fields, and its second root —
     // "a fragment's own position is not exactly known, so a shadow ray must
     // start away from where it really is" — is the bill that packing ran up.
     let place = textureLoad(position_of, texel, 0);
     let at = place.xyz;
     // The solid is the one number the shadow walk compares
-    // (`docs/lighting_rebuild.md` phase 4), and every producer states it: the
+    // (`docs/render/design_model.md` phase 4), and every producer states it: the
     // impostor's own box for a static, `SOLID_NOBODY` for the ground, for a
     // mobile and for a static this frame's grid holds nothing for. Only a mesh
     // face overrides it below, out of its own row.
@@ -1864,7 +1864,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
             f32(ground_instances[id].place0 >> 16u),
         );
     } else if kind == KIND_STATIC && stance == STANCE_MESH_FACE {
-        // `docs/gbuffer.md` step 4c: a mesh face has no picture of its
+        // `docs/archive/render/gbuffer.md` step 4c: a mesh face has no picture of its
         // own, so its row lives in `mesh_instances`, not
         // `face_instances` — and carries the *real* stance the
         // attachment's sentinel stood in for.
@@ -1902,19 +1902,19 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // here, by testing the kind. It is made by the *producer* now: `ground.wesl`
     // writes the bilinear patch's own normal, and `statics.wesl` writes the face
     // of the box this fragment's own view ray met (`package::impostor`,
-    // `docs/lighting_rebuild.md` phase 6c). Neither is a table any more, which is
+    // `docs/render/design_model.md` phase 6c). Neither is a table any more, which is
     // what retired `place_format.wesl`'s `outward` and the two rows of it that
     // were wrong.
     let normal = unpack_normal(textureLoad(normal_of, texel, 0).x);
 
     // The ambient this *tile* has: the sky's share of it scaled by how much of
     // the sky the column over the tile can see, plus the floor everything gets.
-    // `docs/lighting_world.md`, decision 1, and it is the whole of why a room is
+    // `docs/archive/render/lighting_world.md`, decision 1, and it is the whole of why a room is
     // darker than the road outside it before anything burns.
     //
     // **The tile the pass carried, not `floor(at.x/y)`** — the same reason
     // `first` below is, and the same class of defect: a surface may lie exactly
-    // on a tile boundary, and since `docs/lighting_rebuild.md` phase 6c meets a
+    // on a tile boundary, and since `docs/render/design_model.md` phase 6c meets a
     // fragment with its own volume rather than clamping it a
     // hundred-and-twenty-seventh of a tile inside, a south or east wall's face
     // does. Flooring one of those reads the *neighbour* tile's sky, so a street
@@ -1952,7 +1952,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         // *broad phase*, and a broad phase is forbidden to change the answer — so
         // it culls on the **near side** of the sphere, since a fragment the centre
         // says is out of reach can be reached by the near edge of a body that has
-        // one. `docs/lighting_rebuild.md` phase 5b.
+        // one. `docs/render/design_model.md` phase 5b.
         if length(offset) - flame_radius() >= reach {
             continue;
         }
@@ -1960,7 +1960,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         // visibility, the cosine, the falloff and the beam, each taken at the
         // point its own ray ends on. There is nothing left out here to multiply
         // the result by — a cosine at the flame's *centre* is what drew a wedge of
-        // shadow at every join, and `docs/lighting_rebuild.md` phase 5b is that
+        // shadow at every join, and `docs/render/design_model.md` phase 5b is that
         // removed by construction rather than compensated for.
         //
         // A debug view asks for every sample, because `VIEW_SHADOW` is visibility
@@ -2012,7 +2012,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // pixel the art left black stays black, which is what makes the light look
     // like it is falling on the scene instead of floating above it.
     //
-    // **Through `shade`, which is the whole of `docs/lighting_rebuild.md`'s
+    // **Through `shade`, which is the whole of `docs/render/design_model.md`'s
     // phase 1**: the art is decoded out of sRGB, the multiplication happens in
     // linear radiance, and the result is curved and encoded once. What this
     // replaced was `min(color.rgb * lit, 1.0)` — a multiplication of stored

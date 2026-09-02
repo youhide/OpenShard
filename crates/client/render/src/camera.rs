@@ -72,7 +72,7 @@
 //! What is still bare, deliberately, is [`Rect`](crate::geometry::Rect): a
 //! sprite's rectangle is a [`ViewPoint`] and an extent, but the same type is
 //! also an atlas rectangle and a gump's place on the surface, and those are
-//! three spaces sharing one shape. `docs/pixels.md` P3 carries that half.
+//! three spaces sharing one shape. `docs/render/design_pixel_spaces.md` P3 carries that half.
 
 use openshard_protocol::world::Point;
 
@@ -175,7 +175,7 @@ pub struct ViewPixel {
 /// remainder, which rides in [`Projection::origin`] rather than in any quad.
 /// Everything the *map* holds lands on a whole one by construction — a tile
 /// projects to a whole [`WorldPixel`] and [`Camera::to_view`] is an integer
-/// translation of that — which is `docs/pixels.md` P2's first two rows and the
+/// translation of that — which is `docs/render/design_pixel_spaces.md` P2's first two rows and the
 /// reason a whole value here is a box's own corner.
 ///
 /// `f32` and not [`WorldPoint`]'s `f64`: the world's own space is 157,000 pixels
@@ -278,7 +278,7 @@ impl RealPixel {
 /// and a whole `z` — but the *geometry* standing in it is not: a wall of stated
 /// thickness has faces a fifth of a tile apart, and a solid spanning several
 /// tiles has corners on none of them. This is that place, in the same units the
-/// map uses, so a number here is read the way a number in `docs/lighting.md` is
+/// map uses, so a number here is read the way a number in `docs/archive/render/lighting.md` is
 /// read: `x` and `y` in tiles, `z` in the map's own height units.
 ///
 /// **The lattice is the tiles' corners and not their centres**, which is the one
@@ -342,7 +342,7 @@ pub fn project(point: Point) -> WorldPixel {
 /// is 22 pixels across and 22 down, and a step of one in `z` is 4 up, so a solid
 /// authored with equal numbers on the three axes is five and a half times too
 /// tall. That scale is part of the projection and is carried, never corrected;
-/// see `docs/lighting.md` decision 39.1.
+/// see `docs/archive/render/lighting.md` decision 39.1.
 pub fn project_exact(at: WorldSpot) -> WorldPoint {
     WorldPoint {
         x: (at.x - at.y) * f64::from(HALF_WIDTH),
@@ -673,7 +673,7 @@ pub struct Projection {
 /// [`Camera::to_view`] and [`Camera::pick`] do. Spaceless on purpose: it is the
 /// same rounding of the same number whether the extent is real pixels or virtual
 /// ones, and the callers above differ in exactly which — so the space belongs on
-/// what each of them hands back, not in here. `docs/parity.md`'s window-parity
+/// what each of them hands back, not in here. `docs/render/design_frame_assembly.md`'s window-parity
 /// entry is what the floor is for, and [`Projection::centre`] carries the
 /// account.
 fn half_extent(width: u32, height: u32) -> (f32, f32) {
@@ -690,7 +690,7 @@ impl Projection {
     /// world centred on that pixel puts every primary sample on a whole virtual
     /// pixel at some column — where a box's own corner is, and where
     /// [`crate::impostor::meets`] answers the tie with a face that has no area.
-    /// `docs/parity.md`'s window-parity entry is the whole story.
+    /// `docs/render/design_frame_assembly.md`'s window-parity entry is the whole story.
     ///
     /// Integer division *is* that floor, and it is the same rounding
     /// [`Camera::to_view`] and [`Camera::pick`] have always done — which is the
@@ -1208,12 +1208,12 @@ mod tests {
     /// Recorded rather than repaired, because repairing it is a decision about
     /// *motion* and not about centring — dropping the eye's fraction at the
     /// minifying rungs costs a third of a real pixel of smoothness there, which
-    /// is `docs/camera.md` D11's own subject. `docs/parity.md`'s backlog carries
+    /// is `docs/camera.md` D11's own subject. `docs/render/design_frame_assembly.md`'s backlog carries
     /// it; this constant is what keeps the gate above from being green about it
     /// by accident.
     const AN_EYE_ON_A_HALF_PIXEL_REACHES_THE_CORNER: [&str; 1] = ["2/3x"];
 
-    /// **No primary sample can land on a whole virtual pixel** — `docs/parity.md`
+    /// **No primary sample can land on a whole virtual pixel** — `docs/render/design_frame_assembly.md`
     /// P5's G1, and the arithmetic half of the window-parity repair.
     ///
     /// The defect it states the absence of: a fragment samples at `i + 0.5` real
@@ -1303,7 +1303,7 @@ mod tests {
                                     .contains(&zoom.to_string().as_str()),
                                 "at {zoom}, {width}x{height}, eye step {step}, eye fraction \
                                  {fraction}: a sample lands on a whole virtual pixel, which is a \
-                                 view ray through a box's own vertical corner — docs/parity.md's \
+                                 view ray through a box's own vertical corner — docs/render/design_frame_assembly.md's \
                                  window-parity entry, on a rung nothing has recorded it for",
                             );
                             assert!(
@@ -1351,7 +1351,7 @@ mod tests {
             reached_the_corner > 0,
             "no eye reached a box's own corner on any rung, so \
              AN_EYE_ON_A_HALF_PIXEL_REACHES_THE_CORNER now names a defect that is gone — take it \
-             out, here and in docs/parity.md's backlog",
+             out, here and in docs/render/design_frame_assembly.md's backlog",
         );
     }
 
@@ -1362,7 +1362,7 @@ mod tests {
     /// ones, and [`Camera::to_view`] does it a third time in integers. They now
     /// share [`half_extent`], and this is what says so from outside: a floor
     /// written twice is a floor that drifts at exactly the odd extents
-    /// `docs/parity.md`'s window-parity entry is about, and every extent below is
+    /// `docs/render/design_frame_assembly.md`'s window-parity entry is about, and every extent below is
     /// odd on at least one axis for that reason.
     ///
     /// The 1:1 row is the crossing the types otherwise refuse — the one camera at

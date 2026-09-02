@@ -3,7 +3,7 @@
 //! [`crate::facing`] measures which edge of its tile a wall stands on by walking
 //! the sprite's pixels, and until this module existed it did that *in a frame*:
 //! [`StaticAtlas`](crate::atlas::StaticAtlas) called it while packing, on the
-//! frame a graphic was first seen, on the player's machine. `docs/lighting.md`'s
+//! frame a graphic was first seen, on the player's machine. `docs/archive/render/lighting.md`'s
 //! decision 31 is why that stops: a scroll that introduces four hundred graphics
 //! pays for four hundred measurements at once, and every measurement this pass
 //! still wants is a bigger one than the last — an aperture is a hole to be found,
@@ -55,7 +55,7 @@
 //!
 //! `block` is the fourth, and unlike the other three it is never derived: `x0
 //! x1 y0 y1 z0 z1`, a box in eighths of the tile on the ground and `z` above
-//! the static's own base, and a row may carry several — `docs/lighting.md`'s
+//! the static's own base, and a row may carry several — `docs/archive/render/lighting.md`'s
 //! decision 41. An arch is a post, a post and a lintel; nothing a single climb
 //! profile can be fitted to, which is what `prism` is. It may accompany any
 //! verdict, including `none`, because nothing about it is a claim about which
@@ -63,7 +63,7 @@
 //!
 //! `footprint` is the fifth: `x0 x1 y0 y1`, the horizontal box
 //! [`crate::facing::measure_footprint`] reads off a picture's own base edge, in
-//! eighths of the tile like `block` — `docs/footprints.md`'s S1 and S2. Unlike
+//! eighths of the tile like `block` — `docs/render/design_footprints.md`'s S1 and S2. Unlike
 //! `block` it *is* derived, and unlike `hole` and `prism` it belongs to the
 //! *absence* of a verdict: only a `none` row may carry one, because a face or a
 //! corner already answers which edge the picture stands on, and a footprint
@@ -136,18 +136,18 @@ use crate::occlusion::Shape;
 /// **Three** for the prism, and the bump matters more here than it did for the
 /// hole: a format-2 table is a file that *cannot* say a staircase is a solid, so
 /// a build that half-read one would answer `prism: None` for every stair — the
-/// one state `docs/lighting.md`'s backlog called a trap, because the client then
+/// one state `docs/archive/render/lighting.md`'s backlog called a trap, because the client then
 /// occludes a flight of steps like a run of wall and the only sign is that
 /// somebody once ran a tool.
 ///
-/// **Four** for the block list, `docs/lighting.md`'s decision 41: a shape a
+/// **Four** for the block list, `docs/archive/render/lighting.md`'s decision 41: a shape a
 /// single climb profile cannot describe — an arch's posts and lintel — gets a
 /// second, independent kind of solid rather than a wider `Prism`. Authored
 /// only, the same trap as the prism's: a format-3 reader would silently drop
 /// every block a person had placed, and a table that had never carried one
 /// would look exactly like a table that could not.
 ///
-/// **Five** for the footprint, `docs/footprints.md`'s S2: a row may now carry
+/// **Five** for the footprint, `docs/render/design_footprints.md`'s S2: a row may now carry
 /// the horizontal box S1 measures off a `none` verdict's own base edge —
 /// derived, unlike the block list, and the same trap as the hole's and the
 /// prism's each: a format-4 reader would answer `footprint: None` for every
@@ -344,7 +344,7 @@ impl ArtTable {
         self.rows.values().filter(|row| row.shape.prism.is_some()).count()
     }
 
-    /// And how many carry a footprint — `docs/footprints.md`'s S1 and S2, and
+    /// And how many carry a footprint — `docs/render/design_footprints.md`'s S1 and S2, and
     /// its own number for the same reason [`holed`] and [`prisms`] are: a share
     /// of the whole table would hide a gate that quietly stopped admitting them
     /// going to zero.
@@ -679,7 +679,7 @@ fn row(
     // The footprint, if the row states one: the horizontal box
     // `facing::measure_footprint` reads off the art's own base edge, in eighths
     // of the tile like `block`. **Only a `none` verdict may carry one** —
-    // `docs/footprints.md`'s D4, the mirror of the hole's and the prism's own
+    // `docs/render/design_footprints.md`'s D4, the mirror of the hole's and the prism's own
     // restrictions: a face or a corner already says which edge the picture
     // stands on, and a footprint beside either would be a second, independent
     // answer about the same base with nothing saying which one `boxes_of`
@@ -1132,7 +1132,7 @@ mod tests {
         }
     }
 
-    /// **A bookcase survives the file**, `docs/footprints.md`'s S1 and S2: a
+    /// **A bookcase survives the file**, `docs/render/design_footprints.md`'s S1 and S2: a
     /// picture the wall detector named no edge for, with the box its own base
     /// edge states written down beside the `none` verdict.
     #[test]
@@ -1164,7 +1164,7 @@ mod tests {
     }
 
     /// A footprint belongs to a `none` verdict, and a face or a corner may not
-    /// carry one — `docs/footprints.md`'s D4, the mirror of the hole's and the
+    /// carry one — `docs/render/design_footprints.md`'s D4, the mirror of the hole's and the
     /// prism's own restrictions stated in the grammar so a hand-written row
     /// cannot say what no detector will.
     #[test]

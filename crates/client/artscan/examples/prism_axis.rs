@@ -2,7 +2,7 @@
 //! and how far its own steps sit from the joints the art actually draws.**
 //!
 //! Two questions grew out of one staircase in Britain — see
-//! `docs/lighting_pitfalls.md` and `docs/lighting_state.md`'s 🚩 entry "A fit is
+//! `docs/render/evidence/pitfalls.md` and `docs/render/README.md`'s 🚩 entry "A fit is
 //! scored on its outline, and the surfaces are inside it":
 //!
 //! - **The axis.** `facing::best_prism` returns one prism and one score, and a
@@ -72,7 +72,7 @@ const MAX_PRISM: u8 = 20;
 /// margin the handoff measured on a real flight (`0x0751`'s `+0.0775`) and two
 /// above the one picture that showed the signature (`0x0756`'s `+0.0024`). The
 /// open question this exists to settle: whether "almost a tie between axes" is
-/// its own shape class rather than noise. See `docs/lighting_state.md`'s 🚩
+/// its own shape class rather than noise. See `docs/render/README.md`'s 🚩
 /// entry.
 const TIE_MARGIN: f32 = 0.01;
 
@@ -221,7 +221,7 @@ fn edge_residuals(image: &Image, up: Face, run: f32, z: u8) -> Vec<(u16, f32)> {
 /// taken over — `None` if not one column found a confident edge anywhere.
 ///
 /// - `crest` is the original: the distance to the top of the riser, `z` of the
-///   tread being climbed onto. It is what `docs/lighting_state.md`'s 🚩 entry's
+///   tread being climbed onto. It is what `docs/render/README.md`'s 🚩 entry's
 ///   own "mean 8.35 view px" was measured with, kept so the two are comparable.
 /// - `riser` is the reading [`facing::interiors_agree`] now takes: a joint is a
 ///   vertical face with **two** drawn ends, and the residual is to the nearer of
@@ -322,7 +322,7 @@ fn report(dir: &Path) {
             }
             // Whether `facing::best_prism`'s own tie-break actually moves the
             // answer for this near-tied picture — the number
-            // `docs/lighting_state.md`'s 🚩 entry wants to know once
+            // `docs/render/README.md`'s 🚩 entry wants to know once
             // `interiors_agree` exists: does the fix do anything on real
             // content, not just in principle. Only meaningful where the
             // plain-silhouette winner has an axis to disagree about — the
@@ -369,7 +369,7 @@ fn report(dir: &Path) {
     );
     println!("  {rejected:>5} did not");
 
-    println!("\ncoin-flip axis margin (< {TIE_MARGIN:.3}), see docs/lighting_state.md's 🚩 entry:");
+    println!("\ncoin-flip axis margin (< {TIE_MARGIN:.3}), see docs/render/README.md's 🚩 entry:");
     println!("  {accepted_ties:>5} of the {accepted} fitted");
     println!("  {rejected_ties:>5} of the {rejected} refused");
     println!(
@@ -410,7 +410,7 @@ fn report(dir: &Path) {
     if !rows.is_empty() {
         // Both readings of where a joint is, side by side — see
         // `measure_residual`. The `crest` row is the number
-        // `docs/lighting_state.md`'s 🚩 entry carries; the `riser` row is what
+        // `docs/render/README.md`'s 🚩 entry carries; the `riser` row is what
         // the same pictures say once a joint is allowed to be the face it is
         // rather than one of its two edges by convention.
         for (label, values) in [

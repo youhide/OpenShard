@@ -16,7 +16,7 @@
 //! first half of making it a property: **one assembly, so that most of the ways
 //! two callers can differ are unexpressible**, and a caller that genuinely has
 //! to differ says so by setting a field on [`Inputs`]. The second half is a gate
-//! over the handful of fields that are left; see `docs/parity.md`.
+//! over the handful of fields that are left; see `docs/render/design_frame_assembly.md`.
 //!
 //! # What it does not do
 //!
@@ -130,7 +130,7 @@ pub struct Draw {
     /// It is a field all the same, because [`Inputs::summary`] is what two dumps
     /// are diffed by: a frame drawn with the crowd and a frame drawn without it
     /// would otherwise carry identical summaries, which is the exact false
-    /// negative `docs/parity.md` exists about.
+    /// negative `docs/render/design_frame_assembly.md` exists about.
     pub mobiles: bool,
 }
 
@@ -275,7 +275,7 @@ impl Inputs<'_> {
     /// A picture on its own cannot be reproduced: two frames that differ say
     /// nothing about *which* input differed, and a person reading a client's
     /// dump beside a tool's has to reconstruct the client's arguments by reading
-    /// its source — which is the exact failure `docs/parity.md` was written
+    /// its source — which is the exact failure `docs/render/design_frame_assembly.md` was written
     /// about. So a dumped frame carries this beside it, and two of them diff.
     ///
     /// **Every field gets a line, including the four this cannot state.** A
@@ -309,7 +309,7 @@ impl Inputs<'_> {
         // frames aimed at one tile is a real difference this would otherwise
         // round away.
         //
-        // **And the extent's own parity, spelled out** — `docs/parity.md` P5's
+        // **And the extent's own parity, spelled out** — `docs/render/design_frame_assembly.md` P5's
         // G3. It is derivable from the two numbers beside it and it is written
         // anyway, because the whole of the window-parity finding is that nobody
         // ever read it *as an input*: an odd extent centres the world half a
@@ -492,7 +492,7 @@ pub struct AssemblyCosts {
 /// occlusion grid gave it ([`Occlusion::owner_at`]), so that a fragment of it
 /// can say which occluder it is a point of instead of having that guessed from
 /// its height — and a frame that collected its pictures first would stamp them
-/// with numbers off the grid of the frame before. `docs/lighting_height.md`
+/// with numbers off the grid of the frame before. `docs/archive/render/lighting_height.md`
 /// phase 3 is where that cost was taken on.
 ///
 /// Then the ground, then the map's statics, then the server's items absorbed

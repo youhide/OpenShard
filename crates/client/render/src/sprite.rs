@@ -51,7 +51,7 @@ pub struct SpriteQuad {
     /// other half — **for a static.**
     ///
     /// A corner static is one picture but two real faces — see
-    /// `docs/gbuffer.md` decision 3 and step 4. `statics::collect` gives a
+    /// `docs/archive/render/gbuffer.md` decision 3 and step 4. `statics::collect` gives a
     /// corner's own drawn row a `twin` pointing at a second, undrawn row it
     /// appends for exactly this field; `statics.wgsl`'s fragment shader picks
     /// between the two ids per pixel, the same diagonal test that already
@@ -71,7 +71,7 @@ pub struct SpriteQuad {
     /// [`OwnerId::NONE`](crate::occlusion::OwnerId::NONE) for one that is no
     /// occluder at all.
     ///
-    /// `docs/lighting_height.md` phase 3, and the join it pays for: the grid
+    /// `docs/archive/render/lighting_height.md` phase 3, and the join it pays for: the grid
     /// numbers a cell's occluders, and the pass that draws one has to learn the
     /// number the grid gave it — [`crate::occlusion::Occlusion::owner_at`]. What
     /// `blit.wgsl` does with it is ask, for every solid a ray meets on this
@@ -90,7 +90,7 @@ pub struct SpriteQuad {
     /// `hue`'s does.
     pub owner:   u32,
     /// **Which boxes this sprite's own pixels are met against** — the run of
-    /// `docs/lighting_rebuild.md` phase 6's [`crate::impostor::Volume`] list
+    /// `docs/render/design_model.md` phase 6's [`crate::impostor::Volume`] list
     /// belonging to this static, and nothing else's.
     ///
     /// The whole of what makes the impostor's silhouette one silhouette: a
@@ -114,7 +114,7 @@ impl SpriteQuad {
     /// two words of [`crate::place::Place`], `twin`, `owner` and the two of
     /// [`SpriteQuad::volumes`] — is exactly 64, and the stride was 64 before the
     /// last two existed: `blit.wgsl`'s `FaceInstance` mirrors this struct field
-    /// for field to read it a second time as storage (`docs/gbuffer.md` step 3),
+    /// for field to read it a second time as storage (`docs/archive/render/gbuffer.md` step 3),
     /// and WGSL's storage-buffer layout rounds a struct's size up to its own
     /// alignment — 16 bytes here, from the two `vec4<f32>` fields — so the
     /// struct is 64 bytes in the shader's own accounting whatever this writes.
@@ -254,7 +254,7 @@ pub struct InstanceRows {
 /// lands on. What it could not do until this row existed is tell the two
 /// halves apart by id: both wrote `@builtin(instance_index)` unchanged, so
 /// nothing downstream of the `place` attachment could address "the corner's
-/// north-ish half" on its own. See `docs/gbuffer.md` decision 3 and step 4.
+/// north-ish half" on its own. See `docs/archive/render/gbuffer.md` decision 3 and step 4.
 ///
 /// `rows` is the pass's full instance list — map statics and items alike,
 /// since both can carry a corner `Stance` (both go through

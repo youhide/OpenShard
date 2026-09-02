@@ -1,5 +1,5 @@
 //! The broad phase, as a tree of boxes instead of a grid of tiles —
-//! `docs/occluders.md`'s D3.
+//! `docs/render/design_occluders.md`'s D3.
 //!
 //! # Why a hierarchy and not the grid
 //!
@@ -10,7 +10,7 @@
 //! hierarchy likes few large ones of different sizes, which is what a merged
 //! world is. The grid also cannot hold a primitive wider than its own
 //! registration cell without either listing it twice (and then double-counting
-//! it, `docs/occluders.md`'s backlog) or dropping the ray that crosses only the
+//! it, `docs/render/design_occluders.md`'s backlog) or dropping the ray that crosses only the
 //! overhang.
 //!
 //! # What this may not do
@@ -32,7 +32,7 @@
 //!   carries the index its own subtree ends at ([`Node::escape`]); a hit steps to
 //!   `at + 1`, which is its first child, and a miss jumps to the escape. There is
 //!   no stack anywhere, which is what WGSL can run at all — see
-//!   `docs/occluders.md`'s S5.
+//!   `docs/render/design_occluders.md`'s S5.
 //! - **The build is a pure function of the primitive list and its order.** The
 //!   tick is deterministic and the two backends walk one uploaded tree; a build
 //!   that depended on anything else — a hash order, a float tie broken by sort

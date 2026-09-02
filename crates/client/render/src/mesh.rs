@@ -1,7 +1,7 @@
 //! A set of honest faces standing in for a sprite's picture, for whatever
 //! needs the shape a flat billboard cannot give it.
 //!
-//! `docs/gbuffer.md` step 4c's own abstraction, and deliberately not shaped
+//! `docs/archive/render/gbuffer.md` step 4c's own abstraction, and deliberately not shaped
 //! around any one producer: [`crate::facing::Prism`] is the first (its
 //! treads' tops and risers today), and nothing in this module knows that — a
 //! sloped roof, or any future custom geometry, builds its own [`Mesh`] the
@@ -31,7 +31,7 @@ pub const MAX_MESH_FACES: usize = 2 * crate::facing::MAX_TREADS as usize;
 /// One flat, convex polygon, with its own honest normal.
 ///
 /// Not blended, not derived from a neighbour, not an approximation standing
-/// in for a shape it is not — `docs/gbuffer.md` decision 3's whole argument.
+/// in for a shape it is not — `docs/archive/render/gbuffer.md` decision 3's whole argument.
 /// A tread's top and its riser are two different [`Face`]s, each carrying the
 /// normal that is actually true of it, rather than one surface reading like
 /// both by a formula.
@@ -77,7 +77,7 @@ impl Face {
     /// discipline [`MAX_FACE_VERTICES`] states for itself. `crate::solids`
     /// inlines the identical split on already-*projected* screen corners
     /// (`solids.rs`'s own box faces); this operates one stage earlier, on
-    /// world corners, because `docs/gbuffer.md` step 4c's render pass needs
+    /// world corners, because `docs/archive/render/gbuffer.md` step 4c's render pass needs
     /// both a corner's screen position and its true world position per
     /// vertex, and only the latter is available at this stage.
     pub fn fan(&self) -> [WorldSpot; 6] {

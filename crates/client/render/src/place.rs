@@ -3,7 +3,7 @@
 //! The world passes draw pictures; this is the second thing they write while
 //! they do it — for every pixel, the tile and height of *the thing drawn there*.
 //! [`crate::blit`] reads it and lights the frame in world coordinates, which is
-//! the whole of `docs/lighting.md`'s first decision.
+//! the whole of `docs/archive/render/lighting.md`'s first decision.
 //!
 //! # Why the picture alone is not enough
 //!
@@ -19,7 +19,7 @@
 //!
 //! This module was the *format of an attachment* — `Rgba16Uint`, four channels
 //! holding an id, a height in whole units and sixteenths, a stance, and seven
-//! bits of tile-local `x` and seven of `y`. `docs/lighting_rebuild.md` phase 2
+//! bits of tile-local `x` and seven of `y`. `docs/render/design_model.md` phase 2
 //! took it apart one field at a time, and nothing of the packing is left here:
 //!
 //! - the **height** and the **fraction** are one point in
@@ -39,7 +39,7 @@
 //! [`SpriteQuad`](crate::sprite::SpriteQuad) or a
 //! [`GroundQuad`](crate::ground::GroundQuad) carries on the GPU, where a tile
 //! is still a literal `x`/`y` rather than an id into anything. That row is what
-//! `docs/gbuffer.md` step 3 moved a static's and a mobile's tile into, and
+//! `docs/archive/render/gbuffer.md` step 3 moved a static's and a mobile's tile into, and
 //! step 7 the ground's; it is read back by `blit.wgsl` as `face_instances[id]`
 //! and its neighbours.
 //!
@@ -162,7 +162,7 @@ pub enum Stance {
     CornerEastSouth = 8,
     /// The east face on the right half, the west face on the left.
     CornerEastWest = 9,
-    /// Not a real stance: a routing sentinel `docs/gbuffer.md` step 4c's mesh
+    /// Not a real stance: a routing sentinel `docs/archive/render/gbuffer.md` step 4c's mesh
     /// pass writes instead of one of the five above.
     ///
     /// `blit.wgsl` reads `face_instances[id]` for every other `Kind::Static`
@@ -242,7 +242,7 @@ impl Stance {
     ///
     /// **No world pass reads this any more, and its shader twin is deleted.**
     /// `place_format.wesl`'s `outward` was the same table and
-    /// `docs/lighting_rebuild.md` phase 6c retired it: a drawn fragment's normal
+    /// `docs/render/design_model.md` phase 6c retired it: a drawn fragment's normal
     /// is the face of the box its own view ray met, measured rather than looked
     /// up. What still asks this is a *hand-built* G-buffer — `plan.rs`'s
     /// diagnostic pictures and the fixtures in `tests/` — which states its own
@@ -266,7 +266,7 @@ impl Stance {
     /// and never asks this.
     ///
     /// **[`Stance::Flat`] looks up, and land does not.** A wall's top cap is a
-    /// flat static and wants the gate — `docs/lighting.md`'s decision 27, a lamp
+    /// flat static and wants the gate — `docs/archive/render/lighting.md`'s decision 27, a lamp
     /// beside a wall lighting its cap as fully as one standing over it. The
     /// ground carries the same stance and must *not* be gated, so what tells the
     /// two apart is the [`Kind`] beside it and never this: see
@@ -302,7 +302,7 @@ impl Stance {
     /// from exactly two shapes — `[0, 0, 1]` for a top, or
     /// [`crate::facing::Face::outward`] folded into three dimensions for a
     /// riser — so this is a closed set today, not a general vector decoder:
-    /// `docs/gbuffer.md`'s "Not settled" section leaves the general case
+    /// `docs/archive/render/gbuffer.md`'s "Not settled" section leaves the general case
     /// (a packed arbitrary normal) open for whenever a producer that is not
     /// axis-aligned exists to measure a bit layout against. This is that
     /// question's answer for the five that do exist, reusing

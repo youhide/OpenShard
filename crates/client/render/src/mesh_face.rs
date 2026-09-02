@@ -1,4 +1,4 @@
-//! What `docs/gbuffer.md` step 4c's render pass draws from and writes: one
+//! What `docs/archive/render/gbuffer.md` step 4c's render pass draws from and writes: one
 //! [`crate::mesh::Face`] at a time, not one sprite.
 //!
 //! The CPU side, the way [`crate::sprite`] is for the ordinary billboard
@@ -29,7 +29,7 @@ pub struct MeshFaceRow {
     /// [`SolidId::NOBODY`](crate::occlusion::SolidId::NOBODY) for a face this
     /// frame's grid has no solid for.
     ///
-    /// `docs/lighting_rebuild.md` phase 4, and the mesh half of
+    /// `docs/render/design_model.md` phase 4, and the mesh half of
     /// [`SpriteQuad::owner`](crate::sprite::SpriteQuad::owner) — which is still
     /// an owner, because a sprite instance covers a corner's *two* panels and
     /// only a fragment's own stance says which; a mesh face is one primitive by
@@ -90,7 +90,7 @@ pub struct MeshFaceVertex {
     /// second copy of `statics.wgsl`'s per-stance analytic inversion.
     pub world:  [f32; 3],
     /// The enclosing static's own `SpriteQuad::depth`, reused rather than
-    /// recomputed — `docs/gbuffer.md` decision 4's "stays depth-consistent
+    /// recomputed — `docs/archive/render/gbuffer.md` decision 4's "stays depth-consistent
     /// with the visible pass": a second depth formula is a second chance to
     /// disagree with the one that already decided this static's pixels.
     pub depth:  f32,
@@ -106,7 +106,7 @@ pub struct MeshFaceVertex {
     /// flight's own footprint boundary — has nothing to tell `fract(world.xy)`
     /// which of the two tiles that shared edge belongs to, and it always
     /// answers the one `floor` rounds up to. Subtracting the known tile
-    /// instead of flooring the position is the fix: `docs/lighting.md`'s
+    /// instead of flooring the position is the fix: `docs/archive/render/lighting.md`'s
     /// shadow-raymarch anomaly, an isolated lit pixel on an otherwise
     /// evenly-shadowed flat face, sitting exactly on that edge.
     pub tile:   [f32; 2],
@@ -118,7 +118,7 @@ pub struct MeshFaceVertex {
     /// [`crate::place::Stance::of_normal`] refuses anything but the five
     /// vectors [`crate::facing::Prism::mesh`] builds — a mesh whose faces are
     /// not axis-aligned would have a normal no stance can name, and this is the
-    /// field that would still be right. `docs/lighting_rebuild.md` phase 2 is
+    /// field that would still be right. `docs/render/design_model.md` phase 2 is
     /// the decision to carry it: the G-buffer's normal plane is written from
     /// here, and nothing downstream turns a stance into a direction any more.
     ///
@@ -130,7 +130,7 @@ pub struct MeshFaceVertex {
     /// encoded to sRGB once, in `mesh_face.wgsl`'s fragment stage, the way
     /// every other producer of [`crate::blit::WORLD_FORMAT`] does.
     ///
-    /// `docs/lighting_rebuild.md` phase 6d: this pass wrote no colour at all
+    /// `docs/render/design_model.md` phase 6d: this pass wrote no colour at all
     /// until then, because the enclosing static's own billboard sprite always
     /// drew one and this pass ran only to correct a normal. Off real statics
     /// now, the four hand-built diagnostic scenes that still use it have no

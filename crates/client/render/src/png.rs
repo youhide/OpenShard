@@ -3,7 +3,7 @@
 //!
 //! Thirteen places in this crate used to spell `P6\n{width} {height}\n255\n`
 //! into a byte vector — the same idiom restated once per tool, which is the
-//! shape `docs/lighting_rebuild.md`'s backlog complains about elsewhere. This is
+//! shape `docs/render/design_model.md`'s backlog complains about elsewhere. This is
 //! that idiom, once.
 //!
 //! # Why not the `png` crate

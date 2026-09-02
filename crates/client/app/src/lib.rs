@@ -236,7 +236,7 @@ pub struct Opening {
     /// [`run`] for what it does when there is a shard.
     pub at:              Option<Tile>,
     /// Whether the occlusion grid is drawn as solids from the first frame —
-    /// `docs/lighting.md` step 23.0, F5 in the window, and the checkbox in the
+    /// `docs/archive/render/lighting.md` step 23.0, F5 in the window, and the checkbox in the
     /// dev panel.
     pub solids:          bool,
     /// Pause the App update callback immediately after it enters the world.
@@ -440,7 +440,7 @@ pub(crate) const CHAT_LINES: usize = 6;
 /// exposed line-height and its faces run roughly 8 to 14 pixels tall, so 16
 /// leaves a line of air above the tallest of them. `fonts.mul`'s own step, and
 /// only its: a TrueType line is spaced by the size the player asked for — see
-/// `chat::line_height` and `docs/text_sizes.md`.
+/// `chat::line_height` and `docs/render/design_text_sizes.md`.
 pub(crate) const CHAT_LINE_HEIGHT: i32 = 16;
 
 /// Where the speech line's own left edge sits, in gump pixels from the
@@ -616,7 +616,7 @@ pub fn run<D: Dial + Send + 'static>(
     checkpoint("art archive opened");
     // What was measured off that art before this run: which edge of its tile
     // each wall stands on, and the hole in each window.
-    // `docs/lighting.md`'s decision 31: the measurement is a tool's, and this is
+    // `docs/archive/render/lighting.md`'s decision 31: the measurement is a tool's, and this is
     // the client reading what it wrote.
     //
     // **A missing table is a log line and not a failure** (decision 31.6). The

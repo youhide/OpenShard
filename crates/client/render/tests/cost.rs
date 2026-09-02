@@ -1,6 +1,6 @@
 //! What the lighting pass costs, on a real frame at the widest zoom.
 //!
-//! `docs/lighting.md`'s step 6. The plan claims the world-coordinate pass is
+//! `docs/archive/render/lighting.md`'s step 6. The plan claims the world-coordinate pass is
 //! *cheaper* per pixel than the screen-space circles it replaced, and the
 //! argument for it is a branch: a fragment outside every radius leaves the loop
 //! at once, where the old arrangement ran all sixty-four lights for every pixel
@@ -163,7 +163,7 @@ fn widest() -> Zoom {
 /// `OPENSHARD_FRAME_AT=x,y,z` names a place, in which case that place at
 /// `Zoom::ONE` — close enough to tell one tile's edge from the next, which is
 /// the point of naming a place at all. Replaces the hand edit
-/// `docs/lighting.md`'s backlog used to describe: `BRITAIN`'s literal and
+/// `docs/archive/render/lighting.md`'s backlog used to describe: `BRITAIN`'s literal and
 /// `widest()` → `Zoom::ONE`, run, then `git checkout -- tests/cost.rs`.
 fn frame_point_and_zoom() -> (Point, Zoom) {
     match std::env::var("OPENSHARD_FRAME_AT") {
@@ -356,7 +356,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
     // The frame's own grid, built once and not timed here — `light::collect`
     // below builds one of its own for the readings that follow, and this one
     // exists only so the statics pass meets real boxes. `Occlusion::EMPTY` used
-    // to stand in for it (`docs/parity.md`'s D3): every fragment took the
+    // to stand in for it (`docs/render/design_frame_assembly.md`'s D3): every fragment took the
     // billboard fallback, `View::Normal` was not the client's own and
     // `View::Solid` came out uniformly black. Built over `light::lit_tiles`,
     // the same rectangle `light::collect` grows its own grid over, so a wall in
@@ -382,7 +382,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
         None,
     );
     let static_quads = static_geometry.quads;
-    // `docs/gbuffer.md` step 2: the id width has to be sized against a real
+    // `docs/archive/render/gbuffer.md` step 2: the id width has to be sized against a real
     // frame's *face* count, not the object count decision 3 replaces. Quads are
     // objects — one per static, one per land cell — and every one of them is
     // exactly one face except a corner, which decision 3 splits into two. So the
@@ -396,7 +396,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
         .count();
     eprintln!(
         "{} ground quads, {} static quads ({corner_statics} of them corners, so {} faces \
-         once decision 3 splits each in two) — `docs/gbuffer.md` step 2",
+         once decision 3 splits each in two) — `docs/archive/render/gbuffer.md` step 2",
         quads.len(),
         static_quads.len(),
         static_quads.len() + corner_statics,
@@ -477,7 +477,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
             &Cutaway::OPEN,
             // Flat, as the app is by default: the sky field is a second thing
             // changing every tile of the picture, and the frame this test dumps
-            // is read as a picture of the *flames*. See `docs/lighting.md`,
+            // is read as a picture of the *flames*. See `docs/archive/render/lighting.md`,
             // decision 20. It costs the pass nothing either way — the grid is
             // built and uploaded whichever ambient reads it.
             light::NIGHT.flattened(),
@@ -546,7 +546,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
                 + grid.id_bytes().len()
                 + grid.primitive_bytes().len()
                 // And the broad phase, which is uploaded every frame with the
-                // primitives it is over — `docs/occluders.md`'s S5. Counted here
+                // primitives it is over — `docs/render/design_occluders.md`'s S5. Counted here
                 // rather than left out because this reading is what the *upload*
                 // costs, and a plane nobody added to it is a plane nobody sees
                 // grow.
@@ -567,7 +567,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
     );
     assert!(cells > 0, "nothing stands in the grid, so no ray can be stopped");
 
-    // And the same companion for the **broad phase**, since `docs/occluders.md`'s
+    // And the same companion for the **broad phase**, since `docs/render/design_occluders.md`'s
     // S5 made it the thing a ray actually walks: a frame whose tree is one leaf
     // prices four primitives tested outright and no traversal at all, which would
     // be a reading of the narrow phase wearing the name of the wide one.
@@ -673,7 +673,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
         "the flames changed {changed} of {total} pixels: the `night` reading is a measurement of `dark`"
     );
 
-    // What the solids view costs on this same frame — `docs/lighting.md` step
+    // What the solids view costs on this same frame — `docs/archive/render/lighting.md` step
     // 23.0's open DoD item, and the reason that view is a pass rather than an
     // overlay drawn by the client's UI toolkit: a picture drawn by egui appears
     // in none of the tests that take the pictures, and a cost drawn by egui
@@ -871,7 +871,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
     // two unrelated things.
     eprintln!(
         "\nsolids over the same frame: {:.3}ms, {drawn} of {} boxes drawn — \
-         `docs/lighting.md` step 23.0",
+         `docs/archive/render/lighting.md` step 23.0",
         solids.per_frame.as_secs_f64() * 1e3,
         boxes.len(),
     );

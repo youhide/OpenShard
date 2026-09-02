@@ -9,7 +9,7 @@
 // compilation unit and WGSL has no `#include`. A producer that forgot to
 // stamp a bit this module's readers branch on decoded as a meaningful-but-
 // wrong default instead of failing to compile: `ground.wgsl` never stamping
-// `STANCE_FLAT` (session 23, `docs/lighting_raymarch.md`) is what that gap
+// `STANCE_FLAT` (session 23, `docs/archive/render/lighting_raymarch.md`) is what that gap
 // looks like when it fires, not a one-off. `crate::gbuffer::pack_ids` and its
 // neighbouring constants state the same numbers once more on the Rust side;
 // nothing but a person reading both can check the two still agree — see their
@@ -18,7 +18,7 @@
 // **This used to be the `place` attachment's format**, four `u16` channels
 // holding an id, a height in whole units and sixteenths, a stance and a
 // hundred-and-twenty-seventh-of-a-tile fraction on each axis.
-// `docs/lighting_rebuild.md` phase 2 took the height and the fraction out of
+// `docs/render/design_model.md` phase 2 took the height and the fraction out of
 // it — a position plane carries the point itself — and what was left of eight
 // bytes a fragment was six bits and an id. So it is one `u32` now, and the
 // packing below is the whole of it.
@@ -36,7 +36,7 @@ const KIND_MOBILE: u32 = 3u;
 // **No longer a packing.** Nothing quantises a fraction to it any more; what
 // is left is the *clamp* the world passes apply to keep a fragment's position
 // inside the tile its id names — `statics.wesl`'s `INSIDE`, and `mesh_face`'s
-// own copy of the same number. `docs/lighting_rebuild.md` phase 4 is where the
+// own copy of the same number. `docs/render/design_model.md` phase 4 is where the
 // cell stops being a fact separate from the position and this goes with it.
 const SUB_TILE: f32 = 127.0;
 
@@ -66,7 +66,7 @@ const IDS_COMPOSITE_MAP: u32 = 0x00800000u;
 
 // **The two edges a magnified frame draws, and they are drawn at two different
 // resolutions** — in the two bits the id's own ceiling gave up for them.
-// `docs/silhouettes.md`, phase Z1.
+// `docs/render/design_silhouettes.md`, phase Z1.
 //
 // - `IDS_EDGE_ART` — a neighbouring *texel* of the sprite failed the alpha test
 //   this fragment passed. One texel is `Projection::scale` real pixels square
@@ -89,7 +89,7 @@ const IDS_COMPOSITE_MAP: u32 = 0x00800000u;
 // fragment's position is the nearest point of a box rather than a point the ray
 // went through, and how far that is from the picture is `Meeting::outside`. A
 // wide band of box-edge is a box that does not fit its art, which is
-// `docs/footprints.md`'s whole subject.
+// `docs/render/design_footprints.md`'s whole subject.
 //
 // That is the plan's own first question answered on the way past: the zigzag is
 // the art's, and the fragment-fine line beside it is not a silhouette at all.
@@ -131,7 +131,7 @@ const STANCE_MESH_FACE: u32 = 10u;
 //
 // `outward(stance)` lived here — a table turning each of the five named stances
 // into the direction its surface looks, read by `statics.wesl` to write the
-// G-buffer's normal plane. `docs/lighting_rebuild.md` phase 6c deleted it: a
+// G-buffer's normal plane. `docs/render/design_model.md` phase 6c deleted it: a
 // fragment's normal is the face of the box its own view ray met
 // (`package::impostor`), which is a measurement rather than a table, and the
 // table was *wrong* for two of its five rows — it answered `(0, -1, 0)` for a
@@ -153,7 +153,7 @@ const STANCE_MESH_FACE: u32 = 10u;
 
 // What `ground.wgsl`/`statics.wgsl`/`mesh_face.wgsl` each built by hand, one
 // literal per file, before this. Sharing it closes half of session 23's bug
-// class rather than the whole of it — see `docs/lighting_raymarch.md`'s own
+// class rather than the whole of it — see `docs/archive/render/lighting_raymarch.md`'s own
 // note on the distinction — but it closes the more dangerous half: `stance`
 // is a required parameter here, so a producer literally cannot build an id
 // word without deciding on one. Getting the *value* wrong (passing

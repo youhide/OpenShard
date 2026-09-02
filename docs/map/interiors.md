@@ -66,7 +66,7 @@ and picking, and gives the later building-frame input a single cache key.
 | The keys | `Hotkey` (`app/src/keyboard.rs:272-320`), a 19-entry table with `key()` as the single forward statement and `of()` scanning it. **Page Up / Page Down are taken** — `PanUp`/`PanDown`, the camera pan. `of()` takes a bare `KeyCode` and cannot express a chord. |
 | What a tile has over it | `Occlusion::sky_at(x, y) -> u8` against `SKY_OPEN` (`render/src/occlusion.rs:1338,1929`) — the sky field the ambient is built from. A **column**'s answer, not a floor cell's; see R1a for why that matters. |
 | What stops a step, and a look | `Terrain::sight_clear` on both ends (`common/movement/src/terrain.rs:657`, `server/state/src/obstruct.rs:331`), `Blocker::door` on the client's own `Clutter`, `Obstructions::blocker_at_z` on the server's. The client's `sight_clear` (`app/src/clutter.rs:362`) **has never had a reader** — `docs/client.md:3491` files it as exactly that. |
-| A fragment's world position | Per pixel, in the shader: `shaders/statics.wesl`'s `fs_main` meets the view ray with the boxes the instance stands as (`nearest`), and `at = best.at` **is the world point this pixel is a picture of**. Phase 6 of [`lighting_rebuild.md`](../lighting_rebuild.md). This is what makes R3 a shader line rather than a re-cut of the art. |
+| A fragment's world position | Per pixel, in the shader: `shaders/statics.wesl`'s `fs_main` meets the view ray with the boxes the instance stands as (`nearest`), and `at = best.at` **is the world point this pixel is a picture of**. Phase 6 of [`lighting_rebuild.md`](../render/design_model.md). This is what makes R3 a shader line rather than a re-cut of the art. |
 | What an undrawn pixel is | `renderer::CLEAR` — transparent black, `a = 0`, and every fragment shader writes `a = 1`. So "was anything drawn here" **is one byte**, which is the acceptance instrument R2 is measured with and the reason "black area" needs no new mechanism to paint. |
 
 ### Three facts that bound the scope
@@ -151,14 +151,14 @@ it.
 primitive: the gated cells simply draw nothing, and `renderer::CLEAR` is
 transparent black with `a = 0`. That also makes the acceptance test exact — the
 room's screen rectangle is pixels whose alpha byte is zero — which is what
-[`parity.md`](../parity.md) would otherwise have us eyeballing.
+[`parity.md`](../render/design_frame_assembly.md) would otherwise have us eyeballing.
 
 **D12 — the knee cut is the picture only.** The fragment above the clip height is
 discarded; the occlusion box keeps its full height, so the wall still stops light
 and still casts its shadow. **The visible cost is a shadow with no wall over
 it**, and that is the accepted trade for a first version — written here so the
 first person to see it does not open it as a defect.
-[`lighting_pitfalls.md`](../lighting_pitfalls.md) is the ladder for anything else
+[`lighting_pitfalls.md`](../render/evidence/pitfalls.md) is the ladder for anything else
 the cut appears to do.
 
 **D13 — what counts as a wall is decided on the CPU, off the tiledata.** The
@@ -428,7 +428,7 @@ the room behind them visible over the top.
   side too) or the flag stays diagnostic-only. Decide it in R3, do not leave it.
 - **The silhouette and outline passes** draw from the same fragments and will cut
   with them; that is right, and worth one look at a magnified frame because
-  [`silhouettes.md`](../silhouettes.md) is about exactly that boundary.
+  [`silhouettes.md`](../render/design_silhouettes.md) is about exactly that boundary.
 - **The shadow of a wall that is not there**, per D12.
 
 ## What this plan does not cover

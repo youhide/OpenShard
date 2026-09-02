@@ -155,7 +155,7 @@ pub fn graphics_in(
 /// on and every quad in the frame is tested against the same three numbers. See
 /// [`crate::cutaway`].
 /// Everything [`collect`] gathers about the statics on screen: the pictures
-/// to draw, and the honest per-face geometry `docs/gbuffer.md` step 4c's
+/// to draw, and the honest per-face geometry `docs/archive/render/gbuffer.md` step 4c's
 /// mesh pass draws over some of them.
 ///
 /// One walk builds both — [`for_each_static_in`]'s own doc is why a second
@@ -183,7 +183,7 @@ pub struct StaticGeometry {
     pub mesh_rows:     Vec<MeshFaceRow>,
     /// Every box every drawn static stands as, each quad naming its own run of
     /// them through [`SpriteQuad::volumes`] —
-    /// `docs/lighting_rebuild.md` phase 6.
+    /// `docs/render/design_model.md` phase 6.
     ///
     /// One flat list for the frame rather than a list per static, because it
     /// becomes one storage buffer: a range into it is two words on a row the
@@ -252,7 +252,7 @@ impl StaticGeometry {
     /// `mesh_rows`; both are relative to the list they were built against, and
     /// both start at zero in the second one.
     ///
-    /// **The mesh half was a live defect** — `docs/lighting_rebuild.md` phase 6c
+    /// **The mesh half was a live defect** — `docs/render/design_model.md` phase 6c
     /// found it while wiring the first half — and it needs a climbable *item* to
     /// show, which is why nothing had: an item with a prism drew its faces
     /// against whichever of the map's rows its own numbering happened to land
@@ -300,7 +300,7 @@ impl StaticGeometry {
 /// `occlusion` is **this frame's own grid**, and it has to have been built
 /// already: what each row carries beside its picture is the number that grid gave
 /// the static it draws ([`crate::occlusion::Occlusion::owner_at`]), which is the
-/// join `docs/lighting_height.md` phase 3 pays for. A frame that collected its
+/// join `docs/archive/render/lighting_height.md` phase 3 pays for. A frame that collected its
 /// statics first would be stamping numbers from the frame before it.
 #[allow(clippy::too_many_arguments)]
 pub fn collect<'a>(
@@ -542,7 +542,7 @@ fn collect_in_with_fades_profiled_with_interior<'a>(
     // once per frame, then reuse that value for every member.
     let mut foliage_alpha = BTreeMap::new();
     let mut cutaway_boxes = Vec::new();
-    // Always empty since `docs/lighting_rebuild.md` phase 6d: a real static's
+    // Always empty since `docs/render/design_model.md` phase 6d: a real static's
     // position and normal come from the impostor meeting `boxes` below, and
     // nothing here pushes a mesh face for it any more. `StaticGeometry` still
     // carries the two fields — [`crate::renderer::MeshFaceRenderer`]'s own
@@ -735,7 +735,7 @@ fn collect_in_with_fades_profiled_with_interior<'a>(
 /// The boxes one drawn static stands as, appended to `out`, and the range they
 /// occupy in it.
 ///
-/// `docs/lighting_rebuild.md` phase 6's own join, and the reason a fragment can
+/// `docs/render/design_model.md` phase 6's own join, and the reason a fragment can
 /// be met against geometry without a second draw: every sprite instance carries
 /// a range of [`crate::impostor::Volume`]s that are **its own**, so the shader
 /// meeting a view ray with them cannot reach a neighbour's shape. Where two
@@ -758,10 +758,10 @@ fn collect_in_with_fades_profiled_with_interior<'a>(
 /// pictures, twelve of them south-facing walls. Read through the grid, every one
 /// of those became a billboard — the middle of its tile, no facing, lit from
 /// every side — which is a worse answer than the stance it replaced and would
-/// have undone `docs/lighting.md`'s decision 27 for every wall cap in the world.
+/// have undone `docs/archive/render/lighting.md`'s decision 27 for every wall cap in the world.
 /// A pane of glass has a shape whether or not it casts a shadow.
 ///
-/// **But the grid's own box wherever the grid has one** — `docs/occluders.md`'s
+/// **But the grid's own box wherever the grid has one** — `docs/render/design_occluders.md`'s
 /// D6, which that plan wrote down and did not do. Since S3b a run of coplanar
 /// pieces with one [`crate::occlusion::Owner`] is folded into **one** primitive,
 /// and the shapes [`crate::occlusion::boxes_of`] answers with are still one per
@@ -807,7 +807,7 @@ pub(crate) fn push_volumes(
     // class of pictures with no facing. A flight's treads and risers are planes
     // `facing::Prism` measured off the picture. See `occlusion::named_edges`,
     // which is the expression `boxes_of` starts from, and
-    // `docs/lighting_rebuild.md`'s backlog for the frame this was found on.
+    // `docs/render/design_model.md`'s backlog for the frame this was found on.
     let named_edges = crate::occlusion::named_edges(tile, shape);
     crate::occlusion::boxes_of(x, y, at.z, tile, shape, |part, _occluding, space| {
         let named = occlusion.id_of(x, y, owner, part);
@@ -833,7 +833,7 @@ pub(crate) fn push_volumes(
 }
 
 // **`MeshSink` and `push_mesh` lived here** and went with the last thing that
-// called either: `docs/lighting_rebuild.md` phase 6d took the mesh pass off
+// called either: `docs/render/design_model.md` phase 6d took the mesh pass off
 // real statics, and `push_mesh` was `pub(crate)` for exactly two callers, both
 // inside this crate — `statics::collect` and `items::collect` — because a
 // third, external one (`examples/*.rs`, `tests/*.rs`) cannot see a `pub(crate)`
@@ -2156,7 +2156,7 @@ mod tests {
     }
 
     // **`a_stair_s_mesh_vertices_carry_their_tile_and_reach_its_far_edge` lived
-    // here** and went with `push_mesh`, `docs/lighting_rebuild.md` phase 6d:
+    // here** and went with `push_mesh`, `docs/render/design_model.md` phase 6d:
     // `push_mesh` was `pub(crate)` for exactly two callers, both inside this
     // crate — `statics::collect` and `items::collect` — and the phase removed
     // both, since a real static's position and normal come from the impostor
@@ -2181,7 +2181,7 @@ mod tests {
 
     /// A three-tread flight climbing north on tile `(100, 100)`, standing at
     /// `z = 0` — the scene every stair defect in this crate is found on, and the
-    /// one `docs/lighting_rebuild.md`'s backlog wants turned into a constructor.
+    /// one `docs/render/design_model.md`'s backlog wants turned into a constructor.
     fn flight() -> (crate::facing::Prism, openshard_tiles::StaticTile) {
         (
             crate::facing::Prism::new(crate::facing::Face::North, &[1, 3, 5])

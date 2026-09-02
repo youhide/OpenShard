@@ -14,7 +14,7 @@ and an order.
 ✅ **All six steps are green as of 2026-08-09, and this document is a record from
 here on.** A session looking for work does not start here: what is still live out
 of this track is the § *Backlog* below, and the items that outlive it are carried
-in [`lighting_rebuild.md`](lighting_rebuild.md)'s own backlog, which is the one
+in [`lighting_rebuild.md`](design_model.md)'s own backlog, which is the one
 list. **S6 is one of them come back closed** — the aperture, which was the first
 of those three and is written up in § *The aperture*; a step landed after the
 table was full, because a record of a finished track is still where a finding
@@ -37,7 +37,7 @@ S3b are deletions and optimisations that must move nothing. **S3 has since lande
 and moved nothing either** — its exemption needs a ray in the surface's own plane
 and the renderer has none, which is measured at S3's own acceptance. The seam a
 person reports is a *shading* defect and it belongs to
-[`lighting_rebuild.md`](lighting_rebuild.md)'s **phase 5b**, which has since
+[`lighting_rebuild.md`](design_model.md)'s **phase 5b**, which has since
 landed — and it is what licensed S4's deletion of `same_run`, since the rays that
 rule existed for are the below-horizon ones 5b stopped tracing. So acceptance for the
 sentence above is § *Acceptance for S3* — six things to run, each with a figure
@@ -355,7 +355,7 @@ defect is still there, and its first reading is the thing S3 is measured against
 ### Reading the dump, in numbers rather than by eye
 
 `tests/traced.rs` and `examples/boxes.rs` both write
-[`Verdict::strips`](../crates/client/render/examples/oracle/pathtrace.rs) when
+[`Verdict::strips`](../../crates/client/render/examples/oracle/pathtrace.rs) when
 their dump variable names a directory: the frame's own shadow decision, the
 tracer's, their difference, **why an uncompared pixel was not compared**, and
 **which solid the frame drew**, one colour a body. `tools/mask_probe.py` reads

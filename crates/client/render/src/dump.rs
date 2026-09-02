@@ -1,7 +1,7 @@
 //! **Getting a frame off the GPU, so that two frames can be compared.**
 //!
 //! [`crate::frame::assemble`] made one assembly out of seven; this is the other
-//! half of the same argument (`docs/parity.md`): a frame that cannot be read
+//! half of the same argument (`docs/render/design_frame_assembly.md`): a frame that cannot be read
 //! back is a frame nothing can be said about. The tools could always dump a
 //! picture — each of them with its own hand-rolled readback, four copies of the
 //! same padded-row arithmetic at the last count — and the client, the thing that
@@ -22,7 +22,7 @@
 //! picture. So a *plane* here is one blit of one assembled frame under one
 //! [`View`] — the same pass the client draws with, not a second reader of the
 //! same textures — and [`planes`] is that repeated over a list of views without
-//! rebuilding anything in between. `docs/parity.md` D5: a comparison names which
+//! rebuilding anything in between. `docs/render/design_frame_assembly.md` D5: a comparison names which
 //! plane disagreed, and "the frame differs" is not an answer.
 
 use crate::blit::{
@@ -77,7 +77,7 @@ pub fn planes(
 
 /// [`planes`] without the PNG step: one blit per view, read back as raw RGBA8.
 ///
-/// `docs/parity.md` P3 wants this half and not the picture — a gate counts
+/// `docs/render/design_frame_assembly.md` P3 wants this half and not the picture — a gate counts
 /// *differing pixels*, which means two runs of raw bytes to zip, not two files
 /// to open. `planes` is this with an encode on the end, kept as the one place
 /// the loop over views is written.

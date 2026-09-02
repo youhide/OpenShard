@@ -20,7 +20,7 @@
 //! saved (a file that pinned it would fight the compositor on the next screen).
 //! It is *not* the size the world's TTF text is drawn at: that is
 //! [`FontSizes`], a real pixel size per kind of text, and the HUD's scale has
-//! no bearing on it. See `docs/text_sizes.md`.
+//! no bearing on it. See `docs/render/design_text_sizes.md`.
 
 use std::path::Path;
 use std::time::Duration;
@@ -391,7 +391,7 @@ impl<'de> Deserialize<'de> for WindowScale {
 /// A real pixel size for each kind of text this client draws through a
 /// TrueType face, and the matching fractional scale for `fonts.mul`.
 ///
-/// **Sizes, not scales** — `docs/text_sizes.md`, whose whole subject this is.
+/// **Sizes, not scales** — `docs/render/design_text_sizes.md`, whose whole subject this is.
 /// The number in `client_ui.ron` is what reaches the rasterizer: eleven means
 /// eleven pixels tall, and a dense display multiplies it *before* the glyph is
 /// drawn rather than stretching the glyph afterwards. `fontdue` shades an
@@ -1710,7 +1710,7 @@ mod tests {
     ///
     /// The assertion that says this is a *size* and not a factor: 13.5 in the
     /// file is 13.5 pixels at the rasterizer, with nothing multiplying it on
-    /// the way. See `docs/text_sizes.md`.
+    /// the way. See `docs/render/design_text_sizes.md`.
     #[test]
     fn a_font_size_is_pixels_and_survives_a_round_trip() {
         let desk: Desk = ron::from_str("(fonts: (stack_count: 13.5))").unwrap();
@@ -1739,7 +1739,7 @@ mod tests {
     /// an old `ttf_scale` in it is ignored rather than read as a size.
     ///
     /// It was a multiplier of a base this file no longer has, so there is
-    /// nothing to migrate it *to* — see `docs/text_sizes.md`'s P2.
+    /// nothing to migrate it *to* — see `docs/render/design_text_sizes.md`'s P2.
     #[test]
     fn old_per_face_scales_are_ignored_and_the_rest_of_the_file_survives() {
         let desk: Desk = ron::from_str("(zoom: 1.25, chat: (ttf_scale: 2.0, scale: 3))").unwrap();

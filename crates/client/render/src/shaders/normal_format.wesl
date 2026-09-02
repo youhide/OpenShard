@@ -13,7 +13,7 @@
 // and twelve of those were the whole of what stood between this client and
 // WebGPU's guaranteed `maxColorAttachmentBytesPerSample` of 32. See
 // `crate::gbuffer::required_limits`, which no longer asks for anything above
-// the floor. `docs/lighting_rebuild.md`'s own backlog is where this was named,
+// the floor. `docs/render/design_model.md`'s own backlog is where this was named,
 // and its phase 6 is why it had to happen first: the target layout there is
 // position, normal, albedo and ids at exactly 32, and the normal is the only
 // term of that sum that was not already the size it has to be.

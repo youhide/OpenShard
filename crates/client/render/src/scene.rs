@@ -7,7 +7,7 @@
 //! better than a real house for the job these do. The wall is at a stated tile
 //! with a stated height, so a test can name the cell that should have stopped a
 //! ray, and a failure can print the room rather than a coordinate. See
-//! `docs/lighting.md`, decision 10.
+//! `docs/archive/render/lighting.md`, decision 10.
 //!
 //! # Why these are `pub` and not `#[cfg(test)]`
 //!
@@ -120,7 +120,7 @@ pub const DOOR_SHUT: Graphic = Graphic(0x0008);
 /// the gap, so its tiledata entry carries no `NO_SHOOT`; the tile therefore
 /// leaves the occlusion grid on the frame the server changes the graphic, and
 /// light fans out through the doorway with nothing in the lighting knowing what a
-/// door is. `docs/lighting.md`, decision 11.
+/// door is. `docs/archive/render/lighting.md`, decision 11.
 pub const DOOR_OPEN: Graphic = Graphic(0x0009);
 
 /// The same wall with a hole cut through it, for the scene a shaft of light is
@@ -295,7 +295,7 @@ impl Scene {
     ///
     /// Over the *inside* and not over the wall tiles, which is how a real house
     /// is built and is what leaves the ring of wall the only tile a roofed room
-    /// has that the sky can still reach. Decision 1 of `docs/lighting_world.md`
+    /// has that the sky can still reach. Decision 1 of `docs/archive/render/lighting_world.md`
     /// is measured on the difference.
     fn roofed(mut self) -> Self {
         let (cx, cy) = (CENTRE.x, CENTRE.y);
@@ -359,7 +359,7 @@ fn tiledata() -> TileData {
     // The open leaf: `BLOCK` because you cannot walk through the leaf itself,
     // and *not* `NO_SHOOT`, because you can see and shoot past it. The two flags
     // are different questions and this is the tile where that matters most —
-    // see `docs/lighting.md`, decision 4.
+    // see `docs/archive/render/lighting.md`, decision 4.
     set(DOOR_OPEN, TileFlags::BLOCK, WALL_HEIGHT);
     set(TORCH, TileFlags::LIGHT_SOURCE, 0);
     set(ROOF, TileFlags::NO_SHOOT, ROOF_THICKNESS);
@@ -426,7 +426,7 @@ pub const DOORWAY: SceneTile = Tile::new(CENTRE.x, CENTRE.y + ROOM_HALF);
 /// It exists because every scene before it had a room around it. A shape that is
 /// wrong in the middle of a pool — flat where it should fall away — is invisible
 /// against four walls and a shadow, and it was: the flat disc
-/// `docs/lighting.md`'s "where the next session starts" describes was in every
+/// `docs/archive/render/lighting.md`'s "where the next session starts" describes was in every
 /// one of these scenes and none of them was looking at it.
 pub fn torch_on_open_ground() -> Scene {
     empty("one torch on open ground").with(CENTRE, TORCH)
@@ -516,7 +516,7 @@ pub fn south_faced_wall() -> StaticAtlas {
 /// picture the detector refuses: the two arrive at the same `None` through the
 /// same expression in `occlusion::collect`, and a synthetic silhouette that a
 /// detector was *meant* to refuse would be a fixture anchored to the thing the
-/// detector might one day read — see the corner entry in `docs/lighting.md`'s
+/// detector might one day read — see the corner entry in `docs/archive/render/lighting.md`'s
 /// backlog, which is what would then have to change.
 fn corner_of_a_house() -> StaticAtlas {
     corner_art(None)
@@ -528,7 +528,7 @@ fn corner_of_a_house() -> StaticAtlas {
 ///
 /// The pair with [`corner_of_a_house`], and the pair is the point: one house is
 /// built out of a corner the art would not name and the other out of one it
-/// would, and everything else about them is identical. `docs/lighting.md`,
+/// would, and everything else about them is identical. `docs/archive/render/lighting.md`,
 /// decision 25.
 fn corner_of_a_house_the_art_names() -> StaticAtlas {
     corner_art(Some(crate::facing::corner_silhouette(
@@ -587,7 +587,7 @@ pub const CORNER_RUN: u16 = 3;
 /// north-west, so the ray runs the diagonal: it is the 45° direction the report
 /// came in as, and it is the direction that maximises the sliver.
 ///
-/// `docs/lighting.md`, decision 24.
+/// `docs/archive/render/lighting.md`, decision 24.
 pub fn house_corner() -> Scene {
     corner_house(
         "the corner of a house with a lamp outside it",
@@ -616,7 +616,7 @@ pub fn house_corner() -> Scene {
 /// stands in front of. One flame, one tile, two answers — and for a while the
 /// east one was wrong, because the facing test exempted a flame standing in the
 /// wall's own column and a column is a whole street long. `light::mounted_at`
-/// replaced that exemption with a place; `docs/lighting.md`, decisions 25 and 26.
+/// replaced that exemption with a place; `docs/archive/render/lighting.md`, decisions 25 and 26.
 pub fn house_corner_named_by_its_art() -> Scene {
     corner_house(
         "the corner of a house whose art names both its faces",
@@ -787,7 +787,7 @@ pub fn room_with_window() -> Scene {
 /// bolted to, and the room behind a lamp on a house was as bright as the street
 /// under it. The fix is not an exemption but a *place*: the wall's own art says
 /// which side of its tile it stands on, so the flame belongs outside that plane.
-/// `light::mounted_at`, and `docs/lighting.md`'s decision 26.
+/// `light::mounted_at`, and `docs/archive/render/lighting.md`'s decision 26.
 ///
 /// So this scene carries the art, and that is the whole of what makes it the
 /// fixture rather than the pin it used to be: without a picture nothing names an
@@ -887,7 +887,7 @@ pub fn sunlit_room_with_window() -> Scene {
 
 /// A shut, roofed house in the daylight, with nothing burning in it.
 ///
-/// The base case of `docs/lighting_world.md`'s decision 1, and the one the whole
+/// The base case of `docs/archive/render/lighting_world.md`'s decision 1, and the one the whole
 /// step is judged on: nothing here is dark because a flame failed to reach it —
 /// what is dark is dark because a roof is between the floor and the sky. The
 /// pair it is read against is [`roofed_room_with_open_door`], which differs by

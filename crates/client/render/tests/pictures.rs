@@ -97,7 +97,7 @@ fn around() -> openshard_client_render::camera::TileBounds {
 ///
 /// Marked always. A plan view with no occluders drawn on it is exactly the
 /// instrument that made "why is there a shadow here" unanswerable in the client
-/// — see `docs/lighting.md`'s step 14, arriving here for the same reason.
+/// — see `docs/archive/render/lighting.md`'s step 14, arriving here for the same reason.
 fn picture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -487,7 +487,7 @@ fn a_wall_in_front_of_a_torch_darkens_the_ground_behind_it_and_not_beside_it() {
     );
 
     // **And the band is as long as the wall**, which is the claim above read
-    // across the run rather than down one column of it — `docs/occluders.md`'s
+    // across the run rather than down one column of it — `docs/render/design_occluders.md`'s
     // backlog entry on what this instrument was short of. The nine panels of this
     // scene are **one** primitive after `occlusion::merge`, so how far the shadow
     // reaches is a statement about the merged box: a union that stopped growing

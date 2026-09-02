@@ -1,6 +1,6 @@
 # The reference path tracer
 
-> **This is [`lighting_rebuild.md`](lighting_rebuild.md)'s phase 0** — the oracle the rebuild is judged by.
+> **This is [`lighting_rebuild.md`](../design_model.md)'s phase 0** — the oracle the rebuild is judged by.
 > The **BRDF switch** that file asks for is built: `trace::Brdf` computes either
 > physics or the engine's own model, and the gate now runs in the engine's.
 > What phase 0 still owes is the *calibration* — one flame, no occluders,
@@ -22,8 +22,8 @@ right; this one is not in that argument.
 Written against `crates/client/pathtrace/` (the whole crate) and
 `crates/client/render/examples/boxes.rs`'s own `pathtrace_comparison`.
 
-Satellite of [`lighting.md`](lighting.md), beside
-[`lighting_raymarch.md`](lighting_raymarch.md) — that file is about keeping the
+Satellite of [`lighting.md`](../../archive/render/lighting.md), beside
+[`lighting_raymarch.md`](../../archive/render/lighting_raymarch.md) — that file is about keeping the
 CPU and GPU copies of one walk numerically identical, this one is about having
 something that is not either of them.
 
@@ -103,7 +103,7 @@ third one is not a separate policy smuggled in: without a normal there is no lit
 side, so a point on a body's far side would shadow itself against that same body
 and the model would have no answer at all. The engine states it as an exemption
 in its own walk (a fragment's own occluder does not stop the fragment's ray) and
-[`lighting_rebuild.md`](lighting_rebuild.md)'s phase 4 restates it as identity.
+[`lighting_rebuild.md`](../design_model.md)'s phase 4 restates it as identity.
 `Scene::blocked`'s `except` is where it lands, and its own tests hold the
 exemption to one body: an exemption that let the whole scene through would pass
 every back-face test and quietly produce a reference with no shadows in it.

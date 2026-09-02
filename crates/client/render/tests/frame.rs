@@ -1329,7 +1329,7 @@ fn real_map_block_producer_keeps_every_owned_map_tile_after_restore() {
 /// here.
 ///
 /// It used to assert a byte-for-byte copy, and could while lighting was a
-/// multiplication of stored bytes by `1.0`. `docs/lighting_rebuild.md`'s phase 1
+/// multiplication of stored bytes by `1.0`. `docs/render/design_model.md`'s phase 1
 /// decodes the art out of sRGB, multiplies in linear light and curves the
 /// result, and a curve that left `1.0` alone would not be a curve. So the
 /// prediction goes through `tonemap::shade_u8` — which is a **stronger**
@@ -1703,7 +1703,7 @@ fn a_light_brightens_its_own_pool_and_the_ambient_darkens_the_rest() {
         .enumerate()
     {
         // Through the pipeline rather than by multiplying the stored byte —
-        // `docs/lighting_rebuild.md` phase 1, and the same correction the wall
+        // `docs/render/design_model.md` phase 1, and the same correction the wall
         // test below carries.
         let expected = (openshard_client_render::tonemap::shade(f32::from(*drawn) / 255.0, ambient) * 255.0)
             .round() as i32;
@@ -1716,8 +1716,8 @@ fn a_light_brightens_its_own_pool_and_the_ambient_darkens_the_rest() {
 
 /// A wall stops the light behind it.
 ///
-/// The claim `docs/lighting.md` exists for: a torch inside a house must not
-/// light the street. `docs/lighting.md`'s own second half of that
+/// The claim `docs/archive/render/lighting.md` exists for: a torch inside a house must not
+/// light the street. `docs/archive/render/lighting.md`'s own second half of that
 /// claim — a wall's own face stays the brightest thing near the flame — is
 /// deliberately not this fixture's to make: it stands the occluder in as a
 /// *ground* quad rather than a real wall sprite ("what occludes is the grid,
@@ -1731,7 +1731,7 @@ fn a_light_brightens_its_own_pool_and_the_ambient_darkens_the_rest() {
 /// such exemption at all, by design (`light::exemption`'s own doc: a body a
 /// second, taller body stands on needs the precision), so ground standing at
 /// a whole-tile body's own base is genuinely inside that body looking out —
-/// `docs/lighting_raymarch.md`'s ground-stance entry found this fixture had
+/// `docs/archive/render/lighting_raymarch.md`'s ground-stance entry found this fixture had
 /// been passing for the wrong reason, propped up by a land pixel that never
 /// named a stance at all and so read as `Upright`, not `Flat`, to the very
 /// check this fixture meant to exercise.
@@ -1940,7 +1940,7 @@ fn a_wall_stops_the_light_behind_it() {
     let night = openshard_client_render::light::NIGHT.at(openshard_client_render::occlusion::SKY_OPEN);
     // Through the colour pipeline, not by multiplying the stored bytes: an
     // unlit byte times an ambient is not the byte an ambient produces, and
-    // `docs/lighting_rebuild.md` phase 1 is that sentence.
+    // `docs/render/design_model.md` phase 1 is that sentence.
     let ambient_pixel =
         openshard_client_render::tonemap::shade_u8([world_pixel[0], world_pixel[1], world_pixel[2]], night);
     let expected: u32 = ambient_pixel.iter().copied().map(u32::from).sum();
@@ -2528,7 +2528,7 @@ fn render_hued(
 /// Every pixel says which tile it came from, and a wall's pixels say the
 /// wall's tile rather than the ground's.
 ///
-/// The attachment `docs/lighting.md` turns on, and the claim that makes it worth
+/// The attachment `docs/archive/render/lighting.md` turns on, and the claim that makes it worth
 /// having: a wall's picture stands 44 pixels above the tile it is on, so the
 /// ground behind it and the wall itself are neighbouring pixels of one image
 /// that belong to different tiles at different heights. Everything the lighting
@@ -2598,7 +2598,7 @@ fn every_pixel_names_the_tile_it_came_from() {
     );
 
     // A pixel of the wall: an id naming the one static this frame drew — its
-    // own tile is `docs/gbuffer.md` step 3's `instances[id]` row now, not a
+    // own tile is `docs/archive/render/gbuffer.md` step 3's `instances[id]` row now, not a
     // number this attachment carries directly — and the static's kind in the
     // low bits of the fourth channel.
     let wall_pixel = places.at(64, 64);
@@ -2618,7 +2618,7 @@ fn every_pixel_names_the_tile_it_came_from() {
     //
     // And two pixels up is **half** a unit, which the position plane says
     // outright. The attachment this replaced could only say it after
-    // `docs/lighting_height.md` phase 1 put a fraction of sixteenths under the
+    // `docs/archive/render/lighting_height.md` phase 1 put a fraction of sixteenths under the
     // whole units; before that, this same pair of pixels differed by a whole
     // unit or by none at all, which is the staircase that phase is about — and
     // sixteenths are gone now too, along with everything else that quantised a
@@ -2631,7 +2631,7 @@ fn every_pixel_names_the_tile_it_came_from() {
         "two pixels up the wall is not half a unit of height: {higher:?} against {wall_point:?}",
     );
     // A pixel of the ground beside it: an id naming the one ground quad this
-    // frame drew — its own tile is `docs/gbuffer.md` step 7's
+    // frame drew — its own tile is `docs/archive/render/gbuffer.md` step 7's
     // `ground_instances[id]` row, not a number a fragment carries directly, the
     // same move step 3 made for the wall above — at the height the corners gave
     // it, and the land kind.
@@ -2642,7 +2642,7 @@ fn every_pixel_names_the_tile_it_came_from() {
         "the ground beside the wall named something else",
     );
     // `ground.wgsl` stamps its own stance, the same way `statics.wgsl` always
-    // has — see `docs/lighting_raymarch.md`'s ground-stance entry for why a land
+    // has — see `docs/archive/render/lighting_raymarch.md`'s ground-stance entry for why a land
     // pixel that never named one read as `Stance::Upright` to `blit.wgsl`'s own
     // exemption logic instead.
     assert_eq!(
@@ -2830,7 +2830,7 @@ fn a_floor_spreads_across_its_tile_and_a_wall_stands_up_it() {
 
     // **A mobile, drawn with no volume exactly as the wall above, spreads.**
     //
-    // `docs/lighting_rebuild.md` phase 7: a mobile has no volume by
+    // `docs/render/design_model.md` phase 7: a mobile has no volume by
     // construction rather than for want of a measurement, so it is a billboard
     // — a vertical plane through its tile's centre, turned towards the camera —
     // and a fragment of it is where its own view ray meets that plane. The
@@ -2894,7 +2894,7 @@ fn a_floor_spreads_across_its_tile_and_a_wall_stands_up_it() {
 /// channel to the literal `384` — which is `128 | (STANCE_FLAT << 8)`, but
 /// nothing at that call site says so, so a reader (or a future stance value
 /// shifting the packing) cannot tell height and stance apart in it without doing
-/// the arithmetic by hand. `docs/lighting_raymarch.md`'s backlog calls this out
+/// the arithmetic by hand. `docs/archive/render/lighting_raymarch.md`'s backlog calls this out
 /// by name: the fixture where session 23's bug — `ground.wgsl` never stamping a
 /// stance at all — shipped unnoticed, because no test decoded the stance bits on
 /// their own and compared them against the enum. This is that test, using the
@@ -3097,7 +3097,7 @@ fn two_wall_tiles_in_a_row_name_one_continuous_surface() {
     // two assertions above cannot see because both only ever look at `x`.
     //
     // *Exactly*, and this is the claim that was re-taken at
-    // `docs/lighting_rebuild.md` phase 6c. It used to be *one step short* of the
+    // `docs/render/design_model.md` phase 6c. It used to be *one step short* of the
     // edge — `120/127`, produced by `statics.wgsl`'s `INSIDE` clamp — and the
     // reason was that `blit.wgsl` found a fragment's cell with
     // `floor(position)`, so a clean whole number named the tile beyond the wall
@@ -3110,7 +3110,7 @@ fn two_wall_tiles_in_a_row_name_one_continuous_surface() {
     for (x, y) in [(left, row - 21), (left + 21, row), (left + 22, row + 1)] {
         let point = places.position_at(x, y);
         // Which tile this pixel's own sprite stands on — off the row its id
-        // names, which is `docs/gbuffer.md` step 3's whole point and the only
+        // names, which is `docs/archive/render/gbuffer.md` step 3's whole point and the only
         // way to turn a position back into a fraction of a *named* tile.
         let stands = quads[gbuffer::ids_id(places.at(x, y)) as usize].place;
         let sub_y = point[1] - f32::from(stands.y);
@@ -3271,7 +3271,7 @@ fn a_corner_s_pixel_carries_the_face_of_the_half_it_is_drawn_on() {
     );
 
     // And the two halves are two different rows, not one instance's id read
-    // twice — `docs/gbuffer.md` step 4. This frame drew exactly one corner,
+    // twice — `docs/archive/render/gbuffer.md` step 4. This frame drew exactly one corner,
     // so `split_corners` gives it id `0` and a shadow row at id `1`: the
     // right half (its own instance) keeps `0`, the left half (the diagonal
     // test's other side) takes the shadow's `1`.
@@ -3280,7 +3280,7 @@ fn a_corner_s_pixel_carries_the_face_of_the_half_it_is_drawn_on() {
     assert_eq!(id(middle - 4, row), 1, "the left half is not its shadow row");
 }
 
-/// `docs/lighting_rebuild.md` phase 7: a mobile has no volume, so before this
+/// `docs/render/design_model.md` phase 7: a mobile has no volume, so before this
 /// its normal was the zero vector — "lit from every side", the flatness a
 /// person reported beside a torch. The plane it is drawn on has exactly one
 /// normal, and this is the gate that the shader writes *that* one rather than
@@ -3507,7 +3507,7 @@ fn a_walking_billboard_is_lit_where_it_is_drawn_not_where_it_is_going() {
 /// The impostor is written twice — `impostor.wesl` and [`impostor`] — and this
 /// is the only thing that compares them.
 ///
-/// `docs/lighting_rebuild.md` phase 6c, and the same argument
+/// `docs/render/design_model.md` phase 6c, and the same argument
 /// `normal_format.wesl`'s own gate makes one plane down: two spellings of one
 /// arithmetic have no compiler between them, and every reader downstream sees
 /// only the answer, so a disagreement about *which box* or *which face* would
@@ -3653,7 +3653,7 @@ fn a_sprite_pixel_meets_the_same_box_on_both_sides() {
     // **The sprite's own rectangle, not "wherever a static was drawn"** — which
     // is the difference the discard makes and the whole of what this sweep now
     // states. A texel whose ray misses every box is no longer drawn at all
-    // (`statics.wesl`, and the amendment in `docs/lighting_rebuild.md`'s "One
+    // (`statics.wesl`, and the amendment in `docs/render/design_model.md`'s "One
     // silhouette"), so filtering on `Kind::Static` would quietly skip exactly the
     // pixels the rule is about and the test would agree with any rule at all.
     // Walked as the quad's own texels instead, and each one is asked the
@@ -3811,7 +3811,7 @@ fn a_sprite_pixel_meets_the_same_box_on_both_sides() {
 ///
 /// `impostor::Fringe` is a debug state in the sense `debug::View` is: two of its
 /// three answers were measured and refused as defaults
-/// (`docs/lighting_state.md`'s fringe entry), and they are kept reachable
+/// (`docs/render/README.md`'s fringe entry), and they are kept reachable
 /// because refusing them by argument is what this backlog item had already done
 /// twice. A switch wired to nothing would leave every one of those pictures
 /// identical to the shipped one and read as "I looked and saw no difference" —
@@ -3950,8 +3950,8 @@ fn the_fringe_switch_draws_three_different_frames() {
 
 /// A real static's fragment is a point of the primitive it names: its position
 /// on that primitive's own boundary, its normal one of that primitive's
-/// camera-facing faces, and its stance that face's own — `docs/lighting_
-/// rebuild.md` phase 6i, item 3.
+/// camera-facing faces, and its stance that face's own —
+/// `docs/render/design_model.md` phase 6i, item 3.
 ///
 /// Position, normal, solid and stance are not four independent measurements
 /// once a static has a shape behind it: three of them are properties of one
@@ -3964,7 +3964,7 @@ fn the_fringe_switch_draws_three_different_frames() {
 /// them was found by a person looking at a lit frame rather than by a test —
 /// this is the sweep that would have caught each, over the one shape none of
 /// this crate's other GPU fixtures drives through the sprite path at all: a
-/// merged run of wall (`docs/occluders.md`'s D6, 6h's own bill), a fitted
+/// merged run of wall (`docs/render/design_occluders.md`'s D6, 6h's own bill), a fitted
 /// climbable (6f's own shape), a corner (6g's — `occlusion::boxes_of`'s own
 /// doc is why a stair's base reads as one), a lone wall panel and a floor.
 #[test]
@@ -4283,7 +4283,7 @@ fn a_sprite_fragment_is_a_point_of_the_primitive_it_names() {
     // running one.
     // The floor moved from ten thousand to five, and **the reason is the
     // discard**: a fragment whose ray meets no box is no longer drawn
-    // (`statics.wesl`, and the amendment in `docs/lighting_rebuild.md`'s "One
+    // (`statics.wesl`, and the amendment in `docs/render/design_model.md`'s "One
     // silhouette"), so the fringe this sweep used to count is not in the frame
     // any more. It reached 7,382 the first time it ran under the new rule. A
     // floor is here at all so that a pass drawing nothing cannot satisfy every
@@ -4312,7 +4312,7 @@ fn a_sprite_fragment_is_a_point_of_the_primitive_it_names() {
 /// `mesh_instances` storage buffer, a different consumer than this
 /// attachment.
 ///
-/// `docs/lighting_raymarch.md`'s backlog names this the second of two
+/// `docs/archive/render/lighting_raymarch.md`'s backlog names this the second of two
 /// producers with no direct pixel-decode coverage, and the one that needed
 /// real plumbing: unlike ground and statics, `render_places` never drove the
 /// mesh-face pass before this — it does now, wired in right after the statics
@@ -4392,7 +4392,7 @@ fn a_mesh_face_pixel_carries_the_mesh_face_sentinel() {
 
 /// A mesh face's fragment says where it is, to the float.
 ///
-/// `docs/lighting_rebuild.md` phase 2's own "done when", and the mesh pass is
+/// `docs/render/design_model.md` phase 2's own "done when", and the mesh pass is
 /// the producer to ask it of: its vertices carry their true world positions
 /// (`MeshFaceVertex::world`) and the rasteriser interpolates them, so the
 /// number the pass has is the number the geometry has — there is no projection
@@ -4490,7 +4490,7 @@ fn a_mesh_face_pixel_carries_its_exact_world_position() {
 /// A mesh face's pixel carries **its own face's** normal, and the two faces of
 /// one flight carry two different ones.
 ///
-/// The other half of `docs/lighting_rebuild.md` phase 2's "done when", and the
+/// The other half of `docs/render/design_model.md` phase 2's "done when", and the
 /// mesh pass is the producer to ask it of for the same reason the position half
 /// asks it here: its normals are measured geometry — `crate::mesh::Face::normal`,
 /// one per face — rather than a stance a reader turns back into a direction.
@@ -4732,7 +4732,7 @@ fn render_places_with_fringe(
     ground_pass.render(device, queue, &mut encoder, target, quads);
     // A corner static's two faces get their own id here too, the same as the
     // real pass — see `sprite::split_corners`'s own doc and
-    // `docs/gbuffer.md` step 4.
+    // `docs/archive/render/gbuffer.md` step 4.
     let instances = openshard_client_render::sprite::split_corners(static_quads.to_vec());
     sprite_pass.render(
         device,
@@ -4744,7 +4744,7 @@ fn render_places_with_fringe(
         Some(instances.drawn),
     );
     // Right after statics, into the same static's own pixels — the real
-    // renderer's own order (`docs/gbuffer.md` step 4c), so depth and place
+    // renderer's own order (`docs/archive/render/gbuffer.md` step 4c), so depth and place
     // only ever tie or improve on what the billboard sprite just wrote.
     mesh_pass.render(device, queue, &mut encoder, target, mesh_vertices, mesh_rows);
     // **And the silhouette pass, with nothing to ring** — which is what the
@@ -6625,7 +6625,7 @@ struct Fixture {
     /// unreachable.
     ///
     /// **A `SolidId` and not an `OwnerId`, which is what the shader compares** —
-    /// `docs/lighting_rebuild.md` phase 4. It was the coarser one until the
+    /// `docs/render/design_model.md` phase 4. It was the coarser one until the
     /// solid came to ride in the position plane (`solid_format.wesl`): the
     /// shader took an owner off the instance row and narrowed it per fragment by
     /// the stance, which is exact for a wall and ambiguous by construction for a
@@ -6646,14 +6646,14 @@ struct Fixture {
     ///
     /// A fixture's fragments are otherwise inside their own tile by construction
     /// — the fraction runs to `112/127` and never reaches an edge — so the one
-    /// state a real frame is full of since `docs/lighting_rebuild.md` phase 6c
+    /// state a real frame is full of since `docs/render/design_model.md` phase 6c
     /// could not be stated here at all: a position on, or a rounding past, the
     /// boundary its own instance's tile ends at. That is what the impostor writes
     /// for every south and east face, and a share of them land a hair over.
     ///
     /// Zero for every fixture that is not about it. It exists to make a
     /// fragment's position and its carried tile disagree, which
-    /// `docs/occluders.md`'s S4 turned from a rule's own subject into a fact
+    /// `docs/render/design_occluders.md`'s S4 turned from a rule's own subject into a fact
     /// nothing downstream may read: the walk seeds itself from the position and
     /// the tile is not passed to it at all.
     drift:   (f32, f32),
@@ -6698,7 +6698,7 @@ fn parity_frame(
     let gbuffer_views = gbuffer.views();
 
     // Neither `Kind::Static` nor `Kind::Land` pixels carry their own `x`/`y`
-    // in the attachment any more — `docs/gbuffer.md` step 3 moved a static's
+    // in the attachment any more — `docs/archive/render/gbuffer.md` step 3 moved a static's
     // to a row this fixture has to build itself, the same way `statics.wgsl`
     // would have, and step 7 did the same for the ground. One row per
     // distinct tile the sweep below actually uses, keyed by first sight: the
@@ -6744,7 +6744,7 @@ fn parity_frame(
         })
     };
 
-    // `Kind::Land` pixels need the same treatment since `docs/gbuffer.md`
+    // `Kind::Land` pixels need the same treatment since `docs/archive/render/gbuffer.md`
     // step 7 — one row per distinct tile, keyed by first sight, the ground
     // half of `id_of` above.
     let mut ground_ids: std::collections::HashMap<(u16, u16), u32> = std::collections::HashMap::new();
@@ -6968,7 +6968,7 @@ fn parity_frame(
 }
 
 /// **The shader reads a primitive's own corners, at a fraction of a tile no
-/// byte could name** — `docs/occluders.md`'s S1 gate, the shader's third of it.
+/// byte could name** — `docs/render/design_occluders.md`'s S1 gate, the shader's third of it.
 ///
 /// `light::a_primitive_at_no_fraction_a_byte_could_name_reads_the_same_three_ways`
 /// is the same fixture put to the two CPU walks and to a brute-force oracle over
@@ -7315,7 +7315,7 @@ fn the_shader_does_not_stop_a_vertical_ray_with_a_lid_it_is_not_under() {
 }
 
 /// **A vertical ray on the GPU is stopped by the wall it stands inside** —
-/// `docs/occluders.md`'s S4, the shader's third of the vertical shortcut.
+/// `docs/render/design_occluders.md`'s S4, the shader's third of the vertical shortcut.
 ///
 /// That branch skipped every panel outright, on the argument that a panel is a
 /// plane and a vertical ray lying in a wall's own plane is a graze it had no rule
@@ -7429,7 +7429,7 @@ fn the_shader_stops_a_vertical_ray_with_the_panel_it_stands_inside() {
 /// **A fragment a hair past its own tile's edge is shadowed by the wall it has
 /// drifted into.**
 ///
-/// **What it is a claim about has changed, and `docs/occluders.md`'s S4 is
+/// **What it is a claim about has changed, and `docs/render/design_occluders.md`'s S4 is
 /// why.** It used to compare `blit.wesl`'s `starting_cell` against
 /// `light::starting_cell` — one rule written twice with no compiler between the
 /// two — and both are deleted. What it states now is one step further back:
@@ -7546,7 +7546,7 @@ fn a_fragment_a_hair_inside_a_wall_is_shadowed_by_the_cell_it_drifted_into() {
 
 /// Whether `Reach::through` counts as blocked — `light.rs`'s own
 /// `RAY_CUTOFF`, restated here rather than imported: it is not `pub`, and
-/// every oracle in `docs/lighting_raymarch.md` (`tests/lighting.rs`'s
+/// every oracle in `docs/archive/render/lighting_raymarch.md` (`tests/lighting.rs`'s
 /// brute-force grid and fuzz) already carries its own copy of the same
 /// number rather than reach into the crate for it.
 const EXACT_WALK_BLOCKED: f32 = 0.004;
@@ -7576,7 +7576,7 @@ fn in_column(point: [f32; 3], tile: (i32, i32)) -> bool {
 /// does not list that box, so the march could stand inside a wall and report open
 /// ground. It arbitrates between the two walks here, which makes an oracle that
 /// can be wrong about a corner worse than useless: it convicts whichever walk was
-/// right. See `docs/occluders.md` § *The oracle*.
+/// right. See `docs/render/design_occluders.md` § *The oracle*.
 ///
 /// **Twenty thousand steps over the whole segment, not `brute_force_blocked`'s
 /// fixed `0.02`-tile step.** The first version of this oracle used that same
@@ -7645,7 +7645,7 @@ fn ground_truth_blocked(
 /// real, non-degenerate distance inside `blamed`'s own box, rather than only
 /// brushing its corner.
 ///
-/// `docs/lighting_raymarch.md`'s own established stance on a ray that only
+/// `docs/archive/render/lighting_raymarch.md`'s own established stance on a ray that only
 /// ever touches a solid's corner — never a length of its inside — is that
 /// this is not a bug in either walk to resolve, it is the accepted overlap
 /// two panels physically share at a shared corner
@@ -7714,7 +7714,7 @@ struct ExactWalkReport {
     bugs:        Vec<String>,
     /// A classification flip [`ground_truth_blocked`] backs
     /// `walk_the_record` for: an already-real `walk_cells` gap, the same
-    /// family `docs/lighting_raymarch.md`'s session 9 found four of.
+    /// family `docs/archive/render/lighting_raymarch.md`'s session 9 found four of.
     explained:   usize,
     /// A classification flip this oracle cannot rule on — the marched path
     /// crossed a solid with an aperture, which it does not model.
@@ -7727,7 +7727,7 @@ struct ExactWalkReport {
 }
 
 /// [`light::sample_exact`] against [`light::sample`], over one of decision
-/// 9's own real-geometry scenes — `docs/lighting_raymarch.md`'s point 3, the
+/// 9's own real-geometry scenes — `docs/archive/render/lighting_raymarch.md`'s point 3, the
 /// half of it that needs no GPU because neither side being compared is the
 /// shader. The scene is the fixture, the same reason decision 9's own suite
 /// reuses these rather than a fixture built for this test alone: a room's
@@ -7739,7 +7739,7 @@ struct ExactWalkReport {
 /// pixels of the plainest scene here, `scene::room` — a spot standing on one
 /// tile of a straight wall run blamed a *neighbour* tile of the same run for
 /// blocking a ray that, marched by hand, never enters that neighbour's box
-/// at all. `docs/lighting_raymarch.md`'s session 9 already catalogued four
+/// at all. `docs/archive/render/lighting_raymarch.md`'s session 9 already catalogued four
 /// `walk_cells` gaps this exact track's fuzzing found; this is a real fifth,
 /// found by real geometry rather than a fuzzer, in the opposite direction
 /// from the other four (over-occlusion, not under). See this test file's own
@@ -7793,7 +7793,7 @@ fn exact_walk_disagreements(lighting: &Lighting, surface: Surface, z: i8) -> Exa
                     // and a bare point-in-box march (blind to which tile it
                     // is even asking about) cannot itself rule out. See
                     // `blamed_tile_has_a_real_crossing`'s own doc comment:
-                    // this is `docs/lighting_raymarch.md`'s own accepted
+                    // this is `docs/archive/render/lighting_raymarch.md`'s own accepted
                     // corner-grazing ambiguity, the same shape `walk_cells`'
                     // `corner_tie` used to be generous about on purpose, not
                     // a defect in `walk_the_record` to chase.
@@ -7882,7 +7882,7 @@ fn the_exact_walk_agrees_with_light_sample_about_which_side_a_wall_is_on() {
 
 /// And the same at a house corner — a run of panels meeting a faceless whole
 /// tile, exactly the shape `corner_tie` exists for and the one
-/// `docs/lighting_raymarch.md`'s session 9 traced two of `walk_cells`'s own
+/// `docs/archive/render/lighting_raymarch.md`'s session 9 traced two of `walk_cells`'s own
 /// gaps from.
 #[test]
 fn the_exact_walk_agrees_with_light_sample_at_the_corner_of_a_house() {
@@ -7987,7 +7987,7 @@ fn shadow_drawn(pixel: [u8; 4]) -> Shadow {
 ///
 /// A flame outside its own pool by the centre — `d >= 1` — is the shader's blue
 /// as much as no flame at all is: the near-side cull that let it into the loop is
-/// deliberately wider than the pool (`docs/lighting_rebuild.md` phase 5b), so
+/// deliberately wider than the pool (`docs/render/design_model.md` phase 5b), so
 /// "within the cull" and "within the pool" are two different questions and the
 /// view answers the second.
 fn shadow_wanted(sample: &openshard_client_render::light::Sample, lighting: &Lighting) -> (Shadow, f32) {
@@ -8034,7 +8034,7 @@ struct ShaderSweep {
     /// **The census that keeps this sweep from being vacuous**, and it is
     /// asserted rather than printed: a fixture where nothing is in shadow
     /// compares four thousand pixels of "no flame reaches" and agrees about the
-    /// walk on none of them. `docs/occluders.md`'s own "a gate can be vacuous
+    /// walk on none of them. `docs/render/design_occluders.md`'s own "a gate can be vacuous
     /// three times over" is what this is here for.
     blocked:  usize,
     /// And how many see the nearest flame at all — the other half of the same
@@ -8069,7 +8069,7 @@ const VIEW_BYTE: f32 = 2.0 / 255.0;
 
 /// The **shader** against `light::sample`, pixel by pixel, over the shadow view.
 ///
-/// `docs/occluders.md`'s S5, and the reason it exists is written there: the
+/// `docs/render/design_occluders.md`'s S5, and the reason it exists is written there: the
 /// surviving CPU comparisons in this file are the exact walk against the
 /// streaming one, and since the tree landed those two *share* their broad phase —
 /// so a broad phase that loses a primitive is invisible to them. This compares
@@ -8258,7 +8258,7 @@ fn the_shader_and_light_sample_agree_about_a_surface_that_looks_up() {
 }
 
 /// **The shader meets what stands at the corner two leaves meet at** —
-/// `docs/occluders.md`'s backlog entry on the corner-grazing candidate, on the
+/// `docs/render/design_occluders.md`'s backlog entry on the corner-grazing candidate, on the
 /// side the grid's own probe was deleted from.
 ///
 /// The grid carried an *unconditional diagonal probe* in `blit.wesl`'s `walk`, so
@@ -8468,7 +8468,7 @@ fn the_light_view_keeps_a_pools_shape_where_it_is_brightest() {
     //
     // The fixture's leftmost two tiles are the ground outside the ring and the
     // ring's own wall tile, and both are flat dark. That the *wall* stretch is
-    // flat is `docs/lighting_height.md` phase 3: this fixture's pixels are
+    // flat is `docs/archive/render/lighting_height.md` phase 3: this fixture's pixels are
     // `Surface::Upright` points of no occluder at all, so they are exempt from
     // nothing, and a point standing inside the room's own wall body is behind it.
     // The old count happened to include those eight pixels because the height

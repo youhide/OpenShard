@@ -1619,7 +1619,7 @@ hover and the click alike, so a pointer over a panel lights nothing and uses
 nothing.
 
 A second way of saying the same thing — an **outline** round the sprite, pixel
-first and glowing later — is planned in [`outline.md`](outline.md). It is
+first and glowing later — is planned in [`outline.md`](render/design_outline.md). It is
 additive: the hue highlight stays, and the two compose.
 
 Nothing is done locally on the way out: the door swings when the `0x1A` that
@@ -3711,7 +3711,7 @@ was found and not done:
   `every_flame_that_can_reach_the_frame_is_walked` states the implication rather
   than the margin, so a wider flame added later cannot reintroduce it.
 - **Done: walls stop light, and the whole pass moved into world coordinates to
-  let them.** [`lighting.md`](lighting.md) is the plan and the argument; the
+  let them.** [`lighting.md`](archive/render/lighting.md) is the plan and the argument; the
   short of it is that the screen-space shadow sketched here cannot work. A
   wall's sprite stands 44 pixels above the tile it occludes from, so any mask
   drawn over the ground behind it also covers the wall's own lit face — the two
@@ -3723,7 +3723,7 @@ was found and not done:
   `BLOCK`, or every crate on the street would cast a shadow.
 - **Done with the same attachment: a flame no longer lights through a floor.**
   The channel this asked for is `place.rs`'s, the decision is
-  [`lighting.md`](lighting.md)'s, and the distance is now three-dimensional with
+  [`lighting.md`](archive/render/lighting.md)'s, and the distance is now three-dimensional with
   eleven `z` units to the tile — so a cellar's brazier is as far from the street
   above it as it would be eleven tiles away.
 - **Nothing a mobile carries burns.** A player holding a torch is the commonest

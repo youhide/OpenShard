@@ -13,7 +13,7 @@
 //! drawn through it passed the whole time — `light::same_run` covered for the
 //! exemption the missing owner made unreachable, so not one pixel moved — and it
 //! surfaced only when that rule was neutralised for a different reason.
-//! `docs/lighting_rebuild.md`'s backlog asks for this file.
+//! `docs/render/design_model.md`'s backlog asks for this file.
 //!
 //! # What is gated, and what each half is worth
 //!

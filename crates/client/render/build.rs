@@ -26,7 +26,7 @@ fn main() {
     println!("cargo:rerun-if-changed=data");
     println!("cargo:rerun-if-changed=src/shaders");
 
-    // `docs/lighting_raymarch.md`'s backlog item on the `place` format:
+    // `docs/archive/render/lighting_raymarch.md`'s backlog item on the `place` format:
     // compiled here rather than checked in, so `src/shaders/place_format.wesl`
     // stays the one place its constants are written. Each entry's
     // `include_str!(concat!(env!("OUT_DIR"), ...))` counterpart lives beside

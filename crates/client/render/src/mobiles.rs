@@ -706,7 +706,7 @@ fn push_quads(
             twin:    billboard,
             // A billboard is no occluder, so it is exempt from nothing — a
             // creature standing on a walled tile is genuinely in that wall's
-            // shadow. `docs/lighting_height.md` phase 3, and the one behaviour
+            // shadow. `docs/archive/render/lighting_height.md` phase 3, and the one behaviour
             // change it makes on a real frame.
             owner:   u32::from(crate::occlusion::OwnerId::NONE.raw()),
             volumes: crate::impostor::Range::default(),
@@ -2447,7 +2447,7 @@ mod tests {
     /// Mid-step, a body's drawn position sits behind the tile it is arriving
     /// at — [`Mobile::at`]'s own doc — and `billboard_offset` has to recover
     /// exactly how far, or `impostor.wesl`'s billboard is lit at the wrong
-    /// point of the room. `docs/lighting_rebuild.md` phase 7's own defect.
+    /// point of the room. `docs/render/design_model.md` phase 7's own defect.
     #[test]
     fn a_body_half_a_step_in_walks_half_a_tile_short_of_its_offset() {
         let from = Gaze::on(Point::new(100, 100, 0));

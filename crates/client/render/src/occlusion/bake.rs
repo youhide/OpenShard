@@ -1,6 +1,6 @@
 //! The grid, kept per block instead of rebuilt per frame.
 //!
-//! `docs/lighting.md`'s decision 30.4 and step 21.5. Everything a [`Builder`]
+//! `docs/archive/render/lighting.md`'s decision 30.4 and step 21.5. Everything a [`Builder`]
 //! holds is a fact about the **map** — decision 33 moved the frame's [`Cutaway`]
 //! down to [`Builder::finish`], so what is above that line does not depend on
 //! where the player is standing, on which way the camera points, or on anything
@@ -530,7 +530,7 @@ mod tests {
     /// Four blocks of ground with a few walls scattered over them, deliberately
     /// including a tile with two statics on it and a tile on a block boundary.
     ///
-    /// Built rather than loaded — `docs/lighting.md`'s decision 10 — so that a
+    /// Built rather than loaded — `docs/archive/render/lighting.md`'s decision 10 — so that a
     /// disagreement between the two builds names a tile rather than a
     /// coordinate in Britain.
     fn town() -> (WorldMap, TileData) {

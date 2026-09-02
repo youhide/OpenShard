@@ -72,7 +72,7 @@ struct VertexOut {
     @location(3) has_texmap: f32,
     // This instance's own index — what the attachment now carries in place of
     // the tile, and what `blit.wgsl`/`select.wgsl` look up in this pass's own
-    // instance buffer, bound a second time as storage. See `docs/gbuffer.md`
+    // instance buffer, bound a second time as storage. See `docs/archive/render/gbuffer.md`
     // decision 2 and step 7.
     @location(4) @interpolate(flat) id: u32,
     // Where in that tile, as the diamond's own two axes in `0..1`. Interpolated,
@@ -203,7 +203,7 @@ fn vs_main(
     // magnification exists. Everything above is the art's own grid, which is
     // what makes it comparable against the files texel for texel.
     //
-    // **`floor`, and it is the whole of `docs/parity.md`'s window-parity
+    // **`floor`, and it is the whole of `docs/render/design_frame_assembly.md`'s window-parity
     // entry.** The world is centred on the image, and the middle of an image
     // with an *odd* extent is the middle of a pixel rather than the join
     // between two. Centred there, a fragment sampling at `i + 0.5` lands on a
@@ -265,12 +265,12 @@ fn vs_main(
 // Who drew this fragment: the instance's id, "this lies in its tile", and
 // "this is ground".
 //
-// **The tile itself does not ride here** — `docs/gbuffer.md` step 7 moved it
+// **The tile itself does not ride here** — `docs/archive/render/gbuffer.md` step 7 moved it
 // to this pass's own instance buffer, read back by `blit.wgsl`/`select.wgsl`
 // as `ground_instances[id]`, the same move step 3 made for a static's tile.
 // Neither does the height or the sub-tile fraction any more: both are this
 // fragment's own rather than a fact the whole instance shares, so both are in
-// the position plane below, unquantised. `docs/lighting_rebuild.md` phase 2.
+// the position plane below, unquantised. `docs/render/design_model.md` phase 2.
 fn ids_of(in: VertexOut) -> u32 {
     return pack_ids(in.id, STANCE_FLAT, KIND_LAND);
 }
@@ -299,7 +299,7 @@ fn fs_main(in: VertexOut) -> FragmentOut {
     // comfortably above. That is a defect of the half-space and not of the
     // normal: an angular cosine is small at a grazing flame rather than absent,
     // which is what a floor lit from a torch on it actually looks like.
-    // `docs/lighting_rebuild.md`'s third open question, answered by having one.
+    // `docs/render/design_model.md`'s third open question, answered by having one.
     out.normal = pack_normal(land_normal(in.heights_in_tiles, local));
 
     // A slope with a texture of its own takes it, and nothing else about the

@@ -135,10 +135,10 @@ that it earned its own living plan rather than staying inside this file's
 ### A new tool: `synthetic_stair.rs`
 
 **A new tool exists for exactly this class of bug:
-[`examples/synthetic_stair.rs`](../crates/client/render/examples/synthetic_stair.rs)**
+[`examples/synthetic_stair.rs`](../../../crates/client/render/examples/synthetic_stair.rs)**
 — a climbable static, alone, with no client files, no map and no art: one
-hand-built [`facing::Prism`](../crates/client/render/src/facing.rs), its
-own [`occlusion::Occlusion`](../crates/client/render/src/occlusion.rs)
+hand-built [`facing::Prism`](../../../crates/client/render/src/facing.rs), its
+own [`occlusion::Occlusion`](../../../crates/client/render/src/occlusion.rs)
 built the same way `light.rs`'s own
 `a_treads_top_is_not_shadowed_by_its_own_riser` test builds one, and one
 flame, run through the real `GroundRenderer`/`MeshFaceRenderer`/`Blit`
@@ -228,7 +228,7 @@ let sub = clamp(fract(in.world.xy), vec2<f32>(0.0), vec2<f32>(INSIDE));
 
 `fract()` of an exact whole number is `0.0`, not `1.0` — and this tread's
 own outer corner sits at exactly `world.x = 1498.0`, a whole number,
-because [`Prism::footprint`](../crates/client/render/src/facing.rs) holds
+because [`Prism::footprint`](../../../crates/client/render/src/facing.rs) holds
 every stair's tile-crossing edge at the tile's own unit square. The
 `INSIDE = 126/127` constant this crate already had (`scene.rs:868`,
 documenting `statics.wgsl`'s own copy) already named this exact class of
@@ -243,8 +243,8 @@ other point on the same face.
 **The fix:** give `mesh_face.wgsl` the tile it already knows CPU-side,
 instead of asking `fract()` to guess it back from a position that can
 legitimately sit on the tile's own far edge.
-[`MeshFaceVertex`](../crates/client/render/src/mesh_face.rs) grew a `tile:
-[f32; 2]` field — [`push_mesh`](../crates/client/render/src/statics.rs)
+[`MeshFaceVertex`](../../../crates/client/render/src/mesh_face.rs) grew a `tile:
+[f32; 2]` field — [`push_mesh`](../../../crates/client/render/src/statics.rs)
 was already carrying `at.x`/`at.y` right where it builds the vertex, so
 nothing upstream had to change to supply it — carried through as a new
 flat vertex attribute (`mesh_face.wgsl`'s `VertexOut::tile`), and `fs_main`
@@ -254,7 +254,7 @@ picture below: the isolated white dash on the tread's face is gone; the
 second shape (the white line over empty background) is untouched, which is
 the expected result of a fix aimed at the first and not the second — see
 below.
-[`a_stair_s_mesh_vertices_carry_their_tile_and_reach_its_far_edge`](../crates/client/render/src/statics.rs)
+[`a_stair_s_mesh_vertices_carry_their_tile_and_reach_its_far_edge`](../../../crates/client/render/src/statics.rs)
 pins the fact the fix leans on: every mesh face carries the tile it stands
 on, and a stair's own footprint reaches at least as far as that tile's far
 edge, not short of it.
@@ -340,7 +340,7 @@ genuinely sees around the riser from here" and points at the grid lookup
 itself.
 
 **Root cause: `Surface::Flat` gets no boundary nudge, and `Surface::Face`
-does.** [`stand_clear`](../crates/client/render/src/light.rs) moves a lit
+does.** [`stand_clear`](../../../crates/client/render/src/light.rs) moves a lit
 point a hair off the surface it is *the face of* along that face's outward
 normal (`STAND_OFF`, decision-worthy already) before `walk_cells` floors it
 into an occlusion-grid cell — but that nudge comes from `face.outward()`,
@@ -411,9 +411,9 @@ for a wedge finding below. Both are a fitted box not quite reaching the
 true art, not a tie.
 
 Fixed in `facing.rs`'s `Prism::mesh`: every riser now grows
-[`SEAM_OVERLAP`](../crates/client/render/src/facing.rs) (`0.15`, in `z`)
+[`SEAM_OVERLAP`](../../../crates/client/render/src/facing.rs) (`0.15`, in `z`)
 past the tread it meets, and every face grows
-[`WIDTH_OVERLAP`](../crates/client/render/src/facing.rs) (`0.03`, in
+[`WIDTH_OVERLAP`](../../../crates/client/render/src/facing.rs) (`0.03`, in
 tile-fraction) past the tile-crossing edge `Prism::footprint` holds at the
 unit square regardless of `lo`/`hi` — two real overlaps in world space, not
 another depth formula, so `docs/gbuffer.md` decision 4's argument against a

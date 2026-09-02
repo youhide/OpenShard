@@ -647,7 +647,7 @@ pub struct RadarStepReport {
 /// readings `docs/map/radar.md` §10.1 asks for get taken at every scale a person
 /// might have rather than at whichever one the machine in front of them happens
 /// to be. Were the harness to spell this sequence out for itself, it would be
-/// measuring a radar step nothing plays — `docs/parity.md`'s hazard arriving
+/// measuring a radar step nothing plays — `docs/render/design_frame_assembly.md`'s hazard arriving
 /// through the diagnostic rather than through the picture, which is the mistake
 /// §9.1 records the request and the draw making with one `RadarView`.
 ///

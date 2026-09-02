@@ -1,4 +1,4 @@
-//! The instrument step 4 of `docs/lighting.md`'s 23 asks for: a graphic and a
+//! The instrument step 4 of `docs/archive/render/lighting.md`'s 23 asks for: a graphic and a
 //! table in, and what a person needs to author a row by hand out — `tests/
 //! artshot.rs`'s picture and `tests/prism.rs`'s score, joined into the one loop
 //! authoring a candidate actually takes: draw it, score it, see where it
@@ -33,7 +33,7 @@
 //! ```
 //!
 //! `OPENSHARD_ART` is a comma-separated list of graphic ids, decimal or `0x`
-//! hex; the default is the staircase `docs/lighting.md`'s backlog was written
+//! hex; the default is the staircase `docs/archive/render/lighting.md`'s backlog was written
 //! against. `OPENSHARD_TABLE` picks the table file; the default is the checked-in
 //! `data/overrides.table`. Pictures land under `target/art/`, or wherever
 //! `OPENSHARD_ART_OUT` points — the same variable `tests/artshot.rs` reads, so
@@ -52,7 +52,7 @@ use openshard_uofiles::color::{
 };
 use openshard_uofiles::image::Image;
 
-/// The staircase's two statics — see `docs/lighting.md`'s backlog, "found on a
+/// The staircase's two statics — see `docs/archive/render/lighting.md`'s backlog, "found on a
 /// staircase in Britain". The two graphics decision 41 was written to give a
 /// format to author *into*; nothing about them is authored as blocks yet.
 const DEFAULT: &[u16] = &[1822, 1846];

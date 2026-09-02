@@ -1,5 +1,5 @@
 //! **The constants that relate one grid to another, wherever they are written
-//! down twice.** `docs/pixels.md` P4, the half of it that is not
+//! down twice.** `docs/render/design_pixel_spaces.md` P4, the half of it that is not
 //! `camera::tests::no_primary_sample_lands_on_a_whole_virtual_pixel`.
 //!
 //! P2's table says most pairs of grids in this renderer are commensurate *by
@@ -14,7 +14,7 @@
 //! in [`facing`](openshard_client_render::facing) — deliberately, per its own
 //! comment, so a function handed nothing but pixels need not be handed a camera
 //! — and restated again in the shaders, where the Rust constant cannot reach at
-//! all. `docs/pixels.md`'s backlog carries this as *"`Z_STEP` and `Z_PER_TILE`
+//! all. `docs/render/design_pixel_spaces.md`'s backlog carries this as *"`Z_STEP` and `Z_PER_TILE`
 //! are one relationship written twice"*; a copy across the wire is the same
 //! hazard with no compiler on either side of it.
 //!
@@ -106,7 +106,7 @@ fn shader_u32(source: &str, file: &str, name: &str) -> u32 {
 /// (a lamp black in its own light) or every panel without one (a wall lit
 /// through its own back), and both are pictures rather than errors.
 ///
-/// Pinned from the shader's own source for the reason `docs/pixels.md` rule 6
+/// Pinned from the shader's own source for the reason `docs/render/design_pixel_spaces.md` rule 6
 /// states: there is no compiler on either side of that wire.
 #[test]
 fn the_statics_pass_knows_which_mask_means_the_art_named_no_side() {
@@ -127,7 +127,7 @@ fn the_statics_pass_knows_which_mask_means_the_art_named_no_side() {
 ///
 /// A disagreement here does not fail to compile and does not fail to draw. It
 /// draws a frame at a slightly different scale from the one every test on this
-/// side asserts about, which is `docs/parity.md`'s subject exactly: two pictures
+/// side asserts about, which is `docs/render/design_frame_assembly.md`'s subject exactly: two pictures
 /// rather than one wrong one.
 #[test]
 fn the_shaders_restate_the_cameras_constants_and_not_their_own() {
@@ -192,7 +192,7 @@ fn the_shaders_restate_the_cameras_constants_and_not_their_own() {
 }
 
 /// **`Point.z` and tile space are commensurate because the division is exact** —
-/// `docs/pixels.md` P2's second row, as an assertion rather than a sentence.
+/// `docs/render/design_pixel_spaces.md` P2's second row, as an assertion rather than a sentence.
 ///
 /// [`Z_PER_TILE`] is *defined* as `TILE_WIDTH / Z_STEP`, so the two can never
 /// disagree; what they can do is stop dividing evenly. Then `Z_PER_TILE` is
@@ -209,7 +209,7 @@ fn a_height_unit_is_a_whole_number_of_tile_space_units() {
         TILE_WIDTH % Z_STEP,
         0,
         "TILE_WIDTH / Z_STEP no longer divides evenly, so one unit of `Point.z` is no longer a \
-         whole count of tile-space units — docs/pixels.md P2's `Tile z ↔ tile space` row is what \
+         whole count of tile-space units — docs/render/design_pixel_spaces.md P2's `Tile z ↔ tile space` row is what \
          stops being true, and `light::TileVec`'s two crossings are where it shows",
     );
     assert_eq!(Z_PER_TILE, (TILE_WIDTH / Z_STEP) as f32);

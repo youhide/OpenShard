@@ -46,7 +46,7 @@ wgpu = { version = "30", default-features = false, features = ["wgsl", "webgl"] 
 workspace = true
 
 # Compiles `src/shaders/*.wesl` — a shared, `import`-able module for the
-# `place` attachment's bit format (`docs/lighting_raymarch.md`'s backlog) —
+# `place` attachment's bit format (`docs/archive/render/lighting_raymarch.md`'s backlog) —
 # into plain WGSL at build time. This crate's first build-dependency: under
 # plain WGSL each shader module is its own compilation unit with no
 # `#include`, so the format was five hand-copied `const` blocks, one per

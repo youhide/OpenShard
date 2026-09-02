@@ -1638,7 +1638,7 @@ impl Steering {
 /// open half and `App`'s HUD draws both, so the green line a player sees is the
 /// route being walked rather than a second opinion that happens to agree with
 /// it. A cut written for the picture alone would be exactly the shape of bug
-/// `docs/parity.md` is about.
+/// `docs/render/design_frame_assembly.md` is about.
 ///
 /// A `barred` half that comes back empty is a route with nothing standing in it:
 /// one that arrives, or one that stops where the ground itself does. It stays

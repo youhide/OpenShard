@@ -1,6 +1,6 @@
 # The G-buffer: the place attachment
 
-> **Consolidated into [`lighting_rebuild.md`](lighting_rebuild.md)** — the `place` format, which phase 2 replaces.
+> **Consolidated into [`lighting_rebuild.md`](../../render/design_model.md)** — the `place` format, which phase 2 replaces.
 > That document is the entry point: it lists what is still live here, which rebuild phase retires or inherits it, and what carries over untouched. This file stays as the record of how it was built and why.
 
 
@@ -35,7 +35,7 @@ measurements, and the session-by-session work that built it — is in
 ## The place attachment's format
 
 The attachment is `Rgba16Uint`, four `u16` channels
-([`place::FORMAT`](../crates/client/render/src/place.rs), `place.rs:392`):
+([`place::FORMAT`](../../../crates/client/render/src/place.rs), `place.rs:392`):
 
 | channel | contents |
 |---|---|
@@ -51,7 +51,7 @@ a speaker's head) is not lit and not dimmed — `blit.wesl` passes it through
 unchanged.
 
 **Why an id and a depth, and not `(x, y, z)`.** The projection
-([`camera.rs`](../crates/client/render/src/camera.rs)) is affine and fixed —
+([`camera.rs`](../../../crates/client/render/src/camera.rs)) is affine and fixed —
 `screen_x = (x - y) * HALF_WIDTH`, `screen_y = (x + y - 1) * HALF_HEIGHT -
 z * Z_STEP` — two equations in three unknowns. A screen pixel names a *line*
 through world space, not a point: one degree of freedom is missing regardless
@@ -63,16 +63,16 @@ the surviving fragment belongs to. Hence an id, addressing a row that carries
 the rest.
 
 The depth texture itself (`Depth24Plus`,
-[`renderer.rs:46`](../crates/client/render/src/renderer.rs)) is not that
+[`renderer.rs:46`](../../../crates/client/render/src/renderer.rs)) is not that
 value and is never read back — every world pass writes
-[`depth::Order::to_depth`](../crates/client/render/src/depth.rs) (`Order` at
+[`depth::Order::to_depth`](../../../crates/client/render/src/depth.rs) (`Order` at
 `depth.rs:55`, `to_depth` at `depth.rs:74`), which folds `(tile - base) *
 DEPTH_PER_TILE + priority_z` into one ordering key. `priority_z` is `z` bent
 by object-kind-specific adjustments — ground averages its four corners and
-subtracts 2 ([`land_priority_z`](../crates/client/render/src/depth.rs),
+subtracts 2 ([`land_priority_z`](../../../crates/client/render/src/depth.rs),
 `depth.rs:104`), a static shifts ±1 by two tiledata flags
-([`static_priority_z`](../crates/client/render/src/depth.rs), `depth.rs:129`),
-a mobile adds 1 ([`mobile_priority_z`](../crates/client/render/src/depth.rs),
+([`static_priority_z`](../../../crates/client/render/src/depth.rs), `depth.rs:129`),
+a mobile adds 1 ([`mobile_priority_z`](../../../crates/client/render/src/depth.rs),
 `depth.rs:149`) — so two different world heights can fold to the same key
 (`depth::tests::priority_z_can_collide_for_two_different_world_heights`,
 `depth.rs:236`, pins a flat static at `z=5` and a wall at `z=4` producing the
@@ -81,13 +81,13 @@ be reconstructed from.
 
 ## Kind and Stance
 
-[`Kind`](../crates/client/render/src/place.rs) (`place.rs:69-85`) is two bits:
+[`Kind`](../../../crates/client/render/src/place.rs) (`place.rs:69-85`) is two bits:
 `Nothing = 0`, `Land = 1`, `Static = 2` (also a server-dropped ground item),
 `Mobile = 3` (also a worn layer). It selects which per-kind storage buffer the
 id addresses (see below) and, for `KIND_LAND`, tells `blit.wesl` to zero the
 shading normal — land carries no facing.
 
-[`Stance`](../crates/client/render/src/place.rs) (`place.rs:134-179`) is four
+[`Stance`](../../../crates/client/render/src/place.rs) (`place.rs:134-179`) is four
 bits, ten values: `Upright = 0` (nothing known about which way it faces —
 a tree, a body, a wall the art did not name an edge for), `Flat = 1` (a
 floor, a rug, a road, and — since the fix below — land), `FaceNorth`/
@@ -118,7 +118,7 @@ alone.
 
 ## `pack_place`
 
-[`place_format.wesl`](../crates/client/render/src/shaders/place_format.wesl)
+[`place_format.wesl`](../../../crates/client/render/src/shaders/place_format.wesl)
 carries the shift/mask constants and one packing function, shared by
 `ground.wesl`, `statics.wesl` and `mesh_face.wesl` — the alternative, one
 hand-built `vec4<u32>` literal per file, is what let one producer
@@ -242,9 +242,9 @@ per fragment (see the `Stance` arithmetic above). What the attachment could
 not do before was address the two halves separately: both wrote one shared
 id.
 
-[`SpriteQuad::twin`](../crates/client/render/src/sprite.rs) (`sprite.rs:60`)
+[`SpriteQuad::twin`](../../../crates/client/render/src/sprite.rs) (`sprite.rs:60`)
 is the fix: for a row with a corner stance,
-[`split_corners`](../crates/client/render/src/sprite.rs) (`sprite.rs:161`)
+[`split_corners`](../../../crates/client/render/src/sprite.rs) (`sprite.rs:161`)
 appends a second, undrawn row past the frame's real instances, sharing the
 same tile, and sets the drawn row's `twin` to point at it. `statics.wesl`'s
 existing `across > 0.0` test — the same test that already resolves which
@@ -254,7 +254,7 @@ A wall's sprite has one relevant face and one id, unchanged.
 
 `split_corners` runs on the **merged** list of map statics and
 server-dropped items, at the call site in
-[`crates/client/app/src/lib.rs:4464`](../crates/client/app/src/lib.rs), after
+[`crates/client/app/src/lib.rs:4464`](../../../crates/client/app/src/lib.rs), after
 both are collected and appended — an item can carry a corner `Stance` the
 same way a map static can (both go through the same placement arithmetic),
 so running it only over map statics would leave a corner-shaped item's two
@@ -269,7 +269,7 @@ honest, axis-aligned surface — a top's normal is `[0, 0, 1]`, a riser's is
 the climb direction's own outward normal, neither blended nor derived from a
 neighbour.
 
-**Geometry.** [`crate::mesh`](../crates/client/render/src/mesh.rs) is a
+**Geometry.** [`crate::mesh`](../../../crates/client/render/src/mesh.rs) is a
 small, producer-agnostic abstraction: `Face` (`mesh.rs:39`) is up to
 `MAX_FACE_VERTICES` `= 4` (`mesh.rs:21`) corners in ring order plus a unit
 normal; `Mesh` (`mesh.rs:97`) is a fixed-capacity list of up to
@@ -277,7 +277,7 @@ normal; `Mesh` (`mesh.rs:97`) is a fixed-capacity list of up to
 `facing.rs:1377`) faces. `Face::fan` (`mesh.rs:83`) triangulates a
 four-corner face as `0,1,2,0,2,3`.
 
-[`Prism::mesh`](../crates/client/render/src/facing.rs) (`facing.rs:1205`)
+[`Prism::mesh`](../../../crates/client/render/src/facing.rs) (`facing.rs:1205`)
 builds one `Mesh` per climbable, prism-fit static: a flat top per tread at
 its own real height, and a riser between it and the tread (or the static's
 own base) before it, facing `[-ox, -oy, 0]` for the climb direction's
@@ -344,7 +344,7 @@ and, on seeing it, reads `mesh_instances[id]` (a `MeshFaceRow`: tile +
 the face's *real* stance) instead of `face_instances[id]`. The real stance
 is always one of `Flat`/`FaceNorth`/`FaceEast`/`FaceSouth`/`FaceWest`,
 because `Prism::mesh` only ever produces those five exact normals today;
-[`Stance::of_normal`](../crates/client/render/src/place.rs) (`place.rs:249`)
+[`Stance::of_normal`](../../../crates/client/render/src/place.rs) (`place.rs:249`)
 recovers the stance from a `[f32; 3]` normal for exactly that closed set,
 pinned by `place::tests::of_normal_recovers_every_stance_prism_mesh_can_produce`.
 `blit.wesl`'s existing `outward(stance)` then gives the normal unchanged —
@@ -352,7 +352,7 @@ no packed general-vector encoding exists or is needed for these five.
 
 **Collection.** Both map statics (`statics.rs`'s `push_mesh`/`collect`) and
 server-dropped ground items
-([`items.rs:104-153`](../crates/client/render/src/items.rs)) build mesh
+([`items.rs:104-153`](../../../crates/client/render/src/items.rs)) build mesh
 vertices and rows for any placement carrying `Placed::prism` — a climbable
 item gets the same honest mesh a climbable map static does. Both lists are
 merged before `MeshFaceRenderer::render` runs once over the combined set
@@ -365,9 +365,9 @@ The render-side decomposition above has an occlusion-grid twin:
 (`occlusion.rs:1524`, the decomposed case at `occlusion.rs:1569-1610`)
 pushes two `Solid`s per tread instead of one whole-tile body — a
 zero-height lid at the tread's own top
-([`Solid::tread_top_box_of`](../crates/client/render/src/occlusion.rs),
+([`Solid::tread_top_box_of`](../../../crates/client/render/src/occlusion.rs),
 `occlusion.rs:791`) and a panel spanning the rise from the tread before it
-([`Solid::tread_riser_box_of`](../crates/client/render/src/occlusion.rs),
+([`Solid::tread_riser_box_of`](../../../crates/client/render/src/occlusion.rs),
 `occlusion.rs:832`), its edge named `opposite(edge_of(up))` the same way an
 ordinary named-edge wall panel's is. Both box constructors share
 `Solid::strip_footprint` (`occlusion.rs:892`) for the climb-axis footprint
@@ -391,7 +391,7 @@ records:
 
 1. **Is this pixel the selected object?** Answered by a mask: a separate,
    tiny silhouette draw
-   ([`SpriteRenderer::render_mask`](../crates/client/render/src/renderer.rs),
+   ([`SpriteRenderer::render_mask`](../../../crates/client/render/src/renderer.rs),
    `renderer.rs:1158`) with its own instance numbering starting at zero, not
    a second use of the world pass's ids. A pixel's `place` id can never be
    compared against "the picked object's own id" — there is no shared id

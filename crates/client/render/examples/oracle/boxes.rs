@@ -34,7 +34,7 @@ pub struct BoxSpec {
     /// neighbours that share an `Owner`, so a scene where every box is its own
     /// graphic is a scene where nothing merges *ever* — which is what every
     /// scene here was, and it left the reference tracer blind to the merge (the
-    /// blind spot `docs/occluders.md` records under § *The merge*). A run of one
+    /// blind spot `docs/render/design_occluders.md` records under § *The merge*). A run of one
     /// wall says so here, in one number, and the scenes that want distinct boxes
     /// say that just as explicitly.
     pub graphic: u16,

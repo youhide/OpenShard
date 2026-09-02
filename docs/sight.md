@@ -49,7 +49,7 @@ a vendor deciding whether it can see the customer
 **D1 — The trace is the rule, and the boolean is a reading of it.** Not a second
 walk beside the first. `sight_clear` becomes `trace(...).clear()`, one loop, one
 set of thresholds. A diagnostic assembled separately would be a picture of a
-different ray, which is [`docs/parity.md`](parity.md)'s standing complaint about
+different ray, which is [`docs/parity.md`](render/design_frame_assembly.md)'s standing complaint about
 this codebase's seven ways of assembling one frame — and here the drift would be
 invisible, since a wrong overlay looks exactly like a right one.
 

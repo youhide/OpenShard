@@ -1,5 +1,5 @@
-//! **S5 — the frame gate.** `docs/footprints.md`: the bookcase pair
-//! `docs/parity.md`'s "shard's own furniture" names — `0x0A97` at
+//! **S5 — the frame gate.** `docs/render/design_footprints.md`: the bookcase pair
+//! `docs/render/design_frame_assembly.md`'s "shard's own furniture" names — `0x0A97` at
 //! `(1505, 1656)` and `0x0A98` at `(1506, 1656)`, both `z = 27` — asserting the
 //! lid shrinks to the measured slab, with the whole tile as the injection that
 //! must go red.
@@ -93,7 +93,7 @@ use openshard_uofiles::art::Art;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::texmaps::TexMaps;
 
-/// The pair `docs/parity.md`'s "shard's own furniture" section names by their
+/// The pair `docs/render/design_frame_assembly.md`'s "shard's own furniture" section names by their
 /// real placement — `0x0A97`/`0x0A98` at `(1505, 1656)`/`(1506, 1656)`, both
 /// `z = 27`.
 const BOOKCASES: [(u16, u16, u16); 2] = [(0x0A97, 1505, 1656), (0x0A98, 1506, 1656)];
@@ -136,7 +136,7 @@ fn a_bookcases_measured_slab_is_narrower_than_the_whole_tile_and_a_lost_footprin
         assert!(
             shape.footprint.is_some(),
             "{id:#06X} is not the case this gate is about — `Shape::of` gave it no footprint, so \
-             `docs/footprints.md`'s S5 fixture is naming the wrong graphic",
+             `docs/render/design_footprints.md`'s S5 fixture is naming the wrong graphic",
         );
         let tile = tiledata.static_tile(id);
 

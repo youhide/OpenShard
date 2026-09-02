@@ -248,7 +248,7 @@ measures a client's art once, off the clock, so the renderer reads a table
 instead of guessing; `pathtrace` is a reference Monte Carlo path tracer whose
 only job is to be a third opinion about a scene the renderer already drew. The
 lighting engine is mid-rebuild — deferred shading, art as albedo, shadows by
-primitive identity — and [`docs/lighting_state.md`](docs/lighting_state.md) is
+primitive identity — and [`render/README.md`](docs/render/README.md) is
 the one page that says where it actually stands rather than where it is going.
 
 **Where this is honestly unsettled.** @enomado has written that he does not see

@@ -5,7 +5,7 @@
 //! silhouette names. Some are what is left when the art would not say: a whole
 //! tile, standing in for a shape nobody has. And some belong to pictures the
 //! grid holds *nothing* for, which are given a box for the impostor anyway
-//! (`docs/lighting_rebuild.md` phase 6c's deliberate fallback) — a point of no
+//! (`docs/render/design_model.md` phase 6c's deliberate fallback) — a point of no
 //! primitive with a measured face, which is where several defects on that
 //! document's backlog came from.
 //!
@@ -38,11 +38,11 @@ enum Claim {
     /// `boxes_of` argues for by name.
     WholeTileClimbable,
     /// A body the art named no edge for, narrowed to the horizontal box its own
-    /// base edge measured — `docs/footprints.md`'s S3. The height is still
+    /// base edge measured — `docs/render/design_footprints.md`'s S3. The height is still
     /// whatever `tiledata` gives, unmeasured: D1's other half.
     Footprint,
     /// A lid: the whole tile across, `LID_THICKNESS` deep. Measured, and a body
-    /// like every other since `docs/parity.md`'s P4 step 1 — it has side faces
+    /// like every other since `docs/render/design_frame_assembly.md`'s P4 step 1 — it has side faces
     /// with area and an interior a ray can be inside of. The one number it does
     /// not measure is that depth, which is `occlusion::LID_THICKNESS` — argued
     /// from the wire's resolution and the screen's, not from the art.
@@ -160,7 +160,7 @@ fn main() {
                     // The combination that produced this session's specks: no
                     // name in the grid, and a box with side faces to be met on.
                     // **Deeper than the invented minimum, not merely non-flat.**
-                    // Since `docs/parity.md`'s P4 step 1 a lid is a box too, one
+                    // Since `docs/render/design_frame_assembly.md`'s P4 step 1 a lid is a box too, one
                     // `LID_THICKNESS` deep — a quarter of a real pixel at the
                     // deepest zoom — so `min.z != max.z` would now be true of
                     // every floor in the world and this share would jump without

@@ -50,7 +50,7 @@ answer: where the code lives. A topic is a subsystem with a canon of its own.
 | `housing/` | `server/housing`, boats | not migrated |
 | `npc/` | `server/npc`, `ai`, `quests`, `guilds`, chat | not migrated |
 | `client/` | `client/net`, `client/model`, `client/app` | not migrated |
-| `render/` | `client/render`, `client/artscan`, `client/pathtrace` | not migrated |
+| [`render/`](render/README.md) | `client/render`, `client/artscan`, `client/pathtrace` | **migrated** — twelve superseded documents in [`archive/render/`](archive/render/README.md) |
 
 `render` is a domain separate from `client` on purpose: it is the majority of
 this corpus by volume and it has an oracle of its own.

@@ -928,7 +928,7 @@ fn node_key(at: Point) -> PathNodeKey {
 /// the click carried — a table's top is 26 and the art the cursor hit is at 20.
 /// Resolving once, where the order is taken, is what keeps that test and this
 /// search agreeing; resolving it a second way would be the second policy
-/// [`parity.md`](../../../../docs/parity.md) is about. Idempotent, so a place that
+/// [`design_frame_assembly.md`](../../../../docs/render/design_frame_assembly.md) is about. Idempotent, so a place that
 /// has already been through here goes through again unchanged.
 #[must_use]
 pub fn destination_place(footing: &Footing<'_>, from: Point, to: Point) -> Point {

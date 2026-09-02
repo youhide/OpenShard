@@ -6,7 +6,7 @@
 //! renderer whose output nothing predicts is a renderer whose defects are only
 //! ever noticed by eye.
 //!
-//! `docs/lighting_rebuild.md` phase 1 states why the pipeline changed at all:
+//! `docs/render/design_model.md` phase 1 states why the pipeline changed at all:
 //! multiplying stored sRGB bytes by a light value computes an arithmetic that
 //! cannot be right or wrong about anything, because a file's `128` is not half
 //! of its `255`. Light is a quantity; the bytes are not.

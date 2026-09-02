@@ -1,4 +1,4 @@
-//! **P3 — the gate.** `docs/parity.md`: one real place, assembled twice — once
+//! **P3 — the gate.** `docs/render/design_frame_assembly.md`: one real place, assembled twice — once
 //! the client's way (statics off the map, through [`crate::statics::collect`])
 //! and once the tool's way (statics pulled into [`GroundItem`]s and drawn
 //! through [`crate::items::collect`]) — and the G-buffer compared plane by
@@ -97,7 +97,7 @@ use openshard_uofiles::art::Art;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::texmaps::TexMaps;
 
-/// Three real places with a house on them, named in `docs/parity.md` itself:
+/// Three real places with a house on them, named in `docs/render/design_frame_assembly.md` itself:
 /// the corner `tests/dump.rs` already dumps, the stair corner phase 6 was
 /// built against, and the cabinet the shard reader's own entry is about.
 /// Chosen for a lit pixel too (backlog: "a gate laid on a frame with no flame
@@ -124,7 +124,7 @@ const PLACES: [Point; 3] = [
 
 const VIEWPORT: (u32, u32) = (900, 700);
 
-/// The same viewport one pixel wider and one taller — `docs/parity.md` P5's G2.
+/// The same viewport one pixel wider and one taller — `docs/render/design_frame_assembly.md` P5's G2.
 ///
 /// Every picture this repository has ever compared has been drawn on an even
 /// extent, by unanimous accident and never by a decision, and the client's own
@@ -220,7 +220,7 @@ fn pull_map_statics(real: &WorldMap, camera: &Camera, tuning: &Tuning) -> Vec<Gr
 }
 
 /// Everything one drawn frame leaves behind — [`tests/dump.rs`]'s own `Drawn`,
-/// one copy per `docs/parity.md`'s own backlog item about the GPU test
+/// one copy per `docs/render/design_frame_assembly.md`'s own backlog item about the GPU test
 /// scaffolding every file here keeps separately.
 struct Drawn {
     world:    wgpu::Texture,
@@ -416,7 +416,7 @@ fn dump_all_planes(
 /// **How many distinct colours a plane holds where something was drawn** — the
 /// one number that says whether a count of zero differing pixels is evidence.
 ///
-/// `docs/parity.md`'s own backlog: five planes came back `0 of 630,000` from a
+/// `docs/render/design_frame_assembly.md`'s own backlog: five planes came back `0 of 630,000` from a
 /// positive control that reddened nine others, and the entry recorded two
 /// readings of it — either they are blind to a difference that large, or they
 /// are not drawn from the frame under test at all. Measuring says a third
@@ -447,7 +447,7 @@ fn plane_colours(pixels: &[u8]) -> usize {
 /// blue at every pixel. **Listed and not tolerated** — D6 says an input that
 /// differs is set the same or the case is not gated, and the same sentence
 /// read from the other end says a plane the inputs flatten is not gated
-/// either. What varying it would cost is `docs/parity.md`'s backlog.
+/// either. What varying it would cost is `docs/render/design_frame_assembly.md`'s backlog.
 const CONSTANT_BY_CONSTRUCTION: [View; 1] = [View::Sun];
 
 /// How many pixels of two same-sized RGBA8 buffers disagree.
@@ -555,7 +555,7 @@ fn gate_at(
         .collect()
 }
 
-/// The client's own files, loaded once: `docs/parity.md`'s P3 is a comparison,
+/// The client's own files, loaded once: `docs/render/design_frame_assembly.md`'s P3 is a comparison,
 /// not a load, and every place gated here reads the same tables.
 struct Client {
     dir:           PathBuf,
@@ -590,7 +590,7 @@ fn load(dir: PathBuf) -> Client {
 }
 
 /// **Done when it is green at three places with a house on them** —
-/// `docs/parity.md` P3's own words. `map: &WorldMap` reached through
+/// `docs/render/design_frame_assembly.md` P3's own words. `map: &WorldMap` reached through
 /// `statics::collect` and `items: &[GroundItem]` reached through
 /// `items::collect` are D1's two routes into one assembly; this is the gate
 /// that they draw the same thing, not only that they are called the same way.
@@ -649,7 +649,7 @@ fn the_map_route_and_the_item_route_agree_pixel_for_pixel_at_three_real_places()
 }
 
 /// **A frame drawn at an odd extent is the even one with a column added, not the
-/// even one shifted half a pixel** — `docs/parity.md` P5's G2, and the gate the
+/// even one shifted half a pixel** — `docs/render/design_frame_assembly.md` P5's G2, and the gate the
 /// window-parity repair itself is held by.
 ///
 /// Everything upstream of the shader's last line is *identical* between a
@@ -775,7 +775,7 @@ fn a_frame_at_an_odd_extent_is_the_even_one_with_a_column_added() {
             0,
             "the {} plane differs in {differing} of {} shared pixels between a {}x{} frame and a \
              {}x{} one — the world is centred differently at the two parities, which is \
-             docs/parity.md's window-parity entry",
+             docs/render/design_frame_assembly.md's window-parity entry",
             view.name(),
             VIEWPORT.0 * VIEWPORT.1,
             VIEWPORT.0,

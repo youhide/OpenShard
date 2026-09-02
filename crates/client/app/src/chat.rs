@@ -186,7 +186,7 @@ pub(crate) fn room_above(canvas_height: i32, line_height: i32) -> usize {
 /// `M` height and the speech role's fractional bitmap scale; a TrueType face uses its
 /// measured ascent/descent/line-gap at [`desk::FontSizes::speech`].  Both are
 /// real rows, not nominal raster sizes, so changing a face cannot make the
-/// pointer and the rendered chat disagree. See `docs/text_sizes.md`.
+/// pointer and the rendered chat disagree. See `docs/render/design_text_sizes.md`.
 ///
 /// A function and not a line inside the draw, for [`channel_width`]'s reason:
 /// the pointer has to land on the same row the frame drew.
@@ -268,7 +268,7 @@ fn at_chat_origin(box_: Scissor, origin: GumpPixel) -> Scissor {
 /// How wide the widest channel's name is drawn, in gump pixels.
 ///
 /// **The one measurement the channel button's box is built from**, and it is a
-/// function rather than a number for `docs/parity.md`'s reason: the frame that
+/// function rather than a number for `docs/render/design_frame_assembly.md`'s reason: the frame that
 /// draws the button and the click that lands on it are two places, and a box
 /// they each worked out for themselves would agree by coincidence. They call
 /// this instead.
@@ -776,7 +776,7 @@ impl crate::app::App {
     /// `presentation.rs`), so a click that lands on both belongs to whatever is
     /// on top, and that is this. A button drawn over a container and picked
     /// under it would be the pointer disagreeing with the picture, which is
-    /// `docs/parity.md`'s defect in the one place a player can feel it.
+    /// `docs/render/design_frame_assembly.md`'s defect in the one place a player can feel it.
     ///
     /// The box comes out of [`channel_button`] and [`channel_width`], the same
     /// two the frame draws it with, so the two cannot disagree about where it

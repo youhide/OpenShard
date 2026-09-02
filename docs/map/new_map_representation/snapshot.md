@@ -107,7 +107,7 @@ later direction can fix it.
 the same value under two names — an 8×8 map block's coordinate — and become
 `BlockCoord`. `RadarChunkCoord` does **not**: a radar chunk is 64 tiles square
 (`BASE_CHUNK_TILES`), so it addresses a different grid, and collapsing the two
-is exactly the confusion [`pixels.md`](../../pixels.md) exists to prevent.
+is exactly the confusion [`pixels.md`](../../render/design_pixel_spaces.md) exists to prevent.
 
 **`BlockIndex` and `CellIndex` have private fields and an accessor**, unlike
 `LandTile(pub u16)`. They are *derived* values: a caller constructing one by

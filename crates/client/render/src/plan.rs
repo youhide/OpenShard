@@ -48,7 +48,7 @@ use crate::occlusion::{
 /// not a theoretical gap: [`elevation`] stamped
 /// [`occlusion::OwnerId::NONE`] into every row it built for three phases, with
 /// two green tests drawn through it the whole time, because the one field that
-/// was wrong is the one no pixel shows. `docs/lighting_rebuild.md`'s backlog
+/// was wrong is the one no pixel shows. `docs/render/design_model.md`'s backlog
 /// asks for a gate on it, and a gate needs the claim in a form it can read.
 ///
 /// One of these per row [`drawn`] builds — that is, one per distinct tile of
@@ -196,7 +196,7 @@ impl Picture {
     ///
     /// This is the half of the instrument that says *why*. A dark wedge in a pool
     /// is a bug or a wall, and the two look the same until the wall is drawn on
-    /// top of it — which is the same argument `docs/lighting.md`'s step 14 makes
+    /// top of it — which is the same argument `docs/archive/render/lighting.md`'s step 14 makes
     /// for the occluder boxes in the client, arriving where the picture is a plan
     /// and a panel is a line rather than a projected box.
     pub fn mark(&mut self, lighting: &Lighting) {
@@ -413,7 +413,7 @@ pub fn elevation(
     // that is a point of nothing: exempt from nothing, shadowed by its own panel.
     // What stood in for the exemption was `light::same_run`'s row arithmetic, and
     // that is the whole reason that function still reads as load-bearing.
-    // `docs/lighting_rebuild.md`'s backlog, the same finding as the two fixtures in
+    // `docs/render/design_model.md`'s backlog, the same finding as the two fixtures in
     // `tests/lighting.rs` that never called `Spot::part_of`.
     //
     // **The owner is the row's now and no more than that**: the shader stopped
@@ -466,7 +466,7 @@ pub fn elevation(
             // fraction and the tile's: this picture's whole vertical axis *is*
             // height down a face, so a packing that rounded it to whole units — as
             // this closure did, with its own copy of the format — drew the one-unit
-            // treads `docs/lighting_height.md` is about, in the instrument meant to
+            // treads `docs/archive/render/lighting_height.md` is about, in the instrument meant to
             // show them. An instrument that does not write what the world pass
             // writes answers about itself.
             crate::gbuffer::Fragment {
@@ -587,7 +587,7 @@ fn drawn(
     // here it is a row number, and a row number cannot be handed out until every
     // fragment that wants one has been seen. So the closure describes surfaces
     // by their tile and the two loops below turn tiles into rows —
-    // `docs/gbuffer.md` step 3 for a static, step 7 for the ground, both of
+    // `docs/archive/render/gbuffer.md` step 3 for a static, step 7 for the ground, both of
     // which moved a tile out of the attachment and into an instance buffer this
     // function has to build itself, the same as a real world pass would have.
     let fragments: Vec<crate::gbuffer::Fragment> = (0..height)

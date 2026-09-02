@@ -1,7 +1,7 @@
 //! **What the server put in the world, which no client file knows about.**
 //!
 //! A scene tool that reads `map0LegacyMUL.uop` and `statics.mul` sees the
-//! shard's *art* and none of its *furniture*. `docs/parity.md`'s first backlog
+//! shard's *art* and none of its *furniture*. `docs/render/design_frame_assembly.md`'s first backlog
 //! entry is what that costs: a person asked about a cabinet they could see at
 //! Britain's `(1504, 1655)`, and `tile_probe`, `onsite.rs`, `geometry_census.rs`
 //! and `isolated_scene.rs` all agreed there was no cabinet there — because the

@@ -16,7 +16,7 @@ description = "The client binary: a window, a surface, and a camera over the map
 openshard-client-render.workspace = true
 openshard-client-editor.workspace = true
 # What was measured off the art before the client started, and the reader for it.
-# The measurement itself is not this binary's: `docs/lighting.md`'s decision 31
+# The measurement itself is not this binary's: `docs/archive/render/lighting.md`'s decision 31
 # moves it into a tool with a budget of a minute, and what is left here is a file
 # to look for and a log line when there is none.
 openshard-client-artscan.workspace = true

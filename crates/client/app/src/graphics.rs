@@ -4,7 +4,7 @@
 //! function key, read by `App::draw` and `App::hud`, and none of it a fact
 //! about the world itself: the world is walked identically whichever of these
 //! is set. Pulled out of [`crate::App`] for that reason, the same one
-//! `docs/lighting.md` decision 8 gives for keeping `light_view` "beside
+//! `docs/archive/render/lighting.md` decision 8 gives for keeping `light_view` "beside
 //! `night` rather than inside the renderer".
 
 use std::path::PathBuf;
@@ -150,7 +150,7 @@ pub struct GraphicsSettings {
     /// is, which is the whole reason it is a key: two of the three states are
     /// answers this renderer measured and refused, and what a refusal on this
     /// track answers to is a person looking at two pictures of one instant.
-    /// `docs/lighting_state.md`'s fringe entry carries the numbers, and
+    /// `docs/render/README.md`'s fringe entry carries the numbers, and
     /// `OPENSHARD_FRINGE` is the same switch for a run that starts in one state.
     pub fringe: Fringe,
     /// Whether a tile's ambient depends on how much of the sky its column can
@@ -158,7 +158,7 @@ pub struct GraphicsSettings {
     /// burns. Toggled with F6.
     ///
     /// **Off by default**, and that is a decision rather than an oversight. The
-    /// sky field is a plan of its own — `docs/lighting_world.md` — and what it
+    /// sky field is a plan of its own — `docs/archive/render/lighting_world.md` — and what it
     /// does is change the ambient of every tile in the frame, which is exactly
     /// the thing that must hold still while the pools of the point lights are
     /// being judged. A torch that looks wrong indoors is otherwise two questions
@@ -172,7 +172,7 @@ pub struct GraphicsSettings {
     /// Off by default, and that is not shyness: the sun's ray is walked for
     /// *every* ground pixel of a daylit frame, where firelight is walked only
     /// inside a pool. Until there is a measurement on Britain at the widest zoom
-    /// — step 6 of `docs/lighting.md`, which is still open — the sky is a key
+    /// — step 6 of `docs/archive/render/lighting.md`, which is still open — the sky is a key
     /// somebody turns on rather than a cost every frame pays.
     pub sunlit: bool,
     /// Whether the player is carrying a light: a torch in the hand, throwing a
@@ -197,7 +197,7 @@ pub struct GraphicsSettings {
     /// Beside `night` rather than inside the renderer because it is a property of
     /// the person looking: the world is walked identically whichever view is on,
     /// and the field is written onto the frame's `Lighting` on its way to the
-    /// blit. `docs/lighting.md`, decision 8.
+    /// blit. `docs/archive/render/lighting.md`, decision 8.
     pub light_view: View,
     /// Which of the world's producers this client is drawing — the World tab's
     /// own boxes, and [`frame::Draw::EVERYTHING`] until somebody unticks one.
@@ -211,7 +211,7 @@ pub struct GraphicsSettings {
     pub drawing: frame::Draw,
     /// Where the next frame writes itself out, when somebody has pressed F12.
     ///
-    /// **`docs/parity.md`'s first backlog item.** The tools could always dump a
+    /// **`docs/render/design_frame_assembly.md`'s first backlog item.** The tools could always dump a
     /// picture and the client — the thing that is actually broken — could dump
     /// nothing, so every artefact a person reported was *searched for* in a
     /// tool's frame rather than compared against this one's. A defect visible in
@@ -272,14 +272,14 @@ pub struct GraphicsSettings {
     /// The person's non-persistent Auto/Manual floor choice.
     pub floor_view: FloorView,
     /// Whether the HUD is drawing the lighting's occlusion grid as boxes — see
-    /// `shell::draw_occluders` and `docs/lighting.md`, step 14.
+    /// `shell::draw_occluders` and `docs/archive/render/lighting.md`, step 14.
     ///
     /// Off by default and paid for only while it is on, like the terrain
     /// overlay: the grid is a second walk of the map's statics over the same
     /// bounds the frame's lighting walks a moment later.
     pub show_occluders: bool,
     /// Whether the HUD is drawing the same grid as *solids* — decision 39 and
-    /// step 23.0 of `docs/lighting.md`, and `shell::draw_solids`.
+    /// step 23.0 of `docs/archive/render/lighting.md`, and `shell::draw_solids`.
     ///
     /// Beside the wireframe rather than instead of it, and that is the design: a
     /// solid hides what stands behind it and a wireframe shows it, so the two
@@ -327,7 +327,7 @@ pub struct GraphicsSettings {
     /// The half of that pair that reached the target.
     pub solids_drawn: usize,
     /// The blocks of the occlusion grid built for earlier frames — see
-    /// [`occlusion::bake`] and `docs/lighting.md`'s step 21.5.
+    /// [`occlusion::bake`] and `docs/archive/render/lighting.md`'s step 21.5.
     ///
     /// Owned by the app because it is the app that has more than one frame. It
     /// is one map's, and this client has one map; a second facet would want a

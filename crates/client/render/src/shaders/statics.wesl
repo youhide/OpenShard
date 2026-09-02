@@ -8,7 +8,7 @@
 // the fragment shader discards on alpha.
 //
 // **The picture is the artist's and the geometry is ours.**
-// `docs/lighting_rebuild.md` phase 6: where a fragment *is* and which way its
+// `docs/render/design_model.md` phase 6: where a fragment *is* and which way its
 // surface looks are not guessed back from the stance the art was read as — they
 // are found by meeting this pixel's own view ray with the boxes the occlusion
 // grid holds for **this instance**. See `package::impostor` for the meeting and
@@ -20,7 +20,7 @@
 // Vertex-buffer instancing, one uniform block, one sampled texture and one
 // storage buffer — which the header once said was kept out for WebGL2's ceiling,
 // a stale objection: the crate's ceiling is **WebGPU** (see `crate` docs, and
-// `docs/lighting.md` decision 30.5) and `blit.wgsl` beside this reads eleven of
+// `docs/archive/render/lighting.md` decision 30.5) and `blit.wgsl` beside this reads eleven of
 // them.
 //
 // The depth comes in per instance and is written whole. It is not derived here
@@ -99,7 +99,7 @@ struct Volume {
 // **What it means is that the art named none of them.** `edges_of(None)` is
 // where it comes from, and nowhere else: a thing that stands up whose facing the
 // silhouette detector would not say. A literal here and pinned from this source
-// by `grids.rs` — `docs/pixels.md` rule 6 — because there is no compiler on
+// by `grids.rs` — `docs/render/design_pixel_spaces.md` rule 6 — because there is no compiler on
 // either side of this wire.
 //
 // **A climbable's treads used to be in that set and are not.** They were,
@@ -144,11 +144,11 @@ struct VertexOut {
     // This instance's own index — what the attachment now carries in place of
     // `x`/`y`, and what `blit.wgsl` looks up in its own copy of this pass's
     // instance buffer, bound a second time as storage. See
-    // `docs/gbuffer.md` decision 2 and step 3.
+    // `docs/archive/render/gbuffer.md` decision 2 and step 3.
     @location(7) @interpolate(flat) id: u32,
     // The row of this instance's other face, for a corner — `0` and unread
     // for anything else. See `crate::sprite::SpriteQuad::twin` and
-    // `docs/gbuffer.md` step 4.
+    // `docs/archive/render/gbuffer.md` step 4.
     @location(8) @interpolate(flat) twin: u32,
     // Which run of `volumes` is this instance's own: `(offset, count)`, and
     // `(_, 0)` for a picture the grid holds no shape for. See
@@ -197,7 +197,7 @@ const HALF_TILE_HEIGHT: f32 = 22.0;
 // `blit.wesl` wants the second — `lit_plane` is a plane, and a plane the
 // fragment is not in is the wrong one to excuse a candidate against.
 //
-// `docs/lighting_rebuild.md` phase 6g. What made this visible is 6d taking the
+// `docs/render/design_model.md` phase 6g. What made this visible is 6d taking the
 // mesh pass — whose rows carried an honest per-face stance — off real statics:
 // a flight of steps is read as a **corner** by the silhouette detector (see
 // `occlusion::boxes_of`, which says why), so every pixel of a stair tread was
@@ -299,7 +299,7 @@ const NEIGHBOURS: array<vec2<f32>, 4> = array<vec2<f32>, 4>(
 // the sampler is `nearest`, so one texel is `Projection::scale` real pixels
 // square and the art's outline *cannot* step more finely than that. At `4x` the
 // band this marks is four real pixels wide, which is exactly the stair a person
-// sees. `docs/silhouettes.md`.
+// sees. `docs/render/design_silhouettes.md`.
 //
 // Off the end of the sprite's own rectangle counts as an edge. The atlas packs
 // other graphics against this one, so the neighbour texel there belongs to a
@@ -528,9 +528,9 @@ fn fs_main(in: VertexOut) -> FragmentOut {
     // impostor does pick between them for the *normal*, so a fragment could name
     // its own panel outright. What stops it is the id — the left half takes
     // `in.twin`, the row `split_corners` appended, and the box carries no row
-    // number to choose one by. See `docs/lighting_rebuild.md` phase 6c.
+    // number to choose one by. See `docs/render/design_model.md` phase 6c.
     // A corner's two faces need two ids, not one shared between them — see
-    // `docs/gbuffer.md` decision 3 and step 4. The right half (`across > 0.0`)
+    // `docs/archive/render/gbuffer.md` decision 3 and step 4. The right half (`across > 0.0`)
     // keeps this instance's own id; the left half takes `in.twin`, the row
     // `crate::sprite::split_corners` appended for exactly this face. Every
     // other stance never reaches the branch that changes it.
@@ -572,7 +572,7 @@ fn fs_main(in: VertexOut) -> FragmentOut {
     // Neither has a facing at all, which is what `Stance::Upright` has always
     // meant and is what phase 7's own open question is about.
     //
-    // A **mobile** has no volume *by construction*: `docs/lighting_rebuild.md`
+    // A **mobile** has no volume *by construction*: `docs/render/design_model.md`
     // says so in as many words — "a billboard is no volume, so it casts nothing"
     // — and nothing is ever going to measure one. So it is a billboard, and a
     // billboard is a **plane**: the sprite is drawn on a vertical plane through
@@ -608,7 +608,7 @@ fn fs_main(in: VertexOut) -> FragmentOut {
         at = billboard_at(tile + billboard_offset(in.twin), base, across, down);
     }
     // **A billboard's normal is the plane's own, not the zero vector.**
-    // `docs/lighting_rebuild.md` phase 7: a mobile has no volume for `meets` to
+    // `docs/render/design_model.md` phase 7: a mobile has no volume for `meets` to
     // land on, so before this it fell into the same branch as a static missing
     // a *measurement* (below) and read as lit from every side — flat across a
     // figure, since nothing about the light could then vary along a row. A
@@ -629,7 +629,7 @@ fn fs_main(in: VertexOut) -> FragmentOut {
     var mine = SOLID_NOBODY;
     // **The two edges this frame draws, at their two resolutions** — the art's
     // alpha at one *texel* a step, the box's rim at one *fragment* a step.
-    // `docs/silhouettes.md` phase Z1, and `place_format.wesl` carries the account
+    // `docs/render/design_silhouettes.md` phase Z1, and `place_format.wesl` carries the account
     // of what each one is and why this pass is the only place either can be
     // measured.
     //
@@ -657,7 +657,7 @@ fn fs_main(in: VertexOut) -> FragmentOut {
         // This decision has been reversed three times and each reason is worth
         // keeping, because the third is the two earlier ones read together.
         //
-        // `docs/lighting_rebuild.md`'s "One silhouette" clamped a miss onto its
+        // `docs/render/design_model.md`'s "One silhouette" clamped a miss onto its
         // box, and a clamp names whichever face exits first — along a silhouette
         // that is a *side* one, so a lattice of wall-shaded dots appeared on
         // floors and roofs, one per tile corner. `discard` replaced the clamp on
@@ -666,7 +666,7 @@ fn fs_main(in: VertexOut) -> FragmentOut {
         // **That measurement counted the wrong set**: pixels that *changed in
         // one frame with the roof cut*, and a discarded pixel with another
         // static behind it changes nothing. Counted per picture instead —
-        // `examples/discard_census.rs`, `docs/footprints.md`'s S4 — the discard
+        // `examples/discard_census.rs`, `docs/render/design_footprints.md`'s S4 — the discard
         // throws away 11.09% of every panel's art and 32.44% of every whole-tile
         // one. A display case (`0x0B06`) read as a corner of two walls stands as
         // two `PANEL_THICKNESS` panels and its whole top meets neither: it left
@@ -728,7 +728,7 @@ fn fs_main(in: VertexOut) -> FragmentOut {
         // impostor answered its own sprite with has `N · L <= 0` on every
         // visible pixel. And a whole-tile static read **darker and striped**
         // where it used to be even, which is the same claim seen from outside.
-        // `docs/lighting_rebuild.md` phase 6c's own backlog filed the two as one
+        // `docs/render/design_model.md` phase 6c's own backlog filed the two as one
         // finding, and this is the candidate it named: keep the measured normal
         // where the art really does say which way a surface looks, and write
         // none where it does not.
@@ -752,7 +752,7 @@ fn fs_main(in: VertexOut) -> FragmentOut {
         // The box half of the silhouette pair stays behind the `hit`, and that
         // is the one thing here the clamp does not change: the bit marks the rim
         // of the region a box genuinely covers, so a fragment reaching it from
-        // outside is behind that rim rather than on it. `docs/silhouettes.md`.
+        // outside is behind that rim rather than on it. `docs/render/design_silhouettes.md`.
         if hit(best) && box_edge(tile, base, across, down, in.volumes) {
             edges = edges | IDS_EDGE_BOX;
         }
@@ -769,10 +769,10 @@ fn fs_main(in: VertexOut) -> FragmentOut {
     // See `crate::place::Place`.
     //
     // Nothing else rides here. The **tile**'s `x`/`y` went to this pass's own
-    // instance buffer at `docs/gbuffer.md` step 3, read back by `blit.wgsl` as
+    // instance buffer at `docs/archive/render/gbuffer.md` step 3, read back by `blit.wgsl` as
     // `face_instances[id]`, since the whole tile is the same two numbers on
     // every one of a sprite's pixels; the height and the fraction went to the
-    // position plane at `docs/lighting_rebuild.md` phase 2, since both are this
+    // position plane at `docs/render/design_model.md` phase 2, since both are this
     // fragment's own and both were being quantised on the way.
     out.ids = pack_ids(id, stance, (in.place.y >> 8u) & KIND_MASK) | edges;
     // The fourth channel is the solid this fragment is a point of, not a

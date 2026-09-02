@@ -713,7 +713,7 @@ impl App {
     /// really taking, and the red half begins at a shut door — the only thing
     /// the two readings of the ground differ by (see [`steer::Readings`]). A cut
     /// written here for the drawing alone would be a second policy about the
-    /// same question, which `docs/parity.md` is the standing argument against.
+    /// same question, which `docs/render/design_frame_assembly.md` is the standing argument against.
     ///
     /// **One plan per changed route, and only while there is something to
     /// draw.** The walk plans on its own beat — at most once a step, by design,
@@ -738,7 +738,7 @@ impl App {
             // the same static-first rule and the same height — because the
             // preview's whole claim is "this is where clicking here takes you".
             // A second rule here would draw a route to the street under the roof
-            // the cursor is on, which is `docs/parity.md`'s complaint in
+            // the cursor is on, which is `docs/render/design_frame_assembly.md`'s complaint in
             // miniature.
             None => {
                 let tile = hover.filter(|_| self.graphics.show_terrain)?;
@@ -780,7 +780,7 @@ impl App {
             }
         }
         // And the same crowd, for the same reason: the green line a player sees
-        // is the plan itself and not a second opinion about it (`docs/parity.md`),
+        // is the plan itself and not a second opinion about it (`docs/render/design_frame_assembly.md`),
         // so a route drawn through a bystander would be a picture of a walk this
         // client is not going to take.
         let ground = steer::Readings {
@@ -793,7 +793,7 @@ impl App {
             // setting is not: a ghost's route runs through the shut leaf because
             // its step does (`crate::world::walking_doors`). Drawing that route
             // stopped at the door would be a picture of a refusal that is not
-            // going to happen — `docs/parity.md`'s whole complaint.
+            // going to happen — `docs/render/design_frame_assembly.md`'s whole complaint.
             live:   footing(
                 &self.resources,
                 crate::world::walking_doors(self.world.dead(), false),

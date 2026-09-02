@@ -1,7 +1,7 @@
 //! **The shard reader, gated.**
 //!
 //! `examples/shard/mod.rs` is what stops a scene tool from answering "there is
-//! no cabinet there" about a cabinet a player can see (`docs/parity.md`, the
+//! no cabinet there" about a cabinet a player can see (`docs/render/design_frame_assembly.md`, the
 //! shard-furniture section). It reads two tables of a database this crate may
 //! not depend on the writer of, so what can go wrong is a *silent* wrong answer:
 //! a column that has been renamed, a window off by a tile, a `loc_kind` filter

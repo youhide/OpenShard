@@ -63,7 +63,7 @@ pub enum Brdf {
     ///    a body's far side would shadow itself against that same body and the
     ///    model would have no answer anywhere. The engine states it as an
     ///    exemption in its own walk — a fragment's own occluder does not stop
-    ///    the fragment's ray — and `docs/lighting_rebuild.md`'s phase 4
+    ///    the fragment's ray — and `docs/render/design_model.md`'s phase 4
     ///    restates it as identity: a primitive does not shadow itself.
     ///    [`crate::scene::Scene::blocked`]'s `except` is where it lands.
     ///
@@ -871,7 +871,7 @@ mod tests {
         // exactly one: a torch straight above a patch of ground. Whatever else
         // the two models disagree about, here they may differ by `1/π` and by
         // nothing else, which is what makes the calibration
-        // `docs/lighting_rebuild.md`'s phase 0 asks for a statement about the
+        // `docs/render/design_model.md`'s phase 0 asks for a statement about the
         // falloff rather than about the shading.
         let overhead = Light {
             at: Vec3::new(f64::from(LIT.x) + 0.5, f64::from(LIT.y) + 0.5, 5.0),

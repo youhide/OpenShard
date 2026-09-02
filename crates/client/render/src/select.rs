@@ -102,13 +102,13 @@ pub struct Frame<'a> {
     /// The statics pass's own instance buffer, bound a second time as storage —
     /// the same buffer `blit::Frame::face_instances` is. A `Kind::Static`
     /// pixel's id word carries a row in this, not a tile
-    /// (`docs/gbuffer.md` step 3); the ground wash resolves it the same way
+    /// (`docs/archive/render/gbuffer.md` step 3); the ground wash resolves it the same way
     /// `blit.wgsl` does, for the same reason. See step 6.
     pub face_instances:   &'a wgpu::Buffer,
     /// The ground pass's own instance buffer, bound a second time as storage —
     /// the same buffer `blit::Frame::ground_instances` is. A `Kind::Land`
     /// pixel's `place.x`/`place.y` is an id into this, not a tile
-    /// (`docs/gbuffer.md` step 7); the ground wash resolves it the same way
+    /// (`docs/archive/render/gbuffer.md` step 7); the ground wash resolves it the same way
     /// `blit.wgsl` does, for the same reason.
     pub ground_instances: &'a wgpu::Buffer,
     /// The size of both in texels — they are one image's size, and the pass
@@ -186,7 +186,7 @@ impl Select {
                 // The ground pass's own instance data, bound a second time as
                 // storage — `blit.wgsl`'s binding 12, read here for the same
                 // reason: a land pixel's `place` is an id too, since
-                // `docs/gbuffer.md` step 7. Read-only, like binding 3 above.
+                // `docs/archive/render/gbuffer.md` step 7. Read-only, like binding 3 above.
                 wgpu::BindGroupLayoutEntry {
                     binding:    4,
                     visibility: wgpu::ShaderStages::FRAGMENT,

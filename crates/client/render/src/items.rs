@@ -215,7 +215,7 @@ pub fn collect_with_fades_with_interior<'a>(
     let mut quads: Vec<(depth::Order, SpriteQuad)> = Vec::new();
     let mut cutaway_quads: Vec<(depth::Order, SpriteQuad)> = Vec::new();
     let mut cutaway_boxes = Vec::new();
-    // Always empty since `docs/lighting_rebuild.md` phase 6d — see
+    // Always empty since `docs/render/design_model.md` phase 6d — see
     // `crate::statics::collect`'s own comment at the same two locals.
     let mesh_vertices = Vec::new();
     let mesh_rows = Vec::new();

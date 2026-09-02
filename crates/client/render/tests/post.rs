@@ -1,5 +1,5 @@
 //! **A post's shadow, before and after its box was narrowed.**
-//! `docs/footprints.md`'s backlog item "a post's shadow narrowed and that is
+//! `docs/render/design_footprints.md`'s backlog item "a post's shadow narrowed and that is
 //! probably right" — forty-two placements in that plan's own class are pieces
 //! the grid holds a primitive for, so each of them casts a shadow the plan has
 //! already changed, and what was missing was anyone having *looked* at one.
@@ -373,7 +373,7 @@ fn a_posts_shadow_is_a_quarter_tiles_and_a_lost_footprint_makes_it_a_whole_tiles
     assert!(
         measured.footprint(Graphic(POST)).is_some(),
         "{:#06X} is not the case this gate is about — its art measured no footprint, so \
-         `docs/footprints.md`'s post item is naming the wrong graphic",
+         `docs/render/design_footprints.md`'s post item is naming the wrong graphic",
         POST,
     );
     let mut whole_tile = StaticAtlas::build(&art, items::needed_graphics(&items, &animations))

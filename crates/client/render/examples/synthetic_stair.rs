@@ -29,7 +29,7 @@
 //!   What answers that question changed underneath this knob and the sentence
 //!   here changed with it. It used to be `own_run`'s same-row/same-column mask,
 //!   standing in for an identity that could not fire because two flights are two
-//!   statics; `occlusion::merge` retired the mask (`docs/occluders.md`'s S3b and
+//!   statics; `occlusion::merge` retired the mask (`docs/render/design_occluders.md`'s S3b and
 //!   S4) by making identity fire after all — the flights of a run are one
 //!   `Owner`, so a tread of the run is **one primitive** and both halves of the
 //!   seam name it. That is what this knob poses now, and phase 6h is what it
@@ -48,7 +48,7 @@
 //!
 //!   This line used to say that the default "leaves the far tread in its own
 //!   riser's shadow", citing `Surface::shadowed_by_own_tile` and decision 32 —
-//!   a function `docs/lighting_height.md` phase 3 deleted as vacuous. What the
+//!   a function `docs/archive/render/lighting_height.md` phase 3 deleted as vacuous. What the
 //!   default actually shows is the two shapes phase 4 is about: the far tread
 //!   comes out black, and every tread/riser join wears a hard hairline. A
 //!   fixture whose own comment expects a bug is a fixture nobody reads as red,
@@ -78,7 +78,7 @@
 //!
 //! # The face oracle
 //!
-//! `docs/lighting_height.md` phase 4, step 1, and it is deliberately built
+//! `docs/archive/render/lighting_height.md` phase 4, step 1, and it is deliberately built
 //! **before** the fix it is meant to judge. Everything known about that defect
 //! is a reason to skip this — the shapes are visible, the cause is named, the
 //! fix is one predicate — and every number the phase has is a count of pixels
@@ -109,7 +109,7 @@
 //! into one box a tread and a fragment of any flight is a point of all of it.
 //! See [`Body::primitive`].
 //!
-//! That is one body a tread since `docs/lighting_rebuild.md` phase 6; it was a
+//! That is one body a tread since `docs/render/design_model.md` phase 6; it was a
 //! lid and a riser plane before, and for a *plane* dropping the primitive and
 //! excusing a contact at the ray's origin are the same sentence, which is how
 //! phase 4 first put it. They are two sentences for a body — a ray heading into
@@ -402,7 +402,7 @@ impl Slab {
     /// **A diagnostic now and no longer a term.** It was `light::faces`'s own
     /// `along`, the unnormalised dot product the engine divided by `FACE_EDGE`,
     /// and it is what made a single constant mean one width across a wall and
-    /// another above a lid. `docs/lighting_rebuild.md` phase 3 normalised that
+    /// another above a lid. `docs/render/design_model.md` phase 3 normalised that
     /// argument; what is left of this is a *legible* number for a report — "the
     /// flame is a tenth of a tile off this plane" says something a cosine of
     /// `0.04` does not. `z` is divided into tiles first, the way
@@ -500,7 +500,7 @@ impl Slab {
 /// A [`Slab`] is a *surface* — what `Prism::mesh` draws and what the `place`
 /// attachment names — and this is the *solid* a ray travels through. The two
 /// were one thing while the grid held a lid and a riser plane per tread; since
-/// `docs/lighting_rebuild.md` phase 6 put the body back
+/// `docs/render/design_model.md` phase 6 put the body back
 /// (`occlusion::Solid::tread_box_of`), a drawn plane is a **face of** one of
 /// these rather than an occluder in its own right. This file states both because
 /// it checks both: [`gate_against_grid`] holds a body against the grid's own
@@ -514,7 +514,7 @@ struct Body {
     /// Which **primitive of the grid** this tread is a piece of.
     ///
     /// A tread of one flight stopped being a primitive when `occlusion::merge`
-    /// landed (`docs/occluders.md`'s D2b): the same tread of two flights standing
+    /// landed (`docs/render/design_occluders.md`'s D2b): the same tread of two flights standing
     /// side by side shares a whole face with its neighbour and agrees in every
     /// other field the merge asks about — one [`Owner`], because an owner is a
     /// `(z, graphic)` and carries no tile, and one [`Part`](grid::Part), because
@@ -710,7 +710,7 @@ fn flight_bodies(flight: usize, stands: Point, up: Face, treads: &[u8]) -> Vec<B
 /// scene nobody built. A drift that is a panic here is a drift that cannot be
 /// read as the renderer being wrong.
 ///
-/// It compared *planes* until `docs/lighting_rebuild.md` phase 6, when a tread
+/// It compared *planes* until `docs/render/design_model.md` phase 6, when a tread
 /// stopped being a lid and a riser and became one body again. That change is
 /// what this assertion is for — it is the first thing that failed after it, in
 /// the count, which is exactly the shape of failure a gate on a scene's own
@@ -720,7 +720,7 @@ fn flight_bodies(flight: usize, stands: Point, up: Face, treads: &[u8]) -> Vec<B
 /// which is the second time this gate was the first thing to fail: a run's
 /// flights are one owner and one part a tread, so the grid folds the run into a
 /// box a tread and a per-flight derivation is a box a third the width
-/// (`docs/lighting_rebuild.md` phase 6i's fourth item — `this oracle says 101,
+/// (`docs/render/design_model.md` phase 6i's fourth item — `this oracle says 101,
 /// the grid's own solid says 103`, and `OPENSHARD_STAIR_RUN>1` has been unusable
 /// since). What it compares now is the fold, [`merged`], and what makes that a
 /// statement about the grid rather than about this file is the second half
@@ -972,7 +972,7 @@ fn gate_against_mesh(slab: &Slab, face: &openshard_client_render::mesh::Face, up
 /// flight, tested by [`segment_clear_of_box`], once per point of the flame's own
 /// sphere.
 ///
-/// **A share and not a bool since `docs/lighting_rebuild.md`'s phase 5**, which
+/// **A share and not a bool since `docs/render/design_model.md`'s phase 5**, which
 /// is where that phase keeps phase 4's own promise. Phase 4 measured 88 pixels of
 /// a tread's outer corner that the frame drew shadowed and this oracle called
 /// lit, and named them: "the engine's area light against a point source, and
@@ -982,7 +982,7 @@ fn gate_against_mesh(slab: &Slab, face: &openshard_client_render::mesh::Face, up
 ///
 /// `own` is the **solid** the fragment is a point of, and dropping exactly that
 /// one is the engine's own rule stated independently: `light.rs` skips an
-/// occluder whose `SolidId` is the fragment's (`docs/lighting_rebuild.md` phase
+/// occluder whose `SolidId` is the fragment's (`docs/render/design_model.md` phase
 /// 4, `if lit.solid == Some(id) { continue }`). What changed with phase 6 is not
 /// the rule but what a solid *is* — a tread used to be a lid and a riser plane
 /// and is one body now, so the thing to drop is the body the drawn face belongs
@@ -993,7 +993,7 @@ fn gate_against_mesh(slab: &Slab, face: &openshard_client_render::mesh::Face, up
 /// It is a rule and not an epsilon either way. A point on a plane crosses it at
 /// its own origin and nowhere else, so for the split geometry "a contact at the
 /// origin does not count" and "this primitive does not count" were one sentence
-/// — `docs/lighting_height.md` phase 4 says so. For a body they are two: a ray
+/// — `docs/archive/render/lighting_height.md` phase 4 says so. For a body they are two: a ray
 /// heading into the box the fragment stands on is a genuine crossing, and both
 /// walks are told to ignore it by name.
 ///
@@ -1046,7 +1046,7 @@ fn oracle_visible(point: (f64, f64, f64), light: (f64, f64, f64), bodies: &[Body
 ///
 /// A defect that is one band prints as one entry and one spread over a face
 /// prints as many, which is the distinction worth reading at a glance and the
-/// one a total cannot carry: `docs/lighting_height.md` phase 1's own residual
+/// one a total cannot carry: `docs/archive/render/lighting_height.md` phase 1's own residual
 /// was not spread over its face at all, it was a band.
 fn runs_of(bands: &[usize]) -> Vec<(usize, usize, usize)> {
     let mut runs = Vec::new();
@@ -1774,9 +1774,9 @@ fn main() {
     }
 
     // A flight is **one owner** of its tile however many treads it was cut into
-    // — one `Builder::add` is one owner (`docs/lighting_height.md` phase 3), so
+    // — one `Builder::add` is one owner (`docs/archive/render/lighting_height.md` phase 3), so
     // every face of it carries this one number. What it is *not* is one
-    // occluder: `docs/lighting_rebuild.md` phase 4 made the exemption a
+    // occluder: `docs/render/design_model.md` phase 4 made the exemption a
     // `SolidId`, owner **and** part, precisely because a tread does shadow the
     // treads below it and an owner alone could not say so.
     //
@@ -1788,7 +1788,7 @@ fn main() {
     // condition `occlusion::merge` folds on, and the sentence was wrong from the
     // day the merge landed. What the run still poses, and a single flight cannot,
     // is the two-abutting-statics question — it is now posed as *one* primitive
-    // where there were two, which is what `docs/occluders.md`'s D6 is about and
+    // where there were two, which is what `docs/render/design_occluders.md`'s D6 is about and
     // what phase 6h turned out to be.
     let owners: Vec<Owner> = flights
         .iter()
@@ -1835,7 +1835,7 @@ fn main() {
             let id = rows.len() as u32;
             gate_against_mesh(&slabs[rows.len()], face, up);
             // And which *solid* of the grid this face is, which is what the walk
-            // compares a fragment against — `docs/lighting_rebuild.md` phase 4.
+            // compares a fragment against — `docs/render/design_model.md` phase 4.
             // **Two drawn faces a tread, one solid a tread**: `Prism::mesh`
             // emits a top and then the rise below it for each, and phase 6 put
             // the grid's tread back to one body, so the join divides.
@@ -1978,7 +1978,7 @@ fn main() {
     };
     // The CPU twin of a pixel, on demand. A picture says a fragment came out
     // black; this says *what* took its ray, by name — and after
-    // `docs/lighting_rebuild.md` phase 4 the name that decides the answer is the
+    // `docs/render/design_model.md` phase 4 the name that decides the answer is the
     // **solid**, so a probe carries one exactly as the mesh rows above do. A
     // probe carrying none would be a point of nothing and would answer a
     // question no pixel of this scene asks.
@@ -2220,7 +2220,7 @@ fn main() {
         let mut too_light = 0usize;
         // And which of the two walks is out, on every disagreement.
         // `light::sample` is the CPU's own preview of exactly what the shader
-        // does (`docs/lighting.md` decision 9 holds the two to each other), so a
+        // does (`docs/archive/render/lighting.md` decision 9 holds the two to each other), so a
         // disagreement where it sides with the independent oracle is the
         // *shader* alone being out — a parity gap — and one where it sides with
         // the rendered pixel is the engine's own arithmetic being out, in both
@@ -2295,7 +2295,7 @@ fn main() {
             // row this pixel's id names — not `floor` of the position. And so is
             // the solid: the row carries the name of the one it draws, so this
             // probe is a point of exactly what the rendered fragment is a point
-            // of, with nothing re-derived. `docs/lighting_rebuild.md` phase 4.
+            // of, with nothing re-derived. `docs/render/design_model.md` phase 4.
             let row = &rows[texel.id as usize];
             let spot = light::Spot {
                 at: Vec2::new(point.0 as f32, point.1 as f32),

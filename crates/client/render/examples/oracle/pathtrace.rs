@@ -17,7 +17,7 @@
 //!
 //! The reasoning behind each split — why an out-of-reach pixel, a back-facing
 //! pixel and a silhouette pixel are three different things and none of them is
-//! a shadow — is in `docs/lighting_reference.md`.
+//! a shadow — is in `docs/render/reference/path_tracer.md`.
 
 use std::collections::BTreeMap;
 
@@ -44,7 +44,7 @@ use super::{
 /// What the surfaces of a scene are worth, in linear reflectance.
 ///
 /// **Taken from the caller because the caller is the side that knows.** These
-/// were two literals in [`Mirror::of`] until `docs/lighting_rebuild.md`'s phase
+/// were two literals in [`Mirror::of`] until `docs/render/design_model.md`'s phase
 /// 0 asked for the two shaded pictures side by side, at which point they became
 /// the largest difference between them and one that is not about light at all: a
 /// reference whose ground is a different colour from the ground in the frame
@@ -60,8 +60,9 @@ pub struct Albedos {
     /// decodes it, so "the same albedo on both sides" is a measurement rather
     /// than a claim.
     pub ground: [f64; 3],
-    /// Every box's, linear. **Measured off the frame since `docs/lighting_
-    /// rebuild.md` phase 6d**, the same way [`ground`](Self::ground) is —
+    /// Every box's, linear. **Measured off the frame since
+    /// `docs/render/design_model.md` phase 6d**, the same way
+    /// [`ground`](Self::ground) is —
     /// `oracle::body_albedo` reads it back from the mesh pass's own colour
     /// target, which did not exist before that phase. Still [`INVENTED`](
     /// Self::INVENTED) on a scene with no boxes in it — `scene_flat`'s whole
@@ -90,7 +91,7 @@ impl Albedos {
 ///
 /// The engine's diffuse term is `albedo × N·L` and the reference's is
 /// `albedo × N·L / π`. **The missing `1/π` is deliberate on our side and stated
-/// in `docs/lighting_rebuild.md`**: putting it in would mean re-tuning every
+/// in `docs/render/design_model.md`**: putting it in would mean re-tuning every
 /// authored flame in the tree for a constant everyone then divides back out. The
 /// reference is physics and keeps it.
 ///
@@ -106,7 +107,7 @@ pub const LAMBERT_PI: f64 = std::f64::consts::PI;
 
 /// What shape the reference gives the flame, and how hard it works at it.
 ///
-/// **The engine's flame is a sphere as of `docs/lighting_rebuild.md`'s phase 5**,
+/// **The engine's flame is a sphere as of `docs/render/design_model.md`'s phase 5**,
 /// and a reference that kept it a point would report the whole penumbra as a
 /// disagreement — which is what it did, on one pixel, the moment the eight rays
 /// landed. So this is a field of the scene rather than a constant of the tracer:
@@ -169,7 +170,7 @@ pub const PENUMBRA_ALLOWED: f64 = 1.0 / light::SHADOW_RAYS as f64;
 /// The same scene, in the tracer's own terms.
 ///
 /// Two things are taken from the renderer to build it, and both arrive as
-/// **values rather than as formulas** — see `docs/lighting_reference.md`.
+/// **values rather than as formulas** — see `docs/render/reference/path_tracer.md`.
 pub struct Mirror {
     pub scene:  pt_scene::Scene,
     pub camera: pt_camera::Parallel,
@@ -715,7 +716,7 @@ impl Penumbra {
 /// How much of the flame each side says a pixel can see, compared where they
 /// both say "some of it".
 ///
-/// **`docs/lighting_rebuild.md`'s phase 5 "done when".** [`compare`] reads the
+/// **`docs/render/design_model.md`'s phase 5 "done when".** [`compare`] reads the
 /// two pictures as one bit a pixel, which is the right question for a hard shadow
 /// and says nothing at all about the shape of a soft one: a penumbra is exactly
 /// the region where that bit is arbitrary. This reads the *fraction* instead —
@@ -825,7 +826,7 @@ pub fn penumbra(
 /// How much light each side says landed on a pixel, compared where both agree
 /// what surface is there.
 ///
-/// **`docs/lighting_rebuild.md`'s phase 5b, as a measurement.** [`compare`] and
+/// **`docs/render/design_model.md`'s phase 5b, as a measurement.** [`compare`] and
 /// [`penumbra`] both read *visibility*, and visibility is exactly the term phase
 /// 5b does not touch — a flame was already a body for it. What that phase moves
 /// is everything else: the cosine, the falloff and the beam stop being taken at
@@ -1148,7 +1149,7 @@ fn on_an_edge<T: PartialEq>(map: &[Option<T>], size: pt_trace::ImageSize, x: u32
 /// model** after phase 3 turned its *shading* term into a cosine. The variant's
 /// three clauses are one fact — there is no normal — and the third of them is
 /// "a surface point's own body does not occlude it", which the shipped walk
-/// still states as an exemption. `docs/lighting_rebuild.md`'s phase 4 is what
+/// still states as an exemption. `docs/render/design_model.md`'s phase 4 is what
 /// restates that as identity and is where this argument has to be re-taken.
 /// Brightness is judged in `Lambert` already: `tests/traced.rs`'s own gate and
 /// `boxes.rs`'s shaded strip both moved there.

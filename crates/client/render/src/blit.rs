@@ -68,7 +68,7 @@ pub struct Frame<'a> {
     /// The statics pass's own instance buffer, bound a second time as storage
     /// so a static's fragment can read `instances[id]` back instead of
     /// carrying its `(x, y, z)` on every pixel of its own picture — see
-    /// `docs/gbuffer.md` decision 2. [`dummy_instances`] when a caller has
+    /// `docs/archive/render/gbuffer.md` decision 2. [`dummy_instances`] when a caller has
     /// none this frame.
     pub face_instances:   &'a wgpu::Buffer,
     /// Server-item rows.  Their ids carry `IDS_DYNAMIC_ITEM`, so immutable map
@@ -78,7 +78,7 @@ pub struct Frame<'a> {
     /// a separate `SpriteRenderer` with its own instance list, not a second
     /// user of the statics one.
     pub mobile_instances: &'a wgpu::Buffer,
-    /// `docs/gbuffer.md` step 4c's mesh-face pass's own row buffer, bound a
+    /// `docs/archive/render/gbuffer.md` step 4c's mesh-face pass's own row buffer, bound a
     /// second time as storage. A fragment's `Stance::MeshFace` sentinel
     /// (`place.z`'s stance bits) tells this pass to read `mesh_instances[id]`
     /// instead of `face_instances[id]` — a mesh face has no picture, so its
@@ -86,7 +86,7 @@ pub struct Frame<'a> {
     /// [`dummy_mesh_instances`] when a caller has none this frame.
     pub mesh_instances:   &'a wgpu::Buffer,
     /// The ground pass's own instance buffer, bound a second time as storage —
-    /// `docs/gbuffer.md` step 7, the ground half of what step 3 did for a
+    /// `docs/archive/render/gbuffer.md` step 7, the ground half of what step 3 did for a
     /// static's tile. A `Kind::Land` pixel's `place.x`/`place.y` is an id into
     /// this, not a tile, the same move and the same reason.
     /// [`dummy_ground_instances`] when a caller has none this frame — every
@@ -128,7 +128,7 @@ pub struct Blit {
     ///
     /// A second texture and not four more channels of the first: the occluder
     /// cell is what a ray walks through cell after cell in a loop, and this is
-    /// read once per fragment. `docs/lighting_world.md` decides it once, there.
+    /// read once per fragment. `docs/archive/render/lighting_world.md` decides it once, there.
     field:            wgpu::Texture,
     /// What the cells above name — one texel a reference, folded into rows
     /// [`crate::occlusion::LIST_ROW`] wide. See
@@ -143,7 +143,7 @@ pub struct Blit {
     /// outright. See
     /// [`Occlusion::primitive_bytes`](crate::occlusion::Occlusion::primitive_bytes).
     ///
-    /// **A storage buffer, and that is `docs/occluders.md`'s D8 replacing
+    /// **A storage buffer, and that is `docs/render/design_occluders.md`'s D8 replacing
     /// decision 30.5.** Three textures stood here — the solids, their
     /// footprints and their `z` spans, three encodings of one box indexed by one
     /// number — because the ceiling was WebGL2, which has neither compute nor
@@ -160,7 +160,7 @@ pub struct Blit {
     /// order — see
     /// [`Occlusion::aperture_bytes`](crate::occlusion::Occlusion::aperture_bytes).
     ///
-    /// **A storage buffer since `docs/occluders.md`'s S6**, and the last thing
+    /// **A storage buffer since `docs/render/design_occluders.md`'s S6**, and the last thing
     /// indexed by a `SolidId` to stop being an `Rgba8Uint` plane. Still a list
     /// beside the primitives rather than four more fields of one:
     /// `Occlusion::aperture_bytes` argues why, and the argument is about how
@@ -175,7 +175,7 @@ pub struct Blit {
     /// The broad phase, as the shader traverses it: the tree's nodes, depth
     /// first, the root first. See
     /// [`Occlusion::node_bytes`](crate::occlusion::Occlusion::node_bytes) and
-    /// `docs/occluders.md`'s S5.
+    /// `docs/render/design_occluders.md`'s S5.
     ///
     /// Grown and never shrunk, like [`Blit::primitives`] and for a stronger
     /// reason than that one has: a traversal ends at the **root's own escape**,
@@ -281,7 +281,7 @@ impl Blit {
                 // And the primitives the grid indexes into — the list of
                 // decision 30, and one of the three that are not pictures of the
                 // camera's rectangle. A storage buffer since
-                // `docs/occluders.md`'s D8; read-only, the same as 9 through 12
+                // `docs/render/design_occluders.md`'s D8; read-only, the same as 9 through 12
                 // below.
                 wgpu::BindGroupLayoutEntry {
                     binding:    6,
@@ -323,7 +323,7 @@ impl Blit {
                 // The map statics, server items and mobiles passes' own instance data, each
                 // bound a second time as storage — decision 2's `instances[id]`.
                 // Read-only: this pass never writes a fragment's own instance
-                // back, only looks one up. `docs/gbuffer.md` step 3.
+                // back, only looks one up. `docs/archive/render/gbuffer.md` step 3.
                 wgpu::BindGroupLayoutEntry {
                     binding:    9,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -354,7 +354,7 @@ impl Blit {
                     },
                     count:      None,
                 },
-                // The mesh-face pass's own row buffer — `docs/gbuffer.md`
+                // The mesh-face pass's own row buffer — `docs/archive/render/gbuffer.md`
                 // step 4c. Read-only, the same reason 9 and 10 are.
                 wgpu::BindGroupLayoutEntry {
                     binding:    11,
@@ -367,7 +367,7 @@ impl Blit {
                     count:      None,
                 },
                 // The ground pass's own instance data, bound a second time as
-                // storage — `docs/gbuffer.md` step 7, `Kind::Land`'s share of
+                // storage — `docs/archive/render/gbuffer.md` step 7, `Kind::Land`'s share of
                 // decision 2. Read-only, the same reason 9, 10 and 11 are.
                 wgpu::BindGroupLayoutEntry {
                     binding:    12,
@@ -411,7 +411,7 @@ impl Blit {
                     count:      None,
                 },
                 // And the broad phase: the tree's nodes and the permutation its
-                // leaves index into, `docs/occluders.md`'s S5. Read-only storage,
+                // leaves index into, `docs/render/design_occluders.md`'s S5. Read-only storage,
                 // the same as every list above — a traversal indexes them and
                 // writes nothing.
                 wgpu::BindGroupLayoutEntry {
@@ -1205,7 +1205,7 @@ impl Blit {
     }
 
     /// The broad phase on the GPU: the tree's nodes and the permutation its
-    /// leaves index into, `docs/occluders.md`'s S5.
+    /// leaves index into, `docs/render/design_occluders.md`'s S5.
     ///
     /// Every frame, and **before** [`Blit::upload_grid`]'s own early return
     /// rather than after it: a frame with no grid at all still binds this, and a

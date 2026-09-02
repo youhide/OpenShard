@@ -17,7 +17,7 @@
 //! The web is a target, so every device request is `async` because a browser
 //! cannot be blocked on — that is honoured here from the first triangle rather
 //! than discovered later. The ceiling itself is **WebGPU, not WebGL2**
-//! (`docs/lighting.md` decision 30.5): real compute shaders and storage
+//! (`docs/archive/render/lighting.md` decision 30.5): real compute shaders and storage
 //! buffers, because WebGPU is broadly shipped now and was only a flag behind
 //! Chromium when the older, stricter ceiling was written. What that older
 //! ceiling produced is not deleted — `Occlusion`'s texture-folded lookup

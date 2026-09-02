@@ -2,7 +2,7 @@
 //! the same thing.
 //!
 //! Two different claims, and the second is the one this crate exists to make
-//! safe: `docs/lighting.md`'s decision 31 moves a measurement out of the frame,
+//! safe: `docs/archive/render/lighting.md`'s decision 31 moves a measurement out of the frame,
 //! so from now on what the client believes about a wall is *a file* rather than a
 //! function. A round trip that lost corners, or a coverage count that quietly
 //! meant something else, would be a renderer answering confidently out of a table

@@ -1,6 +1,6 @@
 //! Where a sprite's pixel is in the world, and which surface it is a pixel of.
 //!
-//! `docs/lighting_rebuild.md` phase 6. A static is drawn once, as its own
+//! `docs/render/design_model.md` phase 6. A static is drawn once, as its own
 //! picture, and the geometry underneath that picture is found by *intersecting
 //! the view ray with the boxes the occlusion grid already holds for it*. The
 //! silhouette is the artist's; the volume is ours; and because there is only
@@ -93,7 +93,7 @@ const TILE_WIDTH: f32 = crate::camera::TILE_WIDTH as f32;
 ///
 /// The number does **not** move with the zoom. The world passes draw at the
 /// virtual resolution whatever the magnification — a real pixel is
-/// `1 / scale` of a fragment, `docs/pixels.md` — so the grid this is a step of
+/// `1 / scale` of a fragment, `docs/render/design_pixel_spaces.md` — so the grid this is a step of
 /// is the same grid at every rung of the ladder.
 pub const FRAGMENT: f32 = std::f32::consts::SQRT_2 / TILE_WIDTH;
 
@@ -110,11 +110,11 @@ const Z_STEP: f32 = TILE_WIDTH / Z_PER_TILE;
 /// surface the picture does not contain. [`meets`] picks the face whose *exit*
 /// comes first, and on the rim of a flat box that is a side one — a wall's
 /// cosine in the middle of a floor, which is the lattice
-/// `docs/lighting_rebuild.md` phase 6i names and `discard` was once introduced
+/// `docs/render/design_model.md` phase 6i names and `discard` was once introduced
 /// for.
 ///
 /// This used to be `hi.z > lo.z`, which was exact while a lid was a *plane*.
-/// `docs/parity.md`'s P4 step 1 gave it `occlusion::LID_THICKNESS` — `1/64` of a
+/// `docs/render/design_frame_assembly.md`'s P4 step 1 gave it `occlusion::LID_THICKNESS` — `1/64` of a
 /// `z` unit, a **sixteenth of a pixel** tall — and the comparison against zero
 /// stopped standing for anything: the face has area, and no screen this renderer
 /// draws on can show it. Nothing else in the grid is near the line, which is
@@ -145,7 +145,7 @@ const RIM: f32 = FRAGMENT / 1.732_050_8;
 /// this switch is *for* is the one instrument those measurements could not
 /// replace — a person looking at two frames.
 ///
-/// `docs/lighting_state.md`'s fringe entry has the numbers. **F2 cycles it** in
+/// `docs/render/README.md`'s fringe entry has the numbers. **F2 cycles it** in
 /// the client, the way F11 cycles [`crate::debug::View`]; `OPENSHARD_FRINGE`
 /// ([`Fringe::from_env`]) is the same switch for a run that has to *start* in
 /// one of them — a frame dump, a screenshot, a bug report.
@@ -229,7 +229,7 @@ impl Fringe {
 /// for a ray that goes *through* a box and an arbitrary one for a ray that
 /// passes beside it: along a silhouette the first exit can flip between two
 /// faces from one fragment to the next, and a smooth overhang shaded as a comb
-/// is the serrated top edge `docs/lighting_state.md` lists. A face picked from
+/// is the serrated top edge `docs/render/README.md` lists. A face picked from
 /// the box alone is the same face at every pixel of that box's overhang, so the
 /// flip would have nowhere to happen — which is true, and is not the whole of
 /// what the change does.
@@ -314,7 +314,7 @@ pub fn ray_from(tile: (i32, i32), base: f32, across: f32, down: f32) -> WorldVec
 /// Where a fragment of a **billboard** is: the point of its own view ray on the
 /// vertical plane the sprite is drawn on.
 ///
-/// `docs/lighting_rebuild.md` phase 7, and the half of it that is not a choice.
+/// `docs/render/design_model.md` phase 7, and the half of it that is not a choice.
 /// A mobile has no volume, so [`meets`] has nothing to meet and the pass falls
 /// back to a *point* — the middle of the tile, with the height running down the
 /// picture. That point is the same for **every pixel of a screen row**: a
@@ -350,7 +350,7 @@ pub fn billboard_at(tile: (i32, i32), base: f32, across: f32, down: f32) -> Worl
 }
 
 /// The billboard plane's own normal: `(1, 1, 0)` normalised, [`VIEW`]'s
-/// horizontal part. `docs/lighting_rebuild.md` phase 7's "facing the camera"
+/// horizontal part. `docs/render/design_model.md` phase 7's "facing the camera"
 /// candidate — never wrong, never interesting, and the one this phase picked:
 /// the plane a mobile is drawn on has exactly one normal, so giving a fragment
 /// of it *that* normal is not a choice among several so much as the plane's own
@@ -365,7 +365,7 @@ pub fn billboard_normal() -> [f32; 3] {
 
 /// Which run of a frame's [`Volume`] list belongs to one drawn static.
 ///
-/// The association `docs/lighting_rebuild.md` phase 6 rests on: a fragment is
+/// The association `docs/render/design_model.md` phase 6 rests on: a fragment is
 /// met against *these* boxes and no others, so one static's geometry cannot
 /// reach a neighbour's picture. A range and not a list per instance because the
 /// instance buffer is a flat row of words and this is two of them.
@@ -393,7 +393,7 @@ pub struct Range {
 /// draws the whole front of the staircase. So the volume here is one box a
 /// tread — its strip, from the static's own base up to that tread's height —
 /// and the grid is joined to rather than read from. Making the grid hold the
-/// volume is `docs/lighting_geometry.md`'s question.
+/// volume is `docs/archive/render/lighting_geometry.md`'s question.
 ///
 /// Everything that is not a fitted climbable *is* one of the grid's own boxes,
 /// unchanged: a wall's panel, a floor's lid, a body's tile.
@@ -512,7 +512,7 @@ pub struct Meeting {
     /// one that went through, and [`Meeting::hit`] is that comparison spelled
     /// once.
     ///
-    /// The measurement `docs/lighting_rebuild.md` phase 6 asks its own "done
+    /// The measurement `docs/render/design_model.md` phase 6 asks its own "done
     /// when" to carry, and the reason this is a number rather than an
     /// `Option<[f32; 3]>`: a sprite overhangs its own volume by a pixel or two
     /// wherever the fitted box is narrower than the art, and what matters about
@@ -575,9 +575,9 @@ impl Meeting {
 /// that is one pixel per tile corner, since the projection puts a tile's corner
 /// on a whole pixel: a lattice of dots over a roof, each shaded as a wall in the
 /// middle of a floor. Reported twice, and it is the second cause
-/// `docs/lighting_rebuild.md` phase 6i's floor entry names.
+/// `docs/render/design_model.md` phase 6i's floor entry names.
 ///
-/// **No box `Solid::box_of` builds is flat any more** — `docs/parity.md`'s P4
+/// **No box `Solid::box_of` builds is flat any more** — `docs/render/design_frame_assembly.md`'s P4
 /// step 1 gave a lid a real span, which is the same defect's other
 /// cure and the one that also answers for the lattice's *neighbours*, a rounding
 /// out on either side. The rule stays because it is a rule about the geometry it
@@ -998,7 +998,7 @@ mod tests {
     }
 
     /// **What a ray exactly through the box's own corner is answered with** —
-    /// `docs/parity.md` P5's G4, and it is a *record* rather than an
+    /// `docs/render/design_frame_assembly.md` P5's G4, and it is a *record* rather than an
     /// endorsement.
     ///
     /// Two exits are equal exactly on an edge of the box, and there the rule is
@@ -1042,7 +1042,7 @@ mod tests {
         assert_eq!(
             met.normal,
             WorldVec::new(0.0, 1.0, 0.0),
-            "a ray through the vertical corner is answered `+Y` — docs/parity.md's window-parity \
+            "a ray through the vertical corner is answered `+Y` — docs/render/design_frame_assembly.md's window-parity \
              entry, recorded here and not repaired",
         );
 

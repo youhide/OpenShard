@@ -865,8 +865,8 @@ which fights a discrete ladder and would breathe.
 Found while planning this, and not to be lost in it.
 
 - 🚩 **An inventory of every pixel this engine has — its own session**, now
-  written up as [`docs/pixels.md`](pixels.md); the entry below is
-  [`docs/silhouettes.md`](silhouettes.md). Both are kept here in short because
+  written up as [`docs/pixels.md`](render/design_pixel_spaces.md); the entry below is
+  [`docs/silhouettes.md`](render/design_silhouettes.md). Both are kept here in short because
   D11 is where a reader of *this* file will look for them. D11 names
   two, the real one and the virtual one, and that was the whole argument it
   needed. A frame has more, they meet in the same expressions, and no one

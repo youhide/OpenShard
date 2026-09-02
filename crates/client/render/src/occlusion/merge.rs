@@ -1,18 +1,18 @@
 //! Contiguous pieces of one surface become one primitive —
-//! `docs/occluders.md`'s D2b, and the last step of that plan.
+//! `docs/render/design_occluders.md`'s D2b, and the last step of that plan.
 
 //!
 //! # What it is for, and what it is not
 //!
 //! A run of wall is one wall to the artist and N statics on N tiles to us; a
 //! storey's floor is one slab and one box a tile. Every internal seam is a place
-//! where two boxes meet, and `docs/occluders.md`'s own history is a list of rules
+//! where two boxes meet, and `docs/render/design_occluders.md`'s own history is a list of rules
 //! written to paper over that. This is the step that removes the seams instead of
 //! ruling about them.
 //!
 //! **It is a pure optimisation and nothing else**, which is the plan's own
 //! correction to its first draft: what cured the seam a person sees was
-//! `docs/lighting_rebuild.md`'s phase 5b, and the gate here is therefore *not one
+//! `docs/render/design_model.md`'s phase 5b, and the gate here is therefore *not one
 //! pixel moves*. So every condition below is an exact comparison and every doubt
 //! is resolved by **refusing** to merge — a primitive that stays two primitives
 //! costs a slab test, and one that merges when it should not costs a wrong
@@ -43,7 +43,7 @@
 //!   graphic)` and carries no tile, so a run of one wall graphic at one height is
 //!   one owner however many tiles it stands on — which is exactly the run this
 //!   step exists for. What it refuses is a run assembled out of *two* graphics,
-//!   and that is a real refusal, written down in `docs/occluders.md` rather than
+//!   and that is a real refusal, written down in `docs/render/design_occluders.md` rather than
 //!   hidden here.
 //!
 //! - **An [`Aperture`](super::Aperture), which stops a merge outright.** A
@@ -51,7 +51,7 @@
 //!   holes standing a tile apart, so there is nowhere for the second to go.
 //!
 //!   The reason used to be a different one and it was retired by
-//!   `docs/occluders.md`'s S6: a hole was a fraction of **one tile** of the run
+//!   `docs/render/design_occluders.md`'s S6: a hole was a fraction of **one tile** of the run
 //!   (`light::run_v` was `along - along.floor()`), so a merged windowed run would
 //!   have drawn its window in every tile of itself. That is fixed — an aperture
 //!   is stated in world coordinates now and a merged run would carry it exactly
@@ -104,7 +104,7 @@
 //! already nothing, so the frame a player sees is byte-identical. Both halves are
 //! gated by `tests/traced.rs`'s
 //! `a_merged_run_is_exempt_from_itself_only_where_the_cosine_is_already_nothing`,
-//! and `docs/occluders.md` § *The merge under the reference tracer* has the
+//! and `docs/render/design_occluders.md` § *The merge under the reference tracer* has the
 //! reading. So the claim this module may make is the narrow one: a merged run is
 //! exempt from itself **only where nothing was going to be lit anyway**.
 
@@ -508,7 +508,7 @@ mod tests {
     /// one per tile.
     ///
     /// The run is stated the way `Builder::add` states it — each panel's hole in
-    /// **its own** tile's coordinates, which is what `docs/occluders.md`'s S6
+    /// **its own** tile's coordinates, which is what `docs/render/design_occluders.md`'s S6
     /// made expressible. That is the half of the old reason this test lost: a
     /// merged run would now carry its window exactly where the window is, and
     /// what still refuses is that there is one field for four of them.

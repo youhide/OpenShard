@@ -39,7 +39,7 @@
 //! It also costs nothing extra: the ring is found where the mask already is, and
 //! the blit's nearest sampler carries it up whole.
 //!
-//! `docs/outline.md` is the plan this is built against.
+//! `docs/render/design_outline.md` is the plan this is built against.
 
 /// The format of the mask the silhouette pass writes and this one reads.
 ///
@@ -115,7 +115,7 @@ pub fn mask_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Tex
 ///
 /// The ring says *exactly* where the thing is and the glow says *there is
 /// something here*, which is the half that survives being looked at out of the
-/// corner of an eye. They are one mask and one composite — `docs/outline.md` D5
+/// corner of an eye. They are one mask and one composite — `docs/render/design_outline.md` D5
 /// — so a glow costs the blur chain and nothing else.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Glow {

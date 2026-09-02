@@ -36,7 +36,7 @@ fn heading_to(body: camera::WorldPixel, cursor: camera::WorldPixel) -> Option<He
 /// A dump is a directory holding one picture per plane, named for the plane,
 /// and the inputs the frame was assembled from.
 ///
-/// The naming is the contract: `docs/parity.md`'s gate compares a client's
+/// The naming is the contract: `docs/render/design_frame_assembly.md`'s gate compares a client's
 /// plane against a tool's, and it finds them by name. A dump that wrote
 /// `0.png` … `12.png` would be a dump whose reader has to keep
 /// [`View::ALL`]'s order by hand — the shape the plan complains about, since

@@ -149,7 +149,7 @@ rubber-band rather than as a permission.
 
 ## How three other engines lit a flat world
 
-Read while planning the lighting rewrite ([`lighting.md`](lighting.md)), because
+Read while planning the lighting rewrite ([`lighting.md`](archive/render/lighting.md)), because
 a day somebody else already spent is the cheapest day there is. Two findings came
 out of it and the first is the one that changes what we build.
 
@@ -165,7 +165,7 @@ picture.** All three do this and none of them measures anything:
 - **Diablo** does not have occluder shapes at all: light is a level per tile,
   flooded over the grid with radius tables.
 
-So the hand-authored table of [`lighting.md`](lighting.md)'s decision 31.2 is not
+So the hand-authored table of [`lighting.md`](archive/render/lighting.md)'s decision 31.2 is not
 a workaround for missing tooling. It is what everyone who has done this converged
 on, and the part that is genuinely unusual here is the opposite one: **we derive
 a solid from art we did not draw**, because the art is the client's and there is

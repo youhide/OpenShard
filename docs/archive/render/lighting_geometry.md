@@ -1,6 +1,6 @@
 # The occluding primitive: box or mesh
 
-> **Consolidated into [`lighting_rebuild.md`](lighting_rebuild.md)** — box-to-mesh occluders, never started.
+> **Consolidated into [`lighting_rebuild.md`](../../render/design_model.md)** — box-to-mesh occluders, never started.
 > That document is the entry point: it lists what is still live here, which rebuild phase retires or inherits it, and what carries over untouched. This file stays as the record of how it was built and why.
 
 

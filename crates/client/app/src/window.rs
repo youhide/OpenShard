@@ -753,7 +753,7 @@ pub(crate) struct Screen {
     /// another atlas bound: a sprite is a sprite, and the two differ only in
     /// where the quad goes.
     pub(crate) mobile_pass: SpriteRenderer,
-    /// `docs/gbuffer.md` step 4c's mesh-face pass — depth and place only, for
+    /// `docs/archive/render/gbuffer.md` step 4c's mesh-face pass — depth and place only, for
     /// a climbable static's honest per-face geometry. No atlas dependency, so
     /// unlike `statics`/`mobile_pass` it is never rebuilt when the atlases
     /// are.
@@ -943,7 +943,7 @@ impl Screen {
 /// the size changed, because the atlas baked one pixel height for the whole
 /// client; it is keyed by `(char, size)` now, so a new size is a few more
 /// glyphs packed beside the old ones rather than a texture thrown away. See
-/// `docs/text_sizes.md`'s D2, and `TtfAtlas::reset` for the one case that
+/// `docs/render/design_text_sizes.md`'s D2, and `TtfAtlas::reset` for the one case that
 /// still empties it.
 fn build_ttf(
     device: &wgpu::Device,
@@ -1204,7 +1204,7 @@ impl App {
         // Empty, and with no size baked into it: a glyph is packed the first
         // frame something asks for that character *at that size*, and the
         // sizes are the player's own `desk::FontSizes` read where each kind of
-        // text is drawn. See `docs/text_sizes.md`.
+        // text is drawn. See `docs/render/design_text_sizes.md`.
         let (ttf_atlas, ttf_gump_pass) = match &self.resources.ttf_font {
             Some(_) => {
                 let (atlas, pass) = build_ttf(&device, &queue, format, &self.resources.hue_ramp);
@@ -1268,7 +1268,7 @@ impl App {
         // And the selection's wash, over the same finished picture and for the
         // same reason: what is held must stay legible after dark.
         let select = Select::new(&device, format);
-        // The occlusion grid as solids — `docs/lighting.md` step 23.0. Over the
+        // The occlusion grid as solids — `docs/archive/render/lighting.md` step 23.0. Over the
         // lit picture for the third time and for the third statement of the same
         // reason: a diagnostic that dimmed at night would stop working exactly
         // when the picture is hardest to read.
@@ -1375,7 +1375,7 @@ impl App {
     /// reads this same static atlas for an occluder's facing. A wall standing
     /// only in the margin between the two bounds fell back to the whole-tile
     /// shape whenever nothing else had put its graphic in the atlas first —
-    /// see `docs/parity.md`'s backlog.
+    /// see `docs/render/design_frame_assembly.md`'s backlog.
     pub(crate) fn wanted_now(&self) -> Wanted {
         self.wanted_in([light::lit_tiles(self.control.camera(), &self.tuning())])
     }

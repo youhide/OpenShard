@@ -2,7 +2,7 @@
 // the fourth channel of the G-buffer's position plane —
 // `crate::gbuffer::POSITION_FORMAT`.
 //
-// The one number the shadow walk compares (`docs/lighting_rebuild.md` phase 4):
+// The one number the shadow walk compares (`docs/render/design_model.md` phase 4):
 // a candidate box whose id equals this is the very surface the fragment is a
 // point of, and no part of a surface shadows another part of it.
 //
@@ -18,9 +18,9 @@
 // of a flight then claimed to be a point of its bottom step, and the treads
 // above it shadowed themselves in hard triangular wedges.
 //
-// That was invisible while `docs/gbuffer.md` step 4c's mesh pass drew over every
+// That was invisible while `docs/archive/render/gbuffer.md` step 4c's mesh pass drew over every
 // climbable static, because a mesh face is one primitive by construction and its
-// own row named it outright. `docs/lighting_rebuild.md` phase 6d took that pass
+// own row named it outright. `docs/render/design_model.md` phase 6d took that pass
 // off real statics — a static's position and normal come from the impostor
 // meeting its own boxes now — and the ambiguity was what the pass had been
 // covering.

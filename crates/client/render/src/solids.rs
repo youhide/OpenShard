@@ -1,6 +1,6 @@
 //! The pass that draws [`Solid`](crate::solid::Solid)s over a finished frame.
 //!
-//! `docs/lighting.md` step 23.0. The first version of that step painted through
+//! `docs/archive/render/lighting.md` step 23.0. The first version of that step painted through
 //! the client's egui layer, which put the instrument somewhere no test could
 //! reach: `render`'s pictures are rendered headless into a texture and read back
 //! — `tests/cost.rs` draws Britain at the widest zoom and writes the frame out —

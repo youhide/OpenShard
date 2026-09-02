@@ -12,17 +12,17 @@
 //   1. **Is this pixel the selected thing?** That is the mask: the silhouette
 //      pass drew the picked static's quad into it, depth-tested against the
 //      world, so what is in there is what is *visible* of it. The G-buffer's
-//      id plane (`docs/gbuffer.md` step 3) now *can* tell two statics on
+//      id plane (`docs/archive/render/gbuffer.md` step 3) now *can* tell two statics on
 //      one tile apart from each other, but not this pixel from the picked one —
 //      the silhouette is its own tiny draw with its own instance numbering, not
 //      a second use of the world pass's ids, so there is no id here to compare
-//      against. See `docs/gbuffer.md`'s "not settled" item on whether
+//      against. See `docs/archive/render/gbuffer.md`'s "not settled" item on whether
 //      `render_mask` shrinks.
 //   2. **Is this pixel the ground that thing stands on?** That is the id plane,
 //      which names whatever was drawn at each pixel — so the answer is a
 //      comparison, and needs no second mask, but never a
 //      *direct* one: every kind's pixel carries an id rather than a tile,
-//      into `face_instances` for a static (`docs/gbuffer.md` step 3, see step
+//      into `face_instances` for a static (`docs/archive/render/gbuffer.md` step 3, see step
 //      6) or `ground_instances` for the land (step 7), so the tile is one more
 //      lookup away either way.
 //
@@ -57,11 +57,11 @@ fn vs_main(@builtin(vertex_index) index: u32) -> VertexOut {
 @group(0) @binding(1) var ids_of: texture_2d<u32>;
 
 // The statics pass's own instance buffer, bound a second time as storage —
-// `docs/gbuffer.md` decision 2 and step 3, the same buffer `blit.wgsl` reads
+// `docs/archive/render/gbuffer.md` decision 2 and step 3, the same buffer `blit.wgsl` reads
 // as `face_instances`. A `Kind::Static` pixel's `place.x`/`place.y` is an id
 // into this, not a tile; only its `place` field is read here; the rest is
 // declared so the struct's size matches `SpriteQuad::STRIDE` and every row
-// past the first is not read at the wrong offset. See `docs/gbuffer.md` step
+// past the first is not read at the wrong offset. See `docs/archive/render/gbuffer.md` step
 // 6.
 struct FaceInstance {
     rect: vec4<f32>,
@@ -75,7 +75,7 @@ struct FaceInstance {
 @group(0) @binding(3) var<storage, read> face_instances: array<FaceInstance>;
 
 // The ground pass's own instance buffer, bound a second time as storage —
-// `docs/gbuffer.md` step 7, the ground half of what step 3 did for a static's
+// `docs/archive/render/gbuffer.md` step 7, the ground half of what step 3 did for a static's
 // tile above. Scalars rather than `FaceInstance`'s `vec4`s, for the reason
 // `blit.wgsl`'s own copy of this struct gives: `GroundQuad::write`'s first
 // field is only eight bytes wide, and a `vec4` right after it would force
@@ -146,7 +146,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         let ground = kind == KIND_LAND || (kind == KIND_STATIC && stance == STANCE_FLAT);
         // The **tile** itself, never the id directly: every kind's pixel
         // carries an id into its own instance buffer, not a tile — see
-        // `docs/gbuffer.md` step 3 for a static, step 7 for the ground.
+        // `docs/archive/render/gbuffer.md` step 3 for a static, step 7 for the ground.
         let id = ids_id(ids);
         var tile = vec2<u32>(0u);
         if kind == KIND_LAND {

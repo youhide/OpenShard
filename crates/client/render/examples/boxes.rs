@@ -31,7 +31,7 @@
 //!   purpose, to see whether a shape that narrow still throws a shadow with
 //!   the outline its own silhouette suggests. `pair` puts two boxes of one
 //!   height *side by side* on one tile with the flame beyond the second, which
-//!   is `docs/lighting_height.md` phase 3's own fixture: see [`scene_pair`].
+//!   is `docs/archive/render/lighting_height.md` phase 3's own fixture: see [`scene_pair`].
 //!   `line` is `two_cubes.rs`'s own default shape (two whole-tile boxes,
 //!   offset `1,0` — due east, a straight line rather than a diagonal) at a
 //!   shorter height, built here only so both scenes go through one tool with
@@ -70,7 +70,7 @@
 //!   — a wider gap between the two boxes' own silhouettes is easier to read
 //!   a shadow's own edge against. **These four defaults, this scene, and this
 //!   tool's own zoom and flame defaults are the reference scene**
-//!   (`docs/lighting.md`, "Testing and instrumentation"), and the oracle
+//!   (`docs/archive/render/lighting.md`, "Testing and instrumentation"), and the oracle
 //!   counts recorded there are what they produce: override one for a single
 //!   run to ask a question, but editing a default here silently retires every
 //!   recorded number.
@@ -85,7 +85,7 @@
 //! # The oracle
 //!
 //! A rendered picture answers "does this look right" and nothing sharper —
-//! session 14's own account (`docs/lighting_raymarch.md`) of chasing three
+//! session 14's own account (`docs/archive/render/lighting_raymarch.md`) of chasing three
 //! reported artefacts by eye through several renders is the argument against
 //! trusting that alone twice. `oracle_visible`/[`segment_clear_of_box`] is a
 //! second, deliberately independent answer: a bare point-light-vs-AABB
@@ -95,7 +95,7 @@
 //! either. Runs by default (`OPENSHARD_BOXES_ORACLE=0` to skip it), over a
 //! grid of each box's own top, next to what the engine's own CPU walk
 //! (`light::sample`, the same arithmetic `blit.wgsl` runs, held to it by the
-//! parity suite `docs/lighting_raymarch.md` calls decision 9) says for the
+//! parity suite `docs/archive/render/lighting_raymarch.md` calls decision 9) says for the
 //! same points, written as one side-by-side comparison picture per box
 //! (`<path>_oracle_box<N>.png`: oracle | engine | signed diff) plus a
 //! disagreement count on stderr. `OPENSHARD_BOXES_ORACLE_EXACT=1` swaps the
@@ -122,7 +122,7 @@
 //! `Occlusion::solid_bytes` is gone: a primitive is one struct in a storage
 //! buffer with its own six absolute coordinates
 //! (`Occlusion::primitive_bytes`), so the shader reads a body's `x`/`y` outright
-//! and `walk_cells`'s own arm reads the same box. `docs/occluders.md`'s S1. The
+//! and `walk_cells`'s own arm reads the same box. `docs/render/design_occluders.md`'s S1. The
 //! account above is kept because it is how the gap was *found*, which is the one
 //! thing a later reader cannot re-derive.
 //!
@@ -132,7 +132,7 @@
 //! `View::Shadow` frame read back pixel for pixel, because the ground has no
 //! "own top" to ask `light::sample` about directly.
 //!
-//! A third, `docs/lighting_height.md`'s own phase 0
+//! A third, `docs/archive/render/lighting_height.md`'s own phase 0
 //! (`OPENSHARD_BOXES_FACE_ORACLE=0` to skip it), closes the gap the first two
 //! cannot see at all: both sample a *flat* surface, where an integer height is
 //! exact by construction (a lid is at an integer `z`, the ground is at
@@ -204,7 +204,7 @@
 //! is compared only where both agree which surface is there, the surface faces
 //! the flame, and neither picture has a shadow edge in its own eight-
 //! neighbourhood — the three splits, and why each is not a shadow, are in
-//! `docs/lighting_reference.md`.
+//! `docs/render/reference/path_tracer.md`.
 //!
 //! `OPENSHARD_BOXES_PATHTRACE_SAMPLES=n` (with `_BOUNCES`, `_EMITTER`,
 //! `_EXPOSURE`) additionally renders the *full* mode to
@@ -220,7 +220,7 @@
 //! frame, the tracer's exact render of the same scene in the same light model,
 //! and the difference between them per channel, amplified `8×`. Both encoded by
 //! `tonemap::encode`, so what is left to differ is the light and not the way it
-//! was written to a byte. `docs/lighting_rebuild.md`'s phase 0.
+//! was written to a byte. `docs/render/design_model.md`'s phase 0.
 //!
 //! **`OPENSHARD_BOXES_SCENE=flat` is the scene it means something on.** No
 //! boxes: one flame, flat ground, nothing in the way, and no ambient — so no
@@ -371,7 +371,7 @@ fn scene_tree() -> Vec<BoxSpec> {
 /// Two boxes **side by side on one tile, spanning the same heights**, with the
 /// flame beyond the second along the line through both.
 ///
-/// The scene `docs/lighting_height.md`'s phase 3 is measured against, and it
+/// The scene `docs/archive/render/lighting_height.md`'s phase 3 is measured against, and it
 /// exists because the `tree` scene cannot show that phase's defect at all:
 /// `tree` stacks its boxes, so the two `z` spans meet at a single plane and a
 /// fragment of one is inside the other's span for exactly one quantum of
@@ -475,7 +475,7 @@ fn scene_line() -> Vec<BoxSpec> {
 /// **`OPENSHARD_STAIR_RUN=n` stands `n` flights side by side**, across the climb
 /// rather than along it — `examples/synthetic_stair`'s own knob, spelled the same
 /// way so that a person pointing the two tools at "the same scene" gets the same
-/// scene. One flight cannot pose the question `docs/occluders.md` is about: a run
+/// scene. One flight cannot pose the question `docs/render/design_occluders.md` is about: a run
 /// is what puts two treads of *different statics* at one height either side of a
 /// tile boundary, sharing a whole face.
 ///
@@ -513,7 +513,7 @@ fn scene_stair() -> Vec<BoxSpec> {
                     // One graphic per tread of per flight: every tread of this
                     // scene is its own static, so a landing continuous across
                     // the run stays three primitives — which is the geometry
-                    // `docs/occluders.md`'s D2 is argued on.
+                    // `docs/render/design_occluders.md`'s D2 is argued on.
                     graphic: flight * per_flight + i as u16,
                 }
             })
@@ -532,7 +532,7 @@ const ANCHOR: (u16, u16) = (100, 100);
 
 /// Nothing at all: flat ground, and the flame above it.
 ///
-/// **`docs/lighting_rebuild.md`'s phase 0 scene, and the emptiness is the
+/// **`docs/render/design_model.md`'s phase 0 scene, and the emptiness is the
 /// point.** The comparison that phase asks for is the engine's shaded frame
 /// beside the path tracer's, and every other scene here has four things in it
 /// that differ for reasons which are not about light: a box's albedo is invented
@@ -573,7 +573,7 @@ fn flame_radius() -> f32 {
 /// one `point` itself rests on, which must not shadow itself) tested by
 /// [`segment_clear_of_box`], once per point of the flame.
 ///
-/// **A share and not a bool, and `docs/lighting_rebuild.md`'s phase 4 predicted
+/// **A share and not a bool, and `docs/render/design_model.md`'s phase 4 predicted
 /// exactly this.** It answered about the flame's *centre* until phase 5, and its
 /// disagreements with the frame were reported that phase as "the engine's area
 /// light against a point source, and phase 5 is where those become comparable".
@@ -716,7 +716,7 @@ fn main() {
     // carry for `exemption` to know it is a point of it, and what `pair` is
     // entirely about: two boxes on one tile, so two names, where the height test
     // they replaced cannot tell them apart at all. `add_raw` pushes exactly one
-    // solid a box, so `Part::ONLY` is the piece. `docs/lighting_rebuild.md` phase
+    // solid a box, so `Part::ONLY` is the piece. `docs/render/design_model.md` phase
     // 4; it was the box's `OwnerId` until then.
     let solids: Vec<SolidId> = boxes
         .iter()
@@ -1196,7 +1196,7 @@ fn main() {
 
     // A ground-plane companion to the box-top oracle above: that one only ever
     // asks about the tops of the boxes, so it structurally cannot see the bug
-    // `docs/lighting_raymarch.md`'s backlog names ("A live CPU/GPU disagreement
+    // `docs/archive/render/lighting_raymarch.md`'s backlog names ("A live CPU/GPU disagreement
     // on `boxes.rs`'s `tree` scene") — the ground immediately beside a box's own
     // base.
     //
@@ -1333,7 +1333,7 @@ fn main() {
         }
     }
 
-    // The face oracle: `docs/lighting_height.md`'s own phase 0. Neither
+    // The face oracle: `docs/archive/render/lighting_height.md`'s own phase 0. Neither
     // oracle above can see this bug's class — the box-top oracle samples only
     // a box's own flat top, where an integer height is exact (a lid *is* at
     // an integer `z`); the ground oracle samples the ground, `z = 0`,
@@ -1396,7 +1396,7 @@ fn main() {
                 let mut disagreeing = 0usize;
                 // And which of the two walks is out, on every disagreement.
                 // `light::sample` is the CPU's own preview of exactly what the
-                // shader does (`docs/lighting.md` decision 9 holds the two to
+                // shader does (`docs/archive/render/lighting.md` decision 9 holds the two to
                 // each other), so a disagreement where it sides with the
                 // independent oracle is the *shader* alone being out — a parity
                 // gap — and one where it sides with the rendered pixel is the
@@ -1410,7 +1410,7 @@ fn main() {
                 // A total alone says a phase moved the number; it cannot say
                 // whether what is left is the same defect made smaller or a
                 // different one that was always there, and those want opposite
-                // next steps. `docs/lighting_height.md` phase 1's own residual
+                // next steps. `docs/archive/render/lighting_height.md` phase 1's own residual
                 // is the case in point: it is not spread over the face at all,
                 // it is one band, which is a shape the count could never have
                 // shown.
@@ -1543,7 +1543,7 @@ fn main() {
             flame: &lighting.lights[0],
             albedos: oracle::pathtrace::Albedos {
                 ground: oracle::ground_albedo(&drawn, &world_pixels),
-                // Measured since `docs/lighting_rebuild.md` phase 6d gave the
+                // Measured since `docs/render/design_model.md` phase 6d gave the
                 // mesh pass a colour target — except on `scene_flat`, whose
                 // whole point is that it has no boxes, so there is nothing on
                 // the engine's side to read one off.
@@ -1583,7 +1583,7 @@ struct PathtraceInputs<'a> {
     /// passes just drew; see [`ground_albedo`].
     albedos:       oracle::pathtrace::Albedos,
     /// The engine's own lit frame, `RGBA8`, for the shaded comparison — the
-    /// picture `docs/lighting_rebuild.md`'s phase 0 is *about*. Empty when the
+    /// picture `docs/render/design_model.md`'s phase 0 is *about*. Empty when the
     /// run did not dump `View::Lit`, and the comparison then says so rather
     /// than drawing half of itself.
     lit_pixels:    &'a [u8],
@@ -1653,7 +1653,7 @@ fn pathtrace_comparison(inputs: PathtraceInputs<'_>) {
     //
     // `Brdf::Flat` still describes how the engine decides *whether* a pixel is
     // lit: a fragment's own body does not occlude it, which the shipped walk
-    // states as an exemption and `docs/lighting_rebuild.md`'s phase 4 will state
+    // states as an exemption and `docs/render/design_model.md`'s phase 4 will state
     // as identity. So the visibility comparison — the whole of `compare` — stays
     // here, and `physical` beside it still measures how many pixels the choice of
     // model decides.
@@ -1716,7 +1716,7 @@ fn pathtrace_comparison(inputs: PathtraceInputs<'_>) {
 
     // And the *shape* of the soft edge, which the verdict above cannot see: it
     // reads both pictures as one bit a pixel, and a penumbra is exactly the
-    // region where that bit is arbitrary. `docs/lighting_rebuild.md` phase 5.
+    // region where that bit is arbitrary. `docs/render/design_model.md` phase 5.
     // Only where there is a penumbra to look at: `penumbra` says so by panicking,
     // which is right for a gate and wrong for a tool a person points at a scene
     // with no occluder in it.
@@ -1750,7 +1750,7 @@ fn pathtrace_comparison(inputs: PathtraceInputs<'_>) {
         &strips,
     );
 
-    // **The two shaded pictures, side by side.** `docs/lighting_rebuild.md`'s
+    // **The two shaded pictures, side by side.** `docs/render/design_model.md`'s
     // phase 0: the instrument every later phase is judged by is a picture beside
     // the tracer's, looked at by a person — and until this, the tool wrote the
     // engine's frame and the tracer's as two files and laid only their *shadow
@@ -1834,7 +1834,7 @@ fn pathtrace_comparison(inputs: PathtraceInputs<'_>) {
         // by hand until phase 0, with a `clamp` where the tonemap's shoulder is,
         // so the reference and the frame took two different paths out of linear
         // light and a picture of one could not be laid beside a picture of the
-        // other. `docs/lighting_rebuild.md` phase 1's own rule: nothing in this
+        // other. `docs/render/design_model.md` phase 1's own rule: nothing in this
         // crate spells these curves a second time.
         //
         // The exposure knob stays a knob, and stays *outside* the curve: it says
@@ -1856,7 +1856,7 @@ fn pathtrace_comparison(inputs: PathtraceInputs<'_>) {
 /// The engine's shaded frame, the tracer's, and the difference — one picture,
 /// and a line of numbers under it.
 ///
-/// **`docs/lighting_rebuild.md`'s phase 0 instrument.** Not a gate: it prints
+/// **`docs/render/design_model.md`'s phase 0 instrument.** Not a gate: it prints
 /// and draws, and a person decides. The gate with the same subject is
 /// `tests/traced.rs`'s brightness test, which runs the flat scene where the two
 /// sides can be held to a quantisation and asserts on it.

@@ -147,7 +147,7 @@ struct Cli {
 
     /// Draw the lighting's occlusion grid as solids from the first frame.
     ///
-    /// The same view F5 toggles — `docs/lighting.md` step 23.0. As a flag
+    /// The same view F5 toggles — `docs/archive/render/lighting.md` step 23.0. As a flag
     /// because a picture of a place is taken with a command line and not with a
     /// hand on a checkbox, and because the two together (`--at` and this) are
     /// what make one reproducible.

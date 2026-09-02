@@ -9,7 +9,7 @@
 //! height into `y`, so a brazier in a cellar lands a few pixels from a lantern
 //! on the street above, and a wall's picture stands 44 pixels above the tile it
 //! occludes from — which puts the lit face of a wall inside its own shadow the
-//! moment shadows exist at all. `docs/lighting.md` is the argument at length.
+//! moment shadows exist at all. `docs/archive/render/lighting.md` is the argument at length.
 //!
 //! # Why it is a pass over the finished image and not a term in three shaders
 //!
@@ -175,7 +175,7 @@ impl Beam {
     /// [`TileVec`]'s space, pointing *from* the flame *to* the spot.
     ///
     /// `blit.wgsl`'s `cone`, arithmetic for arithmetic, and the parity test of
-    /// `docs/lighting.md`'s decision 9 is what says so. The smoothstep is
+    /// `docs/archive/render/lighting.md`'s decision 9 is what says so. The smoothstep is
     /// written out rather than called, because WGSL's built-in and a Rust crate's
     /// are two texts that can disagree and this is one polynomial either way.
     ///
@@ -202,7 +202,7 @@ impl Beam {
 /// its radius; the sun has no position, so every fragment walks the *same*
 /// direction until the ray leaves the grid or is stopped — which is what gives a
 /// wall a shadow lying across the street, and a window a bright patch on the
-/// floor behind it. `docs/lighting.md`, decision 12.
+/// floor behind it. `docs/archive/render/lighting.md`, decision 12.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Sun {
     /// Which way the sun is, from anywhere, in [`TileVec`]'s space — the same
@@ -276,7 +276,7 @@ pub const Z_PER_TILE: f32 = (crate::camera::TILE_WIDTH / crate::camera::Z_STEP) 
 
 /// A direction or an offset in **tile space**: all three axes in tiles.
 ///
-/// `docs/pixels.md` P3, and the grid that phase found genuinely missing a type.
+/// `docs/render/design_pixel_spaces.md` P3, and the grid that phase found genuinely missing a type.
 /// Two three-vector spaces meet in this module and nothing but prose told them
 /// apart:
 ///
@@ -412,7 +412,7 @@ impl TileVec {
 
 /// A position or offset in **world units**: `x` and `y` in tiles, `z` in the
 /// map's own height units — the other of the two spaces [`TileVec`]'s doc
-/// documents, `docs/pixels.md` P3.
+/// documents, `docs/render/design_pixel_spaces.md` P3.
 ///
 /// This is what every position in the world is stated in: [`Light::z`],
 /// [`Spot::z`], [`crate::impostor::Volume`]'s corners, a ray's origin. Before
@@ -463,7 +463,7 @@ impl WorldVec {
 /// The light a place has before anything burns in it: the sky's share, and the
 /// floor under it.
 ///
-/// `docs/lighting_world.md`, decision 1. One colour for the whole frame lit the
+/// `docs/archive/render/lighting_world.md`, decision 1. One colour for the whole frame lit the
 /// inside of a house exactly as brightly as the street outside it, because
 /// nothing in the ambient knew what a roof was — a dungeon was dark only because
 /// the server had said the whole world was. Split in two:
@@ -506,7 +506,7 @@ impl Ambient {
     /// **The ambient this pass had before the sky field existed**, and the switch
     /// back to it is deliberate rather than a leftover. What a roof does to the
     /// light under it is a whole plan of its own
-    /// (`docs/lighting_world.md`), and while the *point* lights are being got
+    /// (`docs/archive/render/lighting_world.md`), and while the *point* lights are being got
     /// right it is a second thing changing every tile of every picture: a pool
     /// that looks wrong indoors is then two questions, and the field answers the
     /// one nobody asked. Flat is also the honest baseline — it is what a shard
@@ -532,7 +532,7 @@ impl Ambient {
     ///
     /// `blit.wgsl` does this same arithmetic per fragment out of the field
     /// plane, and the two are held together by the parity test of
-    /// `docs/lighting.md`'s decision 9.
+    /// `docs/archive/render/lighting.md`'s decision 9.
     pub fn at(self, sky: u8) -> [f32; 3] {
         let share = f32::from(sky) / f32::from(crate::occlusion::SKY_OPEN);
         let mut lit = self.ground;
@@ -580,7 +580,7 @@ pub struct Lighting {
     /// never walks a ray for it.
     pub sun:          Option<Sun>,
     /// Which of the pass's own values to draw instead of the lit frame — see
-    /// [`crate::debug::View`], and `docs/lighting.md`'s decision 8 for why the
+    /// [`crate::debug::View`], and `docs/archive/render/lighting.md`'s decision 8 for why the
     /// diagnostics are branches of this pass rather than a second one.
     ///
     /// Here rather than in [`crate::blit::Frame`] because it is read where the
@@ -645,7 +645,7 @@ impl Lighting {
     /// Whether this would change a single pixel.
     ///
     /// The occluders *are* asked about now, and that is decision 1 of
-    /// `docs/lighting_world.md` arriving here: a wall with no flame to stop
+    /// `docs/archive/render/lighting_world.md` arriving here: a wall with no flame to stop
     /// still casts nothing, but a roof takes the sky's share of the ambient away
     /// from the tile under it whether anything burns or not. A grid with
     /// something in it is therefore a frame that may be darker than its world
@@ -701,11 +701,11 @@ impl Lighting {
 /// rather than for a source — and because a warm floor would take the one hue a
 /// flame has to itself.
 ///
-/// Invented here, in the way `docs/lighting_world.md`'s decision 11 says every
+/// Invented here, in the way `docs/archive/render/lighting_world.md`'s decision 11 says every
 /// number in this plan is: held by a scene, not argued into existence.
 ///
 /// **Linear**, like every light quantity in this module since
-/// `docs/lighting_rebuild.md`'s phase 1. It was authored as `[0.12, 0.13, 0.18]`
+/// `docs/render/design_model.md`'s phase 1. It was authored as `[0.12, 0.13, 0.18]`
 /// — how dark the floor *looks* — back when the shader multiplied stored sRGB
 /// bytes, and that is what those numbers meant: a fraction of a **displayed**
 /// value. Now the multiplication happens in linear radiance, so the authored
@@ -911,7 +911,7 @@ pub fn light_margin_tiles(tuning: &Tuning) -> i32 {
 ///
 /// Public because it is the rectangle *the grid is*, and a second caller that
 /// wants the same grid must not guess at it: the app's occluder overlay
-/// (`docs/lighting.md`, step 14) rebuilds the grid to draw it, and a wireframe
+/// (`docs/archive/render/lighting.md`, step 14) rebuilds the grid to draw it, and a wireframe
 /// over a rectangle the shader did not walk is an instrument that lies about
 /// exactly the edge it exists to show. Which is also why the tuning is an
 /// argument here rather than read from somewhere: the overlay and the frame have
@@ -1098,7 +1098,7 @@ pub fn collect_with_interior(
 /// made it on purpose: phase 3 moved the picture through the shading term and
 /// through nothing else.
 ///
-/// **`docs/lighting_rebuild.md` phase 4 was to have deleted this and does not**,
+/// **`docs/render/design_model.md` phase 4 was to have deleted this and does not**,
 /// and the reason is the paragraph above rather than a reluctance: what the plan's
 /// "a sconce burns where it is" would mean in practice is a flame at its tile's
 /// *centre*, which is behind the plane of the face it is bolted to, where the
@@ -1132,7 +1132,7 @@ const MOUNTED_CLEARANCE: f32 = 0.7;
 /// its own tile is exempt from shadowing it (decisions 3 and 17), so the room on
 /// the other side of that wall is lit exactly as brightly as the street.
 ///
-/// `docs/lighting.md`'s backlog has carried the shape of this since the first
+/// `docs/archive/render/lighting.md`'s backlog has carried the shape of this since the first
 /// version of the pass — *"a lamp mounted on a wall wants pushing off it, not
 /// exempting from it"* — and the grid already holds what it needs. Moving the
 /// flame answers both, and it is what let the facing test lose its exemption for
@@ -1190,7 +1190,7 @@ fn place(at: Point, flame: Flame, time: f32) -> Light {
     }
 }
 
-// **`MAX_WALK_STEPS` stood here, and `docs/occluders.md`'s S5 deleted it**
+// **`MAX_WALK_STEPS` stood here, and `docs/render/design_occluders.md`'s S5 deleted it**
 // without putting a number in its place — which is a departure from that plan's
 // own letter, and the reason is worth the paragraph.
 //
@@ -1216,7 +1216,7 @@ fn place(at: Point, flame: Flame, time: f32) -> Light {
 // data.
 
 // **`FLAME_SPREAD`, `SOFT_CROSSING_MIN`, `SOFT_CROSSING_MAX` and `FLAME_DEPTH`
-// lived here**, and `docs/lighting_rebuild.md` phase 5 is what deleted all four.
+// lived here**, and `docs/render/design_model.md` phase 5 is what deleted all four.
 // **A ray is a ray, and a penumbra is what N of them disagreeing about make.**
 //
 // They were one apparatus: `FLAME_SPREAD` said a flame is a body a tile across,
@@ -1250,7 +1250,7 @@ fn place(at: Point, flame: Flame, time: f32) -> Light {
 /// tiles is that the ratio it multiplied is dimensionless. This renderer casts
 /// rays at the flame now, so the size is a size: eight times narrower than the
 /// number that stood in for one, and every shadow in the frame is correspondingly
-/// crisper. `docs/lighting_rebuild.md` phase 5 has the pictures.
+/// crisper. `docs/render/design_model.md` phase 5 has the pictures.
 ///
 /// A sphere and not the ellipsoid the two old constants imply, because the
 /// reference tracer's `Emitter::Sphere` is a sphere and a penumbra judged against
@@ -1614,7 +1614,7 @@ impl Default for Tuning {
 /// byte's worth of light either way.
 const RAY_CUTOFF: f32 = 0.004;
 
-// **`crosses` stood here, and `docs/parity.md`'s P4 step 1 deleted it** — with
+// **`crosses` stood here, and `docs/render/design_frame_assembly.md`'s P4 step 1 deleted it** — with
 // `blit.wesl`'s copy, which is the only way a formula written in two languages
 // goes away at all.
 //
@@ -1640,7 +1640,7 @@ const RAY_CUTOFF: f32 = 0.004;
 // cases asked of the geometry instead.
 
 // **`STAND_OFF`, `ON_TOP` and `stand_clear` lived here**, and
-// `docs/lighting_rebuild.md` phase 4 is what deleted them. **The bias is zero.**
+// `docs/render/design_model.md` phase 4 is what deleted them. **The bias is zero.**
 //
 // They were `2.0 / 127.0` of a tile in front of a face's own plane and
 // `1.0 / 128.0` of a `z` above whatever a point lay on, and both numbers came
@@ -1657,7 +1657,7 @@ const RAY_CUTOFF: f32 = 0.004;
 //     attachment placed it a hundred-and-twenty-seventh *behind* that plane and a
 //     ray from there crossed a neighbouring floor before the walk reached the
 //     cell that floor stands in. Phase 2 replaced the packing with the exact
-//     position, and `docs/lighting_raymarch.md`'s per-solid `ray_vs_solid` gave
+//     position, and `docs/archive/render/lighting_raymarch.md`'s per-solid `ray_vs_solid` gave
 //     every solid its own exact interval and footprint — so a crossing is found
 //     on the cell the solid is referenced from, whenever along the ray it
 //     happens.
@@ -1675,7 +1675,7 @@ const RAY_CUTOFF: f32 = 0.004;
 // below.
 
 // **`on_surface` lived here** and went with its only reader, `same_run` —
-// `docs/occluders.md`'s S4. It asked whether a fragment's `z` lay inside a
+// `docs/render/design_occluders.md`'s S4. It asked whether a fragment's `z` lay inside a
 // primitive's own span, inclusively and exactly, and what that answered was
 // "is the lit end at a height this panel occupies at all", the height half of
 // the run mask. Nothing else ever called it: the question a walk asks now is
@@ -1683,7 +1683,7 @@ const RAY_CUTOFF: f32 = 0.004;
 // [`on_the_lit_surface`], and a span read off the wire rather than rounded is
 // held by [`wire_span`] and its own test. `blit.wesl`'s copy went with it.
 
-// **`drawn_on` lived here**, and `docs/lighting_rebuild.md` phase 4 is what
+// **`drawn_on` lived here**, and `docs/render/design_model.md` phase 4 is what
 // retired it. It asked whether a lid was a plane the fragment was *drawn at* the
 // height of — `low == high && drawn == low` — and [`exemption`] used it to tell
 // which of one static's several lids a fragment belonged to, because an
@@ -1698,7 +1698,7 @@ const RAY_CUTOFF: f32 = 0.004;
 // carried beside `spot_z` for the sole purpose of asking this question where the
 // fragment is rather than where its ray starts.
 
-// **`inside` lived here**, and `docs/lighting_rebuild.md` phase 5 deleted it with
+// **`inside` lived here**, and `docs/render/design_model.md` phase 5 deleted it with
 // the rest of the analytic penumbra. It was `pierces` with its one asymmetry
 // taken out — a soft interval, a band wide at each edge — and its one caller was
 // [`hole`], because a window's edges are in the middle of a surface and no ray
@@ -1717,7 +1717,7 @@ const RAY_CUTOFF: f32 = 0.004;
 ///
 /// **It was `run_v` and it took `along - along.floor()`**, a fraction of the
 /// tile the crossing landed in, because the hole's own ends were fractions of a
-/// tile — `docs/occluders.md`'s S6 is where that went. The `floor` was the last
+/// tile — `docs/render/design_occluders.md`'s S6 is where that went. The `floor` was the last
 /// one in this pass and it decided the answer twice over: a crossing exactly on
 /// a boundary floors into the next tile, and a panel wider than one tile has no
 /// single tile for the fraction to be of. The aperture is stated in world
@@ -1798,7 +1798,7 @@ fn pierced(stands: &crate::occlusion::Solid, cross: [f32; 3]) -> f32 {
 /// small tolerance that has no reason to exist on this side — see that
 /// copy's own comment for why.
 ///
-/// `docs/lighting_raymarch.md`'s ray-vs-Solid scoping, point 1: an exact
+/// `docs/archive/render/lighting_raymarch.md`'s ray-vs-Solid scoping, point 1: an exact
 /// test costs a handful of compares, so nothing upstream needs to *guess*
 /// whether a corner is worth asking about before asking it — this asks
 /// directly and answers exactly, for a box as thin as a panel's own
@@ -1823,7 +1823,7 @@ fn pierced(stands: &crate::occlusion::Solid, cross: [f32; 3]) -> f32 {
 ///
 /// **Stays exact on purpose — widening this, even scoped to
 /// [`walk_the_wire`]'s own caller, was tried and reverted.**
-/// `docs/lighting_raymarch.md`'s point 4 cutover found a real GPU/CPU
+/// `docs/archive/render/lighting_raymarch.md`'s point 4 cutover found a real GPU/CPU
 /// disagreement traced to here (see `blit.wgsl`'s own comment for the case),
 /// but rescuing the same near-miss on the CPU side clamped `leaves` up to
 /// `entered`, collapsing a genuine, if small, interior crossing to a
@@ -1831,7 +1831,7 @@ fn pierced(stands: &crate::occlusion::Solid, cross: [f32; 3]) -> f32 {
 /// computed for it. Because [`walk_the_record`]'s `candidate_tiles` probed a
 /// wider set of candidate cells than [`walk_the_wire`]'s own plain
 /// single-axis stepping ever visited — deliberately, session 8's own scoping;
-/// `docs/occluders.md`'s S5 has since given the two **one** broad phase, so
+/// `docs/render/design_occluders.md`'s S5 has since given the two **one** broad phase, so
 /// the asymmetry this paragraph turns on no longer exists — a rescued
 /// near-miss on a cell only one of the two walks reached turned
 /// a shared, unconditional widening into a *new* disagreement between them,
@@ -1847,7 +1847,7 @@ fn pierced(stands: &crate::occlusion::Solid, cross: [f32; 3]) -> f32 {
 /// widening a body's box near a silhouette corner and tapering the result,
 /// to fake a penumbra. Removed: a flame is a point source, and a point
 /// source casts a hard shadow everywhere, corners included — see
-/// `docs/lighting_raymarch.md`'s "hard shadows" decision. `ray_vs_solid`'s
+/// `docs/archive/render/lighting_raymarch.md`'s "hard shadows" decision. `ray_vs_solid`'s
 /// own exact hit is the whole test now, for every edge kind.
 fn ray_vs_solid(from: [f32; 3], to: [f32; 3], solid: &crate::solid::Solid) -> Option<(f32, f32)> {
     let min = [solid.min.x as f32, solid.min.y as f32, solid.min.z as f32];
@@ -1880,7 +1880,7 @@ fn ray_vs_solid(from: [f32; 3], to: [f32; 3], solid: &crate::solid::Solid) -> Op
 }
 
 // **The vertical shortcut stood here, with `over_footprint` its own half, and
-// `docs/occluders.md`'s S4 deleted both.**
+// `docs/render/design_occluders.md`'s S4 deleted both.**
 //
 // A ray with no horizontal run got a branch of its own in both walks and in
 // `blit.wesl`: there is no direction to step in, so only the starting cell can
@@ -1918,7 +1918,7 @@ fn ray_vs_solid(from: [f32; 3], to: [f32; 3], solid: &crate::solid::Solid) -> Op
 // says the rays really are straight, and zero is the one configuration a person
 // can still reach it from (`OPENSHARD_FLAME_RADIUS`).
 
-// **`same_run` stood here, and `docs/occluders.md`'s S4 deleted it.**
+// **`same_run` stood here, and `docs/render/design_occluders.md`'s S4 deleted it.**
 //
 // What it said was that a run of wall is one surface and no part of a surface
 // shadows another part of it — true, and spelled as arithmetic over *cells*: the
@@ -1966,7 +1966,7 @@ fn lit_plane(surface: Surface) -> Option<(usize, bool)> {
     }
 }
 
-/// **`docs/occluders.md`'s D2, and the whole of the surface exemption**: whether
+/// **`docs/render/design_occluders.md`'s D2, and the whole of the surface exemption**: whether
 /// `candidate` is part of the very surface the lit end is a point of, and so must
 /// not shadow it.
 ///
@@ -2011,7 +2011,7 @@ fn lit_plane(surface: Surface) -> Option<(usize, bool)> {
 /// N statics whose panels share one plane, which is what that function's cell
 /// arithmetic and height gate were approximating. **`same_run` is gone**, and its
 /// grave note above [`lit_plane`] is where its argument is kept:
-/// `docs/occluders.md`'s S4 deleted it once every fixture in the tree could name
+/// `docs/render/design_occluders.md`'s S4 deleted it once every fixture in the tree could name
 /// the solid a fragment is a point of. It does **not** replace identity
 /// for [`Surface::Upright`], which has no plane at all: a tree's sprite is excused
 /// from its own box by name and by nothing else.
@@ -2070,7 +2070,7 @@ struct LitEnd {
 impl LitEnd {
     /// The lit end a [`Spot`] is.
     ///
-    /// **[`Spot::tile`] does not come along**, and `docs/occluders.md`'s S4 is
+    /// **[`Spot::tile`] does not come along**, and `docs/render/design_occluders.md`'s S4 is
     /// why: a walk was the last thing that read it, to arbitrate against its own
     /// start point, and it seeds itself from that point now. The field survives
     /// on [`Spot`] for the one job a tile still has here — `sky_at`, which asks
@@ -2094,7 +2094,7 @@ impl LitEnd {
 }
 
 // **`ExemptionContext`, `Exemption` and `exemption` lived here**, and
-// `docs/lighting_rebuild.md` phase 4 dissolved all three. What the function did,
+// `docs/render/design_model.md` phase 4 dissolved all three. What the function did,
 // in the end, was two unrelated things at once — decide whether one solid was
 // exempt from shadowing the ray, and hand back `same_run`'s mask beside it —
 // and the first of those is now one comparison a walk makes inline:
@@ -2139,7 +2139,7 @@ pub struct Spot {
     /// on. Every caller already knows which tile it means; carrying it here
     /// instead of re-deriving it in the walk is the CPU twin of
     /// `MeshFaceVertex::tile`'s fix to the same class of bug on the GPU side.
-    /// `docs/lighting_raymarch.md` step 2.
+    /// `docs/archive/render/lighting_raymarch.md` step 2.
     pub tile:    (i32, i32),
     /// What surface of the world this is a point of.
     ///
@@ -2152,10 +2152,10 @@ pub struct Spot {
     /// **Which solid of the grid this point is a point of**, or `None` for a
     /// point of none — the ground, a mobile, a fixture with no grid behind it.
     ///
-    /// `docs/lighting_rebuild.md` phase 4, and the whole of what a self-shadow
+    /// `docs/render/design_model.md` phase 4, and the whole of what a self-shadow
     /// rule is now: this against the [`crate::occlusion::SolidId`] the walk is
     /// holding, and nothing else. Two things it replaced in turn. A *height*, up
-    /// to phase 3 of `docs/lighting_height.md` — "is this solid the one I am
+    /// to phase 3 of `docs/archive/render/lighting_height.md` — "is this solid the one I am
     /// drawn from" asked as "does my `z` fall inside its span", which two things
     /// stacked on one tile answer identically and two things side by side answer
     /// wrongly for every pixel. And then an [`crate::occlusion::OwnerId`], the
@@ -2239,12 +2239,12 @@ impl Spot {
 ///
 /// [`crate::place::Stance`] is the same question at the other end of the wire —
 /// a corner is resolved to one of its two faces per fragment before the
-/// attachment is written, and `docs/gbuffer.md` step 4c gave a mesh face
+/// attachment is written, and `docs/archive/render/gbuffer.md` step 4c gave a mesh face
 /// (a tread's top or riser) its own honest tag from this same set besides, so
 /// what arrives here is always one of these four fixed normals, never a
-/// computed one. `docs/lighting.md` decision 40 tried carrying a fifth,
+/// computed one. `docs/archive/render/lighting.md` decision 40 tried carrying a fifth,
 /// computed case here (`Sloped`, a blended tread normal) before honest
-/// per-face geometry existed to make it unnecessary; `docs/gbuffer.md` step 5
+/// per-face geometry existed to make it unnecessary; `docs/archive/render/gbuffer.md` step 5
 /// retired it once measuring against decision 40's own reproduction showed
 /// the blend was compensating for a fake continuous-ramp sampling of the
 /// flight, not for anything the real, decomposed geometry still needed.
@@ -2271,7 +2271,7 @@ impl Surface {
     /// top cap is a flat static, so nothing tested which way it looked and a lamp
     /// standing beside a wall lit its top as fully as one standing over it —
     /// reported from the client as two walls "adding up" at a corner, and it is a
-    /// bright diamond where a corner's cap is. `docs/lighting.md`, decision 27.
+    /// bright diamond where a corner's cap is. `docs/archive/render/lighting.md`, decision 27.
     pub fn normal(self) -> Option<TileVec> {
         match self {
             Self::Upright => None,
@@ -2292,7 +2292,7 @@ impl Surface {
     }
 }
 
-// **`Surface::shadowed_by_own_tile` lived here**, and `docs/lighting_height.md`
+// **`Surface::shadowed_by_own_tile` lived here**, and `docs/archive/render/lighting_height.md`
 // phase 3 is what retired it. It answered "which of a tile's own sides may
 // shadow a pixel standing on it" — `edges` for a `Flat` pixel on a tile with
 // named panels, zero for everything else — and `exemption` masked its `lit_end`
@@ -2308,7 +2308,7 @@ impl Surface {
 /// `max(N · L, 0)`, and nothing else.
 ///
 /// Textbook Lambert, with **no wrap, no band and no width knob** — the decision
-/// at the top of `docs/lighting_rebuild.md`. The art is declared clean albedo and
+/// at the top of `docs/render/design_model.md`. The art is declared clean albedo and
 /// this renderer is the ordinary one; no term here has the job of arguing with
 /// what an artist painted into a sprite. There was a dial in the plan between a
 /// half-space and this, and it was closed rather than tuned; the plan parks a
@@ -2348,7 +2348,7 @@ fn lit_from(normal: TileVec, toward: TileVec) -> f32 {
 /// flight, and by which part of it") reads the same cell whatever the answer
 /// turns out to be. A diagnostic that cannot separate those answers cannot be
 /// used to choose between the fixes they call for, and choosing between them by
-/// reading the code instead is how `docs/lighting_height.md` twice let a
+/// reading the code instead is how `docs/archive/render/lighting_height.md` twice let a
 /// plausible attribution stand as a measured cause.
 ///
 /// So the cell stays and the occluder is named beside it. [`Stopper::solid`] is
@@ -2377,7 +2377,7 @@ pub struct Stopper {
     /// [`walk_the_wire`].
     ///
     /// Deliberately not normalised to one of the two. Which span a walk is
-    /// entitled to is the discipline `docs/lighting_height.md` phase 2 states,
+    /// entitled to is the discipline `docs/archive/render/lighting_height.md` phase 2 states,
     /// and a report that quietly picked the exact one would hide the walk that
     /// read the other.
     pub span:  (f32, f32),
@@ -2480,7 +2480,7 @@ pub struct Reach {
 /// exists for two reasons: a test can assert on numbers instead of on pixels,
 /// and the client can answer "why is this tile lit" in words. Both are worthless
 /// if the copy drifts, so a GPU test runs the real blit over a synthetic place
-/// attachment and asserts the two agree — see `docs/lighting.md`, decision 9.
+/// attachment and asserts the two agree — see `docs/archive/render/lighting.md`, decision 9.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Sample {
     /// Where this was asked about.
@@ -2517,7 +2517,7 @@ impl Sample {
 /// within a *cell*, so a fragment of owner 1 stopped by "owner 1" on a different
 /// cell had not been stopped by itself — two unrelated statics that happened to
 /// be their own cells' first — and a person reading the report was fooled by it,
-/// this session's predecessor included. `docs/lighting_rebuild.md` phase 4 made
+/// this session's predecessor included. `docs/render/design_model.md` phase 4 made
 /// the comparison a [`crate::occlusion::SolidId`], which names one solid in the
 /// whole frame, so equal ids *are* the same solid and there is nothing left to
 /// qualify.
@@ -2613,7 +2613,7 @@ pub fn sample(spot: Spot, lighting: &Lighting) -> Sample {
 
 /// [`sample`], through [`walk_the_record`] instead of [`walk_the_wire`].
 ///
-/// A temporary public seam for `docs/lighting_raymarch.md`'s point 3, not a
+/// A temporary public seam for `docs/archive/render/lighting_raymarch.md`'s point 3, not a
 /// second code path anything real should call: the doc's own oracles
 /// (`tests/lighting.rs`'s grid-sweep and fuzz, `tests/frame.rs`'s
 /// real-geometry fixtures) run through `sample`, not the walk directly,
@@ -2634,7 +2634,7 @@ fn sample_with(
     // The ambient this *tile* has, and not the frame's: how much of the sky the
     // column over it can see decides how much of the sky term it gets. The tile
     // and not the fractional spot, because the field is a byte a tile — the blur
-    // of `docs/lighting_world.md`'s decision 2 is what softens its edges, and a
+    // of `docs/archive/render/lighting_world.md`'s decision 2 is what softens its edges, and a
     // second interpolation here would be a different picture from the shader's.
     let mut multiplier = lighting
         .ambient
@@ -2651,7 +2651,7 @@ fn sample_with(
         // flames to walk rays for and is forbidden to change the answer. A
         // fragment the centre says is out of reach can be reached by the *near
         // side* of a body that has one, so the near side is what is tested —
-        // `docs/lighting_rebuild.md` phase 5b.
+        // `docs/render/design_model.md` phase 5b.
         if distance - lighting.flame_radius >= light.radius.max(0.001) {
             reaches.push(Reach {
                 light: LightIdx(index),
@@ -2710,7 +2710,7 @@ fn sample_with(
             within: true,
             through,
             // The sun is a direction and not a beam, and it has no cosine at all
-            // yet — `docs/lighting_rebuild.md` phase 8 is where it gets the same
+            // yet — `docs/render/design_model.md` phase 8 is where it gets the same
             // BRDF as everything else. So what it delivers *is* what it is
             // visible over, and [`Reach::added`] is that times the colour, which
             // is the same invariant every flame above keeps.
@@ -2949,7 +2949,7 @@ impl IntoIterator for FlamePoints {
 /// can see — the two answers [`arrival`] returns, and they are different
 /// questions.
 ///
-/// `docs/lighting_rebuild.md` phase 5b named the split: a flame is a body for
+/// `docs/render/design_model.md` phase 5b named the split: a flame is a body for
 /// *every* term now, so what it delivers is a sum over its own surface and no
 /// longer a visibility share that something outside the loop scales. The share
 /// it is visible over survives as its own number because a diagnostic asks for
@@ -2981,7 +2981,7 @@ struct Arrival {
 /// [`SHADOW_RAYS`] rays at the points of the flame [`flame_points`] names, with
 /// **every term of the sum taken at the sample point**.
 ///
-/// **This is `docs/lighting_rebuild.md` phase 5b**, and the construction is not
+/// **This is `docs/render/design_model.md` phase 5b**, and the construction is not
 /// "the cosine moved inside the loop" — it is that *the sample point is the only
 /// place a flame has a position*. Visibility, the cosine, the falloff and the
 /// beam are all functions of `p`, and `light.at` appears nowhere below except as
@@ -3075,7 +3075,7 @@ fn arrival(
 
 // **`walk_cells`'s own doc comment stood here, orphaned**, and it is deleted
 // with the last of the cells it described. The function went at
-// `docs/lighting_raymarch.md`'s point 4 cutover and the doc outlived it,
+// `docs/archive/render/lighting_raymarch.md`'s point 4 cutover and the doc outlived it,
 // attached to nothing and still promising things no walk has done since: a
 // crossing length a cell's opacity is scaled by (phase 5 made every crossing
 // hard), `FLAME_SPREAD` and its two bounds (deleted with the pancake flame),
@@ -3084,9 +3084,9 @@ fn arrival(
 //
 // Worth a line rather than a silent removal, because it is the fourth thing on
 // this track to be found still describing a rule that had been gone for
-// phases — see the fixtures in `docs/occluders.md`'s S4. A doc comment nothing
+// phases — see the fixtures in `docs/render/design_occluders.md`'s S4. A doc comment nothing
 // compiles against decays exactly like a test whose subject was taken away.
-// **The DDA over the tile grid stood here, and `docs/occluders.md`'s S5 deleted
+// **The DDA over the tile grid stood here, and `docs/render/design_occluders.md`'s S5 deleted
 // it**: `dda_walk`, `candidate_tiles`, `DdaCell`, the `first` cell both walks
 // seeded themselves with by `from.floor()`, and `MAX_WALK_STEPS`, which counted
 // its steps. What answers "what might this segment meet" now is
@@ -3103,7 +3103,7 @@ fn arrival(
 // the same slab test a primitive is, and both backends read one uploaded box.
 //
 // **Three things the grid got wrong that this is not free of by accident but by
-// construction**, and they are `docs/occluders.md`'s own backlog:
+// construction**, and they are `docs/render/design_occluders.md`'s own backlog:
 //
 //   - **A cell listed a primitive once**, in the cell it was added on, so the
 //     first box wider than its own tile would have been invisible to a ray that
@@ -3118,7 +3118,7 @@ fn arrival(
 //     left in either walk.
 
 /// Every primitive the segment `from`..`to` might meet — a **superset**, which
-/// is the whole of what `docs/occluders.md`'s D4 allows a broad phase to decide.
+/// is the whole of what `docs/render/design_occluders.md`'s D4 allows a broad phase to decide.
 ///
 /// What comes back is not "the primitives the ray hits": it is the primitives
 /// whose *node* boxes the ray hits, which is more of them, and the answer is the
@@ -3184,7 +3184,7 @@ fn candidates<'a>(
 /// Which tile a ray was stopped on, for the report alone.
 ///
 /// **A report's coordinate and not a rule's**, and the distinction is the whole
-/// of `docs/occluders.md`'s S4: [`Stopper::cell`] is read by a person and by the
+/// of `docs/render/design_occluders.md`'s S4: [`Stopper::cell`] is read by a person and by the
 /// handful of tests that name a wall by where it stands, and nothing about the
 /// light depends on it. So a `floor` here is allowed where one in a walk is not.
 ///
@@ -3211,7 +3211,7 @@ fn tile_of(at: [f32; 3]) -> (i32, i32) {
 /// [`crate::occlusion::Solid::space`] for [`walk_the_record`], and the wire's
 /// `f32` [`crate::occlusion::Solid::wire_box`] for [`walk_the_wire`],
 /// which exists to be a faithful preview of what `blit.wesl` reads rather than a
-/// better version of it. Before `docs/occluders.md`'s S1 the gap between the two
+/// better version of it. Before `docs/render/design_occluders.md`'s S1 the gap between the two
 /// was a quantisation — a box rebuilt from a cell and four bytes — and the two
 /// walks were two functions because they genuinely computed different geometry.
 /// S1 collapsed the gap to an `f32` rounding, and S5 leaves them differing by
@@ -3219,7 +3219,7 @@ fn tile_of(at: [f32; 3]) -> (i32, i32) {
 /// to drift.
 ///
 /// **The accumulation is a product over primitives, and the per-cell `max` is
-/// gone with the cell it was about.** `docs/occluders.md`'s S4 left that
+/// gone with the cell it was about.** `docs/render/design_occluders.md`'s S4 left that
 /// deletion blocked on this step, and what arrives with the tree is not the
 /// grouping moving to something else but the grouping *disappearing*: what
 /// crosses a segment is a volume, and a segment that crosses two volumes is
@@ -3269,14 +3269,14 @@ fn walk_primitives(
             return;
         };
         // **A surface does not shadow itself, and that is the whole rule** —
-        // `docs/lighting_rebuild.md` phase 4. `Some(id) == Some(id)` and never
+        // `docs/render/design_model.md` phase 4. `Some(id) == Some(id)` and never
         // `None == None`: a fragment that is a point of no occluder is exempt
         // from nothing.
         if lit.solid == Some(id) {
             return;
         }
         // **And a surface does not shadow itself when it is cut into more than
-        // one primitive**, which is the whole of D2 — `docs/occluders.md`'s S3.
+        // one primitive**, which is the whole of D2 — `docs/render/design_occluders.md`'s S3.
         // A neighbouring box whose extent along this fragment's own normal ends
         // exactly on this fragment's plane lies wholly behind that plane, so
         // there is nothing there for the ray to cross.
@@ -3316,14 +3316,14 @@ fn walk_primitives(
         ];
         let opacity = f32::from(stands.opacity) / 255.0;
         let by_surface = match stands.edges {
-            // A **lid is a body**, and this arm is the body's — `docs/parity.md`
+            // A **lid is a body**, and this arm is the body's — `docs/render/design_frame_assembly.md`
             // P4 step 1. A lid used to be a plane in `z` and needed a rule of its
             // own: `crosses` over the segment's two ends, because a hit against
             // a degenerate box says only that the ray touched the plane, and at a
             // corner of the footprint it says that at one `t` where every `z`
             // collapses to one number. A floor leaked one bright point per corner
             // of the grid; reported at `(1492, 1642)`, `z 28`,
-            // `docs/lighting_rebuild.md` phase 6i, and cured there by a widening
+            // `docs/render/design_model.md` phase 6i, and cured there by a widening
             // rather than by geometry.
             //
             // [`crate::occlusion::Solid::box_of`] gives a lid a span of its own
@@ -3340,12 +3340,12 @@ fn walk_primitives(
             // A body is a real 3D box: occlusion is the primitive's own opacity
             // outright. No length-based fade, no per-side floor, no widened-corner
             // graze: those existed only to fake a penumbra a point flame does not
-            // cast. See `docs/lighting_raymarch.md`'s "hard shadows" decision.
+            // cast. See `docs/archive/render/lighting_raymarch.md`'s "hard shadows" decision.
             Edges::NONE | Edges::ANY => opacity,
             // A panel: a named side, and what stops the ray is whether it crossed
             // the plane *inside* the panel's own drawn extent — [`pierced`], and
             // its hole. There was a gate before it, `edges & !same_run == 0`, and
-            // `docs/occluders.md`'s S4 is where it went: the exemption it spelled
+            // `docs/render/design_occluders.md`'s S4 is where it went: the exemption it spelled
             // is [`on_the_lit_surface`]'s, stated about the fragment's own plane
             // instead of about a row of cells, and it is applied above with the
             // rest of them.
@@ -3392,8 +3392,8 @@ fn walk_primitives(
     }
 }
 
-/// The walk against the **record's** own boxes — `docs/lighting_raymarch.md`'s
-/// ray-vs-Solid scoping, point 2, and since `docs/occluders.md`'s S5 one call to
+/// The walk against the **record's** own boxes — `docs/archive/render/lighting_raymarch.md`'s
+/// ray-vs-Solid scoping, point 2, and since `docs/render/design_occluders.md`'s S5 one call to
 /// [`walk_primitives`] rather than a walk of its own.
 ///
 /// The exact one: [`crate::occlusion::Solid::space`] is what the world built and
@@ -3419,7 +3419,7 @@ fn walk_the_record(
 /// it. [`walk`] and [`walk_sun`]'s own walk.
 ///
 /// **What that costs is an `f32` rounding and nothing else** —
-/// `docs/occluders.md`'s S1. It used to be a quantisation: a solid was
+/// `docs/render/design_occluders.md`'s S1. It used to be a quantisation: a solid was
 /// reconstructed from `(tile, bottom, top, fraction)`, four bytes of
 /// two-hundred-and-fifty-fifths of a tile across and sixteen bits an end up,
 /// because the upload folded every primitive back onto a cell. This walk
@@ -3433,7 +3433,7 @@ fn walk_the_wire(from: [f32; 3], to: [f32; 3], lit: LitEnd, occlusion: &Occlusio
 }
 
 /// [`walk`], through [`walk_the_record`] instead of [`walk_the_wire`] — for
-/// `docs/lighting_raymarch.md`'s point 3 agreement pass, not for anywhere
+/// `docs/archive/render/lighting_raymarch.md`'s point 3 agreement pass, not for anywhere
 /// real.
 fn walk_exact(spot: Spot, at: [f32; 3], occlusion: &Occlusion) -> (f32, Option<Stopper>) {
     walk_the_record([spot.at.x, spot.at.y, spot.z], at, LitEnd::of(spot), occlusion)
@@ -3830,7 +3830,7 @@ mod tests {
     /// A lid stops a ray that goes through it and nothing that runs along it.
     ///
     /// **The three cases `crosses` existed for, asked of the geometry that
-    /// retired it** — `docs/parity.md`'s P4 step 1. They are the same three and
+    /// retired it** — `docs/render/design_frame_assembly.md`'s P4 step 1. They are the same three and
     /// they are the point of the whole change: a floor of the height a real one
     /// has (**zero** in `tiledata.mul`, so `bottom == top`) is a box spanning
     /// `19..20` now, and [`ray_vs_solid`] answers all three without being told
@@ -3909,7 +3909,7 @@ mod tests {
     }
 
     // **Three tests of the analytic penumbra stood here** and went with it at
-    // `docs/lighting_rebuild.md` phase 5, along with the two functions they were
+    // `docs/render/design_model.md` phase 5, along with the two functions they were
     // about. `inside_is_full_at_the_middle_and_half_at_each_edge` and
     // `inside_is_clamped_and_symmetric_about_the_intervals_centre` were `inside`'s
     // band, and `pierces_centres_its_band_on_the_top_edge_only` was the one
@@ -3922,7 +3922,7 @@ mod tests {
     /// Which axis [`along_the_run`] reads is the edge mask, and what it returns
     /// is the coordinate **itself**.
     ///
-    /// It took `along - along.floor()` until `docs/occluders.md`'s S6, and the
+    /// It took `along - along.floor()` until `docs/render/design_occluders.md`'s S6, and the
     /// case that made the `floor` a deliberate spelling rather than
     /// [`f32::fract`] is still here as the third pair: a wall running through
     /// negative world space is a real scene, `(-3.25).fract()` is `-0.25` and
@@ -3987,7 +3987,7 @@ mod tests {
     }
 
     /// **A window is one window, wherever along the panel the ray crosses** —
-    /// `docs/occluders.md`'s S6, and the gate on the rule that step is.
+    /// `docs/render/design_occluders.md`'s S6, and the gate on the rule that step is.
     ///
     /// Two claims, and neither is expressible while a hole is a fraction of the
     /// tile a *crossing* landed in:
@@ -4038,23 +4038,23 @@ mod tests {
 
     // **`same_run_keeps_only_the_sides_on_the_same_row_or_column_as_the_start`
     // lived here** and went with the function it was exhaustive over —
-    // `docs/occluders.md`'s S4. It was the only thing in the crate that went red
+    // `docs/render/design_occluders.md`'s S4. It was the only thing in the crate that went red
     // when `same_run` was neutralised, which is what said the rule had no case of
     // its own left; see the note at its grave above `lit_plane`.
 
     // **`stand_clear_nudges_only_along_a_faces_own_outward_normal` lived here**
-    // and went with the nudge it was about: `docs/lighting_rebuild.md` phase 4
+    // and went with the nudge it was about: `docs/render/design_model.md` phase 4
     // took the bias to zero, and a test whose whole subject is which axis a
     // constant moves a ray along does not survive the constant.
 
     // **`on_surface_is_inclusive_of_both_ends_and_exact` lived here** and went
-    // with `on_surface`, `docs/occluders.md`'s S4. Its whole subject was that
+    // with `on_surface`, `docs/render/design_occluders.md`'s S4. Its whole subject was that
     // predicate's two ends, and there is no predicate left to be inclusive: what
     // asks whether a fragment belongs to a primitive is now the primitive's own
     // name (`Spot::part_of`) and the plane test beside it.
 
     /// A primitive's `z` span is the caller's own, fraction included —
-    /// `docs/lighting_height.md` phase 2's whole point on this side.
+    /// `docs/archive/render/lighting_height.md` phase 2's whole point on this side.
     ///
     /// A box based half a unit up is the case the plan's control scene
     /// (`OPENSHARD_TREE_H1=3.5`) is made of: rounded to `4`, the bottom half
@@ -4099,7 +4099,7 @@ mod tests {
         // is a whole number of `Solid::Z_STEPS`, so this is exact rather than
         // near — the step being a power of two is what buys that.
         // `wire_span` was this said as its own function, and it went with
-        // `walk_the_wire`'s own body at `docs/occluders.md`'s S5: the
+        // `walk_the_wire`'s own body at `docs/render/design_occluders.md`'s S5: the
         // walk reads the wire's whole box now and takes its `z` off that,
         // which is the same two numbers with nothing between them.
         let wire = box_at_half.wire_box();
@@ -4130,7 +4130,7 @@ mod tests {
     /// Every authored light value is exactly `srgb_to_linear` of the number a
     /// person chose, and the numbers a person chose are in this test.
     ///
-    /// `docs/lighting_rebuild.md` phase 1 moved the multiplication into linear
+    /// `docs/render/design_model.md` phase 1 moved the multiplication into linear
     /// radiance, which silently changed what every one of these constants means:
     /// `0.20` of a displayed value is a dark street and `0.20` of radiance is an
     /// overcast afternoon. Converting them is not a tweak and must not read like
@@ -4173,7 +4173,7 @@ mod tests {
     /// [`TileVec`]'s two crossings are one conversion, and it is the one the
     /// whole space is defined by.
     ///
-    /// `docs/pixels.md` P3's gate. The type exists to make world units and tile
+    /// `docs/render/design_pixel_spaces.md` P3's gate. The type exists to make world units and tile
     /// space inexpressible in each other's place, and what makes that safe rather
     /// than merely tidy is that the pair round-trips: a mutation that dropped
     /// `Z_PER_TILE` from either method, or applied it the wrong way round, would
@@ -4255,7 +4255,7 @@ mod tests {
     }
 
     /// **The cull is conservative, and the silhouette is why that costs nothing
-    /// today** — the one term `docs/lighting_rebuild.md`'s phase 5b left at the
+    /// today** — the one term `docs/render/design_model.md`'s phase 5b left at the
     /// flame's centre, and a correction to what that phase expected of it.
     ///
     /// The cull is a **broad phase**: it decides which flames to walk rays for,
@@ -4776,7 +4776,7 @@ mod tests {
         );
     }
 
-    /// `docs/lighting_rebuild.md` **phase 4**, at the walk rather than at
+    /// `docs/render/design_model.md` **phase 4**, at the walk rather than at
     /// [`exemption`]: a fragment is not shadowed by the solid it is a point of,
     /// and **is** shadowed by every other solid of its own static.
     ///
@@ -4792,7 +4792,7 @@ mod tests {
     ///
     /// - **Off a tread's own top, steeply down.** The only solid on the line is
     ///   that tread's own lid and the ray leaves its plane, so the only contact
-    ///   is at the origin. Red before `docs/lighting_height.md`'s own phase 4 —
+    ///   is at the origin. Red before `docs/archive/render/lighting_height.md`'s own phase 4 —
     ///   [`stand_clear`]'s [`ON_TOP`] lifted the fragment a
     ///   hundred-and-twenty-eighth clear of its own top and turned that contact
     ///   into a crossing, which is what painted 1522 and 1346 pixels of the
@@ -4937,7 +4937,7 @@ mod tests {
     /// **A ray with no horizontal run is still only stopped by lids it is
     /// actually under.**
     ///
-    /// `docs/lighting_height.md`'s backlog entry, and the reason the ray above
+    /// `docs/archive/render/lighting_height.md`'s backlog entry, and the reason the ray above
     /// this one is *slanted*: both walks take a shortcut when a ray has no
     /// horizontal run — there is no direction to step in, so only this one cell
     /// can hold anything — and the shortcut applied `crosses` to **every** lid
@@ -5071,7 +5071,7 @@ mod tests {
     }
 
     /// **A floor is one surface at the point four of its tiles meet, and a ray
-    /// through that point is stopped** — `docs/lighting_rebuild.md` phase 6i.
+    /// through that point is stopped** — `docs/render/design_model.md` phase 6i.
     ///
     /// Reported by a person playing: a lattice of bright points over a floor at
     /// `(1492, 1642)`, `z 28`, **one to a tile corner** and nothing along the
@@ -5183,7 +5183,7 @@ mod tests {
 
     /// **A wall the flame sits exactly level with can still be skipped whole.**
     ///
-    /// `docs/lighting_raymarch.md`'s "A new `walk_cells` miss" backlog entry,
+    /// `docs/archive/render/lighting_raymarch.md`'s "A new `walk_cells` miss" backlog entry,
     /// found rendering a picture rather than sweeping for it and root-caused by
     /// a per-iteration DDA trace. A flame standing exactly on a wall row's own
     /// north edge (`flame.y == wall_tile.y as f32`) makes `corner_tie` balloon
@@ -5271,14 +5271,14 @@ mod tests {
     }
 
     // **`the_dda_walk_does_not_skip_the_wall_row_on_a_shallow_ray` stood here**,
-    // and `docs/occluders.md`'s S5 took its subject away with the DDA.
+    // and `docs/render/design_occluders.md`'s S5 took its subject away with the DDA.
     //
     // It was the pure-geometry echo of
     // [`a_wall_level_with_the_flame_is_not_skipped_by_a_shallow_ray`] above,
     // which is still drawn and still the gate: the same six spots and the same
     // wall row, asking `dda_walk` alone whether its cell sequence ever visited
     // `(100, 100)`. That question was worth a test because a *row* was how the
-    // grid found a wall, and `docs/lighting_raymarch.md`'s "A new `walk_cells`
+    // grid found a wall, and `docs/archive/render/lighting_raymarch.md`'s "A new `walk_cells`
     // miss" is a ray hugging a row's own grid line and skipping the row.
     //
     // **A tree has no rows to skip.** A primitive is under exactly one leaf
@@ -5287,7 +5287,7 @@ mod tests {
     // the primitive itself. There is no second, coarser question left to get
     // wrong, which is the whole of why the grid's own gap cannot recur here.
 
-    /// `docs/lighting_raymarch.md`'s ray-vs-Solid scoping, point 3, over the
+    /// `docs/archive/render/lighting_raymarch.md`'s ray-vs-Solid scoping, point 3, over the
     /// three-tread climbable stair
     /// [`a_treads_top_is_not_shadowed_by_the_tread_it_is_the_top_of`] uses.
     /// This is the scene that found a real bug in [`walk_the_record`], not
@@ -5355,7 +5355,7 @@ mod tests {
         );
     }
 
-    /// `docs/lighting_raymarch.md`'s ray-vs-Solid scoping, point 3, over the
+    /// `docs/archive/render/lighting_raymarch.md`'s ray-vs-Solid scoping, point 3, over the
     /// same stair scene as
     /// [`walk_the_record_does_not_read_every_lid_as_transparent`] — a
     /// smoke test, not a parity oracle.
@@ -5419,7 +5419,7 @@ mod tests {
         });
     }
 
-    /// `docs/lighting_raymarch.md`'s point 4, the same six-point counter-
+    /// `docs/archive/render/lighting_raymarch.md`'s point 4, the same six-point counter-
     /// example this whole track started from — full numeric agreement with
     /// [`walk_the_record`]. This is a single whole-tile body
     /// (`Shape::UNREAD`), so [`crate::occlusion::Solid::box_of`]'s
@@ -5459,7 +5459,7 @@ mod tests {
         }
     }
 
-    /// `docs/lighting_raymarch.md`'s point 4, over the same single-body wall
+    /// `docs/archive/render/lighting_raymarch.md`'s point 4, over the same single-body wall
     /// scene the six-point counter-example's own occlusion is built from —
     /// **with no corner restriction**, because [`walk_the_wire`] has
     /// no corner-jump branch to be restricted away from. Full numeric
@@ -5508,7 +5508,7 @@ mod tests {
     }
 
     // **`a_walk_starts_in_a_cell_its_own_start_point_is_in` stood here**, and
-    // `docs/occluders.md`'s S5 took the cell it was about.
+    // `docs/render/design_occluders.md`'s S5 took the cell it was about.
     //
     // It had already outlived one deletion: its subject was `starting_cell`, the
     // arbiter S4 removed, and what was repointed at `dda_walk` afterwards was the
@@ -5525,7 +5525,7 @@ mod tests {
     // was only ever a question because a cell was the unit of lookup.
 
     /// **The brute-force oracle: [`ray_vs_solid`] against every primitive in
-    /// the grid, with no cell in it anywhere.** `docs/occluders.md`'s
+    /// the grid, with no cell in it anywhere.** `docs/render/design_occluders.md`'s
     /// § *The oracle*.
     ///
     /// Not either walk with the traversal taken out — it shares no traversal
@@ -5556,7 +5556,7 @@ mod tests {
 
     /// **A primitive whose corners are at no fraction of a tile a byte could
     /// name, read the same by both walks and by the brute-force oracle** —
-    /// `docs/occluders.md`'s S1 gate, and the blindness that step is also
+    /// `docs/render/design_occluders.md`'s S1 gate, and the blindness that step is also
     /// fixing: no scene in the tree had such a shape before this one.
     ///
     /// **The coordinates are chosen, not sampled.** The wire used to carry a
@@ -5678,7 +5678,7 @@ mod tests {
     }
 
     // **`a_ray_starting_just_past_its_own_tile_is_stopped_by_the_cell_it_is_in`
-    // stood here, and it went with `starting_cell`** — `docs/occluders.md`'s S4.
+    // stood here, and it went with `starting_cell`** — `docs/render/design_occluders.md`'s S4.
     //
     // Its whole fixture was a disagreement: a fragment carrying tile `(99, 100)`
     // while standing at `x = 100.0001`, so that a walk seeded from the carried
@@ -5695,7 +5695,7 @@ mod tests {
     // three unit tests and fourteen of `tests/lighting.rs` went red. That
     // is the definition of a test that no longer gates its subject, and this
     // track has now found three of them (the two vertical ones are in
-    // `docs/occluders.md`'s S4). What replaces it is
+    // `docs/render/design_occluders.md`'s S4). What replaces it is
     // `a_walk_starts_in_a_cell_its_own_start_point_is_in`, which asks
     // [`dda_walk`] for its own first cell and does go red under that injection.
 
@@ -5715,7 +5715,7 @@ mod tests {
     /// happen — and the bar stays full numeric agreement, because the last bits
     /// of an `f32` are far under what any of this can be seen through. It was a
     /// quantisation to a two-hundred-and-fifty-sixth of a `z` unit until
-    /// `docs/occluders.md`'s S1, and this test kept working across that change
+    /// `docs/render/design_occluders.md`'s S1, and this test kept working across that change
     /// because it never named the size of the gap — only that there is one. See
     /// [`a_primitive_at_no_fraction_a_byte_could_name_reads_the_same_three_ways`]
     /// for the fixture that names it.
@@ -5781,7 +5781,7 @@ mod tests {
             // meaning the first.
             //
             // **The gap is measured off this very box rather than named as a
-            // constant** — `docs/occluders.md`'s S1 took the quantisation away,
+            // constant** — `docs/render/design_occluders.md`'s S1 took the quantisation away,
             // and what is left has no fixed size: a coordinate an `f32` holds
             // exactly (which is every whole `z` and every half, and therefore
             // most of the world) has a gap of nothing, and the guard skips
@@ -5822,7 +5822,7 @@ mod tests {
         });
     }
 
-    /// `docs/lighting_raymarch.md`'s point 4, over a single **panel**
+    /// `docs/archive/render/lighting_raymarch.md`'s point 4, over a single **panel**
     /// (`Shape::faced`) — the branch [`walk_the_record_disagreements_are_
     /// backed_by_ray_vs_solid`]'s own doc comment flags as the one
     /// deliberate simplification (one [`pierced`] sample at the crossing's
@@ -5882,7 +5882,7 @@ mod tests {
         });
     }
 
-    /// `docs/lighting_raymarch.md`'s point 4, over a small room rather than
+    /// `docs/archive/render/lighting_raymarch.md`'s point 4, over a small room rather than
     /// one isolated wall — three walled sides, a doorway gap, and a
     /// free-standing body in the open area, seven solids on six different
     /// tiles at once. [`walk_the_wire`]'s own doc comment names this
@@ -5982,7 +5982,7 @@ mod tests {
         });
     }
 
-    /// `docs/lighting_raymarch.md`'s point 4, over the three-tread climbable
+    /// `docs/archive/render/lighting_raymarch.md`'s point 4, over the three-tread climbable
     /// stair — and a **real, new-found boundary of the reconstruction**, not
     /// a smoke test alone.
     ///
@@ -6062,7 +6062,7 @@ mod tests {
         });
     }
 
-    // **Two more of the DDA's own tests stood here**, and `docs/occluders.md`'s
+    // **Two more of the DDA's own tests stood here**, and `docs/render/design_occluders.md`'s
     // S5 took the walk they were about:
     //
     // - `a_from_on_a_boundary_starts_in_the_cell_it_is_heading_into`, which was
@@ -6071,7 +6071,7 @@ mod tests {
     //   of that case without a single answer moving; a tree does not ask the
     //   question at all.
     // - `dda_walk_visits_a_connected_path_of_cells_starting_where_the_ray_does`,
-    //   the fast net the testability audit in `docs/lighting_raymarch.md` argued
+    //   the fast net the testability audit in `docs/archive/render/lighting_raymarch.md` argued
     //   for — every promise the DDA made about its own output, over arbitrary
     //   rays and with no scene: a connected path of von-Neumann neighbours, one
     //   axis a step, `entered`/`leaves` walking forward inside `0.0..=1.0`, and
@@ -6230,7 +6230,7 @@ mod tests {
     /// point-in-box oracle discipline step 4's brute-force sampler already
     /// uses against the whole walk, applied here to the one primitive a
     /// future ray-vs-`Solid` walk would build on —
-    /// `docs/lighting_raymarch.md`'s ray-vs-Solid scoping, point 1.
+    /// `docs/archive/render/lighting_raymarch.md`'s ray-vs-Solid scoping, point 1.
     ///
     /// Boxes and segment endpoints are integer-anchored on purpose, so a
     /// random `t` landing within a hair of a face is rare rather than

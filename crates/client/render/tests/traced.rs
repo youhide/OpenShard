@@ -120,7 +120,7 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 /// east, four `z` units tall.
 ///
 /// The same scene and the same flame the tool's own recorded numbers are from
-/// (`docs/lighting_reference.md`), so a person reading a failure here can run
+/// (`docs/render/reference/path_tracer.md`), so a person reading a failure here can run
 /// the tool on the same thing and get the picture. Two boxes rather than one
 /// because a single box cannot produce the case that matters most: an occluder
 /// that is not the one the fragment is standing on.
@@ -160,7 +160,7 @@ fn line_scene() -> Vec<BoxSpec> {
 ///
 /// **Why this scene and not one more pair of cubes.** Every box here has a
 /// neighbour it shares a whole face with, at the same height, belonging to a
-/// *different static* — the shape `docs/occluders.md` is about, and the one no
+/// *different static* — the shape `docs/render/design_occluders.md` is about, and the one no
 /// scene compared against the tracer has ever had. `line_scene`'s two boxes abut
 /// too, but they are one storey of one height: nothing in them can pose the
 /// question of a surface that is continuous across a boundary while its
@@ -222,7 +222,7 @@ const WALL_RUN: std::ops::Range<u16> = 100..103;
 /// any circumstances — which is how S3b landed with its ten CPU gates red under
 /// injection and `tests/traced.rs`, `tests/frame.rs` and `tests/pictures.rs` all
 /// green. The only non-circular arbiter this track has had never saw a merged
-/// frame. `docs/occluders.md` records that as the merge's own blind spot, with
+/// frame. `docs/render/design_occluders.md` records that as the merge's own blind spot, with
 /// this fixture as the recipe.
 ///
 /// Whole tiles and one height, so the union of the three boxes *is* their
@@ -473,7 +473,7 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, shot: Shot<'_>) -> Rendere
     }
     let occlusion = builder.finish(&Cutaway::OPEN);
     // Which *solid* of the grid each box is — `add_raw` pushes exactly one per
-    // box, so `Part::ONLY` names it. `docs/lighting_rebuild.md` phase 4: this is
+    // box, so `Part::ONLY` names it. `docs/render/design_model.md` phase 4: this is
     // the number a fragment carries and the walk compares, and it was the box's
     // `OwnerId` until the phase found one level of identity too coarse for a
     // flight of steps.
@@ -865,7 +865,7 @@ fn the_frame_and_the_path_tracer_agree_about_every_interior_pixel() {
 ///
 /// **Written only where `OPENSHARD_TRACED_DUMP` names a directory**, and the
 /// gate does not read it back: a test that asserted about a file would be a test
-/// of the file. What this is for is the instrument `docs/lighting_rebuild.md`
+/// of the file. What this is for is the instrument `docs/render/design_model.md`
 /// insists on — a picture beside the path tracer's, looked at by a person — and
 /// until now that picture was only reachable by running the tool on the tool's
 /// own scene.
@@ -891,7 +891,7 @@ fn dump_masks(verdict: &oracle::pathtrace::Verdict, name: &str) {
 }
 
 /// **The same gate, on three flights standing side by side** —
-/// [`stair_scene`], and `docs/occluders.md`'s own shape: nine primitives, each
+/// [`stair_scene`], and `docs/render/design_occluders.md`'s own shape: nine primitives, each
 /// sharing a whole face with a neighbour of a *different static* at the same
 /// height.
 ///
@@ -1365,7 +1365,7 @@ fn a_merged_run_is_exempt_from_itself_only_where_the_cosine_is_already_nothing()
 /// and two hundred times the standard error, and the gate is red. With the phase
 /// in, it reads `-0.0002`. That twentyfold fall is the phase's own "the frame has
 /// moved towards the reference", measured rather than asserted; both numbers are
-/// in `docs/lighting_rebuild.md`.
+/// in `docs/render/design_model.md`.
 ///
 /// The sign is worth keeping in mind when this next moves: the wedge makes the
 /// engine **darker** than the truth, because it is rays that could not have lit
@@ -1373,7 +1373,7 @@ fn a_merged_run_is_exempt_from_itself_only_where_the_cosine_is_already_nothing()
 const WEDGE_BIAS: f64 = 0.002;
 
 /// **A flame with a body has no centre, and a landing lit by one from just above
-/// its own plane is where that used to show** — `docs/lighting_rebuild.md`'s
+/// its own plane is where that used to show** — `docs/render/design_model.md`'s
 /// phase 5b, against the reference.
 ///
 /// The scene is [`stair_scene`] again and the flame is barely clear of the top
@@ -1397,7 +1397,7 @@ const WEDGE_BIAS: f64 = 0.002;
 /// the engine's, which makes both pictures the same quantity: the sum over the
 /// flame's body of `visibility × cosine × falloff²`, times colour and intensity.
 /// **Pinned deliberately, not for want of a real number any more** — since
-/// `docs/lighting_rebuild.md` phase 6d a box has a measurable
+/// `docs/render/design_model.md` phase 6d a box has a measurable
 /// [`oracle::pathtrace::Albedos::body`] — but this gate's subject is the
 /// below-horizon wedge alone, and folding a second measured quantity in would
 /// be a second thing that could move the picture on a run where only one is
@@ -1534,7 +1534,7 @@ fn a_flame_just_over_a_landing_does_not_wedge_it_with_its_own_below_horizon_rays
 // followed up with `OPENSHARD_TRACED_PROBE`.
 
 /// **A face fragment's own plane is the primitive's own number, bit for bit** —
-/// the one thing `docs/occluders.md`'s S3 said it had to measure before it could
+/// the one thing `docs/render/design_occluders.md`'s S3 said it had to measure before it could
 /// be written.
 ///
 /// D2's surface exemption compares a fragment's plane against a candidate box's
@@ -1683,7 +1683,7 @@ const QUANTISATION: u8 = 2;
 /// The engine's shaded frame and the path tracer's agree about *brightness*, on
 /// the one scene where nothing else can explain a difference.
 ///
-/// **`docs/lighting_rebuild.md`'s phase 0 "done when", as a gate.** The scene is
+/// **`docs/render/design_model.md`'s phase 0 "done when", as a gate.** The scene is
 /// the one that phase names: one flame, flat ground, no occluders. What that
 /// buys is that everything the two renderers could disagree about *except* the
 /// light is gone — no silhouette, so no rasteriser fill rule; no box, so no

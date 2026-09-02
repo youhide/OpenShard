@@ -771,7 +771,7 @@ one read `window_scale.factor()` and `App::gump_scale()`, the other `magnify`
 and `frame.scale`, and `gump_scale()` and `frame.scale` are separately-written
 spellings of `shell.pixels_per_point()`. Let either drift and the requested
 region stops being the drawn region — a chunk built and never shown, or shown
-and never built, which is exactly [`parity.md`](../parity.md)'s hazard.
+and never built, which is exactly [`parity.md`](../render/design_frame_assembly.md)'s hazard.
 
 **Closed by widening the slice.** `draw_gump_windows` takes
 `&[(WindowSubject, RadarView, RadarLod)]` and looks its window up; the second

@@ -257,7 +257,7 @@ pub(crate) enum Hotkey {
     /// two pictures side by side. The shard now supplies time of day, but F10
     /// remains its separate local lighting switch. The five below are keys for the
     /// same reason, and the
-    /// reason is `docs/lighting_pitfalls.md`'s: what is being read is the
+    /// reason is `docs/render/evidence/pitfalls.md`'s: what is being read is the
     /// difference between two pictures of *one instant*, and a hand that has to
     /// find a checkbox has moved the camera by the time it is back.
     Night,
@@ -392,7 +392,7 @@ impl Hotkey {
     ///
     /// **Answered out of [`ALL`](Self::ALL) rather than by a second `match`.** A
     /// forward table and a backward one are two statements of the same fact, and
-    /// two statements of one fact are a pair that can disagree — `docs/parity.md`
+    /// two statements of one fact are a pair that can disagree — `docs/render/design_frame_assembly.md`
     /// one rung down from a frame. The scan is nineteen comparisons on a
     /// keystroke, which is not a cost worth a second table to avoid.
     ///

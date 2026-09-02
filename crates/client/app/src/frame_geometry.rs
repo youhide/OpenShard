@@ -383,7 +383,7 @@ pub(crate) fn assemble_geometry(
     }
 
     // **One assembly, and the client is a caller of it like any other** —
-    // `docs/parity.md`, decision D1. This sequence used to be written out by
+    // `docs/render/design_frame_assembly.md`, decision D1. This sequence used to be written out by
     // hand here and in six other places, every one of them free to pass a
     // different cutaway, a different grid or a different clock; each of them
     // did, and the difference was only ever found by reading. Everything a
@@ -544,7 +544,7 @@ pub(crate) fn assemble_geometry(
     };
 
     // A corner static's two faces get their own id past this point — see
-    // `docs/gbuffer.md` step 4 and `sprite::split_corners`'s own doc.
+    // `docs/archive/render/gbuffer.md` step 4 and `sprite::split_corners`'s own doc.
     let map_static_instances = split_corners(map_static_quads);
     let cutaway_instances = split_corners(cutaway_quads);
     costs.split = split_started.elapsed();

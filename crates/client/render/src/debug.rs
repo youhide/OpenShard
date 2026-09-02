@@ -12,7 +12,7 @@
 //! `blit.wgsl` over the same bind group; a diagram calls [`crate::light::sample`],
 //! which is the shader's arithmetic in Rust and is held to it by a parity test.
 //! Something that lit its own copy of the world would answer about that copy —
-//! see `docs/lighting.md`, decisions 8 and 9.
+//! see `docs/archive/render/lighting.md`, decisions 8 and 9.
 
 use std::fmt::Write;
 
@@ -93,7 +93,7 @@ pub enum View {
     /// statics stand on the tile next to the one they cover, so the floor under
     /// it reads as sky. A box is drawn for what stands; a hole in a roof is
     /// exactly where there is no box, and would be invisible in the very view
-    /// meant to find it. See `docs/lighting_world.md`'s backlog.
+    /// meant to find it. See `docs/archive/render/lighting_world.md`'s backlog.
     Sky = 9,
     /// What the **flames alone** added, with the ambient taken out: the pool as a
     /// shape, on black.
@@ -116,7 +116,7 @@ pub enum View {
     /// axis a channel, `-1..1` mapped into `0..1` the way every normal map is
     /// read.
     ///
-    /// `docs/lighting_rebuild.md` phase 2's own "done when", and the reason it
+    /// `docs/render/design_model.md` phase 2's own "done when", and the reason it
     /// is a *view* rather than a number is that the failure it looks for is a
     /// shape: a run of wall whose two faces are one colour, a corner whose
     /// halves did not split, a flight of steps whose treads and risers read the
@@ -192,7 +192,7 @@ pub enum View {
     /// **They are not two halves of one outline, and this pair is how that was
     /// established.** Since a box miss stopped being discarded, the silhouette of
     /// the picture is entirely the art's and this layer is the whole of it; the
-    /// box's line is a seam *inside* the picture. `docs/silhouettes.md`'s backlog
+    /// box's line is a seam *inside* the picture. `docs/render/design_silhouettes.md`'s backlog
     /// asked whether the zigzag a person points at is even a silhouette, and it
     /// is — the finer line beside it is not.
     ///

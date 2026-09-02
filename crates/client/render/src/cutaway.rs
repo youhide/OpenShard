@@ -347,7 +347,7 @@ impl Cutaway {
     /// art calls it a roof, which is the whole of what the test looks at.
     ///
     /// It exists because [`crate::occlusion`] asks this question about a surface
-    /// long after the static it came from is gone — `docs/lighting.md`'s decision
+    /// long after the static it came from is gone — `docs/archive/render/lighting.md`'s decision
     /// 33 moved the cut to where a *frame's* grid is packed — and a second
     /// spelling of the rule there would be a second policy rather than a second
     /// caller.
@@ -621,7 +621,7 @@ pub fn shows(cutaway: &Cutaway, z: i8, tile: &StaticTile) -> bool {
 /// A static past the [`DRAW_CEILING`], or one the client marks internal, is
 /// drawn in no frame from any tile — so a caller that is building something a
 /// *frame* is later cut out of asks this and not [`shows`]. That caller is
-/// `occlusion::collect`, and `docs/lighting.md`'s decision 33 is why it wants
+/// `occlusion::collect`, and `docs/archive/render/lighting.md`'s decision 33 is why it wants
 /// the line drawn exactly here.
 pub fn drawn_in_any_frame(z: i8, tile: &StaticTile) -> bool {
     under_ceiling(depth::static_priority_z(z, tile), tile)

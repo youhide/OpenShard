@@ -1,14 +1,18 @@
-# The lighting engine: where it stands
+# Render: where it stands
 
-**A status document, not a plan.** Six tracks have been running against one
-renderer — the rebuild itself and five plans that came out of it — and each of
-them is written as a *living plan with a backlog*, which is the right shape for
-doing the work and the wrong shape for answering "is the lighting finished".
-This page answers that question, in one place, and says which document holds the
-reasoning for each line.
+The canon of the `render` domain — `client/render`, `client/artscan`,
+`client/pathtrace`. It answers "is the lighting finished" in one place and says
+which document holds the reasoning for each line.
 
-Nothing here is new work or a new decision. Where this page and a track document
-disagree, the track document is right and this page is stale.
+**A status document, not a plan.** Six tracks ran against one renderer — the
+rebuild itself and five plans that came out of it — and each was written as a
+*living plan with a backlog*, which is the right shape for doing the work and
+the wrong shape for answering the question above. The work that is still ahead
+is in [`plans/render/`](../../plans/render/lighting/PLAN.md), not here; what is
+built is here and in the `design_*` files beside it.
+
+Nothing on this page is new work or a new decision. Where this page and a design
+document disagree, the design document is right and this page is stale.
 
 ## The one-line answer
 
@@ -27,14 +31,14 @@ fault rather than by reading the code.
 
 What still misreads on screen is, without exception, a **box that does not fit
 its picture** — which is why the two newest tracks
-([`footprints.md`](footprints.md), [`silhouettes.md`](silhouettes.md)) are about
+([`footprints.md`](design_footprints.md), [`silhouettes.md`](design_silhouettes.md)) are about
 boxes and art rather than about light.
 
 ## Readiness, by subsystem
 
 | Subsystem | State | What is left | Held by |
 |---|---|---|---|
-| Colour: sRGB in, linear throughout, ACES out | ✅ shipping | — | [`lighting_rebuild.md`](lighting_rebuild.md) phase 1 |
+| Colour: sRGB in, linear throughout, ACES out | ✅ shipping | — | [`lighting_rebuild.md`](design_model.md) phase 1 |
 | G-buffer: position, normal, ids, albedo — 32 B/sample, WebGPU's floor exactly | ✅ shipping | — | phase 2 |
 | BRDF: `max(N·L, 0)`, no dial, no band | ✅ shipping | — | phase 3 |
 | Attenuation: windowed inverse square | ✅ shipping | — | phase 3 |
@@ -42,14 +46,14 @@ boxes and art rather than about light.
 | Area light: a sphere, 8 stratified rays, world-space dither | ✅ shipping | — | phase 5 |
 | Every term a function of the sample point (no flame centre in the loop) | ✅ shipping | — | phase 5b |
 | Impostor: one silhouette, the box met per fragment | 🟡 shipping with one hole | a corner's two panels are still told apart by the **screen half** (the box carries no instance row). The **fringe** is decided: the clamp stays, and what it costs is a position rather than a facing | phase 6, 6f–6i |
-| Occluders: absolute coordinates, merged runs, a BVH, no tile in the answer | ✅ landed | — | [`occluders.md`](occluders.md) (a record) |
-| Footprints: a sub-tile box measured off the art | ✅ landed, partial by design | the **height** is never measured — a roof's picture stands 76 px over a box 3 `z` tall; the remaining `Crooked` class is furniture standing on more than one thing | [`footprints.md`](footprints.md) |
-| Frame assembly: one `frame::assemble`, one `Inputs`, gated plane by plane | ✅ landed | P4 items 2–4 (a `CLEAR` piece's name, the whole-tile stand-in, `PANEL_THICKNESS`) | [`parity.md`](parity.md) |
-| Pixel spaces: the census, the commensurability statement, the newtypes, the gates | ✅ landed | the **art texel** is the one grid with no type | [`pixels.md`](pixels.md) |
-| Silhouettes: attribution of the two edges, the seam, the clamp | 🟡 attributed | the **widths** at `4x`; the decision S2 (leave it / let the box bound more / estimate coverage) | [`silhouettes.md`](silhouettes.md) |
+| Occluders: absolute coordinates, merged runs, a BVH, no tile in the answer | ✅ landed | — | [`occluders.md`](design_occluders.md) (a record) |
+| Footprints: a sub-tile box measured off the art | ✅ landed, partial by design | the **height** is never measured — a roof's picture stands 76 px over a box 3 `z` tall; the remaining `Crooked` class is furniture standing on more than one thing | [`footprints.md`](design_footprints.md) |
+| Frame assembly: one `frame::assemble`, one `Inputs`, gated plane by plane | ✅ landed | P4 items 2–4 (a `CLEAR` piece's name, the whole-tile stand-in, `PANEL_THICKNESS`) | [`parity.md`](design_frame_assembly.md) |
+| Pixel spaces: the census, the commensurability statement, the newtypes, the gates | ✅ landed | the **art texel** is the one grid with no type | [`pixels.md`](design_pixel_spaces.md) |
+| Silhouettes: attribution of the two edges, the seam, the clamp | 🟡 attributed | the **widths** at `4x`; the decision S2 (leave it / let the box bound more / estimate coverage) | [`silhouettes.md`](design_silhouettes.md) |
 | Billboards (mobiles) | 🟡 half | the inflated-silhouette normal and the choice between it and the camera-facing plane — its *done when* is a person looking | phase 7 |
 | The sun | ⬜ not started | it is added straight, with **no `N·L` anywhere**; no soft edge, no sky visibility as ambient occlusion | phase 8 |
-| Ambient: the day curve, the sky field reaching a lit pixel | ⬜ carried | no default frame has an ambient split, so a house reads as bright as the street | [`lighting_world.md`](lighting_world.md) |
+| Ambient: the day curve, the sky field reaching a lit pixel | ⬜ carried | no default frame has an ambient split, so a house reads as bright as the street | [`lighting_world.md`](../archive/render/lighting_world.md) |
 | UO's own light: `light.mul` / `lightidx.mul` as a picked mode | ⬜ scoped, not started | the tiledata light-id parse, both file readers, the composite point, the toggle | phase's *Wanted after the model works* |
 
 ## The pipeline, phase by phase
@@ -67,7 +71,7 @@ art is albedo and the light is ours.** No term anywhere argues with the artist.
 | 4 | shadows by identity | ✅ — `STAND_OFF`, `ON_TOP`, `exemption` deleted; the light oracle reads zero at every flame height |
 | 5 / 5b | area lights, then no centre | ✅ — shadows ~8× crisper; the join wedge gone, signed mean `-0.0044` → `-0.0002` |
 | 6 | the impostor | 🟡 — 6a, 6c, 6d, 6f, 6g, 6h landed; 6i's item 1 (a fixture driving `statics::collect` over a fitted climbable) is what is left |
-| 6e | the grid stops being a rule | ✅ — [`occluders.md`](occluders.md), all six steps |
+| 6e | the grid stops being a rule | ✅ — [`occluders.md`](design_occluders.md), all six steps |
 | 7 | billboards | 🟡 — position and the camera-facing normal landed |
 | 8 | the sun | ⬜ |
 
@@ -80,7 +84,7 @@ instrument, not a side channel.
 ## The pixel spaces — the spec
 
 Normative. The derivation, the per-site census and the pair-by-pair
-commensurability table are [`pixels.md`](pixels.md); this is the statement of
+commensurability table are [`pixels.md`](design_pixel_spaces.md); this is the statement of
 what a person writing code here may assume.
 
 ### The grids
@@ -142,7 +146,7 @@ what a person writing code here may assume.
   grid* — `LandAtlas` and the statics atlas divide exactly, `TexmapAtlas` insets
   by half a texel — so a newtype over the texel does not stop it. What would is
   a type carrying the convention, and that belongs with
-  [`silhouettes.md`](silhouettes.md).
+  [`silhouettes.md`](design_silhouettes.md).
 - **`geometry::Rect`** is a sprite's rectangle, an atlas rectangle, a gump's
   place and a plan pixel's. A shape shared by four spaces is a different problem
   from two spaces sharing one number.
@@ -157,7 +161,7 @@ what a person writing code here may assume.
 track: the whole-tile class discards **32.7%** of its own art and roofs inside
 it 44–53% — `0x05A2` "slate roof" is 48×76 pixels of picture standing on a box
 three `z` units tall. Every fringe artefact below is downstream of it.
-[`footprints.md`](footprints.md) deliberately measured the *footprint* and left
+[`footprints.md`](design_footprints.md) deliberately measured the *footprint* and left
 the height as a carried item, with `blocks_silhouette` named as the instrument
 that would score it. **Measured 2026-08-10** (`geometry_census`, same window):
 of the 3,388 whole-tile stand-ins, **2,825 (83.4%)** carry `ROOF` — a sloped
@@ -276,36 +280,49 @@ measured rather than guessed at. None is a defect in the model.
 
 ## The map: which document holds what
 
-The rebuild consolidated seven plans; five more have come out of it since. All
-of them stay — the reasoning is worth more than the code it justified — but only
-three are *live*.
+The rebuild consolidated seven plans; five more came out of it since. All of
+them stay — the reasoning is worth more than the code it justified — but they
+are sorted by role now rather than by whether they are live.
 
-**Live plans, with backlogs a session can start from:**
+**Design — how it works today:**
 
-- [`lighting_rebuild.md`](lighting_rebuild.md) — the model, phases 0–8, and the
-  backlog every defect above is filed in. Still the entry point for anything
-  about light itself.
-- [`silhouettes.md`](silhouettes.md) — the two edges, the seam inside the
-  picture, the clamp, and the undecided S2.
-- [`footprints.md`](footprints.md) — a static's box is the box the art drew.
-  Landed, with the height as its own next census.
+- [`design_model.md`](design_model.md) — the model itself, phases 0–8. Still the
+  entry point for anything about light. *(Its phase journal and its backlog have
+  not yet been split out into `evidence/` and the plans; see the note at the
+  bottom of this page.)*
+- [`design_pixel_spaces.md`](design_pixel_spaces.md) — the six grids, all four
+  phases done. The spec above is its normative half.
+- [`design_occluders.md`](design_occluders.md) — the grid stopped being a rule.
+  All six steps green; the four findings that outlive it are in the model's
+  backlog.
+- [`design_footprints.md`](design_footprints.md) — a static's box is the box the
+  art drew. Landed, with the height as its own next census.
+- [`design_silhouettes.md`](design_silhouettes.md) — the two edges, the seam
+  inside the picture, and the clamp.
+- [`design_frame_assembly.md`](design_frame_assembly.md) — one frame however it
+  was asked for. P1–P3 and P5 landed; P4's remaining three items are geometry,
+  which is `design_footprints.md`'s ground and the model's.
+- [`design_outline.md`](design_outline.md) — a hard edge round a sprite and the
+  glow behind it, and how it composes with the highlight hue.
+- [`design_text_sizes.md`](design_text_sizes.md) — a real font size, not a scale.
 
-**Records — read one for its reasoning, not to find work:**
+**The rest of the domain:**
 
-- [`occluders.md`](occluders.md) — the grid stopped being a rule. All six steps
-  green; the four findings that outlive it moved into the rebuild's backlog.
-- [`parity.md`](parity.md) — one frame however it was asked for. P1–P3 and P5
-  landed; P4's remaining three items are geometry, which is
-  [`footprints.md`](footprints.md)'s and the rebuild's ground.
-- [`pixels.md`](pixels.md) — the six grids, all four phases done. The spec above
-  is its normative half.
-- [`lighting.md`](lighting.md), [`lighting_world.md`](lighting_world.md),
-  [`lighting_raymarch.md`](lighting_raymarch.md),
-  [`lighting_geometry.md`](lighting_geometry.md),
-  [`lighting_height.md`](lighting_height.md),
-  [`lighting_reference.md`](lighting_reference.md),
-  [`gbuffer.md`](gbuffer.md), [`world_coordinates.md`](world_coordinates.md) —
-  how the system being replaced was built, and why.
+- [`evidence/pitfalls.md`](evidence/pitfalls.md) — the traps, each one having
+  cost a session.
+- [`reference/path_tracer.md`](reference/path_tracer.md) — the reference tracer
+  the model is calibrated against.
+- [`research/font_upscaling.md`](research/font_upscaling.md) — the `fonts.mul`
+  super-resolution experiment.
+- [`runbook_gump_render.md`](runbook_gump_render.md) — the offline gump preview
+  renderer: no window, no GPU.
+- [`../archive/render/`](../archive/render/README.md) — the twelve documents of
+  the engine that was replaced, with their session logs. Read one for its
+  reasoning, not to find work.
+
+**What is not built** is in [`plans/render/`](../../plans/render/lighting/PLAN.md):
+phase 6i's last hole, phase 7's mobile normal, phase 8's sun, the content layer,
+and [silhouettes' own widths and S2](../../plans/render/silhouettes/PLAN.md).
 
 ## The numbers to re-take
 

@@ -92,8 +92,8 @@ because the track above changes the ground under all of them at once: each of
 these bakes something off terrain, and each is currently keyed to the *files*
 it was baked from rather than to a world revision.
 
-Two neighbours that deliberately did **not** move: [`occluders.md`](../occluders.md)
-and [`footprints.md`](../footprints.md) are static geometry for the lighting
+Two neighbours that deliberately did **not** move: [`occluders.md`](../render/design_occluders.md)
+and [`footprints.md`](../render/design_footprints.md) are static geometry for the lighting
 rebuild and belong to that document set, even though they read the same
 statics.
 

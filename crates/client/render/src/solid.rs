@@ -1,6 +1,6 @@
 //! A box in world coordinates, and the three faces of it a camera can see.
 //!
-//! `docs/lighting.md` decision 39: the scene this client draws is already
+//! `docs/archive/render/lighting.md` decision 39: the scene this client draws is already
 //! three-dimensional — world space, a per-pixel world position, an orthographic
 //! projection and a hardware depth buffer are all in place — and what is missing
 //! is a primitive that is not a billboard. This is that primitive's geometry,
@@ -179,7 +179,7 @@ impl Solid {
     }
 }
 
-// **`DRAWN_LID_THICKNESS` and `drawn` stood here**, and `docs/parity.md`'s P4
+// **`DRAWN_LID_THICKNESS` and `drawn` stood here**, and `docs/render/design_frame_assembly.md`'s P4
 // step 1 retired both: **a view of the grid draws the grid**.
 //
 // `drawn` was the box a view drew for one solid — its own, with whatever it was
@@ -202,7 +202,7 @@ impl Solid {
 // second thickness.
 //
 // What it did *not* do is worth keeping too: it stopped clamping `z` into an
-// `i8` when `docs/occluders.md`'s S1 took that pin off the wire, for the same
+// `i8` when `docs/render/design_occluders.md`'s S1 took that pin off the wire, for the same
 // argument in the same direction — a spire through the top of the world is on
 // the wire at its own height, and a view may not clamp what the renderer does
 // not. The rounding the wire does still cost is `Solid::wire_box`'s, under a

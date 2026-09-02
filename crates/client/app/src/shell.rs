@@ -3722,7 +3722,7 @@ fn audio_panel(ui: &mut egui::Ui, audio: &mut crate::desk::Audio, request: &mut 
 ///
 /// The same four role controls apply whichever face is active. A TrueType face
 /// rasterizes at the selected pixel size; `fonts.mul` uses the corresponding
-/// fractional scale of its baked glyphs. See `docs/text_sizes.md`.
+/// fractional scale of its baked glyphs. See `docs/render/design_text_sizes.md`.
 struct ChatPanel<'a> {
     chat:               &'a mut crate::desk::Chat,
     fonts:              &'a mut crate::desk::FontSizes,
@@ -6661,7 +6661,7 @@ fn route_height_colour(z: i8, min_z: i8, max_z: i8) -> egui::Color32 {
 /// Every surface in the grid, with the tile it stands on.
 ///
 /// **A surface and not a tile**, which is the whole of what this view is for
-/// since `docs/lighting.md`'s step 21.2. `Occlusion::at` — what `boxes()` hands
+/// since `docs/archive/render/lighting.md`'s step 21.2. `Occlusion::at` — what `boxes()` hands
 /// out and what this drew until now — is the *merged* view: the union of the
 /// spans, the largest opacity, and the union of the sides. Drawn, that is the
 /// picture of a world that no longer exists. A floor and the wall on its tile
@@ -6672,7 +6672,7 @@ fn route_height_colour(z: i8, min_z: i8, max_z: i8) -> egui::Color32 {
 /// things, and the merge is exactly what closes them on screen.
 /// The occlusion grid, drawn as the **solid** it is.
 ///
-/// `docs/lighting.md`, step 14, and it is an instrument rather than a picture:
+/// `docs/archive/render/lighting.md`, step 14, and it is an instrument rather than a picture:
 /// what a shadow ray walks through is a list of surfaces — a plane on one edge, a
 /// lid, a whole-tile body — and until this nothing drew them, so "why is there a
 /// shadow where nothing stands" could only be answered by reading the map by

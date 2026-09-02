@@ -318,7 +318,7 @@ mod tests {
     /// the same `priority_z`, and once they do, `to_depth` cannot tell them
     /// apart either. Nothing downstream can walk this value back to a `z`, and
     /// nothing today tries to — `blit.wgsl` never samples the depth texture,
-    /// only `place`. See `docs/gbuffer.md`'s first "Not settled" item, answered
+    /// only `place`. See `docs/archive/render/gbuffer.md`'s first "Not settled" item, answered
     /// against this.
     #[test]
     fn priority_z_can_collide_for_two_different_world_heights() {

@@ -21,7 +21,7 @@
 //! ```
 //!
 //! `OPENSHARD_ART=1822,0x0736` picks the graphics; the default is the staircase
-//! of `docs/lighting.md`'s backlog entry, a plain wall for contrast, and the
+//! of `docs/archive/render/lighting.md`'s backlog entry, a plain wall for contrast, and the
 //! floor lid that stands over both.
 
 use std::path::PathBuf;
@@ -208,7 +208,7 @@ fn how_much_of_the_climbable_art_the_prism_model_covers() {
 // ---------------------------------------------------------------------------
 // The gate under `interiors_agree`: what a regression in it would look like.
 //
-// `docs/lighting_rebuild.md`'s backlog step 3. The measurement itself
+// `docs/render/design_model.md`'s backlog step 3. The measurement itself
 // (`interiors_agree`, and `best_prism`'s tie-break on top of it) was calibrated
 // against a report a person ran and read — which is how it *should* have been
 // built and is not something a later change has to re-run to stay honest. What
@@ -388,7 +388,7 @@ fn a_drawn_joint_is_found_where_the_model_puts_it() {
 }
 
 /// The six stair graphics standing at `(1454, 1728)` in Britain — the flight
-/// `docs/lighting_state.md`'s 🚩 entry was reported on — and what the fit says
+/// `docs/render/README.md`'s 🚩 entry was reported on — and what the fit says
 /// about each.
 ///
 /// Every number was

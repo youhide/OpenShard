@@ -1,6 +1,6 @@
 //! **A real place, assembled and read back with no window in front of it.**
 //!
-//! `docs/parity.md`'s gate (P3) needs two frames of one place and had only one:
+//! `docs/render/design_frame_assembly.md`'s gate (P3) needs two frames of one place and had only one:
 //! the tools could dump a picture and the client — the thing that is actually
 //! broken — could not, so a defect visible in one and absent in the other said
 //! nothing about either. The client's own half of that is F12
@@ -73,7 +73,7 @@ use openshard_uofiles::hues::Hues;
 use openshard_uofiles::texmaps::TexMaps;
 
 /// The house corner in Britain every lighting question in this repository has
-/// been asked at — `docs/parity.md`'s own coordinate, so the frame this dumps is
+/// been asked at — `docs/render/design_frame_assembly.md`'s own coordinate, so the frame this dumps is
 /// the frame the plan talks about.
 const AT: Point = Point::new(1501, 1659, 0);
 
@@ -144,14 +144,14 @@ struct Drawn {
 ///
 /// The map's own statics and no server items, the player's own cutaway, night
 /// with a flame in hand: the client's values, because a fixture that quietly
-/// chose easier ones is the coincidence `docs/parity.md` is about.
+/// chose easier ones is the coincidence `docs/render/design_frame_assembly.md` is about.
 ///
 /// `at`, `draw` and `zoom` are the inputs a caller here varies. `at` is the eye
 /// tile — [`AT`] for every question asked at `1:1`, and [`ON_THE_WALLS`] for one
 /// asked of a magnified frame, for the reason written there. `draw` is
 /// everything, or the subset a person has ticked in the World tab
 /// ([`frame::Draw`]); `zoom` is the magnification, which every question about
-/// `docs/silhouettes.md` needs because the two edges it is about are the same
+/// `docs/render/design_silhouettes.md` needs because the two edges it is about are the same
 /// line at `1:1` and are not at `4x`.
 fn draw_britain(
     device: &wgpu::Device,
@@ -537,13 +537,13 @@ fn a_readback_off_the_corner_is_the_same_pixels_shifted() {
 /// texture read twice. It never calls [`Blit::render`] with a non-zero `rect.x`
 /// or `rect.y` at all, so it cannot say whether the blit *places* the world at
 /// the surface's own corner — `Shell::viewport()`'s documented contract,
-/// `docs/pixels.md`'s backlog item about `ViewportRect`. This closes that gap
+/// `docs/render/design_pixel_spaces.md`'s backlog item about `ViewportRect`. This closes that gap
 /// end to end: the same drawn frame, blit once into a target exactly its own
 /// size at `(0, 0)`, and once into a bigger "window" texture at the corner a
 /// docked panel would leave it — then read back and compared byte for byte.
 /// Nothing here re-sizes the [`Camera`]; only the surface around the rect
 /// grows, which is the property `Camera::image_size` not carrying an origin
-/// (`docs/pixels.md`) relies on.
+/// (`docs/render/design_pixel_spaces.md`) relies on.
 #[test]
 fn a_docked_panels_offset_places_the_same_picture_it_shows_at_the_corner() {
     let (Some(dir), Some((device, queue))) = (client_dir(), gpu()) else {
@@ -884,7 +884,7 @@ fn shade_of(pixel: &[u8]) -> &'static str {
 
 /// **The two edges a frame draws, and they are two different lines.**
 ///
-/// `docs/silhouettes.md` phase Z1's own "done when". The plan set out to
+/// `docs/render/design_silhouettes.md` phase Z1's own "done when". The plan set out to
 /// attribute a silhouette between two bounds and the pair of views answers
 /// something sharper: since a box miss stopped being discarded, the picture's
 /// outline is the art's alone and the box's line is a seam *inside* it. This
@@ -1076,7 +1076,7 @@ fn the_two_silhouette_layers_are_two_lines_and_a_frame_agrees_about_both() {
 /// **Magnifying does not lose the statics — it loses the ones that were never
 /// near the eye.**
 ///
-/// The measurement behind [`ON_THE_WALLS`], and the reason `docs/silhouettes.md`
+/// The measurement behind [`ON_THE_WALLS`], and the reason `docs/render/design_silhouettes.md`
 /// carried a blocker it did not have: a `4x` frame over [`AT`] collects land and
 /// not one static, which reads exactly like a cull that has gone wrong at
 /// magnification. It is not. The nine statics that place draws stand in the

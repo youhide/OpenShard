@@ -284,7 +284,7 @@ below 1.96 should start at `wesl`.
 
 **A live instance of exactly this, found 2026-08-07 and not yet pinned.**
 `crates/client/render`'s build-dependency `wesl = "0.4"` (the WESL-to-WGSL
-shader compiler, see [`lighting_raymarch.md`](lighting_raymarch.md)) resolves
+shader compiler, see [`lighting_raymarch.md`](archive/render/lighting_raymarch.md)) resolves
 today to `wesl` 0.4.2 in `Cargo.lock`, and 0.4.2's own `Cargo.toml` states
 `rust-version = "1.96.0"` — above this workspace's `1.88`, confirmed by
 reading the crate's manifest directly

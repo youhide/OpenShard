@@ -2,7 +2,7 @@
 //!
 //! The instrument for one class of defect: a fragment standing *on* a box comes
 //! back with a side face's normal, which reads as a dot of wall shading in the
-//! middle of a floor. `docs/lighting_rebuild.md` records it twice — once as
+//! middle of a floor. `docs/render/design_model.md` records it twice — once as
 //! fourteen dots on a lattice of exactly one tile over a roof, once as the
 //! specks a person reported at Britain's `(1501, 1659)`.
 //!

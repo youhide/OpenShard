@@ -103,7 +103,7 @@ does have a step budget. They stop being *stand-ins* for the things above.
 
 **Half of that is superseded by phase 6e.** `RAY_CUTOFF` survives it too — a ray
 still has a cutoff — but `MAX_WALK_STEPS` bounds *cells stepped*, and
-[`docs/occluders.md`](occluders.md) deletes the cell. Its replacement is a node
+[`docs/occluders.md`](design_occluders.md) deletes the cell. Its replacement is a node
 budget over the hierarchy, in the same role and for the same reason: a loop over
 data must not become unbounded because somebody widened a radius. The sentence
 above was written when the walk was a DDA and is kept as what it then meant.
@@ -348,7 +348,7 @@ table being stale.
 | 5 | area lights | ✅ landed | — |
 | 5b | a flame has no centre | ✅ landed | — |
 | 6 | the impostor | 🚧 6a, 6c, 6d, 6f and 6g landed | a corner's two panels' **ids** still told apart by the screen half — the *stance* is the met box's since 6g, and only the row number is left; and the phase's own second number — how far a real static's art overhangs its prism, which is the **fringe** along a sprite's silhouette — still untaken |
-| 6e | the grid stops being a rule | ✅ landed [`occluders.md`](occluders.md) | **All six steps are green.** The grid is out of the walk on both backends, and S3b's merge folds a run of wall into one primitive — 73 pieces to 9 on the crate's own two-storey house, with no pixel moved. That document is a **record** now, and the four findings that outlive it — the aperture still measured in a tile, the instruments that could not see a merge (closed since — one of them was drawing it), `PANEL_THICKNESS`'s fattening the merge turned out **not** to answer, and `footprint`'s `i32` ranges — are in this document's backlog |
+| 6e | the grid stops being a rule | ✅ landed [`occluders.md`](design_occluders.md) | **All six steps are green.** The grid is out of the walk on both backends, and S3b's merge folds a run of wall into one primitive — 73 pieces to 9 on the crate's own two-storey house, with no pixel moved. That document is a **record** now, and the four findings that outlive it — the aperture still measured in a tile, the instruments that could not see a merge (closed since — one of them was drawing it), `PANEL_THICKNESS`'s fattening the merge turned out **not** to answer, and `footprint`'s `i32` ranges — are in this document's backlog |
 | 7 | billboards | 🚧 position and the camera-facing normal landed | a mobile pass in a picture harness, the inflated-silhouette candidate, and the choice between them — its *done when* is a person looking at a lit frame |
 | 8 | the sun | ⬜ not started | all of it |
 
@@ -1760,7 +1760,7 @@ disagree by design — `lit_plane(FaceNorth)` names the panel box's `lo.y` and t
 impostor's normal names its `hi.y`, `PANEL_THICKNESS` apart — so moving it is a
 change to every wall in the world and wants its own measurement. In the backlog.
 
-**Phase 6e — the grid stops being a rule.** 🚩 **[`docs/occluders.md`](occluders.md)
+**Phase 6e — the grid stops being a rule.** 🚩 **[`docs/occluders.md`](design_occluders.md)
 is the plan and the live document; this paragraph is its summary and does not
 carry the decisions.** What it fixes is the ragged boundary between solids on
 neighbouring tiles, its "done when" is that there are no holes, no fringe and no
@@ -2059,14 +2059,14 @@ is here, in one list.
 
 | document | what it is | what happens to it |
 |---|---|---|
-| [`lighting.md`](lighting.md) | the current system, end to end: place attachment, occlusion grid, ray walk, sun, beams, doors, art measurement | **the thing being replaced.** Its mechanisms are retired phase by phase; its *content* work (below) survives untouched |
-| [`lighting_world.md`](lighting_world.md) | ambient, the sky field, the day curve, tonal response | **mostly survives.** The sky field is ambient occlusion by another name and phase 8 adopts it; the day curve and the tonal response become phase 1's and phase 8's business |
-| [`lighting_raymarch.md`](lighting_raymarch.md) | the DDA walk, CPU/GPU parity, the tile-boundary hazard | **survived phases 4–6 as the walk, and phase 6e retires it.** Phase 4 changed what a hit *means* (identity, no bias) and not how cells are stepped; [`occluders.md`](occluders.md) deletes the stepping itself, and with it the tile-boundary hazard and the corner tie — a hierarchy has no cell to be on the boundary of. What carries over unchanged is `ray_vs_solid`, which was never about cells: it is an exact slab test in world coordinates and it is what the new traversal ends in |
-| [`lighting_geometry.md`](lighting_geometry.md) | box → mesh occluders, never started | **cheaper after phase 4**, which makes primitives addressable by id, and **started at phase 6**: a tread is one body rather than two degenerate surfaces, which is the first time the grid's own shape was chosen for what a *view* ray needs as well as a shadow ray. `facing::Blocks` — an authored list of up to four boxes, written and wired to nothing — is where the generic form continues |
-| [`lighting_height.md`](lighting_height.md) | the height track: four landed phases and a long backlog | **the backlog is mostly deleted rather than fixed** — see the mapping below |
-| [`lighting_reference.md`](lighting_reference.md) | the path tracer, a third opinion with no shared arithmetic | **becomes phase 0**, the oracle everything else is judged by |
-| [`gbuffer.md`](gbuffer.md) | the `place` attachment's format, ids, per-face mesh geometry | **phase 2 replaced the format** and inherited every one of its readers. Its open question — how to encode a normal for a non-axis-aligned face — is answered there: an octahedral pair packed as integers into an `R32Uint`, with two bits over for the two answers that are not directions. (`Rg16Snorm`, which this document first named, is not a format wgpu will render to under WebGPU's core set; the plane spent one phase as three floats before it was packed) |
-| [`world_coordinates.md`](world_coordinates.md) | a position should carry its own cell; one metric | **half of it is phase 2** (positions as data, `z` in tiles once). The CPU-side type stays its own track |
+| [`lighting.md`](../archive/render/lighting.md) | the current system, end to end: place attachment, occlusion grid, ray walk, sun, beams, doors, art measurement | **the thing being replaced.** Its mechanisms are retired phase by phase; its *content* work (below) survives untouched |
+| [`lighting_world.md`](../archive/render/lighting_world.md) | ambient, the sky field, the day curve, tonal response | **mostly survives.** The sky field is ambient occlusion by another name and phase 8 adopts it; the day curve and the tonal response become phase 1's and phase 8's business |
+| [`lighting_raymarch.md`](../archive/render/lighting_raymarch.md) | the DDA walk, CPU/GPU parity, the tile-boundary hazard | **survived phases 4–6 as the walk, and phase 6e retires it.** Phase 4 changed what a hit *means* (identity, no bias) and not how cells are stepped; [`occluders.md`](design_occluders.md) deletes the stepping itself, and with it the tile-boundary hazard and the corner tie — a hierarchy has no cell to be on the boundary of. What carries over unchanged is `ray_vs_solid`, which was never about cells: it is an exact slab test in world coordinates and it is what the new traversal ends in |
+| [`lighting_geometry.md`](../archive/render/lighting_geometry.md) | box → mesh occluders, never started | **cheaper after phase 4**, which makes primitives addressable by id, and **started at phase 6**: a tread is one body rather than two degenerate surfaces, which is the first time the grid's own shape was chosen for what a *view* ray needs as well as a shadow ray. `facing::Blocks` — an authored list of up to four boxes, written and wired to nothing — is where the generic form continues |
+| [`lighting_height.md`](../archive/render/lighting_height.md) | the height track: four landed phases and a long backlog | **the backlog is mostly deleted rather than fixed** — see the mapping below |
+| [`lighting_reference.md`](reference/path_tracer.md) | the path tracer, a third opinion with no shared arithmetic | **becomes phase 0**, the oracle everything else is judged by |
+| [`gbuffer.md`](../archive/render/gbuffer.md) | the `place` attachment's format, ids, per-face mesh geometry | **phase 2 replaced the format** and inherited every one of its readers. Its open question — how to encode a normal for a non-axis-aligned face — is answered there: an octahedral pair packed as integers into an `R32Uint`, with two bits over for the two answers that are not directions. (`Rg16Snorm`, which this document first named, is not a format wgpu will render to under WebGPU's core set; the plane spent one phase as three floats before it was packed) |
+| [`world_coordinates.md`](../archive/render/world_coordinates.md) | a position should carry its own cell; one metric | **half of it is phase 2** (positions as data, `z` in tiles once). The CPU-side type stays its own track |
 
 ### What each phase deletes from `lighting_height.md`'s backlog
 
@@ -2078,7 +2078,7 @@ may not still matter:
 | ~~`FACE_EDGE`'s two scales; the flame at a surface's own height~~ | **done, phase 3** — there is no band, and a flame in a surface's own plane is a cosine of zero rather than a half |
 | `STAND_OFF`/`ON_TOP` at a grazing corner; the `ON_TOP` twin | **done, phase 4** — there is no nudge |
 | risers excused as a group; `flame_end`'s height test; a mobile shadowed by its own wall | **done, phase 4** — identity answers all three |
-| `own_run` | **survives phase 4, measured** — a run of wall is N statics, which no identity merges. **Retired at phase 6e**, which is where a run *does* become one solid: [`occluders.md`](occluders.md) S3 merges it and S4 deletes the rule, each behind its own measurement |
+| `own_run` | **survives phase 4, measured** — a run of wall is N statics, which no identity merges. **Retired at phase 6e**, which is where a run *does* become one solid: [`occluders.md`](design_occluders.md) S3 merges it and S4 deletes the rule, each behind its own measurement |
 | the `ground < 1e-6` shortcut ignoring a lid's footprint | **fixed** — it was worth fixing alone, and was |
 | `WIDTH_OVERLAP`'s border | **done, phase 6** — there is no second silhouette for a border to reach across |
 | the riser penumbra graded over a third of a face | **done, phase 5** — there is no band; a penumbra is eight rays disagreeing |
@@ -2165,7 +2165,7 @@ still wanted.
   (`lighting_raymarch.md`). Phase 4 does not touch stepping, so it stays.~~
   **It does not outlive the rebuild after all — phase 6e ends it by deleting the
   thing it is about.** A corner tie is two backends disagreeing about which
-  *cell* a ray crosses first, and [`occluders.md`](occluders.md) leaves no cells
+  *cell* a ray crosses first, and [`occluders.md`](design_occluders.md) leaves no cells
   to tie. What replaces the claim is stronger and not weaker: the traversal's two
   spellings are gated against one another on a rendered frame, and both against
   brute force over every primitive. The entry stays listed here, struck, because

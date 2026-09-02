@@ -1052,7 +1052,7 @@ pub struct StaticAtlas {
     prisms:     BTreeMap<Graphic, crate::facing::Prism>,
     /// The horizontal box each graphic's own base edge states, where the
     /// picture is one and nothing else already answered for it — see
-    /// [`Footprint`](crate::facing::Footprint) and `docs/footprints.md`'s S3.
+    /// [`Footprint`](crate::facing::Footprint) and `docs/render/design_footprints.md`'s S3.
     ///
     /// Beside the atlas for the same reason the holes and the prisms are: what
     /// reads it is [`crate::occlusion::boxes_of`], walking the map, and no
@@ -1061,7 +1061,7 @@ pub struct StaticAtlas {
     /// What was measured off this install's art before the client started, or
     /// `None` for an atlas that has to measure as it packs.
     ///
-    /// **The whole of `docs/lighting.md`'s decision 31 at the seam it arrives
+    /// **The whole of `docs/archive/render/lighting.md`'s decision 31 at the seam it arrives
     /// through.** With a table, packing a graphic is a lookup; without one it is
     /// a second walk of the pixels [`copy_sprite`] has just copied, which is
     /// what this did on every frame that introduced a graphic. A client with no
@@ -1114,7 +1114,7 @@ impl StaticAtlas {
     /// The same, reading each graphic's surface out of a table measured off the
     /// clock instead of measuring it here.
     ///
-    /// `docs/lighting.md`'s decision 31: what the client does per frame is a
+    /// `docs/archive/render/lighting.md`'s decision 31: what the client does per frame is a
     /// lookup, and the measurement happened in a tool with a budget of a minute.
     /// `None` is the client that has no table — it measures as it packs, exactly
     /// as it did before one existed.
@@ -1432,7 +1432,7 @@ impl StaticAtlas {
 
     /// Say what hole a graphic has, without measuring one.
     ///
-    /// What a built scene uses: `docs/lighting.md`'s step 21.3 is the *mechanism*
+    /// What a built scene uses: `docs/archive/render/lighting.md`'s step 21.3 is the *mechanism*
     /// — a hole in the walk, tested on a scene that states one — and step 16 is
     /// the measurement that reads it off a real window's silhouette. The two are
     /// deliberately independent, and this method is the line between them: a
@@ -1454,7 +1454,7 @@ impl StaticAtlas {
     /// [`state_hole`](Self::state_hole), and it exists for the same kind of
     /// caller: a scene that wants to reason about a shape rather than about
     /// whatever the art happens to say. Here the shape wanted is the one that
-    /// shipped *before* `docs/footprints.md`'s S3 — the whole tile
+    /// shipped *before* `docs/render/design_footprints.md`'s S3 — the whole tile
     /// [`occlusion::shape_of`](crate::occlusion::shape_of) falls back to — so
     /// that one run of a tool can draw a place both ways and a person can put
     /// the two pictures beside each other. `tests/lid.rs` states the same
@@ -2516,7 +2516,7 @@ impl FontAtlas {
 /// **Not a factor.** `fontdue` rasterizes an outline at whatever pixel height
 /// it is asked for, analytically, so there is nothing here that has to land on
 /// a whole number and nothing that multiplies a finished quad — see
-/// `docs/text_sizes.md`, whose whole subject this type is. A caller says
+/// `docs/render/design_text_sizes.md`, whose whole subject this type is. A caller says
 /// eleven pixels and gets eleven pixels.
 ///
 /// Ordered and hashed by the bits of a **finite, positive** `f32`, which
@@ -2559,7 +2559,7 @@ impl TextSize {
     /// rasterized bigger, not the quad stretched.
     ///
     /// The one place a size is multiplied by anything, and it is
-    /// `docs/text_sizes.md`'s D4: the product is what reaches the rasterizer,
+    /// `docs/render/design_text_sizes.md`'s D4: the product is what reaches the rasterizer,
     /// so what comes out is a real glyph at the real size rather than a
     /// smaller one enlarged. `winit`'s `scale_factor` is one such density; a
     /// window's own magnification is another, and a caption inside a magnified
@@ -2611,7 +2611,7 @@ pub struct TtfAtlas {
     /// TrueType file is one — and says nothing about size, which an outline
     /// answers for continuously. Keying by the pair is what lets a pile's
     /// count be smaller than a spoken line without a second texture, a second
-    /// bind group and a second pass; see `docs/text_sizes.md`'s D2.
+    /// bind group and a second pass; see `docs/render/design_text_sizes.md`'s D2.
     sprites: BTreeMap<(char, TextSize), TtfSprite>,
     /// The source face's baseline and line step for every rasterized size.
     /// Stored with the atlas because layout only receives an atlas after glyphs
@@ -3209,7 +3209,7 @@ mod tests {
     }
 
     /// **The table answers, and the detector is not asked** — the seam
-    /// `docs/lighting.md`'s decision 31 arrives through.
+    /// `docs/archive/render/lighting.md`'s decision 31 arrives through.
     ///
     /// The fixture is a picture the detector reads confidently: a silhouette of
     /// an east face, which `facing::facing_of` names on its own and which every
@@ -3264,7 +3264,7 @@ mod tests {
             },
         );
         // And a fourth that says this picture is a bookcase's own slab —
-        // `docs/footprints.md`'s S3: the footprint travels by the same lookup
+        // `docs/render/design_footprints.md`'s S3: the footprint travels by the same lookup
         // as the hole and the prism, none of it read off this east-facing wall.
         let footprint =
             crate::facing::Footprint::new(crate::facing::Span::new(0, 4), crate::facing::Span::new(3, 8))
@@ -3670,7 +3670,7 @@ mod tests {
     /// The same character at two sizes is two glyphs, and each answers with
     /// its own.
     ///
-    /// The whole of `docs/text_sizes.md`'s D2, asserted: before the atlas was
+    /// The whole of `docs/render/design_text_sizes.md`'s D2, asserted: before the atlas was
     /// keyed by `(char, size)` there was one glyph per character and a second
     /// size had nowhere to go — which is why a pile's count was drawn in a
     /// spoken line's size.
@@ -3710,7 +3710,7 @@ mod tests {
     }
 
     /// A density multiplies the size rather than the finished glyph —
-    /// `docs/text_sizes.md`'s D4.
+    /// `docs/render/design_text_sizes.md`'s D4.
     #[test]
     fn a_density_is_folded_into_the_size() {
         assert_eq!(TextSize::new(11.0).scaled(2.0).pixels(), 22.0);

@@ -9,7 +9,7 @@
 //! `cargo run` — measured, and lower than this file first guessed, because the
 //! two crates that do the work are already at `opt-level = 1` in the dev profile
 //! (the root `Cargo.toml` says why). Worth knowing precisely, because the budget
-//! is the whole point of `docs/lighting.md`'s decision 31: what a measurement may
+//! is the whole point of `docs/archive/render/lighting.md`'s decision 31: what a measurement may
 //! cost here is a minute, and today's spends eleven seconds of it.
 //!
 //! Four of those seconds were the faces and the windows; the prism search

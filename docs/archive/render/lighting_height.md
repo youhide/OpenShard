@@ -1,6 +1,6 @@
 # Height as a continuous quantity
 
-> **Consolidated into [`lighting_rebuild.md`](lighting_rebuild.md)** — the height track, whose backlog is mostly deleted rather than fixed.
+> **Consolidated into [`lighting_rebuild.md`](../../render/design_model.md)** — the height track, whose backlog is mostly deleted rather than fixed.
 > That document is the entry point: it lists what is still live here, which rebuild phase retires or inherits it, and what carries over untouched. This file stays as the record of how it was built and why.
 
 

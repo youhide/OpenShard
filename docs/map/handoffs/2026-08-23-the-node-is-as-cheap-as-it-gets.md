@@ -136,6 +136,6 @@ where in the tick**.
 of the diagonal flank rule, and three of its rows now go through it. It is the
 instrument the plan measures with, so a drift between it and `steps_out_of`
 would be a wrong number rather than a failing test — the same class as
-[`parity.md`](../../parity.md)'s frame assembled by hand in seven places.
+[`parity.md`](../../render/design_frame_assembly.md)'s frame assembled by hand in seven places.
 
 **What would block it:** nothing.

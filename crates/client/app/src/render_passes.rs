@@ -791,7 +791,7 @@ pub(crate) fn draw_gump_windows(
 /// One window's captions, and everything needed to put them on the screen.
 ///
 /// A struct rather than seven arguments, and the fields are what
-/// `docs/text_sizes.md`'s D4 is made of: `magnify` and `density` are the two
+/// `docs/render/design_text_sizes.md`'s D4 is made of: `magnify` and `density` are the two
 /// things a caption is scaled by, and the whole point is that they reach the
 /// *rasterizer* rather than the finished glyph.
 struct WindowText<'a> {
@@ -836,7 +836,7 @@ struct WindowText<'a> {
 ///   *position* still moves with the window's magnification, the glyph does
 ///   not stretch with it. Blowing up a 14-pixel glyph to 28 is the soft,
 ///   sawtoothed line `text::collect_gump_ttf`'s doc describes; asking
-///   `fontdue` for 28 is a 28-pixel glyph. See `docs/text_sizes.md`.
+///   `fontdue` for 28 is a 28-pixel glyph. See `docs/render/design_text_sizes.md`.
 ///
 /// A row's scissor follows its label into whichever space that is, so a skill
 /// sheet's list is cut to its viewport either way.
@@ -1230,7 +1230,7 @@ pub(crate) fn encode_world_passes(
     audit.cpu_statics = cpu_statics;
     audit.cpu_items = cpu_items;
     // Right after statics, into the same static's own pixels its
-    // billboard sprite just drew — `docs/gbuffer.md` step 4c. Depth and
+    // billboard sprite just drew — `docs/archive/render/gbuffer.md` step 4c. Depth and
     // place only, never colour: this only gives a climbable static's
     // pixels a more honest per-face normal than one blended stance could.
     let timed = profile::begin(window.gpu.as_ref(), "mesh faces", encoder);
@@ -1250,7 +1250,7 @@ pub(crate) fn encode_world_passes(
         encoder,
         target,
         &geometry.mobile_quads,
-        // A mobile has no volume — `docs/lighting_rebuild.md` says so in as
+        // A mobile has no volume — `docs/render/design_model.md` says so in as
         // many words, and phase 7 is what gives a billboard a normal.
         &[],
         None,
@@ -1403,7 +1403,7 @@ pub(crate) fn encode_world_passes(
     // of the frame, out of `frame::Inputs`. Nothing between there and here
     // may touch it: a frame this client draws and a frame a tool dumps are
     // the same frame only for as long as neither of them has an adjustment
-    // of its own afterwards. `docs/parity.md`.
+    // of its own afterwards. `docs/render/design_frame_assembly.md`.
     //
     // **Solids alone**, `App::solids_only`: the surface is cleared and the
     // world image is not drawn onto it at all, so the boxes below stand

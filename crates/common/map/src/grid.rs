@@ -75,7 +75,7 @@ impl Tile {
 ///
 /// A radar chunk is sixty-four tiles square (`client/render`'s
 /// `BASE_CHUNK_TILES`), so it addresses a different grid entirely. Collapsing
-/// the two is the confusion `docs/pixels.md` exists to prevent, and this type
+/// the two is the confusion `docs/render/design_pixel_spaces.md` exists to prevent, and this type
 /// is deliberately not it.
 ///
 /// Its fields are public, unlike [`BlockIndex`]'s: a block coordinate is

@@ -3,7 +3,7 @@
 // `crate::impostor` is the Rust twin and carries the argument at length: the
 // projection has one null direction, so every point that draws to a given pixel
 // lies on a line in the constant direction `VIEW`, and a fragment is a *slab
-// test* rather than an unprojection. `docs/lighting_rebuild.md` phase 6.
+// test* rather than an unprojection. `docs/render/design_model.md` phase 6.
 //
 // **Two spellings, and one thing compares them.** This file and `impostor.rs`
 // are the same arithmetic written twice, the way `normal_format.wesl` and
@@ -21,8 +21,8 @@
 //
 // **The metric, and this is its one spelling in a shader.** `light::Z_PER_TILE`
 // is the Rust side of it; `blit.wesl` imports this rather than declaring a
-// second, because `docs/lighting_rebuild.md`'s *One metric* is the line half of
-// `docs/world_coordinates.md` is about.
+// second, because `docs/render/design_model.md`'s *One metric* is the line half of
+// `docs/archive/render/world_coordinates.md` is about.
 const Z_PER_TILE: f32 = 11.0;
 
 // A tile's width in virtual pixels — `camera::TILE_WIDTH`, which in this
@@ -93,7 +93,7 @@ fn ray_from(tile: vec2<f32>, base: f32, across: f32, down: f32) -> vec3<f32> {
 // Where a fragment of a **billboard** is: the point of its own view ray on the
 // vertical plane the sprite is drawn on.
 //
-// `docs/lighting_rebuild.md` phase 7, and the half of it that is not a choice.
+// `docs/render/design_model.md` phase 7, and the half of it that is not a choice.
 // A mobile has no volume, so `meets` has nothing to meet and the pass fell back
 // to a *point* — the middle of the tile, with the height running down the
 // picture — which is the same point for every pixel of a screen row. A figure
@@ -119,7 +119,7 @@ fn billboard_at(tile: vec2<f32>, base: f32, across: f32, down: f32) -> vec3<f32>
 }
 
 // The billboard plane's own normal — `(1, 1, 0)` normalised, `VIEW`'s
-// horizontal part. `docs/lighting_rebuild.md` phase 7's "facing the camera"
+// horizontal part. `docs/render/design_model.md` phase 7's "facing the camera"
 // candidate; `impostor::billboard_normal`, and the two are one formula.
 fn billboard_normal() -> vec3<f32> {
     return normalize(vec3<f32>(1.0, 1.0, 0.0));
@@ -158,7 +158,7 @@ struct Meeting {
     // How far, in **tiles**, the ray passed outside the box before that clamp
     // pulled it back. At most `FRAGMENT` for a ray this grid can tell from one
     // that went through; `hit` is that comparison spelled once. This is the number
-    // `docs/lighting_rebuild.md` phase 6 asks its own "done when" to carry — a
+    // `docs/render/design_model.md` phase 6 asks its own "done when" to carry — a
     // sprite overhangs its own volume wherever the fitted box is narrower than
     // the art, and what matters is not that such pixels exist but how far out
     // they are.
@@ -250,7 +250,7 @@ fn meets(start: vec3<f32>, lo: vec3<f32>, hi: vec3<f32>) -> Meeting {
     // face's normal — one pixel per tile corner, a lattice of dots over a roof,
     // each shaded as a wall in the middle of a floor. `impostor::meets` has the
     // whole account, including why no box `Solid::box_of` builds is flat any
-    // more (`docs/parity.md` P4 step 1) and why the rule stays regardless.
+    // more (`docs/render/design_frame_assembly.md` P4 step 1) and why the rule stays regardless.
     //
     // **And "no area" is measured against the grid rather than against zero.**
     // A side face draws as a band `(hi.z - lo.z) * Z_STEP` virtual pixels tall,

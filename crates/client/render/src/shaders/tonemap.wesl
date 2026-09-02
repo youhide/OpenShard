@@ -1,6 +1,6 @@
 // The colour pipeline: sRGB in, linear throughout, tonemapped out.
 //
-// `docs/lighting_rebuild.md` phase 1, and it is the phase everything else waits
+// `docs/render/design_model.md` phase 1, and it is the phase everything else waits
 // on rather than an improvement on its own. Light is a *quantity*: two equal
 // flames on one spot are twice one flame, and a surface at half the distance is
 // four times as bright. None of that is true of the numbers stored in an image

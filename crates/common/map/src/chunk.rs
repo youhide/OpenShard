@@ -46,7 +46,7 @@
 //!   `docs/map/minimap_lod_plan.md` asks for. Direction D's invalidation is then
 //!   one-to-one instead of a fan-out.
 //!
-//! It is *not* the same type as a radar chunk, and `docs/pixels.md` is why:
+//! It is *not* the same type as a radar chunk, and `docs/render/design_pixel_spaces.md` is why:
 //! sharing a divisor is a decision recorded here, not a licence to collapse two
 //! grids into one value.
 //!
@@ -100,7 +100,7 @@ pub const BLOCKS_PER_CHUNK: u32 = CHUNK_TILES / BLOCK_SIZE;
 ///
 /// It happens to share a divisor with a radar chunk, which the module header
 /// records as a decision. It is still a different type, because the two answer
-/// different questions and `docs/pixels.md` is a list of what happens when a
+/// different questions and `docs/render/design_pixel_spaces.md` is a list of what happens when a
 /// grid is used to index another one that merely lines up with it.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct ChunkCoord {

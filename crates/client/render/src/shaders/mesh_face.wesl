@@ -1,4 +1,4 @@
-// `docs/gbuffer.md` step 4c's render pass: one raw, non-instanced vertex per
+// `docs/archive/render/gbuffer.md` step 4c's render pass: one raw, non-instanced vertex per
 // corner of a `crate::mesh::Face`, fan-triangulated on the CPU
 // (`Face::fan`).
 //
@@ -6,9 +6,9 @@
 // so of its own: it is the enclosing static's own `SpriteQuad::depth`,
 // carried through unchanged, so this pass's depth test can only tie or
 // improve on what the billboard sprite already wrote — never disagree with
-// it (`docs/gbuffer.md` decision 4).
+// it (`docs/archive/render/gbuffer.md` decision 4).
 //
-// **A colour target since `docs/lighting_rebuild.md` phase 6d.** Until then
+// **A colour target since `docs/render/design_model.md` phase 6d.** Until then
 // this pass ran over every real climbable static too, always into a static's
 // own billboard sprite — which had already drawn the picture — so writing one
 // here would only have overwritten it with nothing better. Phase 6d took the
@@ -59,7 +59,7 @@ struct VertexOut {
     //
     // The one producer in the crate whose normal is *measured geometry* rather
     // than a stance: a tread's top and its riser are two `Face`s with two real
-    // normals, and `docs/gbuffer.md` decision 3 is the argument for keeping them
+    // normals, and `docs/archive/render/gbuffer.md` decision 3 is the argument for keeping them
     // apart. The row's `stance` is the same fact rounded to one of five names —
     // `Stance::of_normal`, on the CPU — and it is still what the shadow walk's
     // own-run test reads until phase 4 replaces that with an id.
@@ -103,7 +103,7 @@ fn vs_main(
     return out;
 }
 
-// **`INSIDE` lived here**, and `docs/lighting_rebuild.md` phase 4 deleted it. It
+// **`INSIDE` lived here**, and `docs/render/design_model.md` phase 4 deleted it. It
 // was a hundred-and-twenty-seventh of a tile — the grain the retired `place`
 // attachment held a fragment inside its tile on — and this pass clamped its own
 // exact position into it so that a reader flooring the position would be handed
@@ -116,7 +116,7 @@ fn vs_main(
 
 struct FragmentOut {
     // This face's own albedo, sRGB-encoded the way every other producer of
-    // `crate::blit::WORLD_FORMAT` writes it — `docs/lighting_rebuild.md` phase
+    // `crate::blit::WORLD_FORMAT` writes it — `docs/render/design_model.md` phase
     // 6d, and see the header comment for why this pass has one at all now.
     @location(0) color: vec4<f32>,
     // What drew this fragment and which row it came from —
@@ -148,7 +148,7 @@ fn fs_main(in: VertexOut) -> FragmentOut {
     // one: `MeshFaceVertex::tile`, carried on the vertex. A face's own edge can
     // sit exactly on a whole number — this tread's outer corner does — and
     // `floor`ing a position there picks whichever side rounds down rather than the
-    // side the geometry stands on. `docs/lighting.md`'s shadow-raymarch anomaly is
+    // side the geometry stands on. `docs/archive/render/lighting.md`'s shadow-raymarch anomaly is
     // that bug: one fragment on an otherwise evenly-shadowed tread reading fully
     // lit, because the walk it fed started from the wrong tile's occluders.
     // **`SOLID_NONE` in the fourth channel, and this is the one pass for which

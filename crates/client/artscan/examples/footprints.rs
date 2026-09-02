@@ -1,6 +1,6 @@
 //! How much of the "the art would not say" class the footprint detector reads.
 //!
-//! `docs/footprints.md`'s S1 gate. The class this plan is about is exactly the
+//! `docs/render/design_footprints.md`'s S1 gate. The class this plan is about is exactly the
 //! pictures [`facing::facing_of`] answers `None` for — `occlusion::edges_of`
 //! turns that into `Edges::ANY` and the static is given a whole tile it does not
 //! fill. This walks every graphic an install ships, splits it by that verdict,
@@ -38,7 +38,7 @@ fn main() {
     // **The population that decides this, and it is not the id space.** Most of
     // an install's 16,384 graphics are inventory items — a sword, a potion, a
     // pile of gold — which are never placed in the world and are not boxes by
-    // any reading. What `docs/footprints.md` is about is the statics a frame
+    // any reading. What `docs/render/design_footprints.md` is about is the statics a frame
     // actually draws, weighted by how often each is placed, which is the axis
     // `examples/geometry_census.rs` counts on. `at x y [radius]` is that pass.
     if args.peek().map(String::as_str) == Some("at") {
@@ -181,7 +181,7 @@ fn placed(dir: &std::path::Path, art: &Art, cx: i32, cy: i32, radius: i32) {
                 // sloped slab, whose base edge is not two 45° runs and never
                 // will be — so counting them against a box detector measures the
                 // wrong thing. Named here rather than skipped silently, because
-                // `docs/lighting_rebuild.md`'s phase 6i is an open question
+                // `docs/render/design_model.md`'s phase 6i is an open question
                 // about exactly these and a share that quietly dropped them
                 // would hide it.
                 if tile.flags.is_roof() {

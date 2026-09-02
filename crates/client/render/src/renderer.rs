@@ -412,7 +412,7 @@ impl GroundRenderer {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label:  Some("ground"),
             // `src/shaders/ground.wesl`, compiled to plain WGSL by `build.rs`
-            // — the pilot for `docs/lighting_raymarch.md`'s shared `place`
+            // — the pilot for `docs/archive/render/lighting_raymarch.md`'s shared `place`
             // format module.
             source: wgpu::ShaderSource::Wgsl(include_str!(concat!(env!("OUT_DIR"), "/ground.wgsl")).into()),
         });
@@ -447,7 +447,7 @@ impl GroundRenderer {
                     // `GroundQuad::write`'s test, which is the only thing that
                     // links this to the shader's `@location`s.
                     //
-                    // Five attributes and not six: `docs/gbuffer.md` step 7
+                    // Five attributes and not six: `docs/archive/render/gbuffer.md` step 7
                     // replaced the tile — `GroundQuad::write`'s last two words —
                     // with `@builtin(instance_index)`, so `ground.wgsl`'s vertex
                     // stage no longer fetches them. The bytes are still in the
@@ -602,7 +602,7 @@ impl GroundRenderer {
     /// This pass's own instance buffer, as `blit.wgsl`/`select.wgsl` need it:
     /// bound a second time, as storage, so `ground_instances[id]` can read a
     /// fragment's own tile back instead of carrying it on every pixel of its
-    /// own picture. See `docs/gbuffer.md` decision 2 and step 7.
+    /// own picture. See `docs/archive/render/gbuffer.md` decision 2 and step 7.
     pub fn instances_buffer(&self) -> &wgpu::Buffer {
         &self.instances
     }
@@ -1070,7 +1070,7 @@ impl SpriteRenderer {
                     // it; the fragment stage reads `scale` alone, for the one
                     // question whose answer is in *real* pixels — how far a
                     // neighbouring fragment is, which is what `statics.wesl`'s
-                    // `box_edge` steps by. See `docs/silhouettes.md`: the whole
+                    // `box_edge` steps by. See `docs/render/design_silhouettes.md`: the whole
                     // point of the pair of silhouette layers is that the art's
                     // quantum is a texel and the box's is a fragment, and the
                     // ratio between the two is this number.
@@ -1114,7 +1114,7 @@ impl SpriteRenderer {
                     ty:         wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count:      None,
                 },
-                // The frame's boxes — `docs/lighting_rebuild.md` phase 6c. Read
+                // The frame's boxes — `docs/render/design_model.md` phase 6c. Read
                 // by the fragment stage alone: a quad's rectangle is the
                 // sprite's own and the geometry under it is a *per fragment*
                 // question.
@@ -1219,7 +1219,7 @@ impl SpriteRenderer {
                             },
                             // A corner static's paired shadow row — see
                             // `crate::sprite::SpriteQuad::twin` and
-                            // `docs/gbuffer.md` step 4. Only `statics.wgsl`
+                            // `docs/archive/render/gbuffer.md` step 4. Only `statics.wgsl`
                             // declares a vertex input at this location; the
                             // mobile pass shares this same layout and simply
                             // never reads it.
@@ -1231,7 +1231,7 @@ impl SpriteRenderer {
                             // Which run of the volume buffer this instance's own
                             // fragments are met against —
                             // `crate::impostor::Range`, and
-                            // `docs/lighting_rebuild.md` phase 6c. The two words
+                            // `docs/render/design_model.md` phase 6c. The two words
                             // `SpriteQuad::write` puts where the row was padding
                             // to its stride anyway.
                             wgpu::VertexAttribute {
@@ -1662,7 +1662,7 @@ impl SpriteRenderer {
     /// This pass's own instance buffer, as `blit.wgsl` needs it: bound a
     /// second time, as storage, so `instances[id]` can read a fragment's own
     /// `SpriteQuad` back instead of decoding it from the `place` attachment.
-    /// See `docs/gbuffer.md` decision 2 and step 3.
+    /// See `docs/archive/render/gbuffer.md` decision 2 and step 3.
     pub fn instances_buffer(&self) -> &wgpu::Buffer {
         &self.instances
     }
@@ -1695,7 +1695,7 @@ impl SpriteRenderer {
     /// `drawn` caps how many of `quads` the draw call actually asks for —
     /// `None` draws all of them, same as before this parameter existed. A
     /// corner static's shadow row (`crate::sprite::split_corners`,
-    /// `docs/gbuffer.md` step 4) is uploaded here so `instances_buffer()`
+    /// `docs/archive/render/gbuffer.md` step 4) is uploaded here so `instances_buffer()`
     /// can address it by id, but has no picture of its own to rasterise: it
     /// rides at the tail of `quads`, past `drawn`, and the pass never draws
     /// it.
@@ -2149,10 +2149,10 @@ impl SpriteRenderer {
     }
 }
 
-/// Draws `docs/gbuffer.md` step 4c's mesh-geometry pass, for a
+/// Draws `docs/archive/render/gbuffer.md` step 4c's mesh-geometry pass, for a
 /// [`crate::mesh::Mesh`]'s faces.
 ///
-/// **No longer a real static's pass — `docs/lighting_rebuild.md` phase 6d.**
+/// **No longer a real static's pass — `docs/render/design_model.md` phase 6d.**
 /// It used to run over every climbable static too, always into that static's
 /// own billboard sprite, which had already drawn the picture; this pass
 /// existed only to give those pixels a more honest per-face normal than one
@@ -2274,7 +2274,7 @@ impl MeshFaceRenderer {
                             offset:          36,
                             shader_location: 5,
                         },
-                        // And this face's own albedo — `docs/lighting_rebuild.md`
+                        // And this face's own albedo — `docs/render/design_model.md`
                         // phase 6d. See [`MeshFaceVertex::colour`].
                         wgpu::VertexAttribute {
                             format:          wgpu::VertexFormat::Float32x3,
@@ -2396,7 +2396,7 @@ impl MeshFaceRenderer {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mesh face"),
             // `target.view` first, matching every other world pass's own
-            // order — `docs/lighting_rebuild.md` phase 6d. Loaded and not
+            // order — `docs/render/design_model.md` phase 6d. Loaded and not
             // cleared: for a real static this ran into a billboard sprite's
             // own pixels (before phase 6d took it off real statics
             // entirely), and for the four diagnostic scenes that still call
@@ -2499,7 +2499,7 @@ fn new_ring_buffer(device: &wgpu::Device, quads: u64) -> wgpu::Buffer {
     })
 }
 
-// `STORAGE` alongside `VERTEX`: this buffer is what `docs/gbuffer.md`'s
+// `STORAGE` alongside `VERTEX`: this buffer is what `docs/archive/render/gbuffer.md`'s
 // decision 2 means by "the same memory bound a second way" — `blit.wgsl`
 // indexes it by id instead of decoding a fact already spent on every fragment
 // of the quad it belongs to. `new_instance_buffer` below gains the same flag,
@@ -2619,7 +2619,7 @@ pub(crate) fn write_rows(
 }
 
 // `STORAGE` alongside `VERTEX`, the same reason `new_static_instance_buffer`
-// carries it: `docs/gbuffer.md` step 7 gives `blit.wgsl`/`select.wgsl`
+// carries it: `docs/archive/render/gbuffer.md` step 7 gives `blit.wgsl`/`select.wgsl`
 // `ground_instances[id]`, read off this same buffer bound a second time — see
 // `GroundRenderer::instances_buffer`.
 fn new_instance_buffer(device: &wgpu::Device, quads: u64) -> wgpu::Buffer {

@@ -1,6 +1,6 @@
 //! A picture of one real place, and only what the caller asks to keep in it.
 //!
-//! The tool `docs/lighting.md`'s backlog wanted while chasing a corner where a
+//! The tool `docs/archive/render/lighting.md`'s backlog wanted while chasing a corner where a
 //! staircase's occlusion box met a lamp's soft pool: `OPENSHARD_FRAME_AT`
 //! (`tests/cost.rs`) repoints the camera at a real place but still draws the
 //! whole neighbourhood around it, and a house standing beside the thing under
@@ -80,7 +80,7 @@
 //! - `OPENSHARD_SCENE_NO_FOOTPRINTS=1` — throw away every footprint the art
 //!   measured ([`StaticAtlas::forget_footprints`]), so every picture in this
 //!   scene stands on the whole tile again: the boxes that shipped before
-//!   `docs/footprints.md`'s S3. The "before" half of a before-and-after pair,
+//!   `docs/render/design_footprints.md`'s S3. The "before" half of a before-and-after pair,
 //!   and the only way to get one out of a *drawn* frame — the measurement is a
 //!   property of the art, so nothing else in the scene can state it away.
 //!   Default `0`.
@@ -240,7 +240,7 @@ use openshard_uofiles::texmaps::TexMaps;
 
 // The shard's own `items` and `decorations`, without which this tool draws the
 // client's art and none of the server's furniture — see its own doc, and
-// `docs/parity.md`'s first backlog entry for what that cost.
+// `docs/render/design_frame_assembly.md`'s first backlog entry for what that cost.
 mod shard;
 
 /// Where every scene's real anchor lands in the synthetic map — far from its
@@ -477,7 +477,7 @@ fn run_profile(anchor: (u16, u16), lighting: &light::Lighting) {
             solid: None,
             // `floor()`, deliberately: this tool exists to bisect exactly the
             // ambiguity `Spot::tile` closes for a real caller
-            // (`docs/lighting_raymarch.md` step 2), so the profile has to keep
+            // (`docs/archive/render/lighting_raymarch.md` step 2), so the profile has to keep
             // showing what a naively-derived tile does at a boundary sample,
             // not paper over it with a guessed intent.
             tile: (sx.floor() as i32, sy.floor() as i32),
@@ -685,7 +685,7 @@ fn main() {
     let want_ground = env_flag("OPENSHARD_SCENE_GROUND", true);
 
     // The frame's own cutaway, which the client has and this tool never did —
-    // one of the differences `docs/lighting_rebuild.md` lists between the two.
+    // one of the differences `docs/render/design_model.md` lists between the two.
     // A roof is what a player standing indoors has cut away over their head, and
     // "does the artefact survive without it" is a question about which surface a
     // fragment belongs to rather than about the roof's own pixels.
@@ -764,7 +764,7 @@ fn main() {
     let from_the_map = items.len();
 
     // **What the server placed**, read out of the shard's own database over a
-    // window *wider* than the statics came from — `docs/parity.md`'s backlog:
+    // window *wider* than the statics came from — `docs/render/design_frame_assembly.md`'s backlog:
     // "the shard reader windows by the tool's radius; the client windows by
     // what the server sent". `_RADIUS` is chosen to keep a house from standing
     // beside the thing under test, and both tables here can carry a light (a
@@ -952,7 +952,7 @@ fn main() {
     let animations = StaticAnimations::default();
     let needed = items::needed_graphics(&items, &animations);
     let mut static_atlas = StaticAtlas::build(&art, needed).expect("the scene's own items fit");
-    // The counterfactual `docs/footprints.md`'s post item asks for: the same
+    // The counterfactual `docs/render/design_footprints.md`'s post item asks for: the same
     // place, drawn with the boxes that shipped before a base edge was ever
     // measured. One knob rather than two builds of the tool a session apart.
     if env_flag("OPENSHARD_SCENE_NO_FOOTPRINTS", false) {
@@ -968,7 +968,7 @@ fn main() {
         .and_then(|v| openshard_client_render::debug::View::ALL.get(v).copied())
         .unwrap_or_default();
 
-    // **One assembly, the client's own** — `docs/parity.md`, decision D1. Every
+    // **One assembly, the client's own** — `docs/render/design_frame_assembly.md`, decision D1. Every
     // way this tool used to differ from `App::draw` is a field below, so a
     // difference between the two pictures is a difference in these values and
     // not in which calls somebody wrote out.
@@ -1053,7 +1053,7 @@ fn main() {
     // **What this frame was asked for**, printed and written beside the picture.
     // The client's F12 dump writes the same block from the same function, so two
     // frames that disagree are diffed here first: an input that differs is set
-    // the same or the case is not compared at all — `docs/parity.md` D6.
+    // the same or the case is not compared at all — `docs/render/design_frame_assembly.md` D6.
     //
     // Three lines the client's own dump does not have, and cannot: its `items`
     // list *is* the server's, arriving on the wire as it is placed, while this
@@ -1080,7 +1080,7 @@ fn main() {
                 cutaway_boxes: _,
                 mesh_vertices,
                 mesh_rows,
-                // The impostor's boxes — `docs/lighting_rebuild.md` phase 6c —
+                // The impostor's boxes — `docs/render/design_model.md` phase 6c —
                 // which this scene's own pixels are met against.
                 boxes,
             },
@@ -1143,7 +1143,7 @@ fn main() {
     );
     // Right after, into the same pixels its own billboard just drew — the same
     // order `lib.rs`'s real frame loop uses and for the same reason
-    // (`docs/gbuffer.md` step 4c): without this, a climbable, prism-fit item
+    // (`docs/archive/render/gbuffer.md` step 4c): without this, a climbable, prism-fit item
     // pulled from the real map never gets its honest per-face normal, and
     // this tool would go on showing the flat corner-stance reading a live
     // frame does not.
@@ -1173,7 +1173,7 @@ fn main() {
         lighting.occlusion.boxes().count(),
     );
     // **How many drawn pictures the impostor has no shape for** —
-    // `docs/lighting_rebuild.md` phase 6c, and the census the `View::Normal`
+    // `docs/render/design_model.md` phase 6c, and the census the `View::Normal`
     // grey is read against. A picture with no box is a billboard: it stands in
     // the middle of its tile with its height running down the sprite and no
     // facing at all, so it is lit from every side. That is the honest answer

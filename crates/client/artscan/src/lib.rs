@@ -1,6 +1,6 @@
 //! Measure a client's art once, off the clock, and read the table back.
 //!
-//! `docs/lighting.md`'s decision 31. [`facing_of`](openshard_client_render::facing::facing_of)
+//! `docs/archive/render/lighting.md`'s decision 31. [`facing_of`](openshard_client_render::facing::facing_of)
 //! used to run while the atlas packed a sprite — on the frame a graphic was first
 //! seen, on the player's machine — which was right when the measurement was one
 //! pass over 44×80 pixels and there was one of them. It stops being right twice

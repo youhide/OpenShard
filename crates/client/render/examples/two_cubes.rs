@@ -539,7 +539,7 @@ fn main() {
         // Which *solid* of the grid this cube is, off the grid built above — one
         // `Builder::add`, one solid, so `Part::ONLY` names it. Without it every
         // face of a cube would be a point of nothing and the cube would shadow
-        // itself; `docs/lighting_rebuild.md` phase 4, and `id_of` is the join it
+        // itself; `docs/render/design_model.md` phase 4, and `id_of` is the join it
         // pays for.
         let mine = occlusion
             .id_of(

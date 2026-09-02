@@ -10,7 +10,7 @@
 //! **The trace is the rule; the boolean is a reading of it.** `sight_clear` is
 //! `trace(.., Extent::ToFirstBlock).clear()` and nothing else, so there is one
 //! loop, one eye height and one set of thresholds. A diagnostic that walked its
-//! own copy of the line would answer about that copy — `docs/parity.md`'s
+//! own copy of the line would answer about that copy — `docs/render/design_frame_assembly.md`'s
 //! standing complaint, and worse here than there, because a sight overlay drawn
 //! from the wrong walk looks exactly like one drawn from the right walk.
 //!

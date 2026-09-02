@@ -1,6 +1,6 @@
 //! Which edge of its tile a wall stands on, measured from the wall's own art.
 //!
-//! Nothing in `tiledata.mul` records this. `docs/lighting.md`'s decision 3 says
+//! Nothing in `tiledata.mul` records this. `docs/archive/render/lighting.md`'s decision 3 says
 //! so and is right: there is no flag, no byte and no table for which of a tile's
 //! four edges a `WALL` static occupies. The *picture* knows, because in this
 //! projection a tile edge is half a cell wide with a 45° run, and a wall drawn on
@@ -33,7 +33,7 @@
 //! [`Upright`](crate::place::Stance::Upright) whole-tile occluder — a flat
 //! 44-pixel band between two continuous runs of wall, lit on the side turned
 //! away from the flame, and leaking a diagonal sliver of light into the room
-//! behind it. See `docs/lighting.md`'s decision 25.
+//! behind it. See `docs/archive/render/lighting.md`'s decision 25.
 //!
 //! So the halves are read **twice**. First strictly, each one having to be the
 //! only face in the picture: that is the whole of what this module did before
@@ -73,7 +73,7 @@
 //! # And the hole in it
 //!
 //! [`aperture_of`] is the second measurement off the same silhouette — step 16 of
-//! `docs/lighting.md`. A window is a *hole in a wall*, so what the art left
+//! `docs/archive/render/lighting.md`. A window is a *hole in a wall*, so what the art left
 //! transparent inside an opaque face is the rectangle a ray passes through. It
 //! lives beside the face rather than in a module of its own because it needs one:
 //! which half of the picture is a surface, and which way the run counts along it,
@@ -103,7 +103,7 @@ use openshard_uofiles::image::Image;
 /// row for every window and a hole in none of them, and nothing else in the
 /// stamp could say so.
 ///
-/// **Three** for the footprint, `docs/footprints.md`'s S1: `PLATEAU` and
+/// **Three** for the footprint, `docs/render/design_footprints.md`'s S1: `PLATEAU` and
 /// `MIN_FOOTPRINT_RUN` are new gates nothing above tracked, and a table written
 /// before `measure_footprint` existed would look exactly as fresh as one
 /// written after — the same trap the hole closed for `aperture_of`.
@@ -117,7 +117,7 @@ use openshard_uofiles::image::Image;
 ///
 /// **Five** for [`best_prism`]'s own tie-break: a coin-flip margin between
 /// rival climb axes is disproportionately a refused picture's signature
-/// (`docs/lighting_state.md`'s 🚩 entry, 45.9% of refusals against 10.4% of
+/// (`docs/render/README.md`'s 🚩 entry, 45.9% of refusals against 10.4% of
 /// fits), and among the *accepted* near-ties, [`interiors_agree`] can now
 /// move which prism wins. A table written by detector 4 has no row that ever
 /// took the tie-break, so a graphic whose interior the art disagrees with
@@ -480,7 +480,7 @@ const MIN_FOOTPRINT_RUN: usize = 2;
 /// **Measured rather than chosen** (`examples/discard_census.rs`, Britain's
 /// 121×121 — the sweep it prints). The class's shares are bimodal and the cap
 /// sits in the flat stretch between the two: a wooden post reads `0.0%`, an
-/// elven bookshelf `0.0%`, and the two bookcases `docs/footprints.md` was
+/// elven bookshelf `0.0%`, and the two bookcases `docs/render/design_footprints.md` was
 /// written for read **7.9%**; a table's middle piece (`0x0B80`) reads `15.4%`, a
 /// counter (`0x0B3D`) `29.3%`, and a slate roof (`0x059A`) `44.1%`. Every cap
 /// from 8% to 12% keeps the same 164 placements and leaves the same 1.1% of
@@ -488,7 +488,7 @@ const MIN_FOOTPRINT_RUN: usize = 2;
 /// jumps to 9.4% because the counters come back in.
 ///
 /// What a refusal costs is a picture handed back the whole tile, which is the
-/// answer that shipped before `docs/footprints.md`'s S3 and is never *wrong*,
+/// answer that shipped before `docs/render/design_footprints.md`'s S3 and is never *wrong*,
 /// only wide.
 const OFF_BAND: f32 = 0.10;
 
@@ -527,7 +527,7 @@ fn off_band(image: &Image, footprint: Footprint) -> f32 {
 /// How many columns of flat base a footprint's own near corner may span before
 /// the base is a flat one rather than a corner.
 ///
-/// Measured rather than chosen — see the census under `docs/footprints.md`'s S1,
+/// Measured rather than chosen — see the census under `docs/render/design_footprints.md`'s S1,
 /// which is run at each of these: the class read climbs while the cap admits
 /// what antialiasing and a drawn foot leave, and levels off once it is admitting
 /// shapes whose base is genuinely flat across.
@@ -536,7 +536,7 @@ const PLATEAU: usize = 6;
 /// **The box the art drew**, as a horizontal extent — or `None` where the
 /// picture is not a box.
 ///
-/// `docs/footprints.md` is the plan; this is its S1. What it reads is the same
+/// `docs/render/design_footprints.md` is the plan; this is its S1. What it reads is the same
 /// base edge [`facing_of`] reads and a different question of it: that one asks
 /// *which edge of the tile* a plane stands on, and answers `None` for anything
 /// standing anywhere else — which over Britain is 31.6% of every static in the
@@ -565,7 +565,7 @@ const PLATEAU: usize = 6;
 /// `across` and `down` are `crate::impostor::ray_from`'s own two numbers, in the
 /// convention [`Half::read`] already uses: `across` from the sprite's middle
 /// column, `down` below the tile's centre row, both at pixel centres. Nothing
-/// here re-derives the projection — see `docs/footprints.md` D6, and the test
+/// here re-derives the projection — see `docs/render/design_footprints.md` D6, and the test
 /// that round-trips every answer through [`blocks_silhouette`].
 ///
 /// # What it refuses, and why each refusal is the picture rather than a tolerance
@@ -773,7 +773,7 @@ pub fn measure_footprint(image: &Image) -> Result<Footprint, Refusal> {
     // pixels above it are a surface nothing has measured.
     //
     // The residual is height-free, which is what lets it be asked here at all —
-    // see [`OFF_BAND`], and `docs/footprints.md` D5, whose own words are "the
+    // see [`OFF_BAND`], and `docs/render/design_footprints.md` D5, whose own words are "the
     // fit is a residual, and a picture that does not fit keeps the tile".
     match off_band(image, footprint) > OFF_BAND {
         true => Err(Refusal::Overhung),
@@ -1264,7 +1264,7 @@ pub fn silhouette(face: Face, height: u16) -> Image {
         let base = match face {
             // `dy = 22 * (run - 1)` for the two edges whose apex is the
             // diamond's top vertex, `22 * run` for the two whose apex is its
-            // bottom one — see `docs/lighting.md`, step 15.
+            // bottom one — see `docs/archive/render/lighting.md`, step 15.
             Face::North | Face::West => HALF_TILE_WIDTH * (run - 1.0),
             Face::East | Face::South => HALF_TILE_WIDTH * run,
         };
@@ -1356,7 +1356,7 @@ pub fn corner_silhouette(right: Face, left: Face, height: u16) -> Image {
 ///
 /// **The shape a stair actually is**, and the one the client's own art draws:
 /// a height field over the tile that varies along *one* axis and is constant
-/// across the other — a profile, extruded. See `docs/lighting.md`'s backlog,
+/// across the other — a profile, extruded. See `docs/archive/render/lighting.md`'s backlog,
 /// "found on a staircase in Britain".
 ///
 /// It is a model of the whole tile rather than of a surface on one of its edges,
@@ -1388,7 +1388,7 @@ pub struct Prism {
 
 // **`SEAM_OVERLAP` lived here**, `0.15` of a `z` unit, and every riser was grown
 // by it at both ends. It was there to close a hairline of the enclosing sprite's
-// own flat shading surviving along the tread/riser edge (`docs/gbuffer.md`'s
+// own flat shading surviving along the tread/riser edge (`docs/archive/render/gbuffer.md`'s
 // Geometry section), on the reading that the rasteriser assigns a coincident
 // edge's pixels to neither triangle.
 //
@@ -1429,7 +1429,7 @@ pub struct Prism {
 // sliver it hid that nobody ever measured against it.
 //
 // What replaced it is the disagreement having nowhere left to happen.
-// `docs/lighting_rebuild.md` phase 6 draws a static **once**, as its own sprite,
+// `docs/render/design_model.md` phase 6 draws a static **once**, as its own sprite,
 // and finds the geometry under each pixel by meeting the view ray with that
 // static's own boxes ([`crate::impostor`]) — so there is no second silhouette to
 // differ from the first, and a pixel of art that overhangs its own volume is
@@ -1545,13 +1545,13 @@ impl Prism {
     /// [`Prism::treads`] and [`Prism::up`].
     ///
     /// Two [`crate::mesh::Face`]s per tread, in climb order — a top and a riser,
-    /// `docs/gbuffer.md` decision 3's "seven honest normals" minus the lid
+    /// `docs/archive/render/gbuffer.md` decision 3's "seven honest normals" minus the lid
     /// static's own top, which is an ordinary flat sprite and needs no mesh at
     /// all. The top is a lid, flat at the tread's own height, normal `[0, 0, 1]`
     /// — honestly, not as a blend's `k == 0` special case: a tread's own top
     /// polygon really is flat, and the *ramp* a flight of them reads as on
     /// screen was always a property of the flight, not of any one tread's own
-    /// geometry. `docs/gbuffer.md` step 5 retired the blend a former
+    /// geometry. `docs/archive/render/gbuffer.md` step 5 retired the blend a former
     /// `Prism::tread_normal` computed to fake that ramp's continuity on a
     /// single fixed surface tag, once this method gave every tread's top and
     /// riser its own honest normal to be measured against instead — see that
@@ -1753,7 +1753,7 @@ const MAX_PRISM: u8 = 20;
 /// # Raising it was measured, and it buys nothing
 ///
 /// 32% of multi-tread fits use all four, which read as a cap the population is
-/// piling up against — `docs/lighting_rebuild.md`'s backlog step 4. Run at 6 and
+/// piling up against — `docs/render/design_model.md`'s backlog step 4. Run at 6 and
 /// at 8 over the whole install (`openshard-client-artscan`'s `prism_axis`
 /// report, 2026-08-11):
 ///
@@ -1813,7 +1813,7 @@ pub fn prism_of(image: &Image) -> Option<Prism> {
 /// Ten-thousandths — an order of magnitude under the smallest *confident*
 /// margin measured on a real flight (`+0.0775`, `0x0751`) and two above the
 /// one picture that showed the coin-flip signature (`+0.0024`, `0x0756`).
-/// `docs/lighting_state.md`'s 🚩 entry "A fit is scored on its outline, and
+/// `docs/render/README.md`'s 🚩 entry "A fit is scored on its outline, and
 /// the surfaces are inside it" is where both numbers came from. Below this
 /// margin, silhouette agreement alone is not evidence of which candidate is
 /// right.
@@ -1878,7 +1878,7 @@ pub fn best_prism(image: &Image) -> (Prism, f32) {
     // One representative per climb axis — its own best-scoring near-tied
     // candidate. A rival tread count on the *same* axis is not the
     // ambiguity `interiors_agree` exists to resolve (nothing in
-    // `docs/lighting_state.md`'s 🚩 entry is about that), and letting it win
+    // `docs/render/README.md`'s 🚩 entry is about that), and letting it win
     // would swap a correct fit for a needlessly finer one on no evidence:
     // more treads can shave a hair off the outline score without the art
     // agreeing with a single one of the extra joints.
@@ -1961,7 +1961,7 @@ impl Span {
 /// [`footprint_of`] reads out of the base edge, in eighths of the tile like
 /// [`Block`].
 ///
-/// Deliberately not a [`Block`], and `docs/footprints.md`'s D1 and D2 are the two
+/// Deliberately not a [`Block`], and `docs/render/design_footprints.md`'s D1 and D2 are the two
 /// halves of why. **D1:** this says nothing vertical, because the art's own
 /// height is a separate measurement with a separate census and a box that
 /// answered both at once would be a box no run could attribute. The top stays
@@ -2016,7 +2016,7 @@ impl Footprint {
 /// posts states nothing, because a gap is simply the absence of a third block.
 ///
 /// `x` and `y` are eighths of the tile, `0..=8` — coarser than a hole's 255ths
-/// (step 21.3 of `docs/lighting.md`) or the 128-sample sweep
+/// (step 21.3 of `docs/archive/render/lighting.md`) or the 128-sample sweep
 /// [`blocks_silhouette`] draws with, because a person places these by eye
 /// against a silhouette rather than measuring a pixel edge, and a block a
 /// person cannot state in eighths is not one a text file should pretend to
@@ -2287,7 +2287,7 @@ fn drawn_at(image: &Image, column: u16, row: u16) -> bool {
 /// searches for the art's nearest brightness edge.
 ///
 /// Generous enough to find a joint the model mis-locates by a whole tread's
-/// worth of `z` (the flight `docs/lighting_state.md`'s 🚩 entry was found on
+/// worth of `z` (the flight `docs/render/README.md`'s 🚩 entry was found on
 /// was off by `10.5 - 2.5 = 8` view px) without wandering far enough to lock
 /// onto a neighbouring step instead.
 const SEARCH: i32 = 16;
@@ -2477,7 +2477,7 @@ pub fn art_xy(image: &Image, column: u16, row_from_bottom: f32) -> (i32, i32) {
 ///
 /// The reason is arithmetic rather than a bad threshold. [`SEARCH`] is 16 rows
 /// because the model's own crest is systematically 8–12 view px from the drawn
-/// joint (`docs/lighting_state.md`'s 🚩 entry, measured over the whole install),
+/// joint (`docs/render/README.md`'s 🚩 entry, measured over the whole install),
 /// while one tread of a five-`z` flight rises `2 * Z_STEP = 8` px. A window
 /// wider than the thing it is trying to resolve answers *yes* to every rival, so
 /// presence carried almost no information and a reversal carried none at all.
@@ -2554,7 +2554,7 @@ mod tests {
     /// neither is the height quantum, which is spelled out here for the same
     /// reason and was pinned for neither.
     ///
-    /// `docs/pixels.md` P4: the copies of a grid constant that no compiler
+    /// `docs/render/design_pixel_spaces.md` P4: the copies of a grid constant that no compiler
     /// relates. The shaders' copies are pinned in `tests/grids.rs`.
     #[test]
     fn a_tile_is_the_width_the_camera_draws_one_at() {
@@ -3212,7 +3212,7 @@ mod tests {
     ///
     /// Asserted rather than described because it is the fixture the fix is
     /// measured against: what has to change is not this verdict but that
-    /// something asks a different question first. See `docs/lighting.md`'s
+    /// something asks a different question first. See `docs/archive/render/lighting.md`'s
     /// backlog, "found on a staircase in Britain".
     #[test]
     fn the_wall_detector_reads_a_solid_as_a_corner_of_a_house() {
@@ -3320,7 +3320,7 @@ mod tests {
         );
     }
 
-    /// `docs/footprints.md`'s whole subject: the box the detector above calls a
+    /// `docs/render/design_footprints.md`'s whole subject: the box the detector above calls a
     /// corner of a house measures as the tile it actually fills.
     #[test]
     fn a_picture_that_fills_its_tile_measures_the_whole_tile() {
@@ -3334,7 +3334,7 @@ mod tests {
     }
 
     /// **The measurement against the drawing, not against itself.**
-    /// `docs/footprints.md` D6: [`footprint_of`] inverts a projection that is
+    /// `docs/render/design_footprints.md` D6: [`footprint_of`] inverts a projection that is
     /// spelled elsewhere, so what keeps it honest is that every answer is read
     /// back off a picture [`blocks_silhouette`] drew from the block it is being
     /// compared to.
@@ -3426,7 +3426,7 @@ mod tests {
     /// same fixture: `0x0736`'s three treads, one to five `z`, climbing west.
     /// `Prism::mesh` and `Builder::add`'s climbable branch read the same two
     /// facts (`treads`, `up`), so the two tests pin the same shape from the
-    /// two sides `docs/gbuffer.md` step 4c joins.
+    /// two sides `docs/archive/render/gbuffer.md` step 4c joins.
     #[test]
     fn a_stairs_mesh_is_two_honest_faces_per_tread() {
         let prism = Prism::new(Face::West, &[1, 3, 5]).expect("three treads");

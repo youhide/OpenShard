@@ -24,7 +24,7 @@
 //! ```
 //!
 //! `OPENSHARD_AT=x,y` moves it; the default is the corner of the house a lamp
-//! was reported leaking round — see `docs/lighting.md`, and the backlog entry
+//! was reported leaking round — see `docs/archive/render/lighting.md`, and the backlog entry
 //! "found at a house corner in Britain".
 
 use std::path::PathBuf;

@@ -3,7 +3,7 @@
 //! The last question the picture cannot answer on its own. `View::Normal` shows
 //! a dashed one-pixel line along a floor's tile seams, each pixel carrying a side
 //! face's normal and naming the *neighbouring* slab
-//! (`docs/lighting_rebuild.md`'s floor entry). [`impostor::meets`] refuses a side
+//! (`docs/render/design_model.md`'s floor entry). [`impostor::meets`] refuses a side
 //! face to a **lid** — `hi.z > lo.z` guards both of them, since a lid's sides are
 //! lines — so a pixel that got one was met against a box that is not a lid. This
 //! prints, for the real graphics on the real tiles, exactly which box each static

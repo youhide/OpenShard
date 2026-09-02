@@ -5,7 +5,7 @@
 //! `(offset, count)` into the references, a reference names a solid, and a solid
 //! is a box saying how much of a ray crossing it survives and between which
 //! heights. [`crate::light`] hands all of it to the blit, which walks the cells
-//! between a fragment and each flame — see `docs/lighting.md`, decisions 3
+//! between a fragment and each flame — see `docs/archive/render/lighting.md`, decisions 3
 //! through 6, decision 30 for why the cell is a list rather than one merged
 //! span, and decision 38 for why what a cell holds is a *name*.
 //!
@@ -43,7 +43,7 @@
 //! about the map, and **what this frame draws**, which is a fact about the tile
 //! the player is standing on. [`Builder`] holds the first and [`Builder::finish`]
 //! hands back the second, applying the frame's [`Cutaway`] as it packs — see
-//! `docs/lighting.md`'s decision 33.
+//! `docs/archive/render/lighting.md`'s decision 33.
 //!
 //! What comes out is unchanged: nothing occludes that was not drawn, because a
 //! shadow cast by a wall the cutaway took away is a dark band with nothing in the
@@ -58,7 +58,7 @@
 //! The grid answers a second question, and it is the cheapest one it can be
 //! asked: *can this tile see straight up*. A tile that cannot does not get the
 //! sky's share of the ambient — which is what makes the inside of a house darker
-//! than the street outside it with nothing in either. `docs/lighting_world.md`,
+//! than the street outside it with nothing in either. `docs/archive/render/lighting_world.md`,
 //! decisions 1, 2, 3 and 14, and the field is [`Occlusion::sky_at`].
 //!
 //! Three things about it are not the shadow walk's answers, and each is a
@@ -88,8 +88,8 @@
 //! room. It gets a **texture over the grid's rectangle** rather than a
 //! wider solid — see [`Occlusion::field_bytes`], whose four channels are the
 //! places the answers that are not about *stopping a ray* go: the sky today, an
-//! aperture and a body's opacity when `docs/lighting.md`'s step 16 and
-//! `docs/lighting_world.md`'s step 8 land. One decision for all three, which is
+//! aperture and a body's opacity when `docs/archive/render/lighting.md`'s step 16 and
+//! `docs/archive/render/lighting_world.md`'s step 8 land. One decision for all three, which is
 //! what the plans asked for, and the split is along the line that matters: a
 //! solid is what a ray walks through, and this is what a *tile* is, read once
 //! per fragment and never in a loop.
@@ -143,7 +143,7 @@ pub fn stops_light(tile: &StaticTile) -> bool {
 /// The four sides of a tile, as bits of a cell's fourth channel — and the
 /// difference between an occluder that is a *tile* and one that is a *panel*.
 ///
-/// `docs/lighting.md`'s decision 3 made an occluder a whole tile, because
+/// `docs/archive/render/lighting.md`'s decision 3 made an occluder a whole tile, because
 /// `tiledata.mul` does not say which edge a wall stands on and guessing it from
 /// the art was "a subsystem". Step 15 built that subsystem, so this is decision 3
 /// revised: where [`crate::facing`] names an edge, the occluder is the panel on
@@ -236,7 +236,7 @@ impl std::ops::BitOr for Edges {
 /// rather than duplicated beside it.
 pub const PANEL_THICKNESS: f64 = 0.2;
 /// How thick a lid is, in `z` units: real geometry, hanging **below** the
-/// surface it is — `docs/parity.md`'s P4 step 1.
+/// surface it is — `docs/render/design_frame_assembly.md`'s P4 step 1.
 ///
 /// A lid used to be a plane, `min.z == max.z`, and every defect involving a
 /// floor was a consequence of that degeneracy rather than of any one rule: the
@@ -291,7 +291,7 @@ pub const PRESENT: u8 = 0x80;
 /// See [`Occlusion::aperture_bytes`] and [`Aperture`].
 pub const HOLED: u8 = 0x40;
 
-// **`Z_FLOOR`, `Z_CEILING` and `z_byte` lived here**, and `docs/occluders.md`'s
+// **`Z_FLOOR`, `Z_CEILING` and `z_byte` lived here**, and `docs/render/design_occluders.md`'s
 // S6 was the last of them. They were the ends a `z` could be *named* between on
 // a wire that carried heights as bytes: `-128` and `127`, the map's own `i8`,
 // with `z_byte` clamping into them and offsetting by 128.
@@ -376,7 +376,7 @@ pub fn edges_of(facing: Option<crate::facing::Facing>) -> Edges {
 /// **shadow**. `crate::statics::push_volumes` is the one caller: a fragment's
 /// facing is a statement about the art, and taking it off the occlusion mask
 /// instead put every staircase in the world in the class of pictures that name
-/// no side. `docs/lighting_rebuild.md`'s backlog has the frame and the numbers.
+/// no side. `docs/render/design_model.md`'s backlog has the frame and the numbers.
 ///
 /// **A property of the graphic and not of the box**, which is why it takes a
 /// `Shape` rather than riding beside each `Solid`. The one reader asks whether
@@ -399,7 +399,7 @@ pub fn named_edges(tile: &StaticTile, shape: &Shape) -> Edges {
 /// beside it — does this thing stop light — and answers "no" for everything the
 /// tiledata does not mark `NO_SHOOT` or `WINDOW`, which is most of what a frame
 /// draws: a floorboard, a rug, a fence rail, half the walls of a Britain street.
-/// `docs/lighting_rebuild.md` phase 6c is where those two questions came apart,
+/// `docs/render/design_model.md` phase 6c is where those two questions came apart,
 /// because the impostor needs the first and not the second: **a pane of glass has
 /// a shape whether or not it casts a shadow**, and a fragment met against nothing
 /// is a fragment with no position and no normal.
@@ -479,7 +479,7 @@ pub fn boxes_of(
         // because at the time a fragment's normal was derived from a solid's
         // *kind* and there was nowhere else for a normal to come from.
         //
-        // Both halves of that reason are gone. `docs/lighting_rebuild.md` phase 2
+        // Both halves of that reason are gone. `docs/render/design_model.md` phase 2
         // gave the G-buffer a normal plane, written by the pass that knows the
         // normal; phase 6 takes the mesh pass off every real static. What is left
         // needs the opposite — a *view* ray has to land on something for every
@@ -542,7 +542,7 @@ pub fn boxes_of(
     // roof — Britain's `1490, 1636` is `0x051C` "stone pavers", `FLOOR|NO_SHOOT`,
     // already a lid — and a rule that moves every roof in the world is not
     // landed on an argument. Whoever picks it up wants a frame with a `ROOF`
-    // graphic in it first. See `docs/lighting_rebuild.md` phase 6i.
+    // graphic in it first. See `docs/render/design_model.md` phase 6i.
     //
     // One expression with two readers now, which is what gave it a name:
     // [`named_edges`] is what the *art* said, and on this path it is also what
@@ -556,7 +556,7 @@ pub fn boxes_of(
         // reaches, and so the one place D4 lets a measured footprint narrow the
         // whole-tile fallback: a face or a corner already claimed the base
         // before `edges` could come out `ANY`, and a footprint is only ever
-        // `Some` beside `facing: None` in the first place. `docs/footprints.md`
+        // `Some` beside `facing: None` in the first place. `docs/render/design_footprints.md`
         // S3.
         Edges::ANY => {
             each(
@@ -611,7 +611,7 @@ pub struct Shape {
     /// stands on, and a prism says what shape fills the tile. A stair has both
     /// answers — the wall detector reads its base as a corner of two walls,
     /// because a solid's base is pixel for pixel what two walls meeting leave —
-    /// and the prism is the true one. See `docs/lighting.md`'s backlog, "found on
+    /// and the prism is the true one. See `docs/archive/render/lighting.md`'s backlog, "found on
     /// a staircase in Britain".
     ///
     /// Which of the two is believed is not decided here: this is what the picture
@@ -620,7 +620,7 @@ pub struct Shape {
     pub prism:     Option<crate::facing::Prism>,
     /// A shape [`prism`](Self::prism) cannot describe, authored rather than
     /// derived — an arch's posts and lintel, a gap nothing here states because
-    /// it is simply the absence of a block. `docs/lighting.md`'s decision 41 is
+    /// it is simply the absence of a block. `docs/archive/render/lighting.md`'s decision 41 is
     /// the argument for a second, independent kind of solid rather than a wider
     /// `Prism`: a climb profile is monotonic along one axis by construction, and
     /// an arch is not.
@@ -634,7 +634,7 @@ pub struct Shape {
     /// The horizontal box the art's own base edge states, where the picture is
     /// one and nothing else already answered for it.
     ///
-    /// `docs/footprints.md`'s D1 and D2. Only ever `Some` beside `facing: None`:
+    /// `docs/render/design_footprints.md`'s D1 and D2. Only ever `Some` beside `facing: None`:
     /// a face or a corner already says which edge the picture stands on, and a
     /// second, independent box on the same row would be two answers about the
     /// same base with nothing saying which one [`boxes_of`] should read — the
@@ -703,7 +703,7 @@ impl Shape {
     /// client come to disagree about a picture — and the disagreement would look
     /// like a window that exists only where somebody ran a tool.
     ///
-    /// It is the expensive one. `docs/lighting.md`'s decision 31 is that it
+    /// It is the expensive one. `docs/archive/render/lighting.md`'s decision 31 is that it
     /// belongs off the clock; the atlas calls it only where there is no table to
     /// read instead.
     pub fn of(image: &openshard_uofiles::image::Image) -> Self {
@@ -728,7 +728,7 @@ impl Shape {
             // for.** The mirror of the prism's own gate above: a face or a
             // corner already answers which edge the picture stands on, so a
             // second box measured off the same base would be a second, unrelated
-            // claim about it. `docs/footprints.md`'s S1 census is this same gate,
+            // claim about it. `docs/render/design_footprints.md`'s S1 census is this same gate,
             // one level up — it counts the class this reaches.
             footprint: match facing {
                 None => crate::facing::footprint_of(image),
@@ -813,7 +813,7 @@ pub const RUN_STEPS: f32 = 255.0;
 
 /// A rectangular hole in a surface, in **the world's** coordinates.
 ///
-/// `docs/lighting.md`'s decision 30.2 and step 21.3: a window is a hole *in* a
+/// `docs/archive/render/lighting.md`'s decision 30.2 and step 21.3: a window is a hole *in* a
 /// wall, so a real one is a rectangle in the plane of a panel and not a dimmer
 /// tile. What a ray crossing the panel inside this rectangle meets is nothing.
 ///
@@ -826,7 +826,7 @@ pub const RUN_STEPS: f32 = 255.0;
 /// - `bottom` and `top` are `z`, in the map's own units, exactly as
 ///   [`Surface`]'s are.
 ///
-/// **They were a fraction of the tile until `docs/occluders.md`'s S6**, in
+/// **They were a fraction of the tile until `docs/render/design_occluders.md`'s S6**, in
 /// [`RUN_STEPS`]ths of one, which made this the last rule in the pass still
 /// stated in a tile — `light::run_v` recovered the fraction with
 /// `along - along.floor()` and so answered about whichever tile the *crossing*
@@ -893,7 +893,7 @@ impl Aperture {
 /// One solid the world holds: the box it occupies, and how much of a ray
 /// crossing it survives.
 ///
-/// The thing a cell *references* — `docs/lighting.md`'s decision 38, step 23.1 —
+/// The thing a cell *references* — `docs/archive/render/lighting.md`'s decision 38, step 23.1 —
 /// and **the walk's two rules are still its two kinds**: [`Solid::edges`] naming
 /// one side is a *panel*, a ray is stopped where it crosses it; zero is a *lid*
 /// and all four a *body*, and a ray is stopped by how far it ran inside the span.
@@ -904,7 +904,7 @@ impl Aperture {
 /// the only geometry: what a view draws and what the walk is tested against come
 /// from one record, which is the whole of what step 23.1 buys. **Every kind is a
 /// real slab now** — a panel is [`PANEL_THICKNESS`] deep into the tile it stands
-/// on, and a lid hangs [`LID_THICKNESS`] below the surface it is (`docs/parity.md`'s
+/// on, and a lid hangs [`LID_THICKNESS`] below the surface it is (`docs/render/design_frame_assembly.md`'s
 /// P4 step 1). Both numbers are the geometry the walk itself reads rather than a
 /// nominal thickness sitting in the field beside it; the thickness a *drawing*
 /// wants is still the view's, and [`crate::solid::drawn`] is where that lives.
@@ -941,7 +941,7 @@ pub struct Solid {
     /// sides — a corner is two panels, which is what the list is for.
     pub edges:    Edges,
     /// The hole in it, where the art named one — see [`Aperture`], and step 21.3
-    /// of `docs/lighting.md`. Indexed by the solid's own place in
+    /// of `docs/archive/render/lighting.md`. Indexed by the solid's own place in
     /// [`Occlusion::solid`], which is what the aperture plane is folded to.
     ///
     /// [`Option`] in the sense the style asks for: a surface with no hole is a
@@ -962,7 +962,7 @@ pub struct Solid {
     /// The thing this is a solid **of** — see [`Owner`].
     ///
     /// Every solid one [`Builder::add`] pushes carries the same one, which is
-    /// what `docs/lighting_height.md` phase 3 replaces `on_surface`'s guess with:
+    /// what `docs/archive/render/lighting_height.md` phase 3 replaces `on_surface`'s guess with:
     /// "is this solid the one the fragment is a point of" stops being a question
     /// about height and becomes a question a fragment and a solid each answer
     /// from the same field.
@@ -976,7 +976,7 @@ pub struct Solid {
     /// the wire already names a solid outright ([`SolidId`], the first three
     /// bytes of a reference), so this is only ever a *join key* on this side —
     /// what lets the pass that draws a flight's third tread find the grid's own
-    /// third tread. `docs/lighting_rebuild.md` phase 4.
+    /// third tread. `docs/render/design_model.md` phase 4.
     pub part:     Part,
 }
 
@@ -995,7 +995,7 @@ impl Solid {
     ///
     /// plus [`Occlusion::at`]'s merged view, which is a picture of a tile rather
     /// than a step of a walk. **The walk reads [`Solid::low`]/[`Solid::high`]**,
-    /// which is `docs/lighting_height.md` phase 2: a shadow decided from a
+    /// which is `docs/archive/render/lighting_height.md` phase 2: a shadow decided from a
     /// rounded occluder is a shadow half a unit out of place, and on a face it
     /// is the difference between a fragment being inside its own solid and
     /// under it.
@@ -1054,7 +1054,7 @@ impl Solid {
     /// What it hides, a view has to count and say — a picture that silently
     /// drops most of a grid reads as a grid with nothing in it, which is the one
     /// failure an instrument may not have. See the backlog entry in
-    /// `docs/lighting.md` about a floor that is cut and a hole in a floor
+    /// `docs/archive/render/lighting.md` about a floor that is cut and a hole in a floor
     /// looking identical.
     pub fn stands(&self, floor: i8) -> bool {
         self.space.max.z > f64::from(floor)
@@ -1075,7 +1075,7 @@ impl Solid {
     /// lie on — see that constant for why the record carries a number rather
     /// than staying flat.
     ///
-    /// `pub(crate)` since `docs/lighting_raymarch.md`'s point 4:
+    /// `pub(crate)` since `docs/archive/render/lighting_raymarch.md`'s point 4:
     /// `light::walk_the_wire` reconstructs a solid's box from exactly
     /// `(tile, edges, bottom, top)` rather than reading `Solid::space`
     /// directly, because that is all `blit.wgsl`'s upload format will ever
@@ -1085,7 +1085,7 @@ impl Solid {
     /// is bit-for-bit what built the real `space` in the first place, so the
     /// reconstruction is only lossy for `Builder::add_raw`'s sub-tile boxes,
     /// which is the one gap this doc already has a name for.
-    /// `pub` since `docs/lighting_rebuild.md` phase 6c for a second reader with
+    /// `pub` since `docs/render/design_model.md` phase 6c for a second reader with
     /// the same argument: a test fixture that wants the box a wall *is* has to
     /// state it the way the grid does, or it asserts about a slab of its own
     /// invention — and the panel that is a fifth of a tile deep on the inside of
@@ -1110,7 +1110,7 @@ impl Solid {
         match edges {
             // A lid — a floor, a roof, a plank. The whole tile across, hanging
             // [`LID_THICKNESS`] below the height it lies at: **a floor is a
-            // body**, `docs/parity.md`'s P4 step 1. See that constant for what
+            // body**, `docs/render/design_frame_assembly.md`'s P4 step 1. See that constant for what
             // the degeneracy cost, why the depth goes downwards, and why its
             // size is argued from both ends rather than chosen.
             //
@@ -1145,7 +1145,7 @@ impl Solid {
 
     /// The box a [`facing::Footprint`](crate::facing::Footprint) states: a body,
     /// narrower than [`box_of`](Self::box_of)'s `Edges::ANY` whole tile on
-    /// either axis or both — `docs/footprints.md`'s S3. `bottom` and `top`
+    /// either axis or both — `docs/render/design_footprints.md`'s S3. `bottom` and `top`
     /// still come from `tiledata`, D1's other half: this is the box's floor
     /// plan, not its height.
     fn footprint_box_of(
@@ -1177,7 +1177,7 @@ impl Solid {
     /// each put through `f32`.
     ///
     /// **The whole of what the upload loses**, and it is a rounding rather than
-    /// a quantisation — `docs/occluders.md`'s D10. The record is authored and
+    /// a quantisation — `docs/render/design_occluders.md`'s D10. The record is authored and
     /// merged on the CPU, where `f64` is free; the wire is what a shader can
     /// read. There is no tile in it and no fraction of one: a primitive states
     /// its own six numbers, so a box wider than a tile, one standing between
@@ -1188,7 +1188,7 @@ impl Solid {
     /// that **could not be wider than one tile at all**, with its corners
     /// quantised to a two-hundred-and-fifty-fifth of one, and a `far` rule to
     /// decide which of two tiles a plane at a whole coordinate was measured
-    /// from. `docs/occluders.md`'s § *Why it is ragged*, root 1: none of that
+    /// from. `docs/render/design_occluders.md`'s § *Why it is ragged*, root 1: none of that
     /// was geometry, all of it was the storage.
     ///
     /// [`Occlusion::primitive_bytes`] writes exactly these numbers, and
@@ -1219,7 +1219,7 @@ impl Solid {
     /// One **tread**: the strip it covers along the climb, standing from the
     /// static's own base (`low_z`) to the tread's height (`high_z`).
     ///
-    /// A body, and a real volume — the shape step 23.5 of `docs/lighting.md`
+    /// A body, and a real volume — the shape step 23.5 of `docs/archive/render/lighting.md`
     /// pushed, which `gbuffer.md` step 4b split into a lid and a riser plane so
     /// that a mesh render pass would have one polygon per visible surface. See
     /// [`Builder::add`]'s climbable branch for why that split is retired: the
@@ -1350,7 +1350,7 @@ pub struct Cell {
 /// A tile with nothing at all over it: the whole of the sky.
 pub const SKY_OPEN: u8 = 255;
 
-/// Where one tile's references are: the index `docs/lighting.md`'s decision 30.3
+/// Where one tile's references are: the index `docs/archive/render/lighting.md`'s decision 30.3
 /// keeps the tile grid as, pointing at [`Occlusion::ids`] since step 23.1.
 ///
 /// A count of zero is open ground, and the offset is then meaningless — a caller
@@ -1367,7 +1367,7 @@ struct Span {
 /// **The thing that was added**, as the world names it — one
 /// [`Builder::add`], one of these, however many [`Solid`]s that call pushes.
 ///
-/// `docs/lighting_height.md` phase 3's first decision. A corner is two panels, a
+/// `docs/archive/render/lighting_height.md` phase 3's first decision. A corner is two panels, a
 /// flight of steps is a lid and a riser per tread, and all of them are *one*
 /// static standing at one place: a fragment drawn from that static's picture
 /// belongs to every one of its solids equally, so identity has to be the thing
@@ -1418,7 +1418,7 @@ impl Owner {
 /// [`Builder::add`] pushed, counting from zero within that one call.
 ///
 /// [`Owner`] names the thing the world added and this names the piece of it, and
-/// the pair is what `docs/lighting_rebuild.md` phase 4 needs. A flight of steps
+/// the pair is what `docs/render/design_model.md` phase 4 needs. A flight of steps
 /// is one `add` and a lid and a riser per tread; a corner is one `add` and a
 /// panel per named side. Identity alone — the owner — cannot tell a flight's
 /// second tread from its third, and the whole of phase 4 is that it must, because
@@ -1458,7 +1458,7 @@ impl Part {
 /// Which occluder **of this cell** an [`Owner`] is, in one byte: what the wire
 /// carries and what a fragment is compared against.
 ///
-/// `docs/lighting_height.md` phase 3's third decision. The comparison is only
+/// `docs/archive/render/lighting_height.md` phase 3's third decision. The comparison is only
 /// ever made between a fragment and a solid on the fragment's *own* cell — every
 /// arm of `light::exemption` that asks it is gated on `own_cell` — so this has to
 /// be unique in a tile and not in a frame, and a tile holds at most
@@ -1523,7 +1523,7 @@ impl SolidId {
     /// What an instance row carries for a fragment that is a point of **no**
     /// solid — the ground, a mobile, a gump, a pass with no grid behind it.
     ///
-    /// `docs/lighting_rebuild.md` phase 4: an id is what a fragment carries and
+    /// `docs/render/design_model.md` phase 4: an id is what a fragment carries and
     /// what the shadow walk compares it against, and the absence of one has to be
     /// a word the wire can hold. `Option` is the shape on this side (see
     /// `light::Spot::solid`); this is its spelling on the other.
@@ -1585,7 +1585,7 @@ pub const PRIMITIVE_BYTES: usize = 32;
 /// stride, and `blit.wesl`'s `Aperture` struct size.
 ///
 /// Four `f32` and no padding at all, a `vec4<f32>`'s own size and alignment. It
-/// was **four bytes** until `docs/occluders.md`'s S6, a texel of an `Rgba8Uint`
+/// was **four bytes** until `docs/render/design_occluders.md`'s S6, a texel of an `Rgba8Uint`
 /// plane: two run coordinates quantised to a two-hundred-and-fifty-fifth of a
 /// tile and two `z` ends clamped into a signed byte. Four times the wire for the
 /// last quantisation in the pass, on a list with one entry per primitive and
@@ -1645,7 +1645,7 @@ pub struct Occlusion {
     /// Every solid in the frame, in the order [`Occlusion::primitive_bytes`]
     /// uploads and [`SolidId`] names.
     solids:  Vec<Solid>,
-    /// The broad phase over those solids — `docs/occluders.md`'s D3, and what
+    /// The broad phase over those solids — `docs/render/design_occluders.md`'s D3, and what
     /// replaces the grid above as the thing a ray asks "what might I meet".
     ///
     /// Beside the index rather than instead of it, and that is not a transition
@@ -1756,7 +1756,7 @@ impl Occlusion {
     ///
     /// The pair and not the solid alone, because a walk's whole self-shadow rule
     /// is a comparison of the [`SolidId`] against the one the fragment carries —
-    /// `docs/lighting_rebuild.md` phase 4. It was the [`OwnerId`] beside the
+    /// `docs/render/design_model.md` phase 4. It was the [`OwnerId`] beside the
     /// solid until then, which is one level too coarse: a flight's six solids
     /// wear one owner, and a tread has to be able to shadow the tread below it.
     pub fn cell(&self, x: i32, y: i32) -> impl Iterator<Item = (SolidId, &Solid)> + '_ {
@@ -1781,7 +1781,7 @@ impl Occlusion {
     /// indexing can get wrong. A point on a box's own `max` face floors into the
     /// *next* cell, which does not list that box, so a sampler standing inside a
     /// solid can be told the ground is open. That is measured, not hypothetical:
-    /// see `docs/occluders.md`'s § *The oracle*, where it cost a red suite and a
+    /// see `docs/render/design_occluders.md`'s § *The oracle*, where it cost a red suite and a
     /// session of blaming both walks for it.
     ///
     /// A frame holds hundreds of these, and every caller of this is a test that
@@ -1792,7 +1792,7 @@ impl Occlusion {
     }
 
     /// The broad phase over those solids — see [`Occlusion::bvh`] and
-    /// `docs/occluders.md`'s D3.
+    /// `docs/render/design_occluders.md`'s D3.
     ///
     /// The **structure** and not an answer: what a ray meets is the walk's
     /// business, and the walk is what traverses this. D4 is that a traversal
@@ -1806,7 +1806,7 @@ impl Occlusion {
     /// `graphic` is — [`OwnerId::NONE`] where this frame's grid has no such
     /// static on that tile.
     ///
-    /// **The join `docs/lighting_height.md` phase 3 pays for**, and the one real
+    /// **The join `docs/archive/render/lighting_height.md` phase 3 pays for**, and the one real
     /// cost of the design: the pass that *draws* a static has to learn the number
     /// the *grid* gave it, so a frame's occlusion has to be built before its
     /// statics are collected. A scan of the cell and not a map — a tile holds two
@@ -1831,7 +1831,7 @@ impl Occlusion {
     /// `(x, y)` is — `None` where this frame's grid has no such piece.
     ///
     /// [`Occlusion::owner_at`]'s join carried a step further, and
-    /// `docs/lighting_rebuild.md` phase 4's whole reason for [`Part`]: a pass
+    /// `docs/render/design_model.md` phase 4's whole reason for [`Part`]: a pass
     /// that draws a flight's third tread has to be able to name the *solid* the
     /// grid stood up for that tread, because identity per static excuses a tread
     /// from the risers that genuinely shadow it. The owner alone cannot say which
@@ -1885,7 +1885,7 @@ impl Occlusion {
     /// each — [`Occlusion::id_of`]'s scan asked once for the whole static
     /// instead of once per piece.
     ///
-    /// The impostor's own join (`docs/lighting_rebuild.md` phase 6): a sprite
+    /// The impostor's own join (`docs/render/design_model.md` phase 6): a sprite
     /// fragment is met against the boxes its own static stands as, and it needs
     /// the [`SolidId`] beside every one of them so that the shadow walk's
     /// identity test has a name to compare. Asking [`Occlusion::id_of`] per
@@ -2004,7 +2004,7 @@ impl Occlusion {
     /// **The day something spanned a cell has arrived and it is the merge**, so
     /// this is no longer [`Occlusion::solid_count`] under another name: a run of
     /// wall on four tiles is four references to one primitive. The difference
-    /// between the two is exactly how many pieces `docs/occluders.md`'s S3b took
+    /// between the two is exactly how many pieces `docs/render/design_occluders.md`'s S3b took
     /// out of the frame, which is what `lighting.rs`'s
     /// `the_merge_folds_the_scenes_this_crate_draws` counts and what
     /// `tests/cost.rs` prints.
@@ -2092,7 +2092,7 @@ impl Occlusion {
     /// channels exactly as an offset is in [`Occlusion::bytes`], and for the same
     /// reason.
     ///
-    /// **The fourth channel is [`OwnerId`]**, `docs/lighting_height.md` phase 3.
+    /// **The fourth channel is [`OwnerId`]**, `docs/archive/render/lighting_height.md` phase 3.
     /// It stayed zero for as long as nothing read it — that comment's own words
     /// were that a channel filled with something plausible would be a field the
     /// walk has to be taught to ignore — and a reader exists now: which occluder
@@ -2130,7 +2130,7 @@ impl Occlusion {
     /// `vec3` would otherwise waste and the struct is thirty-two bytes with
     /// nothing dead in it.
     ///
-    /// **A buffer and not three textures**, `docs/occluders.md`'s D8. What stood
+    /// **A buffer and not three textures**, `docs/render/design_occluders.md`'s D8. What stood
     /// here was `solid_bytes` (`(0, 0, opacity, PRESENT | HOLED | edges)`),
     /// `footprint_bytes` (a fraction of a tile, quantised to a byte an axis) and
     /// `solid_z_bytes` (sixteen bits an end, offset from [`Z_FLOOR`]) — three
@@ -2174,7 +2174,7 @@ impl Occlusion {
     ///
     /// `(near, far, bottom, top)` — four `f32`, little-endian, which is
     /// `blit.wesl`'s `Aperture` and its WGSL layout exactly. **Nothing here is
-    /// quantised and nothing is clamped**, which is `docs/occluders.md`'s S6 and
+    /// quantised and nothing is clamped**, which is `docs/render/design_occluders.md`'s S6 and
     /// the end of a list this pass has been shortening since D1: the run
     /// coordinates are the world's, and the two `z` ends are the whole units the
     /// art measured rather than a byte offset by 128. What that byte cost was a
@@ -2293,7 +2293,7 @@ impl Occlusion {
     }
 }
 
-// **`Occlusion::list_rows` lived here**, and `docs/occluders.md`'s S6 took it
+// **`Occlusion::list_rows` lived here**, and `docs/render/design_occluders.md`'s S6 took it
 // with the last plane it was for. It answered how many rows of [`LIST_ROW`] the
 // planes indexed by a [`SolidId`] were folded into; the primitives became a
 // buffer at S1 and the apertures at S6, and nothing is indexed by a `SolidId`
@@ -2425,7 +2425,7 @@ impl Builder {
         let bottom = i32::from(z);
         // One `add` is one owner, and every solid below carries it — the two
         // panels of a corner, a flight's treads, a body. See [`Owner`], and
-        // `docs/lighting_height.md` phase 3.
+        // `docs/archive/render/lighting_height.md` phase 3.
         let owner = Owner::new(z, graphic);
         // **What shape this static is, is not this function's question** — see
         // [`boxes_of`], which answers it for the impostor as well. What is left
@@ -2509,7 +2509,7 @@ impl Builder {
     /// Everything else in this `impl` builds a [`Solid`]'s `space` from
     /// `tiledata` — a whole tile for a body the art gave no narrower footprint,
     /// the measured footprint's own box where it did
-    /// (`docs/footprints.md`'s S3), or a thin strip for a panel. A hand-built
+    /// (`docs/render/design_footprints.md`'s S3), or a thin strip for a panel. A hand-built
     /// scene has no such art to read
     /// (`examples/two_cubes.rs`'s own doc: no client files at all) and
     /// sometimes needs a box the tile grid was never asked to produce —
@@ -2520,7 +2520,7 @@ impl Builder {
     /// finds it exactly the way it finds a wall.
     ///
     /// `owner` is stated by the caller and not derived here, which is
-    /// `docs/lighting_height.md` phase 3's own rule: there is no `tiledata`
+    /// `docs/archive/render/lighting_height.md` phase 3's own rule: there is no `tiledata`
     /// behind such a box to read a `(z, graphic)` off, and a key the builder
     /// invented would be a second identity beside the one every real static
     /// already has. A scene that stands two boxes on one tile has to tell them
@@ -2632,7 +2632,7 @@ impl Builder {
     ///
     /// # The reference level stopped being the identity here
     ///
-    /// The ids this writes ran `0, 1, 2, …` until `docs/occluders.md`'s S3b,
+    /// The ids this writes ran `0, 1, 2, …` until `docs/render/design_occluders.md`'s S3b,
     /// because nothing the builder held was referenced twice: a solid was one
     /// tile's. The **merge** is the first thing to share one — a run of wall on
     /// four tiles is four references to one primitive — and it cost exactly the
@@ -2702,7 +2702,7 @@ impl Builder {
                 count: (solids.len() as u32 - offset) as u8,
             });
         }
-        // **The merge, `docs/occluders.md`'s S3b**, and the only thing between a
+        // **The merge, `docs/render/design_occluders.md`'s S3b**, and the only thing between a
         // cell's references and the primitives they name. Every reference keeps
         // its place — a cell's run is the same length and in the same order — and
         // what changes is that two cells of one run of wall now point at one
@@ -2858,7 +2858,7 @@ fn place(
 /// The hole, the prism and the footprint come off the same lookup and for the
 /// same reasons: a graphic the atlas does not hold has none of them, which is a
 /// solid wall, which is what all but fifty-eight of the install's pictures are.
-/// `pub` since `docs/lighting_rebuild.md` phase 6c: the impostor asks the same
+/// `pub` since `docs/render/design_model.md` phase 6c: the impostor asks the same
 /// question of the same atlas, because a fragment's own shape is what
 /// [`boxes_of`] needs and this is where the art's answer to it lives.
 pub fn shape_of(atlas: Option<crate::atlas::StaticArt<'_>>, graphic: Graphic) -> Shape {
@@ -3038,7 +3038,7 @@ mod tests {
 
     /// `boxes_of`'s D4 gate, through `Builder::add`: a footprint narrows the
     /// whole-tile fallback exactly where `edges_of(None)` would otherwise reach
-    /// `Edges::ANY`, and nowhere it would not — `docs/footprints.md`'s S3.
+    /// `Edges::ANY`, and nowhere it would not — `docs/render/design_footprints.md`'s S3.
     ///
     /// Two tiles apart rather than one, so the second is the mutation the first
     /// alone cannot catch: a wiring that always fell back to the whole tile
@@ -3166,7 +3166,7 @@ mod tests {
     /// was added** however many solids that thing turned into — and the number
     /// is what a drawn static can look itself up by.
     ///
-    /// `docs/lighting_height.md` phase 3's first and third decisions together.
+    /// `docs/archive/render/lighting_height.md` phase 3's first and third decisions together.
     /// The corner is the case that says "per added thing" rather than "per
     /// solid": it is one static, two panels, and a fragment of its picture is a
     /// fragment of both — so a numbering that counted solids would make the wall
@@ -3254,7 +3254,7 @@ mod tests {
     /// A flight of steps is **one** occluder of its tile, however many treads
     /// the art was fitted into.
     ///
-    /// The case `docs/lighting_height.md` phase 3's own "one static, several
+    /// The case `docs/archive/render/lighting_height.md` phase 3's own "one static, several
     /// solids" is about, and the one where a per-solid numbering would be
     /// visibly wrong rather than merely arguable: a tread's own top would be a
     /// different occluder from the riser under it, so a fragment of the flight
@@ -3611,7 +3611,7 @@ mod tests {
     /// the bytes — a surface with no hole writes four zeros, which is a hole of no
     /// width at `z = 0`, and only the bit distinguishes that from a real one.
     ///
-    /// **The four numbers are `f32` and absolute** since `docs/occluders.md`'s
+    /// **The four numbers are `f32` and absolute** since `docs/render/design_occluders.md`'s
     /// S6, so the placement is checked here as coordinates rather than as a byte
     /// and an offset: the run pair is the tile the panel stands on plus the art's
     /// own fraction, and the two `z` ends are the static's base plus the art's
@@ -3707,7 +3707,7 @@ mod tests {
     }
 
     /// **A window on the top storey of the world arrives with its top open** —
-    /// `docs/occluders.md`'s S6, and the half of that step no CPU walk can see.
+    /// `docs/render/design_occluders.md`'s S6, and the half of that step no CPU walk can see.
     ///
     /// Both walks read the record, so a quantisation that lived in the *upload*
     /// was invisible to them and showed on the shader alone: `z_byte` clamped a
@@ -3884,7 +3884,7 @@ mod tests {
     /// which is also `Solid::footprint`'s `far` case — exercised here rather
     /// than assumed, since a riser past the first tread sits at a fraction of
     /// the tile, not its true edge (see `footprint`'s own doc). See
-    /// `Builder::add`, and `docs/lighting.md`'s backlog.
+    /// `Builder::add`, and `docs/archive/render/lighting.md`'s backlog.
     #[test]
     fn a_stair_is_one_body_per_tread_and_each_ones_height_comes_off_the_art() {
         use crate::facing::{
@@ -3980,7 +3980,7 @@ mod tests {
     /// **A flight's `n`th drawn face is its `n`th solid**, and this is the gate
     /// under [`Part`] rather than the two loops being trusted to agree.
     ///
-    /// `docs/lighting_rebuild.md` phase 4 rests on it: a pass drawing a tread has
+    /// `docs/render/design_model.md` phase 4 rests on it: a pass drawing a tread has
     /// to name the solid the grid stood up for that tread, and the number it uses
     /// is [`Builder::add`]'s own push order. [`crate::facing::Prism::mesh`] walks
     /// the same treads from the same two facts ([`Prism::treads`], [`Prism::up`])
@@ -4054,7 +4054,7 @@ mod tests {
     /// boundary was `index / count`, retired with the lid-and-riser split. The
     /// rule it found is not: `footprint`'s gate still decides where a degenerate
     /// box lives, [`Builder::add_raw`] takes any box a hand-built scene states,
-    /// and `docs/lighting.md`'s authored `Blocks` will state more. So the box is
+    /// and `docs/archive/render/lighting.md`'s authored `Blocks` will state more. So the box is
     /// written out here instead of built by a constructor, which is what the
     /// assertion was always about.
     #[test]
@@ -4301,7 +4301,7 @@ mod tests {
             // And the depth is the record's own, on the axis the panel stands
             // across: `PANEL_THICKNESS` inward from the plane its face pixels lie
             // on, and never the whole tile. This used to be said as "`drawn`
-            // leaves a panel where it stands" — `docs/parity.md`'s P4 step 1
+            // leaves a panel where it stands" — `docs/render/design_frame_assembly.md`'s P4 step 1
             // retired that function, so it is said about the box itself.
             let (thin_from, thin_to) = match along {
                 0 => (solid.min.y, solid.max.y),
@@ -4318,7 +4318,7 @@ mod tests {
     /// is, and a body is exactly its tile.
     ///
     /// The companion to the test above, and the same argument said about the
-    /// kind `docs/parity.md`'s P4 step 1 moved. The surface a lid *is* is its
+    /// kind `docs/render/design_frame_assembly.md`'s P4 step 1 moved. The surface a lid *is* is its
     /// top — that is the plane the art drew and the plane a walk is stopped at —
     /// so the thickness goes downwards, and a slab hanging *above* it would put
     /// a floor at the height of the storey over it. A body is travelled through
@@ -4519,7 +4519,7 @@ mod tests {
         // order, with `PRESENT` and the edge mask rather than a bare yes:
         // neither of these was given a face, so both are the whole tile. One
         // struct a primitive, unpadded — nothing folds into rows here since
-        // `docs/occluders.md`'s D8.
+        // `docs/render/design_occluders.md`'s D8.
         let whole = u32::from(PRESENT | Edges::ANY.raw());
         let surfaces = occlusion.primitive_bytes();
         assert_eq!(
@@ -4564,7 +4564,7 @@ mod tests {
     }
 
     /// The wire carries the span the record actually holds, whole.
-    /// `docs/lighting_height.md` phase 2, and `docs/occluders.md`'s D1 took the
+    /// `docs/archive/render/lighting_height.md` phase 2, and `docs/render/design_occluders.md`'s D1 took the
     /// last clamp out of it.
     ///
     /// The spans are named rather than sampled, because these are the ones that
@@ -4631,7 +4631,7 @@ mod tests {
     }
 
     /// **The tree arrives on the wire as the tree the CPU walked**, node for
-    /// node — `docs/occluders.md`'s S5, and the one statement `blit.wesl`'s
+    /// node — `docs/render/design_occluders.md`'s S5, and the one statement `blit.wesl`'s
     /// traversal rests on that no compiler checks.
     ///
     /// Read back from the layout rather than through anything the writer calls,
@@ -4864,7 +4864,7 @@ mod tests {
 
     /// The sky is read off the map as it is, not as it is drawn.
     ///
-    /// `docs/lighting_world.md`'s decision 3, and it is a real inversion of the
+    /// `docs/archive/render/lighting_world.md`'s decision 3, and it is a real inversion of the
     /// rule beside it: the same roof that must stop casting a shadow the moment
     /// the cutaway removes it must go on keeping the daylight out. Otherwise
     /// walking through a door floods the room with noon, and the player carries

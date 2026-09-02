@@ -2265,7 +2265,7 @@ impl App {
         // `draw_gump_windows` draws are the same value handed across rather
         // than two constructions that agree by arithmetic coincidence — the
         // requested region *is* the drawn region, which is the property
-        // `docs/parity.md` exists to protect and the one this whole file used
+        // `docs/render/design_frame_assembly.md` exists to protect and the one this whole file used
         // to leave to luck.
         //
         // A frame behind, like every other reader of `drawn_windows` — see its
@@ -2535,7 +2535,7 @@ impl App {
         // Its own list rather than another `overhead` entry, because a count
         // is its own *role*: it is drawn in `FontSizes::stack_count` and
         // speech is drawn in `FontSizes::speech`, and one list can only be
-        // handed to one size — see `docs/text_sizes.md`'s D1a.
+        // handed to one size — see `docs/render/design_text_sizes.md`'s D1a.
         let counts: Vec<(ViewPixel, String, Font, Hue)> = items::labels(
             &self.world.presentation.items,
             &camera,
@@ -2665,7 +2665,7 @@ impl App {
         let targets_cost = targets_started.elapsed();
 
         // **The frame's occluders are built before its pictures are collected**,
-        // and that ordering is `docs/lighting_height.md` phase 3's one real cost.
+        // and that ordering is `docs/archive/render/lighting_height.md` phase 3's one real cost.
         // A static's drawn row now carries the number this grid gave it
         // (`occlusion::Occlusion::owner_at`), so that a fragment of it can say
         // which occluder it is a point of instead of having that guessed from its
@@ -3014,7 +3014,7 @@ impl App {
         if let Some(gpu) = window.gpu.as_mut() {
             gpu.end_frame(&window.device, &window.queue);
         }
-        // **This frame, written out** — F12, and `docs/parity.md`'s first
+        // **This frame, written out** — F12, and `docs/render/design_frame_assembly.md`'s first
         // backlog item. After the submit above and not beside the blit, because
         // what is read back has to be pixels the device has actually been given
         // the commands for; the world image, the G-buffer and the instance
@@ -3025,7 +3025,7 @@ impl App {
         // solids overlay on top of it, and a tool's frame has none of those.
         // What a comparison wants is the world as the blit left it, so the blit
         // is run again into a texture of its own — the same pass, the same
-        // lighting, the same rect — once per plane. `docs/parity.md` D5.
+        // lighting, the same rect — once per plane. `docs/render/design_frame_assembly.md` D5.
         if let Some(into) = self.graphics.frame_dump.take() {
             let dump = window.device.create_texture(&wgpu::TextureDescriptor {
                 label:           Some("frame dump"),
@@ -3223,7 +3223,7 @@ impl App {
 /// read as the *file* their one picture is written to
 /// (`examples/isolated_scene.rs`, `tests/cost.rs`). One name meaning a file to
 /// one caller and a directory to another is precisely the quiet difference
-/// `docs/parity.md` exists to stop, so the client's knob is its own name — and a
+/// `docs/render/design_frame_assembly.md` exists to stop, so the client's knob is its own name — and a
 /// directory, because what the client has to dump is every plane at once plus
 /// the inputs they came from.
 pub(crate) fn frame_dump_root() -> std::path::PathBuf {

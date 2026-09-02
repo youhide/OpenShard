@@ -1,7 +1,7 @@
 # Lighting pitfalls: how a frame misleads, and the order to ask it things in
 
-**Not a plan and not a status page.** [`lighting_state.md`](lighting_state.md)
-says where the engine stands and [`lighting_rebuild.md`](lighting_rebuild.md)
+**Not a plan and not a status page.** [`lighting_state.md`](../README.md)
+says where the engine stands and [`lighting_rebuild.md`](../design_model.md)
 holds the model and its backlog. This is the third thing: a catalogue of the ways
 a *lit frame* has lied to somebody working on it, each with the instrument that
 caught it, so the next person spends the afternoon on the defect rather than on

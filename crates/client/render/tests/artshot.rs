@@ -37,7 +37,7 @@ use openshard_uofiles::color::{
 use openshard_uofiles::image::Image;
 
 /// The graphics this was written for: the two stair statics standing at
-/// `(1493, 1639)` in Britain — see `docs/lighting.md`'s backlog, "found on a
+/// `(1493, 1639)` in Britain — see `docs/archive/render/lighting.md`'s backlog, "found on a
 /// staircase in Britain".
 const DEFAULT: &[u16] = &[1822, 1846];
 

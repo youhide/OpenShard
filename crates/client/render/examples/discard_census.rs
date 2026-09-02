@@ -4,15 +4,15 @@
 //! **What the overhang costs has changed twice; what it *is* has not**, and
 //! that is why this tool still counts the same thing. `statics.wesl` discarded
 //! a fragment whose view ray met none of its static's boxes, so every
-//! overhanging pixel left the screen — `docs/lighting_rebuild.md` measured that
+//! overhanging pixel left the screen — `docs/render/design_model.md` measured that
 //! trade at 4460 pixels of 187,086, 2.38%. Then a miss became "no measurement",
 //! lit from every side. It is clamped onto the nearest box now
-//! (`docs/silhouettes.md`), so what an overhanging pixel loses is the *truth of
+//! (`docs/render/design_silhouettes.md`), so what an overhanging pixel loses is the *truth of
 //! its own position*: it is answered at a box's rim rather than where the
 //! picture drew it, and `Meeting::outside` is how far that is.
 //!
 //! So the counts below are a count of pixels whose position is invented, and
-//! `docs/footprints.md`'s S4 is still the other half of it — a narrower box is a
+//! `docs/render/design_footprints.md`'s S4 is still the other half of it — a narrower box is a
 //! box the art overhangs *more*, and the plan says outright that "a footprint
 //! that eats a tabletop's overhang is a finding, not a cost to accept quietly".
 //!
@@ -39,7 +39,7 @@
 //! is a placement whose shadow moved, and the report names it.
 //!
 //! Reads the client's own files; no GPU, and no shard database — see
-//! `docs/parity.md`'s backlog on that, which this tool inherits from
+//! `docs/render/design_frame_assembly.md`'s backlog on that, which this tool inherits from
 //! `geometry_census.rs` beside it: what it counts is *the art's* geometry, so a
 //! decoration the server placed is outside its answer.
 //!
@@ -98,7 +98,7 @@ const HALF_TILE: f32 = 22.0;
 ///
 /// This tool claimed for a session that the difference could not reach what it
 /// measures, on the grounds that only a piece the grid took in has a merged
-/// primitive. That was too strong twice over: `docs/footprints.md`'s S4 found
+/// primitive. That was too strong twice over: `docs/render/design_footprints.md`'s S4 found
 /// forty-two placements of its own class inside the grid, and every panel and
 /// whole-tile share this tool prints is about pieces that are mostly *walls*.
 /// So the grid is built and consulted, which is what the frame does.
@@ -282,7 +282,7 @@ struct Shading {
 /// about the ray and not about the box, so two neighbouring pixels of one smooth
 /// overhang can be handed two different faces — a lit pixel beside an unlit one,
 /// repeating: the comb a person reported on a sprite's top edge, and
-/// `docs/lighting_state.md`'s second open defect.
+/// `docs/render/README.md`'s second open defect.
 ///
 /// **This is what refused `impostor::presented_face`**, the rule written to end
 /// that flip. Read the two columns together: the candidate does end it, and it
@@ -420,7 +420,7 @@ impl Comb {
 /// 0.3 and look like the same kind of number; read in steps one is under 1 and
 /// the other is over 10.
 ///
-/// `docs/pixels.md` owns the pair of grids this divides between.
+/// `docs/render/design_pixel_spaces.md` owns the pair of grids this divides between.
 #[derive(Default)]
 struct Steps {
     /// Under half a fragment out: the sample-grid case in full, since half a
@@ -549,7 +549,7 @@ fn outside_the_band(image: &Image, footprint: Footprint) -> u32 {
 /// by a row would put the hit region somewhere else entirely and report a large,
 /// confident, meaningless share. So the same walk is run over
 /// [`blocks_silhouette`]'s drawing of a whole-tile block against that block's
-/// own box — the reference `docs/footprints.md`'s D6 already round-trips the
+/// own box — the reference `docs/render/design_footprints.md`'s D6 already round-trips the
 /// measurement through — and against the same box moved a hundred tiles away.
 ///
 /// The first is the positive control and its answer is the instrument's own
@@ -622,7 +622,7 @@ struct Tally {
     /// The picture's own size in pixels, and how many `z` units tall the box it
     /// is met against is. Two numbers rather than a share, because the first
     /// question a large discard raises is whether the art is simply taller than
-    /// the height `tiledata` states for it — `docs/footprints.md`'s D1 measures
+    /// the height `tiledata` states for it — `docs/render/design_footprints.md`'s D1 measures
     /// the footprint and leaves the height alone, so a picture overhanging its
     /// own *lid* is that carried item showing up in pixels.
     art:           (u16, u16),
@@ -631,7 +631,7 @@ struct Tally {
     /// Whether the client's own `ROOF` bit is on it — the class a player
     /// standing indoors is not shown at all, and the class the only recorded
     /// measurement of this discard was taken **without**
-    /// (`docs/lighting_rebuild.md`: "at Britain's `(1501, 1659)` with the roof
+    /// (`docs/render/design_model.md`: "at Britain's `(1501, 1659)` with the roof
     /// cut"). A roof is a sloped slab given a whole-tile box three `z` units
     /// tall under art seventy-six pixels high, so it overhangs enormously and
     /// for a reason that belongs to that document's phase 6i rather than here.
@@ -901,7 +901,7 @@ fn report(
     println!("    {:>22}   {:>9.2}\n", "the worst", steps.worst);
 
     // **And what letting the nearest box win would cost**, which is the rule
-    // `docs/silhouettes.md` weighs: the ones that take a *side* face off a
+    // `docs/render/design_silhouettes.md` weighs: the ones that take a *side* face off a
     // **lid** are the lattice of wall-shaded dots that made `discard` look like
     // the answer the first time round, and the second column is what
     // `impostor::presented_face` would have shaded the same pixels as.
@@ -1061,7 +1061,7 @@ fn report(
     // them beside each: how tall the art is, and how tall the box under it is.
     // `Z_STEP` pixels of picture stand on one `z` unit of box, so a picture
     // whose height in pixels far exceeds its box's height in units is a picture
-    // hanging over its own lid — `docs/footprints.md`'s D1, in pixels.
+    // hanging over its own lid — `docs/render/design_footprints.md`'s D1, in pixels.
     let mut standing: Vec<(&u16, &Tally)> = tallies.iter().collect();
     standing.sort_by_key(|(_, tally)| std::cmp::Reverse(tally.missed_now));
     println!("  what the impostor discards today, the twelve largest by pixel:\n");
@@ -1202,7 +1202,7 @@ fn report(
     let moved: u32 = shadowing.iter().map(|(_, tally)| tally.in_the_grid).sum();
     println!(
         "\n  {moved:>9}  footprinted placements the grid holds a primitive for — each of them\n\
-         \x20            casts a shadow this plan has narrowed, and `docs/footprints.md`'s S4\n\
+         \x20            casts a shadow this plan has narrowed, and `docs/render/design_footprints.md`'s S4\n\
          \x20            expects none at all"
     );
     for (graphic, tally) in &shadowing {

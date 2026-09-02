@@ -57,7 +57,7 @@ pub struct Drawn {
     /// The number itself, off the position plane. This used to be a tile-local
     /// fraction in hundred-and-twenty-sevenths and a height in sixteenths, which
     /// every caller then added to a tile it looked up — three fields, one of
-    /// them quantised twice on the way. `docs/lighting_rebuild.md` phase 2.
+    /// them quantised twice on the way. `docs/render/design_model.md` phase 2.
     pub at:     (f64, f64, f64),
 }
 
@@ -156,7 +156,7 @@ pub fn ground_albedo(drawn: &[Drawn], world: &[u8]) -> [f64; 3] {
 /// pass drew** — [`ground_albedo`]'s own argument, for the other surface a
 /// shaded comparison needs.
 ///
-/// `docs/lighting_rebuild.md` phase 6d gave the mesh pass a colour target;
+/// `docs/render/design_model.md` phase 6d gave the mesh pass a colour target;
 /// before it, `oracle::pathtrace::Albedos::body` was a stand-in because there
 /// was nothing on the engine's side to measure. A mesh face's own routing
 /// sentinel (`Stance::MeshFace`) is what separates it from a ground pixel here,
