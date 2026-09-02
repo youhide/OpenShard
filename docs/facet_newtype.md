@@ -2,8 +2,8 @@
 
 Living plan for a multi-session sweep of the bare `facet: u8` left across
 `crates/server/*` and a few of `crates/common/*`, opened by
-[`HANDOFF_newtype_hunt_server_common_render_2026-08-11`](../../open_shard_files/handoffs/HANDOFF_newtype_hunt_server_common_render_2026-08-11.md)'s
-newtype hunt as the single largest finding, out of scope for that pass on
+a newtype hunt across `server`, `common` and `render` (2026-08-11; its handoff
+is kept outside this repository) as the single largest finding, out of scope for that pass on
 purpose. It is a sibling to [`protocol_newtypes.md`](protocol_newtypes.md) —
 same shape, same "stages plus a machine-checked gate" discipline — but a
 narrower problem: `protocol::world::Facet(pub u8)` already exists, already

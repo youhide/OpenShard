@@ -339,7 +339,7 @@ at all, not about wire shapes.
 4. **`GumpLayout` stays a hand-written builder, not an `EncodePacket`,** for
    the same reason `PropertyList` did in Stage 4: it accumulates elements
    (and interns their text) across an unbounded number of calls, with nothing
-   to hand back until [`finish`](gump::GumpLayout::finish) but the two
+   to hand back until `GumpLayout::finish` but the two
    half-built pieces. `GumpDisplay` (`0xB0`), which takes the *finished*
    layout string and line table, has no such obstacle and became the
    `EncodePacket`.

@@ -46,7 +46,7 @@ use crate::walk::steps_out_of;
 ///
 /// A clock in there was wrong three times over. It made the answer depend on
 /// what else the machine was doing, in a tick
-/// [`architecture.md`](../../../docs/architecture.md) calls deterministic and
+/// [`architecture.md`](../../../../docs/architecture.md) calls deterministic and
 /// replayable — the same shard, the same inputs, a different route under load.
 /// It made four tests green alone and red together. And it cost 6.5% of a
 /// search: `clock_gettime` was the only syscall in the hot loop and one of the
@@ -928,7 +928,7 @@ fn node_key(at: Point) -> PathNodeKey {
 /// the click carried — a table's top is 26 and the art the cursor hit is at 20.
 /// Resolving once, where the order is taken, is what keeps that test and this
 /// search agreeing; resolving it a second way would be the second policy
-/// [`parity.md`](../../../docs/parity.md) is about. Idempotent, so a place that
+/// [`parity.md`](../../../../docs/parity.md) is about. Idempotent, so a place that
 /// has already been through here goes through again unchanged.
 #[must_use]
 pub fn destination_place(footing: &Footing<'_>, from: Point, to: Point) -> Point {

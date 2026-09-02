@@ -7,7 +7,7 @@ plan has no unbuilt section left in it — only its two "what phase N left
 behind" backlogs and its out-of-scope list.
 
 **A0 — the block order got a type.** `251fdc7f`. It is
-[`crates/common/uofiles/src/grid.rs`](../../../../crates/common/uofiles/src/grid.rs):
+[`crates/common/map/src/grid.rs`](../../../../crates/common/map/src/grid.rs):
 `LandGrid` with `BlockCoord`, `BlockIndex` and `CellIndex` beside it. `map.rs`
 no longer spells the order anywhere — not the four `block_x * blocks_down`, not
 the two verbatim copies in `cell_index` and `block_index`, and not the inverse

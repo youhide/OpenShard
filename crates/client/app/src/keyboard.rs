@@ -231,7 +231,7 @@ pub(crate) enum Hotkey {
     /// [`Paperdoll`](Self::Paperdoll): no round trip.
     ///
     /// Provisional — the minimap's own opening affordance is still an open
-    /// product decision (`docs/minimap_lod_plan.md` phase 4).
+    /// product decision (`docs/map/minimap_lod_plan.md` phase 4).
     Minimap,
     /// The full, pannable facet map. Ctrl+M leaves plain M for the radar.
     WorldMap,

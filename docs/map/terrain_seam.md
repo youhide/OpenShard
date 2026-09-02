@@ -47,7 +47,7 @@ rest:
 | [`MapTerrain`](../../crates/common/movement/src/terrain.rs#L64) | the map and `tiledata.mul` | **a terrain** |
 | [`Cluttered`](../../crates/client/app/src/clutter.rs#L285) | the client's live items over it | a **mask** |
 | [`LiveTerrain`](../../crates/server/state/src/obstruct.rs#L140) | the server's live items over it | the **same mask** |
-| [`CachedTerrain`](../../crates/common/movement/src/cache.rs#L30) | memoises `can_step` for one query | a **memo table** |
+| `CachedTerrain` (removed; see [`steer.rs`](../../crates/client/app/src/steer.rs)) | memoised `can_step` for one query | a **memo table** |
 | [`InRegion`](../../crates/common/movement/src/navigation.rs#L81) | three lines: refuse a step leaving a rectangle | a **parameter** |
 | [`OpenWorld`](../../crates/common/movement/src/walk.rs#L211) | `can_step` returns `Some(to)` | the **absence** of a map |
 
