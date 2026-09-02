@@ -3145,8 +3145,13 @@ pub enum Action {
     Attack,
     /// A death throe.
     Die,
-    /// A spellcasting gesture.
-    Cast,
+    /// The one-armed spellcasting gesture, thrown at whatever the spell is aimed
+    /// at. The client's `CastDirected`, and what all but a handful of spells use.
+    CastDirected,
+    /// The two-armed spellcasting gesture, which reaches for something rather
+    /// than throwing it. The client's `CastArea`: the seven summons, Gate Travel
+    /// and Mass Dispel.
+    CastArea,
     /// Swinging a pick at a rock face.
     Mine,
     /// Swinging an axe at a tree.
@@ -3166,8 +3171,11 @@ impl Action {
         match self {
             Self::Attack => 0, // Attack
             Self::Die => 3,    // Die
-            Self::Cast => 11,  // Spell
-            Self::Bow => 9,    // Bow
+            // One category for both gestures: ServUO's post-SA arm animates every
+            // spell as `Animate(AnimationType.Spell, 0)` and lets the client pick
+            // the pose, so the directed/area split has no expression here.
+            Self::CastDirected | Self::CastArea => 11, // Spell
+            Self::Bow => 9,                            // Bow
             // ServUO's `DoHarvestingEffect` animates a harvest as an *attack* and
             // says which one in the sub-action — see [`sub_action`](Self::sub_action).
             Self::Mine | Self::Chop | Self::Fish => 0, // Attack
@@ -3187,7 +3195,7 @@ impl Action {
             Self::Mine => 3,
             Self::Fish => 6,
             Self::Chop => 7,
-            Self::Die | Self::Cast | Self::Bow => 0,
+            Self::Die | Self::CastDirected | Self::CastArea | Self::Bow => 0,
         }
     }
 
@@ -3209,8 +3217,16 @@ impl Action {
                     if matches!(kind, BodyKind::Human) { 6 } else { 4 },
                 )
             }
-            (Self::Cast, true) => (16, 7),  // human directed-cast
-            (Self::Cast, false) => (12, 7), // monster cast
+            // The two human casting poses, and the one a monster body has for
+            // both. ServUO carries a per-spell `SpellInfo.Action` in the 203..=269
+            // range rather than a group id, but the client's own `Anim2.def`
+            // collapses that whole range onto exactly these two: every id from 203
+            // to 245 replaces to `{16}` and 260 through 269 to `{17}`. So the
+            // per-spell number is a two-valued choice wearing twenty faces, and
+            // the choice is what [`Action`] carries.
+            (Self::CastDirected, true) => (16, 7), // human directed-cast
+            (Self::CastArea, true) => (17, 7),     // human area-cast
+            (Self::CastDirected | Self::CastArea, false) => (12, 7), // monster cast
             // Only a person bows; a creature that is asked for money simply looks
             // at you, so the classic path animates nothing body-specific for it.
             (Self::Bow, true) => (32, 5), // human bow

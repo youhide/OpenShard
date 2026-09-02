@@ -9332,6 +9332,140 @@ fn a_servuo_cast_waits_out_its_delay_then_targets() {
     );
 }
 
+/// The power words go out with the *beginning* of a cast, not with its end.
+///
+/// ServUO's `Spell.Cast` says the mantra on the line after `RevealingAction`,
+/// before a single tick of the cast delay is measured, and the reason is
+/// gameplay rather than ceremony: a mage's words are the warning everyone nearby
+/// gets. Said at resolution they would arrive together with the fireball, which
+/// is no warning at all — so this uses the rooted style, where beginning and
+/// landing are a second apart, and looks for the words on the first tick.
+#[test]
+fn the_power_words_are_said_as_the_cast_begins() {
+    let now = Instant::now();
+    let mut world = world(); // the rooted ServUO style: held, not yet resolved
+    let (connection, entity) = ready_caster(&mut world, BLACK_PEARL, now);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: SpellId(17), // Fireball, "Vas Flam"
+    });
+    world.tick(now);
+    assert!(
+        world
+            .registry()
+            .get::<openshard_state::components::Casting>(entity)
+            .is_some(),
+        "the cast is still being held, so anything below happened at its start"
+    );
+
+    let spoken: Vec<Vec<u8>> = packets_for(&mut world, connection)
+        .into_iter()
+        .filter(|p| p[0] == 0xAE)
+        .collect();
+    assert!(
+        spoken.iter().any(|p| {
+            // Unicode `0xAE`: strip the zero bytes and the ASCII reads through.
+            let text: Vec<u8> = p.iter().copied().filter(|&b| b != 0).collect();
+            String::from_utf8_lossy(&text).contains("Vas Flam")
+        }),
+        "the caster spoke the spell's own words"
+    );
+    // And in the spell mode rather than as an ordinary sentence. The mode byte
+    // sits after `0xAE`'s id, length, speaker serial and body graphic.
+    assert!(
+        spoken.iter().any(|p| p[9] == 10),
+        "said as ServUO's MessageType.Spell"
+    );
+}
+
+/// The gesture is thrown when the cast begins, and not again when it lands.
+///
+/// It used to play at resolution, which put the arm movement *after* the second
+/// of rooted casting it is supposed to fill — and left a fizzle, which resolves
+/// without an effect, with no gesture at all.
+#[test]
+fn the_cast_gesture_is_thrown_at_the_start_and_not_at_the_end() {
+    let now = Instant::now();
+    let mut world = world();
+    let (connection, _) = ready_caster(&mut world, BLACK_PEARL, now);
+    // Either animation packet counts: the classic `0x6E` and the newer `0xE2`
+    // are one fact told to two client generations.
+    let animated = |packets: &[Vec<u8>]| packets.iter().any(|p| p[0] == 0x6E || p[0] == 0xE2);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: SpellId(17),
+    });
+    world.tick(now);
+    assert!(
+        animated(&packets_for(&mut world, connection)),
+        "the gesture goes out with the start of the cast"
+    );
+
+    // Wait the cast out; the spell resolves and raises its cursor.
+    let mut later = now;
+    for _ in 0..Gameplay::ticks(1) {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    let landing = packets_for(&mut world, connection);
+    assert!(
+        landing.iter().any(|p| p[0] == 0x6C),
+        "the cast finished and asked for its target"
+    );
+    assert!(
+        !animated(&landing),
+        "and did not throw a second gesture on the way out"
+    );
+}
+
+/// The art a spell lands with is its own, not its archetype's.
+///
+/// Fireball and Flamestrike are both `Damage(Fire, _)`, and while the visual was
+/// keyed on that they were one picture and one sound between them: the same bolt
+/// for the third circle and the seventh. ServUO throws a fireball for one and
+/// burns the ground under the target's feet for the other, and the spell table
+/// now carries which.
+#[test]
+fn two_fire_spells_no_longer_share_one_picture() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let caster = world.state.players[&connection];
+    let at = Point::new(START.x + 1, START.y, 0);
+    let victim = spawn_mobile_at(&mut world, at, 30_000, now);
+    world.tick(now);
+
+    // The effect straight from the core, so nothing has to be paid for: what is
+    // under test is the art, and `0x70` carries it after the kind and the two
+    // serials it links.
+    let art_of = |world: &mut World, spell: SpellId| -> Vec<u16> {
+        world.drain_outbound().count();
+        world.apply_spell_effect(caster, spell, Some(victim), at);
+        packets_for(world, connection)
+            .iter()
+            .filter(|p| p[0] == 0x70)
+            .map(|p| u16::from_be_bytes([p[10], p[11]]))
+            .collect()
+    };
+
+    let fireball = art_of(&mut world, SpellId(17));
+    let flamestrike = art_of(&mut world, SpellId(50));
+    assert!(
+        fireball.contains(&0x36D4),
+        "Fireball throws ServUO's fireball: {fireball:04X?}"
+    );
+    assert!(
+        flamestrike.contains(&0x3709),
+        "Flamestrike burns where the target stands: {flamestrike:04X?}"
+    );
+    assert!(
+        !flamestrike.contains(&0x36D4),
+        "and is no longer drawn as a fireball"
+    );
+}
+
 #[test]
 fn a_travel_spell_asks_for_an_object_and_not_a_patch_of_ground() {
     let now = Instant::now();

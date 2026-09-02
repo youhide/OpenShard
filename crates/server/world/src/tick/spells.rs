@@ -34,8 +34,7 @@ use openshard_protocol::target::{
 };
 use openshard_protocol::wire::{
     CursorId,
-    Graphic,
-    SoundId,
+    Hue,
 };
 use openshard_state::components::{
     Casting,
@@ -43,8 +42,6 @@ use openshard_state::components::{
 };
 use openshard_state::{
     CastStyle,
-    DamageType,
-    FieldKind,
     TargetPurpose,
 };
 
@@ -103,10 +100,31 @@ impl World {
         // rooted ServUO-style cast must give the caster away for the seconds it is
         // held, not at the end of them.
         self.state.break_cover(caster);
+        // And the words, in the same breath — ServUO's `Spell.Cast` calls
+        // `SayMantra` on the line after `RevealingAction`, before any delay is
+        // measured. They are said whether or not the cast then succeeds: the
+        // point of power words is that everyone nearby hears what is coming, and
+        // a mantra that waited for the spell to land would be a warning that
+        // arrives with the fireball.
+        self.say_mantra(caster, info.mantra);
+        let gesture = match info.gesture {
+            magic::CastGesture::Directed => openshard_state::Action::CastDirected,
+            magic::CastGesture::Area => openshard_state::Action::CastArea,
+        };
         match self.state.gameplay.cast_style {
-            CastStyle::Walk => self.resolve_cast(caster, spell),
+            CastStyle::Walk => {
+                // Nothing to wait out: the gesture and the effect are the same
+                // instant, so the animation is given no duration to hold for.
+                self.state.animate(caster, gesture);
+                self.resolve_cast(caster, spell);
+            }
             CastStyle::Stop => {
                 let delay = magic::cast_delay_ticks(info, TICKS_PER_SECOND);
+                // The gesture is held for as long as the cast is. ServUO restarts
+                // the animation on a timer every 1.5s for the length of the delay;
+                // this says the length once and lets the client keep the cycles
+                // alive, which is the same picture without a second clock.
+                self.state.animate_timed(caster, gesture, delay);
                 self.state.registry.insert(
                     caster,
                     Casting {
@@ -116,6 +134,29 @@ impl World {
                 );
             }
         }
+    }
+
+    /// Say a spell's power words over the caster's head, for everyone in earshot.
+    ///
+    /// ServUO's `Spell.SayMantra`, which is a `PublicOverheadMessage` in
+    /// `MessageType.Spell` — ordinary speech as far as range and drawing go, told
+    /// apart from a sentence only by the mode. It goes through `chat::speak` and
+    /// not through a packet built here, so a mantra is heard by exactly whoever
+    /// would hear the caster talk: a ghost's words reach the living no more than
+    /// its speech does.
+    ///
+    /// Only a player ever gets here — [`Self::begin_cast`] is reached from a
+    /// client's `0xBF` and nothing else — which is also ServUO's rule, where a
+    /// creature keeps its mantra to itself unless it is built to show it.
+    fn say_mantra(&mut self, caster: EntityId, mantra: &str) {
+        chat::speak(
+            &mut self.state,
+            caster,
+            openshard_protocol::speech::TalkMode::Spell,
+            Hue::SPELL_WORDS,
+            openshard_protocol::speech::Font::DEFAULT,
+            mantra,
+        );
     }
 
     /// Advance the ServUO-style casts once per tick: break any the caster took a
@@ -289,7 +330,7 @@ impl World {
         }
         // The sound and bolt/sparkle that make the cast land — before the effect,
         // so a target killed by the blow is still there for the bolt to fly at.
-        self.spell_feedback(caster, target_serial, target_location, info.effect);
+        self.spell_feedback(caster, target_serial, target_location, info.art);
         match info.effect {
             SpellEffect::Damage(kind, base) => {
                 if let Some(target) = target_serial {
@@ -447,83 +488,29 @@ impl World {
         }
     }
 
-    /// The sound and visual a core-run spell plays as it lands — ServUO's
-    /// per-spell sound and particle, mapped from the coarse [`SpellEffect`] the
-    /// engine resolves: a fire bolt for any fire damage, a magic-arrow bolt for
-    /// physical or cold, a sparkle on the mark for a heal or a buff, an explosion
-    /// at the aimed spot for an area blast. Not per-spell exact — that waits on
-    /// the spell table carrying its own art — but a cast is no longer silent and
-    /// invisible, which was the most visible gap against a real client. A
-    /// `Unimplemented` spell has no effect to voice, so this holds
-    /// its tongue for one. Broadcast to everyone who can see the caster.
+    /// Play the art the spell table gives a spell, where it lands. Broadcast to
+    /// everyone who can see the caster.
+    ///
+    /// This used to guess from the coarse [`SpellEffect`] — one fire bolt for
+    /// every fire spell, one sparkle for every stat buff — and the guess is gone:
+    /// [`SpellArt`](magic::SpellArt) is a row of the table, read straight off
+    /// ServUO's own `PlaySound`/`FixedParticles` call for that spell. A
+    /// [`Silent`](magic::SpellArt::Silent) row is a spell that has none, or one
+    /// whose art belongs where its effect happens rather than here: Recall's two
+    /// ends, a gate's pair, the rune Mark writes.
+    ///
+    /// The *placement* is still this function's: a bolt flies caster→mark, a
+    /// sparkle sits on the mark, a fixed effect plants itself at the aimed spot.
     fn spell_feedback(
         &mut self,
         caster: EntityId,
         target_serial: Option<Serial>,
         target_location: Point,
-        effect: SpellEffect,
+        art: magic::SpellArt,
     ) {
-        // A field has no bolt or sparkle — the row of tiles it lays is its own
-        // visual — so it only sounds its cast and plays the gesture.
-        if let SpellEffect::Field(kind) = effect {
-            let sound = field_cast_sound(kind);
-            let at = self.caster_position(caster);
-            self.state.broadcast_packet(
-                caster,
-                &ServerPacket::PlaySound(PlaySound {
-                    sound: SoundId(sound),
-                    at,
-                }),
-            );
-            self.state.animate(caster, openshard_state::Action::Cast);
+        let magic::SpellArt::Landing { sound, visual } = art else {
             return;
-        }
-        // A bolt flies caster→mark; a sparkle sits on the mark; a blast plants
-        // itself at the aimed spot. The graphic and sound are ServUO's per-spell.
-        enum Visual {
-            Bolt(u16),
-            OnTarget(u16),
-            AtSpot(u16),
-        }
-        let (sound, visual): (u16, Visual) = match effect {
-            SpellEffect::Damage(DamageType::Fire, _) => (0x015E, Visual::Bolt(0x36D4)),
-            SpellEffect::Damage(DamageType::Energy, _) => (0x020A, Visual::Bolt(0x379F)),
-            // Physical and cold fall back to the magic-arrow bolt for now.
-            SpellEffect::Damage(_, _) => (0x01E5, Visual::Bolt(0x36E4)),
-            SpellEffect::AreaDamage(_, _) => (0x0207, Visual::AtSpot(0x36BD)),
-            SpellEffect::Heal(_) => (0x01F2, Visual::OnTarget(0x376A)),
-            SpellEffect::Poison => (0x0205, Visual::OnTarget(0x374A)),
-            SpellEffect::Cure | SpellEffect::AreaCure => (0x01E0, Visual::OnTarget(0x373A)),
-            SpellEffect::Teleport => (0x01FE, Visual::AtSpot(0x3728)),
-            SpellEffect::StatMod(_) => (0x01EA, Visual::OnTarget(0x373A)),
-            // Resurrection: ServUO's `0x214` chime and a sparkle on the raised body.
-            SpellEffect::Resurrect => (0x0214, Visual::OnTarget(0x376A)),
-            // Paralyze: ServUO's chime and the freeze sparkle on the caught mobile.
-            SpellEffect::Paralyze => (0x0204, Visual::OnTarget(0x376A)),
-            // The non-stat buffs, ServUO's per-spell sound and sparkle.
-            SpellEffect::BehaviourBuff(kind) => {
-                use openshard_state::BehaviourBuffKind;
-                match kind {
-                    BehaviourBuffKind::PROTECTION => (0x01ED, Visual::OnTarget(0x375A)),
-                    BehaviourBuffKind::REACTIVE_ARMOR => (0x01F2, Visual::OnTarget(0x376A)),
-                    BehaviourBuffKind::NIGHT_SIGHT => (0x01E3, Visual::OnTarget(0x376A)),
-                    _ => (0x01E9, Visual::OnTarget(0x375A)), // Magic Reflection
-                }
-            }
-            // Mark: ServUO's chime and a sparkle on the rune being written.
-            SpellEffect::Mark => (0x01FA, Visual::OnTarget(0x3779)),
-            // Handled above, before this match — a field voices itself and returns.
-            SpellEffect::Field(_) => return,
-            // Recall voices itself where it lands: the departure and arrival
-            // sounds bracket the move, so an onlooker at *each* end hears one.
-            // A single packet here would play both at the tile left behind.
-            SpellEffect::Recall => return,
-            // And a gate voices itself at both ends as the pair opens; the gates
-            // themselves are the visual, as a field's tiles are.
-            SpellEffect::GateTravel => return,
-            SpellEffect::Unimplemented => return, // nothing to voice
         };
-
         let caster_serial = self.state.registry.serial_of(caster);
         let caster_pos = self.caster_position(caster);
         let target_pos = target_serial
@@ -531,64 +518,83 @@ impl World {
             .and_then(|e| self.state.registry.get::<Position>(e).map(|p| p.0))
             // An area spell has no mark: it aims at a spot, not a mobile.
             .unwrap_or(target_location);
+        // `Unseen` draws nothing at all: the field the spell lays is its own
+        // picture, and a second one over the same tiles is two answers to one
+        // question. It still sounds, which is why this is not an early return.
         let packet = match visual {
-            Visual::Bolt(graphic) => {
-                GraphicalEffect {
-                    kind:            EffectKind::Moving,
-                    from:            caster_serial,
-                    to:              target_serial,
-                    art:             Graphic(graphic),
-                    from_point:      caster_pos,
-                    to_point:        target_pos,
-                    speed:           7,
-                    duration:        0,
+            magic::SpellVisual::Unseen => None,
+            magic::SpellVisual::Bolt(art) => {
+                Some(GraphicalEffect {
+                    kind: EffectKind::Moving,
+                    from: caster_serial,
+                    to: target_serial,
+                    art,
+                    from_point: caster_pos,
+                    to_point: target_pos,
+                    speed: 7,
+                    duration: 0,
                     fixed_direction: false,
-                    explode:         true,
-                }
+                    explode: true,
+                })
             }
-            Visual::OnTarget(graphic) => {
-                GraphicalEffect {
-                    kind:            EffectKind::FixedFrom,
+            magic::SpellVisual::OnTarget(art) => {
+                Some(GraphicalEffect {
+                    kind: EffectKind::FixedFrom,
+                    from: target_serial,
+                    to: None,
+                    art,
+                    from_point: target_pos,
+                    to_point: target_pos,
+                    speed: 9,
+                    duration: 20,
+                    fixed_direction: true,
+                    explode: false,
+                })
+            }
+            magic::SpellVisual::AtSpot(art) => {
+                Some(GraphicalEffect {
+                    kind: EffectKind::FixedXyz,
+                    from: None,
+                    to: None,
+                    art,
+                    from_point: target_location,
+                    to_point: target_location,
+                    speed: 9,
+                    duration: 20,
+                    fixed_direction: true,
+                    explode: false,
+                })
+            }
+            // The strike carries no art id — the graphic is the client's own, and
+            // the serial is what it strikes. With no mark (Chain Lightning aims at
+            // ground) the coordinates are what it falls on.
+            magic::SpellVisual::Lightning => {
+                Some(GraphicalEffect {
+                    kind:            EffectKind::Lightning,
                     from:            target_serial,
                     to:              None,
-                    art:             Graphic(graphic),
+                    art:             Graphic(0),
                     from_point:      target_pos,
                     to_point:        target_pos,
-                    speed:           9,
-                    duration:        20,
-                    fixed_direction: true,
+                    speed:           0,
+                    duration:        0,
+                    fixed_direction: false,
                     explode:         false,
-                }
-            }
-            Visual::AtSpot(graphic) => {
-                GraphicalEffect {
-                    kind:            EffectKind::FixedXyz,
-                    from:            None,
-                    to:              None,
-                    art:             Graphic(graphic),
-                    from_point:      target_location,
-                    to_point:        target_location,
-                    speed:           9,
-                    duration:        20,
-                    fixed_direction: true,
-                    explode:         false,
-                }
+                })
             }
         };
-        self.state.broadcast_packet(caster, &ServerPacket::Effect(packet));
+        if let Some(packet) = packet {
+            self.state.broadcast_packet(caster, &ServerPacket::Effect(packet));
+        }
         // The sound at the point of the effect — target_pos is the aimed spot for
         // an area spell, which has no mark.
         self.state.broadcast_packet(
             caster,
             &ServerPacket::PlaySound(PlaySound {
-                sound: SoundId(sound),
-                at:    target_pos,
+                sound,
+                at: target_pos,
             }),
         );
-        // The caster's gesture. A Sphere-style cast resolves as it is made, so the
-        // gesture plays with the effect; the ServUO rooted cast plays it too, on
-        // the tick the spell lands.
-        self.state.animate(caster, openshard_state::Action::Cast);
     }
 
     /// Whether `target` shrugs part of a `circle` spell off, and the line it reads
@@ -771,15 +777,5 @@ impl World {
     /// A private system line to a player, if it is one. A creature hears nothing.
     pub(super) fn notify_self(&mut self, entity: EntityId, text: &str) {
         self.state.system_message(entity, text);
-    }
-}
-
-/// ServUO's cast sound for each field spell — the field tiles are the visual, so
-/// this is all the cast announces beyond the gesture.
-fn field_cast_sound(kind: FieldKind) -> u16 {
-    match kind {
-        FieldKind::Fire => 0x020C,
-        FieldKind::Poison | FieldKind::Energy | FieldKind::Paralyze => 0x020B,
-        FieldKind::Stone => 0x01F6,
     }
 }

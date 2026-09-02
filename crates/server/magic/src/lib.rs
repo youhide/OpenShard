@@ -43,12 +43,15 @@ use openshard_state::{
 mod spells;
 pub use spells::{
     AREA_RADIUS,
+    CastGesture,
     MAGERY,
     MAGERY_SKILL,
+    SpellArt,
     SpellCircle,
     SpellEffect,
     SpellInfo,
     SpellTarget,
+    SpellVisual,
     cast_delay_ticks,
     cast_skills,
     info,

@@ -68,6 +68,17 @@ impl Hue {
     /// [`SYSTEM`](Self::SYSTEM): one is the shard talking, this is a mobile.
     pub const NPC_SPEECH: Self = Self::MUTED_GREY;
 
+    /// The hue a spell's power words are said in, paired with
+    /// [`TalkMode::Spell`](crate::speech::TalkMode::Spell).
+    ///
+    /// ServUO says a mantra in the caster's own `Mobile.SpeechHue` — the hue the
+    /// player last chose in the client, remembered per mobile. This engine does
+    /// not remember it: a player's chosen hue is passed straight through
+    /// `chat::say` and never stored, so there is nothing to read back. Until
+    /// there is, the words come in the same grey every other line the engine
+    /// itself speaks does, and this name is where that decision is written down.
+    pub const SPELL_WORDS: Self = Self::MUTED_GREY;
+
     /// The hue an object's single-click name label comes back in, paired with
     /// [`TalkMode::Label`](crate::speech::TalkMode::Label).
     ///

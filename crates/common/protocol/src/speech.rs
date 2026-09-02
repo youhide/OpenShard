@@ -53,6 +53,12 @@ pub enum TalkMode {
     Whisper,
     /// A yell, carried two screens off.
     Yell,
+    /// A spell's power words, said over the caster's head as the cast begins —
+    /// ServUO's `MessageType.Spell`, which `Spell.SayMantra` speaks in.
+    ///
+    /// Carries like ordinary speech and is drawn like it; the mode exists so a
+    /// client (and a journal) can tell a mantra from a sentence.
+    Spell,
     /// A line to the speaker's guild. ServUO's `MessageType.Guild`.
     ///
     /// **Not a range**, unlike every mode above it: distance decides nothing,
@@ -81,6 +87,7 @@ impl TalkMode {
             Self::Label => 6,
             Self::Whisper => 8,
             Self::Yell => 9,
+            Self::Spell => 10,
             Self::Guild => 13,
             Self::Alliance => 14,
             Self::Other(mode) => mode,
@@ -116,6 +123,7 @@ impl RawTalkMode {
             6 => TalkMode::Label,
             8 => TalkMode::Whisper,
             9 => TalkMode::Yell,
+            10 => TalkMode::Spell,
             13 => TalkMode::Guild,
             14 => TalkMode::Alliance,
             other => TalkMode::Other(other),
@@ -1034,10 +1042,18 @@ mod tests {
 
     #[test]
     fn an_unnamed_mode_stays_the_byte_it_was() {
-        // ServUO's `MessageType.Spell` is 10 and this engine has no rule for it;
+        // ServUO's `MessageType.Focus` is 7 and this engine has no rule for it;
         // the point of the leftover arm is that it neither becomes `Regular` nor
         // disappears.
-        assert_eq!(RawTalkMode(10).interpret(), TalkMode::Other(10));
-        assert_eq!(TalkMode::Other(10).to_wire(), 10);
+        assert_eq!(RawTalkMode(7).interpret(), TalkMode::Other(7));
+        assert_eq!(TalkMode::Other(7).to_wire(), 7);
+    }
+
+    #[test]
+    fn the_spell_mode_is_a_mode_and_not_a_leftover_byte() {
+        // It stopped being one when the power words landed: a mantra goes out as
+        // `MessageType.Spell`, so 10 has to interpret and come back as itself.
+        assert_eq!(RawTalkMode(10).interpret(), TalkMode::Spell);
+        assert_eq!(TalkMode::Spell.to_wire(), 10);
     }
 }

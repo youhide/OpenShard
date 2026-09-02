@@ -144,6 +144,12 @@ impl World {
         self.state
             .registry
             .insert(rune, Name(format!("a recall rune ({name})")));
+        // Voiced here rather than from the spell table's art, for the reason
+        // Recall and Gate Travel are: the sound belongs to the *effect*, not to
+        // the cast. ServUO plays it on the caster once the mark has taken, so a
+        // refused mark stays quiet — and the aimed rune lies in a pack, where it
+        // has no world position for a sound to come from.
+        self.state.play_sound(caster, MARK_SOUND);
         self.notify_self(caster, &format!("You mark the rune: {name}."));
     }
 
@@ -305,6 +311,9 @@ const MAX_CONTAINER_DEPTH: usize = 16;
 
 /// ServUO's `Recall.cs` sound, played on departure and again on arrival.
 const RECALL_SOUND: SoundId = SoundId(0x01FC);
+
+/// ServUO's `Mark.cs` sound, played on the caster once the rune is written.
+const MARK_SOUND: SoundId = SoundId(0x01FA);
 
 /// The gump id the runebook is drawn under — its own, distinct from the quest
 /// log's `0x0051_*`, the craft window's `0x0052_0001` and the moongate list's

@@ -126,12 +126,45 @@
     Coarse (keyed on the effect variant, not exact per-spell art) but the cast is
     no longer silent and invisible, which was the single most visible gap against a
     real client. A `Scripted` spell voices itself in the pack, off `SpellCast`.
-  - **Per-spell exact art, power words, and the cast gesture** — the visual is
-    keyed on the coarse `SpellEffect` today (every fire spell throws the same
-    bolt); exact per-spell art wants the spell table to carry its own graphic/sound,
-    the power words want the `0x54`-adjacent overhead speech, and the cast gesture
-    is the same per-body animation the swing waits on. ServUO's `SpellInfo` carries
-    all of it, so this is data the table can grow.
+  - [x] **Per-spell exact art, power words, and the cast gesture.** The table
+    grew three columns and the guessing stopped.
+    - **The art** was keyed on the coarse `SpellEffect`, so Fireball and
+      Flamestrike were one picture and one sound between them, and eight stat
+      spells shared a single sparkle. Each row now carries ServUO's own
+      `PlaySound`/`FixedParticles` call for that spell: `SpellArt::Landing
+      { sound, visual }`, or `Silent` for the three kinds of spell that have
+      none — one whose art belongs to its *effect* rather than its cast (Recall's
+      two ends, a gate's pair, and Mark, whose sound moved beside the rune it
+      writes, so a refused mark is now quiet), one the reference itself leaves
+      bare (Earthquake, whose noise is everybody it hurts), and one the engine
+      does not run yet. `SpellVisual` names the placement rule that was already
+      here — bolt, on-target, at-spot — plus `Lightning`, the strike that carries
+      no art id because the graphic is the client's, and `Unseen`, for a field
+      whose tiles are its own picture. Where ServUO branches on `Core.AOS` the
+      classic side is taken, era 1 as everywhere else (Fireball's `0x44B`, Harm's
+      `0x1F1`).
+    - **The power words.** `MessageType.Spell` had been sitting in a test as the
+      example of a byte with no rule; it is `TalkMode::Spell` now, carrying like
+      ordinary speech because ServUO's `SayMantra` is a `PublicOverheadMessage`.
+      `begin_cast` says it through `chat::speak` in the same breath as the
+      reveal — before a tick of the cast delay is measured, because a warning
+      that arrives together with the fireball is not one, and it is said whether
+      the cast then takes or fizzles.
+    - **The gesture** moved from resolution to the start, where the second of
+      rooted casting it is supposed to fill actually is. ServUO's twenty
+      `SpellInfo.Action` ids across 203..=269 read like twenty animations and are
+      two: the client's own `Anim2.def` replaces 203..=245 with group `{16}` and
+      260..=269 with `{17}`. So `Action::Cast` split into `CastDirected` and
+      `CastArea`, and nine spells — the seven summons, Gate Travel and Mass
+      Dispel — raise both arms. The rooted style holds it for the cast delay
+      through `animate_timed`, the seam a swing and a pick stroke already use.
+    - Deferred: art played once **per victim** for an area spell (ServUO strikes
+      every mobile Chain Lightning catches and throws a fireball at each one
+      Meteor Swarm does; one landing stands at the aimed spot instead), the
+      hand particle at the cast's start (`LeftHandEffect`/`RightHandEffect`,
+      which want the `0xC7` particle packet this engine does not send), and a
+      mantra in the caster's own speech hue — the client's chosen hue passes
+      through `chat::say` and is never stored, so there is nothing to read back.
   - [x] **The non-stat magical buffs — Protection, Reactive Armor, Night Sight,
     Magic Reflection.** The family that modifies a *behaviour*, not a number, moved
     from `Scripted` into the core. All four ride one `BehaviourBuffs` component (the

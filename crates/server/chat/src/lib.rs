@@ -68,7 +68,10 @@ pub struct MobileSpoke {
 #[must_use]
 pub const fn speech_range(mode: TalkMode, gameplay: &Gameplay) -> u32 {
     match mode {
-        TalkMode::Regular | TalkMode::Emote | TalkMode::Label => gameplay.distance_talk,
+        // A mantra carries exactly as far as a sentence: ServUO's `SayMantra`
+        // goes out through `PublicOverheadMessage`, the same door ordinary
+        // speech uses, and the mode changes only how the client draws it.
+        TalkMode::Regular | TalkMode::Emote | TalkMode::Label | TalkMode::Spell => gameplay.distance_talk,
         TalkMode::Whisper => gameplay.distance_whisper,
         TalkMode::Yell => gameplay.distance_yell,
         TalkMode::Guild | TalkMode::Alliance | TalkMode::Other(_) => 0,
@@ -170,7 +173,12 @@ mod tests {
     #[test]
     fn only_recognised_local_speech_gets_an_audible_range() {
         let gameplay = gameplay();
-        for mode in [TalkMode::Regular, TalkMode::Emote, TalkMode::Label] {
+        for mode in [
+            TalkMode::Regular,
+            TalkMode::Emote,
+            TalkMode::Label,
+            TalkMode::Spell,
+        ] {
             assert_eq!(speech_range(mode, &gameplay), 18);
         }
         assert_eq!(speech_range(TalkMode::Whisper, &gameplay), 2);
