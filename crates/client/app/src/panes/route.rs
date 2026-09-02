@@ -247,6 +247,9 @@ impl App {
         // Copied out above the loop for the same reason the borrows above are:
         // the pane list is held mutably below.
         let window_scale = self.window_scale();
+        // The setting the status window reads, copied out above the loop for
+        // the same reason `window_scale` is: the pane list is held mutably.
+        let status_form = self.status_form();
         let modifiers = Modifiers {
             shift: self.input.shift_held,
             ctrl:  self.input.ctrl_held,
@@ -278,6 +281,7 @@ impl App {
                     hand,
                     has_keyboard: keyboard == Some(open.subject),
                     has_prompt: prompt == Some(open.subject),
+                    status_form,
                 },
                 drawn: drawn_windows
                     .iter()

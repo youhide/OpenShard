@@ -153,6 +153,10 @@ impl Install {
                 hand: None,
                 has_keyboard: false,
                 has_prompt: false,
+                // The setting's own default. A test about the modern frame
+                // builds its own frame with the other value, exactly as one
+                // about the keyboard sets `has_keyboard`.
+                status_form: openshard_client_render::status::Form::Old,
             },
             drawn,
             under_pointer,

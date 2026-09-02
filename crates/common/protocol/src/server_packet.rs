@@ -396,7 +396,7 @@ impl ServerPacket {
             Self::MobileStatus(_) => <MobileStatus as EncodePacket>::ID,
             Self::MobileMove(_) => <MobileMove as EncodePacket>::ID,
             Self::MobileIncoming(_) => <MobileIncoming as EncodePacket>::ID,
-            Self::StatLocks(_) => StatLocks::ID,
+            Self::StatLocks(_) => <StatLocks as EncodePacket>::ID,
             Self::WorldItem(_) => <WorldItem as EncodePacket>::ID,
             Self::DragCancel(_) => <DragCancel as EncodePacket>::ID,
             Self::EquipUpdate(_) => <EquipUpdate as EncodePacket>::ID,
@@ -688,6 +688,11 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
             decode_server(packet, version)
                 .map(ServerPacket::SpellbookContent)
                 .map_err(ServerDecodeError::SpellbookContent)?
+        }
+        crate::mobile::StatLocks::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::StatLocks)
+                .map_err(ServerDecodeError::StatLocks)?
         }
         crate::design::DesignRevision::SUBCOMMAND => {
             decode_server(packet, version)
@@ -1331,6 +1336,8 @@ pub enum ServerDecodeError {
     HouseInventory(DecodeError),
     /// `0xBF` subcommand `0x1B` did not decode.
     SpellbookContent(DecodeError),
+    /// `0xBF` subcommand `0x19` did not decode.
+    StatLocks(DecodeError),
 }
 
 impl fmt::Display for ServerDecodeError {
@@ -1380,6 +1387,7 @@ impl fmt::Display for ServerDecodeError {
             Self::CraftWorkbench(error) => ("0xBF 0xE017 craft workbench", error),
             Self::HouseInventory(error) => ("0xBF 0xE019 house inventory", error),
             Self::SpellbookContent(error) => ("0xBF 0x1B spellbook content", error),
+            Self::StatLocks(error) => ("0xBF 0x19 stat locks", error),
             Self::OpenContainer(error) => ("0x24 open container", error),
             Self::AddToContainer(error) => ("0x25 add to container", error),
             Self::ContainerContents(error) => ("0x3C container contents", error),
@@ -1932,6 +1940,11 @@ mod tests {
                 stat_cap: 225,
                 followers: 0,
                 followers_max: 5,
+                resistances: crate::mobile::Resistances::NONE,
+                luck: 0,
+                damage: crate::mobile::DamageRange::BARE,
+                tithing: 0,
+                aos: crate::mobile::AosStatus::NONE,
             }),
             ServerPacket::MobileMove(MobileMove {
                 serial,
@@ -2628,6 +2641,11 @@ mod tests {
                 stat_cap: 225,
                 followers: 0,
                 followers_max: 5,
+                resistances: crate::mobile::Resistances::NONE,
+                luck: 0,
+                damage: crate::mobile::DamageRange::BARE,
+                tithing: 0,
+                aos: crate::mobile::AosStatus::NONE,
             }),
             ServerPacket::MobileMove(MobileMove {
                 serial,
@@ -2764,6 +2782,11 @@ mod tests {
             stat_cap:      225,
             followers:     0,
             followers_max: 5,
+            resistances:   crate::mobile::Resistances::NONE,
+            luck:          0,
+            damage:        crate::mobile::DamageRange::BARE,
+            tithing:       0,
+            aos:           crate::mobile::AosStatus::NONE,
         };
 
         let bytes = ServerPacket::MobileStatus(sent.clone()).encode(ancient);

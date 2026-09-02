@@ -4,7 +4,10 @@
 //! connection-only identity and independently refreshed values stay outside.
 
 use openshard_protocol::mobile::{
+    AosStatus,
+    DamageRange,
     MobileStatus,
+    Resistances,
     Vitals,
 };
 use openshard_protocol::skill::{
@@ -77,6 +80,18 @@ pub struct Status {
     pub followers:     u8,
     /// The greatest number of pets that may follow.
     pub followers_max: u8,
+    /// Fire, cold, poison and energy. The physical one is
+    /// [`armor`](Self::armor), which is the field the packet carries it in.
+    pub resistances:   Resistances,
+    /// Luck.
+    pub luck:          u16,
+    /// What the weapon in hand hits for, as the shard states it.
+    pub damage:        DamageRange,
+    /// Tithing points.
+    pub tithing:       u32,
+    /// The AoS suit bonuses and resistance caps, for the modern frame's
+    /// right-hand columns.
+    pub aos:           AosStatus,
 }
 
 impl From<&MobileStatus> for Status {
@@ -95,6 +110,11 @@ impl From<&MobileStatus> for Status {
             stat_cap:      status.stat_cap,
             followers:     status.followers,
             followers_max: status.followers_max,
+            resistances:   status.resistances,
+            luck:          status.luck,
+            damage:        status.damage,
+            tithing:       status.tithing,
+            aos:           status.aos,
         }
     }
 }

@@ -133,6 +133,47 @@ const ALLOWLIST: &[(&str, &str, &str)] = &[
     ("mobile.rs", "stat_cap", "MobileStatus: same"),
     ("mobile.rs", "followers", "MobileStatus: same"),
     ("mobile.rs", "followers_max", "MobileStatus: same"),
+    ("mobile.rs", "luck", "MobileStatus: same"),
+    ("mobile.rs", "tithing", "MobileStatus: same"),
+    // The status tail, grouped into types of its own rather than left loose on
+    // `MobileStatus`: which four numbers travel together is the thing worth
+    // saying, and each of them is still a [gameplay] quantity inside its group
+    // — a percentage the shard's own rules bound, not a protocol constant.
+    (
+        "mobile.rs",
+        "fire",
+        "Resistances: a percentage bounded by [gameplay]; the group is the type, the \
+         member is a quantity",
+    ),
+    ("mobile.rs", "cold", "Resistances: same"),
+    ("mobile.rs", "poison", "Resistances: same"),
+    ("mobile.rs", "energy", "Resistances: same"),
+    (
+        "mobile.rs",
+        "min",
+        "DamageRange: half a range is not a smaller number — Vitals' argument, and its shape",
+    ),
+    ("mobile.rs", "max", "DamageRange: same"),
+    (
+        "mobile.rs",
+        "max_physical",
+        "AosStatus: the fifteen shorts of `0x11` type 6, read positionally; each is a \
+         [gameplay] percentage and the struct is what names them",
+    ),
+    ("mobile.rs", "max_fire", "AosStatus: same"),
+    ("mobile.rs", "max_cold", "AosStatus: same"),
+    ("mobile.rs", "max_poison", "AosStatus: same"),
+    ("mobile.rs", "max_energy", "AosStatus: same"),
+    ("mobile.rs", "defense_chance", "AosStatus: same"),
+    ("mobile.rs", "max_defense_chance", "AosStatus: same"),
+    ("mobile.rs", "hit_chance", "AosStatus: same"),
+    ("mobile.rs", "swing_speed", "AosStatus: same"),
+    ("mobile.rs", "damage_increase", "AosStatus: same"),
+    ("mobile.rs", "lower_reagent_cost", "AosStatus: same"),
+    ("mobile.rs", "spell_damage", "AosStatus: same"),
+    ("mobile.rs", "faster_cast_recovery", "AosStatus: same"),
+    ("mobile.rs", "faster_casting", "AosStatus: same"),
+    ("mobile.rs", "lower_mana_cost", "AosStatus: same"),
     // -- gold: N5 amendment 1 ----------------------------------------------
     (
         "vendor.rs",

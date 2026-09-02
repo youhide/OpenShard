@@ -17,6 +17,7 @@ use openshard_protocol::gump::{
 use openshard_protocol::house_inventory::HouseInventoryRequest;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::mapedit::MapEditRequest;
+use openshard_protocol::mobile::Stat;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::skill::SkillLock;
 use openshard_protocol::speech::TalkMode;
@@ -95,6 +96,12 @@ pub enum Outgoing {
         skill: RawSkillId,
         lock:  SkillLock,
     },
+    /// The status window's own arrow: which of the three stats, and where it
+    /// now points. Unanswered, exactly like [`Outgoing::SkillLock`].
+    StatLock {
+        stat: Stat,
+        lock: SkillLock,
+    },
     UseSkill(RawSkillId),
     /// Open the tool-free craft catalogue through OpenShard's private `0xBF`
     /// request. A stock client never sends this, so it remains harmless to one.
@@ -168,6 +175,7 @@ impl Outgoing {
             Self::GuildMenu => crate::doll::guild_menu(player),
             Self::Virtue(mobile) => crate::doll::virtue(player, mobile),
             Self::SkillLock { skill, lock } => crate::skill::set_lock(skill, lock),
+            Self::StatLock { stat, lock } => crate::skill::set_stat_lock(stat, lock),
             Self::UseSkill(skill) => crate::skill::use_skill(skill),
             Self::OpenCraftCatalogue => OpenCraftCatalogue.encode(),
             Self::HouseInventory(request) => request.encode(),

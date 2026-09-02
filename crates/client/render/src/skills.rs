@@ -303,15 +303,6 @@ const HEADING_SHUT: Graphic = Graphic(0x0826);
 /// the right-hand edge.
 const HEADING_RULE: Graphic = Graphic(0x0835);
 
-/// The three faces of a skill's lock: up, down, and held.
-///
-/// `GetStatusButtonGraphic`.
-const LOCK_UP: Graphic = Graphic(0x0984);
-/// Trained down.
-const LOCK_DOWN: Graphic = Graphic(0x0986);
-/// Held where it is.
-const LOCK_HELD: Graphic = Graphic(0x082C);
-
 /// A skill's own use button, drawn only for one the files mark
 /// [`has_action`](openshard_uofiles::skills::Skill::has_action).
 ///
@@ -511,14 +502,11 @@ fn tenths(value: u16) -> String {
     format!("{}.{}", value / 10, value % 10)
 }
 
-/// The lock's picture.
+/// The lock's picture — [`crate::lock`]'s three, which the status frame's
+/// stat arrows draw from too.
 #[must_use]
 const fn lock_of(lock: SkillLock) -> Graphic {
-    match lock {
-        SkillLock::Up => LOCK_UP,
-        SkillLock::Down => LOCK_DOWN,
-        SkillLock::Locked => LOCK_HELD,
-    }
+    crate::lock::art(lock)
 }
 
 /// Lay the window out at `at`.
@@ -1035,7 +1023,7 @@ mod tests {
         for bar in [BAR_UP, BAR_DOWN, BAR_TRACK_TOP] {
             assert_eq!(cut(bar), None, "and neither is the bar beside it");
         }
-        for row in [HEADING_OPEN, HEADING_RULE, LOCK_UP] {
+        for row in [HEADING_OPEN, HEADING_RULE, crate::lock::UP] {
             assert_eq!(
                 cut(row),
                 Some(sheet.viewport),

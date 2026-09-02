@@ -64,6 +64,7 @@ use openshard_protocol::mobile::{
     Equipment,
     Notoriety,
     PaperdollFlags,
+    StatLockBits,
     StatusFlags,
     Vitals,
 };
@@ -244,6 +245,16 @@ pub struct Player {
     /// replies, and keeping a second copy here would make the health line and
     /// status window disagree.
     pub status: Option<Status>,
+    /// Which way each of the three stats trains.
+    ///
+    /// [`hits`](Self::hits)' shape and for its reason: the arrows arrive in a
+    /// packet of their own (`0xBF 0x19`), not in `0x11`, and a copy folded into
+    /// [`status`](Self::status) would be replaced by the next status reply with
+    /// whatever the arrows were when it was built. `None` is "the shard has not
+    /// said", which is not the same as three arrows pointing up: a status frame
+    /// drawn before the reply lands would otherwise show three raise-arrows the
+    /// player never set.
+    pub stat_locks: Option<StatLockBits>,
     /// Where it stands.
     pub position: Point,
     /// Which way it faces, and whether it is running.
@@ -1152,6 +1163,9 @@ impl WorldView {
                 hits: None,
                 mana: None,
                 status: None,
+                // The arrows come in their own `0xBF 0x19`, which a shard sends
+                // beside the first status reply and not in the `0x1B`.
+                stat_locks: None,
                 position: start.position,
                 facing: start.facing,
                 equipment: Vec::new(),
@@ -1522,6 +1536,8 @@ impl WorldView {
                     mana: self.player.mana,
                     // `0x20` says nothing about the paperdoll numbers.
                     status: self.player.status.clone(),
+                    // Nor about which way the three stats train.
+                    stat_locks: self.player.stat_locks,
                     position: update.position,
                     facing: update.facing,
                     // `0x20` is a position and an appearance, never a paperdoll:
@@ -1598,6 +1614,8 @@ impl WorldView {
                     mana: self.player.mana,
                     // `0x78` dresses the player but does not restate status.
                     status: self.player.status.clone(),
+                    // Nor the arrows, which are `0xBF 0x19`'s to state.
+                    stat_locks: self.player.stat_locks,
                     position: self.player.position,
                     facing: self.player.facing,
                     // The catalogue owns an item's position. The inbound list
@@ -1929,6 +1947,17 @@ impl WorldView {
                 self.player.mana = Some(status.mana);
                 changed
             }
+            // `0xBF 0x19`: which way the three stats train. Like `0x11` it is
+            // only ever about this connection's own character — a shard sends
+            // it for the player it is talking to — so a copy naming anybody
+            // else is dropped rather than filed under a stranger who has no
+            // arrows to draw.
+            ServerPacket::StatLocks(locks) if locks.serial == self.player.serial => {
+                let changed = self.player.stat_locks != Some(locks.locks);
+                self.player.stat_locks = Some(locks.locks);
+                changed
+            }
+            ServerPacket::StatLocks(_) => false,
             // `0x2C`: this end just died, or came back. `docs/combat.md`'s
             // D9 — the one packet that greys the whole screen, gates an
             // attack off a ghost's own click, and drops the war stance even
@@ -2179,6 +2208,16 @@ mod tests {
             stat_cap: 225,
             followers: 1,
             followers_max: 5,
+            resistances: openshard_protocol::mobile::Resistances {
+                fire:   12,
+                cold:   8,
+                poison: 3,
+                energy: 5,
+            },
+            luck: 140,
+            damage: openshard_protocol::mobile::DamageRange { min: 5, max: 11 },
+            tithing: 40,
+            aos: openshard_protocol::mobile::AosStatus::NONE,
         }
     }
 
@@ -3109,6 +3148,63 @@ mod tests {
             view.player.status.as_ref().map(|status| status.name.as_str()),
             Some("Lord British")
         );
+        let held = view.player.status.as_ref().expect("still held");
+        assert_eq!(held.resistances.fire, 12, "the AoS tail reaches the window");
+        assert_eq!(held.damage.max, 11);
+        assert_eq!(held.luck, 140);
+    }
+
+    /// The three arrows are the shard's to state and nobody else's: they come in
+    /// a `0xBF 0x19` of their own, they survive a status reply that says nothing
+    /// about them, and a copy naming a stranger is dropped — the frame has one
+    /// set of arrows, this character's.
+    #[test]
+    fn the_stat_arrows_arrive_in_their_own_packet_and_outlive_a_status_reply() {
+        use openshard_protocol::mobile::{
+            StatLockBits,
+            StatLocks,
+        };
+
+        let mut view = WorldView::entered(start());
+        assert_eq!(view.player.stat_locks, None, "nothing said yet");
+
+        let locks = StatLockBits {
+            strength:     SkillLock::Locked,
+            dexterity:    SkillLock::Down,
+            intelligence: SkillLock::Up,
+        };
+        assert!(view.apply(&ServerPacket::StatLocks(StatLocks {
+            serial: view.player.serial,
+            locks,
+        })));
+        assert_eq!(view.player.stat_locks, Some(locks));
+        assert!(
+            !view.apply(&ServerPacket::StatLocks(StatLocks {
+                serial: view.player.serial,
+                locks,
+            })),
+            "the same arrows are not a second world change"
+        );
+
+        view.apply(&ServerPacket::MobileStatus(status_of(view.player.serial)));
+        assert_eq!(
+            view.player.stat_locks,
+            Some(locks),
+            "a `0x11` says nothing about the arrows and must not clear them"
+        );
+
+        assert!(
+            !view.apply(&ServerPacket::StatLocks(StatLocks {
+                serial: other(),
+                locks:  StatLockBits {
+                    strength:     SkillLock::Up,
+                    dexterity:    SkillLock::Up,
+                    intelligence: SkillLock::Up,
+                },
+            })),
+            "arrows for somebody else are not this character's"
+        );
+        assert_eq!(view.player.stat_locks, Some(locks));
     }
 
     /// A stranger's `0x88` says whether *they* are at war, and this client is

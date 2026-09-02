@@ -46,7 +46,10 @@ use openshard_protocol::feedback::{
     GraphicalEffect,
     InterruptReason,
 };
-use openshard_protocol::mobile::Notoriety;
+use openshard_protocol::mobile::{
+    DamageRange,
+    Notoriety,
+};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::wire::{
@@ -2340,27 +2343,63 @@ pub fn melee_blow(state: &mut WorldState, attacker: EntityId) -> u16 {
     if let Some(damage) = state.registry.get::<MeleeDamage>(attacker) {
         return damage.amount;
     }
-    if let Some(weapon) = weapons::equipped_weapon(state, attacker) {
-        let era = state.gameplay.combat_era;
-        let mut min = openshard_state::weapon::by_era(weapon.old_min, weapon.aos_min, era);
-        let mut max = openshard_state::weapon::by_era(weapon.old_max, weapon.aos_max, era);
-        if let Some(item) = weapons::equipped_weapon_item(state, attacker) {
-            if let Some(affixes) = state.registry.get::<ItemAffixes>(item) {
-                for affix in &affixes.0 {
-                    if let ItemAffix::DamageBonus { minimum, maximum } = *affix {
-                        min = offset_damage(min, minimum);
-                        max = offset_damage(max, maximum);
-                    }
+    // The roll happens for a wielded weapon and only for one, exactly as it did
+    // when the range was computed inline here: a bare-handed swing and a fixed
+    // `MeleeDamage` must not draw from the seeded rng, or every replay after the
+    // first unarmed blow diverges.
+    if let Some(range) = weapon_damage_range(state, attacker) {
+        let span = u32::from(range.max.saturating_sub(range.min)) + 1;
+        return range.min + state.rng.below(span) as u16;
+    }
+    SWING_DAMAGE
+}
+
+/// The span a wielded weapon rolls in, or `None` for an empty hand.
+///
+/// The era picks the pair, the item's own affixes move both ends, and a pair an
+/// affix inverted is swapped back — a maximum below its minimum is not a range.
+fn weapon_damage_range(state: &WorldState, attacker: EntityId) -> Option<DamageRange> {
+    let weapon = weapons::equipped_weapon(state, attacker)?;
+    let era = state.gameplay.combat_era;
+    let mut min = openshard_state::weapon::by_era(weapon.old_min, weapon.aos_min, era);
+    let mut max = openshard_state::weapon::by_era(weapon.old_max, weapon.aos_max, era);
+    if let Some(item) = weapons::equipped_weapon_item(state, attacker) {
+        if let Some(affixes) = state.registry.get::<ItemAffixes>(item) {
+            for affix in &affixes.0 {
+                if let ItemAffix::DamageBonus { minimum, maximum } = *affix {
+                    min = offset_damage(min, minimum);
+                    max = offset_damage(max, maximum);
                 }
             }
         }
-        if min > max {
-            std::mem::swap(&mut min, &mut max);
-        }
-        let span = u32::from(max.saturating_sub(min)) + 1;
-        return min + state.rng.below(span) as u16;
     }
-    SWING_DAMAGE
+    if min > max {
+        std::mem::swap(&mut min, &mut max);
+    }
+    Some(DamageRange { min, max })
+}
+
+/// What the status window quotes for this mobile's blow, without rolling it.
+///
+/// ServUO's `GetStatusDamage`, and deliberately the same three cases
+/// [`melee_blow`] decides between — a status line worked out separately from
+/// the blow it describes is a window that disagrees with the fight. A mobile
+/// with a fixed [`MeleeDamage`] quotes that one number on both ends of the
+/// range, and an empty hand quotes the bare-handed constant rather than zero:
+/// the reference client shows nothing swung as `0-0`, but a shard where fists
+/// really do land [`SWING_DAMAGE`] would be lying about them.
+#[must_use]
+pub fn melee_damage_range(state: &WorldState, attacker: EntityId) -> DamageRange {
+    if let Some(damage) = state.registry.get::<MeleeDamage>(attacker) {
+        return DamageRange {
+            min: damage.amount,
+            max: damage.amount,
+        };
+    }
+    weapon_damage_range(state, attacker).unwrap_or(DamageRange {
+        min: SWING_DAMAGE,
+        max: SWING_DAMAGE,
+    })
 }
 
 /// Apply one signed item-property offset without widening ordinary weapon math.

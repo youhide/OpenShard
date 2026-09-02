@@ -188,6 +188,7 @@ pub(crate) fn draw_gump_windows(
     cursor: gump_art::GumpPixel,
     hover: &[String],
     scale: crate::desk::WindowScale,
+    status_form: openshard_client_render::status::Form,
     fonts: crate::desk::FontSizes,
     ttf_active: bool,
     bitmap_font_override: Option<openshard_protocol::speech::Font>,
@@ -258,6 +259,7 @@ pub(crate) fn draw_gump_windows(
                         hand,
                         has_keyboard: windows.keyboard == Some(open.subject),
                         has_prompt: windows.prompt == Some(crate::windows::Asking::Window(open.subject)),
+                        status_form,
                     };
                     (open.subject, open.pane.art(&frame))
                 })
@@ -293,6 +295,7 @@ pub(crate) fn draw_gump_windows(
                     hand,
                     has_keyboard: windows.keyboard == Some(open.subject),
                     has_prompt: windows.prompt == Some(crate::windows::Asking::Window(open.subject)),
+                    status_form,
                 };
                 if let Some(drawn) = open.pane.layout(&frame) {
                     drawn_windows.push((open.subject, drawn));
@@ -467,6 +470,16 @@ pub(crate) fn draw_gump_windows(
                 .map(|open| open.at)
                 .unwrap_or_default();
             let mut art = gump_art::collect(drawn.pictures(), &resources.gump_atlas);
+            // The modern status frame rules a hairline between each current and
+            // its maximum, and there is no art for one: the reference client
+            // paints a rectangle, so this pass appends the same primitive after
+            // the window's pictures — painter's order, so the rule lies over the
+            // frame it divides. `place` below moves and magnifies plates and
+            // pictures alike, which is what keeps the rule with the numbers it
+            // separates at every window scale.
+            if let Drawn::Status(status) = drawn {
+                art.extend(status.rule_quads());
+            }
             gump_art::place(&mut art, at, magnify);
             window
                 .gump_pass

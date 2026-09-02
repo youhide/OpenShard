@@ -2248,6 +2248,9 @@ impl App {
         // one (see `App::window_scale`), so asking for it holds the whole of
         // `self` — which the `&mut self.window` on the next line would refuse.
         let window_scale = self.window_scale();
+        // Read here for the same reason, and it is the same shell copy: which
+        // status frame the player chose.
+        let status_form = self.status_form();
         let gump_scale = self.gump_scale();
         let radar_facet_extent = radar::RadarExtent::new(
             u16::try_from(self.resources.map().width()).expect("a UO map width fits u16"),
@@ -2899,6 +2902,7 @@ impl App {
             self.input.pointer_gump,
             &hover,
             window_scale,
+            status_form,
             fonts,
             ttf_active,
             bitmap_font_override,

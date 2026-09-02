@@ -47,6 +47,7 @@ use openshard_uofiles::font::{
     FONT_COUNT,
 };
 use openshard_uofiles::gumpart::Gumps;
+use openshard_uofiles::hues::Hues;
 use serde::Deserialize;
 
 /// Render a `.ron` gump scene into a PNG design preview.
@@ -193,12 +194,20 @@ enum Element {
         height: u32,
     },
     /// One line from the install's bitmap fonts.
+    ///
+    /// `hue` is a `hues.mul` index the way the wire spells it: `0` leaves the
+    /// font's own greys alone, and anything else recolours the glyphs exactly
+    /// as the client does. A preview that omits it is not a preview of the
+    /// window — the classic frames write nearly every label in `0x0386`, and
+    /// the raw font on that art is unreadably dark.
     Label {
         x:    i32,
         y:    i32,
         text: String,
         #[serde(default = "default_font")]
         font: u16,
+        #[serde(default = "default_hue")]
+        hue:  u16,
     },
     /// A UTF-8 label from a project-owned TrueType face. Unlike the classic
     /// client font files, this lets skin previews include Cyrillic without a
@@ -215,6 +224,11 @@ enum Element {
 
 fn default_font() -> u16 {
     1
+}
+
+/// No recolouring: the glyphs keep the font file's own pixels.
+fn default_hue() -> u16 {
+    Hue::NONE.0
 }
 
 fn main() -> ExitCode {
@@ -293,6 +307,7 @@ fn render(
             scene.height,
             &gump::collect(&pictures, &atlas),
             atlas.pixels(),
+            None,
         );
     }
 
@@ -309,12 +324,18 @@ fn render(
             .iter()
             .filter_map(|element| {
                 match element {
-                    Element::Label { x, y, text, font } => {
+                    Element::Label {
+                        x,
+                        y,
+                        text,
+                        font,
+                        hue,
+                    } => {
                         Some(GumpLabel {
                             at: GumpPixel::new(*x, *y),
                             text,
                             font: Font(*font),
-                            hue: Hue::NONE,
+                            hue: Hue(*hue),
                             clip: None,
                         })
                     }
@@ -322,12 +343,21 @@ fn render(
                 }
             })
             .collect();
+        // `hues.mul` is read only when a label actually asks for a tint, so a
+        // scene of untinted captions still renders against an install that has
+        // no hue file at all.
+        let hues = if labels.iter().any(|label| label.hue != Hue::NONE) {
+            Some(Hues::load(client.join("hues.mul"))?)
+        } else {
+            None
+        };
         composite(
             &mut result,
             scene.width,
             scene.height,
             &text::collect_gump(&labels, &font_atlas),
             font_atlas.pixels(),
+            hues.as_ref(),
         );
     }
     composite_ttf_labels(&mut result, scene.width, scene.height, scene_dir, &scene.elements)?;
@@ -1093,9 +1123,27 @@ fn pictures(elements: &[Element], atlas: &GumpAtlas) -> Result<Vec<Picture>, Box
 }
 
 /// Draw one atlas' quads over an RGB canvas, honouring source transparency.
-fn composite(canvas: &mut [u8], width: u32, height: u32, quads: &[SpriteQuad], pixels: &[u8]) {
+/// Draw sprite quads onto the canvas, tinting each through `hues` the way
+/// `gump.wgsl`'s fragment stage does.
+///
+/// The port is deliberately literal: the ramp has 32 rungs, the rung is chosen
+/// by the source pixel's red channel, and a partial hue leaves any pixel that
+/// is not already grey alone. A preview that skipped this drew the classic
+/// frames' captions in the font file's own near-black, which is not what any
+/// player has ever seen on that art.
+fn composite(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    quads: &[SpriteQuad],
+    pixels: &[u8],
+    hues: Option<&Hues>,
+) {
     let side = SPRITE_ATLAS_SIDE as i32;
     for quad in quads {
+        // `SpriteQuad::hue` carries an opacity and an atlas page above the wire
+        // hue's own bits, so only the low half is a hue at all.
+        let wire = Hue(quad.hue as u16);
         let left = quad.rect.x.round() as i32;
         let top = quad.rect.y.round() as i32;
         let quad_width = quad.rect.width.round() as i32;
@@ -1114,11 +1162,13 @@ fn composite(canvas: &mut [u8], width: u32, height: u32, quads: &[SpriteQuad], p
                     continue;
                 }
                 let target = (target_y as u32 * width + target_x as u32) as usize * 3;
-                blend(
-                    &mut canvas[target..target + 3],
-                    &pixels[source..source + 3],
-                    alpha,
-                );
+                let texel = [pixels[source], pixels[source + 1], pixels[source + 2]];
+                // The renderer's own CPU port of `gump.wgsl`'s hue branch, so a
+                // preview cannot disagree with the client about a colour.
+                let shown = hues
+                    .and_then(|hues| openshard_client_render::hue::tint(hues, wire, texel))
+                    .unwrap_or(texel);
+                blend(&mut canvas[target..target + 3], &shown, alpha);
             }
         }
     }
@@ -1278,7 +1328,7 @@ mod tests {
         let quads =
             openshard_client_render::gump::collect(&[Picture::plain(art, GumpPixel::new(1, 0))], &atlas);
         let mut canvas = [1, 2, 3].repeat(2);
-        composite(&mut canvas, 2, 1, &quads, atlas.pixels());
+        composite(&mut canvas, 2, 1, &quads, atlas.pixels(), None);
         assert_eq!(
             &canvas[..3],
             &[1, 2, 3],

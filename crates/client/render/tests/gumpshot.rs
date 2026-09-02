@@ -9,9 +9,13 @@
 //! What is composited is [`gump::collect`]'s own quads over
 //! [`GumpAtlas`]'s own pixels — the list the GPU pass draws, sampled from the
 //! texture it samples — so a placement bug shows up here exactly as it shows up
-//! on the screen. What is *not* here is the hue lookup and the text: a caption
-//! is drawn as a cross at its origin, because where a line of text starts is a
-//! layout fact and which glyphs it is made of is not.
+//! on the screen. The glyphs are composited from the font atlas beside them and
+//! every quad goes through
+//! [`hue::tint`](openshard_client_render::hue::tint), the CPU port of the
+//! pass's own fragment branch: the classic frames write nearly every caption in
+//! `0x0386`, and a picture drawn without the lookup is a picture of an
+//! unreadable window nobody has seen in play. Each line's origin is still
+//! marked, because where a line starts is the layout fact this tool is for.
 //!
 //! Ignored and gated on `OPENSHARD_CLIENT`, like every other test that reads an
 //! install:
@@ -106,6 +110,12 @@ struct Client {
     tiledata:   TileData,
     /// `fonts.mul`, packed: the face a window's own text is drawn in.
     fonts:      FontAtlas,
+    /// `hues.mul`, for the tint the GPU pass applies in its fragment stage.
+    ///
+    /// Without it every caption here draws in the font file's own near-black,
+    /// which on the classic frames is a picture of an unreadable window that
+    /// nobody has ever seen in play — see [`shoot`].
+    hues:       openshard_uofiles::hues::Hues,
 }
 
 fn client() -> Option<Client> {
@@ -119,6 +129,7 @@ fn client() -> Option<Client> {
         equip_conv: EquipConv::load(dir.join("Equipconv.def")).unwrap_or_default(),
         tiledata:   openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul"),
         fonts:      FontAtlas::build(&fonts).expect("ten faces of small glyphs fit an atlas"),
+        hues:       openshard_uofiles::hues::Hues::load(dir.join("hues.mul")).expect("hues.mul"),
     })
 }
 
@@ -172,6 +183,105 @@ fn what_the_layout_puts_where() {
     bag(&client, &out);
     dialog(&client, &out);
     skill_window(&client, &out);
+    status_windows(&client, &out);
+}
+
+/// Both status frames, out of the same character.
+///
+/// Two pictures rather than one because the whole point of the pair is that
+/// they say the same eleven facts in two shapes: a number that landed in the
+/// wrong column on one of them is only visible next to the other. The arrows
+/// are stated — a frame drawn with `locks: None` is the honest picture of a
+/// client that has had no `0xBF 0x19` yet, and it is also a picture with no
+/// arrows in it to check.
+fn status_windows(client: &Client, out: &Path) {
+    use openshard_client_model::Status;
+    use openshard_client_render::status::{
+        self,
+        Form,
+    };
+    use openshard_protocol::mobile::{
+        AosStatus,
+        DamageRange,
+        Resistances,
+        StatLockBits,
+        Vitals,
+    };
+
+    let status = Status {
+        name:          "Lord British".to_owned(),
+        female:        false,
+        strength:      100,
+        dexterity:     50,
+        intelligence:  75,
+        stamina:       Vitals {
+            current: 49,
+            max:     50,
+        },
+        gold:          1_234,
+        armor:         42,
+        weight:        12,
+        max_weight:    450,
+        stat_cap:      225,
+        followers:     0,
+        followers_max: 5,
+        // Distinct values throughout, so a field drawn from its neighbour is
+        // visible rather than plausible.
+        resistances:   Resistances {
+            fire:   12,
+            cold:   8,
+            poison: 3,
+            energy: 5,
+        },
+        luck:          140,
+        damage:        DamageRange { min: 5, max: 11 },
+        tithing:       40,
+        aos:           AosStatus {
+            max_physical:         70,
+            max_fire:             71,
+            max_cold:             72,
+            max_poison:           73,
+            max_energy:           74,
+            defense_chance:       15,
+            max_defense_chance:   45,
+            hit_chance:           20,
+            swing_speed:          25,
+            damage_increase:      30,
+            lower_reagent_cost:   35,
+            spell_damage:         40,
+            faster_cast_recovery: 4,
+            faster_casting:       2,
+            lower_mana_cost:      8,
+        },
+    };
+    // One arrow of each face, so all three graphics are in the picture.
+    let numbers = status::Numbers {
+        status: &status,
+        hits:   Vitals {
+            current: 98,
+            max:     100,
+        },
+        mana:   Vitals {
+            current: 72,
+            max:     75,
+        },
+        locks:  Some(StatLockBits {
+            strength:     SkillLock::Up,
+            dexterity:    SkillLock::Down,
+            intelligence: SkillLock::Locked,
+        }),
+    };
+    for (form, name) in [(Form::Old, "status-old"), (Form::Modern, "status-modern")] {
+        let window = status::window(
+            form,
+            numbers,
+            |text, font| text::gump_width(text, font, &client.fonts),
+            GumpPixel::new(0, 0),
+        );
+        let lines: Vec<(GumpLabel<'_>, Option<Scissor>)> =
+            window.lines.iter().map(|line| (line.label(), None)).collect();
+        shoot(client, &window.pictures, &lines, &window.rule_quads(), out, name);
+    }
 }
 
 /// Our own doll and a stranger's, dressed the same.
@@ -225,6 +335,7 @@ fn paperdolls(client: &Client, out: &Path) {
             client,
             &doll.pictures,
             &[(paperdoll::title(who, at), None)],
+            &[],
             out,
             name,
         );
@@ -250,7 +361,7 @@ fn bag(client: &Client, out: &Path) {
         item(0x4000_0003, 0x0EED, 60, 90),
     ];
     let pictures = container::window(BACKPACK, &contents, GumpPixel::new(0, 0));
-    shoot(client, &pictures, &[], out, "container-backpack");
+    shoot(client, &pictures, &[], &[], out, "container-backpack");
 
     // The same bag with its client-side action under it, in both faces. The
     // button hangs off the background's bottom edge and its caption off the
@@ -285,7 +396,7 @@ fn bag(client: &Client, out: &Path) {
             text: container::STACK_ALL_LABEL,
             font: openshard_protocol::speech::Font(1),
         };
-        shoot(client, &pictures, &[(caption, None)], out, name);
+        shoot(client, &pictures, &[(caption, None)], &[], out, name);
     }
 }
 
@@ -338,7 +449,7 @@ fn dialog(client: &Client, out: &Path) {
             )
         })
         .collect();
-    shoot(client, &window.pictures, &text, out, "dialog-admin");
+    shoot(client, &window.pictures, &text, &[], out, "dialog-admin");
 }
 
 /// The skill window, scrolled off its first row.
@@ -388,7 +499,7 @@ fn skill_window(client: &Client, out: &Path) {
         .iter()
         .map(|line| (line.label(), line.scissor))
         .collect();
-    shoot(client, &sheet.pictures, &lines, out, "skills");
+    shoot(client, &sheet.pictures, &lines, &[], out, "skills");
 }
 
 /// Composite a laid-out window and write it out.
@@ -405,6 +516,7 @@ fn shoot(
     client: &Client,
     pictures: &[Picture],
     lines: &[(GumpLabel<'_>, Option<Scissor>)],
+    plates: &[openshard_client_render::sprite::SpriteQuad],
     out: &Path,
     name: &str,
 ) {
@@ -414,6 +526,10 @@ fn shoot(
         .expect("the window's art");
     let mut quads = gump::collect(pictures, &atlas);
     assert!(!quads.is_empty(), "{name} drew nothing at all");
+    // Over the art and under the text, which is where the pass draws them. A
+    // plate carries no region at all (`gump::plate`), so the loop below paints
+    // it rather than sampling an atlas that has nothing at those coordinates.
+    quads.extend(plates.iter().copied());
     // A line at a time, because a box is a line's own: the skill window cuts
     // its rows to the list and writes its total outside it, and a single
     // `collect_gump` over the lot could only apply one box or none — which is
@@ -445,6 +561,22 @@ fn shoot(
     let mut rgb = vec![BACKDROP; (width * height) as usize];
     let side = renderer::SPRITE_ATLAS_SIDE;
     for (index, quad) in quads.iter().enumerate() {
+        // A plate: no region at all, and `u` carrying its shade instead of a
+        // texture coordinate. `gump.wgsl` paints it; so does this.
+        if quad.region.du == 0.0 && quad.region.dv == 0.0 {
+            let shade = (quad.region.u * 255.0).round() as u8;
+            for row in 0..quad.rect.height as i32 {
+                for column in 0..quad.rect.width as i32 {
+                    let x = quad.rect.x as i32 + column - left;
+                    let y = quad.rect.y as i32 + row - top;
+                    if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
+                        continue;
+                    }
+                    rgb[(y as u32 * width + x as u32) as usize] = [shade, shade, shade];
+                }
+            }
+            continue;
+        }
         // Which texture this quad samples: the art up to `art_quads`, the font
         // after it. The GPU says the same thing by binding one and then the
         // other, and the split is what a draw call is.
@@ -472,7 +604,14 @@ fn shoot(
                 if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
                     continue;
                 }
-                rgb[(y as u32 * width + x as u32) as usize] = [texels[at], texels[at + 1], texels[at + 2]];
+                let texel = [texels[at], texels[at + 1], texels[at + 2]];
+                // The pass's own fragment stage, on the CPU — `hue::tint`. A
+                // picture drawn without it is a picture of the atlas rather
+                // than of the window: the classic frames write nearly every
+                // caption in `0x0386`, and the raw font is near-black.
+                let shown = openshard_client_render::hue::tint(&client.hues, Hue(quad.hue as u16), texel)
+                    .unwrap_or(texel);
+                rgb[(y as u32 * width + x as u32) as usize] = shown;
             }
         }
     }

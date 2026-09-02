@@ -488,6 +488,12 @@ impl Shell {
         self.desk.window_scale
     }
 
+    /// Which of the two status frames the player has chosen — the live copy,
+    /// for [`Self::window_scale`]'s reason.
+    pub fn status_frame(&self) -> crate::desk::StatusFrame {
+        self.desk.status_frame
+    }
+
     /// Show or hide the dev window — the strip's `dev` toggle, reached from a key.
     ///
     /// It has to come through here, and not through the app's own [`Desk`]: the
@@ -1179,7 +1185,7 @@ fn layout(root: &mut egui::Ui, frame: LayoutFrame<'_>) -> Request {
                         )
                     }
                     Tab::Audio => audio_panel(ui, &mut desk.audio, &mut request),
-                    Tab::Windows => windows_panel(ui, &mut desk.window_scale),
+                    Tab::Windows => windows_panel(ui, &mut desk.window_scale, &mut desk.status_frame),
                     Tab::Admin => {
                         admin_items_panel(
                             ui,
@@ -3859,8 +3865,15 @@ fn chat_panel(ui: &mut egui::Ui, settings: ChatPanel<'_>) {
 /// One knob for all of them rather than one per kind: see
 /// [`crate::desk::WindowScale`], whose doc says why an item that changed size
 /// on its way between two windows is the reason.
-fn windows_panel(ui: &mut egui::Ui, scale: &mut crate::desk::WindowScale) {
-    use crate::desk::WindowScale;
+fn windows_panel(
+    ui: &mut egui::Ui,
+    scale: &mut crate::desk::WindowScale,
+    status_frame: &mut crate::desk::StatusFrame,
+) {
+    use crate::desk::{
+        StatusFrame,
+        WindowScale,
+    };
 
     ui.label("Size");
     let mut factor = scale.factor();
@@ -3907,8 +3920,27 @@ fn windows_panel(ui: &mut egui::Ui, scale: &mut crate::desk::WindowScale) {
     );
 
     ui.separator();
+    ui.label("Status window");
+    ui.horizontal(|ui| {
+        for choice in [StatusFrame::Old, StatusFrame::Modern] {
+            ui.selectable_value(status_frame, choice, choice.label());
+        }
+    });
+    ui.label(
+        egui::RichText::new(
+            "Which frame the paperdoll's Status button opens. The classic one \
+             is 282x151 with its labels painted into the art; the modern one is \
+             the 560x196 AoS frame, whose six columns of icons include suit \
+             bonuses no item on this shard grants yet.",
+        )
+        .small()
+        .weak(),
+    );
+
+    ui.separator();
     if ui.button("back to the defaults").clicked() {
         *scale = WindowScale::default();
+        *status_frame = StatusFrame::Old;
     }
 }
 

@@ -20,6 +20,10 @@
 //! changed. It reads `state.ticks` and components, never a clock, so it replays.
 
 use openshard_config::CombatEra;
+use openshard_protocol::mobile::{
+    AosStatus,
+    Resistances,
+};
 use openshard_state::components::{
     Riding,
     body_is_female,
@@ -124,6 +128,25 @@ impl World {
             stat_cap: STAT_CAP,
             followers: derived.followers,
             followers_max: MAX_FOLLOWERS,
+            // The physical figure is `armor` above — that is the field ServUO
+            // writes the armour rating into before AoS and the physical
+            // resistance into after it. The other four are `NONE` because this
+            // shard reduces no elemental damage at all: there is no resistance
+            // system to read, and four zeroes are what a character on it
+            // genuinely resists, not a stand-in for a number nobody computed.
+            resistances: Resistances::NONE,
+            // Luck likewise: nothing on this shard grants it, so nothing rolls
+            // against it.
+            luck: 0,
+            // Not a constant, and not rolled here either: the same span
+            // `melee_blow` draws its number out of, so the window and the fight
+            // cannot quote different weapons.
+            damage: combat::melee_damage_range(&self.state, entity),
+            // Tithing is the paladin's currency, and there are no paladins yet.
+            tithing: 0,
+            // The AoS suit bonuses and the resistance caps. `NONE` for the
+            // resistances' reason: no item on this shard grants any of them.
+            aos: AosStatus::NONE,
         })
     }
 

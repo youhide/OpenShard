@@ -973,6 +973,8 @@ mod tests {
             hand:         None,
             has_keyboard: true,
             has_prompt:   false,
+            // A dialog does not read it; the field is the status window's.
+            status_form:  openshard_client_render::status::Form::Old,
         };
         let Some(Drawn::Dialog(drawn)) = pane.layout(&with_keyboard) else {
             panic!("a dialog whose gump is still in the view lays itself out");

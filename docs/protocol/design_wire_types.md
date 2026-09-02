@@ -145,7 +145,10 @@ and the two are kept in step by hand.
 | `target::MultiOffset::{x, y, z}` | components of one signed displacement; the enclosing type keeps it distinct from an absolute `Point` and keeps the three wire fields together |
 | `gump::GumpPoint::{x, y}` | the same argument in gump-space pixels, signed for the layout language's negative offsets — [N8 amendment 1](evidence/2026-08-31-the-newtype-sweep.md#amendments-forced-by-n8-the-sweep) |
 | `mobile::Vitals::{current, max}` | components of one bar — [N2 amendment 2](evidence/2026-08-31-the-newtype-sweep.md#amendments-forced-by-n2-mobilers) |
-| `mobile::MobileStatus::{strength, dexterity, intelligence, gold, armor, weight, max_weight, stat_cap, followers, followers_max}` | the status bar's quantities — [N2 amendment 3](evidence/2026-08-31-the-newtype-sweep.md#amendments-forced-by-n2-mobilers) |
+| `mobile::MobileStatus::{strength, dexterity, intelligence, gold, armor, weight, max_weight, stat_cap, followers, followers_max, luck, tithing}` | the status bar's quantities — [N2 amendment 3](evidence/2026-08-31-the-newtype-sweep.md#amendments-forced-by-n2-mobilers) |
+| `mobile::Resistances::{fire, cold, poison, energy}` | the same quantities, grouped: which four travel together is what the type says, and each member is a percentage the shard's rules bound |
+| `mobile::DamageRange::{min, max}` | components of one range — `Vitals`' argument, and its shape |
+| `mobile::AosStatus::*` (fifteen fields) | `0x11` type 6's tail, read positionally off the wire; the struct is what names them, and each is a [gameplay] percentage |
 | `vendor::BuyLine::price`, `vendor::SellLine::price` | gold: the `MobileStatus::gold` argument — [N5 amendment 1](evidence/2026-08-31-the-newtype-sweep.md#amendments-forced-by-n5-vendorrs) |
 | `login::ShardEntry::timezone` | a quantity, by the `MobileStatus` argument — [N6 amendment 8](evidence/2026-08-31-the-newtype-sweep.md#amendments-forced-by-n6-loginrs-seedrs-versionrs) |
 | `version::ClientVersion::{major, minor, revision, patch}` | components of one version, and not a packet struct — [N6 amendment 7](evidence/2026-08-31-the-newtype-sweep.md#amendments-forced-by-n6-loginrs-seedrs-versionrs) |

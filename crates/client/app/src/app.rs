@@ -911,6 +911,19 @@ impl App {
             .map_or(self.desk.window_scale, |shell| shell.window_scale())
     }
 
+    /// Which status frame the Status button opens — see
+    /// [`desk::StatusFrame`](crate::desk::StatusFrame).
+    ///
+    /// Read through the shell for [`Self::window_scale`]'s reason, and it is
+    /// the same trap: `App::desk` is the file as loaded, and the selector the
+    /// player actually moves is the shell's copy.
+    pub(crate) fn status_form(&self) -> openshard_client_render::status::Form {
+        self.shell
+            .as_ref()
+            .map_or(self.desk.status_frame, |shell| shell.status_frame())
+            .form()
+    }
+
     /// Put the eye back on the body and lock it there.
     ///
     /// Where the body is *drawn* this frame, not the tile it is nominally on:

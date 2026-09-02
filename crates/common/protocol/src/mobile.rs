@@ -229,6 +229,19 @@ pub enum Stat {
     Intelligence,
 }
 
+impl Stat {
+    /// The wire's number for this arrow — [`RawStat::validate`]'s inverse, and
+    /// what a client writes when the player moves one.
+    #[must_use]
+    pub const fn to_bits(self) -> u8 {
+        match self {
+            Self::Strength => 0,
+            Self::Dexterity => 1,
+            Self::Intelligence => 2,
+        }
+    }
+}
+
 /// Which stat a client's `0xBF 0x1A` named, exactly as sent.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct RawStat(pub u8);
@@ -588,6 +601,116 @@ pub struct MobileStatus {
     pub followers:     u8,
     /// The most pets that may follow.
     pub followers_max: u8,
+    /// The four resistances that are not [`armor`](Self::armor).
+    ///
+    /// Type 4 and up. The physical one shares [`armor`](Self::armor)'s field on
+    /// the wire — ServUO writes the armour rating there before AoS and the
+    /// physical resistance after it, and one number in one place is what the
+    /// client reads either way.
+    pub resistances:   Resistances,
+    /// Luck. Type 4 and up.
+    pub luck:          u16,
+    /// What the equipped weapon hits for, as the status window states it.
+    pub damage:        DamageRange,
+    /// Tithing points, the paladin's currency. Type 4 and up.
+    pub tithing:       u32,
+    /// The AoS block: caps and the percentage bonuses. Type 6 only.
+    pub aos:           AosStatus,
+}
+
+/// The resistances a status packet carries beside its armour figure.
+///
+/// Percentages, in the range the shard's own rules bound them to — this type
+/// only says which four numbers travel together, exactly as [`Vitals`] says
+/// that a current and a maximum do.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Resistances {
+    pub fire:   u16,
+    pub cold:   u16,
+    pub poison: u16,
+    pub energy: u16,
+}
+
+impl Resistances {
+    /// A mobile that resists nothing.
+    ///
+    /// Not a placeholder for "unknown": a shard with no resistance system at
+    /// all really does reduce no damage, and the status window is right to
+    /// show four zeroes for it.
+    pub const NONE: Self = Self {
+        fire:   0,
+        cold:   0,
+        poison: 0,
+        energy: 0,
+    };
+}
+
+/// The blow the status window quotes for the weapon in hand.
+///
+/// Both ends of the range travel together for [`Vitals`]' reason: a minimum
+/// without its maximum is not a smaller number, it is half of a range.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct DamageRange {
+    pub min: u16,
+    pub max: u16,
+}
+
+impl DamageRange {
+    /// An empty hand: nothing swung, so nothing quoted.
+    pub const BARE: Self = Self { min: 0, max: 0 };
+}
+
+/// `0x11` type 6's tail: fifteen shorts, in ServUO's `GetAOSStatus` order.
+///
+/// The order is the packet's, not an alphabet, because that is what makes the
+/// struct readable next to the encoder — and the client reads them positionally
+/// with no names on the wire to check against. ClassicUO's `PacketHandlers`
+/// reads exactly these fifteen, in this sequence.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct AosStatus {
+    /// Index 0-4: the caps the five resistances may be raised to.
+    pub max_physical:         u16,
+    pub max_fire:             u16,
+    pub max_cold:             u16,
+    pub max_poison:           u16,
+    pub max_energy:           u16,
+    /// Index 5-6: defence chance increase, and its cap.
+    pub defense_chance:       u16,
+    pub max_defense_chance:   u16,
+    /// Index 7-14: the percentage bonuses a suit adds.
+    pub hit_chance:           u16,
+    pub swing_speed:          u16,
+    pub damage_increase:      u16,
+    pub lower_reagent_cost:   u16,
+    pub spell_damage:         u16,
+    pub faster_cast_recovery: u16,
+    pub faster_casting:       u16,
+    pub lower_mana_cost:      u16,
+}
+
+impl AosStatus {
+    /// A character wearing nothing that grants any of these.
+    ///
+    /// The caps are zero too, and deliberately: a shard that has no suit
+    /// bonuses has no cap on them either, and inventing 70 here would be this
+    /// packet claiming a rule the shard does not have.
+    pub const NONE: Self = Self {
+        max_physical:         0,
+        max_fire:             0,
+        max_cold:             0,
+        max_poison:           0,
+        max_energy:           0,
+        defense_chance:       0,
+        max_defense_chance:   0,
+        hit_chance:           0,
+        swing_speed:          0,
+        damage_increase:      0,
+        lower_reagent_cost:   0,
+        spell_damage:         0,
+        faster_cast_recovery: 0,
+        faster_casting:       0,
+        lower_mana_cost:      0,
+    };
 }
 
 impl EncodePacket for MobileStatus {
@@ -629,21 +752,34 @@ impl EncodePacket for MobileStatus {
         out.u8(self.followers_max);
 
         if kind >= 4 {
-            // Resistances, luck, weapon damage, tithing — all zero until the
-            // systems that set them exist. The client only needs the shape.
-            for _ in 0..5 {
-                out.u16(0); // fire, cold, poison, energy, luck
-            }
-            out.u16(0); // damage min
-            out.u16(0); // damage max
-            out.u32(0); // tithing points
+            out.u16(self.resistances.fire);
+            out.u16(self.resistances.cold);
+            out.u16(self.resistances.poison);
+            out.u16(self.resistances.energy);
+            out.u16(self.luck);
+            out.u16(self.damage.min);
+            out.u16(self.damage.max);
+            out.u32(self.tithing);
         }
 
         if kind >= 6 {
-            // The AoS extended-status block: 15 shorts (0..=14). Zeroed.
-            for _ in 0..=14 {
-                out.u16(0);
-            }
+            // The AoS extended-status block: 15 shorts (0..=14), in the order
+            // ServUO's `GetAOSStatus` indexes them and ClassicUO reads them.
+            out.u16(self.aos.max_physical);
+            out.u16(self.aos.max_fire);
+            out.u16(self.aos.max_cold);
+            out.u16(self.aos.max_poison);
+            out.u16(self.aos.max_energy);
+            out.u16(self.aos.defense_chance);
+            out.u16(self.aos.max_defense_chance);
+            out.u16(self.aos.hit_chance);
+            out.u16(self.aos.swing_speed);
+            out.u16(self.aos.damage_increase);
+            out.u16(self.aos.lower_reagent_cost);
+            out.u16(self.aos.spell_damage);
+            out.u16(self.aos.faster_cast_recovery);
+            out.u16(self.aos.faster_casting);
+            out.u16(self.aos.lower_mana_cost);
         }
     }
 }
@@ -701,15 +837,46 @@ impl DecodePacket for MobileStatus {
         let followers = reader.u8()?;
         let followers_max = reader.u8()?;
 
-        if kind >= 4 {
-            // Resistances, luck, weapon damage, tithing: zeroed placeholders on
-            // the way out, so there is nothing here worth keeping on the way in.
-            reader.skip(5 * 2 + 2 + 2 + 4)?;
-        }
-        if kind >= 6 {
-            // The AoS extended-status block: 15 zeroed shorts.
-            reader.skip(15 * 2)?;
-        }
+        // Below type 4 the wire carries none of this, and the numbers a client
+        // draws for them are its own zeroes rather than the shard's — the same
+        // "the server didn't say" `max_weight` has above.
+        let (resistances, luck, damage, tithing) = if kind >= 4 {
+            let resistances = Resistances {
+                fire:   reader.u16()?,
+                cold:   reader.u16()?,
+                poison: reader.u16()?,
+                energy: reader.u16()?,
+            };
+            let luck = reader.u16()?;
+            let damage = DamageRange {
+                min: reader.u16()?,
+                max: reader.u16()?,
+            };
+            (resistances, luck, damage, reader.u32()?)
+        } else {
+            (Resistances::NONE, 0, DamageRange::BARE, 0)
+        };
+        let aos = if kind >= 6 {
+            AosStatus {
+                max_physical:         reader.u16()?,
+                max_fire:             reader.u16()?,
+                max_cold:             reader.u16()?,
+                max_poison:           reader.u16()?,
+                max_energy:           reader.u16()?,
+                defense_chance:       reader.u16()?,
+                max_defense_chance:   reader.u16()?,
+                hit_chance:           reader.u16()?,
+                swing_speed:          reader.u16()?,
+                damage_increase:      reader.u16()?,
+                lower_reagent_cost:   reader.u16()?,
+                spell_damage:         reader.u16()?,
+                faster_cast_recovery: reader.u16()?,
+                faster_casting:       reader.u16()?,
+                lower_mana_cost:      reader.u16()?,
+            }
+        } else {
+            AosStatus::NONE
+        };
 
         Ok(Self {
             serial,
@@ -728,6 +895,11 @@ impl DecodePacket for MobileStatus {
             stat_cap,
             followers,
             followers_max,
+            resistances,
+            luck,
+            damage,
+            tithing,
+            aos,
         })
     }
 }
@@ -973,19 +1145,70 @@ pub struct StatLocks {
     pub locks:  StatLockBits,
 }
 
+impl StatLocks {
+    /// The subcommand that means "here is where the three arrows point".
+    pub const SUBCOMMAND: u16 = 0x19;
+    /// The classic client's type byte; the enhanced client's is `5`.
+    const CLASSIC_TYPE: u8 = 2;
+}
+
 impl EncodePacket for StatLocks {
     const ID: u8 = 0xBF;
     const LENGTH: PacketLength = PacketLength::Fixed(12);
 
     fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
         out.u16(12); // this subcommand's own, constant length
-        out.u16(0x19);
-        out.u8(2); // the classic client's type; the enhanced one wants 5
+        out.u16(Self::SUBCOMMAND);
+        out.u8(Self::CLASSIC_TYPE);
         out.u32(self.serial.raw());
         out.u8(0);
         out.u8((self.locks.strength.to_bits() << 4)
             | (self.locks.dexterity.to_bits() << 2)
             | self.locks.intelligence.to_bits());
+    }
+}
+
+impl DecodePacket for StatLocks {
+    const ID: u8 = 0xBF;
+
+    /// The encoder's mirror, and the reason this client has arrows to draw at
+    /// all: the arrows are shard state, not something a status frame can work
+    /// out from the three numbers beside them.
+    ///
+    /// A type byte other than the classic one is refused rather than read past.
+    /// The enhanced client's type `5` carries a different body, and guessing at
+    /// it would put two of its bytes into this one's arrow byte — three arrows
+    /// pointing somewhere nobody chose.
+    fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
+        let subcommand = reader.u16()?;
+        if subcommand != Self::SUBCOMMAND {
+            return Err(DecodeError::UnknownValue {
+                field: "0xBF subcommand for stat locks",
+                value: u32::from(subcommand),
+            });
+        }
+        let kind = reader.u8()?;
+        if kind != Self::CLASSIC_TYPE {
+            return Err(DecodeError::UnknownValue {
+                field: "0xBF 0x19 extended-status type",
+                value: u32::from(kind),
+            });
+        }
+        let raw = reader.u32()?;
+        let serial = Serial::new(raw).ok_or(DecodeError::UnknownValue {
+            field: "0xBF 0x19 stat locks serial",
+            value: raw,
+        })?;
+        reader.skip(1)?; // the zero ServUO writes between the serial and the bits
+        let bits = reader.u8()?;
+        Ok(Self {
+            serial,
+            locks: StatLockBits {
+                strength:     SkillLock::from_bits((bits >> 4) & 0b11),
+                dexterity:    SkillLock::from_bits((bits >> 2) & 0b11),
+                intelligence: SkillLock::from_bits(bits & 0b11),
+            },
+        })
     }
 }
 
@@ -1015,6 +1238,29 @@ impl StatLockRequest {
             stat: RawStat(reader.u8()?),
             lock: RawStatLock(reader.u8()?),
         })
+    }
+
+    /// Encode the whole `0xBF` envelope for this request.
+    ///
+    /// What `crates/client/net` sends when a player clicks one of the status
+    /// window's arrows; this engine only ever decodes one, the same split
+    /// [`SkillLockRequest::encode`](crate::skill::SkillLockRequest::encode) has.
+    ///
+    /// **Unanswered by design**, and for the identical reason: the reference
+    /// client turns the arrow over on the click itself, so the shard sends no
+    /// confirmation and a caller that waited for one would draw the old face
+    /// forever. What the shard *does* send back is the next `0xBF 0x19` it has
+    /// cause to — which is why the request writes the arrow the player asked
+    /// for rather than trusting the frame's own copy to be refreshed.
+    #[must_use]
+    pub fn encode(self) -> Vec<u8> {
+        let mut out = PacketWriter::with_capacity(7);
+        out.u8(<StatLocks as EncodePacket>::ID);
+        out.u16(7); // id, length, subcommand, stat, lock
+        out.u16(Self::SUBCOMMAND);
+        out.u8(self.stat.0);
+        out.u8(self.lock.0);
+        out.into_bytes()
     }
 }
 
@@ -1422,6 +1668,35 @@ mod tests {
             stat_cap:      225,
             followers:     0,
             followers_max: 5,
+            // Every tail field distinct and non-zero, so a round trip that
+            // dropped or transposed one of them fails instead of matching a
+            // neighbour's zero.
+            resistances:   Resistances {
+                fire:   12,
+                cold:   8,
+                poison: 3,
+                energy: 5,
+            },
+            luck:          140,
+            damage:        DamageRange { min: 5, max: 11 },
+            tithing:       40,
+            aos:           AosStatus {
+                max_physical:         70,
+                max_fire:             71,
+                max_cold:             72,
+                max_poison:           73,
+                max_energy:           74,
+                defense_chance:       15,
+                max_defense_chance:   45,
+                hit_chance:           20,
+                swing_speed:          25,
+                damage_increase:      30,
+                lower_reagent_cost:   35,
+                spell_damage:         40,
+                faster_cast_recovery: 4,
+                faster_casting:       2,
+                lower_mana_cost:      8,
+            },
         }
     }
 
@@ -1580,6 +1855,55 @@ mod tests {
         // female(1) str(2) dex(2) int(2) => stamina starts at byte 50.
         let stamina = u16::from_be_bytes([bytes[50], bytes[51]]);
         assert_eq!(stamina, 90, "the client reads run-eligibility from here");
+    }
+
+    /// The tail the modern status window is made of. Every one of these fields
+    /// used to be written as a zero and skipped on the way back, so the client
+    /// had nothing to draw in twenty of the frame's fields and no way to tell
+    /// "the shard says none" from "this decoder threw it away".
+    #[test]
+    fn a_type_six_status_round_trips_its_resistances_and_aos_block() {
+        let sent = a_status();
+        let bytes = encode_packet(&sent, ClientVersion::TOL);
+        let mut reader = PacketReader::new(&bytes[3..]);
+        let back = MobileStatus::decode_body(&mut reader, ClientVersion::TOL).expect("our own bytes decode");
+        assert_eq!(back, sent);
+    }
+
+    /// A type-4 client is never sent the AoS block, so what comes back is the
+    /// "nothing granted" value rather than whatever the sender happened to
+    /// hold — the same honesty `max_weight` has below type 5.
+    #[test]
+    fn a_type_four_status_carries_the_resistances_but_no_aos_block() {
+        let sent = a_status();
+        let aos = ClientVersion::new(4, 0, 0, 0);
+        let bytes = encode_packet(&sent, aos);
+        let mut reader = PacketReader::new(&bytes[3..]);
+        let back = MobileStatus::decode_body(&mut reader, aos).expect("our own bytes decode");
+        assert_eq!(back.resistances, sent.resistances, "type 4 carries these");
+        assert_eq!(back.luck, sent.luck);
+        assert_eq!(back.damage, sent.damage);
+        assert_eq!(back.tithing, sent.tithing);
+        assert_eq!(back.aos, AosStatus::NONE, "type 4 has no room for them");
+    }
+
+    /// The arrows a client draws beside its three stats come from here and
+    /// nowhere else — they cannot be worked out from the numbers themselves.
+    #[test]
+    fn the_stat_lock_arrows_survive_the_wire() {
+        let sent = StatLocks {
+            serial: Serial::new(0x0000_0007).unwrap(),
+            locks:  StatLockBits {
+                strength:     SkillLock::Locked,
+                dexterity:    SkillLock::Down,
+                intelligence: SkillLock::Up,
+            },
+        };
+        let bytes = encode_packet(&sent, version());
+        let mut reader = PacketReader::new(&bytes[3..]);
+        let back =
+            <StatLocks as DecodePacket>::decode_body(&mut reader, version()).expect("our own bytes decode");
+        assert_eq!(back, sent);
     }
 
     #[test]

@@ -456,6 +456,50 @@ impl FontFace {
     }
 }
 
+/// Which of the reference client's two status windows this client draws.
+///
+/// A setting and not a per-window state, exactly as it is in the reference: the
+/// two frames say the same eleven facts, and which of them a player wants is a
+/// preference they set once — a client that opened whichever frame the last
+/// press happened to leave behind would be answering the question twice. Kept
+/// on [`Desk`] for [`Light`]'s reason: somebody who has decided they want the
+/// compact frame should not have to decide again every launch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StatusFrame {
+    /// `StatusGumpOld` — the 282×151 plate whose labels are painted into the
+    /// art.
+    Old,
+    /// `StatusGumpModern` — the 560×196 AoS frame with six columns of icons.
+    Modern,
+}
+
+impl StatusFrame {
+    /// What the layout module calls this choice.
+    ///
+    /// Two enums rather than one because they answer to different owners: this
+    /// one is a saved setting and lives in a RON file, and
+    /// [`status::Form`](openshard_client_render::status::Form) is the render
+    /// crate's own vocabulary, which has no serde and no business gaining one
+    /// for a client's preferences file.
+    #[must_use]
+    pub const fn form(self) -> openshard_client_render::status::Form {
+        match self {
+            Self::Old => openshard_client_render::status::Form::Old,
+            Self::Modern => openshard_client_render::status::Form::Modern,
+        }
+    }
+
+    /// Its name on the F1 selector.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Old => "classic",
+            Self::Modern => "modern",
+        }
+    }
+}
+
 /// One of the ten bitmap faces a client ships in `fonts.mul`.
 ///
 /// Kept separate from the wire [`Font`]: a packet may carry any `u16` and is
@@ -743,6 +787,8 @@ pub struct Desk {
     pub override_all_fonts: bool,
     /// The classic face used while [`Desk::override_all_fonts`] is on.
     pub bitmap_font:        BitmapFont,
+    /// Which status window the Status button opens — [`StatusFrame`].
+    pub status_frame:       StatusFrame,
     /// What the audio mixer has been turned to — [`Audio`].
     pub audio:              Audio,
     /// Movement preferences, saved beside the rest of the client UI state.
@@ -1246,6 +1292,11 @@ impl Default for Desk {
             font_face:          FontFace::default(),
             override_all_fonts: false,
             bitmap_font:        BitmapFont::default(),
+            // The compact frame, which is what a shard of this era looks like
+            // it wants: the modern one has six columns for suit bonuses no item
+            // here grants yet, and a wall of zeroes is a worse first run than a
+            // small window.
+            status_frame:       StatusFrame::Old,
             light:              Light::new(),
             window:             None,
             chat:               Chat::default(),
@@ -1453,6 +1504,9 @@ mod tests {
             font_face:          FontFace::Classic,
             override_all_fonts: true,
             bitmap_font:        BitmapFont::new(7),
+            // Deliberately not the default, so the round trip proves the field
+            // is written and read rather than reconstructed by `Desk::default`.
+            status_frame:       StatusFrame::Modern,
             audio:              Audio {
                 effects: 0.25,
                 music:   0.75,
@@ -1508,6 +1562,7 @@ mod tests {
         assert_eq!(back.font_face, desk.font_face);
         assert_eq!(back.override_all_fonts, desk.override_all_fonts);
         assert_eq!(back.bitmap_font, desk.bitmap_font);
+        assert_eq!(back.status_frame, desk.status_frame);
         assert_eq!(back.audio, desk.audio);
         assert_eq!(back.movement.always_run, desk.movement.always_run);
         assert_eq!(back.admin_catalogue, desk.admin_catalogue);

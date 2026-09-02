@@ -344,6 +344,14 @@ pub struct PaneFrame<'a> {
     /// out from under the number the player is choosing, and the release that
     /// dismissed the prompt's own window must not put it down.
     pub has_prompt:   bool,
+    /// Which of the two status frames the player has chosen.
+    ///
+    /// The one setting a window reads, and it is here rather than on the pane
+    /// that draws it because the *choice* belongs to `client_ui.ron` — a copy
+    /// held by [`status::StatusPane`] would be a second answer, correct only
+    /// until the setting moved. Every other pane ignores it, exactly as every
+    /// pane but the dialog ignores [`PaneFrame::has_keyboard`].
+    pub status_form:  openshard_client_render::status::Form,
 }
 
 /// Everything a pane may read while it answers one input, and nothing it may

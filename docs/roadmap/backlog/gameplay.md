@@ -73,6 +73,24 @@ started.
   for it (`mobile::MobileStatus`'s own doc says so). The fix is the shape mana
   took — one `set_stamina` door beside `set_mana`, `0xA3` beside `0xA1`/`0xA2`,
   and this client's pool moving out of `Status` to `Player` as mana's did.
+- **The status window now draws twenty numbers this shard always answers zero
+  for.** `0x11`'s AoS tail — four elemental resistances, luck, tithing, and the
+  fifteen-short type-6 block (the five resistance caps, defence chance and its
+  cap, and the eight suit bonuses) — is decoded and drawn now rather than
+  skipped, so the modern frame states what the shard says instead of nothing.
+  What the shard says is `Resistances::NONE` and `AosStatus::NONE`, built in
+  `tick/status.rs`: there is no resistance system, no luck, no tithing and no
+  item property that grants a suit bonus. That is honest for a pre-AoS shard and
+  is exactly why the classic frame is the default, but it means the modern frame
+  has six columns of zeroes until an item-property system exists. Weapon damage
+  is the one that is already real (`combat::melee_damage_range`), and the
+  physical figure rides in `armor` as it always has.
+- **Neither status frame draws its buff-icon button.** The reference client puts
+  one at `(20, 42)` on the classic frame and `(40, 50)` on the modern one, and it
+  opens the buff/debuff icon window. There is no buff window and no `0xDF` on the
+  wire here, so the button is left out rather than drawn wired to nothing —
+  `crates/client/render/src/status.rs`. It is two pictures and one `Effect` the
+  day buffs exist.
 - **Nothing but a player ever casts.** `crates/server/ai` has no notion of a
   spell: no mana on a creature, no choice of spell in `fight_phase`, no cast in
   the beat. A lich, a mage-brigand and a healing dragon are all impossible, so the

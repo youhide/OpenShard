@@ -63,6 +63,7 @@ pub mod impostor;
 pub mod interiors;
 pub mod items;
 pub mod light;
+pub mod lock;
 pub mod lod;
 pub mod mesh;
 pub mod mesh_face;

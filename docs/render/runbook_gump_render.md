@@ -48,7 +48,12 @@ the reusable 9-slice art is being prepared.
 - `Tile` repeats an art source without rescaling it.
 - `Resize` is the client’s nine-piece `resizepic`, including its non-obvious
   piece order and seam offsets.
-- `Label` uses the client’s bitmap font; it defaults to face `1`.
+- `Label` uses the client’s bitmap font; it defaults to face `1`. Its optional
+  `hue` is a `hues.mul` index spelled the way the wire spells it — `0` leaves
+  the font’s own greys alone, anything else recolours the glyphs exactly as the
+  client does, through the renderer’s own `hue::tint` (the CPU port of
+  `gump.wgsl`’s fragment branch). The classic frames write nearly every caption
+  in `0x0386`, and without it a preview of one is unreadably dark.
 - `Asset` copies an RGBA atlas rectangle at native size. It is intended for
   fixed controls such as a scroll track or icon.
 - `ScaledAsset` copies an RGBA atlas rectangle into a fixed target size using

@@ -93,6 +93,31 @@ impl HueRamp {
     }
 }
 
+/// One texel through one hue, on the CPU — `gump.wgsl`'s fragment branch,
+/// ported for everything that composites without a GPU: the offline scene
+/// renderer and the layout screenshots.
+///
+/// `None` means "leave this texel alone", which happens for a partial hue over
+/// a pixel that already has a colour of its own — a dyed robe keeps the
+/// wearer's skin. A caller that has no ramp for the hue leaves the texel alone
+/// too, which is what the shader's out-of-range row would have done.
+///
+/// The rung is the source pixel's **red channel**, not its brightness: the
+/// atlas stores each texel's original five-bit index widened to eight bits, so
+/// `round(red * 31 / 255)` recovers the index exactly. See this module's own
+/// header for why that is a bijection.
+#[must_use]
+pub fn tint(hues: &Hues, hue: Hue, texel: [u8; 3]) -> Option<[u8; 3]> {
+    if openshard_uofiles::hues::is_partial(hue) && !(texel[0] == texel[1] && texel[1] == texel[2]) {
+        return None;
+    }
+    let entry = hues.get(hue)?;
+    // `+ 127` is the half the shader's `round` adds before truncating.
+    let rung = ((u32::from(texel[0]) * 31 + 127) / u32::from(u8::MAX)) as usize;
+    let Rgb8 { red, green, blue } = entry.colors.get(rung)?.rgb8();
+    Some([red, green, blue])
+}
+
 fn write_pixel(pixels: &mut [u8], column: u32, row: u32, height: u32, color: Color16) {
     let at = ((row * COLORS_PER_HUE as u32 + column) * 4) as usize;
     let Rgb8 { red, green, blue } = color.rgb8();
