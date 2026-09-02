@@ -22,34 +22,30 @@ so migrating a domain is also what empties its section below.
 | Rendering and lighting | [`docs/render/README.md`](../../docs/render/README.md), with [`plans/render/`](../render/lighting/PLAN.md) for what is not built |
 | The protocol | ranked, [`docs/protocol/README.md`](../../docs/protocol/README.md) § what is open |
 | The server | ranked, [`docs/server/README.md`](../../docs/server/README.md) § what is open, with [`plans/server/operations/PLAN.md`](../server/operations/PLAN.md) for what is not built |
-| Items · combat · housing · npc | the sections below, until each is migrated |
+| Items and crafting | ranked, [`docs/items/README.md`](../../docs/items/README.md) § what is open, with [`plans/items/item_identity/PLAN.md`](../items/item_identity/PLAN.md) for what is not built |
+| Combat · housing · npc | the sections below, until each is migrated |
 
 ## Next
 
-**Migrate the remaining domains.** Four areas still have their documents flat in
-`docs/` and their phase records under `docs/roadmap/`: `items`, `combat`,
-`housing`, `npc`. Each is one batch — decisions into `design_*`, phase records
-and "amendments forced by" into `evidence/`, what is open into a domain README —
-and none of them blocks another. The batch that claims a domain also takes its
-phase file out of `docs/roadmap/` and its section out of this page.
+**Migrate the remaining domains.** Three areas still have their documents flat in
+`docs/` and their phase records under `docs/roadmap/`: `combat`, `housing`,
+`npc`. Each is one batch — decisions into `design_*`, phase records and
+"amendments forced by" into `evidence/`, what is open into a domain README — and
+none of them blocks another. The batch that claims a domain also takes its phase
+file out of `docs/roadmap/` and its section out of this page.
 
-The order to take them in is cheapest-first: `items`, then `combat`, `housing`,
-`npc`. All four are served by one file, [`docs/roadmap/06-gameplay/`](../../docs/roadmap/06-gameplay/README.md),
-so the first of them has to decide what happens to the parts of it that belong to
-the other three — the `server` batch hit the same shape and left the shared file
-where it was until its own rows had somewhere to go.
+The order to take them in is cheapest-first: `combat`, then `housing`, `npc`.
+All three are served by one file,
+[`docs/roadmap/06-gameplay/`](../../docs/roadmap/06-gameplay/README.md), and the
+`items` batch answered what happens to it the way `server` did: take the two
+subject files that belong to you, leave the other ten and the shared
+`backlog/gameplay.md` where they are, and let the last domain out take the
+directory with it. `backlog/gameplay.md` in particular is one record whose rows
+belong to four domains at once; each batch lifts its own rows into its README's
+"what is open" without cutting the record itself.
 
 ## Gameplay
 
-- [ ] Replace `Graphic + Hue` as item identity with `ItemKindId + MaterialId`,
-      migrate persistence and the item lifecycle, then make crafting a typed
-      recipe graph — design and staged plan: [Item kinds, materials, and recipe
-      graph](../../docs/item_kind.md).
-- [ ] Make item ownership and quantities atomic, index container membership,
-      withdraw craft ingredients from eligible nearby boxes, and hold the whole
-      lifecycle against a reference model with property tests — staged plan:
-      [Item ownership, container indexes, and atomic
-      crafting](../../docs/item_transactions_plan.md).
 - [ ] Complete classic-client per-weapon and per-body animations.
 - [ ] Finish the remaining usable skills and exact skill/spell presentation.
 - [ ] Add summons, the deferred spell subsystems, and adjacent-tile quarry

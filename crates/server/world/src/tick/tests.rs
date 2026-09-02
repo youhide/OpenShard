@@ -23954,8 +23954,9 @@ fn a_house_with_the_addon(
 ///
 /// Before the addon grouping existed, a release unpinned exactly the component
 /// it was aimed at: half an oven left standing, nothing refunded, and no way to
-/// reassemble it (docs/crafting.md's review, point 3). The rule copied here is
-/// ServUO's `BaseAddon`, which deletes itself whole and re-deeds.
+/// reassemble it (docs/items/evidence/2026-09-02-the-crafting-review.md, point
+/// 3). The rule copied here is ServUO's `BaseAddon`, which deletes itself whole
+/// and re-deeds.
 ///
 /// The release is aimed at the **second** component on purpose — the group is
 /// named by the first one's serial, so aiming at the root would pass even if the
@@ -24487,7 +24488,8 @@ fn a_restored_spinning_wheel_is_not_left_turning() {
 ///
 /// An ordinary locked-down item never registers itself in the facet's
 /// obstruction index the way a wall or a door does (see
-/// `World::addon_tile_is_free`'s doc, and docs/crafting.md's review, point 3),
+/// `World::addon_tile_is_free`'s doc, and
+/// docs/items/evidence/2026-09-02-the-crafting-review.md, point 3),
 /// so without a direct check against the house's own storage list a second
 /// deed would stack invisibly on the components the first one already placed.
 #[test]

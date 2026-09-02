@@ -1,4 +1,16 @@
-# Item tooltips
+# The tooltip becomes a property card
+
+What the client draws today is what the first paragraph below calls the thing to
+replace: an unframed stack of text at the cursor, from an `App::hover_tooltip`
+that returns `Vec<String>`. The protocol half is built and is not in scope here —
+`0xDC` announces a revision, `0xD6` supplies the list, `Tooltips` deduplicates by
+`(Serial, revision)` and `WorldView::tooltips` is the cache. What is not built is
+everything between that cache and the screen.
+
+What is built in this area is [`docs/client/README.md`](../../../docs/client/README.md);
+the record of how the current tooltip landed is
+[`docs/client/evidence/2026-08-15-tooltips.md`](../../../docs/client/evidence/2026-08-15-tooltips.md).
+This page is only what is not.
 
 ## Outcome
 

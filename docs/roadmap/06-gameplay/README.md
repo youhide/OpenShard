@@ -22,10 +22,16 @@ benchmark is [`05-scripting.md`](../../server/evidence/2026-08-24-the-scripting-
 
 ## Contents
 
-- [Items](items.md)
+Two subjects have left: **Items** and **Crafting** are records in the migrated
+`items` domain now —
+[`items/evidence/2026-08-24-the-items-phase.md`](../../items/evidence/2026-08-24-the-items-phase.md)
+and
+[`items/evidence/2026-08-24-the-crafting-phase.md`](../../items/evidence/2026-08-24-the-crafting-phase.md)
+— and what is open about them is ranked in
+[`items/README.md`](../../items/README.md).
+
 - [Combat](combat.md)
 - [Skills](skills.md)
-- [Crafting](crafting.md)
 - [Magic](magic.md)
 - [AI](ai.md)
 - [Chat and world administration](chat.md)

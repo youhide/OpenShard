@@ -302,7 +302,9 @@ policy.
 The tick admits at most 256 command work units and 32 coalesced catalogue opens.
 Unadmitted work remains FIFO for a later tick; a gameplay mutation is never
 paused halfway. The complete contract, limits, release measurements, and
-property model live in [`item_transactions_plan.md`](item_transactions_plan.md).
+property model live in [`items/design_transactions.md`](items/design_transactions.md),
+and the release measurements are in
+[`items/evidence/2026-08-31-the-transaction-stages.md`](items/evidence/2026-08-31-the-transaction-stages.md).
 
 ## Events
 

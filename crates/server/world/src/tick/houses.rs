@@ -81,7 +81,8 @@ impl World {
         };
         // Read from `deco_addons.json` through the same table the world's own
         // pre-placed decoration is flattened from, so this geometry cannot drift
-        // from what already stands on the map — see docs/crafting.md's review.
+        // from what already stands on the map — see
+        // docs/items/evidence/2026-09-02-the-crafting-review.md, point 5.
         let parts: Vec<crate::decoration::AddonComponent> = match addon {
             AddonKind::StoneOvenEast => {
                 crate::decoration::addon_components("StoneOvenEastAddon")
@@ -270,11 +271,12 @@ impl World {
     /// knows about every one of them.
     ///
     /// **What `can_fit` cannot see**: an ordinary locked-down item never
-    /// registers there (see docs/crafting.md's review) — a second oven, or any
-    /// other piece of house furniture, stacks on the first invisibly as far as
-    /// the obstruction index is concerned. Asked directly against the house's
-    /// own storage list instead, which is small and already loaded to check
-    /// the allowance a few lines up.
+    /// registers there (see
+    /// docs/items/evidence/2026-09-02-the-crafting-review.md, point 3) — a
+    /// second oven, or any other piece of house furniture, stacks on the first
+    /// invisibly as far as the obstruction index is concerned. Asked directly
+    /// against the house's own storage list instead, which is small and already
+    /// loaded to check the allowance a few lines up.
     fn addon_tile_is_free(&self, facet: Facet, house: EntityId, graphic: Graphic, point: Point) -> bool {
         let tile = Tile::new(point.x, point.y);
         let height = i32::from(self.state.tiles().static_tile(graphic.0).height.max(1));

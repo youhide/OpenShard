@@ -52,7 +52,7 @@ answer: where the code lives. A topic is a subsystem with a canon of its own.
 | [`protocol/`](protocol/README.md) | `common/protocol` | **migrated** — one 1,662-line sweep plan and its two siblings split into three design documents and four records; nothing archived, because none of it was superseded |
 | [`server/`](server/README.md) | `server/server`, `gateway`, `login`, `persistence`, `state` | **migrated** — three living plans and six roadmap phases split into three design documents and ten records; nothing archived, because none of it was superseded |
 | [`world/`](world/README.md) | `server/world`, `common/movement` (search), `common/map`, `common/basemap`, `common/tiles`, `common/uofiles` | **migrated** — the consolidation it replaces is in [`archive/world/`](archive/world/README.md) |
-| `items/` | `server/items`, `server/crafting` | not migrated |
+| [`items/`](items/README.md) | `server/items`, `server/crafting` | **migrated** — two living plans and a reader's map split into three design documents and eight records; nothing archived, because none of it was superseded |
 | `combat/` | `server/combat`, `skills`, `magic` | not migrated |
 | `housing/` | `server/housing`, boats | not migrated |
 | `npc/` | `server/npc`, `ai`, `quests`, `guilds`, chat | not migrated |

@@ -30,19 +30,21 @@ in [`docs/README.md`](../README.md).
 
 | Phase | Record | Domain waiting to claim it |
 |---|---|---|
-| 6. Gameplay | [`06-gameplay/`](06-gameplay/README.md) | `items/`, `combat/`, `housing/`, `npc/` |
+| 6. Gameplay | [`06-gameplay/`](06-gameplay/README.md) | `combat/`, `housing/`, `npc/` |
 
-One file for four domains, which is the thing that makes this the last and
-awkward batch: whichever domain goes first has to decide what happens to the
-eleven subject files under it that belong to the other three. `server/` met the
-same shape and answered it by leaving the shared file alone until every row in it
-had somewhere to go.
+One file for what was four domains, which is the thing that makes this the last
+and awkward batch. `items/` went first on 2026-09-03 and answered it the way
+`server/` had: take the two subject files that are yours — Items and Crafting —
+and leave the other ten where they are. The last domain out takes the directory
+with it.
 
 Beside it, two backlog records that are still the only home their subject has,
 and one policy:
 
 - [`backlog/gameplay.md`](backlog/gameplay.md) — the data-table and
-  Felucca-converter findings.
+  Felucca-converter findings. Its rows belong to four domains at once, so a
+  batch lifts its own rows into its README's "what is open" rather than cutting
+  the record: `items/` did that on 2026-09-03 and left the file where it is.
 - [`backlog/later.md`](backlog/later.md) — the ideas that wait for an engine
   that stands on its own.
 - [`client-files.md`](client-files.md) — the policy on external client files:
@@ -51,4 +53,6 @@ and one policy:
 The `server` batch took phases 0, 2, 4, 5, 7 and 8 and the licensing backlog out
 of here on 2026-09-03; they are records in
 [`docs/server/evidence/`](../server/README.md) now, and what is open about that
-domain is ranked in [`docs/server/README.md`](../server/README.md).
+domain is ranked in [`docs/server/README.md`](../server/README.md). The `items`
+batch took the Items and Crafting subjects of phase 6 the same day, into
+[`docs/items/evidence/`](../items/README.md).

@@ -555,9 +555,13 @@ temporarily unavailable, and the world tick rebuilds at most 256 root/item work
 units before publishing a complete new epoch. Opening or highlighting a result
 rechecks the actor's current indexed house and standing, the root's current
 ground coverage and lockdown, every canonical containment edge to the pile, its
-identity, and the epoch. The server-side selector/page API is built; the
-OpenShard client's catalogue-backed search window and wire exchange remain the
-presentation half tracked in `docs/item_transactions_plan.md` A6a.
+identity, and the epoch. Both halves are built: the server's bounded
+selector/page API, and the OpenShard client's Ctrl+I window, which resolves text
+and category filters against its own static item catalogue and keeps pagination
+presentation-only. The stage that built it is A6a in
+[`items/evidence/2026-08-31-the-transaction-stages.md`](items/evidence/2026-08-31-the-transaction-stages.md);
+the model is
+[`items/design_transactions.md`](items/design_transactions.md) § `HouseInventoryIndex`.
 
 ---
 

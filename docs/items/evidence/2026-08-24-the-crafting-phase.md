@@ -1,6 +1,6 @@
 # Crafting
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+[Gameplay index](../../roadmap/06-gameplay/README.md) · [Roadmap](../../roadmap/README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - [x] `crafting` — **making things, and the 532 recipes to make.** The pillar the
   harvest slice existed for: mining paid a player in ore and nothing in the

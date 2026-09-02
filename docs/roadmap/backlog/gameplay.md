@@ -108,7 +108,7 @@ started.
   Direct crafting from house boxes was deliberately rejected as a separate
   access-policy feature, not left half-built behind the search index. The
   contracts and release evidence are in
-  [`item_transactions_plan.md`](../../item_transactions_plan.md).
+  [`item_transactions_plan.md`](../../items/design_transactions.md).
 - ~~**Travel.**~~ Landed; see **Travel** in §6 `magic`. Still open from that
   entry: Sacred Journey, the moon-phase gates, red/young restrictions, ship-mark
   runes, and a tooltip that refreshes when a property changes — which travel gave

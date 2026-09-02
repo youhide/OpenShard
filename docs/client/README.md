@@ -386,7 +386,10 @@ most likely to want:
 [`plans/client/sessions`](../../plans/client/sessions/PLAN.md),
 [`mobile_picking`](../../plans/client/mobile_picking/PLAN.md),
 [`camera`](../../plans/client/camera/PLAN.md),
-[`lod`](../../plans/client/lod/PLAN.md).
+[`lod`](../../plans/client/lod/PLAN.md),
+[`tooltips`](../../plans/client/tooltips/PLAN.md) — the hover becoming one
+framed property card instead of a stack of strings at the cursor; it arrived
+here with the `items` migration, which is where it had been filed.
 
 **Neighbours.** [`render/README.md`](../render/README.md) is what draws a lit
 frame; [`world/README.md`](../world/README.md) owns the map, the search over it,
