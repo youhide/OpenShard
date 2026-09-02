@@ -568,7 +568,7 @@ hook is synchronous — a tick never awaits.
 The benchmark is the point: a hook call costs on the order of a couple of hundred
 nanoseconds, so ten thousand mobiles each firing a hook per tick spend a
 single-digit-millisecond slice of the 25ms budget. It fits. Numbers and method
-are in `docs/roadmap.md` §5.
+are in [`roadmap/05-scripting.md`](roadmap/05-scripting.md).
 
 `ScriptEngine::load` doubles as hot reload — re-evaluating rebinds the hooks in
 the live isolate — and `DenoEngine::reload_if_changed` polls a watched file's

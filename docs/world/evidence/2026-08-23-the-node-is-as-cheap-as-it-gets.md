@@ -111,7 +111,8 @@ serialised, and `ROUTING_VERSION` stays 4. The only production change is one
 openshard-movement --all-targets` is silent.
 
 **Not ours and still there**, exactly as the previous handoff filed them in
-[`roadmap.md`](../../roadmap.md): a `needless_borrow` in
+[the engineering findings](../../client/evidence/2026-08-27-engineering-follow-up-findings.md):
+a `needless_borrow` in
 `common/uofiles/src/map.rs`, three borrowed expressions in
 `client/render/tests/traced.rs`, and a 640-byte enum variant in
 `client/app/src/link.rs`.
@@ -132,7 +133,8 @@ reaching a connected client. Its precondition landed with
 where in the tick**.
 
 **One thing this session filed rather than fixed**, in
-[`roadmap.md`](../../roadmap.md): `step_cost`'s `expand` helper is a second copy
+[the engineering findings](../../client/evidence/2026-08-27-engineering-follow-up-findings.md):
+`step_cost`'s `expand` helper is a second copy
 of the diagonal flank rule, and three of its rows now go through it. It is the
 instrument the plan measures with, so a drift between it and `steps_out_of`
 would be a wrong number rather than a failing test — the same class as

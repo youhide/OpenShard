@@ -1,6 +1,8 @@
 //! **What a ship is made of, read twice.**
 //!
-//! `roadmap.md`'s pier-and-bridge report has three suspects left after the
+//! The pier-and-bridge report
+//! (`docs/world/evidence/2026-08-24-the-movement-surface-investigation.md`) has
+//! three suspects left after the
 //! `landCheck` mechanism was refuted, and this is inside the first of them: *a
 //! boat moored at a pier*, which is the one shape that puts a live surface
 //! beside a body standing on map terrain. Both surveys that did the refuting
@@ -867,7 +869,8 @@ fn swim_off(
 
 /// **A ship moored at a real pier, and every step off that pier.**
 ///
-/// `roadmap.md`'s first remaining suspect for the 2026-08-02 report, measured
+/// The first remaining suspect for the 2026-08-02 report
+/// (`docs/world/evidence/2026-08-24-the-movement-surface-investigation.md`), measured
 /// rather than reasoned about. The two surveys that refuted the `landCheck`
 /// mechanism both walk the bare map with no overlay at all, and this is the
 /// overlay they could not see: over every pier on facet 0 with sea beside it, a

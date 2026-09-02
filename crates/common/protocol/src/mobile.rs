@@ -67,7 +67,8 @@ use crate::world::Point;
 ///
 /// [`IGNORE_MOBILES`](Self::IGNORE_MOBILES), because the shard now has a rule
 /// the client would otherwise contradict. A body in the way stops a step
-/// (`docs/roadmap.md`, *a mobile is not an obstacle*) and staff are exempt, and
+/// (`docs/world/evidence/2026-08-24-mobiles-and-the-shove-rule.md`, *a mobile
+/// is not an obstacle*) and staff are exempt, and
 /// the client applies its own copy of that rule to what it draws and to what it
 /// predicts — so without this bit a game master walking into an NPC is allowed
 /// by the shard and refused by the client they are looking at. ServUO carries

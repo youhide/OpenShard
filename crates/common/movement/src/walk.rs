@@ -608,7 +608,8 @@ fn landing(footing: &Footing<'_>, stance: Stance, to: Point) -> Option<Point> {
 /// [`climbed`] are the two entrances to the live layer, and which one a tile
 /// gets is decided by whether the *map* had anything to say about it — so a
 /// limit on one and not the other made the reachability of a house's third
-/// storey depend on whether there was water under it. `roadmap.md` filed that
+/// storey depend on whether there was water under it.
+/// `docs/world/evidence/2026-08-23-the-world-and-map-backlog.md` filed that
 /// under R3 and doubted a reach filter could be the fix, on the grounds that
 /// `aboard` exists for a body stepping *down* from a mast. It can:
 /// [`Cover::reach`] of a flat surface is its own height, so everything below the
@@ -766,8 +767,8 @@ pub fn can_stand(footing: &Footing<'_>, tile: Tile, z: i32, height: i32) -> bool
 /// morning are all things the map does not have and a step already knows about.
 /// Put a body on a moored ship through the map alone and there is nothing there
 /// to stand on — it lands in the sea, by construction. That is this function's
-/// whole reason to exist, and `roadmap.md`'s third suspect for the 2026-08-02
-/// pier report.
+/// whole reason to exist, and the third suspect for the 2026-08-02 pier report
+/// (`docs/world/evidence/2026-08-24-the-movement-surface-investigation.md`).
 ///
 /// # The two arms, and why the first one is a step
 ///
@@ -1253,7 +1254,9 @@ mod tests {
     /// or a ship laying a surface twenty above the shore was stepped onto from
     /// the shore in one step.
     ///
-    /// Filed under R3 in `roadmap.md`, which doubted a reach filter could be the
+    /// Filed under R3 in
+    /// `docs/world/evidence/2026-08-23-the-world-and-map-backlog.md`, which
+    /// doubted a reach filter could be the
     /// fix because `aboard` exists for a body stepping *down* onto a deck from a
     /// mast. The last two assertions are why that objection does not hold:
     /// [`Cover::reach`] of a flat surface is its own height, so everything below
@@ -1347,7 +1350,8 @@ mod tests {
     /// **A body put on a moored ship's deck, and the map alone cannot say there
     /// is one.**
     ///
-    /// `roadmap.md`'s third suspect for the 2026-08-02 pier report, pinned: an
+    /// The third suspect for the 2026-08-02 pier report
+    /// (`docs/world/evidence/2026-08-24-the-movement-surface-investigation.md`), pinned: an
     /// arrival — a login, a spawn, a gate, a teleport — is not a step, and every
     /// rule the shard had for one read the bare map. Over open water the map
     /// answers "nothing to stand on", correctly, right up until a ship is moored

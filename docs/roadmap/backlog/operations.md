@@ -1,6 +1,6 @@
 # Operations backlog
 
-[Backlog](README.md) · [Roadmap](../README.md)
+[Backlog](../../../plans/roadmap/PLAN.md) · [Roadmap](../README.md)
 
 ## Licensing — backlog
 

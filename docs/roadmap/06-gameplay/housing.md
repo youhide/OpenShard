@@ -1,6 +1,6 @@
 # Housing
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - [x] `housing` — **built, H1–H5.** A multi placed from a deed, walls
   that stop you, a door and secures that know you, a sign that says who owns it

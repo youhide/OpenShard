@@ -38,7 +38,7 @@ refining a coarse hop now has to arrive at the graph node's own height, which is
 --all-targets` and `cargo fmt --all` are silent.** `cargo test --workspace
 --no-fail-fast` ends with the same two red tests in `openshard-state` and no
 others — R1's finding, still filed under [*`can_step` does not check the
-corner*](../../roadmap.md).
+corner*](2026-08-24-runtime-lookups-and-the-tick.md).
 
 ## What the node decided
 

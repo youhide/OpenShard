@@ -1,6 +1,6 @@
 # Guilds
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - [x] `guilds` — **built, with ServUO's five ranks.** Founding, invitations,
   leaving, dismissal, titles, promotion, leadership, disbanding, and the war and

@@ -168,8 +168,9 @@ are still filed — this session closed only the client's three.
 | **Two bodies on a deck that moves under them** — still unexamined at both ends | — |
 | The four `a bucket is two lists` filed | [that entry](2026-08-24-a-bucket-is-two-lists.md) |
 
-And five this session made, filed in [`roadmap.md`](../../roadmap.md) under the
-entry this closed. **The first two are gameplay this shard owes UO**, and both
+And five this session made, filed in
+[the shove entry](2026-08-24-mobiles-and-the-shove-rule.md) under the entry this
+closed. **The first two are gameplay this shard owes UO**, and both
 came out of the ghost tail rather than out of the code:
 
 - 🚩 **A ghost in war mode is visible to the living, and this shard has never

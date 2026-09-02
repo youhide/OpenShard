@@ -29,7 +29,7 @@
 //! # What is not here yet
 //!
 //! Items: the journal takes entities, and a character is the only thing it knows
-//! how to record so far. See `docs/roadmap.md`.
+//! how to record so far. See `docs/roadmap/04-persistence.md`.
 
 mod journal;
 mod pg;

@@ -1,6 +1,9 @@
 # Protocol and newtype findings
 
-[Client backlog](README.md) · [Backlog](../README.md) · [Roadmap](../../README.md)
+> A record, one of the five the roadmap kept as its client backlog until
+> 2026-09-02. What is open is now ranked in [`client/README.md`](../README.md);
+> the rows here that belong to a neighbouring domain travel there when that
+> domain is migrated.
 
 ## Backlog from the shop that disconnected the player
 
@@ -30,7 +33,7 @@ oracle):
   `0xDC` and `0xD6` were two of the four named here, and both were exactly this
   shape — an encoder, a table row, and no arm — for as long as the entry stood;
   they were read in full on 2026-08-15 (see
-  [`client/evidence/2026-08-15-tooltips.md`](../../../client/evidence/2026-08-15-tooltips.md)),
+  [`client/evidence/2026-08-15-tooltips.md`](2026-08-15-tooltips.md)),
   and finding them again by
   hand rather than by a failing test is the argument for the sweep. `0x14` and
   `0xBF`'s subcommands are still open.

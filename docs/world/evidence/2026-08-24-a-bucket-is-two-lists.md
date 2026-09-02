@@ -116,8 +116,9 @@ The two the previous entry left, unchanged, plus what this one found.
 | **Two bodies on a deck that moves under them** — still simply unexamined, at both ends | — |
 | The three the client's half left: its crowd built per ask against its clutter per view, a living mobile wearing a ghost graphic, and the `0x20`'s half-ignored flag byte | [the previous entry](2026-08-23-the-other-end-of-the-wire-gets-the-rule.md) |
 
-And four this session made, filed in [`roadmap.md`](../../roadmap.md) under the
-entry this closed:
+And four this session made, filed in
+[the runtime-and-tick record](2026-08-24-runtime-lookups-and-the-tick.md) under
+the entry this closed:
 
 - 🚩 **`FacetState::sectors` is public and written from forty-five places in six
   crates.** Its two neighbours in the same struct are private on an argument that

@@ -126,8 +126,9 @@ form.
 | **`move_to`'s signature still does not say "a mobile"** | Unchanged — [the grid gets a door](2026-08-24-the-grid-gets-a-door.md) |
 | **Every rule written against "a body is a wall"** | `occupy_chair` was the first and is fixed here. There will be more: the shove turned a wall into a route, so anything that relied on the wall is now reachable |
 
-And two this session made, filed in [`roadmap.md`](../../roadmap.md) under the
-entry this closed:
+And two this session made, filed in
+[the shove entry](2026-08-24-mobiles-and-the-shove-rule.md) under the entry this
+closed:
 
 - **`occupy_chair` never reserved the seat**, though its doc said it did.
   Nothing checked whether another mobile was already `Seated` on that chair —

@@ -1,6 +1,6 @@
 # Gameplay backlog
 
-[Backlog](README.md) · [Roadmap](../README.md)
+[Backlog](../../../plans/roadmap/PLAN.md) · [Roadmap](../README.md)
 
 ## The tick moved and thirteen constants did not
 

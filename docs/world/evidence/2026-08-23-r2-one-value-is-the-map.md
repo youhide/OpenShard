@@ -36,7 +36,7 @@ not at the end of R1: the six sites that handoff listed in `client/app` and
 `client/render` were cleared by the parallel session that owns those files.
 `cargo test --workspace --no-fail-fast` ends with the same two red tests in
 `openshard-state` and no others; they are R1's finding, still filed under
-[*`can_step` does not check the corner*](../../roadmap.md).
+[*`can_step` does not check the corner*](2026-08-24-runtime-lookups-and-the-tick.md).
 
 ## What the move decided
 
@@ -67,7 +67,8 @@ under *What the move decided*; the reasoning is here.
   borrows the struct where the field it replaced borrowed only itself. One call
   site paid it (`window.rs`'s atlas rebuild, which wants `&mut resources.anim`
   beside the map) by hoisting its argument into a local. Filed in
-  [`roadmap.md`](../../roadmap.md) with what to do if a second one appears.
+  [the map backlog](2026-08-23-the-world-and-map-backlog.md) with what to do if
+  a second one appears.
 
 - **`FacetState::set_map` replaces the public field.** A facet is inserted and
   then loaded on both ends — the tick's loader builds the state before it has
@@ -91,7 +92,7 @@ Two things, neither caused by the move:
   movement's types from the outside for as long as they did — nine server crates
   imported them from there while only wanting to name a place. R2 removed the
   five that were lying; the same reading applies to the rest, and it is filed in
-  [`roadmap.md`](../../roadmap.md).
+  [the map backlog](2026-08-23-the-world-and-map-backlog.md).
 
 ## What is next
 

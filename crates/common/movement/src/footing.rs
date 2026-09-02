@@ -76,8 +76,8 @@ const MOBILE_OVERLAP: i32 = 15;
 /// tile to entity, and is already kept honest by the step itself — so there is
 /// no second copy of `Position` to fall out of step, and no `unblock` anybody
 /// can forget. That was the whole of the argument against registering mobiles in
-/// the obstruction index; see `docs/roadmap.md`'s *a mobile is not an
-/// obstacle*.
+/// the obstruction index; see *a mobile is not an obstacle* in
+/// `docs/world/evidence/2026-08-24-mobiles-and-the-shove-rule.md`.
 ///
 /// **Both ends of the wire build one**, which is the same fact
 /// [`Footing::guide`] records about the bare map: the shard's

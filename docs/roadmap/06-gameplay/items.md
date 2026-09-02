@@ -1,6 +1,6 @@
 # Items
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - [x] `items` — containers, stacking, equipment layers, decay
   - [x] **On the ground and visible.** A script drops an item

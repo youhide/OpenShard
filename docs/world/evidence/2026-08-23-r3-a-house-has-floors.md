@@ -49,7 +49,7 @@ Everything downstream follows from the art being read once:
 --all-targets` and `cargo fmt --all` are silent.** `cargo test --workspace
 --no-fail-fast` ends with the same two red tests in `openshard-state` and no
 others — R1's finding, still filed under [*`can_step` does not check the
-corner*](../../roadmap.md).
+corner*](2026-08-24-runtime-lookups-and-the-tick.md).
 
 ## What the node decided
 
@@ -83,8 +83,8 @@ Tested as `a_ground_floor_laid_on_the_ground_seals_nothing`.
 
 ## What was found
 
-Four things, all filed in [`roadmap.md`](../../roadmap.md) under *Backlog from
-R3*. None blocks R4 or R5.
+Four things, all filed in [the map backlog](2026-08-23-the-world-and-map-backlog.md)
+under *Backlog from R3*. None blocks R4 or R5.
 
 - **`aboard` has no reach filter, and now it lets a house in.** Where the map
   refuses a tile outright, `walk.rs`'s `aboard` still takes the *nearest* live

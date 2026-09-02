@@ -1,11 +1,12 @@
 # World and map backlog
 
-[Backlog](README.md) · [Roadmap](../README.md)
+> A record. It was the roadmap's world-and-map backlog until 2026-09-02; what is
+> open in this domain is now ranked in [`world/README.md`](../README.md).
 
 ## Backlog from R2, the live layer joining the map
 
 Found while moving `Overlay` and its friends into `openshard-map`
-([`realtime_map.md`](../../world/evidence/2026-08-23-era-r-the-map-you-hold.md)'s R2). None of them blocks R3, R4 or
+([`realtime_map.md`](2026-08-23-era-r-the-map-you-hold.md)'s R2). None of them blocks R3, R4 or
 R5.
 
 - **`Resources::map()` borrows the whole struct where a field borrowed itself.**
@@ -39,7 +40,7 @@ R5.
 
 Found while giving `Cover::of_static` its platform arm and teaching `can_step`
 to read the live layer's surfaces
-([`realtime_map.md`](../../world/evidence/2026-08-23-era-r-the-map-you-hold.md)'s R3). None of them blocks R4 or R5.
+([`realtime_map.md`](2026-08-23-era-r-the-map-you-hold.md)'s R3). None of them blocks R4 or R5.
 
 - **~~`aboard` has no reach filter, and now it lets a house in.~~ ✅ Fixed.**
   Where the map refuses a tile outright, `walk.rs`'s `aboard` took the *nearest*
@@ -102,13 +103,13 @@ to read the live layer's surfaces
 ## Backlog from R4, the statics becoming one run
 
 Found while making a facet's statics one run with a per-block offset array
-([`realtime_map.md`](../../world/evidence/2026-08-23-era-r-the-map-you-hold.md)'s R4). Nothing here blocks era P.
+([`realtime_map.md`](2026-08-23-era-r-the-map-you-hold.md)'s R4). Nothing here blocks era P.
 
 - **A patch of many ops is now quadratic in the facet.** `place_static` and
   `remove_static` move the tail of the run and every offset past it, where they
   used to move the tail of one block — which is right for the one op a published
   patch usually is, and wrong for a thousand. Nothing publishes at that size
-  today; [direction F](../../world/evidence/2026-08-25-seven-directions.md#f--the-editor)'s editor
+  today; [direction F](2026-08-25-seven-directions.md#f--the-editor)'s editor
   is what will, and the fix it wants is a publish that groups its ops by block
   and rebuilds each touched block once, rather than an op at a time. Worth
   measuring before designing: the whole run is 29.5 MiB, so an op is a ~30 MiB
@@ -138,7 +139,7 @@ than a caveat.** The land is read as a slice —
 `&[LandCell]` and `land_in_row` steps one cell east at a time — and a three-byte
 cell cannot be a slice of anything. Every read becomes an unaligned load and a
 shift, on the path that draws every frame: the ground walk is the *one* part of
-this map whose cache behaviour [`client_today.md`](../../world/evidence/2026-08-25-the-clients-map-today.md)
+this map whose cache behaviour [`client_today.md`](2026-08-25-the-clients-map-today.md)
 measured as already good ("a block is 64 cells × 4 B = exactly four cache lines
 … the 1997 tiling picked the cache line's size"). **If the unpack costs more
 than the 25% of footprint it saves, the answer is no** — the size is worth
@@ -147,5 +148,5 @@ having only at unchanged read speed.
 So what this finding asks for is a *measurement*, not a change: the ground walk
 of a widest-zoom frame over a packed cell against the same walk over the cell we
 have. The same gate governs the packed four-byte static record in
-[R4](../../world/evidence/2026-08-23-era-r-the-map-you-hold.md#r4--statics-become-one-run), which until now was gated
+[R4](2026-08-23-era-r-the-map-you-hold.md#r4--statics-become-one-run), which until now was gated
 only on whether the statics are still hot.

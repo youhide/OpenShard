@@ -189,7 +189,7 @@ conversion — none of which we have, and all of which are pre-UOP-only.
 ## What targeting an old client would cost us
 
 Two gaps left, in order of how much work they are — a third, the map width, is
-closed; see `docs/roadmap.md`'s own record:
+closed; see [the compatibility backlog](client/evidence/2026-08-24-the-client-compatibility-backlog.md):
 
 - **`verdata.mul` support.** Mandatory below 5.0.0a and entirely absent here:
   `grep -rn verdata --include='*.rs' crates` finds nothing.

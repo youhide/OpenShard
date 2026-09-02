@@ -1,6 +1,8 @@
 # Client compatibility backlog
 
-[Backlog](README.md) · [Roadmap](../README.md)
+> A record. It was the roadmap's client-compatibility backlog until 2026-09-02;
+> what is open in this domain is now ranked in
+> [`client/README.md`](../README.md).
 
 ## Which client versions to support — see [`client_versions.md`](../../client_versions.md)
 

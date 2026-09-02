@@ -1,6 +1,6 @@
 # Boats and house customisation
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - `boats` — a multi that moves: a hull that blocks, a deck you can stand on,
   and everyone aboard arriving with it. **B1 and B2 built; B3–B4 and the tiller

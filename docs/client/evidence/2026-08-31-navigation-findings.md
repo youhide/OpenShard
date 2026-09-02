@@ -1,6 +1,9 @@
 # Navigation findings
 
-[Client backlog](README.md) · [Backlog](../README.md) · [Roadmap](../../README.md)
+> A record, one of the five the roadmap kept as its client backlog until
+> 2026-09-02. What is open is now ranked in [`client/README.md`](../README.md);
+> the rows here that belong to a neighbouring domain travel there when that
+> domain is migrated.
 
 ## The route a Ctrl-drag draws, and what is left around it
 

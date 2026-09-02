@@ -120,7 +120,8 @@ Suites: `openshard-state` (131 + 1), `openshard-world` (617),
 this session's**: a needless borrow in `common/uofiles/src/map.rs`, three
 borrowed expressions in `client/render/tests/traced.rs`, and a 640-byte enum
 variant difference in `client/app/src/link.rs`. The first four are a parallel
-session's open files. Filed in [`roadmap.md`](../../roadmap.md).
+session's open files. Filed in
+[the engineering findings](../../client/evidence/2026-08-27-engineering-follow-up-findings.md).
 
 ## Three things worth carrying
 
@@ -135,7 +136,7 @@ because anybody reading `227a3e1c` alone will find the field already private.
 terrains became one `Footing`, and both survived every test and lint run since:
 `cargo doc` is not one of the three commands and
 `rustdoc::broken_intra_doc_links` is a rustdoc lint. Filed in
-[`roadmap.md`](../../roadmap.md).
+[the engineering findings](../../client/evidence/2026-08-27-engineering-follow-up-findings.md).
 
 **One `openshard-world` run went red and did not reproduce.** It happened on the
 first run after a workspace rebuild and passed on every run after; the panic

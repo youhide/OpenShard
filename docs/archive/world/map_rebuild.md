@@ -267,7 +267,7 @@ defect rather than pathfinding's; here is where it is owned.
   **in reach** and **above** what the map answered, which is Sphere's
   `GetFixPoint` rather than nearest-z. Nearest-z is still `aboard`'s rule for
   the deck, and reconciling the two is filed in
-  [`roadmap.md`](../../roadmap.md)'s *Backlog from R3*.
+  [`roadmap.md`](../../world/evidence/2026-08-23-the-world-and-map-backlog.md)'s *Backlog from R3*.
 - **The picture and the footprint stop expanding a multi twice.** `net_command`'s
   multi expansion is the third path over the map and is named as out of scope by
   [`terrain_seam.md`](../../world/research/terrain_seam.md#out-of-scope-named); with the components
@@ -326,7 +326,7 @@ Take the layout, and take the property under it:
   after a second measurement that is the harder gate: whether the shift and the
   unaligned load cost less than the cache lines they save.** Size alone does not
   buy a packing. The land's own padding byte is 29.4 MB under exactly the same
-  gate, and is filed in [`../roadmap.md`](../../roadmap.md).
+  gate, and is filed in [`../roadmap.md`](../../world/evidence/2026-08-23-the-world-and-map-backlog.md).
 
 **Done when:** `WorldMap` holds two allocations of statics; the base is built
 rather than inserted into; the resident size is recorded here; every statics test
@@ -581,7 +581,7 @@ waits for a measurement that says the statics are still on a hot path.
 
 | question | what settles it |
 |---|---|
-| ~~**Do bodies block?**~~ **Taken: they do.** The shard refuses a step onto a living body and plans around one — `Footing`'s fourth field, built out of the sector grid at the question. The layer carried it unchanged, as this row said it would: no `Cover`, no overlay entry, no identity in `openshard-map`. See [`roadmap.md`](../../roadmap.md)'s *a mobile is not an obstacle* | Settled. What is left is the client's end, which still plans through a crowd, and the *shove* — in UO a player at full stamina pushes past for 10 stamina rather than being stopped, and this engine hard-blocks on purpose |
+| ~~**Do bodies block?**~~ **Taken: they do.** The shard refuses a step onto a living body and plans around one — `Footing`'s fourth field, built out of the sector grid at the question. The layer carried it unchanged, as this row said it would: no `Cover`, no overlay entry, no identity in `openshard-map`. See [`roadmap.md`](../../world/evidence/2026-08-24-mobiles-and-the-shove-rule.md)'s *a mobile is not an obstacle* | Settled. What is left is the client's end, which still plans through a crowd, and the *shove* — in UO a player at full stamina pushes past for 10 stamina rather than being stopped, and this engine hard-blocks on purpose |
 | **Which components of a multi are floors** | R3 reads the platform flag, which is what a static floor already is. If a shipped house has a floor that flag does not mark, that is a finding about the table and belongs in [`findings.md`](../../findings.md) |
 | **Two floors over one tile, for the picture** | The step check chooses the highest surface in reach (`walk::climbed`, not `surface_at` as this table used to say); the *renderer* choosing a storey is [`interiors.md`](../../world/design_interiors.md)'s own subject, and R3 has given it the second surface it lacked |
 | **The packed static record** | N3's node-expansion measurement: whether the statics are still on a hot path once spans exist |
@@ -597,7 +597,7 @@ first thing here a player would notice; and a facet's statics are one run. R5 is
 struck, for the reason in its node, so there is no fifth.
 
 What era R leaves behind is measurement rather than structure, and it is in
-[`../roadmap.md`](../../roadmap.md): the land's fourth byte is 29.4 MB of padding,
+[`../roadmap.md`](../../world/evidence/2026-08-23-the-world-and-map-backlog.md): the land's fourth byte is 29.4 MB of padding,
 which is more than R4 saved. It is gated on the read staying as fast, and so is
 the packed static record — a packing that costs a shift per read on the ground
 walk is not an improvement, whatever it weighs.

@@ -42,7 +42,7 @@ authors = ["OpenShard contributors"]
 #
 # It costs one full dependency rebuild — about a minute and a half on twelve
 # cores — and nothing after that: an edit to a workspace crate recompiles the
-# same crates it always did. See `docs/client_jank_plan.md`.
+# same crates it always did. See `docs/client/evidence/2026-08-14-client-jank.md`.
 [profile.dev.package."*"]
 debug = false
 opt-level = 2
@@ -106,7 +106,7 @@ opt-level = 1
 #
 # What actually retires this cost is direction D — a span layer that rebuilds in
 # pieces — plus an `apply` that can splice a chunk whose static count did not
-# change. See `docs/map/new_map_representation/to_the_client.md`'s backlog.
+# change. See `docs/world/design_chunks_to_the_client.md`'s backlog.
 [profile.dev.package.openshard-map]
 opt-level = 2
 [profile.dev.package.openshard-movement]

@@ -22,7 +22,8 @@ limit**, plus the signature change that let it — see below.
 
 ### 🚩 Four backlog entries were describing work already finished
 
-Read before trusting any entry in [`roadmap.md`](../../roadmap.md): a backlog
+Read before trusting any entry in
+[the map backlog](2026-08-23-the-world-and-map-backlog.md): a backlog
 nobody re-reads decays, and this one had decayed in four places at once.
 
 | the entry | what is actually true |
@@ -88,7 +89,8 @@ live layer applied different rules and which one a tile got was decided by
 whether there was water under it: a house over the sea was boardable from the
 shore at whatever storey happened to be nearest the body's feet.
 
-`roadmap.md` filed this under R3 and doubted a reach filter could be the fix,
+[The map backlog](2026-08-23-the-world-and-map-backlog.md) filed this under R3
+and doubted a reach filter could be the fix,
 because `aboard` exists for a body stepping *down* from a mast. **The objection
 does not hold**: `Cover::reach` of a flat surface is its own height, so
 everything below the body passes at any value — the climb is bounded, the descent

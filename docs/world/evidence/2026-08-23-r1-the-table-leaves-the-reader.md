@@ -70,7 +70,8 @@ whole suite:
   `can_step`, so the rule that stops a body slipping past a blocked tile's
   corner applies to a player's `0x02` and not to a caller asking `can_step`
   directly, which is what a server-driven creature does. Filed in
-  [`roadmap.md`](../../roadmap.md) under *`can_step` does not check the corner*,
+  [the runtime-and-tick record](2026-08-24-runtime-lookups-and-the-tick.md)
+  under *`can_step` does not check the corner*,
   with the second (an `unwrap()` on a deliberate `None`).
 - **Clippy is not silent at `HEAD`** and was not before this session: six sites
   across `client/app` and `client/render` — `presentation.rs:1932`,

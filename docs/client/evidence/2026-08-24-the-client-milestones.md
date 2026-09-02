@@ -1,12 +1,12 @@
-# 9. The client — planned, see [`docs/client/README.md`](../client/README.md)
+# The client — milestones M0, M1 and M1a
 
-> Open work and follow-up findings from this phase are tracked in the
-> [consolidated backlog](backlog/README.md).
+> A record. It was phase 9 of the roadmap until 2026-09-02; what is open in this
+> domain is now ranked in [`client/README.md`](../README.md).
 
 Our own client, starting with the only part that has to exist either way: the
 protocol in the direction a client reads it, and a `crates/client/net` that
 connects, logs in and walks into the world. The milestones, and what is already
-missing for each, are in [`docs/client/README.md`](../client/README.md).
+missing for each, are in [`docs/client/README.md`](../README.md).
 
 - [x] M0 — `server_packet_length`, `frame_server_packet`, incremental Huffman,
       and `ServerPacket::decode` for the login set. `ClientPacket::encode` and
@@ -47,5 +47,5 @@ its own `view` locally at all, closing sets the overlay and sends the
 command, and `reconcile_own_windows` (pulled out of `sync_own_windows` so it
 is testable without a real `App`) clears an entry only once a fresh
 snapshot agrees the subject is gone.
-[`client/evidence/2026-08-15-one-owner-for-a-window.md`](../client/evidence/2026-08-15-one-owner-for-a-window.md) has the decision record
+[`client/evidence/2026-08-15-one-owner-for-a-window.md`](2026-08-15-one-owner-for-a-window.md) has the decision record
 and the test that reproduces the original bug.

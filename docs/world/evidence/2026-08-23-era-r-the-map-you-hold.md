@@ -367,7 +367,8 @@ into `WorldMap`.
   it is the harder one:** a packed record is read with a shift and an unaligned
   load, so it is only an improvement if the unpack costs less than the cache
   lines it saves. Size alone does not buy it. The same gate governs the land's
-  own padding byte — 29.4 MB, filed in [`roadmap.md`](../../roadmap.md).
+  own padding byte — 29.4 MB, filed in
+  [the map backlog](2026-08-23-the-world-and-map-backlog.md).
 
 **Done when:** two allocations; the base-set round trip is byte-identical and
 `openshard-map-import --verify` still compares all 29,360,128 tiles clean; the
@@ -485,7 +486,7 @@ halves of the argument it was waiting for: what a house contributes to a surface
 (R3) and how the statics are held (R4).
 
 What era R leaves behind is measurement rather than structure, and it is filed
-in [`roadmap.md`](../../roadmap.md): the land's fourth byte is 29.4 MB of padding —
+in [the map backlog](2026-08-23-the-world-and-map-backlog.md): the land's fourth byte is 29.4 MB of padding —
 bigger than everything R4 saved — and the packed four-byte static record is
 still worth having. **Both are gated on the same thing, and it is not size:** the
 land is read as a slice and the ground walk is the one part of this map whose

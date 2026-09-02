@@ -1,6 +1,9 @@
 # Engineering follow-up findings
 
-[Client backlog](README.md) · [Backlog](../README.md) · [Roadmap](../../README.md)
+> A record, one of the five the roadmap kept as its client backlog until
+> 2026-09-02. What is open is now ranked in [`client/README.md`](../README.md);
+> the rows here that belong to a neighbouring domain travel there when that
+> domain is migrated.
 
 ## Found while closing the radar plan's section 9
 
@@ -58,7 +61,7 @@
   of the expansion out. So a change to the flank rule leaves the example
   measuring the *old* rule and passing: no test fails, and the plan's next number
   is quietly about something else. Same class as
-  [`parity.md`](../../../render/design_frame_assembly.md)'s frame assembled by hand in seven places, one layer
+  [`parity.md`](../../render/design_frame_assembly.md)'s frame assembled by hand in seven places, one layer
   down. What would close it is `steps_out_of` growing a seam the example can
   substitute into, so there is one flank rule and the harness borrows it.
 - **A bench's default is a claim about the machine it was written on.**
@@ -91,8 +94,8 @@
   worth doing before the next composite budget is argued about rather than
   measured.
 - **`RadarFrame` derives `Default` and `App::new` calls `RadarFrame::default()`**
-  ([`app/src/diagnostics.rs`](../../../../crates/client/app/src/diagnostics.rs),
-  [`lib.rs`](../../../../crates/client/app/src/lib.rs)), which is the construction
+  ([`app/src/diagnostics.rs`](../../../crates/client/app/src/diagnostics.rs),
+  [`lib.rs`](../../../crates/client/app/src/lib.rs)), which is the construction
   `docs/style.md` and this repo's house rules refuse: a value from nowhere, with
   no place where somebody decided what it should be. The `..Default::default()`
   that fed it in `presentation.rs` is gone — every field of that sample is named
@@ -102,7 +105,7 @@
   empty()`, beside the doc that already explains why the sample is reset) is the
   shape.
 - **A layer's `graphic` is two index spaces wearing one type.**
-  [`EquipmentLayer::graphic`](../../../../crates/client/render/src/mobiles.rs) is
+  [`EquipmentLayer::graphic`](../../../crates/client/render/src/mobiles.rs) is
   an `AnimId` — a worn item's picture — for every layer except `Layer::MOUNT`,
   where it is a creature's `Graphic`. The two happen to index the same
   `anim.idx`, which is why it works, and nothing but a doc comment says which one
@@ -122,7 +125,7 @@
   nobody had noticed *it* either, which is what says this is a method problem
   rather than a mount one. The fix closed both, but the check that would have
   caught them is an end-to-end one, and
-  [`crates/e2e/shard/tests/`](../../../../crates/e2e/shard/tests/) is where it
+  [`crates/e2e/shard/tests/`](../../../crates/e2e/shard/tests) is where it
   belongs — `paperdoll_buttons.rs`'s own header already names this exact failure
   mode ("a client that never folds what it decoded") as the fourth of four.
   **A ride is not cheap to drive from there**, which is the reason it does not
@@ -139,7 +142,7 @@
   would go, and the day a unicorn is rideable is the day it is owed.
 - **The lighting proptest fails on fresh seeds, and its regression file grows
   every time somebody runs the suite.**
-  [`render/tests/lighting.rs`](../../../../crates/client/render/tests/lighting.rs)'s
+  [`render/tests/lighting.rs`](../../../crates/client/render/tests/lighting.rs)'s
   `a_fuzzed_flame_near_a_row_edge_agrees_with_the_brute_force_oracle` and its
   `_through_the_exact_walk` sibling failed on one seed in one full-workspace run
   during the map work of 2026-08-25, passed on the next run, and failed on two in
@@ -152,5 +155,5 @@
   file is the record of how often it is reachable. Two things follow: the suite is
   not green on a random seed, and a session that runs `cargo test --workspace`
   leaves a dirty working tree it did not write. Whoever owns
-  [`lighting_pitfalls.md`](../../../render/evidence/pitfalls.md)'s exact-walk ladder
+  [`lighting_pitfalls.md`](../../render/evidence/pitfalls.md)'s exact-walk ladder
   should read the saved cases before they are trimmed.

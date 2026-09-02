@@ -1,7 +1,7 @@
 # 1. Protocol — mostly done
 
 > Open work and follow-up findings from this phase are tracked in the
-> [consolidated backlog](backlog/README.md).
+> [consolidated backlog](../../plans/roadmap/PLAN.md).
 
 - [x] `PacketReader` / `PacketWriter` — std only, every read fallible
 - [x] Client packet length table ported from Sphere's `receive.h` (70 packets)

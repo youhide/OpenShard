@@ -207,7 +207,8 @@ to doors, which is the correct relationship.
 a fourth field, `Bodies`, built out of the sector grid at the question and read
 by `walk::landing`. No span, no `Cover`, no overlay entry: the bake is still over
 ground that has nobody on it, which is what keeps a *corridor* a statement about
-topology. See [`roadmap.md`](../roadmap.md)'s *a mobile is not an obstacle*.
+topology. See *a mobile is not an obstacle* in
+[the shove record](evidence/2026-08-24-mobiles-and-the-shove-rule.md).
 
 **A house floor is a surface, and that was the one hole.** `grep -rn
 "CoverKind::Stands" crates` had a single producer in the workspace — a ship's

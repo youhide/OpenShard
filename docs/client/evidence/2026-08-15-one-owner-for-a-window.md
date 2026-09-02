@@ -212,5 +212,6 @@ direct writes to `App`'s own `view` are gone. The `Command` half is gone. The
 writes are still there.
 
 This plan exists because the patch that fixed the visible bug was flagged,
-correctly, as a shape rather than a cause — see [`roadmap.md`](../../roadmap.md),
-under "The client — planned," which points back here for what to do about it.
+correctly, as a shape rather than a cause — see
+[the client milestones](2026-08-24-the-client-milestones.md), which point back
+here for what to do about it.

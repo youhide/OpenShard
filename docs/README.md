@@ -80,3 +80,10 @@ The tree is mid-move. Files still sitting flat in `docs/` are pre-migration
 documents that have not had a role assigned yet; the domain table above says
 which of them have. The order of the move and its criteria are in
 [`../plans/`](../plans/README.md), not here.
+
+[`roadmap/`](roadmap/README.md) is the other half of the same thing: a holding
+area, holding the phase records of the domains that have not been migrated. It
+is not a status page and has no queue in it — the queue is
+[`plans/roadmap/PLAN.md`](../plans/roadmap/PLAN.md), and the status of a
+migrated domain is that domain's README. A batch that claims a domain also takes
+its phase record out of there.

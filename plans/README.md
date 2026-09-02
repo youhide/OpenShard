@@ -8,6 +8,7 @@ Layout mirrors the documentation domains:
 ```
 plans/<domain>/<topic>/PLAN.md
 plans/<domain>/<topic>/done/          closed plans, kept for the record
+plans/roadmap/PLAN.md                 the order across domains, not inside one
 ```
 
 A plan is edited only when the plan itself is revised. Progress does not belong

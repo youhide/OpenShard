@@ -1963,7 +1963,8 @@ impl WorldState {
     /// authority from tile to entity and is already kept honest by the step
     /// itself, so the crowd a step or a route is decided against is *derived*
     /// where the question is asked rather than maintained as a second copy of
-    /// `Position` — see `docs/roadmap.md`'s *a mobile is not an obstacle*, which
+    /// `Position` — see *a mobile is not an obstacle* in
+    /// `docs/world/evidence/2026-08-24-mobiles-and-the-shove-rule.md`, which
     /// weighed the two and took this one. Nothing here can drift, because
     /// nothing here survives the answer.
     ///
@@ -4256,7 +4257,8 @@ impl WorldState {
     /// draws its stance is visible to the living**, which is how a player who
     /// died in the woods is found and resurrected, and it is a gameplay rule
     /// rather than a detail. The Spirit Speak term is the other way in. Neither
-    /// is implemented here; both are filed in `docs/roadmap.md` under the ghost
+    /// is implemented here; both are filed in
+    /// `docs/world/evidence/2026-08-24-mobiles-and-the-shove-rule.md` under the ghost
     /// entry, together with what they cost — a war toggle becomes a `reveal`/
     /// `hide` for every living watcher in range, which is a draw-path change and
     /// not a predicate change.

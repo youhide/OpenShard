@@ -1,6 +1,6 @@
 # Parties and quests
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - [x] `parties` — **built.** Inviting, accepting, leaving, kicking, the chat and
   the loot flag, all on `0xBF` subcommand `0x06`. Ported from ServUO's

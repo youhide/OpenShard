@@ -55,7 +55,7 @@ number N3 has to plan against.
 --all-targets` and `cargo fmt --all` are silent.** `cargo test --workspace
 --no-fail-fast` ends with the same two red tests in `openshard-state` and no
 others — R1's finding, still filed under [*`can_step` does not check the
-corner*](../../roadmap.md). With `OPENSHARD_CLIENT` set, the install-gated tests
+corner*](2026-08-24-runtime-lookups-and-the-tick.md). With `OPENSHARD_CLIENT` set, the install-gated tests
 in `client/render`, `client/artscan` and `server/state` have reds of their own;
 none of them can be this node's, because `SpanIndex` has no caller outside
 `spans.rs` and the three `movement` examples.

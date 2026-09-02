@@ -1,6 +1,6 @@
 # Combat
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - [x] `combat` — swing timers, damage, resistances, notoriety
   - [x] **Hit points, damage and death.** Mobiles carry `Hitpoints`; scripts

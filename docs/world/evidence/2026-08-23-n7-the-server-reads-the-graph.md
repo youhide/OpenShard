@@ -53,7 +53,7 @@ session's in-flight file. Tests were run on the crates this touches —
 `openshard-client-app` (381), `openshard-server` (37), `openshard-npc`,
 `openshard-quests` — all green, and `openshard-state` ends with the same two
 long-standing red tests and no others (R1's finding, still filed under
-[*`can_step` does not check the corner*](../../roadmap.md)).
+[*`can_step` does not check the corner*](2026-08-24-runtime-lookups-and-the-tick.md)).
 
 ## What the node decided
 

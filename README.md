@@ -27,7 +27,8 @@ checks.
 > world** saves itself to SQLite or PostgreSQL without ever pausing — every NPC,
 > every door, every debuff, every scribed spellbook — and survives a restart.
 > Gameplay is Rust, and its content is data in this repository. See
-> [`docs/roadmap/README.md`](docs/roadmap/README.md).
+> [`docs/README.md`](docs/README.md) for what each area does today, and
+> [`plans/roadmap/PLAN.md`](plans/roadmap/PLAN.md) for what comes next.
 
 See [release notes](docs/release_notes.md) for player-facing changes.
 
@@ -113,7 +114,7 @@ crates/
     persistence   journal, snapshots, SQLite and PostgreSQL stores
     server        the binary — glue only
     housing guilds plugins                              stubs, future
-  client/       our own client, beside the stock one — see docs/client.md
+  client/       our own client, beside the stock one — see docs/client/README.md
     net           the client's half of the wire: framing, login, a world view
     model         read models the wire and presentation layers share
     render        the isometric renderer and its lighting
@@ -226,7 +227,8 @@ pixel, every frame — so the view inherits the walk's discontinuities whole. A
 rollback puts the body back a tile and the world jumps a tile; a kiting reversal
 is a hard stop and a hard start 120ms apart. None of that is a bug in the
 follow; it is the follow having no opinion. Ours detaches it — inertial and
-free, the way Diablo's is — and [`docs/camera.md`](docs/camera.md) is mostly not
+free, the way Diablo's is — and
+[`docs/client/design_camera_rig.md`](docs/client/design_camera_rig.md) is mostly not
 about a camera at all: it is about one pipeline that every camera is a parameter
 set of, and a bench that scores a parameter set against a scripted walk, so
 which camera is right becomes something you measure rather than argue.
@@ -259,8 +261,9 @@ first line of [`docs/architecture.md`](docs/architecture.md) still says so. It
 is recorded here because it is a real disagreement about the horizon, held in
 the open by two people who agree about everything closer than it.
 
-[`docs/client.md`](docs/client.md) is the plan, milestone by milestone, and its
-backlog is where the next session in that area starts.
+[`docs/client/README.md`](docs/client/README.md) is where that client stands, in
+one page — readiness by subsystem and what is open, ranked; the milestones it was
+built to are a record in its `evidence/`.
 
 ## Building
 

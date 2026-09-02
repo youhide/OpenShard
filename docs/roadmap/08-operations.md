@@ -1,7 +1,7 @@
 # 8. Operations
 
 > Open work and follow-up findings from this phase are tracked in the
-> [consolidated backlog](backlog/README.md).
+> [consolidated backlog](../../plans/roadmap/PLAN.md).
 
 - [x] `config` — TOML, validated at load
 

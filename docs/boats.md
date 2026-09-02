@@ -245,8 +245,9 @@ measured, and it needs the overlay this survey does not have.
 **So the flag stays off** — the conclusion is unchanged, and B4 does not move.
 What changes is that the reason is now an open question rather than a settled
 one, and the second bullet's repro is spent: it was run, and it refuted the thing
-it was built to confirm. See `roadmap.md`'s pier-and-bridge entry for the full
-numbers and for the suspects the player report has left.
+it was built to confirm. See
+[the pier-and-bridge investigation](world/evidence/2026-08-24-the-movement-surface-investigation.md)
+for the full numbers and for the suspects the player report has left.
 
 #### 🚩 And the open question was measured, 2026-08-24 — it was right, and it is closed
 

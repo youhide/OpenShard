@@ -1,6 +1,6 @@
 # Magic
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - [x] `magic` — spells, reagents, casting
   - [x] **Mana, casting, and the effect seam.** A mobile carries `Mana` (spent by

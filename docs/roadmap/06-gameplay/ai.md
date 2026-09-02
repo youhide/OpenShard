@@ -1,6 +1,6 @@
 # AI
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - [x] `ai` — brains, aggro, wandering
   - [x] **A built-in brain, and room for scripted ones.** A creature spawned with

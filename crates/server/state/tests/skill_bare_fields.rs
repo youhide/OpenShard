@@ -1,5 +1,7 @@
-//! The gate for the `Skill` newtype sweep (`docs/roadmap.md`'s "server/common/
-//! render newtype hunt" backlog, `Skill` entry): every remaining bare
+//! The gate for the `Skill` newtype sweep (the "server/common/render newtype
+//! hunt" backlog in
+//! `docs/client/evidence/2026-08-25-server-and-render-type-findings.md`,
+//! `Skill` entry): every remaining bare
 //! `skill: u8` in the workspace is on an explicit, reasoned allowlist, not
 //! left behind by omission.
 //!

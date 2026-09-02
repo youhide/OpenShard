@@ -36,7 +36,7 @@ every crate this touches** (`openshard-movement`, `-state`, `-housing`, `-world`
 the two long-standing red tests in `openshard-state` —
 `obstruct::tests::a_diagonal_is_refused_when_either_flank_is_blocked` and
 `a_live_terrain_with_no_map_reports_no_water`, R1's finding, still filed under
-[*`can_step` does not check the corner*](../../roadmap.md).
+[*`can_step` does not check the corner*](2026-08-24-runtime-lookups-and-the-tick.md).
 
 ⚠ `cargo check --workspace --all-targets` is **not** silent, and none of it is
 this: `openshard-client-render`'s tests and examples do not compile against a

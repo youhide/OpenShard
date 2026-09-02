@@ -1,7 +1,7 @@
-# 3. World — a client walks in Britannia
+# World — a client walks in Britannia
 
-> Open work and follow-up findings from this phase are tracked in the
-> [consolidated backlog](../backlog/README.md).
+> A record. It was phase 3 of the roadmap until 2026-09-02; what is open in this
+> domain is now ranked in [`world/README.md`](../README.md).
 
 - [x] `Direction` / `Facing` — steps ported verbatim from Sphere's `sm_Moves`
 - [x] World entry: 0x5D, 0x1B, 0xBF.0x08, 0x20, 0x4F, 0x55
@@ -58,9 +58,9 @@ not.
 
 ## Contents
 
-- [Movement surface investigation](movement-surface-investigation.md)
-- [Mobiles and the shove rule](mobiles-and-shove.md)
-- [Runtime lookups and the tick](runtime-and-tick.md)
+- [Movement surface investigation](2026-08-24-the-movement-surface-investigation.md)
+- [Mobiles and the shove rule](2026-08-24-mobiles-and-the-shove-rule.md)
+- [Runtime lookups and the tick](2026-08-24-runtime-lookups-and-the-tick.md)
 
 ## The pace limiter takes Sphere's numbers and not its arithmetic
 

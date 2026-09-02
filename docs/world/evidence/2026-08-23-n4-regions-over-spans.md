@@ -42,7 +42,7 @@ passes. This added answers rather than moving them.
 **`cargo check`, `clippy --all-targets` and `fmt --all` are silent.** `cargo
 test --workspace --no-fail-fast` ends with the same two red tests in
 `openshard-state` and no others — R1's finding, still filed under [*`can_step`
-does not check the corner*](../../roadmap.md).
+does not check the corner*](2026-08-24-runtime-lookups-and-the-tick.md).
 
 ## What the node decided
 

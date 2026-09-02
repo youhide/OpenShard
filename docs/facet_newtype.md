@@ -15,7 +15,8 @@ file in the same commit that changes the code.
 
 ## Why
 
-`docs/roadmap.md`'s "Two types for one facet byte" entry (closed 2026-08-xx,
+[`roadmap/01-protocol.md`](roadmap/01-protocol.md)'s "Two types for one facet
+byte" entry (closed 2026-08-xx,
 before this hunt) already unified two competing types into one
 `protocol::world::Facet` and converted every *state-owning* call — `state.
 facet_of`, `state.facet_state`, `WorldState::move_to`, the `facets:
@@ -201,8 +202,9 @@ picks up the type too, since it exists for the same reason.
 1. **`step_toward`'s `Option<u8>` return stayed `Option<u8>` — direction, not
    facet, and the two were never confused. This sweep is about the *facet*
    parameter only; a heading/direction sweep is a separate, already-recorded
-   backlog item** (`docs/roadmap.md`'s "server/common/render newtype hunt"
-   entry #2, `Direction` unwrapped through `ai`'s pathing core). Touching it
+   backlog item** ([the server/common/render newtype
+   hunt](client/evidence/2026-08-25-server-and-render-type-findings.md), entry
+   #2, `Direction` unwrapped through `ai`'s pathing core). Touching it
    here would have widened the pilot's blast radius for no reason connected
    to `Facet`.
 2. **`npc::live.rs::nearest_player` picked up `Facet` at the same time as its

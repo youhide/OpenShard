@@ -1668,8 +1668,9 @@ mod tests {
         assert_eq!(terrain.surface_at(u16::MAX, u16::MAX, 0), None);
     }
 
-    /// **The repro `roadmap.md`'s pier-and-bridge backlog asked for, and never
-    /// got.** A survey, not an assertion.
+    /// **The repro the pier-and-bridge backlog asked for, and never got**
+    /// (`docs/world/evidence/2026-08-24-the-movement-surface-investigation.md`).
+    /// A survey, not an assertion.
     ///
     /// That entry says the `landCheck` guard above "fires, the deck static is
     /// discarded, and the walker lands on `land_center` — which for a structure
@@ -2023,7 +2024,8 @@ mod tests {
     /// **Where a body that *arrives* is put, over every bridge and pier on the
     /// facet.** A survey, not an assertion.
     ///
-    /// `roadmap.md`'s third and last suspect for the 2026-08-02 report, after
+    /// The third and last suspect for the 2026-08-02 report
+    /// (`docs/world/evidence/2026-08-24-the-movement-surface-investigation.md`), after
     /// the `landCheck` mechanism was refuted and a moored ship was walked: **a
     /// login, a spawn, a gate or a teleport**, none of which is a step. A step
     /// goes through [`check`](MapTerrain::check), reaching from the top of the

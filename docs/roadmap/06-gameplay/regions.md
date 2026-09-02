@@ -1,6 +1,6 @@
 # Regions, guards, and the world clock
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - [x] **Regions, guards and the world clock.** Two of the "never written down"
   gaps below, which turned out to be one slice: a place has to exist before

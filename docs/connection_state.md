@@ -44,7 +44,7 @@ Five things follow from the split, and each is a reason on its own:
    `players → Client`, so a connection on the character screen is unreachable
    from inside a tick, and unreachable *silently*. This is the structural reason
    the character screen cannot become world commands as
-   [`roadmap.md` §2](roadmap.md) plans: the version has to live on the
+   [`roadmap/02-gateway-login.md`](roadmap/02-gateway-login.md) plans: the version has to live on the
    connection, not on the entity. *(S1 moved it there; S5 is what it was moved
    for, and the row carries the account and access level too.)*
 4. **The login crate already made this argument about itself.**
@@ -132,8 +132,8 @@ phase must exist rather than the gate simply being moved later.
 **D5. The character screen becomes world commands only after the roster moves
 in.** Ordering, not preference: until the world owns the saved records it cannot
 answer `0x5D`, and until the connection record exists it cannot answer anybody
-who has no entity. See [`roadmap.md` §2, "The roster belongs in the
-world"](roadmap.md).
+who has no entity. See ["The roster belongs in the
+world"](roadmap/02-gateway-login.md).
 
 **D6. This does not reopen the decision in `architecture.md`.** That decision —
 create, select and delete stay out of `openshard-login` — was about not dragging
@@ -186,7 +186,8 @@ follows.
       session nor the world, so an arm cannot reach past the packet it was
       handed, and `None` is a packet the world has nothing to do about. The
       phase is matched once, in `handle_world_packet`, which queues what comes
-      back — the rule `roadmap.md` §2 asks for on the character screen, applied
+      back — the rule [`roadmap/02-gateway-login.md`](roadmap/02-gateway-login.md)
+      asks for on the character screen, applied
       to the whole dispatcher.
       `0x5D` moved out of the dispatcher and was routed *before* the gate: it is
       the one packet a connection outside the world may send, and the only one
@@ -616,7 +617,8 @@ acting on it would cost, and entries are struck through in the commit that fixes
 them rather than deleted, so the reasoning that was wrong stays readable beside
 the reasoning that replaced it.
 
-[`roadmap.md` §2](roadmap.md), under "A connection's state is kept in two tables
-that must agree", is where this plan was argued for. Its five findings are all
+[`roadmap/02-gateway-login.md`](roadmap/02-gateway-login.md), under "A
+connection's state is kept in two tables that must agree", is where this plan was
+argued for. Its five findings are all
 closed and it points back here for what is open — do not treat the two as two
 lists.

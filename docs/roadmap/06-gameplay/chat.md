@@ -1,6 +1,6 @@
 # Chat and world administration
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - [x] `chat` — speech, journal routing
   - [x] **Speech, heard and answered.** A player says something (`0x03`), and the

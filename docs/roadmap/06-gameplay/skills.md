@@ -1,6 +1,6 @@
 # Skills
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - [x] `skills` — the table, the check, the gain
   - [x] **The fifty-eight skills are data now** (`state::skill`, ported whole from

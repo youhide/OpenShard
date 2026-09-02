@@ -382,5 +382,6 @@ finally names what it costs — the writes and the rows the save task had not
 finished — but a store that never answers is still a shard that cannot be
 stopped politely. The commit that created this plan is the one that landed the stop
 itself; [`docs/client/design_net.md`](client/design_net.md) → "Stopping is one word, and everything
-hears it" is the design it is built on, and [`roadmap.md`](roadmap.md) §8 points
-here rather than repeating the list.
+hears it" is the design it is built on, and
+[`roadmap/08-operations.md`](roadmap/08-operations.md) points here rather than
+repeating the list.

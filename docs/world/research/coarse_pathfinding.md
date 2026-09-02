@@ -29,7 +29,7 @@ AI consumer yet — chase remains its short-range bounded A*. `cargo run -p open
      leaf) is already correct and `find_long_path` should preserve it exactly, not invent a
      second one.
    - A **server-side AI walker** (`ai::step_toward` and friends) already has
-     `through_doors`/`body_opens_doors` — per `docs/roadmap.md`, humanoids open unlocked doors
+     `through_doors`/`body_opens_doors` — per [`roadmap/06-gameplay/ai.md`](../../roadmap/06-gameplay/ai.md), humanoids open unlocked doors
      in their way as part of normal movement. Whatever eventually calls `find_long_path`
      server-side needs to route through this existing capability rather than stopping like the
      client does — "if it can open it, it opens it" is a caller-side fact, not something the
@@ -233,8 +233,9 @@ assumption about our own game:
   checked against an exhaustive ordinary A* reachability answer, then replayed through
   `step_allowed` so the coarse guide cannot turn into an illegal walk.
 - A bench (`crates/common/movement/benches/` or an `examples/` binary, following the project's
-  existing "measured, not asserted" convention — see `docs/roadmap.md`'s scripting-hook and LOD
-  numbers) comparing `find_long_path` against a plain `find_path` with a raised budget on a large
+  existing "measured, not asserted" convention — see the scripting-hook numbers in
+  [`roadmap/05-scripting.md`](../../roadmap/05-scripting.md) and the LOD ones in
+  [`client/design_lod.md`](../../client/design_lod.md)) comparing `find_long_path` against a plain `find_path` with a raised budget on a large
   synthetic map, to justify `chunk_size` with a number rather than a guess.
 - `cargo test -p openshard-state` / `-p openshard-client-app` for the two wiring points.
 - `cargo check --workspace --all-targets`, `cargo clippy --workspace --all-targets`, `cargo fmt --all` (all expected silent per `CLAUDE.md`).

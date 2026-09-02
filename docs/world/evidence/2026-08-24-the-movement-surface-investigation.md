@@ -1,6 +1,7 @@
 # Movement surface investigation
 
-[World index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+> A record. It was part of the roadmap's world phase until 2026-09-02; what is
+> open in this domain is now ranked in [`world/README.md`](../README.md).
 
 ## Closed: a pier or bridge over low ground can drop a walker under it — the mechanism is refuted
 

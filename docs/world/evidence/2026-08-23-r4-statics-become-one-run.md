@@ -45,7 +45,7 @@ the diff is three files, and two of them are the importers.
 --all-targets` and `cargo fmt --all` are silent.** `cargo test --workspace
 --no-fail-fast` ends with the same two red tests in `openshard-state` and no
 others — R1's finding, still filed under [*`can_step` does not check the
-corner*](../../roadmap.md).
+corner*](2026-08-24-runtime-lookups-and-the-tick.md).
 
 ## What the node decided
 
@@ -89,7 +89,8 @@ so the base layer is that number times a count, and a field added to
 
 ## What was found
 
-Two things, filed in [`roadmap.md`](../../roadmap.md) under *Backlog from R4*.
+Two things, filed in [the map backlog](2026-08-23-the-world-and-map-backlog.md)
+under *Backlog from R4*.
 Neither blocks era P. A third — the land's padding byte — came out of the
 conversation after the node and is at the end of this file.
 
@@ -137,7 +138,7 @@ there is nothing else in era R to wait for.
 **What would block it:** nothing.
 
 **What era R leaves behind** is measurement rather than structure, and it is in
-[`roadmap.md`](../../roadmap.md): **the land's fourth byte is 29.4 MB of
+[the map backlog](2026-08-23-the-world-and-map-backlog.md): **the land's fourth byte is 29.4 MB of
 alignment** — a `LandCell` is a `u16` and an `i8` in four bytes, over 29,360,128
 cells — which is more than everything R4 saved. Under the gate above, and the
 gate is the interesting half: the land is read as a slice, and a three-byte cell

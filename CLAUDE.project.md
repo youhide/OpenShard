@@ -13,7 +13,9 @@ else about Sphere. Gameplay content lives in a second repository, the
 | [`docs/style.md`](docs/style.md) | How code here reads. Read it before writing Rust in this repo. |
 | [`docs/architecture.md`](docs/architecture.md) | The shape: layers, dependency rules, the crate map. |
 | [`docs/findings.md`](docs/findings.md) | What the client actually does. Every entry cost a day — don't re-derive them. |
-| [`docs/roadmap/README.md`](docs/roadmap/README.md) | The order, and what is built. Current status lives here, not in this file. |
+| [`docs/README.md`](docs/README.md) | 🚩 **What each area does today, and where each kind of document lives.** The roles (canon · design · research · evidence · reference · plan) and the domain map. Current status lives in a domain's README, never in this file. |
+| [`plans/roadmap/PLAN.md`](plans/roadmap/PLAN.md) | The order of work across the engine — which area is next and what has to be true first. No status in it; a plan carries no progress. |
+| [`docs/roadmap/README.md`](docs/roadmap/README.md) | What is left of the old roadmap: the phase records of the domains not migrated yet. A holding area, not a status page. |
 | [`client/README.md`](docs/client/README.md) | 🚩 **Where our own client stands, in one page** — readiness by subsystem, what is open ranked, and which of its twelve documents holds each line. It connects, walks, draws the world and its own windows and plays the shard's sound; it holds one session, nothing that breathes can be clicked, and nothing blends. Read it before opening any of them. |
 | [`docs/client_versions.md`](docs/client_versions.md) | Which clients exist and which are played. |
 | [`docs/development.md`](docs/development.md) | The environment: commands, toolchain, `target/`, MSRV. |

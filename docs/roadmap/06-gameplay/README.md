@@ -1,17 +1,24 @@
 # 6. Gameplay
 
 > Open work and follow-up findings from this phase are tracked in the
-> [consolidated backlog](../backlog/README.md).
+> [consolidated backlog](../../../plans/roadmap/PLAN.md).
 
-Roughly in dependency order, each script-first:
+Roughly in dependency order.
 
-- [x] **The script is wired into the tick.** The bridge §5 deferred: the server
-  owns a `DenoEngine`, delivers each tick's domain events to it, and queues the
-  commands it emits for the next tick. `scripting.main` in the config names the
-  script; empty runs scriptless, the same bargain as an empty map. A script acts
-  through `Command::Step` — server-authoritative movement, no client sequence or
-  pace, terrain the only judge — which is the first thing a script command lands
-  on. `crates/server/server/src/scripting.rs` is the whole seam.
+**This phase was written script-first, and it is not any more.** It used to open
+with a bridge: the server owned a `DenoEngine`, delivered each tick's domain
+events to it and queued the commands it emitted for the next tick, with
+`scripting.main` in the config naming the script. That whole seam — the
+`openshard-scripting` crate, the bridge beside it, `deno_core` and the
+`[scripting]` config section — was **deleted**, and the pages below still carry
+sentences written when it existed.
+
+What replaced it is data, not a runtime: `crates/*/data/*.json` compiled by a
+`build.rs` and laid by `server::content`, plus the two item behaviours that were
+scripts as `world::tick::shipped_items`. Each dataset moved under a test that
+compared its `Command`s against the pack's. The record of the spike and its
+benchmark is [`05-scripting.md`](../05-scripting.md); the decision is
+[`architecture.md`](../../architecture.md) § Scripting.
 
 ## Contents
 

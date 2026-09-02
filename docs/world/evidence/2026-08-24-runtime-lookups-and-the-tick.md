@@ -1,11 +1,12 @@
 # Runtime lookups and the tick
 
-[World index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+> A record. It was part of the roadmap's world phase until 2026-09-02; what is
+> open in this domain is now ranked in [`world/README.md`](../README.md).
 
 ## Closed: `can_step` does not check the corner, and two obstruct tests are red
 
 **Both are green**, and were closed by the corner-rule repair recorded in
-[`navigation_spans.md`](../../world/evidence/2026-08-25-the-span-layer.md#out-of-scope-named) — *"`can_step`
+[`navigation_spans.md`](2026-08-25-the-span-layer.md#out-of-scope-named) — *"`can_step`
 has no corner rule, and the shard walked a creature with it"*. The two tests in
 `state/src/obstruct.rs` were what found it: they had been asking `can_step` for a
 rule that moved into `steps_out_of` in N3, and the answer taken was that

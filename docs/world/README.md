@@ -72,9 +72,11 @@ every answer taken so far is a row in [`design_layers.md`](design_layers.md).
 
 ## What is open, ranked
 
-Every entry below was a bullet in one of the thirteen backlog sections the plans
-in this domain each kept for themselves. A finding with a defect behind it is a
-row here; a finding with nothing behind it stayed where it was measured.
+Every entry below was a bullet in one of the seventeen backlog sections the plans
+in this domain each kept for themselves — thirteen inside the documents this
+domain was split out of, and four more the roadmap kept as its own world-and-map
+backlog until 2026-09-02. A finding with a defect behind it is a row here; a
+finding with nothing behind it stayed where it was measured.
 
 **1. The map and the overlay disagree about a platform of no thickness.**
 `MapTerrain::is_obstructed` gives a floor a body from `base` to `base`, so it is
@@ -114,57 +116,84 @@ scratch — right for an operator typing `.setland`, wrong for a drag that
 publishes once a tile. The ready map is ordered, so the rename is a range rather
 than a scan; nothing has measured it.
 
-**6. "The highest static on a tile" is re-derived by linear scan in four
+**6. A patch of many ops is quadratic in the facet, and a brush is a patch of
+many ops.** `place_static` and `remove_static` move the tail of the whole run and
+every block offset past it, where they used to move the tail of one block — right
+for the single op a published patch usually is, wrong for a thousand. Nothing
+publishes at that size today and the editor is what will. The fix is a publish
+that groups its ops by block and rebuilds each touched block once; the crossover
+with "just rebuild the facet" is close enough to be worth measuring first, since
+the whole run is 29.5 MiB and one op is a ~30 MiB move.
+
+**7. "The highest static on a tile" is re-derived by linear scan in four
 places** — the radar, `MapTerrain`, cutaway, occlusion — because the sort key is
 `(y, x)`. It cannot simply become a z-sort: **file order is draw order** and
 `statics::pick` breaks ties by taking the last. Our own chunk format is where
 the two get separated deliberately, which turns every one of those scans into a
 suffix lookup.
 
-**7. The building flood's artifact is 112 MiB of raw `u32`** — one label per
+**8. The building flood's artifact is 112 MiB of raw `u32`** — one label per
 tile, overwhelmingly the exterior's zero, read four bytes at a time on the
 startup path. Run-length or a sparse per-block index cuts it by orders of
 magnitude.
 
-**8. A column's surfaces are walked in at least two places** — `cutaway::stack`
+**9. A column's surfaces are walked in at least two places** — `cutaway::stack`
 on the client, `movement`'s `surfaces`/`spawn_z` on the server — with the same
 question asked of the same files. Interiors' R1a would be a third caller and is
 the moment to decide whether it is one function.
 
-**9. `Cluttered::sight_clear` is the map's answer only**, missing the shut-door
+**10. A house's placement checks got stricter and nothing measured by how much.**
+`footprint_of` returns an entry for every component that lays a cover, so the
+road test and the flat-ground test see a house's *interior* tiles for the first
+time — they only ever saw its walls. Both are ServUO's rules over the whole plot
+and both are more correct this way, but a plot that was legal before and is
+refused now reads to a player as a regression. It wants a pass over the shipped
+decoration data placing each classic multi before anybody is told housing is
+finished.
+
+**11. `WorldMap::from_parts`' grouping is a contract with no oracle.** It asserts
+that the counts are one per block and that they sum to the run's length —
+neither of which catches a caller that put the *right number* of items in the
+*wrong* block. That sorts them into the wrong span and every lookup after it is
+silently wrong, which is the failure mode this crate's block order has always
+had. Both callers are in-tree and tested end to end, so this is about the third
+one: a debug-only check that every item's coordinates fall in the block its count
+claims costs one pass over the run at load.
+
+**12. `Cluttered::sight_clear` is the map's answer only**, missing the shut-door
 half the server has. When it gets its reader, the shared arithmetic wants to
 live in `common/movement` once rather than on both ends. `sight_clear`'s own
 height blindness is the same shape one layer down: a sight line reads the tiles
 it crosses and not the endpoints' columns, so two mobiles on one tile at
 different z see each other through a floor.
 
-**10. The plan cache's invalidation boundary is not covered.**
+**13. The plan cache's invalidation boundary is not covered.**
 `net_command::entered` keeps the client's plan across mobile-only updates on the
 assumption that `WorldView.items` is the complete input to `Cluttered::can_step`.
 Enumerate every production update that can alter the predicate and assert the
 boundary.
 
-**11. The node budgets, and what a tick can afford.** 400 for server AI and 600
+**14. The node budgets, and what a tick can afford.** 400 for server AI and 600
 for a client plan were measured against *tiles*, and a node is a place now, so a
 column with two floors can be finalised twice. Half the argument exists — a
 `Weight::PLANNING` search at 400 arrives at more destinations than an exact one
 at 600, for routes 0.2% longer — and the missing half is the shard's own
 numbers rather than the probe's.
 
-**12. The radar's 21% tangent margin is three people saying 20.7% left a seam.**
+**15. The radar's 21% tangent margin is three people saying 20.7% left a seam.**
 The tests pin the arithmetic and nothing says the seam is gone, because nothing
 here can see. Attribute it with a debug view first.
 
-**13. Real-install facet-0 bake/load measurements** inside the dedicated
+**16. Real-install facet-0 bake/load measurements** inside the dedicated
 `MemoryMax=2G` cgroup — artifact size, peak memory, cold-load time, readiness —
 have not been re-recorded since the compact graph and component grouping landed.
 
-**14. The counters nobody reads.** `RadarCacheCounters` and `RadarWorkCounters`
+**17. The counters nobody reads.** `RadarCacheCounters` and `RadarWorkCounters`
 are written and unread outside the development HUD; markers on the minimap are
 the player and nothing else, and which of party, waypoint and corpse belongs
 there is a decision rather than a drawing.
 
-**15. The publish window.** A revision is visible before the rebake over its
+**18. The publish window.** A revision is visible before the rebake over its
 touched chunks finishes, and today's rule is that a stale artefact refuses itself
 — so routing in those chunks degrades to flat A\* until the rebake lands. The
 alternative is to rebuild the touched regions *inside* the publish and pay the
@@ -173,10 +202,22 @@ single-region rebuild rather than by preference. What made it urgent is gone: a
 restart inside the window used to refuse to boot, and boot replays the log's
 missed chunks now.
 
-**16. Two whole-facet CPU paths with no caller but their own tests.**
+**19. Two whole-facet CPU paths with no caller but their own tests.**
 `RadarCache`'s `bake` and `mark` are the whole-map image path, worth keeping only
 if something is going to want a whole-map image; the minimap's close affordance
 is a provisional `M` and says so in `event_loop.rs`.
+
+**20. The land's fourth byte is 29.4 MB of alignment, and it is bigger than
+everything the statics run saved.** A `LandCell` is a `LandTileId` (`u16`) and a
+`z` (`i8`) — three bytes of fields in four of storage — and Felucca is 29,360,128
+cells, so the land is 117.4 MiB of which 29.4 MB is padding; the whole statics
+layer is 29.5 MiB. It is gated on the read staying cheap, and the gate is the
+point: the land is handed out as `&[LandCell]` and walked one cell east at a
+time on the path that draws every frame, where a block is exactly four cache
+lines. A three-byte cell cannot be a slice of anything, so every read becomes an
+unaligned load and a shift. What this asks for is a *measurement* — the ground
+walk of a widest-zoom frame over a packed cell against the cell we have — and the
+same gate governs the packed four-byte static record.
 
 Two questions this domain deliberately keeps open, and neither is waiting on
 work: **land height per tile or per corner** (closed the day we mean to change
@@ -259,7 +300,21 @@ is most likely to want:
   node-expansion question is closed in it, with the four attempts that did not
   move it.
 - [`evidence/2026-08-23-era-r-the-map-you-hold.md`](evidence/2026-08-23-era-r-the-map-you-hold.md)
-  — the runtime map, node by node: R1 to R4 built and R5 struck.
+  — the runtime map, node by node: R1 to R4 built and R5 struck, and
+  [`evidence/2026-08-23-the-world-and-map-backlog.md`](evidence/2026-08-23-the-world-and-map-backlog.md)
+  — the backlog era R filed as it went, which the roadmap kept until this domain
+  had a place for it.
+- **The world phase, as the roadmap recorded it**, moved here on 2026-09-02:
+  [`evidence/2026-08-26-a-client-walks-in-britannia.md`](evidence/2026-08-26-a-client-walks-in-britannia.md)
+  (world entry, the file-format traps, and the two rules the walk check takes one
+  half of from each reference),
+  [`evidence/2026-08-24-mobiles-and-the-shove-rule.md`](evidence/2026-08-24-mobiles-and-the-shove-rule.md)
+  (a mobile is an obstacle, and the shove),
+  [`evidence/2026-08-24-the-movement-surface-investigation.md`](evidence/2026-08-24-the-movement-surface-investigation.md)
+  (the 2026-08-02 pier report: three suspects walked, none of them the cause) and
+  [`evidence/2026-08-24-runtime-lookups-and-the-tick.md`](evidence/2026-08-24-runtime-lookups-and-the-tick.md)
+  (the corner rule's owner, the sector bucket that became two lists, and what the
+  tick guarantees).
 - [`evidence/2026-08-31-the-base-set-track.md`](evidence/2026-08-31-the-base-set-track.md)
   — a world of our own, from the first imported chunk to a publish reaching a
   connected client.

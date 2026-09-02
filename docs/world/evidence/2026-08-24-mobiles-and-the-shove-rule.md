@@ -1,6 +1,7 @@
 # Mobiles and the shove rule
 
-[World index](README.md) · [Roadmap](../README.md) · [Backlog](../backlog/README.md)
+> A record. It was part of the roadmap's world phase until 2026-09-02; what is
+> open in this domain is now ranked in [`world/README.md`](../README.md).
 
 ## Closed: a mobile is not an obstacle — it was two entries
 

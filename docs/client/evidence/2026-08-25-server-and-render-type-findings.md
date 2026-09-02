@@ -1,6 +1,9 @@
 # Server and render type findings
 
-[Client backlog](README.md) · [Backlog](../README.md) · [Roadmap](../../README.md)
+> A record, one of the five the roadmap kept as its client backlog until
+> 2026-09-02. What is open is now ranked in [`client/README.md`](../README.md);
+> the rows here that belong to a neighbouring domain travel there when that
+> domain is migrated.
 
 ## Backlog from the server/common/render newtype hunt
 
@@ -14,7 +17,7 @@ sweep's own ALLOWLIST precedent already excludes, and `metrics` is an
 unimplemented stub.
 
 The single largest finding is out of scope for one pass and now has its own
-living plan, [`facet_newtype.md`](../../../facet_newtype.md): **`Facet` —
+living plan, [`facet_newtype.md`](../../facet_newtype.md): **`Facet` —
 `protocol::world::Facet(pub u8)` — is typed correctly in exactly the places
 `world::tick::command` already uses it, and a bare `facet: u8` everywhere
 else**, which by grep is upward of eighty signatures across `ai`, `npc`,

@@ -694,8 +694,9 @@ pub fn install_doors(state: &mut WorldState, house: EntityId, facet: Facet, at: 
 /// carried verbatim: a house on a rise puts its own floor a good way over the
 /// slope outside it, and an eviction to that height is a body standing inside
 /// the hill next door — the same defect as every other arrival that named a
-/// height instead of asking for one (`movement::arrival_z`, and `roadmap.md`'s
-/// third pier suspect). The house's z is still what the question is asked
+/// height instead of asking for one (`movement::arrival_z`, and the third pier
+/// suspect in `docs/world/evidence/2026-08-24-the-movement-surface-investigation.md`).
+/// The house's z is still what the question is asked
 /// *near*: out of the door and down the step, not up onto the roof.
 /// The `facet` is the whole reason this takes one: every other question in this
 /// module is about a multi's *shape*, which is the same on every facet, and this
