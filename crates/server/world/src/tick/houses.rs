@@ -82,21 +82,43 @@ impl World {
         // Read from `deco_addons.json` through the same table the world's own
         // pre-placed decoration is flattened from, so this geometry cannot drift
         // from what already stands on the map — see docs/crafting.md's review.
-        let parts: &[crate::decoration::AddonComponent] = match addon {
+        let parts: Vec<crate::decoration::AddonComponent> = match addon {
             AddonKind::StoneOvenEast => {
                 crate::decoration::addon_components("StoneOvenEastAddon")
                     .expect("StoneOvenEastAddon is in deco_addons.json")
+                    .to_vec()
             }
             AddonKind::StoneOvenSouth => {
                 crate::decoration::addon_components("StoneOvenSouthAddon")
                     .expect("StoneOvenSouthAddon is in deco_addons.json")
+                    .to_vec()
             }
-            // No elven oven is pre-placed on this facet, so `deco_addons.json`
+            AddonKind::LoomEast => {
+                crate::decoration::addon_components("LoomEastAddon")
+                    .expect("LoomEastAddon is in deco_addons.json")
+                    .to_vec()
+            }
+            AddonKind::LoomSouth => {
+                crate::decoration::addon_components("LoomSouthAddon")
+                    .expect("LoomSouthAddon is in deco_addons.json")
+                    .to_vec()
+            }
+            // Nothing below is pre-placed on this facet, so `deco_addons.json`
             // never imported one and there is no generated row to read. The
-            // geometry is ServUO's own `ElvenStove{East,South}Addon`: one tile at
-            // the origin, the facing being the graphic and nothing else.
-            AddonKind::ElvenOvenEast => &[(Graphic(0x2DDB), 0, 0, 0)],
-            AddonKind::ElvenOvenSouth => &[(Graphic(0x2DDC), 0, 0, 0)],
+            // geometry is ServUO's own addon constructor: one tile at the origin,
+            // the facing being the graphic and nothing else.
+            AddonKind::ElvenOvenEast => vec![(Graphic(0x2DDB), 0, 0, 0)],
+            AddonKind::ElvenOvenSouth => vec![(Graphic(0x2DDC), 0, 0, 0)],
+            // A wheel is installed at rest, and its resting art is read from
+            // `wheel_arts` rather than written here a second time — the two
+            // would then have to agree, which is #5's own defect one shelf over.
+            AddonKind::SpinningWheelEast
+            | AddonKind::SpinningWheelSouth
+            | AddonKind::ElvenSpinningWheelEast
+            | AddonKind::ElvenSpinningWheelSouth => {
+                let (idle, _) = addon.wheel_arts().expect("every spinning wheel has its two arts");
+                vec![(idle, 0, 0, 0)]
+            }
         };
         if !openshard_housing::storage::has_room_for(&self.state, house, parts.len()) {
             self.state
@@ -109,7 +131,7 @@ impl World {
         // two ovens both carry zero, but a future addon's `deco_addons.json` row
         // need not.
         let mut tiles = Vec::with_capacity(parts.len());
-        for &(graphic, dx, dy, dz) in parts {
+        for &(graphic, dx, dy, dz) in &parts {
             let x = i32::from(at.x) + i32::from(dx);
             let y = i32::from(at.y) + i32::from(dy);
             let z = i32::from(at.z) + i32::from(dz);
@@ -119,8 +141,9 @@ impl World {
             };
             let point = Point::new(x, y, z);
             if self.house_at(point, facet) != Some(house) {
+                let name = addon.name();
                 self.state
-                    .system_message(actor, "The whole oven must fit inside the house.");
+                    .system_message(actor, &format!("The whole {name} must fit inside the house."));
                 return;
             }
             if !self.addon_tile_is_free(facet, house, graphic, point) {

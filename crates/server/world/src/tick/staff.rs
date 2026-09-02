@@ -127,6 +127,12 @@ impl World {
             openshard_state::TargetPurpose::Cut { tool } => {
                 items::cut(&mut self.state, actor, tool, response.object);
             }
+            openshard_state::TargetPurpose::Spin { fibre } => {
+                items::spin(&mut self.state, actor, fibre, response.object);
+            }
+            openshard_state::TargetPurpose::Weave { material } => {
+                items::weave(&mut self.state, actor, material, response.object);
+            }
             openshard_state::TargetPurpose::GuildInvite => {
                 // Re-checked here: the cursor outlives the click that raised it,
                 // and a leader who disbanded or was deposed while it was up

@@ -241,7 +241,9 @@ CREATE TABLE IF NOT EXISTS items (
     material INTEGER,
     -- the installed house addon this item is one tile of. See the sqlite schema.
     addon_kind INTEGER,
-    addon_root BIGINT
+    addon_root BIGINT,
+    -- how much thread an installed loom has taken. See the sqlite schema.
+    loom_phase INTEGER
 );
 CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
 CREATE TABLE IF NOT EXISTS mobiles (
@@ -345,7 +347,8 @@ impl PgStore {
             // v35 adds nullable semantic identity. Existing rows retain their
             // legacy presentation and are explicitly mapped while restoring.
             // v36 adds the addon grouping, also nullable — see the sqlite side.
-            Some(33) if SCHEMA_VERSION == 36 => {
+            // v37 adds the loom's phase, also nullable — likewise.
+            Some(33) if SCHEMA_VERSION == 37 => {
                 client
                     .batch_execute(
                         "ALTER TABLE items ADD COLUMN IF NOT EXISTS affixes TEXT; \
@@ -353,29 +356,41 @@ impl PgStore {
                          ALTER TABLE items ADD COLUMN IF NOT EXISTS material INTEGER; \
                          ALTER TABLE items ADD COLUMN IF NOT EXISTS addon_kind INTEGER; \
                          ALTER TABLE items ADD COLUMN IF NOT EXISTS addon_root BIGINT; \
-                         UPDATE meta SET value = 36 WHERE key = 'schema';",
+                         ALTER TABLE items ADD COLUMN IF NOT EXISTS loom_phase INTEGER; \
+                         UPDATE meta SET value = 37 WHERE key = 'schema';",
                     )
                     .await
                     .map_err(database)?;
             }
-            Some(34) if SCHEMA_VERSION == 36 => {
+            Some(34) if SCHEMA_VERSION == 37 => {
                 client
                     .batch_execute(
                         "ALTER TABLE items ADD COLUMN IF NOT EXISTS item_kind INTEGER; \
                          ALTER TABLE items ADD COLUMN IF NOT EXISTS material INTEGER; \
                          ALTER TABLE items ADD COLUMN IF NOT EXISTS addon_kind INTEGER; \
                          ALTER TABLE items ADD COLUMN IF NOT EXISTS addon_root BIGINT; \
-                         UPDATE meta SET value = 36 WHERE key = 'schema';",
+                         ALTER TABLE items ADD COLUMN IF NOT EXISTS loom_phase INTEGER; \
+                         UPDATE meta SET value = 37 WHERE key = 'schema';",
                     )
                     .await
                     .map_err(database)?;
             }
-            Some(35) if SCHEMA_VERSION == 36 => {
+            Some(35) if SCHEMA_VERSION == 37 => {
                 client
                     .batch_execute(
                         "ALTER TABLE items ADD COLUMN IF NOT EXISTS addon_kind INTEGER; \
                          ALTER TABLE items ADD COLUMN IF NOT EXISTS addon_root BIGINT; \
-                         UPDATE meta SET value = 36 WHERE key = 'schema';",
+                         ALTER TABLE items ADD COLUMN IF NOT EXISTS loom_phase INTEGER; \
+                         UPDATE meta SET value = 37 WHERE key = 'schema';",
+                    )
+                    .await
+                    .map_err(database)?;
+            }
+            Some(36) if SCHEMA_VERSION == 37 => {
+                client
+                    .batch_execute(
+                        "ALTER TABLE items ADD COLUMN IF NOT EXISTS loom_phase INTEGER; \
+                         UPDATE meta SET value = 37 WHERE key = 'schema';",
                     )
                     .await
                     .map_err(database)?;
@@ -812,7 +827,7 @@ impl PgStore {
                  uses, exceptional, crafter, \
                  rune_facet, rune_x, rune_y, rune_z, runebook, \
                  lockdown_house, lockdown_secure, affixes, item_kind, material, \
-                 addon_kind, addon_root FROM items",
+                 addon_kind, addon_root, loom_phase FROM items",
                 &[],
             )
             .await
@@ -1183,9 +1198,9 @@ async fn insert_item(
               corpse, poison_level, poison_charges, trap_kind, trap_power, trap_level, uses, \
               exceptional, crafter, rune_facet, rune_x, rune_y, rune_z, runebook, \
               lockdown_house, lockdown_secure, affixes, item_kind, material, \
-              addon_kind, addon_root) \
+              addon_kind, addon_root, loom_phase) \
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21, \
-                     $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39) \
+                     $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40) \
              ON CONFLICT (serial) DO UPDATE SET \
              owner = EXCLUDED.owner, graphic = EXCLUDED.graphic, hue = EXCLUDED.hue, \
              amount = EXCLUDED.amount, stackable = EXCLUDED.stackable, gump = EXCLUDED.gump, \
@@ -1202,7 +1217,8 @@ async fn insert_item(
              runebook = EXCLUDED.runebook, lockdown_house = EXCLUDED.lockdown_house, \
              lockdown_secure = EXCLUDED.lockdown_secure, affixes = EXCLUDED.affixes, \
              item_kind = EXCLUDED.item_kind, material = EXCLUDED.material, \
-             addon_kind = EXCLUDED.addon_kind, addon_root = EXCLUDED.addon_root",
+             addon_kind = EXCLUDED.addon_kind, addon_root = EXCLUDED.addon_root, \
+             loom_phase = EXCLUDED.loom_phase",
             &[
                 &i64::from(item.serial.raw()),
                 // `owner` is `NOT NULL BIGINT` with `0` the sentinel for "no owner" —
@@ -1268,6 +1284,7 @@ async fn insert_item(
                     .addon
                     .map(|part| i32::try_from(part.kind).expect("a deed's item kind id fits INTEGER")),
                 &item.addon.map(|part| i64::from(part.root.raw())),
+                &item.loom_phase.map(i32::from),
             ],
         )
         .await
@@ -1427,6 +1444,12 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
                 }
                 _ => None,
             },
+            // A phase past the loom's four reads as an empty loom rather than as
+            // a corrupt row: the count is a small integer nobody else writes, and
+            // refusing the whole item would lose a piece of somebody's house.
+            loom_phase: row
+                .get::<_, Option<i32>>(39)
+                .and_then(|phase| u8::try_from(phase).ok()),
             location,
         }))
     }

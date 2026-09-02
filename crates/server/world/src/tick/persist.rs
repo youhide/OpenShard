@@ -644,6 +644,13 @@ impl World {
                         root: part.root,
                     }
                 }),
+            // And how far a loom has been loaded, which is the one piece of an
+            // addon's *working* state that is saved: those spools are already
+            // spent. The wheel's six-second timer deliberately is not — see
+            // `Spinning`'s own docs.
+            loom_phase: registry
+                .get::<openshard_state::components::LoomPhase>(item)
+                .map(|loaded| loaded.0),
             affixes: registry
                 .get::<ItemAffixes>(item)
                 .map(|affixes| {
@@ -805,6 +812,38 @@ impl World {
                         root: part.root,
                     },
                 );
+                // ServUO's `OnComponentLoaded`, and the reason it exists: the
+                // save is a snapshot of whatever art the tile was wearing, and a
+                // shard that went down mid-spin recorded the *turning* wheel.
+                // The timer did not survive, so the picture must not either — a
+                // restored wheel that kept it would turn forever and never pay.
+                if let Some((idle, turning)) = addon.wheel_arts() {
+                    let drawn = self.state.registry.get::<Drawn>(entity).copied();
+                    if drawn.is_some_and(|drawn| drawn.id == turning) {
+                        self.state.registry.insert(
+                            entity,
+                            Drawn {
+                                id:  idle,
+                                hue: drawn.expect("checked just above").hue,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        // The loom's count, restored only onto a component that is one — a stray
+        // phase on anything else would be a number nothing ever reads and a save
+        // that keeps rewriting it.
+        if let Some(phase) = record.loom_phase {
+            let is_loom = self
+                .state
+                .registry
+                .get::<openshard_state::components::AddonPart>(entity)
+                .is_some_and(|part| part.addon.is_loom());
+            if is_loom {
+                self.state
+                    .registry
+                    .insert(entity, openshard_state::components::LoomPhase(phase));
             }
         }
     }

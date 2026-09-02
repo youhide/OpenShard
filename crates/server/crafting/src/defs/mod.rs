@@ -69,20 +69,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_oven_deed_keeps_its_installation_kind() {
-        let ovens: Vec<_> = carpentry::RECIPES
+    fn every_addon_deed_keeps_its_installation_kind() {
+        let addons: Vec<_> = carpentry::RECIPES
             .iter()
             .filter_map(|recipe| recipe.addon)
             .collect();
         assert_eq!(
-            ovens,
+            addons,
             vec![
+                AddonKind::ElvenSpinningWheelEast,
+                AddonKind::ElvenSpinningWheelSouth,
+                AddonKind::SpinningWheelEast,
+                AddonKind::SpinningWheelSouth,
+                AddonKind::LoomEast,
+                AddonKind::LoomSouth,
                 AddonKind::StoneOvenEast,
                 AddonKind::StoneOvenSouth,
                 AddonKind::ElvenOvenSouth,
                 AddonKind::ElvenOvenEast,
             ]
         );
+    }
+
+    /// An addon deed has exactly **one** row in its trade's table.
+    ///
+    /// Every addon deed draws the same generic scroll (`0x14F0`), so a second row
+    /// with the same display name is invisible in the gump *except* as a
+    /// duplicate line — and the untyped one of the pair crafts a scroll that
+    /// installs nothing. That is not hypothetical: giving the two elven ovens
+    /// their `kind` and `addon` added new rows beside the old ones instead of
+    /// changing them, and both facings sat in the carpentry window twice, one
+    /// working and one inert, until this test was written.
+    #[test]
+    fn no_addon_deed_is_offered_twice() {
+        for system in SYSTEMS {
+            for recipe in system.recipes {
+                if recipe.addon.is_none() {
+                    continue;
+                }
+                let same_name = system
+                    .recipes
+                    .iter()
+                    .filter(|other| other.name == recipe.name)
+                    .count();
+                assert_eq!(
+                    same_name, 1,
+                    "{:?} names {same_name} rows in {:?}",
+                    recipe.name, system.skill
+                );
+            }
+        }
     }
 
     /// An addon recipe's output *is* the deed that installs it: a row naming one

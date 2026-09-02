@@ -107,9 +107,7 @@
     UI). The four remaining tables — Inscription, Glassblowing, Masonry and
     Cartography — are data the generator can emit when
     they are wanted; Inscription waits on the writable book it is already tied
-    to. One material chain stays unbuilt rather than implied: **cotton → thread
-    → cloth**, a spinning wheel and a loom, which are addon interactions in
-    ServUO and not crafts at all — until it exists a tailor buys cloth.
+    to.
   - **Hides become leather under scissors, and keep their grade.** The chain the
     butcher's end was missing: `carve` paid a player in hides and 56 tailoring
     rows ate leather that nothing on the shard produced, so more than half the
@@ -123,3 +121,22 @@
     the hell cat and the housecat are both `0xC9`, and that body stays regular.
     Horned and barbed have no carvable source yet; every creature that wears
     them upstream is a dragon or a serpent.
+  - **Cotton becomes cloth on a spinning wheel and a loom.** The other half of
+    the same gap: 56 tailoring rows and a dozen carpentry and smithing ones eat
+    cloth (`0x1766`) that nothing on the shard made, so a tailor bought it. The
+    chain is ServUO's, and it is two **addon interactions** rather than crafts —
+    cotton or flax → wheel → six spools of thread; wool → wheel → three balls of
+    dark yarn; five spools or balls → loom → a bolt of cloth; the bolt →
+    scissors → fifty cloth, in `items/src/{spin,weave,cut}.rs`. The wheel turns
+    for ServUO's six seconds, drawing its turning art and refusing a second pile
+    meanwhile; a hue survives the whole length of the chain, so dyed cotton ends
+    as dyed cloth. Both facings of the loom, the spinning wheel and the elven
+    spinning wheel are Carpenter deeds that install through the machinery the
+    ovens built (deed kinds 115-120), and the loom geometry is read from the
+    generated `decoration::ADDON_COMPONENTS` rather than written twice. The
+    loom's half-woven count is saved (**schema v37**) because those spools are
+    already spent; the wheel's timer deliberately is not, and a restored wheel is
+    stamped back to its resting art the way ServUO's `OnComponentLoaded` does.
+    Cotton, flax and wool are still bought rather than farmed or sheared —
+    `FarmableCotton`, `FarmableFlax` and shearing a sheep are their own world
+    slice.

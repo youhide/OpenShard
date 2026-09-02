@@ -184,6 +184,12 @@ enum AddonRow {
     StoneOvenSouth,
     ElvenOvenEast,
     ElvenOvenSouth,
+    LoomEast,
+    LoomSouth,
+    SpinningWheelEast,
+    SpinningWheelSouth,
+    ElvenSpinningWheelEast,
+    ElvenSpinningWheelSouth,
 }
 
 impl AddonRow {
@@ -193,6 +199,12 @@ impl AddonRow {
             Self::StoneOvenSouth => "openshard_state::AddonKind::StoneOvenSouth",
             Self::ElvenOvenEast => "openshard_state::AddonKind::ElvenOvenEast",
             Self::ElvenOvenSouth => "openshard_state::AddonKind::ElvenOvenSouth",
+            Self::LoomEast => "openshard_state::AddonKind::LoomEast",
+            Self::LoomSouth => "openshard_state::AddonKind::LoomSouth",
+            Self::SpinningWheelEast => "openshard_state::AddonKind::SpinningWheelEast",
+            Self::SpinningWheelSouth => "openshard_state::AddonKind::SpinningWheelSouth",
+            Self::ElvenSpinningWheelEast => "openshard_state::AddonKind::ElvenSpinningWheelEast",
+            Self::ElvenSpinningWheelSouth => "openshard_state::AddonKind::ElvenSpinningWheelSouth",
         }
     }
 
@@ -205,6 +217,12 @@ impl AddonRow {
             Self::StoneOvenSouth => 111,
             Self::ElvenOvenSouth => 112,
             Self::ElvenOvenEast => 113,
+            Self::LoomEast => 115,
+            Self::LoomSouth => 116,
+            Self::SpinningWheelEast => 117,
+            Self::SpinningWheelSouth => 118,
+            Self::ElvenSpinningWheelEast => 119,
+            Self::ElvenSpinningWheelSouth => 120,
         }
     }
 }

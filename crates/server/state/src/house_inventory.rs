@@ -599,6 +599,14 @@ impl WorldState {
                 // of an oven whose other half is now somewhere else. See
                 // [`AddonPart`](crate::components::AddonPart).
                 self.registry.remove::<crate::components::AddonPart>(item);
+                // And with the grouping goes the loom's half-woven count and the
+                // spinning wheel's timer, for the same reason: both are state
+                // about an *installed* addon, and a tile in a moving crate is no
+                // longer one. The count is forfeit rather than refunded, which is
+                // the same bargain the whole addon makes — a collapsed house
+                // hands back the deed, not the boards.
+                self.registry.remove::<crate::components::LoomPhase>(item);
+                self.registry.remove::<crate::components::Spinning>(item);
             }
         }
         let serial = self.registry.serial_of(item);

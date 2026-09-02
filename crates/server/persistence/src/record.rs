@@ -406,7 +406,13 @@ mod optional_serial {
 ///   a locked-down component is a tile of. Two nullable columns; absent on every
 ///   pre-migration row, which is correct — an addon placed before this existed
 ///   was never a group and cannot be made one after the fact.
-pub const SCHEMA_VERSION: u32 = 36;
+/// - v37: `loom_phase` on an item: how much thread an installed loom has taken
+///   toward its next bolt of cloth. One nullable column, absent on every
+///   pre-migration row, which reads as an empty loom — the only reading that
+///   could be wrong is a loom loaded in the same session the shard was upgraded
+///   in, and an empty loom is the direction that costs a weaver nothing they had
+///   not already spent.
+pub const SCHEMA_VERSION: u32 = 37;
 
 /// One component of a house whose shape nobody shipped.
 ///
@@ -1031,6 +1037,16 @@ pub struct ItemRecord {
     /// asked one item at a time, by a release that already has one in hand.
     #[serde(default)]
     pub addon:          Option<AddonPartData>,
+    /// How far an installed loom has been loaded toward its next bolt of cloth —
+    /// one to four, and `None` for an empty loom, which is every item on the
+    /// shard that is not a loom in the middle of a weave.
+    ///
+    /// Saved where the spinning wheel's six-second timer deliberately is not:
+    /// the wheel has taken one pile and owes it back within seconds, while a
+    /// part-loaded loom has *already eaten* up to four spools, and a restart that
+    /// forgot the count would charge the weaver for them twice.
+    #[serde(default)]
+    pub loom_phase:     Option<u8>,
     /// Shard-defined properties of this particular item. A list rather than a
     /// column per property: a sword carries only a few, while new affix kinds
     /// should not force a database redesign. Empty is the ordinary item.
@@ -1793,6 +1809,7 @@ mod tests {
                     kind: 110,
                     root: Serial::new(0x4000_0004).unwrap(),
                 }),
+                loom_phase: Some(3),
                 affixes: vec![ItemAffixRecord::Slayer {
                     body:          0x0009,
                     bonus_percent: 100,

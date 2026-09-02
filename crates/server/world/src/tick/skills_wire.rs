@@ -196,6 +196,15 @@ impl World {
             _ if items::is_scissors(graphic) => {
                 items::use_scissors(&mut self.state, player, item);
             }
+            // And the cloth chain's own two steps, each an item asking for the
+            // house addon it is used on: cotton, flax or wool onto a spinning
+            // wheel, then the thread or yarn that comes off onto a loom.
+            _ if openshard_state::components::Fibre::from_graphic(graphic).is_some() => {
+                items::use_fibre(&mut self.state, player, item);
+            }
+            _ if items::is_cloth_material(graphic) => {
+                items::use_cloth_material(&mut self.state, player, item);
+            }
             _ if match self.state.registry.get::<ItemKind>(item) {
                 Some(kind) => openshard_state::instrument::instrument_data_for_kind(kind.0).is_some(),
                 None => openshard_state::instrument::instrument_data(graphic).is_some(),

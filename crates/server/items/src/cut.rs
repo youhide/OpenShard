@@ -46,6 +46,17 @@ pub const HIDES_KIND: ItemKindId = ItemKindId(114);
 /// Semantic kind of a pile of leather — what a tailor spends.
 pub const LEATHER_KIND: ItemKindId = ItemKindId(37);
 
+/// The art cut cloth takes — what fifty-six tailoring rows, and a dozen
+/// carpentry and smithing ones, actually spend.
+const CLOTH_GRAPHIC: Graphic = Graphic(0x1766);
+/// How much cloth one bolt cuts into. ServUO's `ScissorHelper(from, new Cloth(),
+/// 50)`, and the number a bolt's own single-click line already quotes.
+const CLOTH_PER_BOLT: u32 = 50;
+/// The most bolts one cut will take, so the cloth stays inside one pile.
+/// ServUO's own `60000 / amountPerOldItem` clamp, written against the same
+/// [`MAX_STACK`](crate::MAX_STACK) that is the 60,000.
+const MAX_BOLTS_PER_CUT: u16 = (MAX_STACK as u32 / CLOTH_PER_BOLT) as u16;
+
 /// The art a pile of hides takes. ServUO builds `BaseHides` on `0x1079` and
 /// flips to `0x1078`; this engine has always drawn the flipped one, so that is
 /// the registry's canonical graphic and `0x1079` its alias.
@@ -111,7 +122,7 @@ pub fn cut(state: &mut WorldState, cutter: EntityId, tool: EntityId, target: Opt
         state.localized_message(cutter, NOT_CUTTABLE, "");
         return;
     };
-    let Some(material) = hide_grade(state, target) else {
+    let Some(what) = cuttable(state, target) else {
         state.localized_message(cutter, NOT_CUTTABLE, "");
         return;
     };
@@ -129,29 +140,74 @@ pub fn cut(state: &mut WorldState, cutter: EntityId, tool: EntityId, target: Opt
         return;
     }
 
-    let (Some(serial), Some(container)) = (state.registry.serial_of(target), containing(state, target))
-    else {
+    let (Some(serial), Some(container), Some(drawn)) = (
+        state.registry.serial_of(target),
+        containing(state, target),
+        state.registry.get::<Drawn>(target).copied(),
+    ) else {
         return;
     };
-    // A pile can hold at most `MAX_STACK`, which is ServUO's own 60,000 cut cap,
-    // so the whole pile is always takeable in one go and there is no clamp here.
-    let taking = amount_of(state, target);
-    if taking == 0 {
+    let held = amount_of(state, target);
+    if held == 0 {
         return;
     }
-    consume(state, serial, taking);
-    // The leather lands where the hides were, not in the pack: ServUO's
-    // `ScissorHelper` gives the new item the old one's parent, and a pile cut
-    // inside a bag has no business jumping out of it.
-    let made = give_kind(state, container, LEATHER_KIND, Some(material), u32::from(taking))
-        .expect("every hide grade is a leather grade");
+    // Both cuts put what they make where the old pile was, not in the pack:
+    // ServUO's `ScissorHelper` gives the new item the old one's parent, and a
+    // pile cut inside a bag has no business jumping out of it.
+    let (wanted, made, name) = match what {
+        // A pile of hides can hold at most `MAX_STACK`, which is ServUO's own
+        // 60,000 cut cap at one leather each, so the whole pile always goes in
+        // one go and there is no clamp on this side.
+        Cuttable::Hides(material) => {
+            consume(state, serial, held);
+            let wanted = u32::from(held);
+            let made = give_kind(state, container, LEATHER_KIND, Some(material), wanted)
+                .expect("every hide grade is a leather grade");
+            (wanted, made, "leather")
+        }
+        // Bolts do need the clamp: fifty cloth apiece would put a full pile of
+        // them fifty times over what one pile of cloth can hold.
+        Cuttable::Bolt => {
+            let taking = held.min(MAX_BOLTS_PER_CUT);
+            consume(state, serial, taking);
+            let wanted = u32::from(taking) * CLOTH_PER_BOLT;
+            let made = give(state, container, CLOTH_GRAPHIC, drawn.hue, wanted);
+            (wanted, made, "cloth")
+        }
+    };
     state.play_sound(cutter, SNIP);
     if !made.is_complete() {
         state.system_message(
             cutter,
-            &format!("Only {} of {taking} leather could be placed there.", made.given),
+            &format!("Only {} of {wanted} {name} could be placed there.", made.given),
         );
     }
+}
+
+/// What the scissors found under the cursor, and therefore what comes off it.
+///
+/// Two entries and two identity models, which is the point of naming the answer
+/// rather than returning a material: hides are a *typed* kind carrying a leather
+/// grade, and a bolt of cloth is legacy art carrying a dye. ServUO writes both as
+/// `IScissorable` implementations, and they are not interchangeable — a bolt has
+/// no grade and a hide has no fifty-to-one yield.
+enum Cuttable {
+    /// A pile of hides: one leather per hide, keeping the grade.
+    Hides(MaterialId),
+    /// A bolt of woven cloth: fifty cloth per bolt, keeping the hue.
+    Bolt,
+}
+
+/// Which of the two the scissors were pointed at, or `None` for anything else.
+fn cuttable(state: &WorldState, item: EntityId) -> Option<Cuttable> {
+    if let Some(material) = hide_grade(state, item) {
+        return Some(Cuttable::Hides(material));
+    }
+    // Every facing of ServUO's `[Flipable(0xF95 … 0xF9C)]` bolt, and only for an
+    // item the registry does not already call something else.
+    let drawn = state.registry.get::<Drawn>(item).copied()?;
+    let untyped = !state.registry.has::<ItemKind>(item);
+    (untyped && (0x0F95..=0x0F9C).contains(&drawn.id.0)).then_some(Cuttable::Bolt)
 }
 
 /// Which leather grade a pile of hides would cut into, or `None` when the item is

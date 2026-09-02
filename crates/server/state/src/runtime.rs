@@ -1702,6 +1702,23 @@ pub enum TargetPurpose {
         /// while the cursor was up cuts nothing.
         tool: EntityId,
     },
+    /// A pile of cotton, flax or wool waiting for the spinning wheel to go on —
+    /// ServUO's `PickWheelTarget`.
+    ///
+    /// The cursor is raised by the *fibre*, not by the wheel, which is why the
+    /// fibre rides here: a pile traded away while the cursor was up must not
+    /// still start a wheel turning.
+    Spin {
+        /// The pile being spun.
+        fibre: EntityId,
+    },
+    /// A spool of thread or a ball of yarn waiting for its loom — ServUO's
+    /// `PickLoomTarget`, and [`Spin`](Self::Spin)'s shape one step down the
+    /// chain.
+    Weave {
+        /// The spool or ball being woven.
+        material: EntityId,
+    },
     /// A guild leader's cursor, waiting for whoever is to be asked to join.
     ///
     /// Carries nothing: the guild is the one the clicker leads, and it is read

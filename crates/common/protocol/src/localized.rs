@@ -88,6 +88,18 @@ pub const SERVER_MESSAGES: &[Message] = &[
         fallback: "You are not certain...",
     },
     Message {
+        id:       ClilocId(500366),
+        fallback: "Select a loom to use that on.",
+    },
+    Message {
+        id:       ClilocId(500367),
+        fallback: "Try using that on a loom.",
+    },
+    Message {
+        id:       ClilocId(500368),
+        fallback: "You create some cloth and put it in your backpack.",
+    },
+    Message {
         id:       ClilocId(500397),
         fallback: "To whom do you wish to grovel?",
     },
@@ -396,6 +408,18 @@ pub const SERVER_MESSAGES: &[Message] = &[
         fallback: "Your hands must be free to cast spells or meditate.",
     },
     Message {
+        id:       ClilocId(502655),
+        fallback: "What spinning wheel do you wish to spin this on?",
+    },
+    Message {
+        id:       ClilocId(502656),
+        fallback: "That spinning wheel is being used.",
+    },
+    Message {
+        id:       ClilocId(502658),
+        fallback: "Use that on a spinning wheel.",
+    },
+    Message {
         id:       ClilocId(502698),
         fallback: "Which item will you attempt to steal?",
     },
@@ -563,6 +587,24 @@ pub const SERVER_MESSAGES: &[Message] = &[
         id:       ClilocId(1008085),
         fallback: "You play your music and your target becomes angered.  Whom do you wish them to attack?",
     },
+    // The loom's four loading lines. ServUO sends them as `1010001 + Phase++`,
+    // so they must stay a consecutive run — see `items::weave`.
+    Message {
+        id:       ClilocId(1010001),
+        fallback: "The bolt of cloth has just been started.",
+    },
+    Message {
+        id:       ClilocId(1010002),
+        fallback: "The bolt of cloth needs quite a bit more.",
+    },
+    Message {
+        id:       ClilocId(1010003),
+        fallback: "The bolt of cloth needs a little more.",
+    },
+    Message {
+        id:       ClilocId(1010004),
+        fallback: "The bolt of cloth is almost finished.",
+    },
     Message {
         id:       ClilocId(1010018),
         fallback: "What do you want to use this item on?",
@@ -582,6 +624,18 @@ pub const SERVER_MESSAGES: &[Message] = &[
     Message {
         id:       ClilocId(1010518),
         fallback: "You fail to apply a sufficient dose of poison.",
+    },
+    Message {
+        id:       ClilocId(1010574),
+        fallback: "You put a ball of yarn in your backpack.",
+    },
+    Message {
+        id:       ClilocId(1010576),
+        fallback: "You put the balls of yarn in your backpack.",
+    },
+    Message {
+        id:       ClilocId(1010577),
+        fallback: "You put the spools of thread in your backpack.",
     },
     Message {
         id:       ClilocId(1010585),
@@ -1634,6 +1688,10 @@ pub const SERVER_MESSAGES: &[Message] = &[
     Message {
         id:       ClilocId(1041352),
         fallback: "You have no idea how much it might be worth.",
+    },
+    Message {
+        id:       ClilocId(1042001),
+        fallback: "That must be in your pack for you to use it.",
     },
     Message {
         id:       ClilocId(1042666),

@@ -1,8 +1,8 @@
 # Crafting: how it works
 
 A reader's map of `crates/server/crafting` and the seams it hangs off, plus a
-review of the design as it stands (2026-09-02, with the Cooking and oven-deed
-slice in the working tree). The roadmap entry
+review of the design as it stands (2026-09-02, with the Cooking, oven-deed and
+cloth-chain slices in). The roadmap entry
 ([roadmap/06-gameplay/crafting.md](roadmap/06-gameplay/crafting.md)) says *what*
 landed and why; this page says *how the pieces fit* so a later session does not
 have to re-read six files to find out.
@@ -22,9 +22,13 @@ have to re-read six files to find out.
 | Window | `crafting/src/gump.rs` | ServUO's `CraftGump` through `GumpLayout`; context held server-side |
 | Ore → ingots | `crafting/src/smelt.rs` | the one step between Mining and Blacksmithy |
 | Hides → leather | `items/src/cut.rs` | the one step between butchering and Tailoring. In `items` rather than beside `smelt.rs`: it has no skill, no roll and no workshop, so it is `carve`'s shape (the module that makes the hides) and not a craft's |
+| Bolt → cloth | `items/src/cut.rs` | the same scissors, one step further: fifty cloth per bolt, keeping the hue |
+| Fibre → thread | `items/src/spin.rs` | the spinning wheel. An item action like the cut, with one addition nothing else in `items` has: a **timer**, ticked by `advance_spins` |
+| Thread → bolt | `items/src/weave.rs` | the loom, five applications to a bolt. The count lives on the addon, not on the weaver |
 | Tool table | `state/src/craft.rs` | graphic → trade skill + uses; in `state` because `items` reads it too |
 | In-flight state | `state::components::Crafting`, `Tool`, `Quality`, `CraftedBy` | components on the crafter / the item |
-| World wiring | `world/src/tick/skills_wire.rs`, `tick.rs` | the double-click dispatch, and `advance_crafts` once per tick |
+| Addon state | `state::components::AddonKind`, `AddonPart`, `AddonDeed`, `Spinning`, `LoomPhase`, `Fibre` | what a deed installs, which tiles are one addon, and what the wheel and the loom are in the middle of |
+| World wiring | `world/src/tick/skills_wire.rs`, `tick.rs` | the double-click dispatch, and `advance_crafts` / `advance_spins` once per tick |
 
 Dependency direction is the usual one: `crafting` reads `state`, `items`,
 `skills`; the world calls `crafting`; nothing calls back. The crate emits one
@@ -118,11 +122,32 @@ Points that are load-bearing rather than tidy:
 
 Saved on the item: `Tool` uses, `Quality`, `CraftedBy` (a name, not a serial),
 `Name`, `LockedDown`, `AddonPart` (which installed addon a locked-down component
-is a tile of). **Not saved:** the in-flight `Crafting` component and the
-per-player `craft_gump` context. Both are benign losses (nothing is consumed
-before `complete`), but a restart mid-craft ends the craft silently.
+is a tile of), `LoomPhase` (schema v37). **Not saved:** the in-flight `Crafting`
+component, the per-player `craft_gump` context, and a spinning wheel's
+`Spinning`. The first two are benign losses (nothing is consumed before
+`complete`), but a restart mid-craft ends the craft silently.
 
-## 5. The Cooking slice and addon deeds (working tree, 2026-09-02)
+The wheel and the loom split on exactly that question, and the split is the
+rule rather than an accident of which was easier:
+
+- **`Spinning` is not saved** because it is six seconds long and ServUO does not
+  serialize its own `SpinTimer` either. The cost is the pile of cotton, which
+  `BeginSpin` has already eaten. What *is* handled is the second half of that
+  loss: the save recorded the **turning** art, so `persist.rs` stamps the
+  resting one back on restore — ServUO's own `OnComponentLoaded`. Without it a
+  restored wheel turns forever with no timer left to stop it.
+- **`LoomPhase` is saved** because a part-loaded loom has already eaten up to
+  four spools. Forgetting the count charges the weaver for them twice, which is
+  not a benign loss at all. An empty loom carries no phase rather than a zero
+  one, so the column is NULL for every item on the shard that is not a loom
+  mid-weave.
+
+Both are dropped by `set_item_lockdown(item, None)` alongside `AddonPart`: a
+component swept into a collapsed house's crate is an ordinary item again, and
+the half-woven bolt goes with it — the same bargain the addon itself makes,
+which refunds the deed and not the boards.
+
+## 5. The Cooking slice and addon deeds (2026-09-02)
 
 - Cooking is the seventh `SystemRow`: skill `Cooking`, floor 0, sliding ECA,
   no sound (ServUO's `PlayCraftEffect` is empty too), no system-level needs;
@@ -146,21 +171,77 @@ before `complete`), but a restart mid-craft ends the craft silently.
   anything is spawned, then spawn each component as a ground item and
   `housing::storage::lock_down` it; roll back on any failure; consume the deed.
   The stone ovens' geometry is read from the generated
-  `decoration::ADDON_COMPONENTS` (see #5); only the two elven facings are inline
-  in `houses.rs` (`0x2DDB` east, `0x2DDC` south), since no elven oven is
-  pre-placed and `deco_addons.json` therefore has no row for either.
+  `decoration::ADDON_COMPONENTS` (see #5); the two elven facings are inline in
+  `houses.rs` (`0x2DDB` east, `0x2DDC` south), since no elven oven is pre-placed
+  and `deco_addons.json` therefore has no row for either. §6's four spinning
+  wheels are inline for the same reason, and its two looms are not — a loom *is*
+  pre-placed on this facet, so the generated table already carries it.
 - Placed components are ordinary locked-down items whose graphics fall in
   `environment::is_oven`/`is_heat`, so a cook standing by one passes the
   workshop scan. They also carry `AddonPart`, which is what makes a stone
   oven's two tiles one thing to release — see point 3 of the review below.
 
-## 6. Review: problems found
+## 6. The cloth chain (2026-09-02)
 
-Ordered by how much they mattered when found, except #11, which came out of a
-later pass and is appended rather than slotted in by weight. File references are
-to the working tree at the time. Every item is closed (2026-09-02); the fix is
-noted under each. 9 needed no action, and 8 was closed the low-risk way —
-verbatim upstream values with a comment rather than a quiet edit.
+Cloth (`0x1766`) is eaten by fifty-six tailoring rows, ten carpentry ones and
+one smithing one, and until this slice **nothing on the shard made any** — the
+leather gap of #11 again, one material over. ServUO's answer is not a craft at
+all: it is two house addons a player uses items *on*, and a pair of scissors at
+the end.
+
+```
+cotton (0xDF9) ─┐
+flax  (0x1A9C) ─┴─► [spinning wheel, 6 s] ─► 6 × spool of thread (0xFA0)
+wool   (0xDF8) ────► [spinning wheel, 6 s] ─► 3 × dark yarn (0xE1D)
+tainted wool (0x101F) ► [    ″    ] ─► 1 × dark yarn
+
+thread or yarn ×5 ─► [loom: 4 load, the 5th weaves] ─► bolt of cloth (0xF95)
+bolt ─► [scissors] ─► 50 × cloth (0x1766)          ← what a tailor spends
+```
+
+- **Six new addons, no new machinery.** `LoomEast/South`,
+  `SpinningWheelEast/South` and `ElvenSpinningWheelEast/South` are
+  [`AddonKind`] variants with deed kinds 115-120, and they install through the
+  path #3 and #5 built for the ovens: registered typed deeds on the shared
+  scroll art, `AddonPart` grouping, whole-addon release, refund on collapse.
+  The four carpentry rows that make them **already existed** in
+  `carpentry.json`, generated from `DefCarpentry.cs` and crafting an inert
+  `0x14F0` scroll because they carried no `kind` and no `addon`; giving them
+  both is the whole of the data change. The loom's two-tile geometry comes from
+  the generated `decoration::ADDON_COMPONENTS`, like the stone oven's; a wheel
+  is one tile and reads its own resting art from `wheel_arts` rather than
+  restating it (#5's defect, refused a second time).
+- **The wheel is the first timed thing in `items`.** `Spinning` sits on the
+  addon's root component; `advance_spins` runs beside `advance_crafts` in the
+  tick. Every tile of the wheel redraws to its turning art and back — the
+  `set_door` redraw, forget-then-reveal — and a turning wheel refuses a second
+  pile (cliloc 502656). The art pairs are ServUO's own and **do not all move the
+  same way**: the classic wheel counts up off its resting graphic and both elven
+  ones count down, so a single "+1 while busy" rule would have drawn the elven
+  wheels as different furniture entirely.
+- **Hue is the through-line.** Cotton carries a dye, the thread keeps it, the
+  bolt takes it from the *fifth* material rather than the four already loaded
+  (ServUO's own choice), and the cut keeps it again. Nothing in the chain is a
+  registered kind with a material family: a dye is not a grade, so these stay
+  legacy art plus hue, which is also what the vendors already stock them as.
+- **Where things land.** The wheel's yield goes to the spinner's pack, the
+  loom's bolt to the weaver's pack, and the cut's cloth to whatever container
+  the bolt was in — `ScissorHelper`'s parent rule, the same one the hides
+  follow. A spinner who logged out inside the six seconds gets the thread on the
+  wheel's own tile rather than nowhere: the fibre is already spent, and this
+  engine's logged-out character has no pack to reach.
+- **Still bought, not grown.** Cotton, flax and wool reach a player from a
+  vendor's shelf. `FarmableCotton`, `FarmableFlax` and shearing a sheep are a
+  world slice of their own, and none of them is what made cloth unreachable.
+
+## 7. Review: problems found
+
+Ordered by how much they mattered when found, except #11 and #12, which came out
+of later passes and are appended rather than slotted in by weight. File
+references are to the working tree at the time. Every item is closed
+(2026-09-02); the fix is noted under each. 9 needed no action, and 8 was closed
+the low-risk way — verbatim upstream values with a comment rather than a quiet
+edit.
 
 1. ~~**Most of the Cooking table is unreachable: there is no dough.**~~
    **Fixed.** Hand-wrote the `Dough` row in `cooking.json` (output `0x103D`,
@@ -379,11 +460,32 @@ verbatim upstream values with a comment rather than a quiet edit.
     material set, or `cut` either panics or downgrades), and
     `both_hide_arts_read_back_as_the_same_kind`.
 
-## 7. Deferred, by the roadmap's own list
+12. ~~**Both elven ovens are offered twice, and one of each pair is inert.**~~
+    **Fixed.** Found while §6 was giving the loom and the wheel their `kind` and
+    `addon`, because the same edit had been made once before and made
+    differently: #4 gave the two elven oven facings typed rows by *adding* rows
+    beside the generated ones rather than changing them, so `carpentry.json`
+    carried two rows for cliloc 1073394 and two for 1073395 — identical skills
+    and boards, one installing the oven and one crafting the bare `0x14F0`
+    scroll every addon deed shares. A player saw the line twice in group 7 and
+    had no way to tell which half worked. The two untyped rows are gone. What
+    keeps it from happening a third time is `no_addon_deed_is_offered_twice`
+    (`defs/mod.rs`), which asserts that a recipe carrying an `addon` is the only
+    row in its trade with its display cliloc — the precise invariant, since
+    duplicate names are legitimate elsewhere (tinkering has two, on purpose).
+    The blunter reading, "a row that outputs `0x14F0` must be typed", would be
+    true of the defect and false of the table: a dozen further ServUO addon
+    deeds — the dartboard, the water trough, the bulletin board — are generated
+    on that art and still inert, which is content this engine has not reached
+    rather than a bug it introduced.
+
+## 8. Deferred, by the roadmap's own list
 
 Repair, Enhance, AlterItem, Resmelt, recipe scrolls, make-number / make-max,
-the last-ten list, the four remaining `Def*` tables (Inscription, Glassblowing,
-Masonry, Cartography), and **one** of the two material chains: cotton → thread →
-cloth, which wants a spinning wheel and a loom and is an addon interaction in
-ServUO rather than a craft. Hides → leather has landed — see #11. Hunger and
-eating effects are outside this slice: food is an ordinary item.
+the last-ten list, and the four remaining `Def*` tables (Inscription,
+Glassblowing, Masonry, Cartography). Both material chains have landed: hides →
+leather in #11, cotton → thread → cloth in §6. What is left of the second one is
+its **head** — cotton and flax grow on `FarmableCotton`/`FarmableFlax` plants
+upstream and wool comes off a sheared sheep, and here all three are vendor
+stock. Hunger and eating effects are outside this slice: food is an ordinary
+item.

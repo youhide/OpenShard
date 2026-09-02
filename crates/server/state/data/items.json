@@ -112,5 +112,11 @@
   { "id": 111, "name": "stone oven south deed", "graphic": "0x14F0", "shared_art": true, "tags": [] },
   { "id": 112, "name": "elven oven south deed", "graphic": "0x14F0", "shared_art": true, "tags": [] },
   { "id": 113, "name": "elven oven east deed", "graphic": "0x14F0", "shared_art": true, "tags": [] },
-  { "id": 114, "name": "hides", "graphic": "0x1078", "legacy_graphics": ["0x1079"], "material_family": "leather", "tags": [] }
+  { "id": 114, "name": "hides", "graphic": "0x1078", "legacy_graphics": ["0x1079"], "material_family": "leather", "tags": [] },
+  { "id": 115, "name": "loom east deed", "graphic": "0x14F0", "shared_art": true, "tags": [] },
+  { "id": 116, "name": "loom south deed", "graphic": "0x14F0", "shared_art": true, "tags": [] },
+  { "id": 117, "name": "spinning wheel east deed", "graphic": "0x14F0", "shared_art": true, "tags": [] },
+  { "id": 118, "name": "spinning wheel south deed", "graphic": "0x14F0", "shared_art": true, "tags": [] },
+  { "id": 119, "name": "elven spinning wheel east deed", "graphic": "0x14F0", "shared_art": true, "tags": [] },
+  { "id": 120, "name": "elven spinning wheel south deed", "graphic": "0x14F0", "shared_art": true, "tags": [] }
 ]

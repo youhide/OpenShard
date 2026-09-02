@@ -1211,9 +1211,12 @@
       ]
     },
     {
+      "kind": 119,
       "graphic": "0x14F0",
       "name": 1073393,
+      "addon": "elven_spinning_wheel_east",
       "group": 7,
+      "output_material": "none",
       "never_exceptional": true,
       "skills": [{ "skill": "Carpentry", "min": 750, "max": 1000 }, { "skill": "Tailoring", "min": 650, "max": 850 }],
       "resources": [
@@ -1222,9 +1225,12 @@
       ]
     },
     {
+      "kind": 120,
       "graphic": "0x14F0",
       "name": 1072878,
+      "addon": "elven_spinning_wheel_south",
       "group": 7,
+      "output_material": "none",
       "never_exceptional": true,
       "skills": [{ "skill": "Carpentry", "min": 750, "max": 1000 }, { "skill": "Tailoring", "min": 650, "max": 850 }],
       "resources": [
@@ -1233,29 +1239,12 @@
       ]
     },
     {
-      "graphic": "0x14F0",
-      "name": 1073394,
-      "group": 7,
-      "never_exceptional": true,
-      "skills": [{ "skill": "Carpentry", "min": 850, "max": 1100 }],
-      "resources": [
-        { "graphic": "0x1BD7", "amount": 80, "name": 1044041, "message": 1044351, "from_axis": true }
-      ]
-    },
-    {
-      "graphic": "0x14F0",
-      "name": 1073395,
-      "group": 7,
-      "never_exceptional": true,
-      "skills": [{ "skill": "Carpentry", "min": 850, "max": 1100 }],
-      "resources": [
-        { "graphic": "0x1BD7", "amount": 80, "name": 1044041, "message": 1044351, "from_axis": true }
-      ]
-    },
-    {
+      "kind": 117,
       "graphic": "0x14F0",
       "name": 1044341,
+      "addon": "spinning_wheel_east",
       "group": 7,
+      "output_material": "none",
       "skills": [{ "skill": "Carpentry", "min": 736, "max": 986 }, { "skill": "Tailoring", "min": 650, "max": 700 }],
       "resources": [
         { "graphic": "0x1BD7", "amount": 75, "name": 1044041, "message": 1044351, "from_axis": true },
@@ -1263,9 +1252,12 @@
       ]
     },
     {
+      "kind": 118,
       "graphic": "0x14F0",
       "name": 1044342,
+      "addon": "spinning_wheel_south",
       "group": 7,
+      "output_material": "none",
       "skills": [{ "skill": "Carpentry", "min": 736, "max": 986 }, { "skill": "Tailoring", "min": 650, "max": 700 }],
       "resources": [
         { "graphic": "0x1BD7", "amount": 75, "name": 1044041, "message": 1044351, "from_axis": true },
@@ -1273,9 +1265,12 @@
       ]
     },
     {
+      "kind": 115,
       "graphic": "0x14F0",
       "name": 1044343,
+      "addon": "loom_east",
       "group": 7,
+      "output_material": "none",
       "skills": [{ "skill": "Carpentry", "min": 842, "max": 1092 }, { "skill": "Tailoring", "min": 650, "max": 700 }],
       "resources": [
         { "graphic": "0x1BD7", "amount": 85, "name": 1044041, "message": 1044351, "from_axis": true },
@@ -1283,9 +1278,12 @@
       ]
     },
     {
+      "kind": 116,
       "graphic": "0x14F0",
       "name": 1044344,
+      "addon": "loom_south",
       "group": 7,
+      "output_material": "none",
       "skills": [{ "skill": "Carpentry", "min": 842, "max": 1092 }, { "skill": "Tailoring", "min": 650, "max": 700 }],
       "resources": [
         { "graphic": "0x1BD7", "amount": 85, "name": 1044041, "message": 1044351, "from_axis": true },

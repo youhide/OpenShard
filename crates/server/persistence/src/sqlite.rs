@@ -355,7 +355,10 @@ CREATE TABLE IF NOT EXISTS items (
     -- lockdown pair, and for its reason: neither is a list, and the root half is
     -- what a release sweeps the rest of the oven by.
     addon_kind INTEGER,
-    addon_root INTEGER
+    addon_root INTEGER,
+    -- how much thread an installed loom has taken toward its next bolt of cloth.
+    -- NULL is an empty loom, which is every item that is not a loom mid-weave.
+    loom_phase INTEGER
 );
 CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
 -- NPC mobiles and placed decoration, each a JSON record keyed by serial: a
@@ -455,7 +458,10 @@ impl SqliteStore {
             // v36 adds the addon grouping, also nullable: an addon placed before
             // it existed stays two independent lockdowns, because nothing on
             // disk says which pair of components was ever one oven.
-            Some(33) if SCHEMA_VERSION == 36 => {
+            // v37 adds the loom's phase, also nullable: a loom loaded before it
+            // existed comes back empty, which is the direction that cannot
+            // charge a weaver twice for thread they have not put in yet.
+            Some(33) if SCHEMA_VERSION == 37 => {
                 connection
                     .execute_batch(
                         "ALTER TABLE items ADD COLUMN affixes TEXT; \
@@ -463,27 +469,38 @@ impl SqliteStore {
                          ALTER TABLE items ADD COLUMN material INTEGER; \
                          ALTER TABLE items ADD COLUMN addon_kind INTEGER; \
                          ALTER TABLE items ADD COLUMN addon_root INTEGER; \
-                         UPDATE meta SET value = 36 WHERE key = 'schema';",
+                         ALTER TABLE items ADD COLUMN loom_phase INTEGER; \
+                         UPDATE meta SET value = 37 WHERE key = 'schema';",
                     )
                     .map_err(database)?;
             }
-            Some(34) if SCHEMA_VERSION == 36 => {
+            Some(34) if SCHEMA_VERSION == 37 => {
                 connection
                     .execute_batch(
                         "ALTER TABLE items ADD COLUMN item_kind INTEGER; \
                          ALTER TABLE items ADD COLUMN material INTEGER; \
                          ALTER TABLE items ADD COLUMN addon_kind INTEGER; \
                          ALTER TABLE items ADD COLUMN addon_root INTEGER; \
-                         UPDATE meta SET value = 36 WHERE key = 'schema';",
+                         ALTER TABLE items ADD COLUMN loom_phase INTEGER; \
+                         UPDATE meta SET value = 37 WHERE key = 'schema';",
                     )
                     .map_err(database)?;
             }
-            Some(35) if SCHEMA_VERSION == 36 => {
+            Some(35) if SCHEMA_VERSION == 37 => {
                 connection
                     .execute_batch(
                         "ALTER TABLE items ADD COLUMN addon_kind INTEGER; \
                          ALTER TABLE items ADD COLUMN addon_root INTEGER; \
-                         UPDATE meta SET value = 36 WHERE key = 'schema';",
+                         ALTER TABLE items ADD COLUMN loom_phase INTEGER; \
+                         UPDATE meta SET value = 37 WHERE key = 'schema';",
+                    )
+                    .map_err(database)?;
+            }
+            Some(36) if SCHEMA_VERSION == 37 => {
+                connection
+                    .execute_batch(
+                        "ALTER TABLE items ADD COLUMN loom_phase INTEGER; \
+                         UPDATE meta SET value = 37 WHERE key = 'schema';",
                     )
                     .map_err(database)?;
             }
@@ -632,10 +649,10 @@ impl SqliteStore {
                       trap_level, uses, exceptional, crafter, \
                       rune_facet, rune_x, rune_y, rune_z, runebook, \
                       lockdown_house, lockdown_secure, affixes, item_kind, material, \
-                      addon_kind, addon_root) \
+                      addon_kind, addon_root, loom_phase) \
                      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,\
                              ?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,\
-                             ?38,?39)",
+                             ?38,?39,?40)",
                         params![
                             item.serial.raw(),
                             // `owner` is `NOT NULL`, `0` the sentinel for "no owner" (a
@@ -699,6 +716,7 @@ impl SqliteStore {
                             item.material,
                             item.addon.map(|part| part.kind),
                             item.addon.map(|part| part.root.raw()),
+                            item.loom_phase,
                         ],
                     )?;
                     Ok(())
@@ -1041,7 +1059,7 @@ impl SqliteStore {
                      uses, exceptional, crafter, \
                      rune_facet, rune_x, rune_y, rune_z, runebook, \
                      lockdown_house, lockdown_secure, affixes, item_kind, material, \
-                     addon_kind, addon_root FROM items",
+                     addon_kind, addon_root, loom_phase FROM items",
                 )
                 .map_err(database)?;
             let rows = statement
@@ -1123,6 +1141,7 @@ impl SqliteStore {
                                 (Some(kind), Some(root)) => Some(crate::record::AddonPartData { kind, root }),
                                 _ => None,
                             },
+                            loom_phase:     row.get(39)?,
                             affixes:        Vec::new(),
                             // A placeholder overwritten below; the location cannot be
                             // built inside `query_map`'s closure return type cleanly.
@@ -1704,6 +1723,7 @@ mod tests {
             runebook:       None,
             locked_down:    None,
             addon:          None,
+            loom_phase:     None,
             affixes:        Vec::new(),
             location:       ItemLocation::Contained {
                 container: Serial::new(container).expect("a valid test serial"),
@@ -2337,6 +2357,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_half_loaded_loom_keeps_its_phase_across_a_reopen() {
+        // The spools are already spent, so a phase that did not come back would
+        // charge the weaver for them a second time. `None` is the ordinary item
+        // and must stay distinguishable from a loom at phase zero, which is why
+        // an empty loom carries no phase at all rather than a saved `0`.
+        let path = temp_db("loom-phase");
+        {
+            let store = SqliteStore::open(&path).expect("open");
+            let mut loom = ground(0x4000_0001, 1400, 1600);
+            loom.loom_phase = Some(3);
+            let plain = ground(0x4000_0002, 1401, 1600);
+            let mut snap = snapshot(vec![character(1, 100)], vec![]);
+            snap.ground = Some(vec![loom, plain]);
+            store.save(&snap).await.expect("save");
+        }
+        {
+            let store = SqliteStore::open(&path).expect("reopen");
+            let mut items = store.items().await.expect("read");
+            items.sort_by_key(|item| item.serial.raw());
+            assert_eq!(items[0].loom_phase, Some(3));
+            assert_eq!(items[1].loom_phase, None, "an ordinary item invented a phase");
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
     async fn a_spellbook_mask_survives_a_reopen() {
         // The learned-spell bitmask round-trips through the i64 column even with
         // the top bit set (u64::MAX, the full book) — a signed widen would lose
@@ -2680,6 +2726,43 @@ mod tests {
             .expect("addon columns");
         assert_eq!(version, SCHEMA_VERSION);
         assert_eq!(columns, 2, "the addon grouping columns were not added");
+        drop(connection);
+        drop(store);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn version_36_gains_the_loom_phase_column_without_losing_the_database() {
+        // The third compatible upgrade, for the same reason as the other two:
+        // NULL means "not a loom with thread on it", which is what every row
+        // written before the loom existed was.
+        let path = temp_db("v36-loom");
+        {
+            let connection = Connection::open(&path).expect("raw open");
+            let v36_schema = items_table_ending_after("    addon_root INTEGER");
+            connection
+                .execute_batch(&v36_schema)
+                .expect("create the v36 tables");
+            connection
+                .execute("INSERT INTO meta (key, value) VALUES ('schema', 36)", [])
+                .expect("stamp a v36 database");
+        }
+        let store = SqliteStore::open(&path).expect("migrate");
+        let connection = store.connection.lock().expect("connection");
+        let version: u32 = connection
+            .query_row("SELECT value FROM meta WHERE key = 'schema'", [], |row| {
+                row.get(0)
+            })
+            .expect("schema version");
+        let has_phase: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('items') WHERE name = 'loom_phase')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("loom_phase column");
+        assert_eq!(version, SCHEMA_VERSION);
+        assert!(has_phase, "the loom phase column was not added");
         drop(connection);
         drop(store);
         let _ = std::fs::remove_file(&path);

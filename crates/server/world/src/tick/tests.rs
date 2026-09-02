@@ -23066,7 +23066,21 @@ fn a_crafted_stone_oven_east_deed_places_both_locked_down_components() {
 /// **installed** oven rather than about installing one — the placement path
 /// itself has its own test above.
 fn a_house_with_a_stone_oven(now: Instant) -> (World, ConnectionId, EntityId, EntityId) {
-    use openshard_protocol::item_kind::ItemKindId;
+    // AddonKind::StoneOvenEast's deed kind.
+    a_house_with_the_addon(now, openshard_protocol::item_kind::ItemKindId(110))
+}
+
+/// A GM in a cottage with one installed addon of `deed_kind`, however many tiles
+/// it has: the fixture above, generalized when the loom and the spinning wheel
+/// wanted exactly the same house.
+///
+/// The cottage's two floor tiles at `(0, 0)` and `(0, 1)` fit every addon this
+/// engine installs — the two-tile ovens and looms lie along that axis, and the
+/// wheels are one tile at the origin.
+fn a_house_with_the_addon(
+    now: Instant,
+    deed_kind: openshard_protocol::item_kind::ItemKindId,
+) -> (World, ConnectionId, EntityId, EntityId) {
     use openshard_state::components::House;
     use openshard_uofiles::multi::Component;
 
@@ -23120,16 +23134,8 @@ fn a_house_with_a_stone_oven(now: Instant) -> (World, ConnectionId, EntityId, En
         .map(|(entity, _)| entity)
         .expect("the test house is absent");
 
-    let deed = items::spawn_item_kind(
-        &mut world.state,
-        ItemKindId(110), // AddonKind::StoneOvenEast's deed kind
-        None,
-        1,
-        false,
-        at,
-        Facet(0),
-    )
-    .expect("a stone oven east deed");
+    let deed = items::spawn_item_kind(&mut world.state, deed_kind, None, 1, false, at, Facet(0))
+        .expect("the addon's deed");
     let backpack = items::backpack_of(&world.state, owner).expect("a backpack");
     openshard_state::relocate_item(
         &mut world.state,
@@ -23290,6 +23296,409 @@ fn an_installed_oven_keeps_its_grouping_across_a_save_and_restore() {
         );
         assert_eq!(part.addon, AddonKind::StoneOvenEast);
     }
+}
+
+/// AddonKind::SpinningWheelSouth's deed kind.
+const SPINNING_WHEEL_SOUTH_DEED: openshard_protocol::item_kind::ItemKindId =
+    openshard_protocol::item_kind::ItemKindId(118);
+/// AddonKind::LoomEast's deed kind.
+const LOOM_EAST_DEED: openshard_protocol::item_kind::ItemKindId =
+    openshard_protocol::item_kind::ItemKindId(115);
+
+/// A pile of cotton, `0xDF9`.
+const COTTON: Graphic = Graphic(0x0DF9);
+/// A spool of thread, `0xFA0` — what cotton spins into.
+const THREAD: Graphic = Graphic(0x0FA0);
+/// A bolt of cloth, `0xF95` — what a loom weaves.
+const BOLT: Graphic = Graphic(0x0F95);
+/// Cut cloth, `0x1766` — what fifty-six tailoring rows actually eat.
+const CLOTH: Graphic = Graphic(0x1766);
+/// A spinning wheel south at rest, and turning.
+const WHEEL_IDLE: Graphic = Graphic(0x1015);
+/// The turning art, which is `WHEEL_IDLE + 1` in ServUO and written out here so
+/// the test does not restate the implementation's arithmetic.
+const WHEEL_TURNING: Graphic = Graphic(0x1016);
+/// An arbitrary dye, carried the length of the chain.
+const DYE: Hue = Hue(0x0021);
+/// Long enough for a six-second spin at forty ticks a second, with slack.
+const SPIN_LIMIT: u64 = 6 * 40 + 20;
+
+/// Everything of one art in a container, as `(hue, amount)`.
+fn piles_of(world: &World, container: Serial, graphic: Graphic) -> Vec<(Hue, u16)> {
+    world
+        .state
+        .registry
+        .query::<Contained>()
+        .filter(|(_, contained)| contained.container == container)
+        .filter_map(|(item, _)| {
+            let drawn = world.state.registry.get::<Drawn>(item)?;
+            (drawn.id == graphic).then(|| {
+                (
+                    drawn.hue,
+                    world
+                        .state
+                        .registry
+                        .get::<Amount>(item)
+                        .map_or(1, |amount| amount.0),
+                )
+            })
+        })
+        .collect()
+}
+
+/// Point an item at another one through the two packets a player sends: the
+/// double-click that raises the cursor, and the reply that names the target.
+fn use_item_on(
+    world: &mut World,
+    connection: ConnectionId,
+    owner: Serial,
+    item: Serial,
+    target: Serial,
+    now: Instant,
+) {
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(item.raw())),
+    });
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::target::TargetResponse {
+            cursor_id: openshard_protocol::wire::CursorId(owner.raw()),
+            object:    Some(target),
+            location:  Point::new(0, 0, 0),
+            graphic:   None,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+}
+
+/// The first step of the cloth chain, end to end: a pile of cotton onto an
+/// installed spinning wheel, six seconds of turning, six spools of thread.
+///
+/// Cotton is **dyed** on purpose. ServUO carries the fibre's hue onto the yarn
+/// (`BeginSpin(..., this.m_Cotton.Hue)`), and a spin that dropped it would still
+/// pass with plain cotton while quietly turning every dyed pile on the shard
+/// into undyed thread — the same failure shape the hides' grade has.
+#[test]
+fn a_spinning_wheel_turns_a_pile_of_cotton_into_thread() {
+    use openshard_state::components::Spinning;
+
+    let now = Instant::now();
+    let (mut world, connection, player, house) = a_house_with_the_addon(now, SPINNING_WHEEL_SOUTH_DEED);
+    let owner = world.state.registry.serial_of(player).expect("a player serial");
+    let pack = items::backpack_of(&world.state, owner).expect("a backpack");
+
+    let components = openshard_housing::storage::locked_down(&world.state, house);
+    assert_eq!(components.len(), 1, "a spinning wheel is one tile");
+    let wheel = components[0];
+    let wheel_serial = world.state.registry.serial_of(wheel).expect("a wheel serial");
+    assert_eq!(
+        world.state.registry.get::<Drawn>(wheel).map(|drawn| drawn.id),
+        Some(WHEEL_IDLE),
+        "a freshly installed wheel is not at rest"
+    );
+
+    let cotton = items::give(&mut world.state, pack, COTTON, DYE, 1)
+        .last
+        .expect("a pile of cotton");
+    let cotton_serial = world.state.registry.serial_of(cotton).expect("a cotton serial");
+    use_item_on(&mut world, connection, owner, cotton_serial, wheel_serial, now);
+
+    assert!(
+        world.state.registry.entity_of(cotton_serial).is_none(),
+        "the wheel did not take the cotton"
+    );
+    assert!(
+        world.state.registry.has::<Spinning>(wheel),
+        "the wheel is not turning"
+    );
+    assert_eq!(
+        world.state.registry.get::<Drawn>(wheel).map(|drawn| drawn.id),
+        Some(WHEEL_TURNING),
+        "a turning wheel still draws the resting art"
+    );
+    assert!(
+        piles_of(&world, pack, THREAD).is_empty(),
+        "the thread arrived before the wheel had turned"
+    );
+
+    tick_until(&mut world, now, SPIN_LIMIT, |world| {
+        !world.state.registry.has::<Spinning>(wheel)
+    });
+
+    assert!(
+        !world.state.registry.has::<Spinning>(wheel),
+        "the wheel never stopped"
+    );
+    assert_eq!(
+        world.state.registry.get::<Drawn>(wheel).map(|drawn| drawn.id),
+        Some(WHEEL_IDLE),
+        "a stopped wheel is still drawn turning"
+    );
+    assert_eq!(
+        piles_of(&world, pack, THREAD),
+        vec![(DYE, 6)],
+        "one dyed pile of cotton is six spools of thread in the same dye"
+    );
+}
+
+/// A wheel already turning refuses a second pile — ServUO's `wheel.Spinning`
+/// gate, which is the only thing stopping a player from feeding one wheel the
+/// whole pack in a single tick.
+///
+/// The refusal that matters is the **material** one, not the message: without
+/// the gate the second pile is consumed and its thread never arrives, because
+/// the second `Spinning` simply overwrites the first.
+#[test]
+fn a_turning_spinning_wheel_refuses_a_second_pile() {
+    use openshard_state::components::Spinning;
+
+    let now = Instant::now();
+    let (mut world, connection, player, house) = a_house_with_the_addon(now, SPINNING_WHEEL_SOUTH_DEED);
+    let owner = world.state.registry.serial_of(player).expect("a player serial");
+    let pack = items::backpack_of(&world.state, owner).expect("a backpack");
+    let wheel = openshard_housing::storage::locked_down(&world.state, house)[0];
+    let wheel_serial = world.state.registry.serial_of(wheel).expect("a wheel serial");
+
+    // Two units in one pile: the first spin takes one and leaves the other,
+    // which is the pile the busy wheel has to refuse.
+    let cotton = items::give(&mut world.state, pack, COTTON, DYE, 2)
+        .last
+        .expect("a pile of cotton");
+    let cotton_serial = world.state.registry.serial_of(cotton).expect("a cotton serial");
+    use_item_on(&mut world, connection, owner, cotton_serial, wheel_serial, now);
+    let started = world
+        .state
+        .registry
+        .get::<Spinning>(wheel)
+        .copied()
+        .expect("the wheel took the first pile");
+
+    use_item_on(&mut world, connection, owner, cotton_serial, wheel_serial, now);
+    assert_eq!(
+        piles_of(&world, pack, COTTON),
+        vec![(DYE, 1)],
+        "a busy wheel ate the second pile"
+    );
+    assert_eq!(
+        world.state.registry.get::<Spinning>(wheel),
+        Some(&started),
+        "the second pile restarted the wheel's timer"
+    );
+}
+
+/// The second step: five spools of thread on a loom, four that only load it and
+/// a fifth that comes off as a bolt of cloth.
+///
+/// Aimed at the loom's **second** tile on purpose. The group is named by the
+/// first component's serial, so a weave that only accepted the root would pass
+/// here if the test clicked the root — and a player clicks whichever half of the
+/// loom is under the cursor.
+#[test]
+fn a_loom_takes_five_spools_and_pays_a_bolt_of_cloth() {
+    use openshard_state::components::{
+        AddonPart,
+        LoomPhase,
+    };
+
+    let now = Instant::now();
+    let (mut world, connection, player, house) = a_house_with_the_addon(now, LOOM_EAST_DEED);
+    let owner = world.state.registry.serial_of(player).expect("a player serial");
+    let pack = items::backpack_of(&world.state, owner).expect("a backpack");
+
+    let components = openshard_housing::storage::locked_down(&world.state, house);
+    assert_eq!(components.len(), 2, "a loom is two tiles");
+    let root = components
+        .iter()
+        .copied()
+        .find(|&item| {
+            world.state.registry.serial_of(item)
+                == world.state.registry.get::<AddonPart>(item).map(|part| part.root)
+        })
+        .expect("one component names itself as the root");
+    let leaf = components
+        .iter()
+        .copied()
+        .find(|&item| item != root)
+        .expect("the loom's other tile");
+    let leaf_serial = world.state.registry.serial_of(leaf).expect("a component serial");
+
+    let spools = items::give(&mut world.state, pack, THREAD, DYE, 5)
+        .last
+        .expect("five spools of thread");
+    let spools_serial = world.state.registry.serial_of(spools).expect("a thread serial");
+
+    for loaded in 1..=4 {
+        use_item_on(&mut world, connection, owner, spools_serial, leaf_serial, now);
+        assert_eq!(
+            world.state.registry.get::<LoomPhase>(root),
+            Some(&LoomPhase(loaded)),
+            "the loom did not take spool {loaded}"
+        );
+        assert!(
+            piles_of(&world, pack, BOLT).is_empty(),
+            "the loom wove a bolt out of {loaded} spools"
+        );
+    }
+    assert_eq!(
+        piles_of(&world, pack, THREAD),
+        vec![(DYE, 1)],
+        "four spools were not spent loading the loom"
+    );
+
+    use_item_on(&mut world, connection, owner, spools_serial, leaf_serial, now);
+    assert_eq!(
+        piles_of(&world, pack, BOLT),
+        vec![(DYE, 1)],
+        "the fifth spool did not weave a bolt in the thread's own dye"
+    );
+    assert!(
+        piles_of(&world, pack, THREAD).is_empty(),
+        "the fifth spool was not spent"
+    );
+    assert!(
+        !world.state.registry.has::<LoomPhase>(root),
+        "the woven loom is still loaded"
+    );
+}
+
+/// The last step: scissors turn a bolt into the fifty cloth a tailor spends.
+///
+/// Two bolts, so the multiplication is tested rather than the identity, and dyed
+/// for the reason the cotton is: ServUO's `ScissorHelper` carries the hue, and a
+/// cut that dropped it would bleach every dyed bolt on the shard.
+#[test]
+fn scissors_cut_a_bolt_of_cloth_into_fifty() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+    let Position(at) = *world.registry().get::<Position>(player).unwrap();
+    let owner = world.registry().serial_of(player).unwrap();
+    let pack = items::backpack_of(&world.state, owner).unwrap();
+
+    let scissors = items::spawn_item(&mut world.state, Graphic(0x0F9F), Hue(0), 1, false, at, Facet(0))
+        .expect("a pair of scissors");
+    let scissors_serial = world.registry().serial_of(scissors).unwrap();
+    let bolts = items::give(&mut world.state, pack, BOLT, DYE, 2)
+        .last
+        .expect("two bolts of cloth");
+    let bolts_serial = world.registry().serial_of(bolts).unwrap();
+
+    use_item_on(&mut world, connection, owner, scissors_serial, bolts_serial, now);
+
+    assert_eq!(
+        piles_of(&world, pack, CLOTH),
+        vec![(DYE, 100)],
+        "two bolts did not cut into a hundred cloth of the same dye"
+    );
+    assert!(
+        piles_of(&world, pack, BOLT).is_empty(),
+        "the bolts were not spent"
+    );
+}
+
+/// A part-loaded loom keeps its count across a restart.
+///
+/// Unlike the wheel's timer, this one is **already paid for**: those spools are
+/// gone. A restart that forgot the count would charge the weaver for them twice,
+/// which is why `loom_phase` is a saved column and `Spinning` is not.
+#[test]
+fn a_half_loaded_loom_keeps_its_count_across_a_save_and_restore() {
+    use openshard_state::components::{
+        AddonPart,
+        LoomPhase,
+    };
+
+    let now = Instant::now();
+    let (mut home, connection, player, house) = a_house_with_the_addon(now, LOOM_EAST_DEED);
+    let owner = home.state.registry.serial_of(player).expect("a player serial");
+    let pack = items::backpack_of(&home.state, owner).expect("a backpack");
+    let root = openshard_housing::storage::locked_down(&home.state, house)
+        .into_iter()
+        .find(|&item| {
+            home.state.registry.serial_of(item)
+                == home.state.registry.get::<AddonPart>(item).map(|part| part.root)
+        })
+        .expect("the loom's root component");
+    let root_serial = home.state.registry.serial_of(root).expect("a root serial");
+
+    let spools = items::give(&mut home.state, pack, THREAD, Hue(0), 3)
+        .last
+        .expect("three spools of thread");
+    let spools_serial = home.state.registry.serial_of(spools).expect("a thread serial");
+    for _ in 0..3 {
+        use_item_on(&mut home, connection, owner, spools_serial, root_serial, now);
+    }
+    assert_eq!(
+        home.state.registry.get::<LoomPhase>(root),
+        Some(&LoomPhase(3)),
+        "the loom did not take three spools"
+    );
+
+    let records = home.ground_items();
+    let mut shard = world();
+    let characters = shard.restore_characters(Vec::new());
+    shard.restore_items(records, &characters);
+    let restored = shard
+        .state
+        .registry
+        .entity_of(root_serial)
+        .expect("the loom is back on its serial");
+    assert_eq!(
+        shard.state.registry.get::<LoomPhase>(restored),
+        Some(&LoomPhase(3)),
+        "the restored loom forgot the three spools it had already eaten"
+    );
+}
+
+/// A shard that went down mid-spin comes back up with the wheel at rest.
+///
+/// The save records whatever art the tile was wearing, and the six-second timer
+/// is deliberately not saved — so without ServUO's own `OnComponentLoaded`
+/// normalization the restored wheel would draw itself turning forever and never
+/// pay anybody.
+#[test]
+fn a_restored_spinning_wheel_is_not_left_turning() {
+    use openshard_state::components::Spinning;
+
+    let now = Instant::now();
+    let (mut home, connection, player, house) = a_house_with_the_addon(now, SPINNING_WHEEL_SOUTH_DEED);
+    let owner = home.state.registry.serial_of(player).expect("a player serial");
+    let pack = items::backpack_of(&home.state, owner).expect("a backpack");
+    let wheel = openshard_housing::storage::locked_down(&home.state, house)[0];
+    let wheel_serial = home.state.registry.serial_of(wheel).expect("a wheel serial");
+
+    let cotton = items::give(&mut home.state, pack, COTTON, Hue(0), 1)
+        .last
+        .expect("a pile of cotton");
+    let cotton_serial = home.state.registry.serial_of(cotton).expect("a cotton serial");
+    use_item_on(&mut home, connection, owner, cotton_serial, wheel_serial, now);
+    assert!(
+        home.state.registry.has::<Spinning>(wheel),
+        "the wheel is not turning, so the save proves nothing"
+    );
+
+    let records = home.ground_items();
+    let mut shard = world();
+    let characters = shard.restore_characters(Vec::new());
+    shard.restore_items(records, &characters);
+    let restored = shard
+        .state
+        .registry
+        .entity_of(wheel_serial)
+        .expect("the wheel is back on its serial");
+    assert_eq!(
+        shard.state.registry.get::<Drawn>(restored).map(|drawn| drawn.id),
+        Some(WHEEL_IDLE),
+        "the restored wheel is still drawn turning, with no timer to stop it"
+    );
+    assert!(
+        !shard.state.registry.has::<Spinning>(restored),
+        "a restored wheel invented a spin"
+    );
 }
 
 /// A second oven cannot be planted on top of the first.

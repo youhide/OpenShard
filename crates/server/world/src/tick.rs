@@ -995,6 +995,11 @@ impl World {
         // reason but reading order: the two are independent, and a craft's
         // materials are already in a pack before its first beat.
         crafting::advance_crafts(&mut self.state);
+        // And every spinning wheel whose six seconds are up. Beside the crafts
+        // rather than beside the doors because it is the same kind of thing —
+        // something a player started that finishes on a clock — even though the
+        // timer lives on a house addon rather than on the player.
+        items::advance_spins(&mut self.state);
         // An instrument that played its last tune. `skills` decides, `items`
         // removes — the same split the poison fumble and the beggar's coin use.
         let spent: Vec<openshard_skills::InstrumentSpent> = self

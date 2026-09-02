@@ -43,6 +43,7 @@ use openshard_protocol::items::CorpseEquipmentItem;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::skill::SkillLock;
 use openshard_protocol::wire::{
+    ClilocId,
     Graphic,
     Hue,
     Layer,
@@ -3144,7 +3145,8 @@ pub struct HouseDeed {
     pub multi: openshard_protocol::wire::MultiId,
 }
 
-/// The house addons that provide an oven.
+/// The house addons a carpenter's deed installs: the ovens a cook needs, and
+/// the spinning wheel and loom the cloth chain runs on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AddonKind {
     /// The north-south two-tile oven.
@@ -3155,11 +3157,23 @@ pub enum AddonKind {
     ElvenOvenEast,
     /// The single-tile elven oven, south facing (`0x2DDC`).
     ElvenOvenSouth,
+    /// The two-tile loom, east facing (`0x1060` over `0x105F`).
+    LoomEast,
+    /// The two-tile loom, south facing (`0x1061` beside `0x1062`).
+    LoomSouth,
+    /// The single-tile spinning wheel, east facing (`0x1019`).
+    SpinningWheelEast,
+    /// The single-tile spinning wheel, south facing (`0x1015`).
+    SpinningWheelSouth,
+    /// The single-tile elven spinning wheel, east facing (`0x2E3D`).
+    ElvenSpinningWheelEast,
+    /// The single-tile elven spinning wheel, south facing (`0x2E3F`).
+    ElvenSpinningWheelSouth,
 }
 
 impl AddonKind {
     /// The registered `ItemKindId` of the deed that installs this addon —
-    /// `state/data/items.json` ids 110-113. Every addon deed shares the one
+    /// `state/data/items.json` ids 110-120. Every addon deed shares the one
     /// generic scroll art (`shared_art` in the item-definition registry), so
     /// this id, not the drawing, is what a saved or freshly-double-clicked deed
     /// is identified by.
@@ -3170,6 +3184,12 @@ impl AddonKind {
             Self::StoneOvenSouth => ItemKindId(111),
             Self::ElvenOvenSouth => ItemKindId(112),
             Self::ElvenOvenEast => ItemKindId(113),
+            Self::LoomEast => ItemKindId(115),
+            Self::LoomSouth => ItemKindId(116),
+            Self::SpinningWheelEast => ItemKindId(117),
+            Self::SpinningWheelSouth => ItemKindId(118),
+            Self::ElvenSpinningWheelEast => ItemKindId(119),
+            Self::ElvenSpinningWheelSouth => ItemKindId(120),
         }
     }
 
@@ -3181,6 +3201,12 @@ impl AddonKind {
             111 => Some(Self::StoneOvenSouth),
             112 => Some(Self::ElvenOvenSouth),
             113 => Some(Self::ElvenOvenEast),
+            115 => Some(Self::LoomEast),
+            116 => Some(Self::LoomSouth),
+            117 => Some(Self::SpinningWheelEast),
+            118 => Some(Self::SpinningWheelSouth),
+            119 => Some(Self::ElvenSpinningWheelEast),
+            120 => Some(Self::ElvenSpinningWheelSouth),
             _ => None,
         }
     }
@@ -3194,6 +3220,9 @@ impl AddonKind {
         match self {
             Self::StoneOvenEast | Self::StoneOvenSouth => "stone oven",
             Self::ElvenOvenEast | Self::ElvenOvenSouth => "elven oven",
+            Self::LoomEast | Self::LoomSouth => "loom",
+            Self::SpinningWheelEast | Self::SpinningWheelSouth => "spinning wheel",
+            Self::ElvenSpinningWheelEast | Self::ElvenSpinningWheelSouth => "elven spinning wheel",
         }
     }
 
@@ -3208,7 +3237,40 @@ impl AddonKind {
             Self::StoneOvenSouth => "stone oven south deed",
             Self::ElvenOvenEast => "elven oven east deed",
             Self::ElvenOvenSouth => "elven oven south deed",
+            Self::LoomEast => "loom east deed",
+            Self::LoomSouth => "loom south deed",
+            Self::SpinningWheelEast => "spinning wheel east deed",
+            Self::SpinningWheelSouth => "spinning wheel south deed",
+            Self::ElvenSpinningWheelEast => "elven spinning wheel east deed",
+            Self::ElvenSpinningWheelSouth => "elven spinning wheel south deed",
         }
+    }
+
+    /// The two arts one tile of this addon takes while a fibre is on it: at
+    /// rest, and turning. `None` for everything that is not a spinning wheel,
+    /// which is what makes this one method the answer to both "may this be spun
+    /// on" and "what does it draw while it spins".
+    ///
+    /// The pairs are ServUO's own, and they do not all move the same way: the
+    /// classic wheel counts **up** off its resting art (`BeginSpin`'s
+    /// `++c.ItemID`) while both elven ones count **down** (`--c.ItemID`). A
+    /// single "+1 while busy" rule would have drawn the elven wheels as the
+    /// wrong furniture entirely.
+    #[must_use]
+    pub const fn wheel_arts(self) -> Option<(Graphic, Graphic)> {
+        match self {
+            Self::SpinningWheelEast => Some((Graphic(0x1019), Graphic(0x101A))),
+            Self::SpinningWheelSouth => Some((Graphic(0x1015), Graphic(0x1016))),
+            Self::ElvenSpinningWheelEast => Some((Graphic(0x2E3D), Graphic(0x2E3C))),
+            Self::ElvenSpinningWheelSouth => Some((Graphic(0x2E3F), Graphic(0x2E3E))),
+            _ => None,
+        }
+    }
+
+    /// Whether this addon is a loom — the thing thread and yarn are woven on.
+    #[must_use]
+    pub const fn is_loom(self) -> bool {
+        matches!(self, Self::LoomEast | Self::LoomSouth)
     }
 }
 
@@ -3258,22 +3320,183 @@ impl AddonDeed {
     }
 }
 
+/// What may be put on a spinning wheel, and what one turn of it pays.
+///
+/// ServUO's four `ISpinningWheel` callers — `Cotton`, `Flax`, `Wool` and the
+/// `TaintedWool` that overrides its parent's `OnSpun`. An enum rather than a
+/// graphic on the wheel's state: the amount and the line a player is told both
+/// follow from *which* fibre went on, and three loose fields could disagree.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Fibre {
+    /// Cotton, `0xDF9`.
+    Cotton,
+    /// Flax, `0x1A9C`.
+    Flax,
+    /// Wool off a sheep, `0xDF8`.
+    Wool,
+    /// The wool a lich's flock grows, `0x101F` — one ball of yarn, not three.
+    TaintedWool,
+}
+
+impl Fibre {
+    /// Which fibre an item's art names, or `None` for anything else. Legacy art
+    /// rather than an `ItemKind`: cotton, flax and wool reach a player through
+    /// vendor stock written as bare graphics, and a semantic kind for them would
+    /// identify only the ones bought after it landed — [`AddonPart`]'s own
+    /// reasoning, one shelf over.
+    #[must_use]
+    pub const fn from_graphic(graphic: Graphic) -> Option<Self> {
+        match graphic.0 {
+            0x0DF9 => Some(Self::Cotton),
+            0x1A9C => Some(Self::Flax),
+            0x0DF8 => Some(Self::Wool),
+            0x101F => Some(Self::TaintedWool),
+            _ => None,
+        }
+    }
+
+    /// The art and count one unit of this fibre spins into. Cotton and flax both
+    /// pay six spools of thread; wool pays three balls of dark yarn, and tainted
+    /// wool one.
+    ///
+    /// ServUO spins wool into `DarkYarn` whichever wool it was — `LightYarn` and
+    /// `LightYarnUnraveled` exist as vendor stock and loot, and nothing on a
+    /// wheel makes either.
+    #[must_use]
+    pub const fn spun_into(self) -> (Graphic, u32) {
+        match self {
+            Self::Cotton | Self::Flax => (Graphic(0x0FA0), 6),
+            Self::Wool => (Graphic(0x0E1D), 3),
+            Self::TaintedWool => (Graphic(0x0E1D), 1),
+        }
+    }
+
+    /// What the spinner is told when the wheel stops and the yield is theirs.
+    #[must_use]
+    pub const fn stowed_message(self) -> ClilocId {
+        match self {
+            // "You put the spools of thread in your backpack."
+            Self::Cotton | Self::Flax => ClilocId(1_010_577),
+            // "You put the balls of yarn in your backpack."
+            Self::Wool => ClilocId(1_010_576),
+            // "You put a ball of yarn in your backpack." — one ball, one line.
+            Self::TaintedWool => ClilocId(1_010_574),
+        }
+    }
+}
+
+/// A spinning wheel with a fibre on it, held by the addon's **root** component.
+///
+/// ServUO's `SpinTimer`: the fibre is already gone when this appears (its
+/// `BeginSpin` consumes first), the wheel refuses a second one until the six
+/// seconds are up, and every tile of it draws the turning art meanwhile.
+///
+/// **Transient**, like the in-flight [`Crafting`] a crafter carries: a restart
+/// mid-spin loses the fibre. That is ServUO's own outcome — its timer is not
+/// serialized either — and it is why
+/// [`wheel_arts`](AddonKind::wheel_arts)' resting art is stamped back onto a
+/// restored component rather than trusted from the save, so a shard that went
+/// down mid-spin does not come back up with a wheel turning forever.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Spinning {
+    /// The tick the yield lands on.
+    pub due:     WorldTick,
+    /// Who put the fibre on, by serial — resolved when the wheel stops rather
+    /// than held as an entity, because six seconds is long enough to log out in.
+    pub spinner: Serial,
+    /// What went on, which decides what comes off.
+    pub fibre:   Fibre,
+    /// The fibre's hue, carried onto the yarn: a dyed pile spins dyed thread.
+    pub hue:     Hue,
+}
+
+/// How much thread a loom has taken toward its next bolt of cloth, held by the
+/// addon's **root** component.
+///
+/// ServUO's `ILoom.Phase`, and the same five-application count: four go in
+/// silently but for a line each (clilocs 1010001..1010004), and the fifth is
+/// woven and comes off as a bolt.
+///
+/// **Durable**, unlike [`Spinning`], and for the reason the transience of that
+/// one is harmless and this one's would not be: a loom loaded with four spools
+/// has already eaten them, so a restart that forgot the count would charge the
+/// weaver twice.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct LoomPhase(pub u8);
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Every addon this build knows, so a variant added without a deed id or
+    /// without a row in `from_deed_kind` cannot pass the suite.
+    const EVERY_ADDON: &[AddonKind] = &[
+        AddonKind::StoneOvenEast,
+        AddonKind::StoneOvenSouth,
+        AddonKind::ElvenOvenEast,
+        AddonKind::ElvenOvenSouth,
+        AddonKind::LoomEast,
+        AddonKind::LoomSouth,
+        AddonKind::SpinningWheelEast,
+        AddonKind::SpinningWheelSouth,
+        AddonKind::ElvenSpinningWheelEast,
+        AddonKind::ElvenSpinningWheelSouth,
+    ];
+
     #[test]
-    fn oven_deed_kinds_round_trip_their_addon_kind() {
-        for addon in [
-            AddonKind::StoneOvenEast,
-            AddonKind::StoneOvenSouth,
-            AddonKind::ElvenOvenEast,
-            AddonKind::ElvenOvenSouth,
-        ] {
+    fn addon_deed_kinds_round_trip_their_addon_kind() {
+        for &addon in EVERY_ADDON {
             let deed = AddonDeed { addon };
             assert_eq!(AddonDeed::from_item_kind(addon.deed_kind()), Some(deed));
         }
         assert_eq!(AddonDeed::from_item_kind(ItemKindId(1)), None);
+    }
+
+    #[test]
+    fn no_two_addons_share_a_deed_kind() {
+        // The deed's kind *is* the addon's durable name — in the item registry,
+        // in the crafting table's own assertion, and in the saved `addon_kind`
+        // of every installed component. Two addons on one id would silently
+        // rebuild the wrong furniture out of a save.
+        let mut ids: Vec<u32> = EVERY_ADDON.iter().map(|addon| addon.deed_kind().0).collect();
+        ids.sort_unstable();
+        let unique = ids.len();
+        ids.dedup();
+        assert_eq!(ids.len(), unique);
+    }
+
+    #[test]
+    fn a_spinning_wheel_is_the_only_addon_with_two_arts() {
+        // `wheel_arts` is what `spin` asks "may this be spun on", so an addon
+        // that answered it by accident would take a player's cotton.
+        for &addon in EVERY_ADDON {
+            let is_wheel = matches!(
+                addon,
+                AddonKind::SpinningWheelEast
+                    | AddonKind::SpinningWheelSouth
+                    | AddonKind::ElvenSpinningWheelEast
+                    | AddonKind::ElvenSpinningWheelSouth
+            );
+            assert_eq!(addon.wheel_arts().is_some(), is_wheel, "{addon:?}");
+            assert!(!(is_wheel && addon.is_loom()), "{addon:?} cannot be both");
+        }
+        // And the two arts of one wheel are genuinely different, or the turning
+        // wheel would be indistinguishable from the idle one.
+        for &addon in EVERY_ADDON {
+            if let Some((idle, turning)) = addon.wheel_arts() {
+                assert_ne!(idle, turning, "{addon:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_fibre_art_spins_into_something() {
+        for graphic in [Graphic(0x0DF9), Graphic(0x1A9C), Graphic(0x0DF8), Graphic(0x101F)] {
+            let fibre = Fibre::from_graphic(graphic).expect("a known fibre art");
+            let (_, amount) = fibre.spun_into();
+            assert!(amount > 0, "{fibre:?} spins into nothing");
+        }
+        assert_eq!(Fibre::from_graphic(Graphic(0x1766)), None, "cloth is not a fibre");
     }
 
     #[test]
