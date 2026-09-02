@@ -4,7 +4,7 @@ A living plan, and its own session. The backlog at the end is where the next one
 starts.
 
 **All four phases are done, and the normative half of this page now lives in
-[`docs/lighting_state.md`](README.md) § *The pixel spaces — the spec***:
+[`docs/render/README.md`](README.md) § *The pixel spaces — the spec***:
 the grids with their types, the six rules a person may assume, and the gate
 holding each. This page stays as the derivation — the per-site census (P1), the
 pair-by-pair commensurability table (P2), and what typing each space turned up
@@ -19,7 +19,7 @@ argument it needed at the time. A frame has more than two, they meet inside
 single expressions, and the conversions between them are written where they are
 used rather than anywhere a person can read them in one sitting.
 
-What that costs is on the record. `docs/parity.md`'s window-parity entry is one
+What that costs is on the record. `docs/render/design_frame_assembly.md`'s window-parity entry is one
 defect, and its whole cause is that **two grids turned out to share a divisor
 and nobody knew**: an odd viewport puts the world's centre on a pixel *centre*,
 which makes the fragment grid commensurate with the world's integer grid, which
@@ -60,7 +60,7 @@ And the parameters that decide commensurability:
 
 - `Zoom::LADDER` = `[(1,2), (2,3), (3,4), (1,1), (2,1), (3,1), (4,1)]`, `1:1` at
   index 3. Magnifying rungs are whole on purpose (D11); minifying ones are not.
-- The viewport's **parity**, per axis, which until `docs/parity.md`'s fix was
+- The viewport's **parity**, per axis, which until `docs/render/design_frame_assembly.md`'s fix was
   the difference between "no sample is ever on a whole virtual pixel" and
   "every `scale`-th one is".
 - The eye's own fraction (`Camera::projection`'s `self.eye.x - rounded.x`),
@@ -97,7 +97,7 @@ indexed but grep on the exact names below was faster and just as complete).
 | [`Camera::to_viewport`](../../crates/client/render/src/camera.rs#L790) / [`to_viewport_exact`](../../crates/client/render/src/camera.rs#L802) | view pixel → real viewport pixel (`f32`) | exact, scaled by `zoom.numerator()/zoom.denominator()` |
 | [`Projection`](../../crates/client/render/src/camera.rs#L506-L517) | struct: `origin: Vec2`, `scale: f32` = real px per virtual px | — |
 | [`Camera::projection`](../../crates/client/render/src/camera.rs#L704) | builds `Projection`; `origin` carries the eye's fractional remainder (`self.eye.x - rounded.x`) explicitly, because the same rounding must land bit-for-bit the same as `to_view`'s | — |
-| Vertex stage last line — [`ground.wesl:237`](../../crates/client/render/src/shaders/ground.wesl#L237), [`statics.wesl:226`](../../crates/client/render/src/shaders/statics.wesl#L226), [`mesh_face.wesl:90`](../../crates/client/render/src/shaders/mesh_face.wesl#L90) | virtual/art pixel → real (viewport) pixel → clip space | `floor(viewport.size * 0.5)` — explicit floor, the fix `docs/parity.md`'s window-parity entry is about; then exact linear to NDC. All three shaders end on the identical line by design (comment: "must keep ending on it") |
+| Vertex stage last line — [`ground.wesl:237`](../../crates/client/render/src/shaders/ground.wesl#L237), [`statics.wesl:226`](../../crates/client/render/src/shaders/statics.wesl#L226), [`mesh_face.wesl:90`](../../crates/client/render/src/shaders/mesh_face.wesl#L90) | virtual/art pixel → real (viewport) pixel → clip space | `floor(viewport.size * 0.5)` — explicit floor, the fix `docs/render/design_frame_assembly.md`'s window-parity entry is about; then exact linear to NDC. All three shaders end on the identical line by design (comment: "must keep ending on it") |
 | [`impostor::ray_from`](../../crates/client/render/src/impostor.rs#L82) | view-plane pixel offsets → tile-space point (`base` already in impostor tile space) | exact, no rounding |
 | [`impostor::billboard_at`](../../crates/client/render/src/impostor.rs#L122) | same, billboard variant; `z` via `base - down * Z_PER_TILE / TILE_WIDTH` | exact |
 | [`light::Z_PER_TILE`](../../crates/client/render/src/light.rs#L274) | defined as `(TILE_WIDTH / Z_STEP) as f32` = 11 | exact int division of constants |
@@ -137,16 +137,16 @@ table says out loud which other pairs are in the same position today.
 **Done.** Six grids, fifteen pairs; most are exact by construction because the
 constants that relate them are integers chosen to divide evenly. Only one pair
 is exposed to sub-pixel sampling at all, and that is the one
-[`docs/parity.md`](design_frame_assembly.md)'s window-parity entry is about.
+[`docs/render/design_frame_assembly.md`](design_frame_assembly.md)'s window-parity entry is about.
 
 | Pair | Commensurate when | Why |
 |---|---|---|
 | Tile ↔ World pixel | **always**, at every rung and parity | [`project`](../../crates/client/render/src/camera.rs#L200)/[`project_exact`](../../crates/client/render/src/camera.rs#L216) run before any camera, eye or zoom enters — `HALF_WIDTH = TILE_WIDTH / 2 = 22`, an exact integer, so a tile corner lands on a whole world pixel by construction. This is upstream of the ladder entirely; no `(rung, parity, fraction)` can touch it. |
 | Tile `z` ↔ Impostor tile space | **always** | `Z_PER_TILE = TILE_WIDTH / Z_STEP = 44 / 4 = 11`, an exact integer division of two constants ([`light.rs:274`](../../crates/client/render/src/light.rs#L274)). One `Point.z` unit is exactly 11 impostor-space units; there is no rounding to lose. |
-| **Fragment (view-plane pixel) ↔ Impostor tile space** | **never**, and that is the point | A fragment is a sample, not an area: [`ray_from`](../../crates/client/render/src/impostor.rs#L112) takes one virtual pixel of `across` to `(1, −1) / TILE_WIDTH` of a tile, so two adjacent samples are `SQRT_2 / TILE_WIDTH` apart in the space `impostor::meets` compares in, and an edge crossing between them is invisible to both. The pair therefore needs a *quantum*, not a rounding tolerance: [`impostor::FRAGMENT`](../../crates/client/render/src/impostor.rs#L94) is that step, and `Meeting::hit` is the one comparison that spends it. Sized wrong, this is visible — under the `1e-4` epsilon that preceded it, a floor's own seam row measured "outside its own box" and was drawn as a fragment with no measurement, which `blit.wesl` lights from every side: [`docs/silhouettes.md`](design_silhouettes.md)'s glowing grid. **Independent of the rung**: the world passes draw at the virtual resolution at every magnification, so a real pixel is `1 / scale` of a fragment and the fragment grid itself does not move. |
+| **Fragment (view-plane pixel) ↔ Impostor tile space** | **never**, and that is the point | A fragment is a sample, not an area: [`ray_from`](../../crates/client/render/src/impostor.rs#L112) takes one virtual pixel of `across` to `(1, −1) / TILE_WIDTH` of a tile, so two adjacent samples are `SQRT_2 / TILE_WIDTH` apart in the space `impostor::meets` compares in, and an edge crossing between them is invisible to both. The pair therefore needs a *quantum*, not a rounding tolerance: [`impostor::FRAGMENT`](../../crates/client/render/src/impostor.rs#L94) is that step, and `Meeting::hit` is the one comparison that spends it. Sized wrong, this is visible — under the `1e-4` epsilon that preceded it, a floor's own seam row measured "outside its own box" and was drawn as a fragment with no measurement, which `blit.wesl` lights from every side: [`docs/render/design_silhouettes.md`](design_silhouettes.md)'s glowing grid. **Independent of the rung**: the world passes draw at the virtual resolution at every magnification, so a real pixel is `1 / scale` of a fragment and the fragment grid itself does not move. |
 | World pixel ↔ View pixel | **always** | [`to_view`](../../crates/client/render/src/camera.rs#L746)/[`to_world`](../../crates/client/render/src/camera.rs#L768) are an exact integer translation — subtract `self.eye()` (already rounded to `WorldPixel`) and add `render_width()/2` (integer division, truncating). An integer lattice translated by an integer offset is still that lattice: no rung, parity or fraction can misalign these two, only shift which world pixel sits at view-pixel `(0,0)`. |
 | World point (`f64`, sub-pixel) ↔ View pixel | commensurate **only** when the fractional part is itself zero | [`to_view_exact`](../../crates/client/render/src/camera.rs#L758) is the honest case: a body mid-step is *not* meant to land on a view-pixel boundary, and nothing downstream assumes it does. Not a defect — the one grid pair in this table that is supposed to disagree. |
-| **View pixel (art/virtual) ↔ Real (viewport) pixel** | **magnifying rungs** (`scale` = 1, 2, 3, 4 — [`LADDER`](../../crates/client/render/src/camera.rs#L292) indices 3–6): commensurate **only** at an odd viewport extent, before the fix; **never**, at either parity, after it. Minifying rungs (`1/2`, `2/3`, `3/4`): not a point-sampling question at all — see below. | This is [`docs/parity.md`](design_frame_assembly.md)'s window-parity finding in full, restated in this table's terms. All three vertex stages end on `real = (pixel - origin) * scale + viewport.size * 0.5` ([`ground.wesl:237`](../../crates/client/render/src/shaders/ground.wesl#L237) and its two twins). A fragment samples at `i + 0.5`; at an even extent the world coordinate behind it is always a quarter-fraction of a virtual pixel, never whole — commensurate with *nothing*. At an odd extent, before the fix, `size * 0.5` lost its own half-pixel and the centring put a sample exactly on a whole virtual pixel every `scale`-th column: `i ≡ (scale - 1) (mod scale)`, in the exact numbers `docs/parity.md` derived at `4x` — `i ≡ 3 (mod 4)`. A box's own corner sits at a whole virtual pixel by construction (the Tile ↔ World-pixel row above), so this was the only way a primary ray ever passed exactly through one, which is what fed `impostor::meets`'s unresolved tie. The `floor(viewport.size * 0.5)` fix ([`docs/parity.md`](design_frame_assembly.md) §"Repaired where the sampling is") makes every sample sit at a half-integer over `scale` regardless of parity — no integer `scale` divides a half-integer, so this pair is now provably never commensurate at any magnifying rung, closing the case entirely rather than moving it. |
+| **View pixel (art/virtual) ↔ Real (viewport) pixel** | **magnifying rungs** (`scale` = 1, 2, 3, 4 — [`LADDER`](../../crates/client/render/src/camera.rs#L292) indices 3–6): commensurate **only** at an odd viewport extent, before the fix; **never**, at either parity, after it. Minifying rungs (`1/2`, `2/3`, `3/4`): not a point-sampling question at all — see below. | This is [`docs/render/design_frame_assembly.md`](design_frame_assembly.md)'s window-parity finding in full, restated in this table's terms. All three vertex stages end on `real = (pixel - origin) * scale + viewport.size * 0.5` ([`ground.wesl:237`](../../crates/client/render/src/shaders/ground.wesl#L237) and its two twins). A fragment samples at `i + 0.5`; at an even extent the world coordinate behind it is always a quarter-fraction of a virtual pixel, never whole — commensurate with *nothing*. At an odd extent, before the fix, `size * 0.5` lost its own half-pixel and the centring put a sample exactly on a whole virtual pixel every `scale`-th column: `i ≡ (scale - 1) (mod scale)`, in the exact numbers `docs/render/design_frame_assembly.md` derived at `4x` — `i ≡ 3 (mod 4)`. A box's own corner sits at a whole virtual pixel by construction (the Tile ↔ World-pixel row above), so this was the only way a primary ray ever passed exactly through one, which is what fed `impostor::meets`'s unresolved tie. The `floor(viewport.size * 0.5)` fix ([`docs/render/design_frame_assembly.md`](design_frame_assembly.md) §"Repaired where the sampling is") makes every sample sit at a half-integer over `scale` regardless of parity — no integer `scale` divides a half-integer, so this pair is now provably never commensurate at any magnifying rung, closing the case entirely rather than moving it. |
 | View pixel ↔ Real pixel, **minifying rungs** | not applicable — no primary sample exists on this path | Below `1:1`, `Camera::minifies()` is true and [`Camera::projection`](../../crates/client/render/src/camera.rs#L704) returns `scale: 1.0`: the world is drawn 1:1 into an oversized image and the *blit's linear sampler* shrinks it ([`camera.rs:686-701`](../../crates/client/render/src/camera.rs#L686-L701)). A linear filter blends across whatever pixels it lands between; there is no point-sample tie to land exactly on a boundary, so the whole commensurability question this page exists to ask does not arise on this path. Worth stating rather than leaving silent, since it looks like the same kind of pair as the row above and is not. |
 | Real (viewport) pixel ↔ `Zoom::LADDER` rung | **always inexact except at `1:1`, at magnifying rungs `2/1`–`4/1`** — `render_width = viewport.div_ceil(num) * den` [`camera.rs:337-343`](../../crates/client/render/src/camera.rs#L337-L343) rounds **up**, so a viewport not a multiple of `num` spills a fractional world-pixel column past the edge, clipped. This is a boundary-rounding fact about `render_width` itself, independent of the sampling row above and upstream of it. | Stated because it decides which viewport widths make `render_width()` odd or even — the exact knob the window-parity defect turns on. `render_width` is odd only for specific `(viewport mod num)` residues at each rung; the parity row above is this row's consequence, not a separate coincidence. |
 | Art texel ↔ atlas UV region | **inconsistent by atlas, not by rung** | [`LandAtlas::region`](../../crates/client/render/src/atlas.rs#L415-L426) and [`region_at`](../../crates/client/render/src/atlas.rs#L1896-L1904) (statics/gump) divide exactly, no inset; [`TexmapAtlas::pack`](../../crates/client/render/src/atlas.rs#L640-L648) insets by half a texel on every side (ClassicUO's `CalculateHalfPixelUVs`). Both are internally exact — a `Region`'s own corners always land exactly where the code says — but the *convention differs between atlases*, which is a hazard of the same shape as a rung dependency (two callers assuming one rule) even though it has nothing to do with zoom or viewport parity. Flagged rather than merged into the rows above because P3 (below) has to give both conventions a type, not just the one this page started from. |
@@ -158,7 +158,7 @@ exact integer shift (row 3), so that corner is *always* on a whole view pixel
 too. The only place a rounding choice enters at all is View pixel↔Real pixel
 at a magnifying rung (row 5) — and before the fix, an odd viewport extent made
 that one grid pair commensurate on a residue class of columns, which is
-exactly the eleven-columns-per-tile pattern `docs/parity.md` measured. Every
+exactly the eleven-columns-per-tile pattern `docs/render/design_frame_assembly.md` measured. Every
 other pair in this table was never a candidate, which is the fact P1 makes
 checkable rather than argued.
 
@@ -300,20 +300,20 @@ place rather than deleted.
   `TexmapAtlas` insets by half a texel — but the confusion is *between two
   conventions of one grid*, not between two grids, so a newtype over the texel
   does not stop it; what would is a type carrying the convention. That belongs
-  with [`docs/silhouettes.md`](design_silhouettes.md), which is entirely about this
+  with [`docs/render/design_silhouettes.md`](design_silhouettes.md), which is entirely about this
   grid, rather than being invented here first.
 
 ### P4 — the gates ✅ 2026-08-10
 
 An invariant of the form "no primary sample lands on a whole virtual pixel at
 any rung, at either parity, at any eye fraction" is a unit test with no GPU in
-it: a loop over the ladder and a divisibility assertion. `docs/parity.md`'s fix
+it: a loop over the ladder and a divisibility assertion. `docs/render/design_frame_assembly.md`'s fix
 is currently held by an argument in a comment; this is where it becomes a gate
 that a mutation turns red.
 
 **Done, and the headline gate was already standing.**
 [`camera::tests::no_primary_sample_lands_on_a_whole_virtual_pixel`](../../crates/client/render/src/camera.rs#L1148)
-is exactly the test this phase describes — it landed as `docs/parity.md` P5's
+is exactly the test this phase describes — it landed as `docs/render/design_frame_assembly.md` P5's
 G1, walks all seven rungs × both parities of both axes × every eye fraction the
 quantum can express, asserts the *distance* (`0.5 / scale`, the property) rather
 than the absence, counts what it looked at, and carries
@@ -335,7 +335,7 @@ constant, and this renderer writes its grid constants down more than once.
 The shader pins are the ones that were load-bearing and absent: a copy across
 the wire has no compiler on either side of it, and a disagreement there does not
 fail to build and does not fail to draw — it draws a frame at a different scale
-from the one every test on this side asserts about, which is `docs/parity.md`'s
+from the one every test on this side asserts about, which is `docs/render/design_frame_assembly.md`'s
 "two pictures rather than one wrong one" exactly. `shader_const` **panics** on a
 missing name rather than answering `None`: a renamed constant has not stopped
 being a copy, and a helper that shrugged would let the rename read as "nothing
@@ -350,13 +350,13 @@ row) — `atlas.rs` already pins the half-texel inset at its own site
 ([`atlas.rs:2030`](../../crates/client/render/src/atlas.rs#L2030), and the
 round-trip below it), and what is *un*gated there is not a number but the
 absence of a type carrying which convention a caller is in, which is P3's open
-item and `docs/silhouettes.md`'s subject. A test cannot stand in for it.
+item and `docs/render/design_silhouettes.md`'s subject. A test cannot stand in for it.
 
 ## Backlog
 
 - 🚩 **The art texel is the one grid with no representation anywhere.** It is
   implicit in every atlas rectangle and in `Projection::scale`, and it is the
-  grid `docs/silhouettes.md` is entirely about.
+  grid `docs/render/design_silhouettes.md` is entirely about.
 - ✅ **`Z_STEP` and `Z_PER_TILE` are one relationship written twice — resolved
   2026-08-10, by [`light::WorldVec`](../../crates/client/render/src/light.rs).**
   A reader meeting `lo.z`/`hi.z` in the impostor had no way to know which of

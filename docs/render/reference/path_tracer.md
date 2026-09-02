@@ -224,7 +224,7 @@ in `Stance` — should use it is a design question this file raises and does not
 answer; `lighting_rebuild.md`'s phase 3 is where it is answered, and the third
 column above is what that phase will move. It is recorded here because the
 number is large, because it was invisible to every oracle before this one, and
-because `docs/lighting_height.md`'s own recent "the oracle had no half-space
+because `docs/archive/render/lighting_height.md`'s own recent "the oracle had no half-space
 test, and most residuals were that" is the same fact arrived at from the other
 side.
 

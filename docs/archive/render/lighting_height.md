@@ -1,6 +1,6 @@
 # Height as a continuous quantity
 
-> **Consolidated into [`lighting_rebuild.md`](../../render/design_model.md)** — the height track, whose backlog is mostly deleted rather than fixed.
+> **Consolidated into [`design_model.md`](../../render/design_model.md)** — the height track, whose backlog is mostly deleted rather than fixed.
 > That document is the entry point: it lists what is still live here, which rebuild phase retires or inherits it, and what carries over untouched. This file stays as the record of how it was built and why.
 
 
@@ -471,7 +471,7 @@ of the mistake matters more than the arithmetic:
 The reference scene's honest residual is **18 of 7008 drawn face pixels**, all
 of them `STAND_OFF`/`ON_TOP`'s deliberate nudge at a grazing corner — zeroing
 the two constants on both walks for one run reads `0/7008`. None of it is
-`exemption`. See `docs/lighting.md`'s "One scene is the reference" for the
+`exemption`. See `docs/archive/render/lighting.md`'s "One scene is the reference" for the
 current table and `a4b698c`/`ccca681`/`f050c2d` for the work.
 
 The lesson is not that phases 1 and 2 were wrong — they moved `View::Height`
@@ -766,7 +766,7 @@ statics `occlusion::edges_of` hands a named edge — and because **a flat fragme
 names no side at all**, so a tread top is a point of no riser of its own flight.
 It also restores something phase 3 dropped without noticing: a corner is two
 panels under one owner, and a fragment of the north face is a point of the north
-one only. `docs/lighting.md` decision 23 says a corner's perpendicular panel is
+one only. `docs/archive/render/lighting.md` decision 23 says a corner's perpendicular panel is
 a different surface and stops the ray as it always did; between phase 3 and here,
 it did not.
 
@@ -1166,7 +1166,7 @@ rule landed; none of it blocked any of them.
   tread profiles, the tread count being what moves that edge's sub-pixel phase.
   `facing.rs`'s `a_tread_and_its_riser_share_an_edge_bit_for_bit` is the gate.
 
-  `docs/gbuffer.md` carried the reading that justified it and now carries the
+  `docs/archive/render/gbuffer.md` carried the reading that justified it and now carries the
   correction beside it. The hairline that motivated it was real — it was the
   *outer* silhouette, which is `WIDTH_OVERLAP`'s own doc's measurement, an edge
   bordering no other face at all.
@@ -1235,7 +1235,7 @@ rule landed; none of it blocked any of them.
   _by_lids_it_is_not_over`, and `frame::the_shader_does_not_stop_a_vertical_ray
   _with_a_lid_it_is_not_under` for the shader's copy — which had no coverage at
   all until now, and stayed green with its fix deleted. See
-  `docs/lighting_rebuild.md`'s backlog for what that says about the parity
+  `docs/render/design_model.md`'s backlog for what that says about the parity
   harness.
 
 - **A flight's risers are still excused as a group.** Phase 4's panel arm asks
@@ -1265,7 +1265,7 @@ rule landed; none of it blocked any of them.
   riser's plane, and a riser looks south. With back-facing fragments counted apart
   the run reads **133 of 56034**, so `STAND_OFF`'s measured price at a grazing
   corner is at most that and not `1687`. The entry stays because the mechanism is
-  real and `docs/lighting_height.md`'s own `ON_TOP` twin is measured on a face the
+  real and `docs/archive/render/lighting_height.md`'s own `ON_TOP` twin is measured on a face the
   flame *is* in front of — but it has no scene with a number on it any more, and
   finding one is the work. The shape a fix would take is the one the
   entry below already guesses at — a nudge scaled to the surface rather than to

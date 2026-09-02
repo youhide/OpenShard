@@ -1,6 +1,6 @@
 # The G-buffer: the place attachment
 
-> **Consolidated into [`lighting_rebuild.md`](../../render/design_model.md)** — the `place` format, which phase 2 replaces.
+> **Consolidated into [`design_model.md`](../../render/design_model.md)** — the `place` format, which phase 2 replaces.
 > That document is the entry point: it lists what is still live here, which rebuild phase retires or inherits it, and what carries over untouched. This file stays as the record of how it was built and why.
 
 
@@ -23,7 +23,7 @@ reasoning behind every choice below — arguments, alternatives considered,
 measurements, and the session-by-session work that built it — is in
 [`gbuffer_archive.md`](gbuffer_archive.md).
 
-> **It is no longer the only plane.** `docs/lighting_rebuild.md` phase 2 added a
+> **It is no longer the only plane.** `docs/render/design_model.md` phase 2 added a
 > position plane beside it — `Rgba32Float`, `(x, y, z, 1)`, written by all three
 > world passes and read by `blit.wesl` in place of the `tile + fraction` and
 > `unpack_place_z` reconstruction described below.
@@ -109,7 +109,7 @@ alongside the height) so that `blit.wesl`'s occlusion self-exemption logic —
 built for a wall-mounted fixture standing on the face it is bolted to — can
 tell a flat surface from `Upright`'s "nothing known" case; without it, land
 read as `Upright` and wrongly earned an exemption meant only for a fixture
-on its own surface (`docs/lighting_raymarch_archive.md`, session 23). `kind`, not
+on its own surface (`docs/archive/render/lighting_raymarch_archive.md`, session 23). `kind`, not
 `stance`, is what tells land apart from an ordinary standing surface for the
 one consumer (a wall's flat cap) that also wants the half-space light gate
 `STANCE_FLAT` otherwise implies — `fs_main` zeroes the normal for
@@ -123,7 +123,7 @@ carries the shift/mask constants and one packing function, shared by
 `ground.wesl`, `statics.wesl` and `mesh_face.wesl` — the alternative, one
 hand-built `vec4<u32>` literal per file, is what let one producer
 (`ground.wesl`) go a full session without stamping `stance` at all (see
-`gbuffer_archive.md` and `docs/lighting_raymarch.md` for that bug). WGSL has
+`gbuffer_archive.md` and `docs/archive/render/lighting_raymarch.md` for that bug). WGSL has
 no `#include`; each producer imports the same constants and calls:
 
 ```wgsl

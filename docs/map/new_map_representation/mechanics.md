@@ -135,8 +135,8 @@ decision record:
   forces the second half, which is unchanged: a reader that needs an area pins
   every chunk the area touches and reads owners. Copying a static into the
   neighbour would make removal and hashing ambiguous — see
-  [`occluders.md`](../../render/design_occluders.md) and
-  [`footprints.md`](../../render/design_footprints.md), which already reason about art
+  [`design_occluders.md`](../../render/design_occluders.md) and
+  [`design_footprints.md`](../../render/design_footprints.md), which already reason about art
   footprints that cross tiles.
 
 ## Patches

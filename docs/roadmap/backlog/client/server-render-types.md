@@ -191,7 +191,7 @@ journal row's own server-sent hue.
 That knob only ever reached the classic path, and this entry said a real one
 for the TrueType path "would have to grow the atlas's own rasterization
 height instead of the finished quad — a second, differently-shaped feature".
-That is what `docs/text_sizes.md` built: `TtfAtlas` is keyed by
+That is what `docs/render/design_text_sizes.md` built: `TtfAtlas` is keyed by
 `(char, TextSize)` rather than baked at one height, so every kind of text has
 a **real pixel size** of its own (`desk::FontSizes` — speech, window, tooltip,
 stack count), fractional, rasterized at that size and never stretched. The

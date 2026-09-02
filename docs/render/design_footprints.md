@@ -2,10 +2,10 @@
 
 A living plan. The backlog at the end is where the next session starts.
 
-`docs/occluders.md` names this and puts it outside its own scope, in as many
+`docs/render/design_occluders.md` names this and puts it outside its own scope, in as many
 words: *"the lateral fit … it changes **what one primitive's shape is**, where
 this plan changes **how many there are**."* This is that change, and it is the
-other half of `docs/lighting_rebuild.md`'s census line — the class counted there
+other half of `docs/render/design_model.md`'s census line — the class counted there
 as **"a whole tile, because the art would not say"**.
 
 ## What we are fixing
@@ -205,7 +205,7 @@ rejected and would not have worked anyway — over Britain a stone wall scores
 read 6.2% and reported 76.6% of its refusals as "crooked"; naming the pictures
 turned that into "roof, roof, shingles, roof" — eight of the twelve most-refused
 graphics, 2,825 placements. A sloped plane's base edge is not two 45° runs and
-never will be. `docs/lighting_rebuild.md`'s phase 6i is the open question about
+never will be. `docs/render/design_model.md`'s phase 6i is the open question about
 those and it is untouched here.
 
 *What it still refuses*, named because a share hides a tail: `Crooked` 356 —
@@ -324,7 +324,7 @@ Two of those groups read very differently and the split is the finding:
 **And a number that is not this plan's but was found by its instrument.** The
 whole-tile class discards **32.69%** of its own art today, and the roofs inside
 it 44–53% (`0x05A2` "slate roof", 48×76 pixels of picture over a box three `z`
-units tall). That is `docs/lighting_rebuild.md`'s D1 — the height nobody
+units tall). That is `docs/render/design_model.md`'s D1 — the height nobody
 measures — showing up in pixels, and it dwarfs everything this plan moves.
 
 **S6 — the residual, and the class stops taking pictures that are not boxes.**
@@ -360,7 +360,7 @@ columns, the V from 9 to 53), because the refusal only fires where the clamp
 did and `blocks_silhouette` draws exactly one tile.
 
 **S5 — the frame gate.** ✅ 2026-08-10. The bookcase pair, `0x0A97`/`0x0A98` at
-`(1505, 1656)`/`(1506, 1656)` — `docs/parity.md`'s own "shard's own furniture"
+`(1505, 1656)`/`(1506, 1656)` — `docs/render/design_frame_assembly.md`'s own "shard's own furniture"
 coordinates, since that item is what unblocked this one. `tests/lid.rs`, two
 tests: the mutation and the picture it proves is possible.
 
@@ -404,7 +404,7 @@ above already carries.
   asking for. `0x059A` reads 44.1% of its art outside the box its base states
   and `0x05C7` 47.2%, so both are refused as pictures that are not boxes rather
   than as roofs. The `ROOF`-versus-`BACKGROUND` question `boxes_of` raises is
-  untouched and still belongs to `docs/lighting_rebuild.md`'s phase 6i.
+  untouched and still belongs to `docs/render/design_model.md`'s phase 6i.
   Superseded text follows for the reasoning: **A roof piece is given a footprint
   and nothing stops it.** `0x059A` "slate
   roof" measures `x (0,3) y (0,3)` and `0x05C7` "wooden shingles" `x (0,2) y
@@ -415,7 +415,7 @@ above already carries.
   `facing_of` refused. A sloped slab's base edge is two 45° runs like anything
   else's, so the measurement cannot tell itself apart from a box's — the gate
   has to be the client's own `ROOF` bit, at one of the two ends, and which end
-  is the decision. `docs/lighting_rebuild.md`'s phase 6i is the same class's
+  is the decision. `docs/render/design_model.md`'s phase 6i is the same class's
   other open question. **The sharpest of the three findings below**: the other
   two cost pixels, this one moves shadows on pieces the plan says are not boxes.
 - ✅ **A tabletop is drawn wider than the base that was measured, and the shader
@@ -427,7 +427,7 @@ above already carries.
     keeps — the tile's centre, the zero normal `blit.wesl` reads as "no facing,
     lit from every side", `SOLID_NOBODY`. The fringe the discard was introduced
     for lands in the same state, which is what makes it one answer rather than a
-    third. `docs/lighting_rebuild.md`'s "One silhouette" is where that is
+    third. `docs/render/design_model.md`'s "One silhouette" is where that is
     argued; what this plan contributed is the number that reopened it — the
     2.38% on record counted *pixels that changed in one frame with the roof
     cut*, and per picture the discard was throwing away 11.09% of every panel's
@@ -494,7 +494,7 @@ above already carries.
   working tree, proven by a picture — `0x0B06` alone at `(1496, 1663)`,
   `View::Height`, before and after. It could not be committed from this plan's
   own session: that file was carrying two hundred lines of concurrent work at
-  the time. It does not need to be — `docs/silhouettes.md` has since picked the
+  the time. It does not need to be — `docs/render/design_silhouettes.md` has since picked the
   change up by name and built its own box-edge layer on the state a miss now
   keeps, so it commits there. What is still owed to *this* plan is one re-run of
   `discard_census.rs` afterwards: its panel and whole-tile shares become a
@@ -514,10 +514,10 @@ above already carries.
   `discard_census.rs` counts every sprite pixel in a window, drawn over or not,
   so the two are not comparable and the census is the upper bound. The frame
   number wants two dumps either side of `OPENSHARD_SCENE_IMPOSTOR` and a count
-  of the pixels whose `Place` differs — `dump::plane_bytes` (`docs/parity.md`'s
+  of the pixels whose `Place` differs — `dump::plane_bytes` (`docs/render/design_frame_assembly.md`'s
   P3) is that comparison already written for a different question, and reaching
   it from a tool is what is missing.
-- ✅ **S5's parity item is closed** — `docs/parity.md`'s "The shard's own
+- ✅ **S5's parity item is closed** — `docs/render/design_frame_assembly.md`'s "The shard's own
   furniture", 2026-08-10. The reported picture is two *server* decorations and
   `examples/isolated_scene.rs` read no database, so the frame gate's fixture
   would have been two hand-transcribed `OPENSHARD_SCENE_EXTRA` rows standing in
@@ -553,10 +553,10 @@ above already carries.
 - 🚩 **`Solid::box_of`'s own doc gives a stale reason for its visibility**, found
   while wiring S3 beside it. It says `pub(crate)` exists because
   `light::walk_the_wire` reconstructs a solid's box from `(tile, edges, bottom,
-  top)` — true when `docs/lighting_raymarch.md`'s point 4 wrote it, not true
+  top)` — true when `docs/archive/render/lighting_raymarch.md`'s point 4 wrote it, not true
   today: `occlusion::Occlusion::primitive_bytes` writes `solid.wire_box()`, each
   primitive's own absolute corners, and `light::walk_the_wire` reads
-  `stands.wire_box()` the same way — `docs/occluders.md`'s D1 moved the wire to
+  `stands.wire_box()` the same way — `docs/render/design_occluders.md`'s D1 moved the wire to
   absolute coordinates and nobody came back to this comment. Not fixed here:
   it costs nothing correctness-wise (the visibility itself is still earned by
   the same doc's second reason, `crate::impostor::Volume::of`), and touching it

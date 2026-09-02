@@ -96,7 +96,7 @@ them: `View::SilhouetteArt` and `View::SilhouetteBox`.
 The cost is four `textureLoad`s and four extra runs of the selection loop per
 static fragment, always on. It was gated on the view for one draft and the gate
 was taken out: a G-buffer whose content depends on which picture is being asked
-for is exactly the coincidence `docs/parity.md` is about, and it would have made
+for is exactly the coincidence `docs/render/design_frame_assembly.md` is about, and it would have made
 the flag travel from a diagnostic into a world pass.
 
 **S2. What to do about the coarse edge, once it is attributed.** Not decided,
@@ -106,8 +106,8 @@ and the three are not variations of one answer:
   with drew it this way. Then the work is one paragraph in `docs/style.md` and
   the views above, so the next person who notices reads the answer instead of
   re-deriving it.
-- **Let the box bound more of it.** `docs/footprints.md` and
-  `docs/occluders.md` are both making boxes fit the art better. A tighter box
+- **Let the box bound more of it.** `docs/render/design_footprints.md` and
+  `docs/render/design_occluders.md` are both making boxes fit the art better. A tighter box
   clips more of the outline, which moves fragments from the art's grid onto the
   fragment grid — *for free, as a side effect of work already planned*. This is
   why S3 below insists the ratio is measured before and after those land.
@@ -156,7 +156,7 @@ clamped onto the box it came nearest now (see the two sections below), so both
 sides of the seam carry a measured face and the seam marks a weaker thing: past
 it, a fragment's position is a box's rim rather than a point its ray went
 through. A wide band of it is a box that does not fit its art, which is
-`docs/footprints.md`.
+`docs/render/design_footprints.md`.
 
 That answers the backlog's first 🚩 outright: the zigzag a person points at is
 the art's outline, and the fragment-fine line beside it is not a silhouette at
@@ -174,7 +174,7 @@ both        473        the seam reaching the outline
 ```
 
 Two thirds of the edge is *both*, which is the box fitting the art's outline
-well; the 96 are where it does not, and they are the pixels `docs/footprints.md`
+well; the 96 are where it does not, and they are the pixels `docs/render/design_footprints.md`
 is about.
 
 **What Z1 did not get: the widths.** The two edges are two *rules* at every
@@ -211,7 +211,7 @@ Nothing between `visible_graphics` and `collect` rejects anything it should not:
 the same three zooms over `(1486, 1664)` — standing *on* the wall run — collect
 109, 54 and 30 statics.
 
-The lesson is the plan's own, not the renderer's: **`docs/parity.md`'s coordinate
+The lesson is the plan's own, not the renderer's: **`docs/render/design_frame_assembly.md`'s coordinate
 is a `1:1` coordinate.** It is where a person stands to look at a lit house
 corner, and a magnified frame taken from it is a frame of ground. Every question
 this plan asks above `1:1` is asked from `ON_THE_WALLS` — `tests/dump.rs`'s
@@ -265,7 +265,7 @@ on the shader's copy of the number.
 
 **And what it leaves.** The line was one of two populations, not the whole of
 them: 11.83% of drawn art still misses, running out to 133 fragments, and that
-is real overhang for `docs/footprints.md` rather than sampling. A roof gives up
+is real overhang for `docs/render/design_footprints.md` rather than sampling. A roof gives up
 40% of its art; a whole-tile claim, 30%.
 
 ### Which is why the clamp came back
@@ -303,7 +303,7 @@ shadow ray starts at whichever it is. That is the backlog entry below.
 
 ### Z2 — the ratio, before
 
-The count from Z1 taken at the three places `docs/parity.md`'s gate uses, so
+The count from Z1 taken at the three places `docs/render/design_frame_assembly.md`'s gate uses, so
 that "before the footprints work" is a number and not a memory.
 
 ### Z3 — the decision
@@ -312,7 +312,7 @@ S2, argued with Z1's picture in hand rather than in the abstract.
 
 ### Z4 — the ratio, after
 
-Re-run Z2 once `docs/footprints.md` has landed its fitted boxes. The prediction
+Re-run Z2 once `docs/render/design_footprints.md` has landed its fitted boxes. The prediction
 this plan makes, and which Z4 either confirms or kills: **the zigzags recede on
 their own**, because a box that fits the art clips more of the outline.
 
@@ -344,7 +344,7 @@ their own**, because a box that fits the art clips more of the outline.
   magnification, where one texel is several pixels. Below `1:1` several texels
   land on one pixel and the blit's linear sampler is the filter — a different
   regime, with its own artefacts, and no measurement in this repository.
-- 🚩 **`docs/pixels.md` owes this plan the art texel's own row.** It is the one
+- 🚩 **`docs/render/design_pixel_spaces.md` owes this plan the art texel's own row.** It is the one
   grid with no type and no document, and it is the grid this whole file is
   about.
 - 🚩 **A clamped position is invented, and nothing bounds how far.** The state
@@ -353,7 +353,7 @@ their own**, because a box that fits the art clips more of the outline.
   drawn, and the worst is 133 fragments — four tiles. A roof is the whole class.
   The shadow walk starts from that point and the distance to a flame is measured
   from it, so a large overhang is now a *wrong* answer where it used to be an
-  absent one. `docs/footprints.md` shrinks the population; what nobody has
+  absent one. `docs/render/design_footprints.md` shrinks the population; what nobody has
   measured is whether the remaining lie shows on a lit roof.
   <br>
   **The other half of the clamp — the *facing* it names — is closed as of

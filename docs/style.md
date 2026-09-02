@@ -344,7 +344,7 @@ distinguish. It replaced a rounding tolerance that had been standing in for it â
 `impostor::TANGENT`, `1e-4` of a tile, sized against a corner's rounding â€” and
 the replacement was visible on the screen, because every pixel between the two
 sizes had been answered "a point of nothing". A quantum has to name **which two
-grids** it converts between (`docs/pixels.md`) and carry a control that fails
+grids** it converts between (`docs/render/design_pixel_spaces.md`) and carry a control that fails
 when it shrinks; a rounding tolerance has to name the arithmetic. Neither may be
 sized by looking at a picture until it looks right.
 

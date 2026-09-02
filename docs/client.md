@@ -2649,7 +2649,7 @@ own understanding had written.
   moment a drag restates the destination, so a line drawn from it would blink
   out under the moving cursor. What it must never be is a *second* cut: where
   the red starts is where the body will stop, and both come off one function —
-  `docs/parity.md`'s standing argument, applied to a route.
+  `docs/render/design_frame_assembly.md`'s standing argument, applied to a route.
 
   **What the two readings differ by is a list, and the list is doors.** The first
   cut of this had the optimistic half be the *bare map* — the client's files with
@@ -3124,7 +3124,7 @@ own understanding had written.
   there is no knob in the dev window's Graphics tab to turn them off the way
   there is for the crowd or the statics. What *is* answered: the count has a
   size of its own now (`desk::FontSizes::stack_count`, 11 pixels by default,
-  against speech's 16) whichever face is running — see `docs/text_sizes.md`,
+  against speech's 16) whichever face is running — see `docs/render/design_text_sizes.md`,
   which this entry's second half asked for and which turned out to be one
   atlas keyed by `(char, size)` rather than the second atlas it predicted.
 - **The facet is a startup constant and `0x1B` only carries a size.** The app

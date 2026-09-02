@@ -35,7 +35,7 @@ sort by tile, hand back a `Vec` the caller owns for the length of one question.
 It reaches every footing a **step** is decided against, through
 `Footing::among` — the held arrow, the click-to-walk plan, and the route the HUD
 draws, which is that same plan and not a second opinion about it
-(`docs/parity.md`). `Readings::guide` keeps `Bodies::nobody`, because a
+(`docs/render/design_frame_assembly.md`). `Readings::guide` keeps `Bodies::nobody`, because a
 bystander must not be able to rewrite a corridor's topology; that is what
 `Footing::guide`'s doc already said, and it now means something at both ends.
 

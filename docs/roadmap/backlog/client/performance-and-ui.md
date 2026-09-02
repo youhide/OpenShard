@@ -181,7 +181,7 @@ one of them:
       open; a left click cycles it, ahead of the window layer and the world
       because the chat is drawn over both (`App::press_channel_button`). Its box
       comes out of two functions — `channel_button` and `channel_width` — that
-      the frame and the pointer both call, which is `docs/parity.md`'s rule in
+      the frame and the pointer both call, which is `docs/render/design_frame_assembly.md`'s rule in
       the one place a player can feel it being broken. `Shift+Tab` stays, beside
       it rather than instead of it: a hand already typing should not have to
       leave the keyboard.

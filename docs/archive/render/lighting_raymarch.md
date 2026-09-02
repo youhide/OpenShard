@@ -1,6 +1,6 @@
 # The shadow raymarch: boundary precision and CPU/GPU parity
 
-> **Consolidated into [`lighting_rebuild.md`](../../render/design_model.md)** — the walk itself, which survives.
+> **Consolidated into [`design_model.md`](../../render/design_model.md)** — the walk itself, which survives.
 > That document is the entry point: it lists what is still live here, which rebuild phase retires or inherits it, and what carries over untouched. This file stays as the record of how it was built and why.
 
 
@@ -178,7 +178,7 @@ work, its own session).
 ## The reference path tracer
 
 Everything in this file is about holding two implementations of *one* walk to
-each other. [`lighting_reference.md`](../../render/reference/path_tracer.md) is the other half:
+each other. [`path_tracer.md`](../../render/reference/path_tracer.md) is the other half:
 a third renderer that shares no arithmetic and has no notion of a tile, so it
 can arbitrate where the two copies here disagree. Its degenerate mode reads
 **zero interior disagreements** against the rendered frame on all three of

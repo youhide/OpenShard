@@ -363,7 +363,7 @@ there is one.
 
 - **A new `walk_cells` miss, found by accident while showing the user a
   rendered picture, and confirmed not to be the already-documented `Spot`-tile
-  bug.** `docs/lighting.md`'s "Still open" entry (line 150) is about a query
+  bug.** `docs/archive/render/lighting.md`'s "Still open" entry (line 150) is about a query
   point sitting *exactly* on a tile boundary with no tile to disambiguate it;
   this one is not that — every query point below shares the same explicit,
   unambiguous `Spot::tile`, computed by an ordinary `floor()` nowhere near an
@@ -1140,7 +1140,7 @@ there is one.
   was never the thing standing between a correct answer and this scene.
   **Point 4 is not moot** — decision 9's parity suite still needs the GPU
   and CPU walks to agree, and the corner-grazing precision point 4 was
-  scoped for (`docs/lighting_raymarch.md`'s own "A bigger idea..." entry,
+  scoped for (`docs/archive/render/lighting_raymarch.md`'s own "A bigger idea..." entry,
   point 1-3 above) is a real, separate improvement over today's DDA-stepped
   `walk` — but it is a **prerequisite**, not a fix, for a sub-tile occluder:
   two sequential pieces of work, where this backlog entry only names the
@@ -1900,7 +1900,7 @@ a wall is dimmed rather than switched") never got a *lateral*, at-a-corner
 counterpart. `FLAME_SPREAD`/`soft` soften a crossing's own edges once inside
 the box; nothing softens the box's own silhouette edge at a corner, because
 nothing represents "the ray passed near, but outside, the box" at all —
-`ray_vs_solid` was built (`docs/lighting_raymarch.md`'s own ray-vs-Solid
+`ray_vs_solid` was built (`docs/archive/render/lighting_raymarch.md`'s own ray-vs-Solid
 scoping, point 1) to answer that question *exactly*, on purpose, and exactness
 is precisely what leaves no room for a physically-sized light source's own
 corner penumbra.
@@ -2064,10 +2064,10 @@ oracle already measured a real, numbered defect (3027/9216, dropping to
 theoretical.
 
 **The upload, built roughly as the backlog entry sketched it, checked
-against `docs/lighting.md`'s step 23.5 first to avoid re-deriving a design
+against `docs/archive/render/lighting.md`'s step 23.5 first to avoid re-deriving a design
 that might already exist.** An `Explore` agent read both docs' full
 "step 23.5" and decision 38 material and reported back: 23.5 itself is
-closed (the tread/riser half, credited to `docs/gbuffer.md` steps 4b/4c,
+closed (the tread/riser half, credited to `docs/archive/render/gbuffer.md` steps 4b/4c,
 landed session prior to this track even starting), but the GPU-upload
 half the `blit.wgsl`/`occlusion.rs` comments both point at ("step 23.5 is
 where they arrive with a reader") was never part of that closure — no
@@ -2419,7 +2419,7 @@ same restricted march, rather than either loosening the test's own bar or
 declaring a false regression.
 
 **Then the real work: three rounds of CPU/GPU parity failures, three
-different root causes, in `docs/lighting_raymarch.md`'s own house style of
+different root causes, in `docs/archive/render/lighting_raymarch.md`'s own house style of
 measuring rather than guessing at each one.**
 
 1. **`a_single_flat_face_beside_an_occluder_agrees_with_light_sample`**: a

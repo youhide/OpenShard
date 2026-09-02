@@ -73,7 +73,7 @@ extent, above, and the `Command::Send` newtype once `link.rs` is quiet.
 **The flame fuzzer went red on a fresh seed**, in a run that touched neither
 `light.rs` nor `lighting.rs` — both walks say blocked, the brute-force oracle
 says open, which is exactly the family of
-`docs/occluders.md`'s pinned corner graze. The seed line and what it costs to
+`docs/render/design_occluders.md`'s pinned corner graze. The seed line and what it costs to
 pin it are in that document's backlog; it is deliberately **not** in
 `lighting.proptest-regressions`, because pinned it makes `cargo test
 --workspace` red for every session until another track settles it.

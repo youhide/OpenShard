@@ -47,7 +47,7 @@ already there.
 Written against `crates/client/render/src/place.rs`, `select.rs`, `light.rs`,
 `statics.wgsl`, `ground.wgsl`, `mobiles.wgsl`, `blit.wgsl`, `renderer.rs`
 (file names as they were before the WESL migration — see
-`docs/lighting_raymarch.md`'s backlog for that move; the same files are now
+`docs/archive/render/lighting_raymarch.md`'s backlog for that move; the same files are now
 `.wesl` sources).
 
 ### Where it stood, and why it was tight
@@ -266,7 +266,7 @@ budget and the measured counts behind it.
 ~~The id's width and the buffer's capacity, i.e. how many faces one frame's
 storage buffer is sized to hold. Not measured against how many faces a real
 screen ever holds...~~ **Answered (step 2):** measured, at the same frame
-`docs/lighting.md`'s 25,702/17,201-statics numbers were taken from —
+`docs/archive/render/lighting.md`'s 25,702/17,201-statics numbers were taken from —
 Britain, widest zoom, `Cutaway::OPEN` (nothing hidden, the worst case) —
 by extending `tests/cost.rs` to print the two `collect()` calls it already
 builds but never counted (`cost.rs:319-347`):
@@ -627,7 +627,7 @@ reason.
       `tests/frame.rs` gained direct pixel-decode coverage for the mesh
       pass (`a_mesh_face_pixel_carries_the_mesh_face_sentinel`) plus a full
       shader/CPU parity suite exercising `mesh_face.wgsl`'s own vertex/
-      fragment path — see `docs/lighting_raymarch.md` for that work. See
+      fragment path — see `docs/archive/render/lighting_raymarch.md` for that work. See
       `gbuffer.md`'s current "Mesh faces" section for the shipped state.
 
 - [x] **5. Checked against the same reproduction that found decision 40** —
@@ -678,7 +678,7 @@ reason.
 
 **The per-face normal format for step 4c/5 cannot be the fixed
 `Stance`-shaped set (`Flat`/`Face(N/E/S/W)`) decision 3 assumed for treads.**
-Reopened mid-session-4b: `docs/lighting.md` decision 35's rejection of
+Reopened mid-session-4b: `docs/archive/render/lighting.md` decision 35's rejection of
 sloped roofs ("a roof in this client is a slab five z deep... it would not
 buy the thing it looks like it buys") is no longer settled — inclined faces
 for roofs, land, and future custom geometry are wanted, for the flexibility.
@@ -712,7 +712,7 @@ Covered above under "Steps — occlusion decomposition and the mesh render
 pass" (step 4b) and under decision 3/decision 4's reasoning — the render-side
 motivation for the occlusion grid's tread decomposition is the same "seven
 honest normals" argument; the DDA/raymarch mechanics that walk the resulting
-`Solid`s are `docs/lighting_raymarch.md`'s own territory, not repeated here.
+`Solid`s are `docs/archive/render/lighting_raymarch.md`'s own territory, not repeated here.
 
 ## Selection — reasoning
 

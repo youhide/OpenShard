@@ -22,7 +22,7 @@ stood, quoted and engaged with below, because the box it argued for was not
 going away; only its status as the ceiling was.
 
 `gbuffer.md`'s own "Not settled" list had already half-reopened the same
-question from the *shading* side (its own note: "`docs/lighting.md`
+question from the *shading* side (its own note: "`docs/archive/render/lighting.md`
 decision 35's rejection of sloped roofs... is no longer settled," dated
 2026-08-05, two sessions before this one) and had deliberately fenced
 itself off from the *occlusion* side: "purely a step 4c/5 question —

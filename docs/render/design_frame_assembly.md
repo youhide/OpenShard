@@ -572,7 +572,7 @@ and both mistakes are the kind that repeat.
   body's top edges — and a line is the one shape the report was about. A ratio
   answers "how much of this population", never "what shape is it", and a defect
   reported as a *line* has already told you which question to ask. See
-  `docs/lighting_rebuild.md`'s seam-probe entry for the numbers and the picture
+  `docs/render/design_model.md`'s seam-probe entry for the numbers and the picture
   side by side.
 - **A pass no tool draws is an input no tool varies** — the third one, added
   2026-08-10 and the first to cost a *feature* rather than a measurement. The
@@ -692,7 +692,7 @@ The order follows the counts and the blast radius:
    third state this line never named, and "stand in the grid" would not have
    fixed the defect this line is paired with even if it were still open: the
    cornice glow and the furniture-seam dashes
-   (`docs/lighting_rebuild.md`'s cornice entry and its seam-probe follow-up)
+   (`docs/render/design_model.md`'s cornice entry and its seam-probe follow-up)
    come from a *neighbouring* lid's shadow test deciding a missed pixel by
    clamp geometry, and a piece's own identity only ever exempts it from
    shadowing *itself*. The candidates that would touch it are the cornice
@@ -727,15 +727,15 @@ The order follows the counts and the blast radius:
    the comb inside an overhang and draws a hard line where the overhang joins
    the art (0.30% → 32.59% of those pairs, 97.68% for panels), because **91.79%
    of the art bordering an overhang is the box's own lid** — an overhang hangs
-   above its box. The clamp stays. `docs/lighting_rebuild.md`'s serrated-edge
+   above its box. The clamp stays. `docs/render/design_model.md`'s serrated-edge
    entry carries the table and `examples/discard_census.rs` can re-take it.
 3. **The whole-tile stand-in** — 31.6%, the expensive one, because reducing it
    means measuring more art rather than writing a rule.
 4. **`PANEL_THICKNESS`** — one slab straddling the tile boundary instead of two
-   inset ones, which is `docs/lighting_rebuild.md`'s own backlog item.
+   inset ones, which is `docs/render/design_model.md`'s own backlog item.
 
 Each of the four re-runs the census as its own done-when, and the numbers go in
-`docs/lighting_rebuild.md`'s census section beside the ones above.
+`docs/render/design_model.md`'s census section beside the ones above.
 
 #### P4.1 — a floor is a body ✅ 2026-08-10, and the thickness is not the one the plan named
 
@@ -779,7 +779,7 @@ z 18.00   0.2914
 One `z` unit is four screen pixels at 1:1: **a dark band along the top of every
 interior wall under a storey**, where everything below it is lit.
 `a_room_lights_its_own_wall_and_not_the_storey_over_it` is the fixture
-`docs/lighting_rebuild.md`'s floor entry named as the one that catches both
+`docs/render/design_model.md`'s floor entry named as the one that catches both
 directions, and it caught this.
 
 So the number is argued from **both** ends instead of taken from the wire, and
@@ -958,7 +958,7 @@ a test red, and the test names which grid met which.
   of a `Frame`, and `impostor::Fringe` is not one — it lives on the renderer
   (`SpriteRenderer::set_fringe`), read from the environment once at start-up and
   cycled by F2 since `e4c51b2`. So the switch that changes **6.7% of a lit
-  frame** (`docs/lighting_state.md`'s own table for `discard`) is exactly the
+  frame** (`docs/render/README.md`'s own table for `discard`) is exactly the
   kind of difference the summary exists to name, and two dumps of one session
   can now differ in it while their `inputs.txt` diff is empty. This is the same
   lesson as the window's parity one line over: *a detector must report what it
@@ -1054,7 +1054,7 @@ a test red, and the test names which grid met which.
   frame.** `tests/dump.rs`'s `AT` is that point verbatim, so every picture that
   file gates is three-quarters cleared background with one flame in it — the
   planes it dumps are the ones this section just showed to be constant there.
-  And `docs/silhouettes.md` has the *symptom* written down already, diagnosed
+  And `docs/render/design_silhouettes.md` has the *symptom* written down already, diagnosed
   as far as it could be: `frame::assemble` at that place "returns 595 quads of
   land and **zero** static quads", read there as "the cull is right and the
   scene was the wrong scene". It is right, and the reason is the `z`: the land
@@ -1079,7 +1079,7 @@ a test red, and the test names which grid met which.
   that is how the positive control reddens 309,198 pixels there while `light`
   moves for an entirely different reason. It is an honest default on both sides
   and therefore not a parity defect; what it means is that the whole of
-  `docs/lighting_world.md`'s subject is gated by exactly one plane, and by no
+  `docs/archive/render/lighting_world.md`'s subject is gated by exactly one plane, and by no
   frame anybody looks at.
 - 🚩 **The other three tools still read no shard database.** `isolated_scene` now
   does (see the section above), and `tile_probe`, `onsite.rs` and

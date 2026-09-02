@@ -416,7 +416,7 @@ past the tread it meets, and every face grows
 [`WIDTH_OVERLAP`](../../../crates/client/render/src/facing.rs) (`0.03`, in
 tile-fraction) past the tile-crossing edge `Prism::footprint` holds at the
 unit square regardless of `lo`/`hi` — two real overlaps in world space, not
-another depth formula, so `docs/gbuffer.md` decision 4's argument against a
+another depth formula, so `docs/archive/render/gbuffer.md` decision 4's argument against a
 second depth formula is untouched. Measured on the repro scene below
 (count `View::Place` pixels reading `(1, 1)` in the stair's own screen
 region): 35 leak pixels before, 9 after, and the two dominant 14-pixel
@@ -927,7 +927,7 @@ attachment did not carry. A wall's two faces are **one tile, one plane,
 one fraction and one height** — everything decisions 2, 13 and 16 write —
 so nothing in the frame could tell the street side of a house from the
 room side, and a torch in a room lit both equally.
-`docs/lighting_world.md`'s backlog carried it as "the sun has no facing
+`docs/archive/render/lighting_world.md`'s backlog carried it as "the sun has no facing
 either" since the sun arrived (still true — see "Sunlight" below).
 
 Step 15 already measured the answer and threw it away: the *stance* —
@@ -1582,7 +1582,7 @@ What baking with real geometry buys on top of that, and what it does not:
   the whole tile, which is a dimmer tile and not a beam.
 - **Baked light.** A sky field, an ambient occlusion, a lightmap for the
   static world — computed once per region rather than blurred per frame,
-  which is what `docs/lighting_world.md` does.
+  which is what `docs/archive/render/lighting_world.md` does.
 - **A shaft with a shape** (step 17, not built — see `lighting.md`'s
   Status): the mask can come from the opening's own geometry rather than
   from a tile-sized approximation.
@@ -4265,7 +4265,7 @@ missing pool is easier to see than sixty invented ones.
 **Decision 20. While the point lights are the subject, the ambient holds
 still.**
 
-`docs/lighting_world.md`'s sky field — a room under a roof darker than
+`docs/archive/render/lighting_world.md`'s sky field — a room under a roof darker than
 the road outside it, before anything burns — is **off by default** (F6),
 and the ambient is one colour per frame again. Not because it is wrong:
 because it changes the ambient of *every tile in the frame*, and a pool

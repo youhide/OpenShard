@@ -62,7 +62,7 @@ Only the decisions a later session could reopen by accident; the rest are in
   `MapTerrain<M>` is generic over it.
 - **`BlockCoord` is one type and `RadarChunkCoord` is not it.** A radar chunk is
   64 tiles square; collapsing the two is the confusion
-  [`pixels.md`](../../../render/design_pixel_spaces.md) exists to prevent.
+  [`design_pixel_spaces.md`](../../../render/design_pixel_spaces.md) exists to prevent.
 - **`MapRevision` starts at 1 and nothing moves it yet.** The guard is tested by
   handing `load` a stamp one revision ahead; nothing in a running shard can
   produce that disagreement until C publishes.
@@ -116,7 +116,7 @@ the 64-tile server sector (`SECTOR_SIZE`), and the block *bounds* rectangle in
 - **Sector and radar chunk are both 64 tiles for unrelated reasons** — the radar
   from `BLOCK_TILES * 8`, the sector from Sphere's `SECTORSIZE_DEFAULT`, pinned
   by `VIEW_RANGE`. Two grids that agree by coincidence are exactly what
-  [`pixels.md`](../../../render/design_pixel_spaces.md) is about, and a shared *number* would be the
+  [`design_pixel_spaces.md`](../../../render/design_pixel_spaces.md) is about, and a shared *number* would be the
   wrong way to unify them.
 - **`radar.rs` still open-codes tile → block** (`origin_x / BLOCK_TILES`) where
   `BlockCoord::containing` is the same arithmetic.

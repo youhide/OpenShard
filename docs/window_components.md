@@ -1010,7 +1010,7 @@ never a half-routed frame.
 
   *What the entry was right about stands and is worth keeping in mind:* a frame
   assembled in more than one place makes agreement a coincidence
-  (`docs/parity.md`), and **dead code in the shape of a live branch is the same
+  (`docs/render/design_frame_assembly.md`), and **dead code in the shape of a live branch is the same
   defect wearing a disguise** — it reads as a second assembler, it type-checks
   like one, and the next author keeps it in step for nothing.
 
@@ -1080,7 +1080,7 @@ settle:
   `desk::ChatScale`), which at three times a window is a legible bag with an
   illegible tooltip beside it.
 - **The diagnostic tools do not know the scale.** `tests/gumpshot.rs` and
-  everything else in `docs/parity.md`'s list assemble a frame by hand and place
+  everything else in `docs/render/design_frame_assembly.md`'s list assemble a frame by hand and place
   windows themselves, so a tool's picture is the client's only at
   `WindowScale::MIN`. That is one more caller of the placement that is not
   `gump::place` — the shape `parity.md` exists to complain about.

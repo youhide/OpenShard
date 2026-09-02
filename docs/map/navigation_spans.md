@@ -1779,5 +1779,5 @@ what a step asks, `MapTerrain::check` is the map's own statement of the same
 rule and has no production caller, and the `span_check` example is the 248
 million comparisons between them. That pair is the thing that will notice a bake
 which has stopped describing its map — after a patch, after a base set, after
-the footprint work in [`footprints.md`](../render/design_footprints.md) changes what a static
+the footprint work in [`design_footprints.md`](../render/design_footprints.md) changes what a static
 *is*. Keep both halves.

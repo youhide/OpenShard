@@ -6,15 +6,15 @@ the reason, and the alternatives are recorded so they are not re-opened rather
 than re-argued. A session that starts here starts at the first step whose gate is
 not yet green.
 
-`docs/lighting_rebuild.md` phase 6e is the one-paragraph version and points here.
-This continues `docs/lighting_geometry.md`'s question — box occluders becoming
+`docs/render/design_model.md` phase 6e is the one-paragraph version and points here.
+This continues `docs/archive/render/lighting_geometry.md`'s question — box occluders becoming
 real geometry — with the part that document never had: a reason, a measurement
 and an order.
 
 ✅ **All six steps are green as of 2026-08-09, and this document is a record from
 here on.** A session looking for work does not start here: what is still live out
 of this track is the § *Backlog* below, and the items that outlive it are carried
-in [`lighting_rebuild.md`](design_model.md)'s own backlog, which is the one
+in [`design_model.md`](design_model.md)'s own backlog, which is the one
 list. **S6 is one of them come back closed** — the aperture, which was the first
 of those three and is written up in § *The aperture*; a step landed after the
 table was full, because a record of a finished track is still where a finding
@@ -37,7 +37,7 @@ S3b are deletions and optimisations that must move nothing. **S3 has since lande
 and moved nothing either** — its exemption needs a ray in the surface's own plane
 and the renderer has none, which is measured at S3's own acceptance. The seam a
 person reports is a *shading* defect and it belongs to
-[`lighting_rebuild.md`](design_model.md)'s **phase 5b**, which has since
+[`design_model.md`](design_model.md)'s **phase 5b**, which has since
 landed — and it is what licensed S4's deletion of `same_run`, since the rays that
 rule existed for are the below-horizon ones 5b stopped tracing. So acceptance for the
 sentence above is § *Acceptance for S3* — six things to run, each with a figure
@@ -83,7 +83,7 @@ the storage. Three consequences, each already seen in a frame:
 Measured, on one real place at 4:1, before any of this: 474 fragments stood
 strictly outside their own carried tile and **324 of them leaked a fully lit
 pixel into a shadow**; the narrow leaks over one building's floors numbered 303.
-`starting_cell` took that to zero, and `docs/lighting_rebuild.md`'s backlog
+`starting_cell` took that to zero, and `docs/render/design_model.md`'s backlog
 records that it is a repair rather than a construction — it arbitrates between
 two spellings of one fact instead of removing the second spelling. ✅ **Removed
 at S4, and the second spelling went with it**: the walk seeds itself from the
@@ -161,7 +161,7 @@ reason and says so.
   neither is D2b.** The exemption is reachable only by a ray lying in the
   surface's own plane, and the shipped renderer has no such ray: S3 moves **0
   pixels** on the flights, 0 of 29,696 on the wall run, 0 of 262,144 on the stair
-  under a front light. What cures the seam is `docs/lighting_rebuild.md`'s phase
+  under a front light. What cures the seam is `docs/render/design_model.md`'s phase
   5b — see this plan's backlog, where all three arguments are written out. D2a is
   the rule that says *why* a surface may not shadow itself, and that is worth
   having stated whether or not a frame today can reach it.
@@ -222,7 +222,7 @@ a climbable it was never holding anything up. See § *Why it is ragged*, point 3
 **And so does every *scan* of a cell**, which is the same defect wearing a
 different coat: `blit.wesl`'s `own_solid` walks a cell's list to name the solid a
 sprite fragment is a point of, and `occlusion::owner_at` is a linear scan of one
-too — `docs/lighting_rebuild.md`'s backlog has both, and counts **thirteen scans
+too — `docs/render/design_model.md`'s backlog has both, and counts **thirteen scans
 of one cell for a four-tread flight**. Under D6 the answer is carried: the
 primitive a fragment met is the primitive it is a point of. They are in scope
 here and land in S4 with the rest.
@@ -706,7 +706,7 @@ restated.
    plane, which needs a point flame — the gate below uses one, and the shipped
    renderer never does, because a sphere of `FLAME_RADIUS` centred in the plane
    puts half its rays below it. So S3 is a rule made right and a picture unchanged,
-   and the seam a person sees belongs to `docs/lighting_rebuild.md`'s backlog
+   and the seam a person sees belongs to `docs/render/design_model.md`'s backlog
    entry on the flame's own extent — the cosine is taken from the flame's centre
    while visibility is sampled over its whole sphere.
 
@@ -798,7 +798,7 @@ once). See § *The merge* for what each would have broken.
 
 ~~**`PANEL_THICKNESS`'s inward fattening is answered here** and not separately:
 two walls on a shared tile edge are one surface, so they merge into one slab lying
-on the plane the art draws, which is what the `docs/lighting_rebuild.md` backlog
+on the plane the art draws, which is what the `docs/render/design_model.md` backlog
 entry asks for.~~ 🔴 **It is not answered here, and the reason is `edges`.** A
 tile's north panel and its northern neighbour's south panel do share a whole face
 — both are fattened inward from the plane between them — but they are a
@@ -809,7 +809,7 @@ as built refuses them, which is exact and leaves the fattening exactly where it
 was. What would answer it is a decision about what a two-sided panel means to
 `pierced` and to `on_the_lit_surface` — a change to what one primitive *is*, which
 is what § *Not in scope*'s "lateral fit" entry is also about. It stays
-`docs/lighting_rebuild.md`'s backlog item. The constant is still both *how thick a
+`docs/render/design_model.md`'s backlog item. The constant is still both *how thick a
 wall is* and *which side of its tile it sits on*.
 
 *Gate:* **not one pixel moves.** That is the whole of what a pure optimisation
@@ -828,7 +828,7 @@ the path tracer will not allow them. What was written here was that the merge
 retires it; what actually does is that **those rays stop being traced**: a sample
 behind the fragment's own plane has a zero cosine and contributes nothing, so there
 is no crossing left for `same_run` to excuse. That is
-`docs/lighting_rebuild.md`'s phase 5b, it is measured rather than argued, and this
+`docs/render/design_model.md`'s phase 5b, it is measured rather than argued, and this
 deletion waits on it — not on S3b. ⚠ **Phase 5b landed and did *not* license it.**
 Neutralised after it, `light_runs_along_a_wall_and_stops_across_it` and
 `the_two_faces_of_a_corner_are_lit_from_the_side_each_looks_at` still go red,
@@ -914,7 +914,7 @@ So the case the rule was written for happens **18 times, all of them in the two
 fixtures written for it**, and there the rule *is* `floor`. Zero times in any
 generated or rendered scene. What it still decided, 11,544 times, is the
 exact-edge tie — the normal state of every south and east face since
-`docs/lighting_rebuild.md` phase 6c.
+`docs/render/design_model.md` phase 6c.
 
 **And that tie has one answer.** Both cells contain a point on the boundary
 between them, and a walk seeds its distance to the next boundary from the cell it
@@ -990,7 +990,7 @@ the shader.
 **The licence is a census, and the census is what makes this step honest.**
 Instrumented — both answers computed for every straight-up ray, printed — the
 whole crate enters the branch **zero times**. Not "agrees everywhere": never
-runs. The reason is `docs/lighting_rebuild.md`'s phase 5: a flame is a sphere and
+runs. The reason is `docs/render/design_model.md`'s phase 5: a flame is a sphere and
 `light::flame_points` lays its samples at `sqrt((i + 0.5) / n)` of the radius, so
 **no sample is the centre** and a flame directly overhead is eight rays each
 leaning a `FLAME_RADIUS` out of the vertical. `walk_sun` answers an overhead sun
@@ -1612,7 +1612,7 @@ second spelling with no compiler between the two; and a cost measurement — whi
 needs `tests/cost.rs` to be able to price a frame **with real occluders**, since
 it builds against `Occlusion::EMPTY` today and therefore cannot see this at all.
 That harness fix is part of this step, not a follow-up — and it is also
-`docs/lighting_rebuild.md`'s own backlog entry asking for "a cost harness that
+`docs/render/design_model.md`'s own backlog entry asking for "a cost harness that
 prices the pass the client actually runs", inherited here rather than left in two
 places.
 
@@ -1622,7 +1622,7 @@ Named so that a later session does not adopt them by accident:
 
 - **A flame's own sprite reading black.** A real defect, found in the same frame,
   and it is about where a light *is* rather than about the shape of an occluder.
-  `docs/lighting_rebuild.md`'s backlog owns it.
+  `docs/render/design_model.md`'s backlog owns it.
 - **How far a real static's art overhangs its own volume.** Phase 6's own second
   number, still untaken. It is art against volume, not solid against solid.
 - **The lateral fit.** `facing::Prism` is `up`, `heights` and `count` — it has no
@@ -1630,7 +1630,7 @@ Named so that a later session does not adopt them by accident:
   its climb and a whole tile across. Worth doing and not this: it changes what one
   primitive's shape is, where this plan changes how many there are.
 - **The tile-to-world mapping.** D7.
-- **Phases 7 and 8** of `docs/lighting_rebuild.md`, which are billboards and the
+- **Phases 7 and 8** of `docs/render/design_model.md`, which are billboards and the
   sun and touch none of this.
 - **Land as an occluder** — a hill casts no shadow today. A hierarchy over
   arbitrary boxes is the structure that would make terrain an occluder cheap,
@@ -1859,7 +1859,7 @@ visibility is sampled over the flame's whole sphere: a sample point below the
 fragment's horizon should contribute zero by `N·L` and never be asked about
 occlusion. Fix that, and the set of rays a join can block is empty — no merge
 required, and `same_run` loses its reason too. Prototyped and rendered on
-2026-08-09; it lives in `docs/lighting_rebuild.md`'s backlog, since it is a shading
+2026-08-09; it lives in `docs/render/design_model.md`'s backlog, since it is a shading
 question rather than a geometry one. **Measure that before spending S3b on this**,
 because the merge's own argument then falls back to what it always was — one
 primitive per surface is cheaper and simpler, not a cure.
@@ -1892,7 +1892,7 @@ enough on its own:
   may not move a pixel cannot fix a defect measured in moved pixels, and the count
   is now eight times larger than the one quoted.
 
-So: `docs/lighting_rebuild.md`'s **phase 5b is the cure**, S3b is an optimisation —
+So: `docs/render/design_model.md`'s **phase 5b is the cure**, S3b is an optimisation —
 one primitive per surface is cheaper and simpler — and it keeps its place last,
 after S5, with its own gate unchanged: not one pixel moves.
 

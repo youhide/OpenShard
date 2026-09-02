@@ -1,12 +1,12 @@
 # A position is not a coordinate
 
-> **Consolidated into [`lighting_rebuild.md`](../../render/design_model.md)** — one metric, half of which is phase 2.
+> **Consolidated into [`design_model.md`](../../render/design_model.md)** — one metric, half of which is phase 2.
 > That document is the entry point: it lists what is still live here, which rebuild phase retires or inherits it, and what carries over untouched. This file stays as the record of how it was built and why.
 
 
 **The world is already continuous.** `camera::WorldSpot` is three `f64` in tiles,
 `occlusion::Solid::space` is two of them, `light::Spot` carries an `f32` pair and
-an `f32` height, and `docs/lighting_height.md`'s phases 1 and 2 made height
+an `f32` height, and `docs/archive/render/lighting_height.md`'s phases 1 and 2 made height
 continuous on both sides of the wire. There is no integer world to migrate off.
 
 What is still integer is the **cell**, and the defect is not that it exists — a
@@ -63,7 +63,7 @@ own the decision. Neither of them is a premise:
 - **The `place` attachment's precision is a number this layer chooses.** It is
   not a foreign wire — it is this crate's own g-buffer, `crate::place`, designed
   here. It carries a sub-tile fraction to a hundred-and-twenty-seventh and a
-  height to a sixteenth because `docs/lighting_height.md`'s phase 1 took the
+  height to a sixteenth because `docs/archive/render/lighting_height.md`'s phase 1 took the
   spare bits that were lying around, and its own doc already prices the next step
   ("eight would need the stance moved out of the channel entirely, into the id
   channels — real work"). So the question is not what the format allows but what
@@ -140,7 +140,7 @@ they were chasing was the instrument.
 - **Phase 5 — the nudges, and then the format.** `ON_TOP` and `STAND_OFF` are
   sized against the attachment's byte layout, which is the inversion this plan is
   about: a statement about surfaces should decide them, and the format should be
-  chosen to carry it. `docs/lighting_height.md`'s orbit measurement is the
+  chosen to carry it. `docs/archive/render/lighting_height.md`'s orbit measurement is the
   fixture — the two nudges cost `654` pixels of one tread with the flame on one
   side and `654` on the other, mirrored, so any answer has to be judged over the
   whole orbit rather than over one placement. If the answer needs more bits than

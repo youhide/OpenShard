@@ -865,8 +865,8 @@ which fights a discrete ladder and would breathe.
 Found while planning this, and not to be lost in it.
 
 - 🚩 **An inventory of every pixel this engine has — its own session**, now
-  written up as [`docs/pixels.md`](render/design_pixel_spaces.md); the entry below is
-  [`docs/silhouettes.md`](render/design_silhouettes.md). Both are kept here in short because
+  written up as [`docs/render/design_pixel_spaces.md`](render/design_pixel_spaces.md); the entry below is
+  [`docs/render/design_silhouettes.md`](render/design_silhouettes.md). Both are kept here in short because
   D11 is where a reader of *this* file will look for them. D11 names
   two, the real one and the virtual one, and that was the whole argument it
   needed. A frame has more, they meet in the same expressions, and no one
@@ -878,7 +878,7 @@ Found while planning this, and not to be lost in it.
   one of them nothing else is measured against. What the session is for is not a
   glossary: it is which conversions exist, which are exact, which round, and
   which pairs are commensurate — because two grids that share a divisor are the
-  whole of the parity defect `docs/parity.md` records, and nobody knew they
+  whole of the parity defect `docs/render/design_frame_assembly.md` records, and nobody knew they
   shared one.
 - 🚩 **Two quantisations stand side by side in one magnified frame, and a person
   reads the coarser one as a bug.** Measured at Britain on the client's own
