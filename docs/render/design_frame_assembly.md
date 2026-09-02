@@ -572,7 +572,7 @@ and both mistakes are the kind that repeat.
   body's top edges — and a line is the one shape the report was about. A ratio
   answers "how much of this population", never "what shape is it", and a defect
   reported as a *line* has already told you which question to ask. See
-  `docs/render/design_model.md`'s seam-probe entry for the numbers and the picture
+  [`evidence/2026-08-11-lighting-backlog-findings.md`](evidence/2026-08-11-lighting-backlog-findings.md)'s seam-probe entry for the numbers and the picture
   side by side.
 - **A pass no tool draws is an input no tool varies** — the third one, added
   2026-08-10 and the first to cost a *feature* rather than a measurement. The
@@ -692,7 +692,7 @@ The order follows the counts and the blast radius:
    third state this line never named, and "stand in the grid" would not have
    fixed the defect this line is paired with even if it were still open: the
    cornice glow and the furniture-seam dashes
-   (`docs/render/design_model.md`'s cornice entry and its seam-probe follow-up)
+   ([`evidence/2026-08-11-lighting-backlog-findings.md`](evidence/2026-08-11-lighting-backlog-findings.md)'s cornice entry and its seam-probe follow-up)
    come from a *neighbouring* lid's shadow test deciding a missed pixel by
    clamp geometry, and a piece's own identity only ever exempts it from
    shadowing *itself*. The candidates that would touch it are the cornice
@@ -727,12 +727,12 @@ The order follows the counts and the blast radius:
    the comb inside an overhang and draws a hard line where the overhang joins
    the art (0.30% → 32.59% of those pairs, 97.68% for panels), because **91.79%
    of the art bordering an overhang is the box's own lid** — an overhang hangs
-   above its box. The clamp stays. `docs/render/design_model.md`'s serrated-edge
+   above its box. The clamp stays. [`evidence/2026-08-11-lighting-backlog-findings.md`](evidence/2026-08-11-lighting-backlog-findings.md)'s serrated-edge
    entry carries the table and `examples/discard_census.rs` can re-take it.
 3. **The whole-tile stand-in** — 31.6%, the expensive one, because reducing it
    means measuring more art rather than writing a rule.
 4. **`PANEL_THICKNESS`** — one slab straddling the tile boundary instead of two
-   inset ones, which is `docs/render/design_model.md`'s own backlog item.
+   inset ones, which is [`evidence/2026-08-11-lighting-backlog-findings.md`](evidence/2026-08-11-lighting-backlog-findings.md)'s own backlog item.
 
 Each of the four re-runs the census as its own done-when, and the numbers go in
 `docs/render/design_model.md`'s census section beside the ones above.
@@ -779,7 +779,7 @@ z 18.00   0.2914
 One `z` unit is four screen pixels at 1:1: **a dark band along the top of every
 interior wall under a storey**, where everything below it is lit.
 `a_room_lights_its_own_wall_and_not_the_storey_over_it` is the fixture
-`docs/render/design_model.md`'s floor entry named as the one that catches both
+[`evidence/2026-08-11-lighting-backlog-findings.md`](evidence/2026-08-11-lighting-backlog-findings.md)'s floor entry named as the one that catches both
 directions, and it caught this.
 
 So the number is argued from **both** ends instead of taken from the wire, and

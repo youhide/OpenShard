@@ -1,6 +1,6 @@
 # The reference path tracer
 
-> **This is [`lighting_rebuild.md`](../design_model.md)'s phase 0** — the oracle the rebuild is judged by.
+> **This is the rebuild's [phase 0](../evidence/2026-08-11-lighting-rebuild-phases.md)** — the oracle the rebuild is judged by.
 > The **BRDF switch** that file asks for is built: `trace::Brdf` computes either
 > physics or the engine's own model, and the gate now runs in the engine's.
 > What phase 0 still owes is the *calibration* — one flame, no occluders,
@@ -103,7 +103,7 @@ third one is not a separate policy smuggled in: without a normal there is no lit
 side, so a point on a body's far side would shadow itself against that same body
 and the model would have no answer at all. The engine states it as an exemption
 in its own walk (a fragment's own occluder does not stop the fragment's ray) and
-[`lighting_rebuild.md`](../design_model.md)'s phase 4 restates it as identity.
+the rebuild's [phase 4](../evidence/2026-08-11-lighting-rebuild-phases.md) restates it as identity.
 `Scene::blocked`'s `except` is where it lands, and its own tests hold the
 exemption to one body: an exemption that let the whole scene through would pass
 every back-face test and quietly produce a reference with no shadows in it.
@@ -221,7 +221,7 @@ This is a difference between the two **light models**, not a bug report: UO's
 own art has no normals, and a face's brightness in the client comes from the
 sprite. Whether the mesh-face path — which *does* have a normal, and states it
 in `Stance` — should use it is a design question this file raises and does not
-answer; `lighting_rebuild.md`'s phase 3 is where it is answered, and the third
+answer; the rebuild's phase 3 is where it is answered, and the third
 column above is what that phase will move. It is recorded here because the
 number is large, because it was invisible to every oracle before this one, and
 because `docs/archive/render/lighting_height.md`'s own recent "the oracle had no half-space
@@ -351,7 +351,7 @@ Built and current:
   sees — worth doing anyway, but the limit has to be stated in the same breath
   or a green tracer will be read as a green shard.
 - **Phase 0's calibration is not done.** The switch can compute the engine's
-  model; nothing yet compares the two as *brightness*. `lighting_rebuild.md`'s
+  model; nothing yet compares the two as *brightness*. Phase 0's
   own "done when" is one flame, no occluders, the tracer's radiance against the
   frame's own pixel to within its quantisation — which is a statement about
   falloff and colour handling alone, and is what everything else rests on. The

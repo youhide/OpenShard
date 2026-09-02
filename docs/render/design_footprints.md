@@ -205,7 +205,7 @@ rejected and would not have worked anyway — over Britain a stone wall scores
 read 6.2% and reported 76.6% of its refusals as "crooked"; naming the pictures
 turned that into "roof, roof, shingles, roof" — eight of the twelve most-refused
 graphics, 2,825 placements. A sloped plane's base edge is not two 45° runs and
-never will be. `docs/render/design_model.md`'s phase 6i is the open question about
+never will be. [`plans/render/lighting/PLAN.md`](../../plans/render/lighting/PLAN.md)'s phase 6i is the open question about
 those and it is untouched here.
 
 *What it still refuses*, named because a share hides a tail: `Crooked` 356 —
@@ -324,8 +324,8 @@ Two of those groups read very differently and the split is the finding:
 **And a number that is not this plan's but was found by its instrument.** The
 whole-tile class discards **32.69%** of its own art today, and the roofs inside
 it 44–53% (`0x05A2` "slate roof", 48×76 pixels of picture over a box three `z`
-units tall). That is `docs/render/design_model.md`'s D1 — the height nobody
-measures — showing up in pixels, and it dwarfs everything this plan moves.
+units tall). That is [`evidence/2026-08-11-lighting-backlog-findings.md`](evidence/2026-08-11-lighting-backlog-findings.md)'s "the height nobody
+measures" — showing up in pixels, and it dwarfs everything this plan moves.
 
 **S6 — the residual, and the class stops taking pictures that are not boxes.**
 ✅ 2026-08-10, out of S4's own finding and a person's own picture. D8 above is
@@ -404,7 +404,7 @@ above already carries.
   asking for. `0x059A` reads 44.1% of its art outside the box its base states
   and `0x05C7` 47.2%, so both are refused as pictures that are not boxes rather
   than as roofs. The `ROOF`-versus-`BACKGROUND` question `boxes_of` raises is
-  untouched and still belongs to `docs/render/design_model.md`'s phase 6i.
+  untouched and still belongs to [`plans/render/lighting/PLAN.md`](../../plans/render/lighting/PLAN.md)'s phase 6i.
   Superseded text follows for the reasoning: **A roof piece is given a footprint
   and nothing stops it.** `0x059A` "slate
   roof" measures `x (0,3) y (0,3)` and `0x05C7` "wooden shingles" `x (0,2) y
@@ -415,7 +415,7 @@ above already carries.
   `facing_of` refused. A sloped slab's base edge is two 45° runs like anything
   else's, so the measurement cannot tell itself apart from a box's — the gate
   has to be the client's own `ROOF` bit, at one of the two ends, and which end
-  is the decision. `docs/render/design_model.md`'s phase 6i is the same class's
+  is the decision. [`plans/render/lighting/PLAN.md`](../../plans/render/lighting/PLAN.md)'s phase 6i is the same class's
   other open question. **The sharpest of the three findings below**: the other
   two cost pixels, this one moves shadows on pieces the plan says are not boxes.
 - ✅ **A tabletop is drawn wider than the base that was measured, and the shader
