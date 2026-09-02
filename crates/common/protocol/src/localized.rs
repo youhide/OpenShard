@@ -360,6 +360,18 @@ pub const SERVER_MESSAGES: &[Message] = &[
         fallback: "You successfully render the trap harmless.",
     },
     Message {
+        id:       ClilocId(502434),
+        fallback: "What should I use these scissors on?",
+    },
+    Message {
+        id:       ClilocId(502437),
+        fallback: "Items you wish to cut must be in your backpack",
+    },
+    Message {
+        id:       ClilocId(502440),
+        fallback: "Scissors can not be used on that to produce anything.",
+    },
+    Message {
         id:       ClilocId(502443),
         fallback: "You fail your attempt at contacting the netherworld.",
     },

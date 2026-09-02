@@ -124,6 +124,9 @@ impl World {
             openshard_state::TargetPurpose::Carve { tool } => {
                 items::carve(&mut self.state, actor, tool, response.object);
             }
+            openshard_state::TargetPurpose::Cut { tool } => {
+                items::cut(&mut self.state, actor, tool, response.object);
+            }
             openshard_state::TargetPurpose::GuildInvite => {
                 // Re-checked here: the cursor outlives the click that raised it,
                 // and a leader who disbanded or was deposed while it was up

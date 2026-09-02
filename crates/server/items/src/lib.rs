@@ -130,6 +130,7 @@ mod capacity;
 mod carve;
 mod consume;
 mod containers;
+mod cut;
 mod decay;
 mod defaults;
 mod doors;
@@ -148,6 +149,7 @@ pub use capacity::*;
 pub use carve::*;
 pub use consume::*;
 pub use containers::*;
+pub use cut::*;
 pub use decay::*;
 pub use defaults::{
     apply_core_defaults,

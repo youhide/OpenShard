@@ -5,6 +5,7 @@
 //! corpse. The corpse retains a `carved` bit so taking its contents cannot make
 //! the same body yield resources again.
 
+use openshard_protocol::item_kind::MaterialId;
 use openshard_protocol::target::{
     TargetCursor,
     TargetKind,
@@ -15,6 +16,7 @@ use openshard_state::components::{
 };
 
 use super::*;
+use crate::cut::HIDES_KIND;
 
 /// A dagger, butcher knife, cleaver, or skinning knife may carve a carcass.
 #[must_use]
@@ -26,10 +28,13 @@ pub const fn is_carving_tool(graphic: Graphic) -> bool {
 const RAW_RIBS: Graphic = Graphic(0x09F1);
 /// The uncooked bird produced by a bird or chicken.
 const RAW_BIRD: Graphic = Graphic(0x09B9);
-/// The pile of hides a tanner turns into leather.
-const HIDES: Graphic = Graphic(0x1078);
 /// A bird's feathers.
 const FEATHERS: Graphic = Graphic(0x1BD1);
+
+/// Regular leather — what all but a handful of bodies are worth.
+const REGULAR_LEATHER: MaterialId = MaterialId(40);
+/// Spined leather: ServUO's `HideType.Spined`.
+const SPINED_LEATHER: MaterialId = MaterialId(41);
 
 /// What one animal body yields when carved. These are intentionally keyed by
 /// body graphic, rather than creature name: a renamed cow is still a cow, and a
@@ -38,6 +43,11 @@ const FEATHERS: Graphic = Graphic(0x1BD1);
 struct Yield {
     ribs:     u16,
     hides:    u16,
+    /// Which grade the hides are — ServUO's `BaseCreature.HideType`, and the
+    /// only thing that makes the tailor's upper three material grades reachable
+    /// at all. A separate axis from [`hides`](Self::hides): how many a body
+    /// gives and how good they are are two different facts about it.
+    hide:     MaterialId,
     feathers: u16,
     bird:     bool,
 }
@@ -66,9 +76,28 @@ const fn yield_of(body: Graphic) -> Option<Yield> {
     Some(Yield {
         ribs,
         hides,
+        hide: hide_grade_of(body),
         feathers,
         bird,
     })
+}
+
+/// The grade of hide a body wears — ServUO's `BaseCreature.HideType`, which
+/// defaults to `Regular` and is overridden on the individual creature.
+///
+/// Only the exceptions are listed, and only for bodies [`yield_of`] already
+/// carves. **Keyed by body, so a body two creatures share cannot be split**:
+/// ServUO's hell cat is `Spined` and its ordinary cat is not, and both are
+/// `0xC9` — so `0xC9` stays regular rather than paying a housecat in monster
+/// leather. Horned and barbed have no source on this shard yet: every ServUO
+/// creature that wears them is a dragon, drake, wyrm or serpent, and none of
+/// those bodies is carvable here.
+const fn hide_grade_of(body: Graphic) -> MaterialId {
+    match body.0 {
+        0x0017 => SPINED_LEATHER, // dire wolf; the grey and timber wolves are regular
+        0x00CA => SPINED_LEATHER, // alligator
+        _ => REGULAR_LEATHER,
+    }
 }
 
 /// A double-clicked blade raises the object cursor used to select a carcass.
@@ -147,7 +176,18 @@ pub fn carve(state: &mut WorldState, carver: EntityId, tool: EntityId, target: O
         complete &= give(state, corpse_serial, RAW_RIBS, Hue(0), u32::from(yielded.ribs)).is_complete();
     }
     if yielded.hides != 0 {
-        complete &= give(state, corpse_serial, HIDES, Hue(0), u32::from(yielded.hides)).is_complete();
+        // Typed rather than drawn: the grade is the point, and a hue alone would
+        // leave it to whoever reads the pile next to guess the family it belongs
+        // to. `give_kind` derives the art from the registry.
+        complete &= give_kind(
+            state,
+            corpse_serial,
+            HIDES_KIND,
+            Some(yielded.hide),
+            u32::from(yielded.hides),
+        )
+        .expect("every hide grade is a registered leather material")
+        .is_complete();
     }
     if yielded.feathers != 0 {
         complete &= give(
@@ -183,6 +223,16 @@ mod tests {
     fn the_dagger_is_a_carving_tool() {
         assert!(is_carving_tool(Graphic(0x0F52)));
         assert!(!is_carving_tool(Graphic(0x0F5C)));
+    }
+
+    #[test]
+    fn the_bodies_servuo_gives_a_better_hide_keep_it() {
+        assert_eq!(hide_grade_of(Graphic(0x00CA)), SPINED_LEATHER, "alligator");
+        assert_eq!(hide_grade_of(Graphic(0x0017)), SPINED_LEATHER, "dire wolf");
+        assert_eq!(hide_grade_of(Graphic(0x0019)), REGULAR_LEATHER, "grey wolf");
+        // The hell cat is `Spined` upstream and shares this body with the
+        // housecat, so the table cannot tell them apart and does not try.
+        assert_eq!(hide_grade_of(Graphic(0x00C9)), REGULAR_LEATHER, "cat");
     }
 
     #[test]

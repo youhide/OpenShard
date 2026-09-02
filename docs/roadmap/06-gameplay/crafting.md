@@ -107,8 +107,19 @@
     UI). The four remaining tables — Inscription, Glassblowing, Masonry and
     Cartography — are data the generator can emit when
     they are wanted; Inscription waits on the writable book it is already tied
-    to. And two material chains stay unbuilt rather than implied: **hides →
-    leather** (scissors on a hide) and **cotton → thread → cloth** (a spinning
-    wheel and a loom), both of which are addon interactions in ServUO and not
-    crafts at all — until they exist a tailor buys cloth and leather from the
-    vendors that already stock them.
+    to. One material chain stays unbuilt rather than implied: **cotton → thread
+    → cloth**, a spinning wheel and a loom, which are addon interactions in
+    ServUO and not crafts at all — until it exists a tailor buys cloth.
+  - **Hides become leather under scissors, and keep their grade.** The chain the
+    butcher's end was missing: `carve` paid a player in hides and 56 tailoring
+    rows ate leather that nothing on the shard produced, so more than half the
+    trade was unreachable. ServUO's `Hides.Scissor` — the whole pile, one
+    leather per hide — is `items/src/cut.rs`, an item action rather than a craft
+    (no skill, no roll, no workshop, and no wear, since ServUO charges a use for
+    it only on Siege). Hides are a registered kind now (`0x1078`, the `leather`
+    material family) so the grade is durable rather than a hue, and `carve`
+    stamps ServUO's `HideType`: the alligator and the dire wolf give spined. The
+    table is keyed by body and so cannot split two creatures that share one —
+    the hell cat and the housecat are both `0xC9`, and that body stays regular.
+    Horned and barbed have no carvable source yet; every creature that wears
+    them upstream is a dragon or a serpent.

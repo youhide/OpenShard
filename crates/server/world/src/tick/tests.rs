@@ -1845,6 +1845,178 @@ fn a_dagger_carves_an_animal_corpse_once() {
 }
 
 #[test]
+fn scissors_cut_a_pile_of_hides_into_leather_of_the_same_grade() {
+    // The other end of carving, and the step without which Tailoring cannot be
+    // reached from butchering: fifty-six tailoring rows eat leather and nothing
+    // else in the engine made any. Two packets, like carving — use the scissors,
+    // then point at the pile — so both halves belong in one test.
+    //
+    // Cut *spined* hides on purpose: a cut that dropped the grade would still
+    // pass with regular ones, and dropping it is the failure that matters (the
+    // whole reason a hide carries a material is that the grade is worth money).
+    use openshard_protocol::item_kind::{
+        ItemKindId,
+        MaterialId,
+    };
+    use openshard_state::components::{
+        ItemKind,
+        Material,
+    };
+
+    const SPINED: MaterialId = MaterialId(41);
+
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+    let Position(at) = *world.registry().get::<Position>(player).unwrap();
+    let owner = world.registry().serial_of(player).unwrap();
+    let pack = openshard_items::backpack_of(&world.state, owner).unwrap();
+
+    let scissors =
+        openshard_items::spawn_item(&mut world.state, Graphic(0x0F9F), Hue(0), 1, false, at, Facet(0))
+            .expect("a pair of scissors");
+    let scissors_serial = world.registry().serial_of(scissors).unwrap();
+    let hides = openshard_items::give_kind(
+        &mut world.state,
+        pack,
+        openshard_items::HIDES_KIND,
+        Some(SPINED),
+        5,
+    )
+    .expect("spined hides")
+    .last
+    .expect("the pile was created");
+    let hides_serial = world.registry().serial_of(hides).unwrap();
+
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(scissors_serial.raw())),
+    });
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::target::TargetResponse {
+            cursor_id: openshard_protocol::wire::CursorId(0),
+            object:    Some(hides_serial),
+            location:  Point::new(0, 0, 0),
+            graphic:   None,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    let in_pack: Vec<(ItemKindId, Option<MaterialId>, u16)> = world
+        .registry()
+        .query::<Contained>()
+        .filter(|(_, contained)| contained.container == pack)
+        .filter_map(|(item, _)| {
+            world.registry().get::<ItemKind>(item).map(|kind| {
+                (
+                    kind.0,
+                    world.registry().get::<Material>(item).map(|material| material.0),
+                    world.registry().get::<Amount>(item).map_or(1, |amount| amount.0),
+                )
+            })
+        })
+        .collect();
+    assert!(
+        in_pack.contains(&(openshard_items::LEATHER_KIND, Some(SPINED), 5)),
+        "five spined hides cut into five spined leather: {in_pack:?}"
+    );
+    assert!(
+        !in_pack
+            .iter()
+            .any(|(kind, _, _)| *kind == openshard_items::HIDES_KIND),
+        "the hides were spent: {in_pack:?}"
+    );
+}
+
+#[test]
+fn scissors_refuse_a_pile_of_hides_still_lying_in_the_corpse() {
+    // ServUO's `IsChildOf(from.Backpack)`, and the branch a player hits first:
+    // carving leaves the hides in the corpse, so a cut that only asked "is it in
+    // reach" would let a pile be cut out of any container nearby — one somebody
+    // else is looting included.
+    //
+    // The pile is inside a *container* on purpose. On the bare ground the cut
+    // refuses anyway, for a duller reason (there is nowhere to put the leather),
+    // and a test written that way passes with the pack check deleted.
+    use openshard_protocol::item_kind::MaterialId;
+    use openshard_state::components::ItemKind;
+
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+    let Position(at) = *world.registry().get::<Position>(player).unwrap();
+
+    let scissors =
+        openshard_items::spawn_item(&mut world.state, Graphic(0x0F9F), Hue(0), 1, false, at, Facet(0))
+            .expect("a pair of scissors");
+    let scissors_serial = world.registry().serial_of(scissors).unwrap();
+    let corpse = spawn_plain_item_at(&mut world, Point::new(at.x + 1, at.y, at.z), now);
+    let corpse_entity = world.registry().entity_of(corpse).unwrap();
+    world.state.registry.insert(
+        corpse_entity,
+        Container {
+            gump: openshard_state::components::CORPSE_GUMP,
+        },
+    );
+    let hides = openshard_items::give_kind(
+        &mut world.state,
+        corpse,
+        openshard_items::HIDES_KIND,
+        Some(MaterialId(40)),
+        5,
+    )
+    .expect("hides")
+    .last
+    .expect("the pile was created");
+    let hides_serial = world.registry().serial_of(hides).unwrap();
+    // Pinned so the refusal cannot quietly become "that is not hides at all":
+    // the pile must be recognisable, or this test passes through the wrong door.
+    assert_eq!(
+        world.registry().get::<ItemKind>(hides).map(|kind| kind.0),
+        Some(openshard_items::HIDES_KIND)
+    );
+
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(scissors_serial.raw())),
+    });
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::target::TargetResponse {
+            cursor_id: openshard_protocol::wire::CursorId(0),
+            object:    Some(hides_serial),
+            location:  Point::new(0, 0, 0),
+            graphic:   None,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world.registry().entity_of(hides_serial),
+        Some(hides),
+        "the pile in the corpse was not consumed"
+    );
+    assert_eq!(
+        world.registry().get::<Amount>(hides).map(|amount| amount.0),
+        Some(5)
+    );
+    assert!(
+        !world
+            .registry()
+            .query::<ItemKind>()
+            .any(|(_, kind)| kind.0 == openshard_items::LEATHER_KIND),
+        "no leather was made"
+    );
+}
+
+#[test]
 fn double_clicking_a_plain_item_fires_the_use_trigger() {
     // The item-trigger seam (Sphere's @DClick): an item with no engine behaviour
     // — not a door, container, spellbook, mount or mobile — hands its double-click

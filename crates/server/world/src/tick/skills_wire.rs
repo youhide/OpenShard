@@ -190,6 +190,12 @@ impl World {
             _ if items::is_carving_tool(graphic) => {
                 items::use_carving_tool(&mut self.state, player, item);
             }
+            // Scissors turn a carved carcass's hides into the leather fifty-six
+            // tailoring rows eat — the step between butchering and Tailoring, as
+            // smelting is the step between Mining and Blacksmithy.
+            _ if items::is_scissors(graphic) => {
+                items::use_scissors(&mut self.state, player, item);
+            }
             _ if match self.state.registry.get::<ItemKind>(item) {
                 Some(kind) => openshard_state::instrument::instrument_data_for_kind(kind.0).is_some(),
                 None => openshard_state::instrument::instrument_data(graphic).is_some(),

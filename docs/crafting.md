@@ -21,6 +21,7 @@ have to re-read six files to find out.
 | Workshop scan | `crafting/src/environment.rs` | forge/anvil/heat/oven/mill/water, items **and** map statics |
 | Window | `crafting/src/gump.rs` | ServUO's `CraftGump` through `GumpLayout`; context held server-side |
 | Ore → ingots | `crafting/src/smelt.rs` | the one step between Mining and Blacksmithy |
+| Hides → leather | `items/src/cut.rs` | the one step between butchering and Tailoring. In `items` rather than beside `smelt.rs`: it has no skill, no roll and no workshop, so it is `carve`'s shape (the module that makes the hides) and not a craft's |
 | Tool table | `state/src/craft.rs` | graphic → trade skill + uses; in `state` because `items` reads it too |
 | In-flight state | `state::components::Crafting`, `Tool`, `Quality`, `CraftedBy` | components on the crafter / the item |
 | World wiring | `world/src/tick/skills_wire.rs`, `tick.rs` | the double-click dispatch, and `advance_crafts` once per tick |
@@ -155,10 +156,11 @@ before `complete`), but a restart mid-craft ends the craft silently.
 
 ## 6. Review: problems found
 
-Ordered by how much they mattered when found. File references are to the
-working tree at the time. Every item is closed (2026-09-02); the fix is noted
-under each. 9 needed no action, and 8 was closed the low-risk way — verbatim
-upstream values with a comment rather than a quiet edit.
+Ordered by how much they mattered when found, except #11, which came out of a
+later pass and is appended rather than slotted in by weight. File references are
+to the working tree at the time. Every item is closed (2026-09-02); the fix is
+noted under each. 9 needed no action, and 8 was closed the low-risk way —
+verbatim upstream values with a comment rather than a quiet edit.
 
 1. ~~**Most of the Cooking table is unreachable: there is no dough.**~~
    **Fixed.** Hand-wrote the `Dough` row in `cooking.json` (output `0x103D`,
@@ -322,10 +324,66 @@ upstream values with a comment rather than a quiet edit.
     literal `assert_eq!(rows.len(), 492)` beside it became a lower bound: it
     was a data snapshot that every new trade moves without saying anything.
 
+11. ~~**Leather has no source, so fifty-six tailoring rows are unreachable.**~~
+    **Fixed.** #1 again, one trade over, and worse: the dough at least had a
+    recipe that could not resolve its ingredient, whereas leather (`0x1081`) had
+    no producer at all — not a recipe, not a vendor, not a loot table — while 56
+    of the tailoring rows eat it. The other half of the same gap was `carve`
+    paying a butcher in hides (`0x1078`) that nothing in the engine consumed.
+    ServUO's step between the two is scissors on the pile — `Hides.Scissor`,
+    which is `ScissorHelper(from, new Leather(), 1)`: the whole pile, one leather
+    per hide, keeping the hue — and it is now `items/src/cut.rs`, reached through
+    the same double-click seam smelting is, with `TargetPurpose::Cut` carrying
+    the scissors to the second packet. No skill, no roll, no workshop and no
+    tool wear: ServUO charges a use only on a Siege shard, so an ordinary pair
+    never wears out and this does not invent a durability it does not have.
+    Three things were load-bearing:
+    - **The grade has to survive the cut**, which is what made hides a *typed*
+      kind rather than an art plus a hue: `items.json` id 114, `0x1078` with
+      `0x1079` as its flipped alias, in the same `leather` material family the
+      tailor's axis already uses. Cutting now carries `MaterialId` straight
+      across, so barbed hides become barbed leather instead of the axis's three
+      upper grades quietly collapsing into the cheapest one. A pile made before
+      the registry knew about hides is still read back from its art, and only
+      *within* the leather family — a bare global hue lookup answers plain iron
+      and plain wood to the same `Hue::NONE`.
+    - **The grades needed a source**, or the fix would have left the axis's
+      upper three orphaned the way `ElvenOven` was in #4. `carve` stamps
+      ServUO's `BaseCreature.HideType` now: spined for the alligator (`0xCA`)
+      and the dire wolf (`0x0017`), regular for everything else it carves. The
+      table is keyed by body, so a body two creatures share cannot be split —
+      ServUO's hell cat is spined and its housecat is not, and both are `0xC9`,
+      so `0xC9` stays regular rather than paying a housecat in monster leather.
+      **Horned and barbed still have no source**, and that is content rather
+      than a defect: every ServUO creature wearing them is a dragon, drake, wyrm
+      or serpent, and none of those bodies is carvable here yet.
+    - **Which pack, and where the leather lands.** ServUO's
+      `IsChildOf(from.Backpack)` is recursive, so the check is
+      `craft_stock_root_of_item` against the cutter's own pack: hides in a bag
+      in the pack are in the pack, and hides still lying in the corpse — where
+      carving leaves them — are not (cliloc 502437). The leather is given to the
+      pile's *own* container, not to the pack root, which is what
+      `ScissorHelper` does with the old item's parent.
+
+    Coverage: `scissors_cut_a_pile_of_hides_into_leather_of_the_same_grade`
+    (world tick, both packets, and deliberately cutting *spined* hides — with
+    regular ones a cut that dropped the grade would still pass; verified to fail
+    when the material is hard-coded),
+    `scissors_refuse_a_pile_of_hides_still_lying_in_the_corpse`
+    (verified to fail without the pack check — and the pile
+    is put in a **container** on purpose, because on the bare ground the cut
+    refuses anyway, for the duller reason that there is nowhere to put the
+    leather, so a test written that way passes with the check deleted),
+    `the_bodies_servuo_gives_a_better_hide_keep_it`,
+    `every_hide_grade_is_a_leather_grade` (the two kinds must accept the same
+    material set, or `cut` either panics or downgrades), and
+    `both_hide_arts_read_back_as_the_same_kind`.
+
 ## 7. Deferred, by the roadmap's own list
 
 Repair, Enhance, AlterItem, Resmelt, recipe scrolls, make-number / make-max,
 the last-ten list, the four remaining `Def*` tables (Inscription, Glassblowing,
-Masonry, Cartography), and the two material chains (hides → leather, cotton →
-cloth). Hunger and eating effects are outside this slice: food is an ordinary
-item.
+Masonry, Cartography), and **one** of the two material chains: cotton → thread →
+cloth, which wants a spinning wheel and a loom and is an addon interaction in
+ServUO rather than a craft. Hides → leather has landed — see #11. Hunger and
+eating effects are outside this slice: food is an ordinary item.

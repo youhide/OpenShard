@@ -1687,6 +1687,19 @@ pub enum TargetPurpose {
         /// The dagger, knife, or cleaver that raised the cursor.
         tool: EntityId,
     },
+    /// Scissors waiting for the thing to cut — ServUO's `Scissors.OnDoubleClick`
+    /// and its `IScissorable` target.
+    ///
+    /// A separate purpose from [`Carve`](Self::Carve) rather than a second blade
+    /// in it: the two answer different clicks (a carcass on the ground, a pile in
+    /// the pack) and produce different things, and folding them together would
+    /// let a dagger cut hides and scissors carve a cow.
+    Cut {
+        /// The scissors that raised the cursor. Re-checked when the click lands,
+        /// for the same reason every other tool here is: a pair dropped or sold
+        /// while the cursor was up cuts nothing.
+        tool: EntityId,
+    },
     /// A guild leader's cursor, waiting for whoever is to be asked to join.
     ///
     /// Carries nothing: the guild is the one the clicker leads, and it is read
