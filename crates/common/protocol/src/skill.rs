@@ -71,7 +71,7 @@ impl SkillLock {
 /// components and `feedback.rs`'s animation numbers stay plain. `value`,
 /// `base` and `cap` are quantities — trained, computed and clamped in
 /// `openshard_skills` and `[gameplay]` config, far above `protocol` — exactly
-/// `mobile::Vitals`'s argument. See `docs/protocol_newtypes.md`.
+/// `mobile::Vitals`'s argument. See `docs/protocol/design_wire_types.md`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SkillEntry {
     /// The skill id, zero-based (Alchemy is 0), as the client numbers them.

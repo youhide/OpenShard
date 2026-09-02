@@ -51,7 +51,7 @@
 //! Every packet is a variant of [`client_packet::ClientPacket`] (client → server)
 //! or [`server_packet::ServerPacket`] (server → client), each implementing
 //! [`packet::DecodePacket`] or [`packet::EncodePacket`] on a named payload type.
-//! See `docs/protocol_rewrite.md` for the design decisions and the handful of
+//! See `docs/protocol/design_packet_enums.md` for the design decisions and the handful of
 //! packets that deliberately stay outside that shape.
 
 pub mod access;

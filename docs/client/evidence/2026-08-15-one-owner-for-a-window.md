@@ -5,7 +5,7 @@ Living plan for a client-side refactor. It starts from a bug fixed on
 itself a second or so later — and the plan is what closing that bug the
 honest way would take, versus the patch that actually shipped.
 
-As with [`protocol_newtypes.md`](../../protocol_newtypes.md): when reality
+As with [`protocol_newtypes.md`](../../protocol/design_wire_types.md): when reality
 contradicts a decision here, change this file in the same commit that changes
 the code.
 

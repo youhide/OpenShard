@@ -1,179 +1,60 @@
-# Facet newtypes: carrying a wrap that already exists
+# The facet sweep: carrying a wrap that already exists
 
-Living plan for a multi-session sweep of the bare `facet: u8` left across
-`crates/server/*` and a few of `crates/common/*`, opened by
-a newtype hunt across `server`, `common` and `render` (2026-08-11; its handoff
-is kept outside this repository) as the single largest finding, out of scope for that pass on
-purpose. It is a sibling to [`protocol_newtypes.md`](protocol_newtypes.md) —
-same shape, same "stages plus a machine-checked gate" discipline — but a
-narrower problem: `protocol::world::Facet(pub u8)` already exists, already
-carries the right derives, and is already the type at both ends of most call
-chains. What is missing is the middle.
+Record of the multi-session sweep of the bare `facet: u8` left across
+`crates/server/*` and a few of `crates/common/*`, opened 2026-08-11 by a newtype
+hunt across `server`, `common` and `render` (its handoff is kept outside this
+repository) as that pass's single largest finding, out of scope for it on
+purpose. The decisions it settled — F1–F6 and the gate — are
+[`design_facet.md`](../design_facet.md); below is the survey it started from,
+the pilot, and the amendment each crate forced.
 
-As with its predecessor: when reality contradicts a decision here, change this
-file in the same commit that changes the code.
+## The survey
 
-## Why
-
-[`roadmap/01-protocol.md`](roadmap/01-protocol.md)'s "Two types for one facet
-byte" entry (closed 2026-08-xx,
-before this hunt) already unified two competing types into one
-`protocol::world::Facet` and converted every *state-owning* call — `state.
-facet_of`, `state.facet_state`, `WorldState::move_to`, the `facets:
-BTreeMap<Facet, FacetState>` table itself — to the wrapped type. That closed
-fix did not, and was not asked to, touch the *functions in between*: a caller
-holds a `Facet` from `state.facet_of(entity)`, unwraps it to `.0` to satisfy a
-neighbour's `fn foo(facet: u8, ...)`, and that neighbour immediately rewraps
-it (`Facet(facet)`) to call back into `state`. The type is never wrong, never
-absent at either end — it is thrown away and rebuilt at every function
-boundary in between, which is exactly the shape
-[N2's `Serial` finding](protocol_newtypes.md#amendments-forced-by-n2-mobilers)
+[The protocol phase record](2026-08-24-the-protocol-phase.md)'s "Two types for
+one facet byte" entry (closed before this hunt) had already unified two
+competing types into one `protocol::world::Facet` and converted every
+*state-owning* call — `state.facet_of`, `state.facet_state`,
+`WorldState::move_to`, the `facets: BTreeMap<Facet, FacetState>` table itself —
+to the wrapped type. That closed fix did not, and was not asked to, touch the
+*functions in between*: a caller holds a `Facet` from `state.facet_of(entity)`,
+unwraps it to `.0` to satisfy a neighbour's `fn foo(facet: u8, ...)`, and that
+neighbour immediately rewraps it (`Facet(facet)`) to call back into `state`. The
+type is never wrong, never absent at either end — it is thrown away and rebuilt
+at every function boundary in between, which is exactly the shape
+[N2's `Serial` finding](2026-08-31-the-newtype-sweep.md#amendments-forced-by-n2-mobilers)
 described: "the call sites already held a `Serial`... and were unwrapping them
 to satisfy a `u32`."
 
 By grep, `facet: u8` (as a function parameter, struct field, or enum variant
-field) appears in:
-
-The survey below is the one taken when the plan was written; the **status**
-column is kept current as stages land, because a count that only ever
-described the starting position is a count nobody can act on.
+field) appeared in the crates below. The survey is the one taken when the sweep
+was scoped; the **status** column was kept current as stages landed, because a
+count that only ever described the starting position is a count nobody can act
+on.
 
 | crate | files | occurrences | status |
 |---|---|---|---|
 | `world` | `tick.rs`, `tick/{command,gates,decor,regions,travel,fields,death,tests}.rs`, `gm.rs`, `spawner.rs`, `events.rs` | ~38 | done |
 | `scripting` | `lib.rs`, `engine/ops.rs` | ~16 | done — `op_clear_regions`'s one parameter allowlisted, F4 |
-| `persistence` | `record.rs`, `sqlite.rs`, `pg.rs` | ~10 | **not in scope — see Decisions** |
+| `persistence` | `record.rs`, `sqlite.rs`, `pg.rs` | ~10 | **not in scope — F2** |
 | `ai` | `lib.rs` | 7 | done (pilot) |
 | `magic` | `travel.rs` | 5 | done |
 | `npc` | `guards.rs`, `live.rs`, `spawn.rs` | 5 | done |
 | `items` | `spawn.rs` | 4 | done |
 | `state` | `harvest.rs` | 2 | done — but the crate's real stage was four `components.rs` fields the survey missed, also done |
 | `skills` | `handlers/harvest.rs` | 1 | done |
-| `uofiles` | `map.rs` | 1 | **not in scope — see Decisions** |
+| `uofiles` | `map.rs` | 1 | **not in scope — F2** |
 | examples (`render`, `uofiles`) | | 2 | follow their crate's fix, allowlisted |
 
-Every occurrence outside the two carve-outs below is the same shape checked
-by hand while scoping this plan: `ai::lib.rs`'s `foe_in_sight`, `probe`,
-`chase_step`, `flee_step`, `kite_step` and `step_toward` all take `facet: u8`
-while every one of their callers holds a `Facet` and writes `facet.0` to call
-in; `npc::guards.rs`'s `call_guards`/`guarded_here`/`nearest_candidate` and
+Every occurrence outside the two carve-outs was the same shape, checked by hand
+while scoping: `ai::lib.rs`'s `foe_in_sight`, `probe`, `chase_step`,
+`flee_step`, `kite_step` and `step_toward` all took `facet: u8` while every one
+of their callers held a `Facet` and wrote `facet.0` to call in;
+`npc::guards.rs`'s `call_guards`/`guarded_here`/`nearest_candidate` and
 `npc::spawn.rs`, `items::spawn.rs`, `magic::travel.rs`'s `may_travel`/
 `describe`, `world::gm.rs`'s admin commands and every `world::tick/*.rs` file
-repeat it. Nowhere does a bare `facet: u8` in this set hold a value that
-*isn't* a `Facet` a moment before or after — the wrap is never the question;
-carrying it is.
-
-## Decisions
-
-Settled. Do not re-open mid-sweep.
-
-**F1. This is not `protocol_newtypes.md`'s problem, so it does not get that
-plan's machinery.** `Facet` has no domain to validate — every one of the 256
-values a `u8` can hold is a legal facet number in principle (an unloaded one
-is refused at the point that matters, `state.facets.contains_key`, which is a
-*shard-config* fact, not a wire-format one). There is no `RawFacet`, no
-`interpret`, no `validate`, no class A/B/C/D split. A field either already
-carries `Facet` or gets changed to, full stop. This is why the sweep is worth
-a plan and not a `sed` run despite being simpler than the protocol one: it
-touches ~70 call sites across eight crates, and a plan is what keeps an agent
-from "fixing" a boundary that is supposed to stay bare (F2).
-
-**F2. Two boundaries stay bare, on purpose, and are not part of this sweep's
-count.**
-
-- **`persistence::{record, sqlite, pg}.rs` is the disk/SQL boundary.**
-  `tick/regions.rs`'s own comment already says it — `// .0 at the record
-  seam: a saved facet is a SQL column.` A `u8` is what SQLite and Postgres
-  columns hold; `record.rs`'s structs are what serde reads a save file into.
-  Converting there is not a bug, it is the seam, exactly
-  [N3 amendment 7](protocol_newtypes.md#amendments-forced-by-n3-speechrs)'s
-  `localized_message` argument and the `Contained.grid` exception in
-  [N4 amendment 4](protocol_newtypes.md#amendments-forced-by-n4-containersrs).
-  Left as-is; not on this sweep's task list and not on its coverage count
-  either — it was never bare by omission.
-- **`uofiles::map::{read_facet, candidate_shapes, facet_size,
-  largest_facet_within}`'s `facet: Option<u8>` indexes a fixed-size array
-  (`FACET_SHAPES.get(facet as usize)`) and formats client filenames
-  (`format!("map{facet}LegacyMUL.uop")`).** Both uses want the raw number,
-  not the domain type — an array index and a path component are exactly
-  [N1 amendment 2](protocol_newtypes.md#amendments-forced-by-n1-the-rest-of-worldrs)'s
-  `Point` case: the *number itself* is what is being used, not "a value
-  believed to be a legal facet." `uofiles` is below `protocol` in the
-  dependency graph for everything else it parses (`Graphic`, `Hue`), but
-  `Facet` is the one type this file would gain nothing from taking a
-  dependency on. Stays bare; documented here so a future scan does not
-  rediscover it as an open question.
-
-**F3. Order: the crate that discards it first, to the crate with the most
-call sites.** `ai` (pilot, below) is small, self-contained, and every one of
-its callers already holds a `Facet` — proving the pattern costs one file. From
-there: `npc`, `items`, `magic` (each under ten occurrences, each the same
-shape as the pilot); `state::harvest` and `skills::handlers::harvest`
-together, since the harvest handler is `state::harvest`'s only caller; `world`
-last, because it is both the largest (`tick.rs` and eight `tick/*.rs` files)
-and the one place `Command`'s enum variants live — the type has to exist on
-every upstream caller (`ai`, `npc`, `items`, `magic`) before `Command`'s own
-fields can stop needing a `.0` to build. `scripting` closes the sweep, not
-because it is hardest technically but because its `facet: u8` fields are a
-**third kind of boundary**, not yet decided (F4).
-
-**F4. Answered — corrected premise first.** This section originally asked how
-"this crate's Rhai integration resolves native function parameter types."
-There is no Rhai integration: `scripting` embeds `deno_core`/V8 (a
-TypeScript/JS runtime, see the crate's own `Cargo.toml` description), and its
-native-function boundary is the `#[op2]` proc macro, not `rhai::register_fn`.
-The question the wrong name was pointing at still had a real answer, once
-asked correctly.
-
-`engine/ops.rs`'s `#[derive(serde::Deserialize)] *Spec` structs (`SpawnSpec`,
-`ContainerSpec`, region/door specs) and `lib.rs`'s `Event`/`Command` enum
-fields are a serde boundary exactly like F2's persistence carve-out — but
-plausibly closable the same way `ClilocId`/`SoundId` closed theirs
-(`protocol_newtypes.md`'s N3 backlog): give `Facet` `#[serde(transparent)]`
-and these fields hold `pub facet: Facet` directly, no per-call
-`Facet(spec.facet)` conversion.
-
-The one site that is *not* this shape: `op_clear_regions(state: &mut OpState,
-facet: u8)` (`ops.rs:866`) binds `facet` as a **direct `#[op2(fast)]`
-argument**. `#[op2]`'s fast path only accepts primitives it knows natively
-(numeric types, `bool`, `#[string] String`, byte buffers) — it has no
-mechanism to bind a single-field tuple struct positionally, the same
-constraint Rhai's fast path would have imposed. The crate's own precedent
-settles this rather than leaving it open: `Serial`, the crate's most-used
-domain identifier, is `pub type Serial = u32` here (`lib.rs:42`) — a plain
-alias, not a newtype, chosen specifically so it crosses the op2/JS boundary
-bare. No newtype (`Graphic`, `Hue`, `ClilocId`, `SoundId`) is ever bound as a
-direct op2 parameter; all of them appear only as primitive fields inside
-`#[serde]` spec structs. `op_clear_regions` stays `facet: u8`, converted with
-`Facet(facet)`/`.0` at its call site — the same exception `Serial` already is,
-not a gap this sweep left open.
-
-**F5. No compatibility shims.** Same as `protocol_newtypes.md`'s N11: a stage
-wraps a group of signatures **and** updates every call site in the same
-commit. A `.0` left in place "to keep the diff small" is the exact
-invisibility this sweep exists to remove.
-
-**F6. Coverage is counted, not assumed.** Each stage's commit message records
-the file's `facet: u8`/`facet:u8` occurrence count before and after, the same
-discipline as N10. The sweep's own gate (below) is added once the crate order
-in F3 is far enough along that most of the workspace is clean — early stages
-would spend more effort maintaining a mostly-red gate than the gate is worth.
-
-## The gate
-
-A text scan in the same spirit as
-[`bare_integer_fields.rs`](../crates/common/protocol/tests/bare_integer_fields.rs),
-but simpler: `Facet` is one name, not a class hierarchy, so the check is "does
-`facet: u8` (or `facet:u8`) appear in this fixed list of files" rather than a
-directory walk with a type-shape matcher. It lives in
-`crates/common/protocol/tests/facet_bare_fields.rs` — `protocol` is where
-`Facet` is defined, and the test reaches out to the other crates' source by a
-workspace-relative path (`CARGO_MANIFEST_DIR/../../..`), the same way this
-plan's own survey did, because the thing being asserted is a property of the
-workspace, not of `protocol`'s own `src/`. The two F2 carve-outs
-(`persistence::{record,sqlite,pg}.rs`, `uofiles::map.rs`) are the allowlist,
-each with the reason from F2. Added at the end of F3's order, not the start —
-see F6.
+repeated it. Nowhere did a bare `facet: u8` in this set hold a value that
+*wasn't* a `Facet` a moment before or after — the wrap was never the question;
+carrying it was.
 
 ## The pilot: `ai::lib.rs`
 
@@ -203,7 +84,7 @@ picks up the type too, since it exists for the same reason.
    facet, and the two were never confused. This sweep is about the *facet*
    parameter only; a heading/direction sweep is a separate, already-recorded
    backlog item** ([the server/common/render newtype
-   hunt](client/evidence/2026-08-25-server-and-render-type-findings.md), entry
+   hunt](../../client/evidence/2026-08-25-server-and-render-type-findings.md), entry
    #2, `Direction` unwrapped through `ai`'s pathing core). Touching it
    here would have widened the pilot's blast radius for no reason connected
    to `Facet`.

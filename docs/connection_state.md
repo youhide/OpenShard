@@ -7,7 +7,7 @@ it does the one thing that design left unresolved: it says **where the
 connection's state lives**, rather than which of its questions each existing
 table answers.
 
-As with [`protocol_newtypes.md`](protocol_newtypes.md): when reality contradicts
+As with [`design_wire_types.md`](protocol/design_wire_types.md): when reality contradicts
 a decision here, change this file in the same commit that changes the code.
 
 ## Why

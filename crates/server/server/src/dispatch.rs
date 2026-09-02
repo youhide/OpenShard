@@ -202,7 +202,8 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
             match request {
                 // interpret() is total, so it may run right here rather than waiting
                 // for a tick system to have the domain in hand — see
-                // `docs/protocol_newtypes.md`'s N4 containers amendment 2. A wire 0
+                // `docs/protocol/evidence/2026-08-31-the-newtype-sweep.md`'s N4
+                // containers amendment 2. A wire 0
                 // is never a legitimate spell id and queues nothing.
                 ExtendedRequest::Cast(cast) => {
                     cast.spell.interpret().map(|spell| {

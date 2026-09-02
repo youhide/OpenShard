@@ -1,4 +1,4 @@
-//! `docs/facet_newtype.md`'s gate: every remaining bare `facet: u8` in the
+//! `docs/protocol/design_facet.md`'s gate: every remaining bare `facet: u8` in the
 //! workspace is on an explicit, reasoned allowlist, not left behind by
 //! omission. Added at the end of the sweep's `world`/`scripting` stage, per
 //! that plan's F6 — early stages would have spent more effort maintaining a
@@ -20,7 +20,7 @@ use std::path::{
 };
 
 /// Every file with a bare `facet: u8` left, how many times, and why —
-/// `docs/facet_newtype.md`'s F2 and F4 carve-outs, plus the two examples that
+/// `docs/protocol/design_facet.md`'s F2 and F4 carve-outs, plus the two examples that
 /// "follow their crate's fix" (F3's survey table). A file not on this list
 /// with a hit is a violation; a listed count that no longer matches is stale
 /// and the entry should have moved or been deleted with the fix that changed
@@ -180,7 +180,7 @@ fn every_bare_facet_field_is_on_the_allowlist() {
 
     assert_eq!(
         found, allowed,
-        "docs/facet_newtype.md's gate disagrees with what's actually in the workspace.\n\
+        "docs/protocol/design_facet.md's gate disagrees with what's actually in the workspace.\n\
          \n\
          Found (file, count): {found:#?}\n\
          \n\

@@ -529,7 +529,7 @@ impl DecodePacket for OpenPaperdoll {
 /// The two components stay bare integers by decision, exactly as
 /// `world::Point`'s do: they are genuinely numbers, added to and clamped on
 /// every regeneration tick and every blow landed, and their rules live in the
-/// gameplay crates far above `protocol`. See `docs/protocol_newtypes.md` N10.
+/// gameplay crates far above `protocol`. See `docs/protocol/design_wire_types.md` N10.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Vitals {
     /// What there is now.
@@ -1104,7 +1104,7 @@ mod tests {
 
     #[test]
     fn a_fourth_stat_decodes_cleanly_and_is_refused_at_promotion() {
-        // The pair `docs/protocol_newtypes.md` N9 asks for. The packet is
+        // The pair `docs/protocol/design_wire_types.md` N9 asks for. The packet is
         // well-formed — dropping the connection over it would be wrong — and the
         // value is refused where the arrow would have been stored.
         let packet = [0xBF, 0x00, 0x07, 0x00, 0x1A, 0x03, 0x01];

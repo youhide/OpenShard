@@ -6,7 +6,8 @@
 //! independently deciding whether a given `0xBF` was its own: the "three
 //! different 0xBF types (context, casting, mobile) that each re-read the same
 //! envelope and each decide independently whether the packet is theirs"
-//! `docs/protocol_rewrite.md` calls out as the thing worth fixing. This reads
+//! `docs/protocol/evidence/2026-07-29-the-packet-rewrite.md` records as the
+//! thing worth fixing. This reads
 //! the subcommand once and hands the reader — already positioned past it — to
 //! whichever body it names.
 

@@ -212,7 +212,7 @@ pub(super) fn item_name(state: &WorldState, item: EntityId) -> Option<String> {
 /// The wrap from tiledata's *quality* byte to a [`Layer`] happens here:
 /// `openshard-uofiles` reads the client's files and is below `protocol`, so it
 /// hands out the byte and this is where it becomes a layer — see
-/// `docs/protocol_newtypes.md` N4.
+/// `docs/protocol/design_wire_types.md` N4.
 fn tiledata_layer(state: &WorldState, graphic: Graphic) -> Layer {
     Layer(state.tiles().static_tile(graphic.0).layer)
 }

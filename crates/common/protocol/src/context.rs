@@ -49,7 +49,7 @@ impl RawContextMenuIndex {
     /// The entry this names, when the menu that was drawn had `offered` of
     /// them.
     ///
-    /// This is the check `docs/protocol_newtypes.md` N5 calls "is this one I
+    /// This is the check `docs/protocol/design_wire_types.md` N5 calls "is this one I
     /// offered": the tags are the rows numbered from zero, so their count is
     /// the whole domain. A tag past the end is a menu this side never drew —
     /// a stale click on a window whose object has changed, or a crafted

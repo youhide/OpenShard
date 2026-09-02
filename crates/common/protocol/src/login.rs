@@ -297,7 +297,7 @@ impl PercentFull {
 /// It is the case N2 amendment 3 settled for the status bar's numbers: a
 /// quantity, not an id, with no protocol rule about its range and only one
 /// place it is ever written — a struct literal that names it. See the
-/// allowlist in `docs/protocol_newtypes.md`. `percent_full` looked like the
+/// allowlist in `docs/protocol/design_wire_types.md`. `percent_full` looked like the
 /// same case and is not: 100 is a ceiling the *client* imposes, so the rule
 /// lives in [`PercentFull`].
 #[derive(Clone, PartialEq, Eq, Debug)]

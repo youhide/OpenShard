@@ -148,7 +148,7 @@ impl RawGumpId {
     /// The dialog this answers, when it is one of the `offered` — the ids the
     /// asking handler drew.
     ///
-    /// `docs/protocol_newtypes.md` N5's "is this one I offered", and the reason
+    /// `docs/protocol/design_wire_types.md` N5's "is this one I offered", and the reason
     /// the argument is a list: the quest system draws two windows and claims a
     /// reply for either. An `Option` rather than a typed error, on
     /// `RawSerial::validate`'s licence: every handler in the router asks in
@@ -178,7 +178,7 @@ impl ButtonId {
     /// many: at that point the type wants to be an enum with a `Reply(u32)` arm
     /// rather than a newtype with named zeroes, because three names for one
     /// value is a discriminant nobody wrote down. See
-    /// `docs/protocol_newtypes.md` N5.
+    /// `docs/protocol/design_wire_types.md` N5.
     pub const CLOSE_BOX: Self = Self(0);
 
     /// What a [`GumpButton::Page`] button puts in the id field: nothing.
@@ -332,7 +332,7 @@ impl GumpKey {
 
 /// A gump key exactly as a client's `0xB1` echoed it.
 ///
-/// Class D in `docs/protocol_newtypes.md`'s table, and so it has no promotion:
+/// Class D in `docs/protocol/design_wire_types.md`'s table, and so it has no promotion:
 /// nothing reads it. A reply is routed by its [`RawGumpId`] alone, and each
 /// handler then matches against the context it remembers drawing — which is a
 /// stronger check than the echo could be, since the client chose what to echo.
@@ -1000,7 +1000,8 @@ pub struct GumpResponse {
     /// founding fields and gives each roster row its own index — and it resolves
     /// them against the context it remembers drawing, which is the same rule its
     /// buttons follow. The engine types what the engine can check —
-    /// `docs/protocol_newtypes.md`, N5's amendments.
+    /// `docs/protocol/evidence/2026-08-31-the-newtype-sweep.md`, N5's
+    /// amendments.
     pub text_entries: Vec<(u16, String)>,
 }
 

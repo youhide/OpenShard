@@ -1,4 +1,4 @@
-//! N8 — the sweep's last stage: `docs/protocol_newtypes.md`'s N10 says every
+//! N8 — the sweep's last stage: `docs/protocol/design_wire_types.md`'s N10 says every
 //! bare integer field remaining in the crate is either wrapped or on an
 //! explicit, reasoned allowlist, and that the count is asserted, not assumed.
 //! This test is the assertion — "no violations found" from a detector that
@@ -45,7 +45,7 @@ use std::path::Path;
 
 /// Every bare-integer field the sweep leaves in place, and why — `(file,
 /// field, reason)`. This is what the sweep actually enforces; the table in
-/// `docs/protocol_newtypes.md`'s N10 section is the narrative for the same
+/// `docs/protocol/design_wire_types.md`'s N10 section is the narrative for the same
 /// list, and the two must agree by hand. A field appears here once per
 /// struct that has it: `vendor.rs`'s `amount` is on three different structs
 /// and is on this list three times, one per struct, because the scan below

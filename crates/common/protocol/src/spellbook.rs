@@ -44,7 +44,7 @@ pub struct SpellbookContent {
     /// The spell the low bit of `content` stands for. Bare by decision: the
     /// only value ever sent is `1` (Magery), and N3 amendment 1's test —
     /// "does something already branch on this byte" — is not met while no
-    /// second spell school is wired up. See `docs/protocol_newtypes.md`.
+    /// second spell school is wired up. See `docs/protocol/design_wire_types.md`.
     pub offset:  u16,
     /// Bit `n` set means the book holds the `offset + n`-th spell.
     pub content: u64,

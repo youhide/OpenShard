@@ -1288,7 +1288,9 @@ pub enum Command {
         connection: ConnectionId,
         /// The vendor mobile, as the client named it — checked in
         /// `openshard_npc::vendor::buy`, which is the seam. The queue is a
-        /// delivery and not a checkpoint; see `docs/protocol_newtypes.md`.
+        /// delivery and not a checkpoint; see
+        /// `docs/protocol/evidence/2026-08-31-the-newtype-sweep.md`'s N-commands
+        /// amendments.
         vendor:     openshard_protocol::serial::RawSerial,
         /// What it took, by stock serial and amount.
         purchases:  Vec<openshard_protocol::vendor::Purchase>,

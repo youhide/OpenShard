@@ -1,7 +1,7 @@
 # Invariants nothing enforces
 
 Living plan for the backlog that three finished sweeps left behind. Unlike
-[`protocol_newtypes.md`](protocol_newtypes.md) and
+[the wire-type sweep](protocol/design_wire_types.md) and
 [`connection_state.md`](connection_state.md), which each took one subject
 through one crate, this one is a shape found in four places at once — a fifth
 came out of the first while it was being done — so the stages share a reason

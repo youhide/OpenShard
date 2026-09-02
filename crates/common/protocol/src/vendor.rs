@@ -35,7 +35,7 @@ use crate::wire::{
 pub struct BuyLine {
     /// What one unit costs, in gold.
     ///
-    /// A bare integer by decision, on `docs/protocol_newtypes.md`'s N10
+    /// A bare integer by decision, on `docs/protocol/design_wire_types.md`'s N10
     /// allowlist: a price is a quantity in the sense `MobileStatus`'s `gold`
     /// is — multiplied by an amount, added into a total, compared against what
     /// a purse holds — and the rules that bound it (what a vendor charges,
@@ -145,7 +145,8 @@ impl DecodePacket for BuyReply {
             //
             // This byte is read and not kept, which is the *opposite* of
             // `StatLockRequest`'s and `0xAD`'s findings in
-            // `docs/protocol_newtypes.md`: those two folded a value they then
+            // `docs/protocol/evidence/2026-08-31-the-newtype-sweep.md`: those
+            // two folded a value they then
             // stored, destroying the client's own byte. Here the flag is pure
             // framing — it says whether a list follows — and the two answers it
             // distinguishes ("closed" and "bought nothing") are the same empty
@@ -405,7 +406,7 @@ mod tests {
     fn a_shelf_serial_no_client_could_own_survives_decoding_and_is_refused() {
         // N9's pair for `Purchase::serial`: `0xFFFF_FFFF` is past the item pool
         // and addresses nothing, and the split
-        // `docs/protocol_newtypes.md` N2 draws says so at the *seam* — the
+        // `docs/protocol/design_wire_types.md` N2 draws says so at the *seam* — the
         // packet still decodes, because a framing error would drop the
         // connection over a value that is merely a lie.
         let mut bytes = vec![0x3B, 0, 0];

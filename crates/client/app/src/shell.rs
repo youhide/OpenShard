@@ -6356,7 +6356,7 @@ fn draw_tile_highlight(
     // The surface, not the land: on a pier the two are thirteen z-units apart
     // and the land's height puts the diamond in the water beside the boards.
     // `.0` here is the presentation seam: `Point` stays a bare coordinate by
-    // project convention (`docs/protocol_newtypes.md`), so this is where
+    // project convention (`docs/protocol/design_wire_types.md`), so this is where
     // `Height` is unwrapped to meet it.
     let at = |z: Height, corners: [Height; 4]| {
         facet_corners(

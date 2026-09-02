@@ -135,7 +135,10 @@ broken afterwards because there was no shard left to answer it. The class is
 wider than that one id: `0x2E`, `0x74`, `0x9E`, `0x27` and `0x6C` each had an
 encoder and a table row and no decode arm, and `0x14` and `0xBF`'s subcommands
 still do. Nothing asserts that a variant this engine *sends* is a variant this
-client can *read*; both times the gap was found by hand.
+client can *read*; both times the gap was found by hand. The check that would
+end the class belongs to the crate that owns both tables and is ranked in
+[`protocol/README.md`](../protocol/README.md); what is this domain's is the
+missing arms themselves.
 
 **6. A spell is heard and not seen.** `0x6E` and `0xE2` decode and are folded onto
 the crowd; `0x70` and `0xC0` have no arm in `ServerPacket::decode` at all, so a

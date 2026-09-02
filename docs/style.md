@@ -191,9 +191,9 @@ which is the only place anybody ever reads it.
 `use openshard_protocol::AccountName` says only that somebody was tidying.
 
 Several `lib.rs` files are still a wall of `pub use` from before this was a rule.
-Removing them is one mechanical sweep, planned as D8 in
-[`protocol_rewrite.md`](protocol_rewrite.md) — do not drip-feed it, and do not add
-to it in the meantime.
+Removing them is one mechanical sweep, decided as D8 in
+[`design_packet_enums.md`](protocol/design_packet_enums.md) — do not drip-feed
+it, and do not add to it in the meantime.
 
 ## Look for it before writing it
 

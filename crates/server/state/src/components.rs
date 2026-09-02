@@ -208,7 +208,7 @@ pub struct Equipped {
     /// is the only component whose value goes out unaltered in two packets
     /// (`0x2E` and the `0x78` outfit list), and every rule that reads it — what
     /// a corpse keeps, what armour counts, what may not be lifted — is naming a
-    /// slot rather than doing arithmetic. `docs/protocol_newtypes.md` N4.
+    /// slot rather than doing arithmetic. `docs/protocol/design_wire_types.md` N4.
     pub layer:  Layer,
 }
 

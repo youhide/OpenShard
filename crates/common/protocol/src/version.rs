@@ -25,7 +25,7 @@ use std::str::FromStr;
 /// reaches a `revision` except through a `ClientVersion`, and it is not a
 /// packet field at all: what arrives off the wire is a seed dword or a `0xBD`
 /// string, and both are narrowed here. See the allowlist in
-/// `docs/protocol_newtypes.md`.
+/// `docs/protocol/design_wire_types.md`.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct ClientVersion {
     /// Major version. `7` for all modern clients.

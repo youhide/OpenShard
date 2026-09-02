@@ -91,7 +91,7 @@ use crate::wire::Graphic;
 /// Its own type rather than a `u32` because it is a **cache key on the client**
 /// and it travels beside a serial in both packets that carry it — two opaque
 /// four-byte numbers about the same house, which is exactly the pair
-/// `docs/protocol_newtypes.md` exists to stop being swapped. Nothing compares
+/// `docs/protocol/design_wire_types.md` exists to stop being swapped. Nothing compares
 /// two of them for order: a client either holds this revision or it does not.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Revision(pub u32);

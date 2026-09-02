@@ -47,7 +47,7 @@ pub const SEED_COMMAND: u8 = 0xEF;
 /// the same claim [`RawClientIp`](crate::wire::RawClientIp) refuses to believe,
 /// with the socket's real address available for free. So nothing reads it, and
 /// the type is the record of that decision rather than a promise to check
-/// something. See `docs/protocol_newtypes.md`.
+/// something. See `docs/protocol/design_wire_types.md`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default)]
 pub struct RawSeedValue(pub u32);
 

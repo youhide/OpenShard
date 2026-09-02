@@ -10,7 +10,7 @@
 //! A newtype for a packet nobody has read closely yet is a guess, and a guess
 //! that hardens before it is right is worse than a bare `u16`. So this module
 //! grows one type at a time, in the stage that first has a field for it — see
-//! `docs/protocol_rewrite.md`. [`Serial`](crate::serial::Serial) is the
+//! `docs/protocol/design_packet_enums.md`. [`Serial`](crate::serial::Serial) is the
 //! exception and lives in its own module: it carries a validity rule and a
 //! pool split, not just a name.
 
@@ -250,7 +250,7 @@ impl Layer {
 ///
 /// Only `0x13` carries one inbound — the client works the slot out from the
 /// item's tiledata and offers it — so by N4's counting rule in
-/// `docs/protocol_newtypes.md` this would live in `items.rs`. It is here
+/// `docs/protocol/design_wire_types.md` this would live in `items.rs`. It is here
 /// instead, beside its validated twin, the way [`RawHue`] sits beside [`Hue`]
 /// and `RawSerial` beside `Serial`: a pair split across two modules is a pair
 /// the next reader has to be told about.
@@ -276,7 +276,7 @@ impl RawLayer {
 
 /// A colour choice exactly as a client packet carried it: not yet checked
 /// against the set of hues this shard actually allows. See
-/// `docs/protocol_newtypes.md` — the allowed set is content, so the check that
+/// `docs/protocol/design_wire_types.md` — the allowed set is content, so the check that
 /// turns this into a real [`Hue`] lives above `protocol`, and does not exist
 /// yet.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
@@ -297,7 +297,7 @@ pub struct RawGraphic(pub u16);
 /// a class D value, named and ignored. `0x83` delete is different — the slot
 /// *is* the whole request — so the type grew [`validate`](Self::validate) in
 /// N6, and the promotion is there for the other two the day slot choice is
-/// honoured. See `docs/protocol_newtypes.md`.
+/// honoured. See `docs/protocol/design_wire_types.md`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default)]
 pub struct RawCharacterSlot(pub u32);
 
@@ -364,6 +364,6 @@ pub struct RawClientIp(pub u32);
 /// hand — the same licence `RawSerial::validate` documents for `Serial::new`.
 /// Named here rather than in `world.rs`, where the pilot first needed it,
 /// because `skill.rs` is its second user — N4's "two or more modules"
-/// counting rule. See `docs/protocol_newtypes.md`.
+/// counting rule. See `docs/protocol/design_wire_types.md`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default)]
 pub struct RawSkillId(pub u8);

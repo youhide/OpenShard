@@ -59,7 +59,8 @@ pub struct SpellId(pub u16);
 /// the same shape as `StatLockRequest`'s and `0xAD`'s findings — "wherever a
 /// decoder normalises, the raw byte is being destroyed" — so the fold moved
 /// out of `decode_body` and into [`interpret`](Self::interpret), which keeps
-/// the two apart. See `docs/protocol_newtypes.md`, "Amendments forced by N7".
+/// the two apart. See `docs/protocol/evidence/2026-08-31-the-newtype-sweep.md`,
+/// "Amendments forced by N7".
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct RawSpellId(pub u16);
 
@@ -68,7 +69,8 @@ impl RawSpellId {
     ///
     /// Total: every `u16` has an answer, so this may run right at the network
     /// seam rather than waiting for a tick system to have the domain in hand
-    /// (`docs/protocol_newtypes.md`'s N4 containers amendment 2 licence for a
+    /// (`docs/protocol/evidence/2026-08-31-the-newtype-sweep.md`'s N4
+    /// containers amendment 2 licence for a
     /// packet-level `interpret`). Whether the *number* names a spell in the
     /// table is a different, fallible question — `openshard_magic::info`'s,
     /// at whatever seam already asks it.

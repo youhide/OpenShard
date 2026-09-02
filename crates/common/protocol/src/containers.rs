@@ -129,7 +129,7 @@ impl DoubleClick {
     /// Total, and deliberately so: both arms carry a [`RawSerial`], because
     /// stripping a flag bit does not make what is left address anything. The
     /// check that it does is [`RawSerial::validate`], at whichever seam acts on
-    /// the request — see `docs/protocol_newtypes.md` N2.
+    /// the request — see `docs/protocol/design_wire_types.md` N2.
     #[must_use]
     pub const fn interpret(self) -> UseRequest {
         if self.serial.0 & PAPERDOLL_REQUEST == 0 {
@@ -236,7 +236,8 @@ impl ContainedItem {
 ///
 /// # Not an `EncodePacket`
 ///
-/// This is `0xB9`'s problem from Stage 2 (`docs/protocol_rewrite.md`) again: the
+/// This is `0xB9`'s problem from Stage 2
+/// (`docs/protocol/evidence/2026-07-29-the-packet-rewrite.md`) again: the
 /// packet is fixed-length, but *which* fixed length depends on
 /// [`Feature::HsPackets`], and [`EncodePacket::LENGTH`] is a `const` that cannot
 /// ask a payload's own `version`. Neither `Fixed` nor `Variable` describes it, so
@@ -538,7 +539,7 @@ mod tests {
 
     #[test]
     fn a_double_click_on_nothing_decodes_and_is_refused_at_promotion() {
-        // `docs/protocol_newtypes.md` N9: the hostile value gets all the way
+        // `docs/protocol/design_wire_types.md` N9: the hostile value gets all the way
         // through the framer — dropping the connection over it would be wrong —
         // and dies where it would have addressed something.
         let bytes = [0x06, 0x00, 0x00, 0x00, 0x00];

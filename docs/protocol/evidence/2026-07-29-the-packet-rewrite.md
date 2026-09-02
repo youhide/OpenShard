@@ -1,151 +1,31 @@
-# Protocol rewrite: from free functions to packet enums
+# The packet rewrite: from free functions to packet enums
 
-Living plan for a multi-session rewrite of `crates/common/protocol`. It records
-the decisions so they are not re-litigated at the start of every session. When
-reality contradicts a decision here, change this file in the same commit that
-changes the code.
+Record of the multi-session rewrite of `crates/common/protocol` that landed the
+two root enums, closed 2026-07-29 with Stage 7. The decisions it settled — D1
+through D10 and the survey behind them — are
+[`design_packet_enums.md`](../design_packet_enums.md); below is what the crate
+looked like before, the amendment each stage forced, and the ordering that was
+followed.
 
-## Why
+## What was there before
 
-Today the crate has two shapes bolted together:
+The crate had two shapes bolted together:
 
-- **Client → server** is a set of unrelated structs, each with its own
-  `const ID` and its own `decode`. Nothing ties them together, so
-  `server/server/src/dispatch.rs` is a 719-line hand-written `match` over raw
+- **Client → server** was a set of unrelated structs, each with its own
+  `const ID` and its own `decode`. Nothing tied them together, so
+  `server/server/src/dispatch.rs` was a 719-line hand-written `match` over raw
   bytes — including `packet.get(5) == Some(&0x05)` reaching into an undecoded
   packet, and three different `0xBF` types (`context`, `casting`, `mobile`)
-  that each re-read the same envelope and each decide independently whether the
-  packet is "theirs".
-- **Server → client** is 47 free functions named `encode_*`, each returning a
+  that each re-read the same envelope and each decided independently whether the
+  packet was "theirs".
+- **Server → client** was 47 free functions named `encode_*`, each returning a
   fresh `Vec<u8>`, each writing the id byte by hand and each patching its own
   length field by hand.
 
-Neither shape is checkable. Nothing tells you a packet id is handled twice, or
-not at all; nothing stops a new encoder from forgetting its length patch; the
-`match` in `dispatch` has no exhaustiveness to lean on because it matches on
+Neither shape was checkable. Nothing told you a packet id was handled twice, or
+not at all; nothing stopped a new encoder from forgetting its length patch; the
+`match` in `dispatch` had no exhaustiveness to lean on because it matched on
 `Option<&u8>`.
-
-The wire format is a fixed external contract with a closed set of messages.
-That is exactly a sum type. It should be one.
-
-## The shape of the protocol (surveyed against ClassicUO)
-
-ClassicUO is the reference: `src/ClassicUO.Client/Network/PacketsTable.cs` is
-the 256-entry server-packet length table, `PacketHandlers.cs` (7161 lines) is
-every server packet parsed, `OutgoingPackets.cs` (4671 lines) every client
-packet built.
-
-**There is no recursion.** The nesting is finite and shallow:
-
-1. **id byte** — 256 slots.
-2. **subcommand** — a handful of envelopes: `0xBF` general information (`u16`
-   subcommand, ~40 defined), `0xD7` encoded command (`u16`), `0xB5`/`0xB3` chat
-   (`u16`, `0x03E8..0x03F4`), `0x12` (type byte).
-3. **third level, rare** — `0xBF 0x06` party has its own byte subcommand
-   (`PartyManager.ParsePacket`); `0xBF 0x16` close-window keys on a window id;
-   `0xBF 0x19` extended stats keys on a `version` byte (0/2/5), and inside
-   version 5 branches again on `type2 == 0xFF` — effectively a fourth level.
-
-So: an enum of enums, no `Box`, no cycles.
-
-Three things complicate it beyond plain nesting, and the type design has to
-carry all three from the start rather than retrofit them:
-
-- **Repeated records** — container contents, skill lists, shard and character
-  lists, buy/sell lists. These are `Vec<T>` of a named row type.
-- **Fields conditional on bit flags** — `0x1A` world item hides the presence of
-  count, hue and flags in the high bits of the serial and graphic; `0x77`/`0x78`
-  do the same. Presence is data, so the optional parts are modelled as fields
-  that are semantically absent, not as defaulted zeros.
-- **Version-conditional tails** — `0x11` status, `0x78`/`0xD3`, `0xA9` change
-  shape by era. The branch is on `ClientVersion::supports(Feature::…)`, never on
-  `Era` and never on a version comparison (see the crate docs).
-
-One genuine grammar exists: **gump layout** (`0xB0`, compressed `0xDD`) is a
-text DSL — `{ gumppic 0 0 100 }{ page 1 }…` — plus a string table. It is not
-recursive (pages are flat sections) but it is a language, and it gets its own
-type and its own encoder rather than a variant that carries a pre-built string.
-
-## Decisions
-
-These are settled. Do not re-open them mid-rewrite.
-
-**D1. Two root enums.** `ClientPacket` (decoded, client → server) and
-`ServerPacket` (encoded, server → client). Both non-exhaustive.
-
-**D2. Variant payloads.** Every variant is a newtype around a named payload
-struct (`Status(MobileStatus)`, `WarMode(WarMode)`). The pilot disproved the
-inline exception: [`EncodePacket`] is implemented on a payload type, so inline
-variant fields would need a second body-writing path inside the root enum.
-One shape for every variant keeps the framing layer mechanical.
-
-**D3. The header is written once.** Payload encoders write **body only**. A
-single framing layer writes the id and, for variable packets, back-patches the
-`u16` length. This deletes the whole class of "forgot to patch the length"
-and makes the length table the single source of truth for both directions.
-
-**D4. Traits.**
-
-```rust
-pub trait EncodePacket {
-    const ID: u8;
-    const LENGTH: PacketLength;
-    fn encode_body(&self, out: &mut PacketWriter, version: ClientVersion);
-}
-
-pub trait DecodePacket: Sized {
-    const ID: u8;
-    fn decode_body(reader: &mut PacketReader, version: ClientVersion)
-        -> Result<Self, DecodeError>;
-}
-```
-
-`ClientVersion` is passed to every encoder and decoder uniformly, even where it
-is unused — a packet that grows a version-conditional tail later must not
-change its signature and every call site with it.
-
-`EncodePacket::LENGTH` tells the framing layer whether a payload is fixed or
-variable length. For fixed packets, the framer debug-asserts that the encoded
-body matches the declared size, catching a field added to a struct but forgotten
-in its encoder.
-
-**D5. Nothing is silently dropped.** `ClientPacket` has an
-`Unknown { id: u8, body: Vec<u8> }` variant. An unhandled id is a logged fact,
-not a dropped connection and not a silent `true` return.
-
-**D6. Newtypes on the wire.** `Serial`, `Graphic`, `Hue`, `Layer`, `SoundId`,
-`GumpId`, `CursorId`, `CliLocId`, `MusicId`. Bare `u32`/`u16` fields
-are gone from packet definitions; `.0` is unwrapped only inside the codec.
-`Serial` already exists in `common/entities` and **moves into
-`common/protocol`** — it is a wire concept first; `entities` depends on
-`protocol` for it, never the reverse.
-
-Each newtype is introduced in the stage that first needs it, in `wire.rs`, not
-all of them up front: a type nothing uses yet is a guess about a packet nobody
-has read closely, and it hardens before it is right.
-
-`Option<Serial>` is the packet shape for an absent object field. A zero object
-serial on the wire decodes to `None`, and an absent object encodes as zero.
-Sound ids stop at the packet boundary for now: gameplay sound tables still carry
-plain `u16` and wrap them in `SoundId` only when building packets.
-
-**D7. `LoginDecodeError` is renamed `DecodeError`.** It was never login-specific
-(56 references across the workspace); the name lies about scope.
-
-**D8. No re-exports.** `lib.rs` stops being a wall of `pub use` (CLAUDE.md:
-re-exports hide where a type lives). Modules become `pub`, call sites import
-from the defining module. This lands in Stage 6 as one mechanical sweep, not
-drip-fed.
-
-**D9. No compatibility shims.** Each stage rewrites a group of packets **and**
-updates every call site of that group in the same commit. No `#[deprecated]`
-wrapper layer: a half-migrated crate with two ways to send a packet is worse
-than a bigger diff.
-
-**D10. Byte-level tests are the contract.** Every existing encoder test keeps
-asserting the same bytes; only the call that produces them changes. A stage
-that cannot keep the bytes identical has found a bug — fix it deliberately and
-say so in the commit, do not adjust the expectation quietly.
 
 ## Amendments forced by the Stage 1 pilot
 
@@ -181,7 +61,8 @@ say so in the commit, do not adjust the expectation quietly.
 
 Stage 2 is where the variable-length path first carries a real payload — the
 shard list and the character list are both `Vec<T>` bodies, not the unit test
-Stage 1 covered it with — and where a packet finally does not fit [`D3`](#decisions)'s
+Stage 1 covered it with — and where a packet finally does not fit
+[`D3`](../design_packet_enums.md#decisions)'s
 Fixed/Variable split at all.
 
 1. **`decode_packet` now skips a variable packet's length field itself,**
@@ -512,9 +393,9 @@ Each stage ends with all four silent: `cargo check --workspace --all-targets`,
 
 ## What this plan left for the next one
 
-[D6](#decisions) — newtypes on the wire — was scoped to "a newtype arrives with
+[D6](../design_packet_enums.md#decisions) — newtypes on the wire — was scoped to "a newtype arrives with
 the packet that first needs it", which is why `Serial`, `Graphic`, `Hue`,
 `SoundId`, `CursorId` and `AuthKey` exist and 193 other packet fields are still
 bare integers. Finishing that, and adding the raw-versus-validated split those
 fields need to say whether anyone checked them, is
-[`protocol_newtypes.md`](protocol_newtypes.md).
+[`protocol_newtypes.md`](../design_wire_types.md).

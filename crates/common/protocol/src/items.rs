@@ -282,7 +282,8 @@ impl WorldItemPayload {
 /// This packet's own sentinel, checked as itself rather than through
 /// [`RawSerial::validate`]: `validate` says "addresses nothing", and `0` says
 /// that too — but a `0` container is a confused client, and `0xFFFFFFFF` is the
-/// floor. See `docs/protocol_newtypes.md` N3 amendment 4.
+/// floor. See `docs/protocol/evidence/2026-08-31-the-newtype-sweep.md`'s N3
+/// amendment 4.
 pub const DROP_TO_GROUND: RawSerial = RawSerial(0xFFFF_FFFF);
 
 /// A light source's id, as `light.mul` numbers them.
@@ -1357,7 +1358,7 @@ mod tests {
 
     #[test]
     fn a_lift_of_nothing_decodes_and_is_refused_at_promotion() {
-        // `docs/protocol_newtypes.md` N9. `0` is the wire's word for "no object"
+        // `docs/protocol/design_wire_types.md` N9. `0` is the wire's word for "no object"
         // and a client is free to send it; the packet is well-formed, so the
         // framer must not drop the connection over it, and the refusal happens
         // where the serial would have addressed something.

@@ -13,11 +13,18 @@
 //! [`EncodePacket`](crate::packet::EncodePacket) — and this enum is the only
 //! thing that turns one into bytes.
 //!
-//! # It grows one group at a time
+//! # A handful stay outside it
 //!
-//! Non-exhaustive and deliberately incomplete: the packets that have been
-//! rewritten are here, the rest are still free functions elsewhere in the crate.
-//! `docs/protocol_rewrite.md` tracks which group lands when.
+//! Non-exhaustive, and seven packets are still free `encode_*` functions in
+//! their own modules. Three of them are a real exception with an argument:
+//! [`EncodePacket::LENGTH`] is a `const` and theirs depends on the connection's
+//! [`Feature`] set, so neither `Fixed` nor `Variable` describes them —
+//! `containers::encode_open_container` carries that reasoning in full, with
+//! `encode_add_to_container` and `login::encode_supported_features` beside it.
+//! See `docs/protocol/design_packet_enums.md`'s D3 and D4, and for the packet
+//! that first hit it, `docs/protocol/evidence/2026-07-29-the-packet-rewrite.md`'s
+//! Stage 2. The other four — `trade`'s three and `world::encode_server_change` —
+//! are fixed-length and have no such argument: they were simply never moved.
 
 use std::fmt;
 

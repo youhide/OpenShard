@@ -191,7 +191,7 @@ impl World {
                 start,
                 appearance: Some(Appearance {
                     // No promotion exists yet for either raw value — see
-                    // `docs/protocol_newtypes.md` — so this is still an unchecked
+                    // `docs/protocol/design_wire_types.md` — so this is still an unchecked
                     // pass-through, visible at the call site as `.0`.
                     body: {
                         let (sex, race) = create.sex_race.interpret();
@@ -212,8 +212,8 @@ impl World {
     ///
     /// None of the stat or skill values is validated: no promotion exists yet for
     /// `RawStatValue`/`RawSkillValue`, so the `.0`s below are an unchecked
-    /// pass-through of client input. See `docs/protocol_newtypes.md`'s pilot
-    /// notes.
+    /// pass-through of client input. See
+    /// `docs/protocol/evidence/2026-08-31-the-newtype-sweep.md`'s pilot notes.
     fn chosen_sheet(create: &CreateCharacter) -> CharacterSheet {
         CharacterSheet {
             strength:        u16::from(create.strength.0),

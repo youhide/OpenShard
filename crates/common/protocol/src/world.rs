@@ -72,7 +72,7 @@ use crate::wire::{
 /// axis would buy nothing — nothing reaches an `x` except through a `Point`, so
 /// there is no call site at which it could be mistaken for a hue — and would
 /// cost a `.0` on every step, every sector lookup and every line of sight in the
-/// server. See the allowlist in `docs/protocol_newtypes.md`.
+/// server. See the allowlist in `docs/protocol/design_wire_types.md`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Point {
     /// East-west tile.
@@ -199,7 +199,7 @@ pub enum Race {
 
 /// A starting skill value exactly as sent — the client's own whole points,
 /// not yet checked against the shard's starting-skill rule. No promotion
-/// method yet — see `docs/protocol_newtypes.md`.
+/// method yet — see `docs/protocol/design_wire_types.md`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct RawSkillValue(pub u8);
 
@@ -233,7 +233,8 @@ pub struct SkillChoice {
 /// [`DecodePacket`] assumes one packet has one `const ID`. This one logically
 /// decodes across *two* ids (`0x00`, `0x1F8`) with two different fixed lengths —
 /// the same shape of problem the Stage 2 pilot hit with `0xB9`
-/// (`docs/protocol_rewrite.md`, "Amendments forced by the Stage 2 pilot"), and
+/// (`docs/protocol/evidence/2026-07-29-the-packet-rewrite.md`, "Amendments
+/// forced by the Stage 2 pilot"), and
 /// the Stage 3 pilot's counterpart to it. So [`Self::decode`] stays a plain
 /// inherent method rather than bending the trait to fit two ids.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -267,7 +268,7 @@ pub struct CreateCharacter {
     pub beard_hue:      RawHue,
     /// Which starting city the player picked, as an index into the list the
     /// character-list packet offered. No promotion method yet — see
-    /// `docs/protocol_newtypes.md`.
+    /// `docs/protocol/design_wire_types.md`.
     pub start_location: RawStartLocationIndex,
     /// Which character slot to fill. Class D — `create_character` fills the
     /// first free slot and does not read this. See [`RawCharacterSlot`].
@@ -349,13 +350,13 @@ impl RawSexRace {
 ///
 /// No promotion method yet — the per-stat floor/ceiling and total-points rule
 /// that would produce one is gameplay balance this crate does not own; see
-/// `docs/protocol_newtypes.md`.
+/// `docs/protocol/design_wire_types.md`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct RawStatValue(pub u8);
 
 /// Which starting city index a create-character packet carried, not yet
 /// checked against the list the character-list packet actually offered. No
-/// promotion method yet — see `docs/protocol_newtypes.md`.
+/// promotion method yet — see `docs/protocol/design_wire_types.md`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct RawStartLocationIndex(pub u8);
 
@@ -1440,7 +1441,7 @@ pub struct MapChange {
 /// decides. One type for both the wire's own idea of a facet and the world's —
 /// they used to be two (`world::MapId` here, `state::components::Facet`
 /// separately), converted at every seam; see "Two types for one facet byte" in
-/// `docs/protocol_newtypes.md`.
+/// `docs/protocol/design_wire_types.md`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default, Deserialize, Serialize)]
 #[serde(transparent)]
 pub struct Facet(pub u8);

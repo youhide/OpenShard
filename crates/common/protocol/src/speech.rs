@@ -99,7 +99,8 @@ const KEYWORD_BITS: u8 = 0xC0;
 /// Kept unfolded through decoding on purpose: a decoder that rewrites a value
 /// destroys the only evidence of what the client actually sent, so a log line
 /// about a nonsense mode becomes impossible to write. See
-/// `docs/protocol_newtypes.md` — the same finding as `0xBF 0x1A`'s stat lock.
+/// `docs/protocol/evidence/2026-08-31-the-newtype-sweep.md` — the same finding
+/// as `0xBF 0x1A`'s stat lock.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default)]
 pub struct RawTalkMode(pub u8);
 
@@ -148,7 +149,7 @@ impl Font {
 ///
 /// Same status as [`RawHue`](crate::wire::RawHue): the set is the client's files,
 /// which `protocol` does not read, so the check that turns this into a real
-/// [`Font`] lives above and does not exist yet. See `docs/protocol_newtypes.md`.
+/// [`Font`] lives above and does not exist yet. See `docs/protocol/design_wire_types.md`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default)]
 pub struct RawFont(pub u16);
 

@@ -20,27 +20,20 @@ so migrating a domain is also what empties its section below.
 | World and map | ranked, [`docs/world/README.md`](../../docs/world/README.md) § what is open |
 | The client | ranked, [`docs/client/README.md`](../../docs/client/README.md) § what is open |
 | Rendering and lighting | [`docs/render/README.md`](../../docs/render/README.md), with [`plans/render/`](../render/lighting/PLAN.md) for what is not built |
-| Protocol · server · items · combat · housing · npc | the sections below, until each is migrated |
+| The protocol | ranked, [`docs/protocol/README.md`](../../docs/protocol/README.md) § what is open |
+| Server · items · combat · housing · npc | the sections below, until each is migrated |
 
 ## Next
 
-**Migrate the remaining domains.** Six areas still have their documents flat in
-`docs/` and their phase records under `docs/roadmap/`: `protocol`, `server`,
-`items`, `combat`, `housing`, `npc`. Each is one batch — decisions into
-`design_*`, phase records and "amendments forced by" into `evidence/`, what is
-open into a domain README — and none of them blocks another. The batch that
-claims a domain also takes its phase file out of `docs/roadmap/` and its section
-out of this page.
+**Migrate the remaining domains.** Five areas still have their documents flat in
+`docs/` and their phase records under `docs/roadmap/`: `server`, `items`,
+`combat`, `housing`, `npc`. Each is one batch — decisions into `design_*`, phase
+records and "amendments forced by" into `evidence/`, what is open into a domain
+README — and none of them blocks another. The batch that claims a domain also
+takes its phase file out of `docs/roadmap/` and its section out of this page.
 
-The order to take them in is cheapest-first: `protocol`, then `server`, then
-`items`, `combat`, `housing`, `npc`.
-
-## Protocol
-
-- [ ] Add packet tests against captures from real clients.
-- [ ] Revisit login encryption only when a client that cannot disable it must be
-      supported — the argument is in
-      [`backlog/protocol.md`](../../docs/roadmap/backlog/protocol.md).
+The order to take them in is cheapest-first: `server`, then `items`, `combat`,
+`housing`, `npc`.
 
 ## Gameplay
 

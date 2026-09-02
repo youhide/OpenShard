@@ -1,8 +1,10 @@
-# Protocol backlog
+# Login encryption: read, and deferred
 
-[Backlog](../../../plans/roadmap/PLAN.md) · [Roadmap](../README.md)
+What the two reference servers do about encrypting the login stream, why this
+one does not, and what would have to turn up before the answer changes. The open
+item this leaves is ranked in [the domain README](README.md).
 
-## Login encryption is deliberately deferred
+## It buys obfuscation, not security
 
 Sphere ships `sphereCrypt.ini`: a per-client-version key table for the login
 stream, and separate game-stream encryption. It is a real lift and it buys

@@ -17,7 +17,7 @@ sweep's own ALLOWLIST precedent already excludes, and `metrics` is an
 unimplemented stub.
 
 The single largest finding is out of scope for one pass and now has its own
-living plan, [`facet_newtype.md`](../../facet_newtype.md): **`Facet` —
+living plan, [`facet_newtype.md`](../../protocol/design_facet.md): **`Facet` —
 `protocol::world::Facet(pub u8)` — is typed correctly in exactly the places
 `world::tick::command` already uses it, and a bare `facet: u8` everywhere
 else**, which by grep is upward of eighty signatures across `ai`, `npc`,

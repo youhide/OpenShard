@@ -13,8 +13,10 @@ impl World {
     /// class B and interprets totally; `hue` and `font` are class C and their
     /// checks — which set of hues, which of the client's faces this shard allows —
     /// are content that does not exist in this repo yet, so they pass through
-    /// unchecked and *visibly* so. See `docs/protocol_newtypes.md`: a `.0` with no
-    /// `validate` beside it is the grep the plan asks for.
+    /// unchecked and *visibly* so. See
+    /// `docs/protocol/evidence/2026-08-31-the-newtype-sweep.md`'s pilot
+    /// amendments: a `.0` with no `validate` beside it is the grep the sweep
+    /// left in place of an invisible gap.
     pub(super) fn say(
         &mut self,
         connection: ConnectionId,

@@ -1,7 +1,9 @@
-# 1. Protocol — mostly done
+# Phase 1: the protocol, as the roadmap recorded it
 
-> Open work and follow-up findings from this phase are tracked in the
-> [consolidated backlog](../../plans/roadmap/PLAN.md).
+The roadmap's phase record for the protocol, moved here unchanged when the
+domain took its documents. What is open now is ranked in
+[the domain README](../README.md); this is what was built and the context that
+came with it.
 
 - [x] `PacketReader` / `PacketWriter` — std only, every read fallible
 - [x] Client packet length table ported from Sphere's `receive.h` (70 packets)

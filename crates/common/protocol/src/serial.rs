@@ -92,7 +92,7 @@ impl Serial {
 /// Every inbound packet that names something — a single click, a lift, a target,
 /// a vendor's shelf — carries four bytes the client chose, and nothing about
 /// them is a [`Serial`] until somebody looks. `0`, `0xFFFF_FFFF` and everything
-/// above the item pool all arrive here happily; see `docs/protocol_newtypes.md`
+/// above the item pool all arrive here happily; see `docs/protocol/design_wire_types.md`
 /// for why the check belongs at the seam that acts on the packet and not in
 /// `decode_body`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default)]
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn a_raw_serial_off_the_wire_is_checked_before_it_addresses_anything() {
-        // The pair `docs/protocol_newtypes.md` N9 asks for: the hostile value
+        // The pair `docs/protocol/design_wire_types.md` N9 asks for: the hostile value
         // arrives intact (no decode error to drop the connection over) and is
         // refused where it would have been used.
         assert_eq!(RawSerial(0).validate(), None, "zero is 'no object'");

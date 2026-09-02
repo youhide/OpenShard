@@ -112,7 +112,7 @@ pub enum ClientPacket {
     /// An id this crate has no handler for, or a known envelope whose
     /// content this engine does not act on (a `0x12` text command other than
     /// "use skill"). `body` is everything from the id byte on, for a caller
-    /// that wants to log it. Per D5 (`docs/protocol_rewrite.md`): a logged
+    /// that wants to log it. Per D5 (`docs/protocol/design_packet_enums.md`): a logged
     /// fact, never a silently dropped connection.
     Unknown {
         /// The packet id.

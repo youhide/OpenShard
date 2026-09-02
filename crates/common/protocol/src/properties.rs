@@ -136,7 +136,8 @@ pub struct TooltipRevision {
     /// client input nor a value this crate names elsewhere — it is an opaque
     /// accumulator the *server* computes ([`PropertyList::add_hash`]) and only
     /// the *client* ever reads back, which is class D's shape reversed. See
-    /// "Amendments forced by N7" in `docs/protocol_newtypes.md`.
+    /// "Amendments forced by N7" in
+    /// `docs/protocol/evidence/2026-08-31-the-newtype-sweep.md`.
     pub hash:   u32,
 }
 
