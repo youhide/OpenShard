@@ -612,7 +612,7 @@ pub struct Outbound {
 /// shard, not to a facet ([`WorldState::tiles`]), so the pair is put back
 /// together for the length of one question by
 /// [`WorldState::map_terrain`](WorldState::map_terrain) — see
-/// `docs/map/terrain_seam.md`'s node D.
+/// `docs/world/research/terrain_seam.md`'s node D.
 pub struct FacetState {
     /// The ground, what the live world has laid over it, and where a body may
     /// stand on the pair.
@@ -678,7 +678,7 @@ pub struct FacetState {
     /// **Private, and mutated only through this facet.** Every write here has to
     /// be followed by a rewrite of the same tile in [`overlay`](Self::overlay),
     /// and a public field is a way to forget — which is the failure mode
-    /// `docs/map/terrain_seam.md` is entirely about. See
+    /// `docs/world/research/terrain_seam.md` is entirely about. See
     /// [`FacetState::block`].
     obstructions:   Obstructions,
     /// Which houses draw on each tile of this facet.
@@ -948,7 +948,7 @@ impl FacetState {
     /// others. It used to be **dropped**, on the honest argument that a
     /// whole-facet rebuild is 11.6 s on a tick and a graph of the world as it
     /// stood is a router planning through a wall somebody just built; what
-    /// changed is `docs/map/navigation_graph.md`'s G1, which makes the rebuild
+    /// changed is `docs/world/design_navigation_graph.md`'s G1, which makes the rebuild
     /// local — the regions the chunks cover, their neighbours, and the ring
     /// beyond for edges only.
     ///

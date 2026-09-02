@@ -441,7 +441,7 @@ impl App {
         self.steer.clear_plan_cache();
         self.steer.clear_route();
         // The coarse graph **follows** the ground over the chunks that moved,
-        // which is `docs/map/navigation_graph.md`'s G1 at this end — the same
+        // which is `docs/world/design_navigation_graph.md`'s G1 at this end — the same
         // call the shard's own publish makes, over the same two rings. It used
         // to be dropped here, on the argument that a whole-facet bake is half a
         // minute of flood and there is no smaller seam; there is one now.

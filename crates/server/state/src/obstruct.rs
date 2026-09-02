@@ -371,7 +371,7 @@ mod tests {
     /// the step ends, and a diagonal's two flanks are not that question. The
     /// rule lives one layer up, in `steps_out_of`, which resolves all eight
     /// neighbours together precisely so a diagonal can read the flanks it needs
-    /// — see `docs/map/navigation_spans.md`'s N3. These two used to ask
+    /// — see `docs/world/evidence/2026-08-25-the-span-layer.md`'s N3. These two used to ask
     /// `can_step` and had been failing since the rule moved.
     #[test]
     fn a_diagonal_passes_an_open_corner() {
@@ -651,7 +651,7 @@ mod tests {
     /// the tile and computes surfaces; against that baseline the same absolute
     /// cost is a small fraction rather than a multiple."*
     ///
-    /// `docs/map/terrain_seam.md`'s node D replaced that double with a `Scene`
+    /// `docs/world/research/terrain_seam.md`'s node D replaced that double with a `Scene`
     /// building a real `MapTerrain`, which made the prediction testable and the
     /// old number stale. It came out as predicted: 12% of a real step rather
     /// than 267% of a synthetic one. Both readings are kept because the pair is

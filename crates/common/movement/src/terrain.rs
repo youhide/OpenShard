@@ -57,7 +57,7 @@ pub const PLAYER_HEIGHT: i32 = 16;
 /// the overlay rather than through the map, and a second copy of "halve a
 /// climbable" here would be the same flight of stairs climbed by two rules. So
 /// this builds the cover the overlay would have held and asks it. See
-/// `docs/map/realtime_map.md`'s R3.
+/// `docs/world/evidence/2026-08-23-era-r-the-map-you-hold.md`'s R3.
 fn platform_surface(base: i32, height: i32, climbable: bool) -> (i32, i32) {
     // The map's own heights are `i8` bases and `u8` art heights, which is
     // exactly what a cover is spelled in.
@@ -91,7 +91,7 @@ pub(crate) fn static_top(tile: &StaticTile, base: i32) -> i32 {
 /// the caller already has rather than a thing anybody stores. It used to be
 /// generic over how the map and the tile data were *held*, which bought exactly
 /// one property: a terrain with no lifetime, so it could be boxed in a struct
-/// field. Nothing is boxed any more; see `docs/map/terrain_seam.md`'s node D.
+/// field. Nothing is boxed any more; see `docs/world/research/terrain_seam.md`'s node D.
 ///
 /// `Copy`, because it is two pointers and a bool: an overlay that wants to keep
 /// one beside its own data copies it rather than borrowing the borrow.
@@ -106,7 +106,7 @@ pub struct MapTerrain<'a> {
     /// it optional would make the fast path something a holder could silently
     /// forget, leaving the step rule to re-derive every column from `tiledata`
     /// at six times the cost with nothing saying so. See
-    /// `docs/map/navigation_spans.md`'s N3.
+    /// `docs/world/evidence/2026-08-25-the-span-layer.md`'s N3.
     spans:    &'a SpanIndex,
     /// Whether water counts as ground. A boat or a fish says yes.
     ///
@@ -327,7 +327,7 @@ impl<'a> MapTerrain<'a> {
     /// lands at.
     ///
     /// **The rule as the map states it, and no longer what a step asks.** Since
-    /// `docs/map/navigation_spans.md`'s N3 every caller here goes through
+    /// `docs/world/evidence/2026-08-25-the-span-layer.md`'s N3 every caller here goes through
     /// [`Spans::check`], which reads the same rule off a bake instead of
     /// re-deriving it from the column's statics. This is what that bake is
     /// *proved equal to* — 248 million steps over facet 0, 0 disagreements, by
@@ -604,7 +604,7 @@ impl<'a> MapTerrain<'a> {
 /// Five of that trait's six implementors were an *action over* a terrain rather
 /// than a terrain, and the trait existed so a search could take any of them. It
 /// does not any more: a search takes a [`Footing`](crate::Footing), and a caller
-/// that wants the bare map takes the map. See `docs/map/terrain_seam.md`.
+/// that wants the bare map takes the map. See `docs/world/research/terrain_seam.md`.
 impl MapTerrain<'_> {
     pub fn land_is_water(&self, tile: Tile) -> bool {
         self.map()
@@ -633,7 +633,7 @@ impl MapTerrain<'_> {
     /// than once per node.** A search expands a tile into eight neighbours and
     /// pays for `start_surface` once; this is what it pays for eight times, and
     /// it reads the span bake rather than re-deriving the column from
-    /// `tiledata`. `docs/map/navigation_spans.md`'s N3 left the start half on
+    /// `tiledata`. `docs/world/evidence/2026-08-25-the-span-layer.md`'s N3 left the start half on
     /// the map on that ratio: 23.3 ns of a 170.8 ns node expansion.
     ///
     /// `to.z` is not read — a landing is decided by the column and by where the

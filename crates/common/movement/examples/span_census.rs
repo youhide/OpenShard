@@ -5,7 +5,7 @@
 //!   --client "/path/to/Ultima Online Classic"
 //! ```
 //!
-//! The census `docs/map/navigation_spans.md`'s storage decision is taken from.
+//! The census `docs/world/design_spans.md`'s storage decision is taken from.
 //! A span grid's whole cost is *how many spans there are* and *how they are
 //! addressed*, and both are properties of the map rather than of the design —
 //! so they are counted rather than assumed. The distribution matters more than

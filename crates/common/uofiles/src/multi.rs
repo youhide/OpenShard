@@ -225,7 +225,7 @@ impl Component {
     /// the copies did not agree about the edge of the world — the shard refused
     /// the placement, the client *wrapped* the offset, so a house built near
     /// x = 0 had a wall drawn on the far side of Britannia. See
-    /// `docs/map/realtime_map.md`'s R3.
+    /// `docs/world/evidence/2026-08-23-era-r-the-map-you-hold.md`'s R3.
     ///
     /// `None` where the result does not fit the world's own coordinates: off
     /// the map east or west, or a `dz` that leaves the `i8` a z is. Refusing is

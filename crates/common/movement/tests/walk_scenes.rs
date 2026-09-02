@@ -445,7 +445,7 @@ fn a_random_scene_is_walked_the_way_the_rules_say() {
 /// reading lays, so a fixture that stated the answer would agree with itself.
 /// The three layers compose in one order, over ground whose spans were baked.
 ///
-/// `docs/map/navigation_spans.md`'s N3 asks for exactly this, and it is a
+/// `docs/world/evidence/2026-08-25-the-span-layer.md`'s N3 asks for exactly this, and it is a
 /// composition test rather than a step test: since N3 the map's half of a
 /// landing is read off a [`SpanIndex`](openshard_movement::spans::SpanIndex)
 /// instead of derived from the column's statics, and the live world still has

@@ -916,7 +916,7 @@ than waiting for a phase of its own:
   same hundred entries coming back out — has not been asked.
 - ~~🚩 **A house has no floors, for movement — the step check has nothing to pick
   between.**~~ **Repaired 2026-08-23**, by
-  [`realtime_map.md`](map/realtime_map.md#r3--a-house-has-floors)'s R3.
+  [`realtime_map.md`](world/evidence/2026-08-23-era-r-the-map-you-hold.md#r3--a-house-has-floors)'s R3.
   `Cover::of_static` reads a platform now and lays two covers for one — the
   surface a body on top stands on and the body a mobile beside it walks into —
   and `walk::climbed` takes the highest of those *in reach and above what the
@@ -940,13 +940,13 @@ than waiting for a phase of its own:
   stand on one either.
   `CoverKind::Stands` is already the right type for the repair: a house floor is
   the general case of what `aboard` does for one ship. Found while writing
-  [`docs/map/navigation_spans.md`](map/navigation_spans.md), which names it
+  [`docs/world/design_spans.md`](world/design_spans.md), which names it
   because a span grid baked from client files will contain no player house
   either, and the gap would otherwise read as a pathfinding regression the day
   that lands. **Wants an in-game confirmation before the repair is scoped** —
   walk a character upstairs in a placed villa and see.
   **The repair is owned**, since 2026-08-23, by
-  [`map_rebuild.md`](map/map_rebuild.md#r3--a-house-is-a-layer-and-it-has-floors)'s
+  [`map_rebuild.md`](archive/world/map_rebuild.md#r3--a-house-is-a-layer-and-it-has-floors)'s
   R3: a house is the live layer over the map rather than a patch to it — which is
   what closed `mechanics.md`'s open row — and `Cover::of_static` grows the arm
   that makes a platform component a surface. This entry stays here because the

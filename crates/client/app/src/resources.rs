@@ -42,7 +42,7 @@ use openshard_uofiles::ttf_font::TtfFont;
 /// [`Resources::ground`]'s live layer, which is what the shard has put on the
 /// ground. It is here because the ground is here — the two are one facet, and
 /// splitting them across two structs is exactly the arrangement
-/// `docs/map/realtime_map.md`'s era R exists to end. See
+/// `docs/world/evidence/2026-08-23-era-r-the-map-you-hold.md`'s era R exists to end. See
 /// [`crate::clutter::project`], which is the only writer — and which writes the
 /// bodies standing on that ground in the same call, because refreshing one
 /// without the other is a step decided against two different moments.

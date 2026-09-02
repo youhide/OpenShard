@@ -5,7 +5,7 @@
 ## Closed: `can_step` does not check the corner, and two obstruct tests are red
 
 **Both are green**, and were closed by the corner-rule repair recorded in
-[`navigation_spans.md`](../../map/navigation_spans.md#out-of-scope-named) — *"`can_step`
+[`navigation_spans.md`](../../world/evidence/2026-08-25-the-span-layer.md#out-of-scope-named) — *"`can_step`
 has no corner rule, and the shard walked a creature with it"*. The two tests in
 `state/src/obstruct.rs` were what found it: they had been asking `can_step` for a
 rule that moved into `steps_out_of` in N3, and the answer taken was that

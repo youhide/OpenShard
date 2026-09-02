@@ -562,7 +562,7 @@ impl WorldMap {
     ///
     /// **O(the blocks that arrived**, since S3, and the shape of the answer is
     /// the same one at both ends of the wire — see
-    /// `docs/map/new_map_representation/what_a_change_costs.md`.
+    /// `plans/world/what_a_change_costs/PLAN.md`.
     ///
     /// Land is free of the question entirely: a block is
     /// [`CELLS_PER_BLOCK`] cells wherever it sits, so each one is written where

@@ -44,7 +44,7 @@ answer: where the code lives. A topic is a subsystem with a canon of its own.
 |---|---|---|
 | `protocol/` | `common/protocol`, `common/movement` (wire) | not migrated |
 | `server/` | `server/server`, `gateway`, `login`, `persistence`, `state` | not migrated |
-| `world/` | `server/world`, `common/movement` (search), `common/map`, `common/uofiles` | not migrated |
+| [`world/`](world/README.md) | `server/world`, `common/movement` (search), `common/map`, `common/basemap`, `common/tiles`, `common/uofiles` | **migrated** — the consolidation it replaces is in [`archive/world/`](archive/world/README.md) |
 | `items/` | `server/items`, `server/crafting` | not migrated |
 | `combat/` | `server/combat`, `skills`, `magic` | not migrated |
 | `housing/` | `server/housing`, boats | not migrated |
@@ -53,7 +53,10 @@ answer: where the code lives. A topic is a subsystem with a canon of its own.
 | [`render/`](render/README.md) | `client/render`, `client/artscan`, `client/pathtrace` | **migrated** — twelve superseded documents in [`archive/render/`](archive/render/README.md) |
 
 `render` is a domain separate from `client` on purpose: it is the majority of
-this corpus by volume and it has an oracle of its own.
+this corpus by volume and it has an oracle of its own. `world/` holds the
+documents of three readers that live in `client/render` — the radar raster, the
+building flood, the roof cutaway — because what each of them asks is a question
+about the map.
 
 Two directories sit outside the domain grid:
 

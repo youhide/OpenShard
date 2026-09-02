@@ -1,7 +1,7 @@
 //! N8's oracle on a real facet: **a facet patched into shape answers what the
 //! same facet baked whole answers.**
 //!
-//! `docs/map/navigation_spans.md`'s N8 names this as the one of its three "done
+//! `docs/world/evidence/2026-08-25-the-span-layer.md`'s N8 names this as the one of its three "done
 //! when"s that is not a number, and says what it is for: *"what it catches is a
 //! column reading its neighbour's run — the failure this layer's packing has
 //! always been one mistake away from, and which the bake's own comment says

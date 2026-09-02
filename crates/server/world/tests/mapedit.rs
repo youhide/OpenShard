@@ -280,7 +280,7 @@ fn graph_of(state: &WorldState) -> NavigationGraph {
 ///
 /// It *was* dropped, on the argument that a graph of somewhere else is worse
 /// than no graph at all and a facet-wide rebuild is half a minute on a tick.
-/// `docs/map/navigation_graph.md`'s G1 is what replaced the first half of that
+/// `docs/world/design_navigation_graph.md`'s G1 is what replaced the first half of that
 /// with the second: the regions the chunks cover, their neighbours, and the ring
 /// beyond for edges only.
 #[test]

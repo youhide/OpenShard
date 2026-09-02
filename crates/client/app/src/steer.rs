@@ -599,7 +599,7 @@ pub struct Steering {
     /// run" is this module's own business, and the terrain has no way to say so
     /// any more. It used to be counted by a `CountingTerrain` double whose
     /// `can_step` incremented a cell — an instrument that existed only because
-    /// the seam was a trait. See `docs/map/terrain_seam.md`'s node E.
+    /// the seam was a trait. See `docs/world/research/terrain_seam.md`'s node E.
     #[cfg(test)]
     plans:       std::cell::Cell<u32>,
     /// The arrows, and shift.
@@ -1777,7 +1777,7 @@ fn replay(footing: &Footing<'_>, from: Point, directions: &[Direction]) -> Vec<P
 /// each half of the plan wrapped its terrain in. `CachedTerrain` is gone: the
 /// oracle measured it at a 50.6% hit rate and about 5% *slower* than the calls
 /// it memoised, so the numbers it reported were about a thing not worth having.
-/// See `docs/map/terrain_seam.md`'s node 0.
+/// See `docs/world/research/terrain_seam.md`'s node 0.
 fn debug_plan(from: Point, goal: Point, elapsed: Duration, result: Option<&Plan>) {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if !*ENABLED.get_or_init(|| std::env::var_os("OPENSHARD_PATH_DEBUG").is_some()) {

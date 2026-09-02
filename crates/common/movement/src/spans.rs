@@ -1,6 +1,6 @@
 //! Where a body may stand, baked once instead of re-derived per step.
 //!
-//! `docs/map/navigation_spans.md`'s N1. A search spends 85% of its time asking
+//! `docs/world/evidence/2026-08-25-the-span-layer.md`'s N1. A search spends 85% of its time asking
 //! the map what a column holds — walking that column's statics, reading
 //! `tiledata` for each, and re-deriving the same platform arithmetic sixteen
 //! times per node expansion. This is that answer, computed once at load: a
@@ -290,7 +290,7 @@ pub struct SpanIndex {
     ///
     /// Indexed by the map's own block index and not by a second one of this
     /// module's — a parallel block addressing is a second thing to keep in step
-    /// with the map, and `docs/map/` is a catalogue of what that costs.
+    /// with the map, and `docs/world/` is a catalogue of what that costs.
     blocks: Vec<u32>,
     /// One per block that holds any static — 120,744 of 458,752 on facet 0.
     tables: Vec<BlockTable>,
@@ -393,7 +393,7 @@ impl SpanIndex {
     /// Bring the bake back in step with a base that moved under these chunks,
     /// and touch nothing else.
     ///
-    /// `docs/map/navigation_spans.md`'s N8. [`build`](Self::build) walks a whole
+    /// `docs/world/evidence/2026-08-25-the-span-layer.md`'s N8. [`build`](Self::build) walks a whole
     /// facet — 109.7 ms on Felucca, paid on the shard's tick *and* on the
     /// window's event-loop thread — and a publish moves one chunk of 7,168. This
     /// is the same bake over the blocks that chunk covers: each is rebuilt onto
@@ -480,7 +480,7 @@ impl SpanIndex {
     }
 
     /// How much memory the bake holds, in bytes — the number
-    /// `docs/map/navigation_spans.md` estimated before it was built.
+    /// `docs/world/evidence/2026-08-25-the-span-layer.md` estimated before it was built.
     #[must_use]
     pub fn resident_bytes(&self) -> usize {
         self.blocks.capacity() * size_of::<u32>()
@@ -674,7 +674,7 @@ impl<'a> Spans<'a> {
     ///
     /// [`MapTerrain::check`](crate::MapTerrain::check) with the column already
     /// resolved: the same rule, choosing among surfaces this layer stored rather
-    /// than deriving them from `tiledata` per step. `docs/map/navigation_spans.md`'s
+    /// than deriving them from `tiledata` per step. `docs/world/evidence/2026-08-25-the-span-layer.md`'s
     /// N2, and its whole content is that the answer did not change — the
     /// `span_check` example is where that is proved over the facet.
     ///

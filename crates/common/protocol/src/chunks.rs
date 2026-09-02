@@ -2,7 +2,7 @@
 //!
 //! Seven subcommands in the [`OPENSHARD_SUBCOMMANDS`] range, and together they
 //! are how a client of ours comes to draw the ground *the shard* is standing on
-//! rather than the ground on its own disk. `docs/map/new_map_representation/to_the_client.md`
+//! rather than the ground on its own disk. `docs/world/design_chunks_to_the_client.md`
 //! is the plan; this is its wire.
 //!
 //! ```text

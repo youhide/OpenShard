@@ -26,7 +26,7 @@
 //! live world put in the way, a rectangle to stay inside, a memo table, the
 //! absence of a map. Each was a kind of terrain because the seam was a trait,
 //! and each one being a kind of terrain was then the argument for the seam
-//! being a trait. See `docs/map/terrain_seam.md`.
+//! being a trait. See `docs/world/research/terrain_seam.md`.
 //!
 //! This is not that, and three properties are what keep it from becoming that:
 //!
@@ -254,7 +254,7 @@ impl<'a> Footing<'a> {
     /// The same ground with nothing the live world has put on it — what a coarse
     /// navigation graph is guided by and what its ordinary endpoints join over.
     ///
-    /// The graph is baked over the bare map (`docs/map/navigation_spans.md`'s
+    /// The graph is baked over the bare map (`docs/world/evidence/2026-08-25-the-span-layer.md`'s
     /// N4), so the corridor it proposes has to be read over the bare map too: a
     /// door that happens to be shut, or a crate somebody dropped, must not be
     /// able to rewrite a route's *topology*. What the live world has to say is

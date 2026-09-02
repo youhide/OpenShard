@@ -32,12 +32,12 @@
 //! keeps that in its own indexes, because the client has no identity to offer:
 //! a `GroundItem` is a position, a graphic, a hue and an amount. An owner field
 //! here would be a hole one end fills with a lie. See
-//! `docs/map/terrain_seam.md`'s node E.
+//! `docs/world/research/terrain_seam.md`'s node E.
 //!
 //! # Why this is the map's crate and not movement's
 //!
 //! It is storage — a span and a kind per tile — and the third layer of the map
-//! `docs/map/map_rebuild.md` describes: the ground, the statics, and what the
+//! `docs/archive/world/map_rebuild.md` describes: the ground, the statics, and what the
 //! live world has laid over them. Every *rule* that reads one stayed in
 //! `openshard-movement`, which is why nothing here knows how tall a body is; see
 //! [`Body`].

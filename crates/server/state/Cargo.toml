@@ -20,7 +20,7 @@ openshard-gateway.workspace = true
 # For `MapSnapshot`, which is what a facet's ground *is*: the published map and
 # the revision a reader holds of it. A facet used to keep a boxed `Terrain`
 # so this crate could stay below the map — an abstraction it never used for
-# anything but hiding one concrete type. See `docs/map/terrain_seam.md`'s node D.
+# anything but hiding one concrete type. See `docs/world/research/terrain_seam.md`'s node D.
 openshard-map.workspace = true
 openshard-movement.workspace = true
 openshard-protocol.workspace = true

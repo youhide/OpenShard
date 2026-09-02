@@ -41,7 +41,7 @@
 //! route be planned *through* a shut door to find out where the way would go, and
 //! the walk stop in front of it. `steer::plan` is the reader; the server has the same pair
 //! under the same name (`state::obstruct`'s `Obstacle::door`), and since node E
-//! of `docs/map/terrain_seam.md` it is not merely the same name but the same
+//! of `docs/world/research/terrain_seam.md` it is not merely the same name but the same
 //! type: both ends build an `openshard_map::overlay::Overlay`.
 //!
 //! **The graphic is what says a door is open, and its own art disagrees.** This

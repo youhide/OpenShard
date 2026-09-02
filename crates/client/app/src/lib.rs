@@ -272,7 +272,7 @@ pub enum WorldSource<'a> {
     BaseSet(&'a Path),
     /// The shard's own ground, fetched over the game connection after login.
     ///
-    /// `docs/map/new_map_representation/to_the_client.md`'s E2. It needs a shard
+    /// `docs/world/design_chunks_to_the_client.md`'s E2. It needs a shard
     /// — an offline viewer with this arm has nobody to ask — and it is the one
     /// arm under which the window exists before the facet does. What that costs
     /// is stated once, on [`crate::resources::Resources::map`].
@@ -564,7 +564,7 @@ pub fn run<D: Dial + Send + 'static>(
     // a base set of ours and the patch log beside it. It goes through the same
     // resolution the shard's boot and the two bakes use, so a client and a shard
     // pointed at one base set cannot arrive at different revisions of it —
-    // `docs/map/new_map_representation/to_the_client.md`'s E0.
+    // `docs/world/design_chunks_to_the_client.md`'s E0.
     //
     // `None` is E2's arm and reads nothing: the ground is the shard's, and it
     // arrives on the connection opened further down. Everything below that used

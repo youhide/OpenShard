@@ -232,7 +232,7 @@ fn shape_of<'a>(design: Option<&'a [Component]>, state: &'a WorldState, multi: M
 /// spell out a `z` and a `height` beside the tile and hand those to
 /// `FacetState::block`, which is a cover with the kind left out — and leaving
 /// the kind out is exactly why a house had no floors. See
-/// `docs/map/realtime_map.md`'s R3.
+/// `docs/world/evidence/2026-08-23-era-r-the-map-you-hold.md`'s R3.
 ///
 /// One component can produce two of these on one tile: a stair tread is a
 /// surface and a body. See [`openshard_map::overlay::Cover::of_static`].
@@ -1018,7 +1018,7 @@ fn check_region(state: &WorldState, facet: Facet, at: Point, covered: &[Tile]) -
 /// components — a roof driven into a hillside over a tile whose ground level is
 /// empty. `can_fit` at the house's z already refuses the hill wherever the house
 /// has a wall, and the remaining case needs a terrain question this seam does not
-/// have; see `docs/map/terrain_seam.md`.
+/// have; see `docs/world/research/terrain_seam.md`.
 fn check_ground(state: &WorldState, facet: Facet, at: Point, footprint: &[Footprint]) -> Result<(), Refusal> {
     let Some(terrain) = state.map_terrain(facet) else {
         return Ok(()); // no map, no opinion — every other check here says the same

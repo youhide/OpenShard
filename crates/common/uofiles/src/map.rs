@@ -5,7 +5,7 @@
 //! the one thing in the workspace that has heard of `.mul`, `.uop` and `staidx`,
 //! and its whole job is to turn those bytes into one of those. A shard that
 //! never had a client install is what that split is for — see
-//! `docs/map/new_map_representation/overview.md`.
+//! `docs/world/research/a_map_we_can_change.md`.
 //!
 //! # Block order is column-major, and nothing tells you
 //!

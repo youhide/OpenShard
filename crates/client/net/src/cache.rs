@@ -1,6 +1,6 @@
 //! The ground the shard gave us, kept.
 //!
-//! `docs/map/new_map_representation/to_the_client.md`'s E3, and the whole of it
+//! `docs/world/design_chunks_to_the_client.md`'s E3, and the whole of it
 //! in one sentence: **the 21.3 MiB is paid once**. E2 taught a client to take
 //! the world off the wire and it took it again on every start; this is where
 //! what arrived is written down, read back, and compared with what the shard

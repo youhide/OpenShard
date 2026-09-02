@@ -96,7 +96,7 @@ four are structural; the fifth is the one that decides it.
 so both silently answered `&[]`. Housing got away with it because its three
 readers reach the facet's own ground directly — `state.facet_state(facet).terrain`
 then, `WorldState::map_terrain` since
-[`map/terrain_seam.md`](map/terrain_seam.md)'s D; the first caller to
+[`map/terrain_seam.md`](world/research/terrain_seam.md)'s D; the first caller to
 ask a *wrapped* terrain about a house's shape would have got an empty list and no
 error.
 

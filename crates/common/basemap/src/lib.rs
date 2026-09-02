@@ -44,14 +44,14 @@
 //!
 //! The table is redundant today: a chunk's own header says how long it is, so a
 //! whole-facet read could walk them. It is here because
-//! `docs/map/new_map_representation/plan.md`'s direction G — chunks fetched on
+//! `docs/world/evidence/2026-08-25-seven-directions.md`'s direction G — chunks fetched on
 //! approach and dropped behind — is a seek and a read away with it and a full
 //! scan away without it, and 57 KiB on a Felucca-sized facet is not a reason to
 //! close that door.
 //!
 //! # What version 2 added, and why all three at once
 //!
-//! `docs/map/new_map_representation/what_a_change_costs.md`'s S1. A version byte
+//! `plans/world/what_a_change_costs/PLAN.md`'s S1. A version byte
 //! names a layout, so three changes that were each worth a bump are one bump:
 //!
 //! - **The chunks are deflated.** 107,528,650 bytes of Felucca become
@@ -668,7 +668,7 @@ fn decode_chunks(path: &Path, bytes: &[u8], index: &BaseIndex) -> Result<Vec<Chu
 /// client that kept a copy of one and compared revisions with the other would
 /// draw a world nobody built. A shard tells a client this in its
 /// `WorldNotice`, and the client files what it keeps under it — see
-/// [`WorldId`], and `docs/map/new_map_representation/to_the_client.md`'s E3.
+/// [`WorldId`], and `docs/world/design_chunks_to_the_client.md`'s E3.
 ///
 /// **Of the base set alone, and not of the log beside it.** A base set never
 /// changes, so this never does; where the world has got to since is the

@@ -1,6 +1,6 @@
 //! What a base set costs to write and to read, phase by phase.
 //!
-//! The numbers in `docs/map/new_map_representation/what_a_change_costs.md`'s S1
+//! The numbers in `plans/world/what_a_change_costs/PLAN.md`'s S1
 //! are about *size*; this is the other half, and it exists because a format that
 //! trades bytes for a stall on the path a person waits on has not been measured
 //! until somebody has run this.

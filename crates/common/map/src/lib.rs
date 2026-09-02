@@ -10,7 +10,7 @@
 //! lives in `openshard_uofiles::map`, hands back one of these, and is the only
 //! thing in the workspace that has heard of a `.mul`. A world that never came
 //! from an install is the point of the split, and it is what
-//! `docs/map/new_map_representation/` is building towards.
+//! `docs/world/` is building towards.
 //!
 //! Eight modules, and the order they depend on each other in:
 //!
@@ -30,7 +30,7 @@
 //!
 //! Bytes are not a file: nothing here opens one, and where a base set or a
 //! patch log lives on disk is a caller's business — `openshard_basemap` is the
-//! crate that answers that. See `docs/map/new_map_representation/plan.md`.
+//! crate that answers that. See `docs/world/evidence/2026-08-25-seven-directions.md`.
 
 pub mod chunk;
 pub mod codec;

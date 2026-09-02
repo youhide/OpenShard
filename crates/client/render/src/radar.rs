@@ -547,7 +547,7 @@ impl RadarLodSelector {
 /// asks for its own region at its own level and for nothing else — which is
 /// what makes an open facet map unable to take a chunk away from the minimap,
 /// the defect one region standing for both windows used to be
-/// (`docs/map/radar.md`, defect 3.3).
+/// (`docs/world/design_radar.md`, defect 3.3).
 ///
 /// A key the cache already holds is not requested and is still protected: a
 /// ready chunk about to be drawn is precisely the one eviction must not take.
@@ -644,7 +644,7 @@ pub struct RadarStepReport {
 ///
 /// `examples/radar_soak.rs` is that second caller. It drives this function frame
 /// after frame against the shipped map with no window at all, which is how the
-/// readings `docs/map/radar.md` §10.1 asks for get taken at every scale a person
+/// readings `docs/world/design_radar.md` §10.1 asks for get taken at every scale a person
 /// might have rather than at whichever one the machine in front of them happens
 /// to be. Were the harness to spell this sequence out for itself, it would be
 /// measuring a radar step nothing plays — `docs/render/design_frame_assembly.md`'s hazard arriving
@@ -1108,7 +1108,7 @@ impl RadarCache {
     /// publish leaves every other product reachable only through
     /// [`select_ready`](Self::select_ready)'s stale path — 7,167 good squares
     /// of Felucca given up for the one that moved, which is
-    /// `docs/map/radar.md` §10.2 stated from the writer's end.
+    /// `docs/world/design_radar.md` §10.2 stated from the writer's end.
     ///
     /// `touched` names the **level-zero chunks whose content changed**, which
     /// is `openshard_map::patch::Patch::touched_chunks` at the other end of the
@@ -1232,7 +1232,7 @@ impl RadarCache {
     /// merely because they share an ancestor, and no edit can put an
     /// 8192²-tile walk in a frame (see `SWEEP_LOD`).
     ///
-    /// What the clamp costs is written down in `docs/map/radar.md`'s section 10:
+    /// What the clamp costs is written down in `docs/world/design_radar.md`'s section 10:
     /// a facet-wide revision bump already leaves every coarse product reachable
     /// only through [`Self::select_ready`]'s stale-exact path, because a parent
     /// needs four children at the *new* revision and an edit rebuilds one. The

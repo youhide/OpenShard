@@ -493,7 +493,7 @@ fn rules_of(config: &Config, facet: Facet) -> FacetRules {
 /// derived from that file, and the install's `map0LegacyMUL.uop` still sits
 /// there with its old length and its old mtime — so a graph baked over the
 /// install would validate happily against a world it has never seen. That is
-/// `docs/map/new_map_representation/plan.md`'s direction D arriving one caller
+/// `docs/world/evidence/2026-08-25-seven-directions.md`'s direction D arriving one caller
 /// early, and it is the reason this function exists rather than an `if` at the
 /// call site.
 fn facet_source(

@@ -491,7 +491,7 @@ impl World {
         // `steps_out_of` rather than in one landing. A mobile the shard moves is
         // held to the rule its own planner uses — `find_path` refuses to *plan*
         // a corner cut, and a creature stepping straight at its quarry used to
-        // walk one. See `docs/map/navigation_spans.md`'s N3.
+        // walk one. See `docs/world/evidence/2026-08-25-the-span-layer.md`'s N3.
         //
         // It answers `None` off the edge of the coordinate space too, where
         // there is nowhere to step at all: the same refusal, and there is no

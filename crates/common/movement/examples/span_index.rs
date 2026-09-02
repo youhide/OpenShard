@@ -6,7 +6,7 @@
 //!   --client "/path/to/Ultima Online Classic"
 //! ```
 //!
-//! `docs/map/navigation_spans.md`'s N1 is done when
+//! `docs/world/evidence/2026-08-25-the-span-layer.md`'s N1 is done when
 //! `Spans::surfaces(x, y)` returns exactly what
 //! [`stand_surfaces`](openshard_movement::surfaces::stand_surfaces) returns for
 //! **every** column of facet 0 and for both abilities, and when the built size

@@ -43,7 +43,7 @@
 //!   move one wall is that trade taken deliberately.
 //! - **Sixty-four is the grid every artefact derived from terrain is already
 //!   keyed to** — `client/render`'s `BASE_CHUNK_TILES`, and the cache key
-//!   `docs/map/minimap_lod_plan.md` asks for. Direction D's invalidation is then
+//!   `docs/world/design_minimap_lod.md` asks for. Direction D's invalidation is then
 //!   one-to-one instead of a fan-out.
 //!
 //! It is *not* the same type as a radar chunk, and `docs/render/design_pixel_spaces.md` is why:
@@ -626,7 +626,7 @@ struct Placed<'a> {
 /// [`assemble`]'s other half. That one builds a world out of a complete set;
 /// this one takes a world and a handful of squares that have moved since, which
 /// is what a client with a cache does when the shard tells it the ground is at a
-/// newer revision — `docs/map/new_map_representation/to_the_client.md`'s E3 —
+/// newer revision — `docs/world/design_chunks_to_the_client.md`'s E3 —
 /// and what a client told about a publish does with the chunks it refetches.
 ///
 /// **It writes into the world rather than building a second one.** A block's

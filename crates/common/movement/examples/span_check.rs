@@ -6,7 +6,7 @@
 //!   --client "/path/to/Ultima Online Classic"
 //! ```
 //!
-//! `docs/map/navigation_spans.md`'s N2 is done when
+//! `docs/world/evidence/2026-08-25-the-span-layer.md`'s N2 is done when
 //! [`Spans::check`](openshard_movement::spans::Spans::check) answers exactly
 //! what [`MapTerrain::check`](openshard_movement::MapTerrain::check) answers, and
 //! that is two questions rather than one:

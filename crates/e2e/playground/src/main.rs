@@ -176,7 +176,7 @@ struct Cli {
 
     /// Give the window its ground over the connection instead of off the disk.
     ///
-    /// `docs/map/new_map_representation/to_the_client.md`'s E2, and the reason
+    /// `docs/world/design_chunks_to_the_client.md`'s E2, and the reason
     /// it is worth having here rather than only on `openshard-client-app`: this
     /// is the one launcher where both ends are in one process, so a world that
     /// arrives wrong arrives wrong beside the world it was cut from.
@@ -237,7 +237,7 @@ fn main() -> ExitCode {
     // process reading two different worlds is the disagreement this playground
     // exists to make impossible, and a base set is a *different world* from the
     // install it was imported from the moment one patch is committed to the log
-    // beside it. See `docs/map/new_map_representation/to_the_client.md`.
+    // beside it. See `docs/world/design_chunks_to_the_client.md`.
     let base_set = openshard_e2e_shard::window_base_set(operator.as_ref());
     if let Some(base_set) = &base_set {
         match cli.world_from_shard {

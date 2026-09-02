@@ -14,7 +14,7 @@
 //! [`steps_out_of`](crate::steps_out_of), which resolves the place being
 //! stepped off once and each cardinal neighbour once rather than once as a
 //! destination and again as some diagonal's flank. N4 stopped paying it in the
-//! bake and `docs/map/navigation_spans.md` filed the rest; this module is the
+//! bake and `docs/world/evidence/2026-08-25-the-span-layer.md` filed the rest; this module is the
 //! rest, in one place, where a fourth copy cannot be written without noticing
 //! that a third already exists.
 //!
@@ -27,7 +27,7 @@
 //! a tile this calls reachable really is one. A flood keyed by *place* is a
 //! different structure over a different index — [`NavigationGraph`] has one per
 //! region, and the facet-wide one is what
-//! `docs/map/navigation_spans.md`'s N5 is waiting on.
+//! `docs/world/evidence/2026-08-25-the-span-layer.md`'s N5 is waiting on.
 //!
 //! [`NavigationGraph`]: crate::NavigationGraph
 //!

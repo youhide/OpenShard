@@ -6,7 +6,7 @@
 //!
 //! # A node is a place to stand, and an edge goes one way
 //!
-//! Both halves of `docs/map/navigation_spans.md`'s N4, and they are one repair.
+//! Both halves of `docs/world/evidence/2026-08-25-the-span-layer.md`'s N4, and they are one repair.
 //! The graph used to sample **one height per tile** — `ground_z`, the land alone
 //! — so a tile whose only surface is a static floor came back at the ground
 //! beneath it. Britain's castle plateau is land at z=30 over a city at z=0 and
@@ -136,7 +136,7 @@ pub struct NavigationGraph {
 /// that change and the same reason each time: a prefix sum *is* the ordering, so
 /// re-laying one owner's run moves every run after it and repairs every offset
 /// behind it. The span index's `BlockTable` and `WorldMap`'s `blocks` are the
-/// other two; `docs/map/navigation_graph.md`'s G1 is the argument in full, and
+/// other two; `docs/world/design_navigation_graph.md`'s G1 is the argument in full, and
 /// what it buys here is that a publish rebuilds the regions around it instead of
 /// dropping a graph that costs 11.6 s to build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -320,7 +320,7 @@ struct RegionBake {
 /// *border*, so every neighbour of a rebuilt region is sampled too, to be the
 /// far side of one. For [`NavigationGraph::build`] that is every region of the
 /// facet; for [`NavigationGraph::rebake_chunks`] it is the ring outside the ring
-/// — `docs/map/navigation_graph.md`'s G1 calls it two rings and a half, and this
+/// — `docs/world/design_navigation_graph.md`'s G1 calls it two rings and a half, and this
 /// is the half.
 struct Held {
     /// Which entry of [`bakes`](Self::bakes) a region is, or [`NOT_HELD`].
@@ -581,7 +581,7 @@ fn crossings(
 /// The filter is [`can_step`](crate::can_step) asked of the place itself, which
 /// is what drops a column the live world has walled off. A production bake runs
 /// over an empty overlay by design — a door that happened to be shut is not a
-/// property of the ground, see `docs/map/navigation_graph_bake.md` — so on the
+/// property of the ground, see `docs/world/reference/navigation_artifact.md` — so on the
 /// shard's own artifact this only ever drops what the map itself refuses.
 ///
 /// One function, and a *query* reads it again — [`RegionPlaces::sampled`] is
@@ -912,7 +912,7 @@ impl NavigationGraph {
 
     /// Bring the graph back in step with ground that moved under these chunks.
     ///
-    /// `docs/map/navigation_graph.md`'s **G1**, and the third artefact of
+    /// `docs/world/design_navigation_graph.md`'s **G1**, and the third artefact of
     /// `what_a_change_costs.md`'s S3: the span index and `WorldMap`'s statics
     /// already follow a publish locally, and this is the one that used to be
     /// *dropped* instead — 11.6 s to build, on a tick an operator typed into.
@@ -2175,7 +2175,7 @@ fn distance(from: Point, to: Point) -> u32 {
 /// The four refusals used to be one string — `unreachable_or_live_refinement`
 /// — which is four different repairs wearing one word. Telling them apart is
 /// what the facet-0 oracle needed to say *why* the router refuses a route past
-/// one region, rather than only that it does. See `docs/map/terrain_seam.md`.
+/// one region, rather than only that it does. See `docs/world/research/terrain_seam.md`.
 ///
 /// **It was diagnostics-only until a player asked.** A client that cannot plan
 /// a route owes the person who clicked a reason, and the reasons here are the

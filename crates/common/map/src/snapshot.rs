@@ -2,7 +2,7 @@
 //!
 //! One process loads a facet once — through an importer, which is the only kind
 //! of thing that can mint revision 1 — and everything downstream borrows what it
-//! loaded. See `docs/map/new_map_representation/snapshot.md` for how this began
+//! loaded. See `docs/world/evidence/2026-08-25-one-world-one-door.md` for how this began
 //! as a revision that could not yet change.
 //!
 //! It can now: [`MapSnapshot::publish`] applies a [`Patch`] and moves the facet
@@ -201,7 +201,7 @@ impl MapSnapshot {
     /// which half the chunks are in. A shard moves its ground by applying a patch
     /// it has the whole history for; a client is handed the chunks that changed
     /// and has no patch at all — see
-    /// `docs/map/new_map_representation/to_the_client.md`, which argues why whole
+    /// `docs/world/design_chunks_to_the_client.md`, which argues why whole
     /// chunks travel rather than operations.
     ///
     /// The revision it moves to is the chunks' own, and **it is not checked

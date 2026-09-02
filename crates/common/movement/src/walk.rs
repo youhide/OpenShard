@@ -488,7 +488,7 @@ pub fn predict_step(footing: &Footing<'_>, from: Point, tile: Tile) -> i32 {
 /// diagonals' flanks) from one of them, and re-deriving these per landing is
 /// most of what made `8 × step_allowed` cost 1,105 ns where the same eight
 /// answers cost 171. See [`steps_out_of`] and
-/// `docs/map/navigation_spans.md`'s N3.
+/// `docs/world/evidence/2026-08-25-the-span-layer.md`'s N3.
 #[derive(Clone, Copy, Debug)]
 struct Stance {
     /// The feet — ServUO's `startZ`, and what the body's height is measured
@@ -859,7 +859,7 @@ pub fn sight_clear(footing: &Footing<'_>, from: Point, to: Point) -> bool {
 /// needs both flanks and everything else needs only one, so its creatures cut
 /// corners its players cannot. This engine gives everybody the player's rule,
 /// which is also the rule the baked graph and every plan are made of. The
-/// divergence is deliberate and argued in `docs/map/navigation_spans.md`'s
+/// divergence is deliberate and argued in `docs/world/evidence/2026-08-25-the-span-layer.md`'s
 /// *Out of scope, named*; if the lax reading is ever wanted, this is where it
 /// goes.
 ///

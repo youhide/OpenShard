@@ -62,7 +62,7 @@ const WANDER_IN_EIGHT: u32 = 3;
 /// How many *nodes* an exact chase plan may finalise before it gives up.
 ///
 /// Ample to round a building; an unreachable quarry is not worth more. It is
-/// not a reach: since `docs/map/navigation_spans.md`'s N3b a column with two
+/// not a reach: since `docs/world/evidence/2026-08-25-the-span-layer.md`'s N3b a column with two
 /// floors can be finalised twice, so this bounds the work rather than the
 /// distance — and past it the answer comes from the coarse graph instead of
 /// from a bigger number. See [`step_toward`].
@@ -807,7 +807,7 @@ fn will_move(state: &WorldState, creature: EntityId, dir: Direction) -> bool {
 /// two blockers meet, and the flanks are not a question one landing can answer.
 /// This is the reading [`find_path`](openshard_movement::find_path) plans with,
 /// so a chase that walks straight at its quarry is held to the rule its own
-/// route already obeys — see `docs/map/navigation_spans.md`'s N3.
+/// route already obeys — see `docs/world/evidence/2026-08-25-the-span-layer.md`'s N3.
 ///
 /// A diagonal refused by a *flank* has no door to name, even when a door stands
 /// in that flank: the door half below asks about the tile being stepped onto,

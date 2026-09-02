@@ -49,7 +49,7 @@ use crate::navigation::{
 const MAGIC: &[u8; 8] = b"OSNAV\0\r\n";
 /// Increment whenever the bytes change shape, whatever the graph in them means.
 ///
-/// 6 is `docs/map/navigation_graph.md`'s G1: the two prefix-sum offset arrays
+/// 6 is `docs/world/design_navigation_graph.md`'s G1: the two prefix-sum offset arrays
 /// became tables of `base` and `count`, so that a publish can re-lay one
 /// region's nodes and one node's edges where they stand. The graph a version 5
 /// file holds is still a graph this code would agree with — it is the
@@ -59,7 +59,7 @@ const MAGIC: &[u8; 8] = b"OSNAV\0\r\n";
 const FORMAT_VERSION: u32 = 6;
 /// Increment whenever graph construction or static movement semantics change.
 ///
-/// 4 is `docs/map/navigation_spans.md`'s N4: a node is a standing place rather
+/// 4 is `docs/world/evidence/2026-08-25-the-span-layer.md`'s N4: a node is a standing place rather
 /// than a tile, and a portal joins two of them in one direction. The bytes did
 /// not change shape — a node was always a `Point` and the walkable bitmap was
 /// always per tile — so nothing but this number would stop a shard from loading
@@ -232,7 +232,7 @@ pub fn stamp_of(client_dir: &Path, facet: Facet, revision: MapRevision) -> Resul
 /// `None` is a world nobody has edited: an absent file is not a zero-length
 /// one, and stamping a file that is not there is not a thing this can do.
 ///
-/// This is `docs/map/new_map_representation/plan.md`'s direction D arriving one
+/// This is `docs/world/evidence/2026-08-25-seven-directions.md`'s direction D arriving one
 /// caller early. D's answer is that the revision is the whole key and the file
 /// stamps go away; until then the revision is carried *and* the real inputs are
 /// stamped, which is strictly more than either alone.
@@ -785,7 +785,7 @@ fn encode(mut w: impl Write, g: &NavigationGraph, stamp: &Stamp) -> io::Result<(
     // The tables, and they are what the file carries now: a run is written as it
     // stands, dead entries and all, so that saving a graph a publish has already
     // moved is the same operation as saving one straight off a bake. See
-    // `NavigationGraph::Run`, and `docs/map/navigation_graph.md`'s G1.
+    // `NavigationGraph::Run`, and `docs/world/design_navigation_graph.md`'s G1.
     for run in &g.region_runs {
         put_u32(&mut w, run.base)?;
         put_u32(&mut w, run.count)?;

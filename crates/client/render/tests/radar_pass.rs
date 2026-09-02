@@ -140,7 +140,7 @@ fn adjacent_chunks_each_draw_their_own_pixels() {
 /// breaks is not a crash — two resident chunks holding one layer draw the same
 /// picture twice, which reads as terrain that has not arrived yet.
 ///
-/// `docs/map/radar.md`'s 10.3. The bookkeeping was safe only by arithmetic —
+/// `docs/world/design_radar.md`'s 10.3. The bookkeeping was safe only by arithmetic —
 /// one insert of one fixed-size page can put the budget at most one page over,
 /// so the eviction list was never longer than one and taking its first element
 /// happened to be taking all of it. That argument lived in a different file from
@@ -308,7 +308,7 @@ fn two_identical_draws_grow_the_instance_buffer_once() {
 
 /// **The page cache says what it did, and what it could not do.**
 ///
-/// R7 of `docs/map/radar.md`: three of these numbers were written and none was
+/// R7 of `docs/world/design_radar.md`: three of these numbers were written and none was
 /// readable. `evicted` and `over_capacity_draws` look identical on screen —
 /// terrain that is not there — and mean opposite things. An eviction is this
 /// cache working, since a page is only a copy and the chunk is still on the

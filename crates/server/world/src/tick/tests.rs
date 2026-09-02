@@ -1013,7 +1013,7 @@ fn a_server_step_does_not_cut_a_corner() {
     // of the step rule lives in `steps_out_of` rather than in one landing. The
     // decree used to ask `can_step`, which answers for the destination tile
     // alone — so `find_path` refused to *plan* a corner cut and the shard then
-    // walked one on the next order. See `docs/map/navigation_spans.md`'s N3.
+    // walked one on the next order. See `docs/world/evidence/2026-08-25-the-span-layer.md`'s N3.
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
@@ -6247,7 +6247,7 @@ fn a_prepared_blow_releases_after_its_short_contact_interval() {
 // under a comment reading *"Adjacent tiles can still be separated by a closed
 // door or wall"*) therefore cannot fire at all. The check is left in place —
 // it becomes live the moment a sight line learns about height — and the finding
-// is filed in `docs/map/terrain_seam.md`. What is deleted is a test that only
+// is filed in `docs/world/research/terrain_seam.md`. What is deleted is a test that only
 // ever proved its own double answered `false`.
 
 #[test]
@@ -17552,7 +17552,7 @@ fn context_menus_off_sends_no_popup() {
 /// none: no map can make a sight line between adjacent tiles anything but clear.
 /// The double this replaced said sight was never clear from anywhere to
 /// anywhere, which let a test claim a wall stood between two tiles that touch.
-/// See `docs/map/terrain_seam.md` — the gate it was standing in for cannot fire
+/// See `docs/world/research/terrain_seam.md` — the gate it was standing in for cannot fire
 /// at melee range at all.
 fn a_wall_two_tiles_across() -> Scene {
     let mut scene = Scene::flat_holding(START.x + 4, START.y + 4, 0);
@@ -19209,7 +19209,7 @@ fn a_chase_does_not_cut_a_corner_past_a_bystander() {
 /// The walkway is the other half: five units up, laid on ground that has no
 /// room under it, so standing on it is standing somewhere `ground_z` does not
 /// report. That is the raised origin
-/// [`docs/map/navigation_spans.md`](../../../../../docs/map/navigation_spans.md)'s
+/// [`docs/world/evidence/2026-08-25-the-span-layer.md`](../../../../../docs/world/evidence/2026-08-25-the-span-layer.md)'s
 /// N7 asks for by name — the one that would have passed for the wrong reason
 /// before N4 gave the graph a node per place rather than per tile.
 fn two_corridors() -> Scene {
@@ -19274,7 +19274,7 @@ fn walk_toward(world: &mut World, from: Point, to: Point) -> Point {
 /// The shard walks a creature a route the exact search cannot see, and the
 /// baked graph is what carries it.
 ///
-/// **[`docs/map/navigation_spans.md`](../../../../../docs/map/navigation_spans.md)'s
+/// **[`docs/world/evidence/2026-08-25-the-span-layer.md`](../../../../../docs/world/evidence/2026-08-25-the-span-layer.md)'s
 /// N7**, and the first thing on the shard to read `FacetState::coarse`. The
 /// artifact has been loaded, validated and paid for since the terrain-seam work;
 /// what it had was one test for its only reader. Server AI planned with flat
@@ -19390,7 +19390,7 @@ const DOORWAY: (u16, u16) = (90, 32);
 /// A refused long route is remembered, and the graph is not asked again until
 /// it lapses.
 ///
-/// **[`docs/map/navigation_spans.md`](../../../../../docs/map/navigation_spans.md)'s
+/// **[`docs/world/evidence/2026-08-25-the-span-layer.md`](../../../../../docs/world/evidence/2026-08-25-the-span-layer.md)'s
 /// N7 finding.** `ai::step_toward` is a pure function of the world, so a body
 /// following something it cannot reach paid the whole endpoint join on *every*
 /// beat and had nowhere to write down that it had already asked. A chase does

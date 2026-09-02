@@ -5783,7 +5783,7 @@ fn frames_panel(ui: &mut egui::Ui, hud: &Hud) {
 /// one another. `mib` is handed in so this and the composite grid above spell
 /// a byte count the same way.
 ///
-/// R7 of `docs/map/radar.md`. Every number here was already being written and
+/// R7 of `docs/world/design_radar.md`. Every number here was already being written and
 /// none of it was readable, which for `over_capacity_draws` in particular means
 /// a truncated draw — chunks silently dropped from a region wider than the page
 /// array — looked exactly like terrain that had not finished loading.

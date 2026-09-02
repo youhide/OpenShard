@@ -15,7 +15,7 @@
 //!   remembered to carry together.
 //! - **A bake cannot reach the live layer.** It takes [`World::snapshot`], which
 //!   is the ground, the statics and a revision — and has no field to reach a
-//!   door through. `docs/map/map_rebuild.md`'s invariant is a borrow rather than
+//!   door through. `docs/archive/world/map_rebuild.md`'s invariant is a borrow rather than
 //!   a rule anybody has to remember, and there is deliberately no accessor that
 //!   hands out both halves at once.
 //! - **The tile table stays outside.** Its scope is different: one install has
@@ -145,7 +145,7 @@ impl World {
     /// [`publish`](Self::publish)'s counterpart on the *other* end of the wire.
     /// A shard moves its ground by applying a patch it has the whole history for;
     /// a client is handed the chunks that changed and has no patch at all — see
-    /// `docs/map/new_map_representation/to_the_client.md`, which argues why whole
+    /// `docs/world/design_chunks_to_the_client.md`, which argues why whole
     /// chunks travel rather than operations.
     ///
     /// The revision it hands back is the chunks' own, and it is the world's

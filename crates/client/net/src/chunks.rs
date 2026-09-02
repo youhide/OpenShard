@@ -4,7 +4,7 @@
 //! deliberately left out: that phase built the wire and one chunk's round trip,
 //! and said that "the bookkeeping over many chunks in flight" belonged to
 //! whoever knew what it wanted a progress line to say. This is it —
-//! `docs/map/new_map_representation/to_the_client.md`'s E2.
+//! `docs/world/design_chunks_to_the_client.md`'s E2.
 //!
 //! # It is a state machine and not a loop
 //!

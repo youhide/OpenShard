@@ -499,7 +499,7 @@ impl LandGrid {
 
     /// One block's sixty-four cells, row-major within the block.
     ///
-    /// Never more than one block: `docs/map/new_map_representation/plan.md`'s
+    /// Never more than one block: `docs/world/evidence/2026-08-25-seven-directions.md`'s
     /// direction G holds chunks lazily, and a slice spanning two of them is the
     /// one thing that would make that expensive to reach.
     ///

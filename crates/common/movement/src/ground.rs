@@ -176,7 +176,7 @@ impl Ground {
     /// how a client's moves: it holds no patch and no history, only the chunks a
     /// publish notice named and it went and fetched. See
     /// [`World::take_chunks`], which is the half without the bake, and
-    /// `docs/map/new_map_representation/to_the_client.md`'s E4.
+    /// `docs/world/design_chunks_to_the_client.md`'s E4.
     ///
     /// **The rebake is this method's reason for existing**, exactly as it is
     /// `publish`'s: the span layer is a projection of the base, and this is the

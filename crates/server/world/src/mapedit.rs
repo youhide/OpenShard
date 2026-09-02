@@ -37,7 +37,7 @@
 //! local** since direction D: the span index over the chunks the patch named
 //! (0.3 ms on Felucca, where a facet-wide bake was 109.7), and the coarse router
 //! over the two rings of regions around them (80 ms, where a facet-wide bake is
-//! half a minute — see `docs/map/navigation_graph.md`'s G1).
+//! half a minute — see `docs/world/design_navigation_graph.md`'s G1).
 //!
 //! The router used to be **dropped** here rather than rebuilt, because a
 //! facet-wide bake is not something a tick can do and a router of the world as it

@@ -642,7 +642,7 @@ fn explore(
         // The whole node at once — `steps_out_of` and not eight `step_allowed`
         // calls, which would resolve the tile being stepped off eight times and
         // each cardinal neighbour twice. Same answers, in the same order:
-        // `step_allowed` is one slot of this. See `docs/map/navigation_spans.md`'s
+        // `step_allowed` is one slot of this. See `docs/world/evidence/2026-08-25-the-span-layer.md`'s
         // N3 for what the difference is worth.
         //
         // `steps_out_of`, not `can_step` per neighbour: a diagonal may not clip

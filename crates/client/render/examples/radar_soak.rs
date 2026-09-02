@@ -1,4 +1,4 @@
-//! The soak `docs/map/radar.md` §10.1 asks for, with nobody in front of it.
+//! The soak `docs/world/design_radar.md` §10.1 asks for, with nobody in front of it.
 //!
 //! ```text
 //! OPENSHARD_CLIENT=/path/to/client \

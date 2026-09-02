@@ -84,7 +84,7 @@ struct Cli {
 
     /// Take the ground from the shard, and not from any file on this machine.
     ///
-    /// `docs/map/new_map_representation/to_the_client.md`'s E2. The client
+    /// `docs/world/design_chunks_to_the_client.md`'s E2. The client
     /// starts with no facet at all, is told on world entry how big the one it is
     /// standing in is, asks for every chunk of it, and assembles the world out of
     /// what arrives. `map0LegacyMUL.uop`, `staidx0.mul` and `statics0.mul` need
