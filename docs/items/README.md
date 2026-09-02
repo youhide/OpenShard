@@ -6,7 +6,7 @@ The canon of the `items` domain — `crates/server/items` and
 catalogue `common/protocol`'s build script generates for both ends of the wire.
 This is everything a thing in the world *is* and everything a player can *make*:
 where an item can be, what it weighs, what it stacks with, who owns it, and the
-seven trades that turn one item into another.
+eight trades that turn one item into another.
 
 What a house does with an item that is locked down belongs to `housing`; what a
 weapon does when it swings belongs to `combat`; what the client draws belongs to
@@ -58,6 +58,7 @@ fail runs after the point of no return.
 | House addon deeds: a typed item, a checked footprint, one addon out of many tiles, a refund on release or collapse | ✅ shipping | a dozen further deeds are inert — row 3 | [`evidence/2026-09-02-the-cooking-slice-and-oven-deeds.md`](evidence/2026-09-02-the-cooking-slice-and-oven-deeds.md) |
 | The material chains, end to end: ore → ingots, hides → leather, fibre → thread → bolt → cloth | ✅ shipping | — | [`evidence/2026-09-02-the-cloth-chain.md`](evidence/2026-09-02-the-cloth-chain.md) |
 | The head of those chains: a cotton field to pick, a sheep to shear | ✅ shipping | flax has no field, upstream included | [`evidence/2026-09-03-the-chains-head.md`](evidence/2026-09-03-the-chains-head.md) |
+| Inscription: sixty-four scrolls on mana and a spellbook you own, and the runebook that had no source at all | ✅ shipping | necromancy and mysticism scrolls wait on their schools; Inscription's own use button copies books, which this engine has not got | [`evidence/2026-09-03-the-inscription-trade.md`](evidence/2026-09-03-the-inscription-trade.md) |
 | Repair, Enhance, AlterItem, Resmelt, recipe scrolls, make-number/make-max, the last-ten list | ⬜ not built | each is its own system hanging off crafting — row 8 | [`evidence/2026-08-24-the-crafting-phase.md`](evidence/2026-08-24-the-crafting-phase.md) |
 
 ## What is enforced, and by what
@@ -207,7 +208,20 @@ the same audited projection with none of it asserted. It is the same
 missing-CI-server shape as [`server/`](../server/README.md) row 5 and is worth
 doing in that session.
 
-**12. Smaller, and each is written where it lives.** `environment::is_mill`
+**12. A vendor's display art is not the item, and our shelves cannot tell.** A
+`GenericBuyInfo` in ServUO carries a picture for the shop window and constructs
+the *item* separately; `townsfolk.json` has one graphic per line and hands over
+whatever it says. Two shelves were caught by the inscription slice — the mage and
+the real-estate broker sold a blank scroll drawn as `0x0E34` while `BlankScroll`
+is `0x0EF3`, so the scrolls a scribe buys where scribes shop could not be written
+on — and were fixed one line each. **Nobody has swept the rest.** The converter
+that built the file read the display art throughout, so any shelf line whose
+ServUO buy-info overrides the art is the same defect waiting for a consumer: it
+shows up only when something *else* asks what the item is, which is why this one
+survived until a recipe wanted it. The sweep is a comparison against ServUO's
+`SB*.cs` constructors, not a re-read of the art.
+
+**13. Smaller, and each is written where it lives.** `environment::is_mill`
 lists `0x1295` and `0x129F`, which are almost certainly ServUO's own misprints
 for `0x1925`/`0x192F` — left verbatim on purpose, with a comment warning against
 a silent "fix" that would be parity drift, because upstream parity is the point
