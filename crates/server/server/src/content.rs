@@ -110,6 +110,14 @@ pub fn verb(action: &str) -> Vec<Command> {
         .filter(|set| set.verb == action)
         .flat_map(|set| set.spawners)
         .map(|spawner| Command::RegisterSpawner { spawner });
+    // The farmland, on the same verb: a facet's cotton is part of its population,
+    // and the fields are laid before the people for the reason the regions are —
+    // the wilderness first, then who lives in it.
+    let fields = openshard_world::crops::shipped()
+        .into_iter()
+        .filter(|set| set.verb == action)
+        .flat_map(|set| set.fields)
+        .map(|field| Command::RegisterCropField { field });
     // The people, after the regions that keep the wilderness full — the pack's
     // order, and the order the verb has always meant: a populate both maintains a
     // facet and puts its named townsfolk on their doorsteps.
@@ -157,6 +165,7 @@ pub fn verb(action: &str) -> Vec<Command> {
     };
     regions
         .chain(spawners)
+        .chain(fields)
         .chain(people)
         .chain(decor)
         .chain(clear)

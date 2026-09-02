@@ -3424,6 +3424,107 @@ pub struct Spinning {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct LoomPhase(pub u8);
 
+/// Which crop a farmable plant is, and therefore what it wears and what picking
+/// it pays.
+///
+/// ServUO writes one `FarmableCrop` subclass per crop and answers both questions
+/// with overrides (`GetCropID`, `GetPickedID`, `GetCropObject`); an enum puts the
+/// answers beside each other, which is the shape [`Fibre`] has one step further
+/// down the same chain.
+///
+/// **Cotton is the only variant, and that is upstream's content rather than a
+/// simplification here.** `Regions.xml` spawns `FarmableCotton` in two Felucca
+/// fields and `FarmableFlax` in none at all — the class exists, and only the
+/// staff `[add` menu ever reaches it. A flax variant would therefore be a crop
+/// nothing plants, which is the same dead content `world`'s `build.rs` already
+/// refuses of a creature no region spawns.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CropKind {
+    /// Cotton: four plant arts, picked into the pile of cotton that
+    /// [`Fibre::Cotton`] spins into thread.
+    Cotton,
+}
+
+impl CropKind {
+    /// The arts a standing plant may wear — one drawn at random when the field
+    /// plants it, so a field is not four rows of identical bushes. ServUO's
+    /// `FarmableCotton.GetCropID`, which is `Utility.Random(3153, 4)`.
+    #[must_use]
+    pub const fn standing_arts(self) -> &'static [Graphic] {
+        match self {
+            Self::Cotton => &[Graphic(0x0C51), Graphic(0x0C52), Graphic(0x0C53), Graphic(0x0C54)],
+        }
+    }
+
+    /// The art a picked stub wears: ServUO's `GetPickedID`, the same bare furrow
+    /// for every crop it grows.
+    #[must_use]
+    pub const fn picked_art(self) -> Graphic {
+        match self {
+            Self::Cotton => Graphic(0x0CB6),
+        }
+    }
+
+    /// What one plant pays, and how much of it — ServUO's `GetCropObject`, whose
+    /// every farmable returns a single item.
+    #[must_use]
+    pub const fn yield_of(self) -> (Graphic, u16) {
+        match self {
+            Self::Cotton => (Graphic(0x0DF9), 1),
+        }
+    }
+}
+
+/// A farmable plant in a field: standing and pickable, or the stub left where one
+/// was picked.
+///
+/// **Not saved**, and for [`Field`]'s reason rather than [`Spinning`]'s: a crop
+/// is world furniture the `populate:` verb lays, like the townsfolk it also
+/// re-places on every boot, so a restored plant would be a second copy of one
+/// the boot is about to plant anyway. The stub is worse — restored, it is a
+/// permanent bare furrow with no timer left to clear it, the eternal-static bug
+/// a restored field tile used to be. Nothing is lost with it: the cotton a pick
+/// paid is an ordinary item on the ground and saves like one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Crop {
+    /// Standing: what a field counts toward its ceiling, and the only thing a
+    /// pick will take.
+    Standing(CropKind),
+    /// Picked, and waiting to be taken away at this tick. ServUO unlinks the
+    /// plant from its spawner the moment it is picked and deletes it five
+    /// minutes later, so the field starts regrowing at once while the harvested
+    /// furrow stays visible.
+    Picked {
+        /// The tick the stub stops existing.
+        withers: WorldTick,
+    },
+}
+
+/// The body a sheep in fleece wears. Also what a shorn one is stamped back to on
+/// restore — see [`Shorn`].
+pub const WOOLLY_SHEEP: Graphic = Graphic(0x00CF);
+/// The body a sheep wears between the shears and its next fleece.
+pub const SHORN_SHEEP: Graphic = Graphic(0x00DF);
+
+/// A sheep whose wool has been taken, and the tick it comes back on.
+///
+/// ServUO keeps the same fact as a `NextWoolTime` on the sheep and re-derives
+/// the body from it on every `OnThink`; the component *is* the timer, and the
+/// tick puts the fleece back when it runs out.
+///
+/// **Not saved**, which is the wheel's bargain rather than the loom's: nothing
+/// was spent to reach this state, so forgetting it costs a player nothing and
+/// pays them at most one early fleece. What that forgetting does need is the
+/// same second half the wheel needed — the *body* is saved, so a restore that
+/// dropped the timer alone would leave a sheep shorn for ever with nothing left
+/// to regrow it, and `persist` stamps [`WOOLLY_SHEEP`] back for exactly that
+/// reason.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Shorn {
+    /// The tick the fleece is back.
+    pub regrows: WorldTick,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

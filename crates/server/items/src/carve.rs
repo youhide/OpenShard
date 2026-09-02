@@ -148,6 +148,20 @@ pub fn carve(state: &mut WorldState, carver: EntityId, tool: EntityId, target: O
     if !tool_is_usable {
         return;
     }
+    // Something still alive is not a carcass, and ServUO's `BladedItemTarget`
+    // has one answer for the whole of that case: a sheep in fleece is `ICarvable`
+    // and is shorn, everything else is told it can only skin the dead. A live
+    // mobile is the one thing here carrying a `Body` — a corpse wears
+    // `CorpseBody` and is drawn as an item.
+    //
+    // Before the reach check below, and that is load-bearing rather than tidy:
+    // [`in_reach`] answers an *item's* location, and a mobile has none, so it
+    // refuses every living thing as too far away however close it is standing.
+    // The shear does its own reach.
+    if state.registry.has::<Body>(target) {
+        crate::shear::shear(state, carver, target);
+        return;
+    }
     if !in_reach(state, target, carver) {
         state.system_message(carver, "That is too far away.");
         return;

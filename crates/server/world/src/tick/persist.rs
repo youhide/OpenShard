@@ -467,10 +467,19 @@ impl World {
             // same terms for a different reason: it is derived from the house and
             // rebuilt at restore, so an item copy would come back as a plaque
             // that no longer opens anything.
+            //
+            // A field's crop is out on the field tile's own terms: the plant is
+            // world furniture the `populate:` verb lays, like the townsfolk it
+            // also re-places on every boot, so a restored one would be a second
+            // copy of what the boot is about to sow. The picked stub is the
+            // worse half — restored, it is a bare furrow with no timer left to
+            // clear it, the eternal static again. What a pick *paid* is an
+            // ordinary item on the ground and saves like one.
             if !registry.has::<Drawn>(item)
                 || registry.has::<Body>(item)
                 || registry.has::<Decoration>(item)
                 || registry.has::<Field>(item)
+                || registry.has::<openshard_state::components::Crop>(item)
                 || registry.has::<Moongate>(item)
                 || registry.has::<openshard_state::components::House>(item)
                 || registry.has::<openshard_state::components::HouseSign>(item)
@@ -1827,10 +1836,23 @@ impl World {
     fn restore_mobile_core(&mut self, mobile: &RestoringMobile) {
         let record = &mobile.record;
         let registry = &mut self.state.registry;
+        // A shorn sheep comes back in fleece. The body is saved and the timer
+        // that would grow the wool back is not — `Shorn` is transient, the way
+        // the spinning wheel's `Spinning` is — so a sheep restored as it was
+        // would stay shorn for ever with nothing left to change it, which is the
+        // wheel that turns for ever one shelf over. ServUO re-derives the same
+        // body from its own saved `NextWoolTime` on the first `OnThink`; here
+        // the fleece is simply back, which costs a player nothing and pays them
+        // at most one early shearing.
+        let body = if Graphic(record.body) == openshard_state::components::SHORN_SHEEP {
+            openshard_state::components::WOOLLY_SHEEP
+        } else {
+            Graphic(record.body)
+        };
         registry.insert(
             mobile.entity,
             Body {
-                id:  Graphic(record.body),
+                id:  body,
                 hue: openshard_protocol::wire::Hue(record.hue),
             },
         );

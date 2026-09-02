@@ -230,6 +230,15 @@ fn liftable_item(
         reject_drag(state, connection, DragCancelReason::CannotLift);
         return None;
     }
+    // Nor is a field's crop, standing or picked. ServUO builds every
+    // `FarmableCrop` with `Movable = false` and checks it again in the pick, for
+    // the reason the whole slice exists: a cotton plant that lifted into a pack
+    // would be a field harvested by dragging rather than by picking, and the
+    // plant is not the cotton.
+    if state.registry.has::<openshard_state::components::Crop>(item) {
+        reject_drag(state, connection, DragCancelReason::CannotLift);
+        return None;
+    }
     // A house and its sign are both world items for protocol purposes, but are
     // fixed housing infrastructure.  In particular the sign is derived from
     // its house and rebuilt on restore, so letting it into a pack detaches the

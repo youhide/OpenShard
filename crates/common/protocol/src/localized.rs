@@ -140,6 +140,18 @@ pub const SERVER_MESSAGES: &[Message] = &[
         fallback: "That is too far away.",
     },
     Message {
+        id:       ClilocId(500449),
+        fallback: "This sheep is not yet ready to be shorn.",
+    },
+    Message {
+        id:       ClilocId(500450),
+        fallback: "You can only skin dead creatures.",
+    },
+    Message {
+        id:       ClilocId(500452),
+        fallback: "You place the gathered wool into your backpack.",
+    },
+    Message {
         id:       ClilocId(500489),
         fallback: "You can't use an axe on that.",
     },
@@ -668,6 +680,10 @@ pub const SERVER_MESSAGES: &[Message] = &[
     Message {
         id:       ClilocId(1019043),
         fallback: "Being perfectly rested, you shove something invisible out of the way.",
+    },
+    Message {
+        id:       ClilocId(1019045),
+        fallback: "I can't reach that.",
     },
     Message {
         id:       ClilocId(1028335),

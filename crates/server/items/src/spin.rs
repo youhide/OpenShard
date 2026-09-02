@@ -208,11 +208,8 @@ fn wheel_root(state: &WorldState, item: EntityId) -> Option<EntityId> {
 ///
 /// ServUO swaps the component's `ItemID` in `BeginSpin`/`EndSpin`; the pair is
 /// [`AddonKind::wheel_arts`](openshard_state::components::AddonKind::wheel_arts),
-/// which is also what says the addon is a wheel at all. Each tile is forgotten
-/// by its watchers and revealed again, the redraw `set_door` uses for the same
-/// reason: a client is told what an item looks like when it comes into view, and
-/// an item that changed art without leaving anybody's view would keep the old
-/// picture.
+/// which is also what says the addon is a wheel at all. The in-place swap itself
+/// is [`redraw_item`](crate::redraw_item)'s, once per tile.
 fn draw_wheel(state: &mut WorldState, root: Serial, turning: bool) {
     let parts: Vec<(EntityId, Graphic)> = state
         .registry
@@ -225,18 +222,7 @@ fn draw_wheel(state: &mut WorldState, root: Serial, turning: bool) {
         })
         .collect();
     for (part, graphic) in parts {
-        let Some(serial) = state.registry.serial_of(part) else {
-            continue;
-        };
-        let hue = state
-            .registry
-            .get::<Drawn>(part)
-            .map_or(Hue(0), |drawn| drawn.hue);
-        for watcher in state.watchers_of(part) {
-            state.forget(watcher, part, serial);
-        }
-        state.registry.insert(part, Drawn { id: graphic, hue });
-        state.reveal(part);
+        redraw_item(state, part, graphic);
     }
 }
 

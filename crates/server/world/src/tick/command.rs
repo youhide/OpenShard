@@ -504,8 +504,18 @@ pub enum Command {
         /// The region to add.
         spawner: crate::spawner::Spawner,
     },
+    /// Register a crop field — a patch of farmland the tick then keeps standing
+    /// in cotton. See [`crate::crops`].
+    ///
+    /// Laid by the same `populate:` verb as a spawn region, and unlike one it is
+    /// never saved: a boot re-lays the fields and they sow themselves.
+    RegisterCropField {
+        /// The field to add.
+        field: crate::crops::CropField,
+    },
     /// Remove every spawn region and despawn the creatures they were maintaining —
-    /// what the admin menu's "Clear spawns" does.
+    /// what the admin menu's "Clear spawns" does. Takes the crop fields and their
+    /// plants with it: they are content the same verb laid.
     ClearSpawners,
     /// Give a facet its named areas — towns, dungeons, guarded zones. Sent by
     /// whoever answers the `regions:` admin verb: `server::content`, from
@@ -1330,6 +1340,7 @@ impl Command {
             Self::GumpResponse { .. } => "GumpResponse",
             Self::TargetResponse { .. } => "TargetResponse",
             Self::RegisterSpawner { .. } => "RegisterSpawner",
+            Self::RegisterCropField { .. } => "RegisterCropField",
             Self::ClearSpawners => "ClearSpawners",
             Self::RegisterRegions { .. } => "RegisterRegions",
             Self::ClearRegions { .. } => "ClearRegions",

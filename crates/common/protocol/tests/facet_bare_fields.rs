@@ -98,8 +98,8 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/server/world/build.rs",
-        3,
-        "the set-level facet of data/{spawns,deco,townsfolk}.json, the state/build.rs shape for the same reason: a build script has no protocol dependency, and every expression it emits carries a Facet",
+        4,
+        "the set-level facet of data/{spawns,crops,deco,townsfolk}.json, the state/build.rs shape for the same reason: a build script has no protocol dependency, and every expression it emits carries a Facet",
     ),
 ];
 

@@ -205,6 +205,13 @@ impl World {
             _ if items::is_cloth_material(graphic) => {
                 items::use_cloth_material(&mut self.state, player, item);
             }
+            // And the chain's own head: the cotton plant standing in a field.
+            // Matched on the component rather than the art because the art is
+            // one of four and says nothing on its own — a bush drawn `0xC51`
+            // that no field planted is scenery, not a crop.
+            _ if self.state.registry.has::<openshard_state::components::Crop>(item) => {
+                items::pick(&mut self.state, player, item);
+            }
             _ if match self.state.registry.get::<ItemKind>(item) {
                 Some(kind) => openshard_state::instrument::instrument_data_for_kind(kind.0).is_some(),
                 None => openshard_state::instrument::instrument_data(graphic).is_some(),

@@ -137,9 +137,28 @@
     loom's half-woven count is saved (**schema v37**) because those spools are
     already spent; the wheel's timer deliberately is not, and a restored wheel is
     stamped back to its resting art the way ServUO's `OnComponentLoaded` does.
-    Cotton, flax and wool are still bought rather than farmed or sheared —
-    `FarmableCotton`, `FarmableFlax` and shearing a sheep are their own world
-    slice.
+    Cotton, flax and wool were still bought rather than farmed or sheared when
+    this landed; the entry below is that world slice.
+  - **Cotton grows in a field, and wool comes off a sheep.** The head of the same
+    chain: two Felucca cotton fields (Moonglow and Skara Brae, eight plants and
+    six, read off the `<spawning>` blocks of ServUO's `Regions.xml`) whose plants
+    are double-clicked for a pile of cotton, and a blade on a live sheep for two
+    wool and a shorn animal for the next two hours. A **crop field is a spawn
+    region for items** — a box, a crop and a ceiling, maintained beside the
+    creature regions with the same level-of-detail rule and the same seeded
+    picks, laid full on registration the way ServUO's own region `Respawn` is.
+    None of it is saved: a plant is world furniture the `populate:` verb re-lays
+    on every boot, and a restored *picked* plant would be a bare furrow with no
+    timer left to clear it, which is why a spell's field tile is out of the save
+    too. The shear rides ServUO's `ICarvable` and so answers a **blade**, not the
+    scissors that lore would suggest, and it had to sit ahead of the carve's
+    reach check: that one asks where an *item* is, and a mobile has none, so it
+    refuses every sheep on the shard. The fleece timer is transient like the
+    spinning wheel's and needs the wheel's other half — a sheep saved shorn is
+    stamped back into fleece on restore, or it stays shorn for ever. **Flax has
+    no field**, upstream included: `FarmableFlax` exists as a class that nothing
+    in `Regions.xml` plants, so it stays vendor stock rather than becoming a crop
+    this engine invented a home for.
   - Found while building that chain, not fixed, each worth its own small slice:
     - **A dozen further addon deeds are craftable and inert.** Carpentry group 7
       carries generated rows for ServUO's dartboard, water trough, bulletin
@@ -161,3 +180,26 @@
       included: a wheel makes `DarkYarn` whichever wool went on. Both are vendor
       stock here and both weave, so nothing is broken; noted so a later pass does
       not read it as a gap this engine opened.
+  - Found while giving that chain its head, not fixed:
+    - **A carved sheep pays no wool.** ServUO's `BaseCreature.Wool` is 3 on a
+      sheep in fleece and the corpse carve hands it over alongside the meat;
+      `items/src/carve.rs`'s `Yield` has no wool axis at all, so a butchered
+      sheep gives ribs and hides and nothing else. Now that shearing exists the
+      gap is visible rather than theoretical — the same animal pays wool alive
+      and none dead. One field on `Yield` and one row in `yield_of`, plus the
+      question ServUO answers by body and this table cannot: the sheep shares
+      `0xCF` with nothing, so unlike the hide grades it splits cleanly.
+    - **Flax's second facing would not spin.** `Fibre::from_graphic` knows flax
+      as `0x1A9C` alone, and ServUO's `FarmableFlax.GetCropObject` draws the
+      picked pile's art at random between `0x1A9C` and `0x1A9D` — harmless while
+      no field plants flax (nothing on the shard makes the second facing), and a
+      pile a player could not spin the day one does. The fix is the alias the
+      hides already carry (`0x1079`), and it belongs in the same commit as the
+      field, not before it.
+    - **`in_reach` refuses every living thing.** It resolves an *item's*
+      location, and a mobile has none, so it answers "not in reach" for a sheep
+      standing on the next tile. That is correct for what it asks and a trap for
+      anything that starts targeting mobiles through the item helpers — the
+      shear hit it, and `equip` measures a mobile by hand for the same reason.
+      Worth a named `mobile_in_reach` beside it before a third caller finds out
+      the hard way.

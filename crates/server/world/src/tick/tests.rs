@@ -2016,6 +2016,452 @@ fn scissors_refuse_a_pile_of_hides_still_lying_in_the_corpse() {
     );
 }
 
+/// A cotton plant, standing one tile east of the player.
+fn a_cotton_plant(world: &mut World, at: Point) -> EntityId {
+    openshard_items::plant(
+        &mut world.state,
+        openshard_state::components::CropKind::Cotton,
+        at,
+        Facet(0),
+    )
+    .expect("a cotton plant")
+}
+
+/// The cotton lying loose on the ground, tile by tile.
+fn loose_cotton(world: &World) -> Vec<(Point, u16)> {
+    world
+        .registry()
+        .query::<Drawn>()
+        .filter(|(_, drawn)| drawn.id == Graphic(0x0DF9))
+        .filter_map(|(item, _)| {
+            world.registry().get::<Position>(item).map(|at| {
+                (
+                    at.0,
+                    world.registry().get::<Amount>(item).map_or(1, |amount| amount.0),
+                )
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn a_cotton_plant_pays_cotton_once_and_stands_picked() {
+    // The head of the cloth chain: the wheel spins cotton, and until the field
+    // nothing on the shard grew any. Two things are being pinned at once, and
+    // the second is the one that matters — a plant that stayed `Standing` after
+    // a pick is an unlimited cotton fountain, one double-click per tick, which
+    // no amount of spinning downstream would ever notice.
+    use openshard_state::components::Crop;
+
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+    let Position(at) = *world.registry().get::<Position>(player).unwrap();
+    let tile = Point::new(at.x + 1, at.y, at.z);
+
+    let plant = a_cotton_plant(&mut world, tile);
+    let plant_serial = world.registry().serial_of(plant).unwrap();
+    assert!(
+        matches!(
+            world.registry().get::<Crop>(plant),
+            Some(Crop::Standing(openshard_state::components::CropKind::Cotton))
+        ),
+        "a fresh plant is standing"
+    );
+
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(plant_serial.raw())),
+    });
+    world.tick(now);
+
+    assert_eq!(
+        loose_cotton(&world),
+        vec![(tile, 1)],
+        "one pile of cotton, on the plant's own tile"
+    );
+    assert!(
+        matches!(world.registry().get::<Crop>(plant), Some(Crop::Picked { .. })),
+        "the plant is a picked stub"
+    );
+    assert_eq!(
+        world.registry().get::<Drawn>(plant).map(|drawn| drawn.id),
+        Some(openshard_state::components::CropKind::Cotton.picked_art()),
+        "and is drawn as the bare furrow"
+    );
+
+    // The second click, which is the whole point.
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(plant_serial.raw())),
+    });
+    world.tick(now);
+    assert_eq!(
+        loose_cotton(&world),
+        vec![(tile, 1)],
+        "a picked plant pays nothing a second time"
+    );
+}
+
+#[test]
+fn a_cotton_plant_cannot_be_lifted_out_of_the_field() {
+    // ServUO builds every `FarmableCrop` with `Movable = false`, and this is why:
+    // a plant that lifted into a pack would be a field harvested by dragging,
+    // which pays the bush rather than the cotton and empties the field for
+    // everyone else at no cost.
+    use openshard_state::components::Crop;
+
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+    let Position(at) = *world.registry().get::<Position>(player).unwrap();
+    let tile = Point::new(at.x + 1, at.y, at.z);
+
+    let plant = a_cotton_plant(&mut world, tile);
+    let plant_serial = world.registry().serial_of(plant).unwrap();
+    world.queue(Command::PickUpItem {
+        connection,
+        serial: RawSerial(plant_serial.raw()),
+        amount: 1,
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world.registry().get::<Position>(plant).map(|position| position.0),
+        Some(tile),
+        "the plant is still standing where it grew"
+    );
+    assert!(
+        matches!(world.registry().get::<Crop>(plant), Some(Crop::Standing(_))),
+        "and is still pickable"
+    );
+}
+
+#[test]
+fn a_crop_field_plants_itself_full_and_regrows_what_was_picked() {
+    // The field is the reason the plant is worth having: a patch that emptied
+    // once and stayed empty would put cotton back where it started, on a
+    // vendor's shelf. Registering lays it full (ServUO's own `Respawn` on a
+    // region loading) and the tick puts back what a player takes.
+    use openshard_state::components::Crop;
+
+    let standing = |world: &World| -> usize {
+        world
+            .registry()
+            .query::<Crop>()
+            .filter(|(_, crop)| matches!(crop, Crop::Standing(_)))
+            .count()
+    };
+
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+    let Position(at) = *world.registry().get::<Position>(player).unwrap();
+
+    world.queue(Command::RegisterCropField {
+        field: crate::crops::CropField::new(
+            "A Test Field".to_owned(),
+            openshard_state::components::CropKind::Cotton,
+            crate::spawner::SpawnArea {
+                x:      at.x,
+                y:      at.y,
+                width:  8,
+                height: 8,
+                facet:  Facet(0),
+            },
+            3,
+            // Four ticks rather than the data's twenty seconds: the pace is the
+            // data's and the mechanism is what is under test. Long enough that
+            // the pick and the regrowth are separate ticks, which is what lets
+            // the count in between be asserted at all.
+            4,
+        ),
+    });
+    world.tick(now);
+    assert_eq!(standing(&world), 3, "a fresh field is laid full");
+
+    // Pick one — the ordinary way, so the count falls the way it does in play.
+    let picked = world
+        .registry()
+        .query::<Crop>()
+        .find(|(_, crop)| matches!(crop, Crop::Standing(_)))
+        .map(|(entity, _)| world.registry().serial_of(entity).unwrap())
+        .expect("a plant to pick");
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(picked.raw())),
+    });
+    world.tick(now);
+    assert_eq!(standing(&world), 2, "the picked plant stopped counting at once");
+
+    // And it comes back once the field's own delay has run out.
+    for _ in 0..5 {
+        world.tick(now);
+    }
+    assert_eq!(standing(&world), 3, "the field regrew what was picked");
+}
+
+#[test]
+fn a_field_of_cotton_is_not_saved_but_the_cotton_it_paid_is() {
+    // The split the plant's own doc names. A restored plant would be a second
+    // copy of what the boot's `populate:` is about to sow, and a restored stub
+    // would be a bare furrow with no timer left to clear it — the eternal static
+    // a restored field tile used to be. What a pick *paid* is an ordinary item
+    // and has to survive, or a player who logged out beside their cotton would
+    // come back to nothing.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+    let Position(at) = *world.registry().get::<Position>(player).unwrap();
+
+    let standing = a_cotton_plant(&mut world, Point::new(at.x + 1, at.y, at.z));
+    let picked = a_cotton_plant(&mut world, Point::new(at.x + 2, at.y, at.z));
+    let picked_serial = world.registry().serial_of(picked).unwrap();
+    let standing_serial = world.registry().serial_of(standing).unwrap();
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(picked_serial.raw())),
+    });
+    world.tick(now);
+
+    let saved = world.ground_items();
+    assert!(
+        !saved
+            .iter()
+            .any(|record| record.serial == standing_serial || record.serial == picked_serial),
+        "neither a standing plant nor a picked stub is saved: {saved:?}"
+    );
+    assert!(
+        saved.iter().any(|record| record.graphic == 0x0DF9),
+        "the cotton it paid is: {saved:?}"
+    );
+}
+
+/// A sheep in fleece, standing where it is told.
+fn a_sheep(world: &mut World, at: Point, now: Instant) -> Serial {
+    world.queue(Command::SpawnMobile {
+        body:        openshard_state::components::WOOLLY_SHEEP,
+        hue:         openshard_protocol::wire::Hue(0),
+        hits:        12,
+        notoriety:   Notoriety::from_bits(3),
+        damage:      2,
+        resistance:  openshard_protocol::world::PhysicalResistance::new(0),
+        swing:       0,
+        sight:       Sight(0),
+        aggression:  Aggression::from_bits(0),
+        beat:        0,
+        ranged:      None,
+        ranged_kind: DamageType::Physical,
+        wander:      false,
+        position:    at,
+        facet:       Facet(0),
+        name:        None,
+        title:       None,
+        shoe:        0,
+        fame:        300,
+        karma:       0,
+        night_home:  None,
+        banker:      false,
+        vendor:      false,
+        healer:      false,
+        equipment:   Vec::new(),
+        skills:      Vec::new(),
+        stock:       Vec::new(),
+        escort_to:   None,
+        quests:      Vec::new(),
+    });
+    world.tick(now);
+    world
+        .state
+        .registry
+        .query::<Body>()
+        .filter(|(entity, _)| !world.state.registry.has::<Client>(*entity))
+        .filter_map(|(entity, _)| world.state.registry.serial_of(entity))
+        .max()
+        .expect("a sheep")
+}
+
+/// How much wool is in a container, counting every pile in it.
+fn wool_in(world: &World, container: Serial) -> u16 {
+    world
+        .registry()
+        .query::<Contained>()
+        .filter(|(_, contained)| contained.container == container)
+        .filter(|(item, _)| {
+            world
+                .registry()
+                .get::<Drawn>(*item)
+                .is_some_and(|drawn| drawn.id == Graphic(0x0DF8))
+        })
+        .map(|(item, _)| world.registry().get::<Amount>(item).map_or(1, |amount| amount.0))
+        .sum()
+}
+
+#[test]
+fn a_blade_shears_a_sheep_once_and_leaves_it_shorn() {
+    // Wool's one source on the shard, and the same two packets carving uses —
+    // ServUO reaches a sheep through `BladedItemTarget` and `ICarvable`, not
+    // through the scissors, so this rides the carve seam rather than the cut.
+    //
+    // The second shearing is the half that matters: the fleece is the timer's
+    // public face, and a sheep that stayed woolly would be two wool per tick
+    // for as long as somebody kept clicking.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+    let Position(at) = *world.registry().get::<Position>(player).unwrap();
+    let owner = world.registry().serial_of(player).unwrap();
+    let pack = openshard_items::backpack_of(&world.state, owner).unwrap();
+
+    let dagger =
+        openshard_items::spawn_item(&mut world.state, Graphic(0x0F52), Hue(0), 1, false, at, Facet(0))
+            .expect("a dagger");
+    let dagger_serial = world.registry().serial_of(dagger).unwrap();
+    let sheep = a_sheep(&mut world, Point::new(at.x + 1, at.y, at.z), now);
+    let sheep_entity = world.registry().entity_of(sheep).unwrap();
+
+    let shear = |world: &mut World| {
+        world.queue(Command::DoubleClick {
+            connection,
+            request: UseRequest::Use(RawSerial(dagger_serial.raw())),
+        });
+        world.tick(now);
+        world.queue(Command::TargetResponse {
+            connection,
+            response: openshard_protocol::target::TargetResponse {
+                cursor_id: openshard_protocol::wire::CursorId(0),
+                object:    Some(sheep),
+                location:  Point::new(0, 0, 0),
+                graphic:   None,
+                cancelled: false,
+            },
+        });
+        world.tick(now);
+    };
+
+    shear(&mut world);
+    assert_eq!(
+        wool_in(&world, pack),
+        2,
+        "Felucca pays two wool, ServUO's own rate"
+    );
+    assert_eq!(
+        world.registry().get::<Body>(sheep_entity).map(|body| body.id),
+        Some(openshard_state::components::SHORN_SHEEP),
+        "and the sheep is drawn shorn"
+    );
+
+    shear(&mut world);
+    assert_eq!(wool_in(&world, pack), 2, "a shorn sheep has nothing left to give");
+}
+
+#[test]
+fn a_blade_on_something_alive_that_is_not_a_sheep_takes_nothing() {
+    // ServUO's `BladedItemTarget` answers every other living thing with "You can
+    // only skin dead creatures", and the branch is worth pinning because the one
+    // above it now *does* something to a mobile: a shear that read the body
+    // loosely would take wool off a llama, or worse, off a player.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+    let Position(at) = *world.registry().get::<Position>(player).unwrap();
+    let owner = world.registry().serial_of(player).unwrap();
+    let pack = openshard_items::backpack_of(&world.state, owner).unwrap();
+
+    let dagger =
+        openshard_items::spawn_item(&mut world.state, Graphic(0x0F52), Hue(0), 1, false, at, Facet(0))
+            .expect("a dagger");
+    let dagger_serial = world.registry().serial_of(dagger).unwrap();
+    let goat = spawn_mobile_at(&mut world, Point::new(at.x + 1, at.y, at.z), 12, now);
+
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(dagger_serial.raw())),
+    });
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::target::TargetResponse {
+            cursor_id: openshard_protocol::wire::CursorId(0),
+            object:    Some(goat),
+            location:  Point::new(0, 0, 0),
+            graphic:   None,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    assert_eq!(wool_in(&world, pack), 0, "nothing was shorn");
+    let goat_entity = world.registry().entity_of(goat).unwrap();
+    assert!(
+        world.registry().get::<Body>(goat_entity).is_some(),
+        "and it is still standing there, unchanged"
+    );
+}
+
+#[test]
+fn a_shorn_sheep_comes_back_in_fleece_after_a_restart() {
+    // The wheel's bargain, one shelf over: the body is saved and the timer that
+    // would regrow the wool is not, so a sheep restored exactly as it was would
+    // be shorn for ever with nothing left to change it — the wheel that turns
+    // for ever. Losing the timer instead costs a player nothing.
+    let now = Instant::now();
+    let mut pen = world();
+    let connection = enter(&mut pen, now);
+    let player = pen.state.players[&connection];
+    let Position(at) = *pen.registry().get::<Position>(player).unwrap();
+
+    let dagger = openshard_items::spawn_item(&mut pen.state, Graphic(0x0F52), Hue(0), 1, false, at, Facet(0))
+        .expect("a dagger");
+    let dagger_serial = pen.registry().serial_of(dagger).unwrap();
+    let sheep = a_sheep(&mut pen, Point::new(at.x + 1, at.y, at.z), now);
+
+    pen.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(dagger_serial.raw())),
+    });
+    pen.tick(now);
+    pen.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::target::TargetResponse {
+            cursor_id: openshard_protocol::wire::CursorId(0),
+            object:    Some(sheep),
+            location:  Point::new(0, 0, 0),
+            graphic:   None,
+            cancelled: false,
+        },
+    });
+    pen.tick(now);
+    let records = pen.mobile_records();
+    assert!(
+        records
+            .iter()
+            .any(|record| Graphic(record.body) == openshard_state::components::SHORN_SHEEP),
+        "the save recorded the shorn body, which is what makes the stamp necessary"
+    );
+
+    let mut shard = world();
+    let characters = shard.restore_characters(Vec::new());
+    let filed = shard.restore_items(Vec::new(), &characters);
+    shard.restore_mobiles(records, &filed);
+
+    let restored = shard
+        .registry()
+        .entity_of(sheep)
+        .expect("the sheep came back on its serial");
+    assert_eq!(
+        shard.registry().get::<Body>(restored).map(|body| body.id),
+        Some(openshard_state::components::WOOLLY_SHEEP),
+        "and came back in fleece rather than shorn for ever"
+    );
+}
+
 #[test]
 fn double_clicking_a_plain_item_fires_the_use_trigger() {
     // The item-trigger seam (Sphere's @DClick): an item with no engine behaviour

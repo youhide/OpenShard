@@ -1,0 +1,14 @@
+{
+  "verb": "populate:felucca",
+  "facet": 0,
+
+  "fields": [
+    { "name": "A Cotton Field in Moonglow", "crop": "cotton",
+      "x": 4557, "y": 1471, "width": 20, "height": 10,
+      "max_count": 8, "respawn_secs": 20 },
+
+    { "name": "A Cotton Field in Skara Brae", "crop": "cotton",
+      "x": 816, "y": 2344, "width": 16, "height": 24,
+      "max_count": 6, "respawn_secs": 20 }
+  ]
+}

@@ -2,7 +2,8 @@
 
 A reader's map of `crates/server/crafting` and the seams it hangs off, plus a
 review of the design as it stands (2026-09-02, with the Cooking, oven-deed and
-cloth-chain slices in). The roadmap entry
+cloth-chain slices in; the fields and shears that feed the chain landed
+2026-09-03). The roadmap entry
 ([roadmap/06-gameplay/crafting.md](roadmap/06-gameplay/crafting.md)) says *what*
 landed and why; this page says *how the pieces fit* so a later session does not
 have to re-read six files to find out.
@@ -25,10 +26,14 @@ have to re-read six files to find out.
 | Bolt → cloth | `items/src/cut.rs` | the same scissors, one step further: fifty cloth per bolt, keeping the hue |
 | Fibre → thread | `items/src/spin.rs` | the spinning wheel. An item action like the cut, with one addition nothing else in `items` has: a **timer**, ticked by `advance_spins` |
 | Thread → bolt | `items/src/weave.rs` | the loom, five applications to a bolt. The count lives on the addon, not on the weaver |
+| Field → cotton | `items/src/crop.rs` | the plant standing in a field and the double-click that picks it. A second timer in `items`, ticked by `advance_crops` |
+| Sheep → wool | `items/src/shear.rs` | a blade on a live sheep. A branch of `carve`, because upstream reaches both through one target |
+| The fields themselves | `world/src/crops.rs`, `world/src/tick/crops.rs`, `world/data/crops.json` | which patches of ground grow cotton, and the pass that keeps them planted — the spawn region's shape, for items |
 | Tool table | `state/src/craft.rs` | graphic → trade skill + uses; in `state` because `items` reads it too |
 | In-flight state | `state::components::Crafting`, `Tool`, `Quality`, `CraftedBy` | components on the crafter / the item |
 | Addon state | `state::components::AddonKind`, `AddonPart`, `AddonDeed`, `Spinning`, `LoomPhase`, `Fibre` | what a deed installs, which tiles are one addon, and what the wheel and the loom are in the middle of |
-| World wiring | `world/src/tick/skills_wire.rs`, `tick.rs` | the double-click dispatch, and `advance_crafts` / `advance_spins` once per tick |
+| Field state | `state::components::Crop`, `CropKind`, `Shorn` | whether a plant is standing or picked, what it grows, and when a sheep's fleece is back |
+| World wiring | `world/src/tick/skills_wire.rs`, `tick.rs` | the double-click dispatch, and `advance_crafts` / `advance_spins` / `advance_crops` / `regrow_fleece` / `maintain_crops` once per tick |
 
 Dependency direction is the usual one: `crafting` reads `state`, `items`,
 `skills`; the world calls `crafting`; nothing calls back. The crate emits one
@@ -123,9 +128,12 @@ Points that are load-bearing rather than tidy:
 Saved on the item: `Tool` uses, `Quality`, `CraftedBy` (a name, not a serial),
 `Name`, `LockedDown`, `AddonPart` (which installed addon a locked-down component
 is a tile of), `LoomPhase` (schema v37). **Not saved:** the in-flight `Crafting`
-component, the per-player `craft_gump` context, and a spinning wheel's
-`Spinning`. The first two are benign losses (nothing is consumed before
-`complete`), but a restart mid-craft ends the craft silently.
+component, the per-player `craft_gump` context, a spinning wheel's `Spinning`, a
+field's `Crop` (the plant *and* the stub, and the field itself), and a sheep's
+`Shorn`. The first two are benign losses (nothing is consumed before
+`complete`), but a restart mid-craft ends the craft silently. The last three are
+§7's, with the same second half the wheel needs: what the save *does* record —
+the turning art, the shorn body — is stamped back on restore.
 
 The wheel and the loom split on exactly that question, and the split is the
 rule rather than an accident of which was easier:
@@ -230,11 +238,90 @@ bolt ─► [scissors] ─► 50 × cloth (0x1766)          ← what a tailor sp
   follow. A spinner who logged out inside the six seconds gets the thread on the
   wheel's own tile rather than nowhere: the fibre is already spent, and this
   engine's logged-out character has no pack to reach.
-- **Still bought, not grown.** Cotton, flax and wool reach a player from a
-  vendor's shelf. `FarmableCotton`, `FarmableFlax` and shearing a sheep are a
-  world slice of their own, and none of them is what made cloth unreachable.
+- **Still bought, not grown** — *as this slice landed*. Cotton, flax and wool
+  reached a player from a vendor's shelf and nowhere else; `FarmableCotton`,
+  `FarmableFlax` and shearing a sheep were a world slice of their own, and none
+  of them is what made cloth unreachable. Two of the three grew a day later;
+  see §7.
 
-## 7. Review: problems found
+## 7. The chain's head (2026-09-03)
+
+§6 left the chain standing on a shelf: cotton, flax and wool reached a player
+from a vendor and nowhere else, so a tailor still *bought* the first link of
+everything they made. Two of those three now grow.
+
+```
+[cotton field, 8 or 6 plants] ─ double-click ─► 1 cotton on the plant's tile
+[live sheep in fleece] ─ blade ─► 2 wool, and a shorn sheep for two hours
+```
+
+- **A field is a spawn region for items.** `CropField` is a box, a crop and a
+  ceiling, and `maintain_crops` runs beside `maintain_spawners` with the same
+  rules: skip unless due, one plant per pass, level of detail holds a field
+  nobody is near, every pick drawn from the seeded rng. Two of them, both
+  ServUO's — Moonglow (`4557,1471`, 20×10, eight plants) and Skara Brae
+  (`816,2344`, 16×24, six), read off the `<spawning>` blocks of `Regions.xml`
+  rather than the spawner map, which is why they are `data/crops.json` and not a
+  section of `spawns.json`: the converter that built that file has never seen an
+  object spawn. Registering a field **plants it full**, ServUO's own `Respawn`
+  on a region loading, so a shard that has just laid its world does not hand the
+  first player to reach the farm a patch of bare soil.
+- **Nothing about a field is saved**, and that is the one design decision here
+  worth arguing over. A plant carries no field id, because there is nothing for
+  an id to survive: it is world furniture the `populate:` verb lays, like the
+  townsfolk that verb also re-places on every boot, so a restored plant would be
+  a second copy of one the boot is about to sow. It is the *picked stub* that
+  settles it — restored, a stub is a permanent bare furrow with no timer left to
+  clear it, which is exactly why a spell's `Field` tile is excluded from the
+  save on the line above. What a pick *paid* is an ordinary item on the ground
+  and is saved like one. The cost is that a field counts what stands inside its
+  box, so **no two fields of one crop may overlap** — `build.rs` refuses the data
+  that would.
+- **The shear is the blade's, not the scissors'.** UO lore says shears; ServUO
+  wires a sheep as `ICarvable` and reaches it through `BladedItemTarget`, so a
+  dagger shears and a pair of scissors does not, and this is that verbatim. The
+  branch lives inside `carve` because upstream's *target* is one target. One
+  thing there is load-bearing and was got wrong first: it must come **before**
+  `carve`'s reach check, because `in_reach` answers where an *item* is and a
+  mobile has no item location at all — asked about a sheep it says "too far
+  away" whatever the distance, so the shear measures its own.
+- **The fleece timer is not saved and the body is**, which is the wheel's
+  bargain and needs the wheel's second half. `Shorn` is transient like
+  `Spinning`; without anything else, a sheep saved shorn would come back shorn
+  for ever with no timer left to regrow it — the wheel that turns for ever, one
+  shelf over. `persist` stamps the woolly body back on restore for that reason.
+  Nothing is lost with the timer: no one spent anything to shear, and the worst
+  a restart pays is one early fleece.
+- **Flax still has no field, and that is upstream's content rather than a gap
+  here.** `Regions.xml` spawns `FarmableCotton` in two Felucca fields and
+  `FarmableFlax` in none at all — the class exists and only the staff `[add`
+  menu reaches it. So there is no `CropKind::Flax`: a crop nothing plants is the
+  dead content `build.rs` already refuses of a creature no region spawns. Flax
+  stays vendor stock, and it spins into the same thread cotton does, so nothing
+  downstream is unreachable for want of it.
+- **Numbers, all ServUO's.** Two wool on Felucca and one elsewhere (the era's
+  own reward for shearing in the dangerous world, kept as a facet test rather
+  than folded into the one facet that exists); two hours between fleeces; five
+  minutes before a picked stub is taken away; one cotton per plant. The regrowth
+  pace is the one place a range became a number: upstream draws each plant's
+  wait between ten and thirty seconds, and one delay takes the middle.
+- **One redraw, three callers.** Swapping a thing's art where it stands —
+  forget, insert, reveal — was the spinning wheel's private trick and is now
+  `items::redraw_item` and `items::redraw_body`, which the wheel, the picked
+  furrow and the shorn sheep all go through.
+
+Coverage: `a_cotton_plant_pays_cotton_once_and_stands_picked` (both packets,
+and a second double-click on purpose — verified to fail with the picked
+transition dropped, which is an unlimited cotton fountain at one click per
+tick), `a_cotton_plant_cannot_be_lifted_out_of_the_field`,
+`a_crop_field_plants_itself_full_and_regrows_what_was_picked`,
+`a_field_of_cotton_is_not_saved_but_the_cotton_it_paid_is`,
+`a_blade_shears_a_sheep_once_and_leaves_it_shorn`,
+`a_blade_on_something_alive_that_is_not_a_sheep_takes_nothing`, and
+`a_shorn_sheep_comes_back_in_fleece_after_a_restart` (verified to fail with the
+body stamp removed — the sheep comes back `0xDF` and stays it).
+
+## 8. Review: problems found
 
 Ordered by how much they mattered when found, except #11 and #12, which came out
 of later passes and are appended rather than slotted in by weight. File
@@ -479,13 +566,13 @@ edit.
     on that art and still inert, which is content this engine has not reached
     rather than a bug it introduced.
 
-## 8. Deferred, by the roadmap's own list
+## 9. Deferred, by the roadmap's own list
 
 Repair, Enhance, AlterItem, Resmelt, recipe scrolls, make-number / make-max,
 the last-ten list, and the four remaining `Def*` tables (Inscription,
-Glassblowing, Masonry, Cartography). Both material chains have landed: hides →
-leather in #11, cotton → thread → cloth in §6. What is left of the second one is
-its **head** — cotton and flax grow on `FarmableCotton`/`FarmableFlax` plants
-upstream and wool comes off a sheared sheep, and here all three are vendor
-stock. Hunger and eating effects are outside this slice: food is an ordinary
-item.
+Glassblowing, Masonry, Cartography). Both material chains have landed end to
+end: hides → leather in #11, cotton → thread → cloth in §6, and the head that
+feeds it in §7 — a cotton field to pick and a sheep to shear. What is left of
+the head is **flax**, which upstream plants nowhere either (§7), and which is
+therefore content rather than a defect. Hunger and eating effects are outside
+this slice: food is an ordinary item.

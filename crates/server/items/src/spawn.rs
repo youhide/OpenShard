@@ -246,6 +246,49 @@ pub fn equip_new_container(
     Some(entity)
 }
 
+/// Draw an item as a different graphic where it stands, keeping its hue.
+///
+/// A client is told what a thing looks like when it comes into view, so one
+/// whose art changed without leaving anybody's view would keep the old picture
+/// until they walked away and back. Forget-then-reveal is what `set_door` does
+/// about that, and every other in-place art swap — a spinning wheel starting to
+/// turn, a picked crop becoming a furrow — comes through here rather than
+/// restating it.
+pub fn redraw_item(state: &mut WorldState, item: EntityId, art: Graphic) {
+    let Some(serial) = state.registry.serial_of(item) else {
+        return;
+    };
+    let hue = state
+        .registry
+        .get::<Drawn>(item)
+        .map_or(Hue(0), |drawn| drawn.hue);
+    for watcher in state.watchers_of(item) {
+        state.forget(watcher, item, serial);
+    }
+    state.registry.insert(item, Drawn { id: art, hue });
+    state.reveal(item);
+}
+
+/// The same in-place redraw for a mobile's body — a sheep losing its fleece.
+///
+/// A separate door because the component is: a mobile carries [`Body`] and an
+/// item [`Drawn`], and which one an entity has is what decides the packet that
+/// draws it.
+pub fn redraw_body(state: &mut WorldState, mobile: EntityId, body: Graphic) {
+    let Some(serial) = state.registry.serial_of(mobile) else {
+        return;
+    };
+    let hue = state
+        .registry
+        .get::<Body>(mobile)
+        .map_or(Hue(0), |drawn| drawn.hue);
+    for watcher in state.watchers_of(mobile) {
+        state.forget(watcher, mobile, serial);
+    }
+    state.registry.insert(mobile, Body { id: body, hue });
+    state.reveal(mobile);
+}
+
 /// Land an item on the ground at `position` and draw it for everyone in range.
 pub fn place_on_ground(state: &mut WorldState, item: EntityId, position: Point, facet: Facet) {
     relocate_item(state, item, ItemLocation::ground(facet, position))

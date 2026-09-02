@@ -230,6 +230,7 @@ mod ambient;
 mod chunks;
 mod command;
 mod context;
+mod crops;
 mod death;
 mod decor;
 mod defaults;
@@ -370,6 +371,11 @@ pub struct World {
     ///
     /// [`SpawnedBy`]: openshard_state::components::SpawnedBy
     spawners:            Vec<crate::spawner::Spawner>,
+    /// The crop fields the tick keeps planted. Laid by the same `populate:` verb
+    /// as the spawn regions and maintained beside them, but **not persisted**:
+    /// neither the field nor a plant standing in it is saved, so a boot re-lays
+    /// the fields and they grow back from empty. See [`crate::crops`].
+    crop_fields:         Vec<crate::crops::CropField>,
     /// Saved inventories waiting for their owners to log in, keyed by character
     /// serial. Loaded from the store at boot by [`restore_inventory`]; a character
     /// entering takes its own and equips it, once.
@@ -457,6 +463,7 @@ impl World {
             inbox:               Vec::new(),
             opened_door_leaves:  HashSet::new(),
             spawners:            Vec::new(),
+            crop_fields:         Vec::new(),
             pending_inventories: HashMap::new(),
             clock_base:          0,
             player_sectors:      HashMap::new(),
@@ -1000,6 +1007,11 @@ impl World {
         // something a player started that finishes on a clock — even though the
         // timer lives on a house addon rather than on the player.
         items::advance_spins(&mut self.state);
+        // And the two clocks at the head of the same chain: the picked furrow
+        // that has waited out its five minutes, and the sheep whose fleece is
+        // back. Both are scans over a handful of things mid-timer.
+        items::advance_crops(&mut self.state);
+        items::regrow_fleece(&mut self.state);
         // An instrument that played its last tune. `skills` decides, `items`
         // removes — the same split the poison fumble and the beggar's coin use.
         let spent: Vec<openshard_skills::InstrumentSpent> = self
@@ -1041,6 +1053,7 @@ impl World {
         // setter, which is a call beside every one of this engine's five movers.
         items::validate_trades(&mut self.state);
         self.maintain_spawners();
+        self.maintain_crops();
         // Notice who walked into a town or out of a dungeon: the crossing emits
         // its event and starts the region's music. Before the guards read it, and
         // before the light pass, which the crossing can change.
@@ -1422,6 +1435,7 @@ impl World {
             Command::GumpResponse { connection, response } => self.handle_gump_response(connection, response),
             Command::TargetResponse { connection, response } => self.handle_target(connection, response),
             Command::RegisterSpawner { spawner } => self.register_spawner(spawner),
+            Command::RegisterCropField { field } => self.register_crop_field(field),
             Command::ClearSpawners => self.clear_spawners(),
             Command::RegisterRegions { facet, regions } => self.register_regions(facet, regions),
             Command::ClearRegions { facet } => self.clear_regions(facet),

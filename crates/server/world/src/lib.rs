@@ -31,6 +31,7 @@
 //! Both are settled by arithmetic and pinned by tests against real files.
 
 pub mod admin;
+pub mod crops;
 pub mod decoration;
 mod doorgen;
 pub mod events;

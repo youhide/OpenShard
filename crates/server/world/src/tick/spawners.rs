@@ -312,6 +312,9 @@ impl World {
     /// [`SpawnedBy`]: openshard_state::components::SpawnedBy
     pub(super) fn clear_spawners(&mut self) {
         self.spawners.clear();
+        // And the crop fields, which the same `populate:` laid: a "clear" that
+        // left the farmland standing would be a reset that reads as half done.
+        self.clear_crop_fields();
         let mobiles: Vec<EntityId> = self
             .state
             .registry
