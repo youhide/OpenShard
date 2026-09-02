@@ -953,6 +953,54 @@ pub struct Field {
 /// shut door.
 pub const FIELD_HEIGHT: u8 = 20;
 
+/// Which creature a Magery summon calls up — the eight summoning spells, one
+/// variant each.
+///
+/// The kind and not the body, for the reason [`FieldKind`] is not a graphic: what
+/// a spell summons is a whole creature — a body, a stat block, a follower cost and
+/// a lifetime rule — and the table that spells those out is [`crate::summon`].
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum SummonKind {
+    /// Summon Creature — one harmless beast of the woods, chosen at random.
+    Creature,
+    /// Blade Spirits — the whirling blades, laid on the aimed tile.
+    BladeSpirits,
+    /// Energy Vortex — likewise laid on the aimed tile.
+    EnergyVortex,
+    /// Air Elemental.
+    AirElemental,
+    /// Earth Elemental.
+    EarthElemental,
+    /// Fire Elemental.
+    FireElemental,
+    /// Water Elemental.
+    WaterElemental,
+    /// Summon Daemon — the whole of a caster's following in one creature.
+    Daemon,
+}
+
+/// A creature a spell called up, which goes on its own timer.
+///
+/// The marker that makes a summon a summon, and it is read in four places that no
+/// single one of them could have covered: the tick that expires it, the save sweep
+/// that must *not* write it down (restored, a five-minute daemon is a permanent one
+/// whose caster no longer exists — a spell's gate and a field tile are excluded for
+/// exactly the same reason), the death path that gives it no corpse (pre-AoS
+/// ServUO's `DeleteCorpseOnDeath`, and without it a summoned daemon would be a gold
+/// press), and — when it lands — Dispel, whose whole question is "is this thing
+/// summoned".
+///
+/// Whose it is lives on the [`Pet`] beside this, because a summon *is* a controlled
+/// creature and everything that follows, obeys and counts against the follower cap
+/// already reads that. This carries only what a pet does not have: a deadline.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Summoned {
+    /// What was called up — what Dispel and the roadmap's later refinements ask.
+    pub kind:       SummonKind,
+    /// The tick it goes, whatever else has happened by then.
+    pub expires_at: WorldTick,
+}
+
 /// The kind tag on a saved effect and a live [`StatMod`], canonical across the
 /// engine.
 ///

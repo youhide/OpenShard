@@ -62,6 +62,7 @@ pub mod runtime;
 pub mod sectors;
 pub mod skill;
 pub mod spawner;
+pub mod summon;
 pub mod tame;
 pub mod title;
 pub mod weapon;
@@ -173,6 +174,8 @@ pub use components::{
     StatMods,
     Stats,
     Stealthing,
+    SummonKind,
+    Summoned,
     SwingSpeed,
     Title,
     Tool,

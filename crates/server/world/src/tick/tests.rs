@@ -9598,7 +9598,8 @@ fn a_characters_stats_and_skills_survive_a_relogin() {
         access:     AccessLevel::Player,
         // Nothing but the name: the world reads its own roster, which the
         // logout above wrote. Handing the row in would test an unpacking the
-        // shard no longer does — see `docs/connection_state.md`, S4.
+        // shard no longer does — see S4 in
+        // `docs/server/evidence/2026-07-30-the-connection-state-machine.md`.
         character:  Character::Saved,
     }));
     world.tick(now);
@@ -10157,7 +10158,8 @@ fn poison_survives_a_relogin() {
         access:     AccessLevel::Player,
         // Nothing but the name: the world reads its own roster, which the
         // logout above wrote. Handing the row in would test an unpacking the
-        // shard no longer does — see `docs/connection_state.md`, S4.
+        // shard no longer does — see S4 in
+        // `docs/server/evidence/2026-07-30-the-connection-state-machine.md`.
         character:  Character::Saved,
     }));
     world.tick(now);
@@ -10375,7 +10377,8 @@ fn a_stat_buff_survives_a_relogin() {
         access:     AccessLevel::Player,
         // Nothing but the name: the world reads its own roster, which the
         // logout above wrote. Handing the row in would test an unpacking the
-        // shard no longer does — see `docs/connection_state.md`, S4.
+        // shard no longer does — see S4 in
+        // `docs/server/evidence/2026-07-30-the-connection-state-machine.md`.
         character:  Character::Saved,
     }));
     world.tick(now);
@@ -10742,7 +10745,8 @@ fn a_behaviour_buff_survives_a_relogin() {
         access:     AccessLevel::Player,
         // Nothing but the name: the world reads its own roster, which the
         // logout above wrote. Handing the row in would test an unpacking the
-        // shard no longer does — see `docs/connection_state.md`, S4.
+        // shard no longer does — see S4 in
+        // `docs/server/evidence/2026-07-30-the-connection-state-machine.md`.
         character:  Character::Saved,
     }));
     world.tick(now);
@@ -11156,7 +11160,8 @@ fn paralysis_survives_a_relogin() {
         access:     AccessLevel::Player,
         // Nothing but the name: the world reads its own roster, which the
         // logout above wrote. Handing the row in would test an unpacking the
-        // shard no longer does — see `docs/connection_state.md`, S4.
+        // shard no longer does — see S4 in
+        // `docs/server/evidence/2026-07-30-the-connection-state-machine.md`.
         character:  Character::Saved,
     }));
     world.tick(now);
@@ -11209,6 +11214,203 @@ fn paralyze_field_freezes_who_stands_in_it() {
     assert!(
         world.registry().get::<Frozen>(victim_entity).is_some(),
         "the field froze who stood in it"
+    );
+}
+
+/// Summon Creature, the self-cast summon: it needs no cursor, so one tick of a
+/// Sphere-style world is the whole cast.
+const SUMMON_CREATURE: SpellId = SpellId(39);
+
+/// The summon standing in the world, or `None`. There is at most one in these
+/// tests, and finding it by its marker rather than by a serial the cast never
+/// handed back is what makes them read.
+fn the_summon(world: &World) -> Option<EntityId> {
+    world
+        .registry()
+        .query::<openshard_state::components::Summoned>()
+        .next()
+        .map(|(entity, _)| entity)
+}
+
+#[test]
+fn a_summoned_creature_is_its_casters_follower_for_a_magery_scaled_while() {
+    use openshard_state::components::{
+        Pet,
+        Summoned,
+    };
+    let now = Instant::now();
+    let mut world = field_world();
+    // `ready_caster` sets Magery to grandmaster (1000 tenths), which is what the
+    // four-hundred-second span below is worked out from.
+    let (connection, caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    let caster_serial = serial_of(&world, connection);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: SUMMON_CREATURE,
+    });
+    world.tick(now);
+
+    let summon = the_summon(&world).expect("the spell called something up");
+    assert_eq!(
+        world.registry().get::<Pet>(summon).map(|pet| pet.owner),
+        Some(caster_serial),
+        "a summon is its caster's, by the one path a creature becomes somebody's"
+    );
+    assert_eq!(
+        openshard_skills::followers_of(&world.state, caster),
+        2,
+        "and it fills the two follower slots its spell demanded be free"
+    );
+    // ServUO's `(2 * Magery.Fixed) / 5` seconds: four hundred at grandmaster. Pinned
+    // because it is the only thing skill buys a summon — the stat block is the same
+    // for a novice — so a wrong divisor here is invisible from every other angle.
+    assert_eq!(
+        world.registry().get::<Summoned>(summon).unwrap().expires_at - world.state.ticks,
+        400 * TICKS_PER_SECOND,
+        "grandmaster Magery buys four hundred seconds"
+    );
+}
+
+#[test]
+fn a_summon_goes_when_its_span_runs_out() {
+    // Driven through `npc::summon` rather than a cast, because the span is
+    // Magery-scaled and a caster with no skill sheet at all gets the one-second
+    // floor — forty ticks to wait out instead of sixteen thousand. The floor is
+    // worth exercising in its own right: without it a skill-less summon would
+    // expire on the tick it appeared.
+    let now = Instant::now();
+    let mut world = world();
+    let at = Point::new(START.x, START.y, 0);
+    let caster_serial = spawn_mobile_at(&mut world, at, 50, now);
+    let caster = entity(&world, caster_serial);
+    let summoned = openshard_npc::summon(
+        &mut world.state,
+        caster,
+        openshard_state::SummonKind::Creature,
+        at,
+    )
+    .expect("a creature was called up");
+    assert!(world.registry().serial_of(summoned).is_some());
+
+    let mut later = now;
+    for _ in 0..Gameplay::ticks(2) {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert!(
+        the_summon(&world).is_none(),
+        "the summon went out on its own timer"
+    );
+    assert!(
+        world.registry().serial_of(summoned).is_none(),
+        "and took its whole mobile with it"
+    );
+}
+
+#[test]
+fn a_summon_killed_leaves_no_corpse() {
+    // Pre-AoS ServUO deletes a summon's corpse (`DeleteCorpseOnDeath`), and here it
+    // is never made. Not cosmetic: a corpse is filled by `fill_creature_loot`, whose
+    // gold baseline scales with the dead thing's hit points, so a conjured creature
+    // that could be killed for loot would be a coin press.
+    let now = Instant::now();
+    let mut world = field_world();
+    let (connection, _caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    world.queue(Command::RequestCast {
+        connection,
+        spell: SUMMON_CREATURE,
+    });
+    world.tick(now);
+    let summon = the_summon(&world).expect("the spell called something up");
+    let serial = world.registry().serial_of(summon).unwrap();
+    let corpses_before = world.registry().query::<Corpse>().count();
+
+    world.queue(Command::Damage {
+        serial,
+        amount: 5000,
+        damage_type: 0,
+        by: None,
+    });
+    world.tick(now);
+
+    assert!(the_summon(&world).is_none(), "the summon died");
+    assert_eq!(
+        world.registry().query::<Corpse>().count(),
+        corpses_before,
+        "and left nothing behind to loot"
+    );
+}
+
+#[test]
+fn the_follower_cap_refuses_a_summon_there_is_no_room_for() {
+    // ServUO's per-summon `CheckCast`. Two beasts fill four of the five slots; the
+    // third would want six, and the refusal must cost nothing — a mage charged
+    // eighth-circle mana to be told the daemon will not fit has paid for a "no".
+    let now = Instant::now();
+    let mut world = field_world();
+    let (connection, caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    for _ in 0..2 {
+        world.queue(Command::RequestCast {
+            connection,
+            spell: SUMMON_CREATURE,
+        });
+        world.tick(now);
+    }
+    assert_eq!(
+        openshard_skills::followers_of(&world.state, caster),
+        4,
+        "two beasts at two slots each"
+    );
+    let standing = world
+        .registry()
+        .query::<openshard_state::components::Summoned>()
+        .count();
+    let mana_before = world.registry().get::<Mana>(caster).unwrap().current;
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: SUMMON_CREATURE,
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world
+            .registry()
+            .query::<openshard_state::components::Summoned>()
+            .count(),
+        standing,
+        "the third summon was refused"
+    );
+    assert_eq!(
+        world.registry().get::<Mana>(caster).unwrap().current,
+        mana_before,
+        "and refused before a point of mana"
+    );
+}
+
+#[test]
+fn a_summon_is_not_written_down() {
+    // On the field tile's and the spell gate's own terms: restored, a five-minute
+    // creature becomes a permanent one whose caster no longer exists, standing as
+    // somebody's pet against a follower cap nothing will ever free.
+    let now = Instant::now();
+    let mut world = field_world();
+    let (connection, _caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    world.queue(Command::RequestCast {
+        connection,
+        spell: SUMMON_CREATURE,
+    });
+    world.tick(now);
+    let summon = the_summon(&world).expect("the spell called something up");
+    let serial = world.registry().serial_of(summon).unwrap();
+
+    assert!(
+        world
+            .mobile_records()
+            .iter()
+            .all(|record| record.serial != serial),
+        "the save sweep passed the summon over"
     );
 }
 

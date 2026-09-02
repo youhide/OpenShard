@@ -868,6 +868,15 @@ impl World {
             if registry.has::<Client>(entity) {
                 continue;
             }
+            // A summon is transient like a cast in flight, and is excluded on the
+            // field tile's and the spell gate's own terms: restored, a five-minute
+            // daemon becomes a permanent one whose caster no longer exists, standing
+            // as somebody's pet against a follower cap nothing will ever free.
+            // ServUO says the same by starting a fresh `UnsummonTimer` on
+            // deserialise and letting it fire.
+            if registry.has::<openshard_state::components::Summoned>(entity) {
+                continue;
+            }
             let Some(&Position(at)) = registry.get::<Position>(entity) else {
                 continue;
             };
@@ -1361,8 +1370,9 @@ impl World {
     /// once, before anyone connects.
     ///
     /// A row also says the character *exists*, and since S5 of
-    /// `docs/connection_state.md` this is where that is recorded — the account's
-    /// list is the roster's, not the login crate's. So this is the whole of what
+    /// `docs/server/evidence/2026-07-30-the-connection-state-machine.md` this is
+    /// where that is recorded — the account's list is the roster's, not the login
+    /// crate's. So this is the whole of what
     /// the store knows about who may be played, and the config's
     /// `[[accounts]] characters` is folded in beside it by
     /// [`enrol_character`](World::enrol_character) afterwards.

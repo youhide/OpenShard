@@ -116,5 +116,12 @@
       { "ids": ["0x0007"], "name": "an orc captain" },
       { "ids": ["0x0046"], "name": "a terathan warrior" }
     ]
+  },
+  {
+    "group": "Summoned only",
+    "rows": [
+      { "ids": ["0x023E"], "name": "a blade spirit" },
+      { "ids": ["0x00A4"], "name": "an energy vortex" }
+    ]
   }
 ]

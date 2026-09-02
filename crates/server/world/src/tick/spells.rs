@@ -47,6 +47,16 @@ use openshard_state::{
 
 use super::*;
 
+/// "You have too many followers to summon that creature." — ServUO's cliloc for
+/// every summoning spell's `CheckCast`.
+const TOO_MANY_FOLLOWERS_TO_SUMMON: openshard_protocol::wire::ClilocId =
+    openshard_protocol::wire::ClilocId(1_049_645);
+
+/// "That location is blocked." — the reference's answer when a summon finds
+/// nowhere to stand (cliloc 501942).
+const SUMMON_LOCATION_BLOCKED: openshard_protocol::wire::ClilocId =
+    openshard_protocol::wire::ClilocId(501_942);
+
 impl World {
     /// A client asked to cast a spell (`0xBF`). Begin it: right away in the
     /// Sphere style, or as a rooted [`Casting`] with a cast delay in the ServUO
@@ -79,6 +89,19 @@ impl World {
         if let Some(refusal) = self.travel_check_cast(caster, info.effect) {
             self.notify_self(caster, refusal);
             return;
+        }
+        // And the summoning family's, which is the same kind of rule: ServUO gives
+        // every summon a `CheckCast` that refuses when `Followers + ControlSlots >
+        // FollowersMax`, before a point of mana. It has to be here and not at
+        // resolution, because a mage who has paid eighth-circle mana to be told the
+        // daemon will not fit has been charged for the refusal.
+        if let SpellEffect::Summon(kind) = info.effect {
+            let cost = openshard_state::summon::summoned(kind).slots.get();
+            if skills::followers_of(&self.state, caster) + cost > MAX_FOLLOWERS {
+                self.state
+                    .localized_message(caster, TOO_MANY_FOLLOWERS_TO_SUMMON, "");
+                return;
+            }
         }
         // One cast at a time: a second request while a rooted one is held is not a
         // cast at all, so it is refused *before* the reveal below — ServUO's own
@@ -482,6 +505,13 @@ impl World {
                     }
                     let until = self.state.ticks + span;
                     magic::apply_paralyze(&mut self.state, target, until);
+                }
+            }
+            SpellEffect::Summon(kind) => {
+                // The creature is its own picture, so `spell_feedback` only voiced
+                // the cast — the `Unseen` visual a field uses, for the same reason.
+                if npc::summon(&mut self.state, caster, kind, target_location).is_none() {
+                    self.state.localized_message(caster, SUMMON_LOCATION_BLOCKED, "");
                 }
             }
             SpellEffect::Unimplemented => {} // casts, and then nothing happens

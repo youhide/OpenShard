@@ -8,8 +8,8 @@
 //! with. [`SpellCast`](crate::SpellCast) is still emitted for anything that wants
 //! to watch a cast.
 //!
-//! Effects that need systems the engine does not have yet — summons with a
-//! lifetime, a body swap, dispelling — are tagged
+//! Effects that need systems the engine does not have yet — a body swap,
+//! dispelling, the lock-and-trap family — are tagged
 //! [`SpellEffect::Unimplemented`]: the spell still *casts* (its words, its
 //! gesture, mana, reagents, skill, delay and target all resolve) and then
 //! nothing happens, until the subsystem lands. Such a row is
@@ -20,6 +20,7 @@ use openshard_state::{
     DamageType,
     FieldKind,
     Skill,
+    SummonKind,
 };
 
 /// A reagent's item graphic — the eight classic Magery reagents.
@@ -117,6 +118,11 @@ pub enum SpellEffect {
     /// A persistent field — a row of ground tiles laid at the aimed spot that pulse
     /// harm (Fire, Poison) or bar the way (Energy, Stone) until their tick comes.
     Field(FieldKind),
+    /// A creature called up for a while — the summoning family. It stands as the
+    /// caster's follower, counts against the follower cap, and goes on its own
+    /// timer. What each kind *is* — its body, its blow, its cost in slots and how
+    /// long it holds — is [`openshard_state::summon`].
+    Summon(SummonKind),
     /// Paralyze — freezes the target mobile in place for a Magery-scaled span; a
     /// blow lifts it. See [`Frozen`](openshard_state::Frozen).
     Paralyze,
@@ -137,7 +143,8 @@ pub enum SpellEffect {
     /// gesture all happen — and then nothing occurs. That was the seam a script
     /// pack filled; with the pack gone it is simply a spell that is not built,
     /// and the name says so rather than pointing at a layer that no longer
-    /// exists. Summons, fields and the rest of the unbuilt list are here.
+    /// exists. Polymorph, the dispels, the lock-and-trap family and the rest of
+    /// the unbuilt list are here.
     Unimplemented,
 }
 
@@ -177,8 +184,9 @@ pub enum SpellVisual {
     /// [`EffectKind::Lightning`](openshard_protocol::feedback::EffectKind).
     Lightning,
     /// Nothing to see. What the spell *makes* is its own visual — a field's row
-    /// of tiles — so drawing anything else would be a second, contradictory
-    /// picture of the same event.
+    /// of tiles, a summoned creature standing there — so drawing anything else
+    /// would be a second, contradictory picture of the same event. The sound
+    /// still plays: the reference gives these spells one and no particle.
     Unseen,
 }
 
@@ -664,8 +672,8 @@ pub static MAGERY: [SpellInfo; 64] = [
         &[BLACK_PEARL, MANDRAKE_ROOT, NIGHTSHADE],
         Location,
         Area,
-        Unimplemented,
-        SILENT,
+        SpellEffect::Summon(SummonKind::BladeSpirits),
+        art(0x0212, Unseen),
     ),
     spell(
         "Dispel Field",
@@ -732,12 +740,16 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Kal Xen",
         5,
         &[BLOOD_MOSS, MANDRAKE_ROOT, SPIDERS_SILK],
-        Location,
+        // No cursor: ServUO's `SpellInfo` for it passes `allowTarg: false` and
+        // `OnCast` summons beside the caster without asking where. It read
+        // `Location` here while the row did nothing, and a target cursor for a
+        // spell that ignores the answer is a lie the moment the row runs.
+        SelfCast,
         // The one summon ServUO gives the directed gesture: its `SpellInfo` names
         // group 16 outright rather than an id in the 260s.
         Directed,
-        Unimplemented,
-        SILENT,
+        SpellEffect::Summon(SummonKind::Creature),
+        art(0x0215, Unseen),
     ),
     // -- Sixth circle --------------------------------------------------------
     spell(
@@ -931,8 +943,8 @@ pub static MAGERY: [SpellInfo; 64] = [
         &[BLOOD_MOSS, MANDRAKE_ROOT, NIGHTSHADE, SPIDERS_SILK],
         Location,
         Area,
-        Unimplemented,
-        SILENT,
+        SpellEffect::Summon(SummonKind::EnergyVortex),
+        art(0x0212, Unseen),
     ),
     spell(
         "Resurrection",
@@ -951,8 +963,8 @@ pub static MAGERY: [SpellInfo; 64] = [
         &[BLOOD_MOSS, MANDRAKE_ROOT, SPIDERS_SILK],
         SelfCast,
         Area,
-        Unimplemented,
-        SILENT,
+        SpellEffect::Summon(SummonKind::AirElemental),
+        art(0x0217, Unseen),
     ),
     spell(
         "Summon Daemon",
@@ -961,8 +973,8 @@ pub static MAGERY: [SpellInfo; 64] = [
         &[BLOOD_MOSS, MANDRAKE_ROOT, SPIDERS_SILK],
         SelfCast,
         Area,
-        Unimplemented,
-        SILENT,
+        SpellEffect::Summon(SummonKind::Daemon),
+        art(0x0216, Unseen),
     ),
     spell(
         "Earth Elemental",
@@ -971,8 +983,8 @@ pub static MAGERY: [SpellInfo; 64] = [
         &[BLOOD_MOSS, MANDRAKE_ROOT, SPIDERS_SILK],
         SelfCast,
         Area,
-        Unimplemented,
-        SILENT,
+        SpellEffect::Summon(SummonKind::EarthElemental),
+        art(0x0217, Unseen),
     ),
     spell(
         "Fire Elemental",
@@ -981,8 +993,8 @@ pub static MAGERY: [SpellInfo; 64] = [
         &[BLOOD_MOSS, MANDRAKE_ROOT, SPIDERS_SILK, SULFUROUS_ASH],
         SelfCast,
         Area,
-        Unimplemented,
-        SILENT,
+        SpellEffect::Summon(SummonKind::FireElemental),
+        art(0x0217, Unseen),
     ),
     spell(
         "Water Elemental",
@@ -991,8 +1003,8 @@ pub static MAGERY: [SpellInfo; 64] = [
         &[BLOOD_MOSS, MANDRAKE_ROOT, SPIDERS_SILK],
         SelfCast,
         Area,
-        Unimplemented,
-        SILENT,
+        SpellEffect::Summon(SummonKind::WaterElemental),
+        art(0x0217, Unseen),
     ),
 ];
 
@@ -1222,6 +1234,39 @@ mod tests {
                 spell.name
             );
         }
+    }
+
+    /// A summon that is laid on a tile asks for one, and one that is not does not.
+    ///
+    /// The same fact is written in two tables — the spell's target column here, and
+    /// [`openshard_state::summon::SummonData::at_the_mark`] there — because each is
+    /// the natural home for one half: the client is told which cursor to raise from
+    /// the spell, and the spawn point is chosen from the creature. Two copies of one
+    /// fact is exactly the shape that drifts, and the drift would be silent in the
+    /// worst way: a spell that raises a cursor and then ignores the answer, or one
+    /// that summons at the caster's feet while the player is still pointing at a
+    /// spot across the room.
+    #[test]
+    fn a_summon_asks_for_the_tile_it_is_laid_on_and_no_other() {
+        for spell in &MAGERY {
+            let SpellEffect::Summon(kind) = spell.effect else {
+                continue;
+            };
+            assert_eq!(
+                openshard_state::summon::summoned(kind).at_the_mark,
+                spell.target == SpellTarget::Location,
+                "{} disagrees with its creature about where it lands",
+                spell.name
+            );
+        }
+        // And the family is all eight, so a ninth row cannot join it unnoticed.
+        assert_eq!(
+            MAGERY
+                .iter()
+                .filter(|spell| matches!(spell.effect, SpellEffect::Summon(_)))
+                .count(),
+            8
+        );
     }
 
     /// The art rows, spot-checked against ServUO's own calls.

@@ -243,9 +243,81 @@
     than deadlines to make the cut possible (`stat_buff_terms`, `paralyze_ticks`); a
     Paralyze *Field* still freezes outright, as `ParalyzeFieldSpell` does. Deferred:
     the AoS resist-swap variants.
-  - **Summons with a lifetime** — Blade Spirits, Energy Vortex, Summon
-    Creature/Daemon: a spawned creature that despawns on its own timer and counts
-    against the follower cap the status bar already carries.
+  - [x] **Summons with a lifetime.** The last eight `Unimplemented` rows of the
+    Magery table that have an effect at all — Summon Creature, Blade Spirits,
+    Energy Vortex, the four elementals and Summon Daemon — now call something up.
+    - **A summon is a pet with a deadline**, and that is the whole reason the
+      slice is small. ServUO's `BaseCreature.Summon` sets `ControlMaster` and
+      `Summoned`, and everything a *controlled* creature does then follows: it is
+      friendly, it heels, it answers "all kill", it counts against `Followers`.
+      All four already existed here as `Pet`, so a summon **is** one, and the
+      `Summoned` marker beside it carries only what a pet has not got — the tick
+      it goes. Nothing that follows, obeys or counts had to learn a second kind
+      of creature, and the follower number on the status bar needed no telling
+      at all: it is derived from what stands in the world
+      (`skills::followers_of`), so the bar's own half-second diff sees the slot
+      taken and freed.
+    - **What each one *is* is a table** (`state::summon`), the shape `tame` and
+      `weapon` set: body, hit points, blow, physical resistance, trained skills,
+      follower cost and lifetime rule, read straight off
+      `Scripts/Mobiles/Summons`. Pre-AoS throughout, so a daemon costs five slots
+      and fills a mage's whole following, and a blade spirit costs one.
+    - **Skill buys time and nothing else.** `(2 * Magery.Fixed) / 5` seconds —
+      four hundred at grandmaster — for the six that appear beside the caster; a
+      flat `Random(80, 40)` for Blade Spirits and Energy Vortex, which ignore the
+      caster entirely. A novice's elemental is exactly as strong and goes far
+      sooner. The roll is on the tick's seeded generator, so a replay summons for
+      the same span.
+    - **The refusal costs nothing**, `begin_cast` beside Recall's: ServUO gives
+      every summoning spell a `CheckCast` that turns it down when
+      `Followers + ControlSlots > FollowersMax` (cliloc 1049645). It cannot wait
+      for resolution — a mage charged eighth-circle mana to be told the daemon
+      will not fit has paid for a "no". The number the gate reads and the slots
+      the creature then takes are one column of one table, because a gate that
+      asks for more room than it admits is a cap nobody can reason about.
+    - **Where it stands** is the creature's own business, and it is two rules
+      because the reference has two: the pair that take a target are laid on the
+      aimed tile and refused if it is blocked, while the six that take none walk
+      the eight neighbours of the caster from a seeded rotation and never land on
+      the caster's own tile (`FindValidSpawnLocation(.., surroundingsOnly:
+      true)`). Both read `movement::arrival_z` and not the bare map, so a summon
+      can be called onto a deck or a house floor. **Summon Creature lost a target
+      cursor it should never have had**: its row said `Location` while it did
+      nothing, and ServUO's `SpellInfo` passes `allowTarg: false` — a cursor whose
+      answer the spell ignores is a lie the moment the row runs.
+    - **A summon leaves no corpse**, which is not cosmetic. Pre-AoS ServUO
+      deletes the one it just made (`DeleteCorpseOnDeath`); here none is laid,
+      because a corpse is filled by `fill_creature_loot`, whose gold baseline
+      scales with the dead thing's hit points — a two-hundred-hit daemon conjured
+      for fifty mana and killed on the spot would be a coin press.
+    - **And it is not written down**, on the field tile's and the spell gate's
+      own terms: restored, a five-minute daemon is a permanent one whose caster no
+      longer exists, standing as somebody's pet against a cap nothing will ever
+      free.
+    - **It goes out in a puff** either way — expiry, death or (later) a dispel all
+      leave through one `unsummon`. ServUO's `UnsummonTimer` is silent, and a
+      creature blinking out of existence with no feedback reads as a client
+      glitch, so the art is its own `BaseCreature.Dispel` (`0x3728`, sound
+      `0x201`). That flash is now `npc::flash`, shared with the guard who
+      materialises in the same picture with a different noise.
+    - Deferred: **Blade Spirits and Energy Vortex are summoned controlled here
+      and the reference summons them free** (`BaseCreature.Summon(.., controlled:
+      false, ..)`), which is why on OSI they famously turn on the mage who called
+      them. Reproducing that wants a hostility model the engine has not got — its
+      `acquire_phase` only ever acquires *players*, so an "uncontrolled" spirit
+      would hunt the caster and walk past an orc. **Summon Creature's beasts share
+      one stat block**: the reference draws eighteen classes with their own
+      numbers, this draws nine bodies the engine can name over one modest woodland
+      animal, because there is no per-body stat table to draw from and inventing
+      eighteen is a bestiary rather than a spell. And **Dispel is still
+      `Unimplemented`** — it now has its question answered (`Summoned` is the
+      marker) and waits only on being written.
+  - **The roadmap still calls the unbuilt archetype `SpellEffect::Scripted`.** It
+    is `SpellEffect::Unimplemented` in the tree and has been since the script-pack
+    seam was retired; the entries above that name the old tag (the core-table
+    slice, the cast-art slice, the buff and field slices) point at a variant that
+    does not exist. Prose about a past decision, so nothing is wrong with the
+    code — but a reader greps for the name and finds nothing.
   - [x] **Travel — Recall, Mark, Gate Travel, and the moongates.** The last big
     Magery family out of `Scripted`, and the first reader of `no_recall`, which
     had been carried through persistence, the converter and the script bridge

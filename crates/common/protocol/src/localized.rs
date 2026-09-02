@@ -304,6 +304,10 @@ pub const SERVER_MESSAGES: &[Message] = &[
         fallback: "You can't mine there.",
     },
     Message {
+        id:       ClilocId(501942),
+        fallback: "That location is blocked.",
+    },
+    Message {
         id:       ClilocId(501986),
         fallback: "You have no idea how to smelt this strange ore!",
     },
@@ -1948,6 +1952,10 @@ pub const SERVER_MESSAGES: &[Message] = &[
     Message {
         id:       ClilocId(1049611),
         fallback: "You have too many followers to tame that creature.",
+    },
+    Message {
+        id:       ClilocId(1049645),
+        fallback: "You have too many followers to summon that creature.",
     },
     Message {
         id:       ClilocId(1049655),

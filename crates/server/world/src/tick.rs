@@ -1062,6 +1062,11 @@ impl World {
         // having to call — ServUO's `GuardedRegion.OnEnter`.
         self.guard_crossings();
         npc::expire_guards(&mut self.state);
+        // And the summons whose span has run out. Beside the guards because it is
+        // the same shape — a mobile this shard made for a purpose, going out on its
+        // own clock — and *after* `reap`, so a summon killed this tick has already
+        // gone the death path rather than being swept out from under it.
+        npc::expire_summons(&mut self.state);
 
         // Follow this tick's skill gains on any open window. Before `update`
         // retires the events, like `mark_dirty`.

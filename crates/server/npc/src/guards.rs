@@ -22,13 +22,7 @@
 use openshard_combat as combat;
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
-use openshard_protocol::feedback::{
-    EffectKind,
-    GraphicalEffect,
-    PlaySound,
-};
 use openshard_protocol::mobile::Notoriety;
-use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::wire::{
     Graphic,
     Hue,
@@ -260,28 +254,10 @@ fn make_guard(state: &mut WorldState, target: EntityId) {
 
 /// The flash a guard comes and goes in: the teleport sparkle and its sound, to
 /// everyone who can see the spot. A mobile that simply blinks into existence —
-/// or out of it — with no feedback reads as a client glitch.
+/// or out of it — with no feedback reads as a client glitch, which is why
+/// [`crate::flash`] is shared with the summon that goes out in one.
 fn flash(state: &mut WorldState, guard: EntityId, at: Point) {
-    let packet = GraphicalEffect {
-        kind:            EffectKind::FixedXyz,
-        from:            None,
-        to:              None,
-        art:             ARRIVAL_GRAPHIC,
-        from_point:      at,
-        to_point:        at,
-        speed:           9,
-        duration:        20,
-        fixed_direction: true,
-        explode:         false,
-    };
-    state.broadcast_packet(guard, &ServerPacket::Effect(packet));
-    state.broadcast_packet(
-        guard,
-        &ServerPacket::PlaySound(PlaySound {
-            sound: SoundId(ARRIVAL_SOUND),
-            at,
-        }),
-    );
+    crate::flash(state, guard, at, ARRIVAL_GRAPHIC, SoundId(ARRIVAL_SOUND));
 }
 
 /// The sentence: the guard speaks, and the target takes its whole hit point

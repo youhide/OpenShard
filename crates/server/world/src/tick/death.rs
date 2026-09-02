@@ -642,6 +642,23 @@ impl World {
     /// Turn one dead creature into a corpse holding its gear and a little gold,
     /// then despawn the creature.
     fn lay_corpse(&mut self, entity: EntityId, serial: Serial, killer: Option<String>) {
+        // A summoned creature leaves none. Pre-AoS ServUO deletes the corpse it
+        // just made (`BaseCreature.DeleteCorpseOnDeath`, which is exactly
+        // `!Core.AOS && Summoned`), and here there is no reason to make one first:
+        // what a player sees is the summon going out in the same puff its timer
+        // would have taken it in.
+        //
+        // Not cosmetic. A corpse gets `fill_creature_loot`, whose gold baseline
+        // scales with the dead thing's hit points — so a two-hundred-hit daemon
+        // conjured for fifty mana and killed on the spot would be a coin press.
+        if self
+            .state
+            .registry
+            .has::<openshard_state::components::Summoned>(entity)
+        {
+            npc::unsummon(&mut self.state, entity);
+            return;
+        }
         let Some(&Position(at)) = self.state.registry.get::<Position>(entity) else {
             // No position (a mount in limbo, say) — nothing to lay a corpse on.
             self.despawn_creature(entity, serial);

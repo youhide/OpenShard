@@ -54,6 +54,7 @@ pub mod names;
 mod pets;
 mod spawn;
 mod speech;
+mod summons;
 mod vendor;
 pub use dress::{
     Appearance,
@@ -91,6 +92,11 @@ pub use spawn::{
 pub use speech::{
     check_vendor_access,
     overhear,
+};
+pub use summons::{
+    expire_summons,
+    summon,
+    unsummon,
 };
 pub use vendor::{
     RESTOCK_TICKS,
@@ -139,6 +145,45 @@ pub(crate) const GREET_FONT: Font = Font::DEFAULT;
 /// and a script's `Speak` names its own hue.
 pub(crate) fn say(state: &mut WorldState, npc: EntityId, line: &str) {
     openshard_chat::speak(state, npc, TalkMode::Regular, GREET_HUE, GREET_FONT, line);
+}
+
+/// Draw a fixed animation on a spot and play a sound there, for everyone who can
+/// see `mobile`.
+///
+/// The flash a mobile this crate makes comes and goes in. A guard materialises in
+/// one and vanishes in one; a summon goes out in one. **A mobile that simply blinks
+/// into existence — or out of it — with no feedback reads as a client glitch**, and
+/// that is the whole rule, so the two callers share it rather than each keeping a
+/// nine-field packet literal that could drift from the other.
+///
+/// The art and the sound stay the caller's, because they are not the same event:
+/// ServUO's guard arrives in the teleport sparkle (`0x3728` + `0x1FE`, the Teleport
+/// spell's own pair) and its `BaseCreature.Dispel` sends a summon away in the same
+/// picture with a different noise (`0x201`).
+pub(crate) fn flash(
+    state: &mut WorldState,
+    mobile: EntityId,
+    at: openshard_protocol::world::Point,
+    art: Graphic,
+    sound: openshard_protocol::wire::SoundId,
+) {
+    let packet = openshard_protocol::feedback::GraphicalEffect {
+        kind: openshard_protocol::feedback::EffectKind::FixedXyz,
+        from: None,
+        to: None,
+        art,
+        from_point: at,
+        to_point: at,
+        speed: 9,
+        duration: 20,
+        fixed_direction: true,
+        explode: false,
+    };
+    state.broadcast_packet(mobile, &ServerPacket::Effect(packet));
+    state.broadcast_packet(
+        mobile,
+        &ServerPacket::PlaySound(openshard_protocol::feedback::PlaySound { sound, at }),
+    );
 }
 
 /// Answer a banker's keywords for a speaking player, if one is in reach. "bank"
