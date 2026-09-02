@@ -31,13 +31,18 @@
 //! player. The sign is the one the reference itself moved to.
 
 use openshard_entities::EntityId;
-use openshard_protocol::serial::Serial;
+use openshard_protocol::serial::{
+    Serial,
+    SerialKind,
+};
 use openshard_protocol::wire::{
     Graphic,
     Hue,
 };
 use openshard_protocol::world::Point;
 use openshard_state::components::{
+    AddonKind,
+    AddonPart,
     Contained,
     Drawn,
     House,
@@ -46,6 +51,7 @@ use openshard_state::components::{
     LockedDown,
     Position,
 };
+use openshard_state::item_identity::install_item_identity;
 use openshard_state::{
     ItemLocation,
     WorldState,
@@ -280,11 +286,46 @@ pub fn demolish(state: &mut WorldState, house: EntityId) -> Result<Option<Entity
         .map(|(entity, _)| entity)
         .collect();
 
-    let crate_entity = if pinned.is_empty() {
+    // An installed addon comes down as the deed that made it, not as its
+    // component tiles. This is the same rule the release path answers with —
+    // ServUO's `BaseAddon` deletes itself whole and re-deeds — and demolition is
+    // the other way an addon leaves a house. Two loose oven graphics in the
+    // crate would lock down again and still cook, but the [`AddonPart`] group
+    // that made them one oven dies with the house, so the player would be left
+    // holding halves of a thing they can no longer take up.
+    let mut redeeded: Vec<AddonKind> = Vec::new();
+    let mut seen_roots: Vec<Serial> = Vec::new();
+    let mut components: Vec<EntityId> = Vec::new();
+    for &item in &pinned {
+        let Some(&part) = state.registry.get::<AddonPart>(item) else {
+            continue;
+        };
+        components.push(item);
+        if !seen_roots.contains(&part.root) {
+            seen_roots.push(part.root);
+            redeeded.push(part.addon);
+        }
+    }
+    let pinned: Vec<EntityId> = pinned
+        .into_iter()
+        .filter(|item| !components.contains(item))
+        .collect();
+
+    let crate_entity = if pinned.is_empty() && redeeded.is_empty() {
         None
     } else {
-        pack_into_a_crate(state, at, facet, &pinned, &stored)
+        pack_into_a_crate(state, at, facet, &pinned, &stored, &redeeded)
     };
+    // The tiles stop existing only once their deed is actually in a crate: a
+    // house whose crate could not be made refunds nothing and destroys nothing.
+    if crate_entity.is_some() {
+        for item in components {
+            // Unpinned first, so the house's lockdown count and storage
+            // projection are told before the entity goes.
+            state.set_item_lockdown(item, None);
+            take_off_the_ground(state, item);
+        }
+    }
 
     // Doors installed as part of a classic house come down with it. A content
     // door the house merely adopted stays where the pack put it and only loses
@@ -331,17 +372,41 @@ pub fn demolish(state: &mut WorldState, house: EntityId) -> Result<Option<Entity
 }
 
 /// Put everything into one crate on the house's tile.
+///
+/// `redeeded` names one addon per installed group: unlike everything else here
+/// it is not moved into the crate but *made* in it, because the components it
+/// stands for are removed rather than packed.
 fn pack_into_a_crate(
     state: &mut WorldState,
     at: Point,
     facet: openshard_protocol::world::Facet,
     pinned: &[EntityId],
     stored: &[EntityId],
+    redeeded: &[AddonKind],
 ) -> Option<EntityId> {
-    let (crate_entity, crate_serial) = state
-        .registry
-        .spawn_with_serial(openshard_protocol::serial::SerialKind::Item)
-        .ok()?;
+    // The refund entities come first, and a shard out of item serials refuses
+    // the whole packing here rather than halfway through: the caller removes an
+    // addon's component tiles only when a crate came back, so an oven that
+    // cannot be re-deeded is an oven that is not taken down.
+    let mut deeds: Vec<EntityId> = Vec::with_capacity(redeeded.len());
+    for _ in redeeded {
+        match state.registry.spawn_with_serial(SerialKind::Item) {
+            Ok((deed, _)) => deeds.push(deed),
+            Err(_) => {
+                for made in deeds {
+                    state.registry.despawn(made);
+                }
+                return None;
+            }
+        }
+    }
+
+    let Ok((crate_entity, crate_serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
+        for made in deeds {
+            state.registry.despawn(made);
+        }
+        return None;
+    };
     state.registry.insert(
         crate_entity,
         Drawn {
@@ -384,6 +449,22 @@ fn pack_into_a_crate(
             )
         })
         .collect::<Vec<_>>();
+
+    let packed = pinned.len() + loose.len();
+    for (index, (&addon, &deed)) in redeeded.iter().zip(deeds.iter()).enumerate() {
+        // A deed is a typed item and nothing else: its art is the registry's
+        // projection of the kind, never a graphic chosen here.
+        install_item_identity(state, deed, addon.deed_kind(), None);
+        let contained = Contained {
+            container: crate_serial,
+            position:  openshard_protocol::gump::GumpPoint::new(0, 0),
+            grid:      openshard_protocol::containers::GridSlot(
+                u8::try_from(packed + index).unwrap_or(u8::MAX),
+            ),
+        };
+        establish_item_location(state, deed, ItemLocation::contained(contained))
+            .expect("a fresh addon deed enters the crate it was made for");
+    }
 
     for (slot, &item) in pinned.iter().chain(loose.iter()).enumerate() {
         state.set_item_lockdown(item, None);

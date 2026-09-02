@@ -51,6 +51,7 @@ pub mod harvest;
 pub mod house_inventory;
 pub mod instrument;
 pub mod item_definition;
+pub mod item_identity;
 pub mod item_location;
 pub mod obstruct;
 pub mod party;
@@ -73,6 +74,9 @@ pub use boat::{
 pub use components::{
     Access,
     Account,
+    AddonDeed,
+    AddonKind,
+    AddonPart,
     Amount,
     Banker,
     BehaviourBuff,

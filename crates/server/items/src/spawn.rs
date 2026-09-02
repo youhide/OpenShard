@@ -165,18 +165,7 @@ pub fn install_identity(
     kind: ItemKindId,
     material: Option<MaterialId>,
 ) {
-    let drawn = presentation_of(kind, material).expect("only validated item identities are installed");
-    state.registry.insert(entity, drawn);
-    state.registry.insert(entity, ItemKind(kind));
-    match material {
-        Some(material) => {
-            state.registry.insert(entity, Material(material));
-        }
-        None => {
-            state.registry.remove::<Material>(entity);
-        }
-    }
-    state.invalidate_house_inventory_for_item(entity);
+    openshard_state::item_identity::install_item_identity(state, entity, kind, material);
 }
 
 /// Upgrade an audited legacy presentation pair when the registry names it.

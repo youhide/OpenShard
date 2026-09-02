@@ -2380,6 +2380,90 @@ fn a_collapsed_house_leaves_a_crate_and_no_walls() {
     let _ = house_serial;
 }
 
+/// An installed addon leaves a collapsing house as the deed that made it.
+///
+/// The components would otherwise land in the crate as two loose oven graphics:
+/// nothing lost, but the [`AddonPart`] group that made them one oven dies with
+/// the house, so what the player got back could never be taken up again.
+#[test]
+fn a_collapsed_house_packs_an_installed_oven_as_one_deed() {
+    use openshard_state::components::{
+        AddonKind,
+        AddonPart,
+        Contained,
+        Container,
+        ItemKind,
+    };
+
+    use crate::decay::{
+        CRATE_GRAPHIC,
+        demolish,
+    };
+    use crate::storage::lock_down;
+
+    let mut state = world_with(cottage());
+    let (actor, owner) = an_actor(&mut state);
+    let at = Point::new(10, 10, 0);
+    let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
+    let master = state.registry.entity_of(owner).expect("a mobile");
+
+    // Two locked-down tiles grouped the way `place_addon_from_deed` groups them:
+    // the root carries the group as well, naming itself.
+    let root = an_item(&mut state, at, false);
+    let second = an_item(&mut state, at, false);
+    lock_down(&mut state, master, house, root, None).unwrap();
+    lock_down(&mut state, master, house, second, None).unwrap();
+    let root_serial = state
+        .registry
+        .serial_of(root)
+        .expect("a locked-down item has a serial");
+    for component in [root, second] {
+        state.registry.insert(
+            component,
+            AddonPart {
+                addon: AddonKind::StoneOvenEast,
+                root:  root_serial,
+            },
+        );
+    }
+
+    demolish(&mut state, house).expect("a readable house");
+
+    assert!(
+        state.registry.serial_of(root).is_none() && state.registry.serial_of(second).is_none(),
+        "the oven tiles outlived the addon they were part of"
+    );
+
+    let crates: Vec<EntityId> = state
+        .registry
+        .query::<Container>()
+        .filter(|(entity, _)| {
+            state
+                .registry
+                .get::<Drawn>(*entity)
+                .is_some_and(|drawn| drawn.id == Graphic(CRATE_GRAPHIC))
+        })
+        .map(|(entity, _)| entity)
+        .collect();
+    assert_eq!(crates.len(), 1, "the wrong number of crates");
+    let crate_serial = state
+        .registry
+        .serial_of(crates[0])
+        .expect("a fresh crate has a serial");
+    let packed: Vec<EntityId> = state
+        .registry
+        .query::<Contained>()
+        .filter(|(_, held)| held.container == crate_serial)
+        .map(|(entity, _)| entity)
+        .collect();
+    assert_eq!(packed.len(), 1, "the crate holds {packed:?}");
+    assert_eq!(
+        state.registry.get::<ItemKind>(packed[0]).map(|kind| kind.0),
+        Some(AddonKind::StoneOvenEast.deed_kind()),
+        "the refund is not the oven's own deed"
+    );
+}
+
 /// A house with nothing pinned in it leaves no crate.
 #[test]
 fn an_empty_house_leaves_no_crate() {
