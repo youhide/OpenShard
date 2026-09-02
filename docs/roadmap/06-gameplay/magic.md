@@ -12,13 +12,28 @@
     `SpellCast` and gives it its effect, `MobileDied`'s decoupling a third time.
     `Command::Heal` mends toward the maximum; `op_cast_spell`/`op_heal`/typed
     `op_damage` are the script's hands.
-  - **Live mana redraw.** The client draws the local player's mana as the blue
-    line below the overhead health bar (`client/app/src/shell.rs`), but the line
-    reads the last full `0x11` status reply. Casting and `magic::regen_mana` mutate
-    `Mana` without sending a mana/status update, while `refresh_statuses` only
-    diffs inventory-derived fields. The displayed pool can therefore stay stale
-    until another status reply; the mana mutation path needs one authoritative
-    live wire update and a regression test covering both spending and regen.
+  - [x] **Live mana redraw (`0xA2`).** The blue line under the character read the
+    last full `0x11`, and `refresh_statuses` only sends one when an
+    *inventory-derived* number moves — so a mage could empty the pool in a fight
+    and watch a full bar throughout. The pool now has **one door**,
+    `WorldState::set_mana` (`broadcast_health`'s sibling): it writes the component
+    and sends the owner a `0xA2` mana bar in the same breath, and the four sites
+    that mutated `Mana` in place from three crates — the cast, the fizzle, the
+    meditation trickle, an intelligence buff's cap shift — all go through it. Only
+    a character *sheet* being assembled at login still writes directly: there is no
+    client on the other end of it yet. `0xA2` carries the real pool and goes to the
+    mobile itself alone, as ServUO's `MobileMana` does (the scaled party copy has no
+    reader here yet). On this client the pool left `Status` for `Player::mana`, the
+    way hit points live in `Player::hits`, because a value two packets can state
+    must have one home.
+  - [x] **A cast reveals, and breaks concentration.** `Spell.Cast` calls
+    `RevealingAction` the moment the state turns to casting, and that call ends in a
+    `DisruptiveAction` — neither happened here, so a hidden mage stayed hidden
+    through a fireball and a meditating one cast out of the trance and kept
+    regenerating at twice the rate. One `break_cover` in `begin_cast` does both (it
+    already ends in `disrupt`), placed after the free refusals and after the
+    one-cast-at-a-time gate: a spell the book does not hold was never begun, so it
+    gives nobody away.
   - [x] **Typed damage and resistances** (the piece combat deferred). `damage`
     now takes a `DamageType` — physical, fire, cold, poison, energy — and cuts it
     by the target's `Resistance` *for that type*, in the one place all damage
@@ -164,8 +179,26 @@
     blow lifts it** — `combat::damage` clears `Frozen` inline the moment real damage
     lands, so a reflected hit wakes too. It expires on the tick counter
     (`magic::expire_frozen`, thawing with a "you can move again" line) and **persists**
-    on the same `effects` list (kind `13`), so a relog does not thaw it. Deferred: the
-    Resisting-Spells duration cut (×0.75), and barring a cast while paralyzed.
+    on the same `effects` list (kind `13`), so a relog does not thaw it. The
+    Resisting-Spells cut landed with the skill below; still deferred: barring a cast
+    while paralyzed.
+  - [x] **Resisting Spells, the skill nothing read.** `Skill::MagicResist` was in
+    the table, on the trainers' lists and in every saved sheet while no code
+    anywhere consulted it: a grandmaster warder took a flamestrike exactly as hard
+    as a mage in a robe. `magic::resist` is the read site — ServUO's
+    `Spell.CheckResisted` pre-AoS, in tenths of a per-cent so the reference's fifths
+    and halves stay exact. The chance is the better of two readings of the skill,
+    halved: a flat `resist / 5` floor, and a contested one weighing the caster's
+    Magery and the circle, which is what makes an eighth-circle spell land where a
+    first-circle one would not. **A resist is not a shield** — it takes a quarter
+    off, and off *whatever* the spell was going to do: damage for the bolts (each
+    victim of an area blast rolls its own), duration for Paralyze and for the debuff
+    half of the Bless/Curse family. Being cast at is also how the skill trains, and
+    only while the spell is above `(1 + circle) * 10 + (1 + circle / 6) * 25` points,
+    so a grandmaster cannot train on first-circle spam. Two spans became spans rather
+    than deadlines to make the cut possible (`stat_buff_terms`, `paralyze_ticks`); a
+    Paralyze *Field* still freezes outright, as `ParalyzeFieldSpell` does. Deferred:
+    the AoS resist-swap variants.
   - **Summons with a lifetime** — Blade Spirits, Energy Vortex, Summon
     Creature/Daemon: a spawned creature that despawns on its own timer and counts
     against the follower cap the status bar already carries.

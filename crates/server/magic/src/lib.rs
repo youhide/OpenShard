@@ -55,6 +55,15 @@ pub use spells::{
     mana,
 };
 
+mod resist;
+pub use resist::{
+    RESIST_SKILL,
+    RESISTED_MESSAGE,
+    check_resisted,
+    resist_chance,
+    resisted,
+};
+
 mod travel;
 pub use travel::{
     PUBLIC_MOONGATES,
@@ -189,7 +198,7 @@ pub fn cast_spell(state: &mut WorldState, cast: Cast<'_>) {
 
     consume_reagents(state, pack, reagents);
     if let Some(&Mana { current, max }) = state.registry.get::<Mana>(caster) {
-        state.registry.insert(
+        state.set_mana(
             caster,
             Mana {
                 current: current - mana,
@@ -241,7 +250,7 @@ pub fn pay_and_roll(
     let success = openshard_skills::roll_skill_band(state, caster, skill, skill_band);
     if success || mana_loss_on_fail {
         if let Some(&Mana { current, max }) = state.registry.get::<Mana>(caster) {
-            state.registry.insert(
+            state.set_mana(
                 caster,
                 Mana {
                     current: current.saturating_sub(mana),
@@ -342,7 +351,7 @@ fn shift_stats(state: &mut WorldState, entity: EntityId, kind: StatEffectKind, o
     if di != 0 {
         if let Some(&Mana { current, max }) = state.registry.get::<Mana>(entity) {
             let max = apply_delta(max, di);
-            state.registry.insert(
+            state.set_mana(
                 entity,
                 Mana {
                     current: current.min(max),
@@ -635,7 +644,7 @@ pub fn regen_mana(state: &mut WorldState) {
             continue;
         }
         if let Some(&Mana { current, max }) = state.registry.get::<Mana>(entity) {
-            state.registry.insert(
+            state.set_mana(
                 entity,
                 Mana {
                     current: (current + 1).min(max),

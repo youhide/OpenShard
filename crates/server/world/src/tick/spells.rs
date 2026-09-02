@@ -83,12 +83,29 @@ impl World {
             self.notify_self(caster, refusal);
             return;
         }
+        // One cast at a time: a second request while a rooted one is held is not a
+        // cast at all, so it is refused *before* the reveal below — ServUO's own
+        // order, where `Spell.Cast` tests `m_Caster.Spell == null` first.
+        if self.state.registry.has::<Casting>(caster) {
+            return;
+        }
+        // Everything above this line refuses the cast for free; from here it is
+        // begun, and beginning one is both a revealing and a disruptive act —
+        // ServUO's `Spell.Cast` calls `RevealingAction` the moment the state turns
+        // to `Casting`, and `RevealingAction` ends with a `DisruptiveAction`
+        // ("anything that unhides you will also disrupt meditation"). So it is one
+        // call here as it is one there: a hidden mage who casts is seen, and a
+        // meditating one leaves the trance rather than casting out of it at twice
+        // the regen rate.
+        //
+        // It happens in `begin_cast` and not at resolution because that is where
+        // the two references put it: the reveal is the price of *trying*, and a
+        // rooted ServUO-style cast must give the caster away for the seconds it is
+        // held, not at the end of them.
+        self.state.break_cover(caster);
         match self.state.gameplay.cast_style {
             CastStyle::Walk => self.resolve_cast(caster, spell),
             CastStyle::Stop => {
-                if self.state.registry.has::<Casting>(caster) {
-                    return; // already mid-cast — one at a time
-                }
                 let delay = magic::cast_delay_ticks(info, TICKS_PER_SECOND);
                 self.state.registry.insert(
                     caster,
@@ -276,6 +293,7 @@ impl World {
         match info.effect {
             SpellEffect::Damage(kind, base) => {
                 if let Some(target) = target_serial {
+                    let base = self.resist_damage(caster, target, info.circle, base);
                     combat::damage(&mut self.state, target, base, kind, by);
                 }
             }
@@ -297,6 +315,11 @@ impl World {
                     .filter_map(|(entity, _)| self.state.registry.serial_of(entity))
                     .collect();
                 for victim in victims {
+                    // Every victim rolls its own resist: a blast that catches four
+                    // people is four spells as far as the skill is concerned, which
+                    // is ServUO's reading and the only one under which standing in
+                    // an area spell trains the skill at all.
+                    let base = self.resist_damage(caster, victim, info.circle, base);
                     combat::damage(&mut self.state, victim, base, kind, by);
                 }
             }
@@ -360,7 +383,14 @@ impl World {
                 // A Mobile-target spell, so it lands on the aimed mobile — or on
                 // the caster for a self-cast that answered its own cursor.
                 if let Some(who) = target_serial.or(by) {
-                    let (offset, expires_at) = self.stat_buff_terms(caster, kind);
+                    let (offset, mut span) = self.stat_buff_terms(caster, kind);
+                    // A curse can be resisted; a blessing is not something the
+                    // blessed fights off. Only the debuff half of the family rolls,
+                    // and what a resist buys is a shorter hold, not none.
+                    if openshard_state::is_debuff(kind) && self.spell_resisted(caster, who, info.circle) {
+                        span = magic::resisted(span);
+                    }
+                    let expires_at = self.state.ticks + span;
                     magic::apply_stat_buff(&mut self.state, who, kind, offset, expires_at);
                     self.refresh_status_of(who);
                 }
@@ -400,7 +430,16 @@ impl World {
             SpellEffect::Paralyze => {
                 // A Mobile-target spell: it freezes the aimed mobile in place.
                 if let Some(target) = target_serial {
-                    let until = self.paralyze_until(Some(caster));
+                    // The Resisting-Spells cut the paralyze slice deferred: a
+                    // resisted hold is three quarters as long, not absent. The
+                    // *field* does not roll one — ServUO's `ParalyzeFieldSpell`
+                    // freezes whoever crosses it outright — so the cut lives here
+                    // and not in `paralyze_ticks`.
+                    let mut span = self.paralyze_ticks(Some(caster));
+                    if self.spell_resisted(caster, target, info.circle) {
+                        span = magic::resisted(span);
+                    }
+                    let until = self.state.ticks + span;
                     magic::apply_paralyze(&mut self.state, target, until);
                 }
             }
@@ -552,17 +591,57 @@ impl World {
         self.state.animate(caster, openshard_state::Action::Cast);
     }
 
-    /// How strong a stat buff the caster lands, and the tick it lifts.
+    /// Whether `target` shrugs part of a `circle` spell off, and the line it reads
+    /// when it does.
+    ///
+    /// The one door the Resisting-Spells roll goes through, so the skill trains from
+    /// exactly the spells it softens and a caster cannot find a spell that skips it.
+    /// The roll itself, and the gain it offers, are [`magic::check_resisted`]; what
+    /// a resist is *worth* is the caller's, because a bolt loses damage and a curse
+    /// loses seconds.
+    fn spell_resisted(&mut self, caster: EntityId, target: Serial, circle: magic::SpellCircle) -> bool {
+        let Some(target) = self.state.registry.entity_of(target) else {
+            return false;
+        };
+        // A spell cast on yourself is not resisted: there is nobody to resist it,
+        // and rolling would train the skill off a self-cast Curse.
+        if target == caster {
+            return false;
+        }
+        if !magic::check_resisted(&mut self.state, caster, target, circle) {
+            return false;
+        }
+        self.state.localized_message(target, magic::RESISTED_MESSAGE, "");
+        true
+    }
+
+    /// A spell's damage after the target's Resisting Spells has had its say — three
+    /// quarters of it on a resist, all of it otherwise.
+    fn resist_damage(
+        &mut self,
+        caster: EntityId,
+        target: Serial,
+        circle: magic::SpellCircle,
+        base: u16,
+    ) -> u16 {
+        if self.spell_resisted(caster, target, circle) {
+            magic::resisted(u64::from(base)) as u16
+        } else {
+            base
+        }
+    }
+
+    /// How strong a stat buff the caster lands, and how long it holds, in ticks.
     ///
     /// Both scale from the caster's Magery, ServUO's shape: the magnitude rises to
     /// `+10` at grandmaster, the duration to a couple of minutes. A debuff kind
     /// takes the same magnitude with the sign flipped — the negation the `magic`
     /// crate then folds in and, later, backs out.
-    fn stat_buff_terms(
-        &self,
-        caster: EntityId,
-        kind: openshard_state::StatEffectKind,
-    ) -> (i16, openshard_state::WorldTick) {
+    ///
+    /// A *span* and not the tick it lifts, because a resist shortens the hold: an
+    /// absolute deadline cannot be cut by a quarter without first subtracting the
+    /// present out of it again.
+    fn stat_buff_terms(&self, caster: EntityId, kind: openshard_state::StatEffectKind) -> (i16, u64) {
         let magery = self
             .state
             .registry
@@ -575,7 +654,7 @@ impl World {
             magnitude
         };
         let seconds = u64::from(magery / 10).clamp(10, 120);
-        (offset, self.state.ticks + seconds * TICKS_PER_SECOND)
+        (offset, seconds * TICKS_PER_SECOND)
     }
 
     /// How strong a behaviour buff the caster lands, and the tick it lifts. The
@@ -619,16 +698,27 @@ impl World {
         (amount, self.state.ticks + seconds * TICKS_PER_SECOND)
     }
 
-    /// The tick a paralysis this caster lands would lift — ServUO's pre-AoS
-    /// `7 + Magery*0.2` seconds (grandmaster `1000` tenths → 27s). Reused by both
-    /// the Paralyze spell and a Paralyze Field's pulse; a missing caster (a field
-    /// whose caster has gone) falls to the 7-second floor.
-    pub(super) fn paralyze_until(&self, caster: Option<EntityId>) -> openshard_state::WorldTick {
+    /// How long a paralysis this caster lands holds, in ticks — ServUO's pre-AoS
+    /// `7 + Magery*0.2` seconds (grandmaster `1000` tenths → 27s). A missing caster
+    /// (a field whose caster has gone) falls to the 7-second floor.
+    ///
+    /// A span rather than a deadline for the same reason [`Self::stat_buff_terms`]
+    /// gives one: the Paralyze spell cuts it on a resist, and a quarter cannot be
+    /// taken off a tick that already has the present folded into it.
+    fn paralyze_ticks(&self, caster: Option<EntityId>) -> u64 {
         let magery = caster
             .and_then(|c| self.state.registry.get::<Skills>(c))
             .map_or(0, |s| s.get(MAGERY_SKILL));
         let seconds = 7 + u64::from(magery) / 50;
-        self.state.ticks + seconds * TICKS_PER_SECOND
+        seconds * TICKS_PER_SECOND
+    }
+
+    /// The tick a paralysis this caster lands would lift. What a Paralyze Field's
+    /// pulse wants: it freezes whoever it catches outright, with no resist roll of
+    /// its own (ServUO's `ParalyzeFieldSpell` has none), so it asks for the deadline
+    /// and not the span.
+    pub(super) fn paralyze_until(&self, caster: Option<EntityId>) -> openshard_state::WorldTick {
+        self.state.ticks + self.paralyze_ticks(caster)
     }
 
     /// Send a mobile its personal light level, if it has a client — the seam Night

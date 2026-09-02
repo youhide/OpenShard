@@ -10745,6 +10745,246 @@ fn a_resolved_cast_plays_its_sound_and_shows_its_bolt() {
     );
 }
 
+/// Spending mana puts the new pool on the wire.
+///
+/// It did not. `Mana` was mutated in place by the cast and nothing was sent, so
+/// the blue line under the character read whatever the last `0x11` had said — and
+/// `refresh_statuses` only sends one when an *inventory-derived* number moves, so
+/// a mage could empty the pool in a fight and watch a full bar the whole time.
+#[test]
+fn casting_sends_the_client_its_new_mana_pool() {
+    let now = Instant::now();
+    let mut world = sphere_world();
+    let (connection, entity) = ready_caster(&mut world, BLACK_PEARL, now);
+    let before = world.registry().get::<Mana>(entity).unwrap().current;
+    let _ = packets_for(&mut world, connection); // drain the setup burst
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: SpellId(17),
+    }); // Fireball, nine mana at the third circle
+    world.tick(now);
+
+    let after = world.registry().get::<Mana>(entity).unwrap().current;
+    assert!(after < before, "the cast paid for itself");
+    let packets = packets_for(&mut world, connection);
+    let bar = packets
+        .iter()
+        .rev()
+        .find(|packet| packet[0] == 0xA2)
+        .expect("the cast sent a 0xA2 mana bar");
+    assert_eq!(
+        u16::from_be_bytes([bar[7], bar[8]]),
+        after,
+        "and the bar carries the pool the world now holds, unscaled"
+    );
+}
+
+/// And so does getting it back: the trickle is the other half of the same bar,
+/// and a pool that only ever *falls* on screen is no better than one that never
+/// moves.
+#[test]
+fn the_mana_trickle_reaches_the_client_too() {
+    let now = Instant::now();
+    let mut world = sphere_world();
+    let (connection, entity) = ready_caster(&mut world, BLACK_PEARL, now);
+    let Mana { max, .. } = *world.registry().get::<Mana>(entity).unwrap();
+    world.state.registry.insert(
+        entity,
+        Mana {
+            current: max - 1,
+            max,
+        },
+    );
+    // The regen is stateless: a mobile gets a point when the tick counter divides
+    // its own rate. So put the counter on a multiple of that rate rather than
+    // ticking a world for the seconds it would otherwise take.
+    let rate = openshard_magic::mana_regen_ticks(&world.state, entity);
+    world.state.ticks = openshard_state::WorldTick::ZERO + rate;
+    let _ = packets_for(&mut world, connection);
+
+    openshard_magic::regen_mana(&mut world.state);
+
+    assert_eq!(
+        world.registry().get::<Mana>(entity).unwrap().current,
+        max,
+        "the trickle gave the point back"
+    );
+    let packets = packets_for(&mut world, connection);
+    let bar = packets
+        .iter()
+        .find(|packet| packet[0] == 0xA2)
+        .expect("the trickle sent a 0xA2 too");
+    assert_eq!(u16::from_be_bytes([bar[7], bar[8]]), max);
+}
+
+/// Casting is a revealing act, and a disruptive one.
+///
+/// ServUO's `Spell.Cast` calls `RevealingAction` the moment the state turns to
+/// casting, and that call ends in a `DisruptiveAction`. Neither happened here: a
+/// hidden mage stayed hidden through a fireball, and a meditating one cast out of
+/// the trance and went on regenerating at twice the rate.
+#[test]
+fn a_cast_gives_a_hidden_mage_away_and_ends_his_trance() {
+    use openshard_state::components::{
+        Hidden,
+        Meditating,
+    };
+    let now = Instant::now();
+    let mut world = sphere_world();
+    let (connection, entity) = ready_caster(&mut world, BLACK_PEARL, now);
+    world.state.registry.insert(entity, Hidden);
+    world.state.registry.insert(entity, Meditating);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: SpellId(17),
+    });
+    world.tick(now);
+
+    assert!(
+        !world.registry().has::<Hidden>(entity),
+        "the cast gave the caster away"
+    );
+    assert!(
+        !world.registry().has::<Meditating>(entity),
+        "and broke the trance rather than casting out of it"
+    );
+}
+
+/// A refused cast costs nothing — including the hiding.
+///
+/// The reveal sits *after* the free refusals for the reference's reason: a spell
+/// the book does not hold was never begun, so it cannot be the thing that gives a
+/// hidden thief away.
+#[test]
+fn a_spell_the_book_does_not_hold_does_not_reveal_the_caster() {
+    use openshard_state::components::Hidden;
+    let now = Instant::now();
+    let mut world = sphere_world();
+    // Enter with reagents and skill but no spellbook at all.
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    world.state.registry.insert(entity, Hidden);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: SpellId(17),
+    });
+    world.tick(now);
+
+    assert!(
+        world.registry().has::<Hidden>(entity),
+        "a cast that never began reveals nobody"
+    );
+}
+
+/// The Resisting-Spells curve, against a live skill sheet.
+///
+/// ServUO's `GetResistPercentForCircle`, in tenths of a per-cent. The numbers are
+/// hand-evaluated from the reference expression, and the shape they pin is the
+/// point: the *contested* reading falls with the caster's Magery and the circle,
+/// while the flat `resist / 5` is a floor that a novice keeps against an
+/// eighth-circle spell.
+#[test]
+fn the_resist_chance_follows_the_reference_curve() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let caster = world.state.players[&connection];
+    let target_serial = spawn_mobile_at(&mut world, Point::new(START.x + 1, START.y, 0), 50, now);
+    let target = entity(&world, target_serial);
+    let caster_serial = serial_of(&world, connection);
+    // The wire's own skill ids: 25 Magery, 26 Resisting Spells.
+    let set = |world: &mut World, serial, skill, value| {
+        world.queue(Command::SetSkill { serial, skill, value });
+        world.tick(now);
+    };
+    let circle = |n: u8| openshard_magic::SpellCircle::new(n).unwrap();
+
+    // A grandmaster warder against a grandmaster's eighth circle: the contested
+    // reading is 1000 - ((1000-200)/5 + 8*50) = 440, halved 220 — 22%.
+    set(&mut world, caster_serial, 25, 1000);
+    set(&mut world, target_serial, 26, 1000);
+    assert_eq!(
+        openshard_magic::resist_chance(&world.state, caster, target, circle(8)),
+        220
+    );
+    // The same pair at the first circle: 1000 - (160 + 50) = 790, halved 395.
+    assert_eq!(
+        openshard_magic::resist_chance(&world.state, caster, target, circle(1)),
+        395
+    );
+    // A novice warder against that eighth circle: the contested reading goes
+    // negative, and the flat fifth halved — one per-cent — is what is left.
+    set(&mut world, target_serial, 26, 100);
+    assert_eq!(
+        openshard_magic::resist_chance(&world.state, caster, target, circle(8)),
+        10
+    );
+    // No skill, no resist.
+    set(&mut world, target_serial, 26, 0);
+    assert_eq!(
+        openshard_magic::resist_chance(&world.state, caster, target, circle(1)),
+        0
+    );
+}
+
+/// Resisting Spells softens what lands — the read site the skill never had.
+///
+/// The skill sat in the table, on the trainers' lists and in every saved sheet
+/// while nothing anywhere consulted it. Two casts of the same bolt at two targets
+/// that differ only in that skill: the warder takes strictly less over a run, and
+/// the target with no skill takes the full bolt every single time, which is the
+/// half of this that is exact rather than statistical.
+#[test]
+fn resisting_spells_softens_a_bolt_and_no_skill_resists_nothing() {
+    const CASTS: u16 = 30;
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let caster = world.state.players[&connection];
+    let caster_serial = serial_of(&world, connection);
+    // Flamestrike: seventh circle, 28 fire damage before any resistance.
+    let spell = SpellId(50);
+    let base = u32::from(CASTS) * 28;
+
+    let hammer = |world: &mut World, resist: u16| -> u32 {
+        let victim = spawn_mobile_at(world, Point::new(START.x + 1, START.y, 0), 30_000, now);
+        let victim_entity = entity(world, victim);
+        world.queue(Command::SetSkill {
+            serial: victim,
+            skill:  26, // Resisting Spells
+            value:  resist,
+        });
+        world.tick(now);
+        // No `Resistance` component, so the bolt arrives at its face value and the
+        // only thing between it and the hit points is the roll under test.
+        let before = world.registry().get::<Hitpoints>(victim_entity).unwrap().current;
+        for _ in 0..CASTS {
+            world.apply_spell_effect(caster, spell, Some(victim), Point::new(START.x + 1, START.y, 0));
+        }
+        let after = world.registry().get::<Hitpoints>(victim_entity).unwrap().current;
+        u32::from(before - after)
+    };
+
+    // A caster with no Magery at all, which is the *worst* case for the contested
+    // reading and so the best for the warder: a grandmaster resists just under half
+    // of these. Thirty casts without a single one is a 1-in-a-billion run.
+    let _ = caster_serial;
+    let warded = hammer(&mut world, 1000);
+    let bare = hammer(&mut world, 0);
+
+    assert_eq!(
+        bare, base,
+        "a target with no Resisting Spells takes every point of every bolt"
+    );
+    assert!(
+        warded < bare,
+        "a grandmaster warder takes less over {CASTS} bolts: {warded} against {bare}"
+    );
+}
+
 #[test]
 fn a_cast_without_reagents_fizzles() {
     let now = Instant::now();

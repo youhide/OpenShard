@@ -44,8 +44,11 @@ impl From<&SkillEntry> for Skill {
 /// The packet's serial is the connection's own player serial and has already
 /// decided where this belongs; carrying it again would make two identities for
 /// one status. Hits similarly live beside the player position because `0xA1`
-/// can refresh that value between status replies. Everything below has no
-/// other packet that can state it.
+/// can refresh that value between status replies, and **mana** left for the same
+/// reason the day `0xA2` arrived: a pool that two packets can state must have one
+/// home, or the status window and the bar under the character disagree for as
+/// long as it takes the next `0x11` to come. Everything below has no other packet
+/// that can state it.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Status {
     /// The character name the status window displays.
@@ -60,8 +63,6 @@ pub struct Status {
     pub intelligence:  u16,
     /// Stamina, current and maximum.
     pub stamina:       Vitals,
-    /// Mana, current and maximum.
-    pub mana:          Vitals,
     /// Gold held in the pack.
     pub gold:          u32,
     /// Physical resistance, or armour for the older packet shape.
@@ -87,7 +88,6 @@ impl From<&MobileStatus> for Status {
             dexterity:     status.dexterity,
             intelligence:  status.intelligence,
             stamina:       status.stamina,
-            mana:          status.mana,
             gold:          status.gold,
             armor:         status.armor,
             weight:        status.weight,

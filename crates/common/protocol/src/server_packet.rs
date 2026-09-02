@@ -25,6 +25,7 @@ use crate::codec::PacketWriter;
 use crate::combat::{
     AttackTarget,
     HealthBar,
+    ManaBar,
     WarMode,
 };
 use crate::containers::{
@@ -162,6 +163,8 @@ pub enum ServerPacket {
     AttackTarget(AttackTarget),
     /// `0xA1` — a mobile's health bar.
     Health(HealthBar),
+    /// `0xA2` — a mobile's mana bar, for its own client alone.
+    Mana(ManaBar),
     /// `0x54` — a sound at a world location.
     PlaySound(PlaySound),
     /// `0x6E` — the classic mobile animation.
@@ -346,6 +349,7 @@ impl ServerPacket {
             Self::WarMode(_) => <WarMode as EncodePacket>::ID,
             Self::AttackTarget(_) => <AttackTarget as EncodePacket>::ID,
             Self::Health(_) => <HealthBar as EncodePacket>::ID,
+            Self::Mana(_) => <ManaBar as EncodePacket>::ID,
             Self::PlaySound(_) => <PlaySound as EncodePacket>::ID,
             Self::Animation(_) => <Animation as EncodePacket>::ID,
             Self::NewAnimation(_) => <NewAnimation as EncodePacket>::ID,
@@ -440,6 +444,7 @@ impl ServerPacket {
             Self::WarMode(_) => <WarMode as EncodePacket>::LENGTH,
             Self::AttackTarget(_) => AttackTarget::LENGTH,
             Self::Health(_) => HealthBar::LENGTH,
+            Self::Mana(_) => ManaBar::LENGTH,
             Self::PlaySound(_) => <PlaySound as EncodePacket>::LENGTH,
             Self::Animation(_) => Animation::LENGTH,
             Self::NewAnimation(_) => NewAnimation::LENGTH,
@@ -536,6 +541,7 @@ impl ServerPacket {
             Self::WarMode(packet) => packet.encode_body(out, version),
             Self::AttackTarget(packet) => packet.encode_body(out, version),
             Self::Health(packet) => packet.encode_body(out, version),
+            Self::Mana(packet) => packet.encode_body(out, version),
             Self::PlaySound(packet) => packet.encode_body(out, version),
             Self::Animation(packet) => packet.encode_body(out, version),
             Self::NewAnimation(packet) => packet.encode_body(out, version),
@@ -1109,6 +1115,11 @@ fn decode_feedback_packet(
                 .map(ServerPacket::Health)
                 .map_err(ServerDecodeError::Health)?
         }
+        <ManaBar as DecodePacket>::ID => {
+            decode_server(packet, version)
+                .map(ServerPacket::Mana)
+                .map_err(ServerDecodeError::Mana)?
+        }
         <PlaySound as DecodePacket>::ID => {
             decode_server(packet, version)
                 .map(ServerPacket::PlaySound)
@@ -1230,6 +1241,8 @@ pub enum ServerDecodeError {
     AttackTarget(DecodeError),
     /// `0xA1` did not decode.
     Health(DecodeError),
+    /// `0xA2` did not decode.
+    Mana(DecodeError),
     /// `0x70` did not decode.
     Effect(DecodeError),
     /// `0x54` did not decode.
@@ -1368,6 +1381,7 @@ impl fmt::Display for ServerDecodeError {
             Self::WarMode(error) => ("0x72 war mode", error),
             Self::AttackTarget(error) => ("0xAA attack target", error),
             Self::Health(error) => ("0xA1 health bar", error),
+            Self::Mana(error) => ("0xA2 mana bar", error),
             Self::Effect(error) => ("0x70 graphical effect", error),
             Self::PlaySound(error) => ("0x54 play sound", error),
             Self::PlayMusic(error) => ("0x6D play music", error),
@@ -1484,6 +1498,7 @@ pub fn server_packet_length(id: u8, version: ClientVersion) -> Option<PacketLeng
         0x8C => <Relay as EncodePacket>::LENGTH,
         0x9E => SellList::LENGTH,
         0xA1 => HealthBar::LENGTH,
+        0xA2 => ManaBar::LENGTH,
         0xA8 => <ShardList as EncodePacket>::LENGTH,
         0xA9 => <CharacterList as EncodePacket>::LENGTH,
         0xAA => AttackTarget::LENGTH,
@@ -1612,6 +1627,7 @@ mod tests {
         WarMode,
         AttackTarget,
         Health,
+        Mana,
         PlaySound,
         Animation,
         NewAnimation,
@@ -1722,6 +1738,7 @@ mod tests {
             ServerPacket::WarMode(WarMode { war: true }),
             ServerPacket::AttackTarget(AttackTarget { target: Some(serial) }),
             ServerPacket::Health(HealthBar::exact(serial, 100, 50)),
+            ServerPacket::Mana(ManaBar::new(serial, 90, 14)),
             ServerPacket::PlaySound(PlaySound {
                 sound: crate::wire::SoundId(0x28),
                 at:    crate::world::Point::new(1, 2, 3),

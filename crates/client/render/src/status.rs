@@ -63,8 +63,12 @@ const HUE: Hue = Hue(0x0386);
 /// left-column values at `y = 62 + 12n`, and the five right-column values at
 /// the same rows. The art itself carries the labels and no caller supplies a
 /// second localized copy of them.
+///
+/// Hits and mana come in beside the status rather than inside it: each has a
+/// packet of its own (`0xA1`, `0xA2`) that can restate it between `0x11` replies,
+/// so the view keeps one home for each and hands both here.
 #[must_use]
-pub fn window(status: &Status, hits: Vitals, at: GumpPixel) -> Window {
+pub fn window(status: &Status, hits: Vitals, mana: Vitals, at: GumpPixel) -> Window {
     let left = 86;
     let right = 171;
     let row = |x, y, text: String| {
@@ -83,7 +87,7 @@ pub fn window(status: &Status, hits: Vitals, at: GumpPixel) -> Window {
             row(left, 98, if status.female { "Female" } else { "Male" }.to_owned()),
             row(left, 110, status.armor.to_string()),
             row(right, 62, vitals(hits)),
-            row(right, 74, vitals(status.mana)),
+            row(right, 74, vitals(mana)),
             row(right, 86, vitals(status.stamina)),
             row(right, 98, status.gold.to_string()),
             row(right, 110, format!("{}/{}", status.weight, status.max_weight)),
@@ -110,10 +114,6 @@ mod tests {
                 current: 49,
                 max:     50,
             },
-            mana:          Vitals {
-                current: 72,
-                max:     75,
-            },
             gold:          1_234,
             armor:         42,
             weight:        12,
@@ -131,6 +131,10 @@ mod tests {
             Vitals {
                 current: 98,
                 max:     100,
+            },
+            Vitals {
+                current: 72,
+                max:     75,
             },
             GumpPixel::new(300, 200),
         );

@@ -234,6 +234,72 @@ impl DecodePacket for HealthBar {
     }
 }
 
+/// `0xA2` — a mobile's mana bar. 9 bytes, [`HealthBar`]'s twin in every respect
+/// but who may read it.
+///
+/// # One truth, for one pair of eyes
+///
+/// Health has two shapes because a stranger may see a bar without being told the
+/// numbers. Mana has one: ServUO sends `MobileMana` to the mobile's *own* client
+/// and to nobody else (a party bar gets its own scaled packet, which this engine
+/// has no reader for yet). So there is a single constructor and it carries the
+/// real pool — the day a party window wants a stranger's mana, this grows the
+/// `scaled` half [`HealthBar`] already has.
+///
+/// Without it a spent or regenerated pool reaches the client only inside the next
+/// `0x11`, which is sent on a half-second diff of *inventory-derived* numbers and
+/// therefore may not come at all: casting drains a bar the player watches stand
+/// still.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ManaBar {
+    /// Whose pool.
+    pub serial: Serial,
+    /// The current/max pair, as `mobile::Mana` holds it.
+    pub vitals: Vitals,
+}
+
+impl ManaBar {
+    /// The real numbers, for the mobile's own client — the only recipient.
+    #[must_use]
+    pub const fn new(serial: Serial, max: u16, current: u16) -> Self {
+        Self {
+            serial,
+            vitals: Vitals { current, max },
+        }
+    }
+}
+
+impl EncodePacket for ManaBar {
+    const ID: u8 = 0xA2;
+    const LENGTH: PacketLength = PacketLength::Fixed(9);
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u32(self.serial.raw());
+        out.u16(self.vitals.max);
+        out.u16(self.vitals.current);
+    }
+}
+
+impl DecodePacket for ManaBar {
+    const ID: u8 = 0xA2;
+
+    fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
+        Ok(Self {
+            serial: {
+                let raw = reader.u32()?;
+                Serial::new(raw).ok_or(DecodeError::UnknownValue {
+                    field: "mana bar serial",
+                    value: raw,
+                })?
+            },
+            vitals: Vitals {
+                max:     reader.u16()?,
+                current: reader.u16()?,
+            },
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,6 +448,20 @@ mod tests {
         assert_eq!(bar.serial, mobile(0x2A));
         assert_eq!(bar.vitals.max, 100);
         assert_eq!(bar.vitals.current, 37);
+    }
+
+    /// `0xA2` is `0xA1`'s twin on the wire — same nine bytes, same field order —
+    /// and the round trip is what says so, because the two are only ever told
+    /// apart by their id byte.
+    #[test]
+    fn a_mana_bar_round_trips_the_real_pool() {
+        let bytes = encode_packet(&ManaBar::new(mobile(0x2A), 90, 14), version());
+        assert_eq!(bytes[0], 0xA2);
+        assert_eq!(bytes.len(), 9);
+        let back: ManaBar = decode_packet(&bytes, version()).unwrap();
+        assert_eq!(back.serial, mobile(0x2A));
+        assert_eq!(back.vitals.max, 90);
+        assert_eq!(back.vitals.current, 14, "the owner's own pool goes out unscaled");
     }
 
     #[test]

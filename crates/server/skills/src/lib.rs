@@ -198,7 +198,7 @@ pub fn apply_stats(state: &mut WorldState, entity: EntityId, stats: Stats) {
         );
     }
     if let Some(&Mana { current, .. }) = state.registry.get::<Mana>(entity) {
-        state.registry.insert(
+        state.set_mana(
             entity,
             Mana {
                 current: current.min(stats.intelligence),

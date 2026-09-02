@@ -229,12 +229,20 @@ pub struct Player {
     /// whether the pair is exact or scaled; this client only draws
     /// `current / max`.
     pub hits: Option<Vitals>,
+    /// The mana pool the shard last stated for this character.
+    ///
+    /// [`hits`](Self::hits)' twin, and here for the same reason: `0xA2` states it
+    /// between status replies — every cast, every fizzle, every point the
+    /// meditation trickle gives back — so a copy inside [`status`](Self::status)
+    /// would be the stale one. `None` is "not said yet", not an empty pool.
+    pub mana: Option<Vitals>,
     /// The paperdoll numbers the shard last stated for this character.
     ///
     /// `0x11` is only ever about the connection's own character. Its hit
-    /// points deliberately stay in [`Player::hits`]: `0xA1` can refresh that
-    /// one fact between status replies, and keeping a second copy here would
-    /// make the health line and status window disagree.
+    /// points deliberately stay in [`Player::hits`] and its mana in
+    /// [`Player::mana`]: `0xA1` and `0xA2` refresh those two facts between status
+    /// replies, and keeping a second copy here would make the health line and
+    /// status window disagree.
     pub status: Option<Status>,
     /// Where it stands.
     pub position: Point,
@@ -1141,6 +1149,7 @@ impl WorldView {
                 dead: false,
                 attacking: None,
                 hits: None,
+                mana: None,
                 status: None,
                 position: start.position,
                 facing: start.facing,
@@ -1509,6 +1518,7 @@ impl WorldView {
                     dead: self.player.dead,
                     attacking: self.player.attacking,
                     hits: self.player.hits,
+                    mana: self.player.mana,
                     // `0x20` says nothing about the paperdoll numbers.
                     status: self.player.status.clone(),
                     position: update.position,
@@ -1584,6 +1594,7 @@ impl WorldView {
                     dead: self.player.dead,
                     attacking: self.player.attacking,
                     hits: self.player.hits,
+                    mana: self.player.mana,
                     // `0x78` dresses the player but does not restate status.
                     status: self.player.status.clone(),
                     position: self.player.position,
@@ -1896,15 +1907,25 @@ impl WorldView {
                     None => false,
                 }
             }
+            // `0xA2` is the local player's mana and nobody else's — the shard sends
+            // it to no other client — so a bar for a stranger is not a case here.
+            ServerPacket::Mana(bar) => {
+                let changed = self.player.mana != Some(bar.vitals);
+                self.player.mana = Some(bar.vitals);
+                changed
+            }
             // `0x11` is status-bar data, not a position or an appearance. It
-            // belongs on the one player the connection is about, and its hits
-            // join `0xA1` in Player::hits so the two pictures have one value.
+            // belongs on the one player the connection is about, and its hits and
+            // mana join `0xA1`/`0xA2` in Player::hits and Player::mana so each of
+            // the two pictures has one value.
             ServerPacket::MobileStatus(status) if status.serial == self.player.serial => {
                 let fresh = Status::from(status);
-                let changed =
-                    self.player.status.as_ref() != Some(&fresh) || self.player.hits != Some(status.hits);
+                let changed = self.player.status.as_ref() != Some(&fresh)
+                    || self.player.hits != Some(status.hits)
+                    || self.player.mana != Some(status.mana);
                 self.player.status = Some(fresh);
                 self.player.hits = Some(status.hits);
+                self.player.mana = Some(status.mana);
                 changed
             }
             // `0x2C`: this end just died, or came back. `docs/combat.md`'s

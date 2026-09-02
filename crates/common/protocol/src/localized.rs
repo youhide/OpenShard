@@ -252,6 +252,10 @@ pub const SERVER_MESSAGES: &[Message] = &[
         fallback: "Your music succeeds, as you start a fight.",
     },
     Message {
+        id:       ClilocId(501783),
+        fallback: "You feel yourself resisting magical energy.",
+    },
+    Message {
         id:       ClilocId(501845),
         fallback: "You are busy doing something else and cannot focus.",
     },

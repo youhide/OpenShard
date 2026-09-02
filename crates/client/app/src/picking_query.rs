@@ -1562,12 +1562,10 @@ impl App {
             .filter_map(|(who, drawn)| {
                 let (hits, mana, notoriety, targeted) = match who {
                     Some(serial) if *serial == view.player.serial => {
-                        (
-                            view.player.hits,
-                            view.player.status.as_ref().map(|status| status.mana),
-                            Notoriety::Innocent,
-                            false,
-                        )
+                        // The pool as `0xA2` last stated it, which is what makes
+                        // this line move while a spell is being cast: the `0x11` it
+                        // used to read arrives on a diff of gold and weight.
+                        (view.player.hits, view.player.mana, Notoriety::Innocent, false)
                     }
                     Some(serial) => {
                         let mobile = view.mobiles.get(serial)?;

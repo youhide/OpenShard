@@ -48,6 +48,7 @@ use openshard_protocol::casting::SpellId;
 use openshard_protocol::combat::{
     AttackTarget,
     HealthBar,
+    ManaBar,
     WarMode,
 };
 use openshard_protocol::feature::Feature;
@@ -141,6 +142,7 @@ use crate::components::{
     ItemKind,
     ItemLocation,
     LastStep,
+    Mana,
     Meditating,
     Movement,
     Name,
@@ -2402,6 +2404,47 @@ impl WorldState {
             .filter(|(watcher, seen)| **watcher != entity && seen.contains(&entity))
             .map(|(watcher, _)| *watcher)
             .collect()
+    }
+
+    /// Write a mobile's mana pool and tell its own client in the same breath —
+    /// **the one door every mana mutation passes**.
+    ///
+    /// It is a door rather than a pair of calls for the reason
+    /// [`broadcast_health`](Self::broadcast_health) is one: casting, a fizzle, the
+    /// meditation trickle and an intelligence buff all move the same pool from four
+    /// different crates, and a "and now re-send the bar" line beside each is a line
+    /// the fifth will not have. The pool was mutated in place at all four sites and
+    /// nothing was sent at any of them, so a player watched the blue line stand
+    /// still through a whole fight: the only mana that ever reached the client rode
+    /// inside a `0x11`, which is sent on a diff of *inventory-derived* numbers and
+    /// so need never come at all.
+    ///
+    /// The one write that stays direct is a character *sheet* being assembled at
+    /// login: there is no client on the other end of it yet, and the full `0x11`
+    /// that follows the entry states the pool anyway.
+    pub fn set_mana(&mut self, entity: EntityId, mana: Mana) {
+        self.registry.insert(entity, mana);
+        self.send_mana(entity);
+    }
+
+    /// Send a mobile its own mana pool (`0xA2`). Nobody else is told: mana is not a
+    /// stranger's business, and the party bar that would want a scaled copy does not
+    /// exist here yet. A creature with no client is a no-op.
+    pub fn send_mana(&mut self, entity: EntityId) {
+        let Some(&Mana { current, max }) = self.registry.get::<Mana>(entity) else {
+            return;
+        };
+        let Some(serial) = self.registry.serial_of(entity) else {
+            return;
+        };
+        let Some((connection, version)) = self.client_of(entity) else {
+            return;
+        };
+        let packet = ServerPacket::Mana(ManaBar::new(serial, max, current));
+        self.outbox.push(Outbound {
+            connection,
+            packet: packet.encode(version),
+        });
     }
 
     /// Redraw `entity`'s health bar: the real numbers to itself, a 0–100 scale to

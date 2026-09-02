@@ -64,6 +64,36 @@ started.
   Resmelt, recipe scrolls, make-number/make-max and the last-ten list, and the
   two material chains (hides → leather, cotton → cloth) that are addon
   interactions in ServUO rather than crafts.
+- **Stamina has the mana bug mana just lost.** `0xA2` landed for mana
+  (`WorldState::set_mana`, §6 `magic`); `0xA3` does not exist, and `Stamina` is
+  mutated in place by every step and every regen tick with nothing sent, so the
+  pool reaches a client only inside a `0x11` — which `refresh_statuses` sends on a
+  diff of *inventory-derived* numbers. The stakes are higher than a stale bar: a
+  client that believes it has no stamina **refuses to run**, with no error to show
+  for it (`mobile::MobileStatus`'s own doc says so). The fix is the shape mana
+  took — one `set_stamina` door beside `set_mana`, `0xA3` beside `0xA1`/`0xA2`,
+  and this client's pool moving out of `Status` to `Player` as mana's did.
+- **Nothing but a player ever casts.** `crates/server/ai` has no notion of a
+  spell: no mana on a creature, no choice of spell in `fight_phase`, no cast in
+  the beat. A lich, a mage-brigand and a healing dragon are all impossible, so the
+  whole of §6 `magic` is one-directional — the player casts at the world and the
+  world never casts back. The cast path itself is reusable (`begin_cast` is a
+  client seam, but `resolve_cast`/`apply_spell_effect` are not), so what is
+  missing is the *decision*: which spell, at whom, and how often.
+- **A scroll is a textbook and not a spell.** A Magery scroll can be dragged onto
+  a spellbook to learn its spell (§6 `magic`, schema v8) and that is all it does:
+  double-clicking one casts nothing. Classic UO casts from the scroll itself, at
+  the circle's difficulty less one and without reagents, consuming it — the piece
+  that makes a scroll worth buying for a mage who cannot yet hold the circle.
+- **Eleven of the twenty-five unbuilt spells need no new subsystem.** They are
+  `SpellEffect::Unimplemented` only because nobody has written the arm: Create
+  Food (spawn into the pack), Mana Drain and Mana Vampire (`Mana` is right there),
+  Arch Protection and Mass Curse (the area sweep plus the buff appliers that both
+  already exist), Invisibility and Reveal (`Hidden`, `break_cover`, `refresh_around`
+  all exist), Magic Lock and Unlock (`ILockable` exists), Magic Trap and Untrap
+  (`Trap`/`TrapKind` and `tick/traps.rs` exist), and Dispel Field (`remove_field`
+  exists, and is private). The genuinely blocked ones are the eight summons, the
+  two Dispels behind them, Telekinesis, Incognito and Polymorph.
 - **House catalogue material-family umbrella rows.** The generated house item
   catalogue currently emits a material-less semantic identity as well as every
   concrete material for metal, wood and leather families. That material-less

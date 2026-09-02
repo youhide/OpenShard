@@ -73,6 +73,7 @@ impl StatusPane {
         Some(Drawn::Status(status::window(
             player.status.as_ref()?,
             player.hits?,
+            player.mana?,
             // Window-local — see `PaneFrame::cursor`'s doc.
             GumpPixel::new(0, 0),
         )))
